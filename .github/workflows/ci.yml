@@ -184,16 +184,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
-    # Source-aware Go build cache (distinct job prefix so lint and test don't overwrite
-    # each other's entry). See the test job for the design rationale.
+    # Go build cache keyed on a UTC-day bucket (distinct job prefix so lint and test don't
+    # overwrite each other's entry). See the test job for the design rationale.
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
     - name: Restore Go build cache
       id: gocache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
-        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-
 
     - name: Log Go build cache restore
@@ -561,17 +565,27 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
-    # Source-aware Go build cache. Warmed on push-to-main (main-scoped, restorable by both
-    # PR and merge_group runs); restore-keys fall back deps-first then job-prefix. Split
+    # Go build cache keyed on go.mod/go.sum plus a UTC-day bucket, not on a source hash: a
+    # per-commit key missed on every Go change and made main save a fresh full snapshot on
+    # each merge, while the restore-key fallback already gave every run a warm cache. With
+    # the day bucket, main saves at most once per job per day, or when go.mod/go.sum change
+    # (go-kure/launcher#777). Warmed on push-to-main (main-scoped, restorable by both PR and
+    # merge_group runs); restore-keys fall back deps-first (the newest entry for the same
+    # go.mod/go.sum, any day) then job-prefix. Go's build cache is content-addressed, so an
+    # entry from earlier in the day only costs recompiling what changed since. Split
     # restore/save so we can log exact vs fallback via cache-matched-key.
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
     - name: Restore Go build cache
       id: gocache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
-        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-
 
     - name: Log Go build cache restore
@@ -590,7 +604,9 @@ jobs:
         go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic -timeout 5m ./... 2>&1 | tee /tmp/gotest.log
 
     # Save only on non-exact restore (fallback/miss) and only if the run succeeded, so a
-    # broken build never publishes a cache. Refreshes the per-tree entry for main-warming.
+    # broken build never publishes a cache. On main this writes the day's entry once (the
+    # first successful run that day, or after a go.mod/go.sum change); later runs that day
+    # restore it exactly and skip the save.
     # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
     # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
     # from those refs only inflates the shared actions-cache bucket for no restore benefit.
@@ -667,16 +683,21 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
-    # Source-aware Go build cache. govulncheck's symbol scan compiles the whole program,
-    # so a warm build cache cuts this job materially (it had no caching before).
+    # Go build cache keyed on a UTC-day bucket (see the test job for the design rationale).
+    # govulncheck's symbol scan compiles the whole program, so a warm build cache cuts this
+    # job materially (it had no caching before).
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
     - name: Restore Go build cache
       id: gocache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
-        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-
 
     - name: Log Go build cache restore
@@ -884,15 +905,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
-    # Source-aware Go build cache (build prefix, shared with cross-platform per-arch).
+    # Go build cache keyed on a UTC-day bucket (build prefix, shared with cross-platform
+    # per-arch). See the test job for the design rationale.
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
     - name: Restore Go build cache
       id: gocache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
-        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-
 
     - name: Log Go build cache restore
@@ -1372,17 +1398,22 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
-    # Source-aware Go build cache, scoped per target arch (cross-compiled arm64 artifacts
-    # differ from amd64, so matrix.arch is part of the key — runner.arch is the host arch
-    # and is identical across legs).
+    # Go build cache keyed on a UTC-day bucket (see the test job for the design rationale),
+    # scoped per target arch (cross-compiled arm64 artifacts differ from amd64, so
+    # matrix.arch is part of the key — runner.arch is the host arch and is identical across
+    # legs).
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
     - name: Restore Go build cache
       id: gocache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
-        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-
 
     - name: Log Go build cache restore

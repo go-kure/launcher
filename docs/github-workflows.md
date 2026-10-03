@@ -603,19 +603,24 @@ below):
 ```
 
 **Go build cache** (`~/.cache/go-build`) uses split `actions/cache/restore` + `actions/cache/save`
-so the log can show exact vs fallback restore (`cache-matched-key`). The key is **source-aware**
-and **split by job purpose** so `validate` (non-race) and `test` (race+coverage) never overwrite
-each other's entry:
+so the log can show exact vs fallback restore (`cache-matched-key`). The key ends in a **UTC-day
+bucket** and is **split by job purpose** so `validate` (non-race) and `test` (race+coverage) never
+overwrite each other's entry. GitHub expressions have no date function, so a one-line step before
+the restore computes the bucket:
 
 ```yaml
+- name: Compute Go build cache day bucket
+  id: cache-bucket
+  run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
 - name: Restore Go build cache
   id: gocache
   uses: actions/cache/restore@v6
   with:
     path: ~/.cache/go-build
-    key: ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.sum hash>-src-<source hash>
+    key: ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.mod+go.sum hash>-day-${{ steps.cache-bucket.outputs.day }}
     restore-keys: |
-      ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.sum hash>-src-
+      ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.mod+go.sum hash>-
       ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-
 # ... compile / test ...
 - name: Save Go build cache
@@ -628,15 +633,23 @@ each other's entry:
 
 Purpose prefixes: `gocache-validate-`, `gocache-test-race-cover-`, `gocache-security-`,
 `gocache-build-` (the `cross-platform` job adds `<os>-<arch>` because cross-compiled artifacts
-differ per target). The source hash covers `**/*.go`, `go.mod`, `go.sum`, `Makefile`, and
-`**/testdata/**`. The save runs only on a non-exact (fallback/miss) restore, only when the
-run succeeded (so a broken build never publishes a cache), and only on `main` (see below).
+differ per target). The `deps-` hash covers `go.mod` and `go.sum`; the source tree is
+deliberately not in the key. The save runs only on a non-exact (fallback/miss) restore, only
+when the run succeeded (so a broken build never publishes a cache), and only on `main` (see
+below), so `main` writes at most one entry per job per day, plus one after a `go.mod`/`go.sum`
+change. A per-commit source hash used to sit in place of the day bucket: every Go change missed
+the exact key, so each merge to `main` saved a fresh full build cache for every Go job (about
+6 GB per merge), although the restore-key fallback already gave every run a warm cache. The
+deps-first restore key picks the newest entry for the same `go.mod`/`go.sum` from any day; Go's
+build cache is content-addressed, so an entry from earlier in the day only costs recompiling the
+packages changed since.
 
 **Cross-ref scoping caveat.** GitHub caches are ref-scoped: a `pull_request` cache lives on
 `refs/pull/N/merge` and is **not** visible to the `merge_group` (merge-queue) run — verified
 empirically. The only scope both PR and queue runs can read is the default branch (`main`).
 So these caches are warmed by push-to-main runs; a code-changing PR and its queue run restore
-main's cache via **restore-key fallback** (not an exact hit) and Go reuses unchanged package
+main's entry (an exact hit when `main` already saved that day's entry for the same
+`go.mod`/`go.sum`, otherwise via **restore-key fallback**) and Go reuses unchanged package
 entries internally. This lowers the absolute cost of both runs but does **not** deduplicate the
 PR↔queue build — that duplication is inherent to the merge queue and cannot be removed with
 GitHub-scoped caches.
