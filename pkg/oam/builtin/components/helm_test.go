@@ -401,7 +401,8 @@ func TestHelmRule_Template(t *testing.T) {
 // TestHelmRule_TemplateReleaseName: delivery: template forwards an authored
 // releaseName, in any spelling, to the helmtemplate under its declared one, and
 // forwards none when none is authored or it is null, leaving the terminal's
-// chart-name default. The emitted component then resolves to that name.
+// default: the component name, as the HelmRelease of delivery: flux would be
+// named and so released. The emitted component then resolves to that name.
 func TestHelmRule_TemplateReleaseName(t *testing.T) {
 	base := func(extra map[string]any) map[string]any {
 		m := map[string]any{"delivery": "template", "chart": "podinfo", "source": map[string]any{"url": "https://charts.example.com"}}
@@ -416,8 +417,8 @@ func TestHelmRule_TemplateReleaseName(t *testing.T) {
 	}{
 		{"authored", base(map[string]any{"releaseName": "shop-podinfo"}), "shop-podinfo", "shop-podinfo"},
 		{"other spelling", base(map[string]any{"ReleaseName": "shop-podinfo"}), "shop-podinfo", "shop-podinfo"},
-		{"unset", base(nil), nil, "podinfo"},
-		{"null", base(map[string]any{"releaseName": nil}), nil, "podinfo"},
+		{"unset", base(nil), nil, "web"},
+		{"null", base(map[string]any{"releaseName": nil}), nil, "web"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -27,9 +27,22 @@ func htBaseProps() map[string]any {
 }
 
 func htParse(props map[string]any) (stack.ApplicationConfig, error) {
-	return (&components.HelmTemplateHandler{}).ToApplicationConfig(
-		&oam.Component{Name: "web", Type: "helmtemplate", Properties: props}, "demo")
+	return htParseNamed("web", props)
 }
+
+// htParseNamed is htParse for a component called name.
+func htParseNamed(name string, props map[string]any) (stack.ApplicationConfig, error) {
+	return (&components.HelmTemplateHandler{}).ToApplicationConfig(
+		&oam.Component{Name: name, Type: "helmtemplate", Properties: props}, "demo")
+}
+
+// Component names whose 40-character cut, under Flux's release-name
+// shortening, ends in '-' (the shortened name is still valid: "--" is) and in
+// '.' (the shortened name is not: a label may not start with '-').
+var (
+	htDashAtCut = strings.Repeat("a", 39) + "-" + strings.Repeat("b", 20)
+	htDotAtCut  = strings.Repeat("a", 39) + "." + strings.Repeat("b", 20)
+)
 
 // htAuthoredErr runs authored-property validation — the check kurel build runs
 // before any handler — on a one-component Application carrying props.
@@ -252,7 +265,8 @@ func TestHelmTemplateConfig_DirectConfigCheckedBeforeRender(t *testing.T) {
 		{"kind disagrees with scheme", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", SourceKind: "OCIRepository", Version: "1.0.0"}, "requires an oci:// URL"},
 		{"non-finite values", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", Values: map[string]any{"x": math.Inf(1)}}, "not representable as JSON"},
 		{"invalid release name", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", ReleaseName: "Web"}, `releaseName "Web" must be a DNS-1123 subdomain`},
-		{"invalid default release name", &components.HelmTemplateConfig{Name: "web", SourceURL: "oci://ghcr.io/x/Pod_Info", Version: "1.0.0"}, "set releaseName"},
+		{"invalid default release name", &components.HelmTemplateConfig{Name: htDotAtCut, SourceURL: "https://charts.example.com", Chart: "podinfo"}, "set releaseName"},
+		{"neither ReleaseName nor Name", &components.HelmTemplateConfig{SourceURL: "https://charts.example.com", Chart: "podinfo"}, "set ReleaseName or Name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -401,8 +415,8 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 
 // TestHelmTemplate_ReleaseIdentity: the render's .Release.Namespace is the
 // namespace the handler is given, and its .Release.Name is the authored
-// releaseName, or the chart name when none is authored — rendered by kure from
-// a locally served chart, as a build does.
+// releaseName, or the component name when none is authored — rendered by kure
+// from a locally served chart, as a build does.
 func TestHelmTemplate_ReleaseIdentity(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
 	for _, tc := range []struct {
@@ -410,7 +424,7 @@ func TestHelmTemplate_ReleaseIdentity(t *testing.T) {
 		releaseName any
 		want        string
 	}{
-		{"unset defaults to the chart name", nil, "testchart-cm"},
+		{"unset defaults to the component name", nil, "web-cm"},
 		{"authored", "shop-a", "shop-a-cm"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -435,24 +449,33 @@ func TestHelmTemplate_ReleaseIdentity(t *testing.T) {
 }
 
 // TestHelmTemplateConfig_DirectConfigReleaseName: a config built directly,
-// which never went through the handler, still renders under the chart name
-// when ReleaseName is empty, and under ReleaseName when it is set.
+// which never went through the handler, still renders under Name when
+// ReleaseName is empty, and under ReleaseName when it is set, with or without
+// a Name. With neither it is refused before any render
+// (TestHelmTemplateConfig_DirectConfigCheckedBeforeRender).
 func TestHelmTemplateConfig_DirectConfigReleaseName(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
-	for releaseName, want := range map[string]string{"": "testchart-cm", "direct": "direct-cm"} {
-		cfg := &components.HelmTemplateConfig{Name: "web", Namespace: "demo", SourceURL: srvURL, Chart: "testchart", Version: "0.1.0", ReleaseName: releaseName}
-		if gotName, _ := renderedIdentity(t, cfg); gotName != want {
-			t.Errorf("ReleaseName %q: rendered %s, want %s", releaseName, gotName, want)
+	for _, tc := range []struct{ name, releaseName, want string }{
+		{"web", "", "web-cm"},
+		{"", "direct", "direct-cm"},
+		{"web", "direct", "direct-cm"},
+	} {
+		cfg := &components.HelmTemplateConfig{Name: tc.name, Namespace: "demo", SourceURL: srvURL, Chart: "testchart", Version: "0.1.0", ReleaseName: tc.releaseName}
+		if gotName, _ := renderedIdentity(t, cfg); gotName != tc.want {
+			t.Errorf("Name %q, ReleaseName %q: rendered %s, want %s", tc.name, tc.releaseName, gotName, tc.want)
 		}
 	}
 }
 
 // TestHelmTemplateHandler_ReleaseName pins the release name the handler
-// resolves and records: the authored releaseName, else the chart name — chart
-// for a HelmRepository, the last path segment of source.url (a trailing slash
-// ignored) for an OCIRepository — and refuses one that is not a valid Helm
-// release name, a default with the remedy to set releaseName. Both the
-// handler and authored-property validation accept the key.
+// resolves and records: the authored releaseName, never shortened, else the
+// release name Flux gives a HelmRelease named after the component with no
+// targetNamespace — the component name, shortened past 53 characters as
+// helm-controller's release.ShortenName does — whatever the chart or source.
+// It refuses a name that is not a valid Helm release name, a default with the
+// remedy to set releaseName. Both the handler and authored-property validation
+// accept the key. The shortened names are fixed strings computed outside the
+// code under test (the first 12 hex digits of `printf %s <name> | sha256sum`).
 func TestHelmTemplateHandler_ReleaseName(t *testing.T) {
 	oci := func(url string) map[string]any {
 		return map[string]any{"version": "1.0.0", "source": map[string]any{"url": url}}
@@ -461,22 +484,28 @@ func TestHelmTemplateHandler_ReleaseName(t *testing.T) {
 		p["releaseName"] = releaseName
 		return p
 	}
+	const longName = "checkout-service-payment-gateway-adapter-for-the-eu-region" // 58 characters
+	name53 := "a" + strings.Repeat("b", 51) + "c"
 	okCases := []struct {
-		name  string
-		props map[string]any
-		want  string
+		name      string
+		component string
+		props     map[string]any
+		want      string
 	}{
-		{"HelmRepository default is chart", htBaseProps(), "podinfo"},
-		{"OCIRepository default is the last path segment", oci("oci://ghcr.io/example/charts/podinfo"), "podinfo"},
-		{"OCIRepository default ignores a trailing slash", oci("oci://ghcr.io/example/charts/podinfo/"), "podinfo"},
-		{"authored on a HelmRepository", with(htBaseProps(), "shop-podinfo"), "shop-podinfo"},
-		{"authored on an OCIRepository", with(oci("oci://ghcr.io/example/charts/Pod_Info"), "podinfo"), "podinfo"},
-		{"authored 53 characters", with(htBaseProps(), strings.Repeat("a", 53)), strings.Repeat("a", 53)},
-		{"authored with dots", with(htBaseProps(), "shop.podinfo"), "shop.podinfo"},
+		{"HelmRepository default is the component name", "web", htBaseProps(), "web"},
+		{"OCIRepository default is the component name", "web", oci("oci://ghcr.io/example/charts/Pod_Info"), "web"},
+		{"default keeps a 53-character component name", name53, htBaseProps(), name53},
+		{"default shortens a longer component name as Flux does", longName, htBaseProps(), "checkout-service-payment-gateway-adapter-a380d4c53021"},
+		{"default cut at a dash stays valid", htDashAtCut, htBaseProps(), strings.Repeat("a", 39) + "--223f6f9789ce"},
+		{"authored on a HelmRepository", "web", with(htBaseProps(), "shop-podinfo"), "shop-podinfo"},
+		{"authored on an OCIRepository", "web", with(oci("oci://ghcr.io/example/charts/Pod_Info"), "podinfo"), "podinfo"},
+		{"authored overrides a long component name", longName, with(htBaseProps(), "shop-podinfo"), "shop-podinfo"},
+		{"authored 53 characters is not shortened", "web", with(htBaseProps(), strings.Repeat("a", 53)), strings.Repeat("a", 53)},
+		{"authored with dots", "web", with(htBaseProps(), "shop.podinfo"), "shop.podinfo"},
 	}
 	for _, tc := range okCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := htParse(tc.props)
+			cfg, err := htParseNamed(tc.component, tc.props)
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
@@ -491,26 +520,22 @@ func TestHelmTemplateHandler_ReleaseName(t *testing.T) {
 
 	const rule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
 	errCases := []struct {
-		name    string
-		props   map[string]any
-		wantErr string
+		name      string
+		component string
+		props     map[string]any
+		wantErr   string
 	}{
-		{"authored uppercase", with(htBaseProps(), "Podinfo"), `helmtemplate: releaseName "Podinfo" ` + rule},
-		{"authored underscore", with(htBaseProps(), "pod_info"), `helmtemplate: releaseName "pod_info" ` + rule},
-		{"authored 54 characters", with(htBaseProps(), strings.Repeat("a", 54)), "helmtemplate: releaseName " + `"` + strings.Repeat("a", 54) + `" ` + rule},
-		{"authored leading dash", with(htBaseProps(), "-podinfo"), `helmtemplate: releaseName "-podinfo" ` + rule},
-		{"HelmRepository default from an invalid chart", map[string]any{"chart": "Pod_Info", "source": map[string]any{"url": "https://charts.example.com"}},
-			`helmtemplate: the default release name "Pod_Info", taken from chart, ` + rule + "; set releaseName"},
-		{"OCIRepository default from an invalid segment", oci("oci://ghcr.io/example/charts/Pod_Info"),
-			`helmtemplate: the default release name "Pod_Info", taken from the last path segment of source.url, ` + rule + "; set releaseName"},
-		{"OCIRepository default from a too long segment", oci("oci://ghcr.io/example/" + strings.Repeat("a", 54)),
-			"taken from the last path segment of source.url, " + rule + "; set releaseName"},
-		{"OCIRepository URL without a path", oci("oci://ghcr.io"), "helmtemplate: source.url has no path segment to take the default release name from; set releaseName"},
-		{"OCIRepository URL of a bare slash", oci("oci://ghcr.io/"), "helmtemplate: source.url has no path segment to take the default release name from; set releaseName"},
+		{"authored uppercase", "web", with(htBaseProps(), "Podinfo"), `helmtemplate: releaseName "Podinfo" ` + rule},
+		{"authored underscore", "web", with(htBaseProps(), "pod_info"), `helmtemplate: releaseName "pod_info" ` + rule},
+		{"authored 54 characters is refused, not shortened", "web", with(htBaseProps(), strings.Repeat("a", 54)), "helmtemplate: releaseName " + `"` + strings.Repeat("a", 54) + `" ` + rule},
+		{"authored leading dash", "web", with(htBaseProps(), "-podinfo"), `helmtemplate: releaseName "-podinfo" ` + rule},
+		{"default cut at a dot", htDotAtCut, htBaseProps(),
+			`helmtemplate: the default release name "` + strings.Repeat("a", 39) + `.-b46d196cb11f", derived from the component name "` + htDotAtCut +
+				`" as Flux derives a HelmRelease's, ` + rule + "; set releaseName"},
 	}
 	for _, tc := range errCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := htParse(tc.props)
+			_, err := htParseNamed(tc.component, tc.props)
 			if err == nil {
 				t.Fatalf("accepted %v", tc.props)
 			}

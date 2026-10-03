@@ -81,43 +81,51 @@ func validHelmReleaseName(name string) bool {
 // Helm's, which quotes its regular expression.
 const helmReleaseNameRule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
 
-// templateReleaseName resolves the release name of a client-side render whose
-// source kind is already resolved: releaseName when set, else the chart's name
-// — chart for a HelmRepository, the last path segment of an OCIRepository's
-// URL (a trailing slash ignored), which names the chart there. Either must be
-// a valid Helm release name (validHelmReleaseName); a default that is not is
-// refused with the remedy to set releaseName. Every error is prefixed with
-// owner, the component type.
-func templateReleaseName(owner, releaseName, kind, rawURL, chart string) (string, error) {
+// templateReleaseName resolves the release name of a client-side render:
+// releaseName when set, else the release name Flux gives a HelmRelease named
+// componentName with no spec.releaseName and no spec.targetNamespace — the
+// name itself, shortened as Flux shortens it (fluxShortenReleaseName) — so a
+// chart renders under the same name under either delivery of the helm rule.
+// An authored name is never shortened; it, and the default, must be a valid
+// Helm release name (validHelmReleaseName). A default that is not (Flux's
+// shortening can leave a label starting with '-') is refused with the remedy to
+// set releaseName. Every error is prefixed with owner, the component type.
+func templateReleaseName(owner, releaseName, componentName string) (string, error) {
 	if releaseName != "" {
 		if !validHelmReleaseName(releaseName) {
 			return "", errors.Errorf("%s: releaseName %q %s", owner, releaseName, helmReleaseNameRule)
 		}
 		return releaseName, nil
 	}
-	name, from := chart, "chart"
-	if kind == "OCIRepository" {
-		name, from = ociChartName(rawURL), "the last path segment of source.url"
-		if name == "" {
-			return "", errors.Errorf("%s: source.url has no path segment to take the default release name from; set releaseName", owner)
-		}
+	if componentName == "" {
+		return "", errors.Errorf("%s: no release name: releaseName is unset and the component has no name to derive it from; set ReleaseName or Name", owner)
 	}
+	name := fluxShortenReleaseName(componentName)
 	if !validHelmReleaseName(name) {
-		return "", errors.Errorf("%s: the default release name %q, taken from %s, %s; set releaseName", owner, name, from, helmReleaseNameRule)
+		return "", errors.Errorf("%s: the default release name %q, derived from the component name %q as Flux derives a HelmRelease's, %s; set releaseName", owner, name, componentName, helmReleaseNameRule)
 	}
 	return name, nil
 }
 
-// ociChartName returns the last path segment of an oci:// chart URL, a
-// trailing slash ignored, or "" when the URL has no path (or does not parse,
-// which inlineChartSourceKind has already refused).
-func ociChartName(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
+// fluxReleaseNameMaxLen and fluxReleaseNameHashLen are the constants of Flux
+// helm-controller's release-name shortening (fluxShortenReleaseName).
+const (
+	fluxReleaseNameMaxLen  = 53
+	fluxReleaseNameHashLen = 12
+)
+
+// fluxShortenReleaseName mirrors Flux helm-controller's release.ShortenName,
+// which helm-controller applies to HelmRelease.GetReleaseName() before an
+// install or upgrade, and which is internal to helm-controller, so it cannot be
+// imported: a name of at most 53 characters is kept; a longer one is cut to its
+// first 40 characters, followed by '-' and the first 12 hex digits of the
+// SHA-256 of the whole name — 53 characters in all.
+func fluxShortenReleaseName(name string) string {
+	if len(name) <= fluxReleaseNameMaxLen {
+		return name
 	}
-	p := strings.TrimRight(u.Path, "/")
-	return p[strings.LastIndex(p, "/")+1:]
+	sum := sha256.Sum256([]byte(name))
+	return name[:fluxReleaseNameMaxLen-(fluxReleaseNameHashLen+1)] + "-" + hex.EncodeToString(sum[:])[:fluxReleaseNameHashLen]
 }
 
 // chartURL is the location handed to the renderer: a HelmRepository's base URL

@@ -1213,9 +1213,11 @@ spec:
 // TestBuildCommand_TemplateRenderedReleaseName builds one chart, served
 // locally, twice into one namespace: as a helmtemplate and as a helm component
 // with delivery: template. The chart names its object after the release name.
-// With no releaseName both render under the chart name and their objects
-// collide, which the build refuses; a releaseName on one of them — authored on
-// either type — gives each its own objects.
+// With no releaseName each renders under its component name, as its
+// HelmRelease would be released under delivery: flux, so the two get distinct
+// objects; an authored releaseName — on either type — replaces that name; the
+// same releaseName on both makes their objects collide, which the build
+// refuses.
 func TestBuildCommand_TemplateRenderedReleaseName(t *testing.T) {
 	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", map[string]string{
 		"testchart/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-cm\n  namespace: {{ .Release.Namespace }}\ndata:\n  k: v\n",
@@ -1273,33 +1275,37 @@ spec:
 	}
 	const releaseName = "\n        releaseName: other"
 
-	t.Run("same chart, no releaseName: collision refused", func(t *testing.T) {
-		out, err := build(t, "", "")
-		if err == nil {
-			t.Fatalf("build succeeded; want a generated-object collision, output:\n%s", out)
-		}
-		for _, want := range []string{"generated-object collision", "testchart-cm"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error does not contain %q: %v", want, err)
-			}
-		}
-	})
-	for name, extra := range map[string][2]string{
-		"releaseName on the helmtemplate":                {releaseName, ""},
-		"releaseName on the helm with template delivery": {"", releaseName},
+	for name, tc := range map[string]struct {
+		templateExtra, helmExtra string
+		want                     []string
+	}{
+		"no releaseName: each under its component name":  {"", "", []string{"name: first-cm", "name: second-cm"}},
+		"releaseName on the helmtemplate":                {releaseName, "", []string{"name: other-cm", "name: second-cm"}},
+		"releaseName on the helm with template delivery": {"", releaseName, []string{"name: first-cm", "name: other-cm"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, err := build(t, extra[0], extra[1])
+			out, err := build(t, tc.templateExtra, tc.helmExtra)
 			if err != nil {
 				t.Fatalf("build failed: %v\noutput:\n%s", err, out)
 			}
-			for _, want := range []string{"name: testchart-cm", "name: other-cm"} {
+			for _, want := range tc.want {
 				if !strings.Contains(out, want) {
 					t.Errorf("output does not contain %q:\n%s", want, out)
 				}
 			}
 		})
 	}
+	t.Run("same releaseName on both: collision refused", func(t *testing.T) {
+		out, err := build(t, releaseName, releaseName)
+		if err == nil {
+			t.Fatalf("build succeeded; want a generated-object collision, output:\n%s", out)
+		}
+		for _, want := range []string{"generated-object collision", "other-cm"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error does not contain %q: %v", want, err)
+			}
+		}
+	})
 }
 
 // topologySpreadAppYAML is a deployment component carrying the topology-spread

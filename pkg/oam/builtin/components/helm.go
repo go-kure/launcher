@@ -132,7 +132,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"values":          object("Helm values tree. Must be representable as JSON."),
 		"valuesMode":      {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves non-empty values into a ConfigMap emitted by a configmap trait on the HelmRelease, referenced by a valuesFrom entry placed before the authored ones. Unset means inline. configMap is refused under delivery: template."},
 		"interval":        str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
-		"releaseName":     str("Release name. Under delivery: flux, HelmRelease spec.releaseName (Flux's default applies when unset). Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, defaulting to the chart's name (chart for a HelmRepository source, the last path segment of source.url for an OCIRepository source)."),
+		"releaseName":     str("Release name. Under delivery: flux, HelmRelease spec.releaseName (Flux's default applies when unset). Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, defaulting to the name Flux gives the HelmRelease under delivery: flux when it has no targetNamespace (the component name, shortened as Flux shortens a name over 53 characters)."),
 		"targetNamespace": str("HelmRelease spec.targetNamespace. Refused under delivery: template."),
 		"driftDetection":  object("HelmRelease spec.driftDetection. Refused under delivery: template."),
 		"install":         object("HelmRelease spec.install: Helm install options. Refused under delivery: template."),
@@ -736,7 +736,8 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough m
 	if props.Version != "" {
 		rendered["version"] = props.Version
 	}
-	// The helmtemplate terminal checks both, and defaults the release name.
+	// The helmtemplate terminal checks both, and defaults the release name
+	// from comp.Name, the name the HelmRelease gets under delivery: flux.
 	for _, key := range []string{"values", "releaseName"} {
 		if v, ok := passthrough[key]; ok {
 			rendered[key] = v
