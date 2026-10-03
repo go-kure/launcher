@@ -1,6 +1,6 @@
 # Launcher delivery scope: ordering, naming, Helm values and template security
 
-*Date: 2026-10-04 | Status: Draft design, tickets being filed*
+*Date: 2026-10-04 | Status: Draft design, tickets filed*
 
 This document records the target scope of the launcher library and `kurel` after a
 cross-library scope review of kure, launcher and a downstream cluster engine that consumes
@@ -8,10 +8,10 @@ both. For each area it states launcher's current behaviour, with `file:line` ref
 and the target behaviour of the ticket that changes it.
 
 It supersedes [§11 "Launcher Layout"](design.md#11-launcher-layout) of the design
-document. Ticket L1 deletes that section.
+document. Ticket go-kure/launcher#781 deletes that section.
 
-**Ticket IDs.** `L1` to `L15` are provisional IDs. Each is replaced by its go-kure/launcher
-issue link once the issue is filed. L3 was folded into L1 and has no ticket.
+**Tickets.** Each target names the go-kure/launcher issue that implements it; §8 lists them
+all. Each issue links back to this document.
 
 **Basis.** "Current" means `main` at v0.2.0-beta.1. Paths are relative to the repository
 root. Kure paths refer to kure v0.2.0-beta.15. Everything here is pre-release: output,
@@ -38,7 +38,7 @@ constraint.
    or Flux annotations. Delivery-relevant intent (ordering, prune protection, force replace)
    is carried in kure's model, not in the YAML. launcher still emits Flux objects when an
    author writes them as components (`helmrelease`, the source kinds, `helmchart`, and the
-   new `kustomization` kind).
+   new `fluxcd-kustomization` kind).
 2. **Nothing implicit.** Ordering inside an application exists only where the author
    declares it (`placement`, `dependency`) or a component declares it about its own parts
    (`helm`: source before release). Readiness defaults to waiting for every applied
@@ -59,18 +59,18 @@ constraint.
    make sense. A mechanism launcher offers to consumers (such as contract metadata) is used
    by its own builtins. An asymmetry is either documented with its reason or a gap.
 
-### 1.3 What leaves launcher (L1, L2)
+### 1.3 What leaves launcher (go-kure/launcher#781, go-kure/launcher#782)
 
 | Today | Where | Target |
 |---|---|---|
-| Automatic health checks on every leaf bundle, from a type table | `applyAutoHealthChecks` `pkg/oam/transform.go:1858`, table `componentHealthCheckGVK` `:1799`, `isFluxControlPlaneGVK` `:1842`, the `EmitsAutoHealthCheck` veto | **L1:** removed. Default for every step is the delivery engine's wait-for-all (`wait: true`, no health checks). An author who needs explicit checks declares them through the consumer's own policy. |
-| Reconciliation settings on bundles (interval, retry, timeout, prune, wait, force, suspend) | `applyReconciliationSettings` `transform.go:1909`; policy `pkg/oam/builtin/policies/reconciliation.go` | **L1:** removed with the policy. |
-| `health-checks` policy | `pkg/oam/builtin/policies/healthchecks.go` | **L1:** removed. |
-| `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **L1:** removed. |
-| `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **L1:** removed (breaking for a consumer that aliased them). |
-| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **L1:** removed with `bundle_patches.go`. `GeneratedApplication.Forced` loses its source (the reconciliation policy's `force`, `transform.go:1929`) and is re-sourced by L2. |
-| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; [design §11](design.md#11-launcher-layout) | **L1:** removed in the same change. An engine-neutral artifact option may follow when `kurel` work resumes. |
-| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **L2:** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
+| Automatic health checks on every leaf bundle, from a type table | `applyAutoHealthChecks` `pkg/oam/transform.go:1858`, table `componentHealthCheckGVK` `:1799`, `isFluxControlPlaneGVK` `:1842`, the `EmitsAutoHealthCheck` veto | **go-kure/launcher#781:** removed. Default for every step is the delivery engine's wait-for-all (`wait: true`, no health checks). An author who needs explicit checks declares them through the consumer's own policy. |
+| Reconciliation settings on bundles (interval, retry, timeout, prune, wait, force, suspend) | `applyReconciliationSettings` `transform.go:1909`; policy `pkg/oam/builtin/policies/reconciliation.go` | **go-kure/launcher#781:** removed with the policy. |
+| `health-checks` policy | `pkg/oam/builtin/policies/healthchecks.go` | **go-kure/launcher#781:** removed. |
+| `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **go-kure/launcher#781:** removed. |
+| `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **go-kure/launcher#781:** removed (breaking for a consumer that aliased them). |
+| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **go-kure/launcher#781:** removed with `bundle_patches.go`. `GeneratedApplication.Forced` loses its source (the reconciliation policy's `force`, `transform.go:1929`) and is re-sourced by go-kure/launcher#782. |
+| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; [design §11](design.md#11-launcher-layout) | **go-kure/launcher#781:** removed in the same change. An engine-neutral artifact option may follow when `kurel` work resumes. |
+| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **go-kure/launcher#782:** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
 
 What stays: `placement`, `dependency`, the tier annotation (author-declared ordering
 intent), `postProcessFluxNamespace` (`transform.go:1822`), which places authored Flux
@@ -78,7 +78,7 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 
 ---
 
-## 2. Ordering model (L4, L5)
+## 2. Ordering model (go-kure/launcher#783, go-kure/launcher#784)
 
 ### 2.1 Current behaviour
 
@@ -94,7 +94,7 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 - **Per-component shape** (`buildDependencyAwareCluster`, `transform.go:926`): one bundle
   per component, children of an unnamed root node.
 
-### 2.2 Target (L4)
+### 2.2 Target (go-kure/launcher#783)
 
 1. **Remove the automatic category table** and the generated-source rule. Keep, in
    `classify.go`: `DefaultDomain` (`:13`), `TierAnnotationKey` (`:38`),
@@ -116,24 +116,26 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 5. **Decide in the ticket:** the placement vocabulary (keep `infra`/`services`/`apps`, or
    named groups) and the default child group names (§3).
 
-### 2.3 Target (L5): `oci` lowers to kind components
+### 2.3 Target (go-kure/launcher#784): `oci` lowers to kind components
 
-- New kind component `kustomization`: one Flux Kustomization, with strict decode of the
-  upstream `KustomizationSpec` (the pattern of `helmrelease`, `pkg/oam/builtin/components/helmrelease.go:167-168`).
+- New kind component `fluxcd-kustomization`: one Flux Kustomization, with strict decode of
+  the upstream `KustomizationSpec` (the pattern of `helmrelease`,
+  `pkg/oam/builtin/components/helmrelease.go:167-168`). The type name follows the naming
+  decision in [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352).
 - `oci` becomes an upper-level component that lowers into `ocirepository` plus
-  `kustomization`. The `OCIHandler` kind goes.
+  `fluxcd-kustomization`. The `OCIHandler` kind goes.
 - `oci` today misses most of the Kustomization spec (`patches`, `postBuild`, `force`,
   `dependsOn`, `timeout`, `serviceAccountName` and more). The new kind closes that gap.
 - Keep the explicit-registry rule for a non-empty allowlist (`oci.go:258-279`) on the
   `ocirepository` path.
 - `SourceDeduplicatable` (`pkg/oam/handler.go`) has one implementer today, `OCIConfig`
-  (`oci.go:287`). After L5 it has none: remove it, or document why it stays.
+  (`oci.go:287`). After go-kure/launcher#784 it has none: remove it, or document why it stays.
 - The name of an authored Kustomization against a delivery Kustomization a consumer
   generates is a kure check, not launcher's.
 
 ---
 
-## 3. Naming and overrides (L6, L8, L9, L13, L14)
+## 3. Naming and overrides (go-kure/launcher#785, go-kure/launcher#787, go-kure/launcher#788, go-kure/launcher#792, go-kure/launcher#793)
 
 ### 3.1 Current behaviour
 
@@ -158,7 +160,7 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
   name) within one document. Hook-group child names are not unique across two applications
   with a same-named component (documented in `helmtemplate_render.go:264-268`).
 
-### 3.2 Target (L8): name overrides
+### 3.2 Target (go-kure/launcher#787): name overrides
 
 - **Author:** an override property for every generated name that has none (the list above),
   plus an object name separate from the component name. The latter allows a Service named
@@ -172,17 +174,17 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
     the roles.
   - An override is validated and collision-checked exactly as a default name.
 
-### 3.3 Target (L13, L14): uniqueness and shortening
+### 3.3 Target (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
-- **L13:** hook-group child layout names include the application, so they are unique across
+- **go-kure/launcher#792:** hook-group child layout names include the application, so they are unique across
   applications (`hookGroupChildName`, `helmtemplate_render.go:711`).
-- **L14:** one shortening helper, prefix plus hash, with a documented limit passed by the
+- **go-kure/launcher#793:** one shortening helper, prefix plus hash, with a documented limit passed by the
   caller (63, 253, or 53 for a Helm release name). Every generated name uses it. The Namer
   shortens instead of failing. One documented exception: at limit 53 for a Helm release
   name, the helper reproduces Flux's shortening algorithm, so a template-rendered release
   is named as Flux would name it.
 
-### 3.4 Target (L9): component label and provenance
+### 3.4 Target (go-kure/launcher#788): component label and provenance
 
 - **Today:** launcher never stamps `<domain>/component`. It is only a NetworkPolicy
   selector key, so a synthesized NetworkPolicy can select a label present nowhere in the
@@ -201,7 +203,7 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 
 ---
 
-## 4. Helm and values (L6, L7)
+## 4. Helm and values (go-kure/launcher#785, go-kure/launcher#786)
 
 ### 4.1 Current behaviour
 
@@ -213,19 +215,19 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 
 No path writes explicit values into a Secret.
 
-### 4.2 Target (L6): release name
+### 4.2 Target (go-kure/launcher#785): release name
 
 - Default release name `<component>` under both deliveries, written explicitly:
   `spec.releaseName` on every HelmRelease, and the template render's release name, as in
   [go-kure/launcher#778](https://github.com/go-kure/launcher/pull/778).
 - The `helmrelease` kind sets the default, so a directly authored `helmrelease` gets it
   too, as the kind already defaults `targetNamespace` (`helmrelease.go:358-359`).
-- Shortened with the L14 helper at 53 characters, which reproduces Flux's own algorithm
-  for that limit (§3.3).
+- Shortened with the shortening helper of go-kure/launcher#793 at 53 characters, which
+  reproduces Flux's own algorithm for that limit (§3.3).
 - The author's `releaseName` overrides it under both deliveries. The consumer override
-  comes from L8.
+  comes from go-kure/launcher#787.
 
-### 4.3 Target (L7): Secret values
+### 4.3 Target (go-kure/launcher#786): Secret values
 
 - A property for marked sensitive values (proposed name `secretValues`).
 - **Flux delivery:** a Secret `<component>-secret-values-<hash>` in the HelmRelease's
@@ -233,8 +235,8 @@ No path writes explicit values into a Secret.
   `valuesFrom` ahead of the authored entries, mirroring the ConfigMap mode.
 - **Template delivery:** merged into the render values.
 - launcher has no Secret kind or secret trait today. The ConfigMap mode emits its object
-  through a synthesized `configmap` trait. L7 needs an equivalent Secret path; it can reuse
-  the Secret kind of L11.
+  through a synthesized `configmap` trait. go-kure/launcher#786 needs an equivalent Secret path; it can reuse
+  the Secret kind of go-kure/launcher#790.
 - **Decide in the ticket:** the `valuesFrom` order when both `valuesMode: configMap` and
   `secretValues` are set, and whether a key present in both `values` and `secretValues` is
   refused.
@@ -245,7 +247,7 @@ No path writes explicit values into a Secret.
 
 ---
 
-## 5. Security on template delivery (L12)
+## 5. Security on template delivery (go-kure/launcher#791)
 
 ### 5.1 Current behaviour
 
@@ -260,7 +262,7 @@ No path writes explicit values into a Secret.
 every path (`pkg/cmd/kurel/build.go:190-195`, `transform.go:551-552`). Only a library
 consumer that passes a `Policy` gets it.
 
-### 5.2 Target (L12)
+### 5.2 Target (go-kure/launcher#791)
 
 1. **Decode** chart output with kure's parser (`ParseYAMLWithOptions` with
    `AllowUnstructured`) instead of `decodeKubeManifests` (`helmtemplate_render.go:542-573`),
@@ -279,9 +281,9 @@ consumer that passes a `Policy` gets it.
 
 ---
 
-## 6. Contract metadata and kind coverage (L10, L11)
+## 6. Contract metadata and kind coverage (go-kure/launcher#789, go-kure/launcher#790)
 
-### 6.1 Target (L10): contract metadata
+### 6.1 Target (go-kure/launcher#789): contract metadata
 
 - **Today:** no builtin implements `ContractDescriber` (`pkg/oam/handler.go:100-131`), so
   `HandlerContracts()` returns empty maps. A missing co-registration is found only when a
@@ -296,7 +298,7 @@ consumer that passes a `Policy` gets it.
   check at registration time would refuse that valid order. The check runs once the
   registry is complete: at the first `Transform`, or at an explicit seal.
 
-### 6.2 Target (L11): full spec and the full set of kinds
+### 6.2 Target (go-kure/launcher#790): full spec and the full set of kinds
 
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: `tolerations`, `topologySpreadConstraints`;
@@ -320,7 +322,7 @@ consumer that passes a `Policy` gets it.
 
 ---
 
-## 7. Asymmetries (L15)
+## 7. Asymmetries (go-kure/launcher#794)
 
 Fix or document each:
 
@@ -331,26 +333,27 @@ Fix or document each:
   `daemonset`, `cronjob`, `job`.
 - Template output carries no namespace.
 
-`kurel`'s global `-f/--output-file`, which `build` ignores, is filed separately and
-deferred with the rest of the `kurel` CLI work.
+`kurel`'s global `-f/--output-file`, which `build` ignores, is filed separately as
+go-kure/launcher#795 and deferred with the rest of the `kurel` CLI work.
 
 ---
 
 ## 8. Ticket index
 
-| ID | Ticket | Section | Needs |
+| Issue | Ticket | Section | Needs |
 |---|---|---|---|
-| L1 | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | — |
-| L2 | Delivery intent instead of Flux annotations | §1.3 | kure delivery-intent field |
-| L4 | Explicit ordering only; one bundle shape | §2.2 | — |
-| L5 | `oci` as an upper-level component; new `kustomization` kind | §2.3 | — |
-| L6 | Release name default | §4.2 | L14 |
-| L7 | Secret values | §4.3 | a Secret path (L11) |
-| L8 | Name overrides | §3.2 | — |
-| L9 | Component label and provenance | §3.4 | — |
-| L10 | Contract metadata | §6.1 | — |
-| L11 | Full spec and full set of kind components | §6.2 | kure builders for missing kinds |
-| L12 | Security on template delivery | §5.2 | — |
-| L13 | Hook-group child names unique across applications | §3.3 | — |
-| L14 | One shortening rule | §3.3 | — |
-| L15 | Asymmetries | §7 | — |
+| [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781) | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | — |
+| [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent) |
+| [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | — |
+| [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | — |
+| [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | go-kure/launcher#793 |
+| [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | a Secret path (go-kure/launcher#790) |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | — |
+| [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | — |
+| [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | — |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors) |
+| [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | — |
+| [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | — |
+| [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | — |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | — |
+| [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | — |
