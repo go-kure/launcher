@@ -134,9 +134,12 @@ jobs:
         fi
         echo "version=$YQ_VER" >> $GITHUB_OUTPUT
 
-    - name: Cache yq
+    # Split restore + save, the save gated on main: a workflow_dispatch run from another ref
+    # (a release tag, say) would otherwise save an entry only that ref can read
+    # (go-kure/launcher#777).
+    - name: Restore yq from cache
       id: yq-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/yq
         key: yq-${{ steps.yq-version.outputs.version }}-linux-amd64
@@ -149,6 +152,13 @@ jobs:
           https://github.com/mikefarah/yq/releases/download/v${{ steps.yq-version.outputs.version }}/yq_linux_amd64
         chmod +x ~/bin/yq
         echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Save yq to cache
+      if: steps.yq-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/bin/yq
+        key: ${{ steps.yq-cache.outputs.cache-primary-key }}
 
     - name: Add yq to PATH
       if: steps.yq-cache.outputs.cache-hit == 'true'
