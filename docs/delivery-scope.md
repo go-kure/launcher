@@ -178,7 +178,9 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
   applications (`hookGroupChildName`, `helmtemplate_render.go:711`).
 - **L14:** one shortening helper, prefix plus hash, with a documented limit passed by the
   caller (63, 253, or 53 for a Helm release name). Every generated name uses it. The Namer
-  shortens instead of failing.
+  shortens instead of failing. One documented exception: at limit 53 for a Helm release
+  name, the helper reproduces Flux's shortening algorithm, so a template-rendered release
+  is named as Flux would name it.
 
 ### 3.4 Target (L9): component label and provenance
 
@@ -216,12 +218,12 @@ No path writes explicit values into a Secret.
 - Default release name `<component>` under both deliveries, written explicitly:
   `spec.releaseName` on every HelmRelease, and the template render's release name, as in
   [go-kure/launcher#778](https://github.com/go-kure/launcher/pull/778).
-- Shortened with the L14 helper at 53 characters.
+- The `helmrelease` kind sets the default, so a directly authored `helmrelease` gets it
+  too, as the kind already defaults `targetNamespace` (`helmrelease.go:358-359`).
+- Shortened with the L14 helper at 53 characters, which reproduces Flux's own algorithm
+  for that limit (§3.3).
 - The author's `releaseName` overrides it under both deliveries. The consumer override
   comes from L8.
-- **Decide in the ticket:** whether the default is set by the `helmrelease` kind (so a
-  directly authored `helmrelease` gets it too, as the kind already defaults
-  `targetNamespace`) or only by the `helm` rule.
 
 ### 4.3 Target (L7): Secret values
 
@@ -272,7 +274,8 @@ consumer that passes a `Policy` gets it.
      types. The host-namespace, host-process and resource helpers take launcher's own
      config types, so they need a variant over `corev1.PodSpec`.
    - **Decide in the ticket:** whether `ValidateImageRef` (tag or digest required, no
-     `:latest`) applies to chart images.
+     `:latest`) applies to chart images. Recommendation: yes, so a rendered workload is
+     held to the same image rule as a launcher-built one.
 
 ---
 
