@@ -1,6 +1,471 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.0] - 2026-10-03
+
+### Added
+
+- Add NameAllocator emit-or-adopt for elements shared across siblings
+- Add a strict JSON decode for external API types, with a field-reachability check
+- Add CheckCrossDocumentCollisions for multi-document callers
+- Export CheckEnumMembersHoldNoNull for static Enum null checks
+- Recognise traits a component rule forwards by value
+- Lower worker to deployment via a component lowering rule
+- Release through the shared Release workflow
+- Promote dependency, placement, reconciliation and health-checks to builtins
+- Publish policy schemas through HandlerSchemas
+- Return raw lowering steps on the success path
+- Generate Flux delivery objects with --oci-repository
+- Accept a Flux source timeout of an hour or more, emitted in minutes
+- Let a component lowering rule emit a same-name sibling group
+- Warn on an authored component or trait whose type is deprecated
+- Read a component's endpoints from the lowering rule claiming its type
+- Generate a sibling group's primary objects first
+- Apply a sibling group's traits in authored order
+- Lower webservice into a deployment and service pair
+- Let a lowering rule record a rendered PlatformReserved value
+- Add serviceaccount, persistentvolumeclaim and configmap kind components
+- Warn when a PersistentVolume or claim is force-applied
+- Replace engine-only traits with a post-policy step on lowering rules
+- Check issue references in commit messages too
+- Build the pvc trait through the persistentvolumeclaim kind's claim path
+- Give the persistentvolumeclaim component the pvc capability's storageClassName default
+- Build the configmap trait through the configmap kind's path
+- Give webservice and worker pvc volumes the pvc capability's storageClassName
+- Give statefulset claim templates the pvc capability's storageClassName
+
+### Build
+
+- Update dependency hugo to v0.167.0
+- Update dependency yq to v4.54.1
+- Bump kure to v0.2.0-beta.14
+- Keep fluxcd/pkg/apis/meta out of Renovate proposals now it is a shared direct dep
+- Exclude helm.sh/helm/v4, now a direct dep shared with kure
+- Update dependency flux2 to v2.9.6
+- Update dependency syft to v1.53.0
+- Revert syft to v1.52.0
+- Keep the unpublished syft v1.53.0 from being proposed again
+- Update dependency flux-schema-plugin to v0.15.0
+- Update dependency syft to v1.54.0
+- Drop helm from the shared-direct mirror
+- Bump kure to v0.2.0-beta.15
+
+### CI
+
+- Add the Release / State dispatch workflow
+
+### Document Format
+
+- Close the typed-nil holes in the cilium and auto-synthesis netpol parsers
+- Reject cilium-networkpolicy documents without rules or endpointSelector
+- Add the kind-named service component
+- Refuse a service component name that is not a valid Service name
+- Admit the scaler trait on deployment
+- Add the topology-spread trait for any Deployment
+- Check the topology-spread selector at every replica count
+- Accept the engine-owned scope on a topology-spread trait
+- Refuse a topology-spread capability rendering at profile evaluation
+- List the topology-spread trait in the kurel-package trait table
+- Default podFailurePolicy onPodConditions status to True
+- Say onPodConditions status defaults when absent or null
+- Reject networkpolicy peers the API server refuses
+- Read every Go integer kind in the property readers, refuse what does not fit
+- Refuse a wrapped maxSize and out-of-range ports; report overflow as a range error
+- Reject postgresql documents with wrongly typed optional properties
+- Read typed-nil postgresql scalars as omitted
+- Close the remaining typed-nil holes in pkg/oam parsers
+- Give typed nils the untyped answer in the remaining trait parsers
+- Refuse typed-nil list entries with the untyped message in the remaining readers
+- Add opt-in force-replace trait for immutable-field updates
+- Add a Types union to PropertySchema for int-or-string and quantity leaves
+- Type the service kind's targetPort as the integer/string union
+- Support raw block volumes (volumeMode: Block)
+- Refuse volume names a raw block device already uses
+- Refuse claim-template name and mountPath collisions on statefulset
+- Validate Service names as DNS-1035 labels in webservice, daemonset and statefulset
+- Refuse an empty postgresql version
+- Add opt-in wait and healthChecks to the oci component's Kustomization
+- Correct the oci healthChecks apiVersion and opt-in wording
+- Forward every resource name onto the postgresql Cluster
+- Refuse hugepages without cpu or memory on postgresql and podResources
+- Add the kind-named helmrelease component
+- Omit the helmrelease values ConfigMap app label past 63 characters
+- Skip the auto health check for a suspended helmrelease
+- Refuse worker documents whose affinity topologyKey or nodeSelector is not valid label syntax
+- Project component names over 63 characters onto a valid app label value
+- Project the helmrelease values ConfigMap app label past 63 characters
+- Add the kind-named helmtemplate component
+- Add the kind-named Flux source components
+- Check the registry and bucket host Flux actually contacts
+- Refuse an Amazon S3 bucket endpoint under a registry allowlist
+- Refuse an oci or helmchart interval that truncates to zero or bypasses the handler
+- Refuse an invalid Flux interval on helmrelease and the source components, and a wrongly typed helmchart property
+- Refuse a truncating Flux interval Go code sets with a named string type
+- Refuse a wrongly typed helmchart valuesMode
+- Refuse a wrongly typed helmchart source or source field
+- Accept a reserved component value a schema-declaring rule writes, reject one a document rule would drop
+- Reject a reserved value a schema-less trait rule copies out of a sealed trait
+- Reject a reserved value a schema-declaring trait rule copies out of a sealed trait
+- Keep every component a document lowering rule emits authored
+- State the inherited and forwarded cases in the createApplications exemption comment
+- Name the unsealed-trait condition in the createApplications exemption comment
+- Accept array and object kurel parameters, substituted as a whole YAML node
+- Keep the anchor on a substituted node and refuse an array or object parameter in a string default
+- Refuse a typed-nil structured value and stop blaming --set for every string
+- Add the EnvironmentSet document (environments.yaml) and kurel build --environment
+- Require Application and raw-document namespaces to be DNS-1123 labels
+- Refuse reconciliation policy durations Flux rejects once emitted
+- Install a native helmchart release built under a Flux namespace into the application namespace
+- Refuse a reserved component property a lowering rule emits as null
+- Check a rule's whole emission for reserved keys before validating any of it
+- Check authored components for reserved keys at the start of every lowering round
+- A multi-tier Application's tier umbrella Kustomization no longer sets wait
+- Add the cnpg-cluster component, a full CloudNativePG Cluster projection
+- Describe the operator custom-resource component pattern
+- Refuse app.yaml documents that set a platform-reserved trait property a lowering rule copies as null or drops
+- Refuse postgresql and cnpg-cluster documents with non-positive storage sizes or replicas 0
+- Refuse a platform-reserved property set inside an array item, or authored as a nested null
+- Keep Transform's exemptions and document naming in the authored reservation check
+- Add the role-named helm component type to the v1alpha1 Application, lowered to the kind-named Flux terminals
+- Add cnpg-pooler, cnpg-database and cnpg-objectstore kind components
+- Refuse postgresql names CloudNativePG cannot give a Cluster
+- Deprecate the helmchart component type in favour of helm
+- Accept a ports list on the deployment component in app.yaml
+- Refuse an empty deployment port protocol in app.yaml, as its schema does
+- Point the postgresql WAL-archiver entry at the barman-cloud plugin and carry serverName there
+- Refuse two applications of one document generating the same object
+- State the real reason pod priority and overhead are refused
+- Refuse a container port name repeated across the pod in app.yaml
+- Refuse a postgresql managed role's connectionLimit: 0
+- Refuse a zero managed-role connectionLimit in postgresql Generate too
+- Refuse an authored empty ensure on a cnpg-database schema, extension, fdw or server
+- Copy the chart layer of a helmchart OCI source and stop sharing it with oci
+- Lower postgresql onto the cnpg kind components, changing app.yaml output layout
+- Forward postgresql's traits to every member and order a pooler-named database after the Pooler in app.yaml
+- Refuse repeated postgresql database names in app.yaml and bound its placement names
+- Refuse a fileKeyRef whose volume is missing or not emptyDir
+- Refuse webservice documents whose affinity topologyKey or nodeSelector is not valid label syntax
+- Let a helm component in app.yaml reference a GitRepository or Bucket chart source
+- Accept a ports list on the daemonset, statefulset, job and cronjob components in app.yaml
+- Qualify the named-port refusal note for daemonset and statefulset
+- Accept clusterIP None on the service component for a headless Service
+- Let a helm component in app.yaml generate an inline GitRepository or Bucket chart source
+- Make a helm component in app.yaml redeploy Git/Bucket charts and refuse inline ssh sources
+- Refuse a user or token in an inline helm GitRepository URL in app.yaml
+- Refuse credentials in an inline helm Bucket endpoint and an unknown provider in app.yaml
+- Accept only a plain host and path in an inline helm Git URL or Bucket endpoint in app.yaml
+- Refuse an http:// inline helm Bucket endpoint in app.yaml
+- Daemonset and statefulset emit no Service and refuse `port`
+- Remove the helmchart component
+- Add the helmchart Flux HelmChart source terminal
+- Prune-protection and force-replace in app.yaml reach a component's trait sub-applications
+- Refuse an out-of-range port in an inline helm Git URL or Bucket endpoint in app.yaml
+- Refuse a user or password in an inline helm chart source url
+- Drop the ServiceAccount and claims the pod kinds generate
+- Emit helm values ConfigMap through a configmap trait
+- Accept a typed valuesFrom list under helm valuesMode: configMap
+- Strict-decode a typed valuesFrom list before normalizing it
+- Refuse a helmrelease valuesFrom kind Flux does not admit
+- Hold helmrelease valuesFrom name, valuesKey and targetPath to the CRD
+
+### Documentation
+
+- Record the real cost of the labeled/unlabeled PR trigger
+- Strip-ack starts no run, and only docs-skip reads the payload
+- Document the optional-field-wrapper guard
+- Correct the scaler, statefulset-claim and token-trigger wording
+- Scope the peer-shape null wording to the three peer fields
+- Record the two-axis type model and the type naming rule in design-gvk
+- Classify worker by role, not kind count; name policies as lowering output
+- Tighten the two-axis wording against the engine's behavior
+- State the adoption exception wherever collisions are called fatal
+- Correct the allocator's collision key and location in D2
+- Constrain emit-or-adopt to terminal shared elements
+- Say launcher does not add the force annotation without the trait
+- List the force-replace trait in the kurel package guide's trait catalogue
+- Name ValidateAuthoredProperties as the raw-rule trait check
+- Replace drifted line citations and correct stale claims
+- Correct the remaining stale claims the review found
+- Keep built-in terminal types admissible in the D4 settled-pass note
+- Describe the traits README as a key-property catalog
+- State the daemonset Service-name rule as port > 0
+- Bound the surviving null and helper-routing universals
+- Bound the nested-null, typed-nil and resource-list claims
+- Correct the typed-nil, raw-read and empty-string routing claims
+- Stop naming one diagnostic for a null on a raw read
+- Qualify the raw-lookup null and resource-quantity null claims
+- Exclude the always-written cronjob fields from the presence-gated claim
+- Record the helmrelease health-check and build behaviour
+- Narrow the oci explicit-registry claims to what the parser does
+- State why forwardableTraits marks a copy
+- Name DeploymentConfig, not the removed WorkerConfig, as a policy implementer
+- Scope the app-label compatibility claim and name worker's label path
+- Scope the component label uniqueness claim to validated Applications
+- Say which helmtemplate errors carry the component-type prefix
+- A wrongly typed value is an error on a direct Transform call too
+- Re-vendor the release guide at go-kure/.github 27e9923
+- Document the Deploy Docs slot restriction
+- A forwarded component keeps the classification it arrived with
+- Point the EnvironmentSet reference in design-gvk at pkg.go.dev
+- Link the EnvironmentSet reference to the README on GitHub
+- List environments.yaml in the format-scope checklists
+- Name artifact directories by bundle, including dependency-policy splits
+- Accept a zero duration in the delivery refusal paragraph
+- Scope the cnpg-cluster lowering-value claim to what the schema checks
+- Qualify bare issue and PR references as go-kure/launcher#N
+- Reword two downstream tracker references in the external-secret data shorthand design
+- Describe bundle ordering and shared-source ownership in the package README
+- State the deployed-first source owner in the SourceDeduplicatable contract
+- Update the oci source-owner comment and scope helmchart sharing to native delivery
+- Document why oci's targetNamespace has no default
+- Name objects still namespace-less after the artifact's kustomize build
+- Say the deploy step follows the pages checkout, not that it alone can read the token
+- Qualify issue references in Go comments, tests and scripts
+- Record that postgresql carries serverName on the plugin entry
+- Describe the sibling-group hooks on deployment and service
+- Make identity ports the condition for the sibling selector switch
+- Name DeploymentConfig, not the removed WebserviceConfig, as a policy implementer
+- State when the docs deploy refuses to write the root
+- Say the slot still deploys when the label no longer ranks highest
+- Give the missing-tag deploy failure its own remedy
+- Dispatch the deploy retry from the tag it names
+- Give the deploy retry every input it needs
+- Retry the root write with the highest existing stable tag
+- Apply the document-format lifecycle from the first stable release
+- State the GA baseline and the pre-GA disclosure rule consistently
+- Migration pod replacement and probe port names
+- The pod replacement step under a rollingUpdate partition
+- Repoint the remaining statefulset Service references
+- Repoint the probe-port and port-less daemonset references
+- Vendor the shared workflows guide
+- Reword the helm rule references to the removed helmchart
+- Record helmchart as removed and reused by the HelmChart CR
+- A moved external-secret's namespaced SecretStore must exist in the Flux namespace
+- Link the force warning's attribution limit to its follow-up
+- Say the helm values configmap trait is built through the configmap kind
+
+### Fixed
+
+- Save Go caches from main only
+- Save the docs-build Hugo modules cache from main only
+- Keep setup-go's cache in deploy-docs
+- Bring check-pin-impact.sh level with kure's gate and pin it with hermetic cases
+- Hold a service component's named implicit backend to its first port
+- Compare pin impact against the base the PR merges onto
+- Scope adoption to one document, digest identities in errors
+- Stop sharing label selectors and inherited-metadata maps with generated objects
+- Add IntegerInRange and read uintptr as an integer kind
+- Report overflow in scaler, certificate and volsync as a range error
+- Stop UnreachableJSONFields at a repeated embedded type
+- Match owned keys case-insensitively, keep exact numbers, and let encoding/json decide reachability
+- Report keys behind unexported embedded pointers, honour encoding/json's tag-name fallback, and document the per-key contract
+- Accept a union value any member validates, and read uintptr as a number
+- Run LowerRaws for round 0 only and seal nothing
+- Scope LowerRaws error chains to the failing document
+- Skip typed-nil objects and report each collision once
+- Report fields hidden behind another field in UnreachableJSONFields
+- Report rather than panic when the UnreachableJSONFields probe cannot marshal
+- Treat a self-decoding root as unprovable in UnreachableJSONFields
+- Treat a jsonv2 self-coding root as unprovable in UnreachableJSONFields
+- Prepend each release's changelog section, never regenerate
+- Restore published CHANGELOG sections to their release-time text
+- Keep a hook-group helmchart layout a directory under an AppFileSingle writer default
+- Check an ingress implicit backend's portName against every kind's Service port
+- Require an explicit registry in oci source urls under an allowlist
+- Keep a forwarded trait's authored Origin.Index behind a rule's own trait
+- Reject components whose projected app label values collide
+- Convert rendered chart values to JSON types at decode
+- Keep refusing rendered timestamps RFC 3339 cannot express
+- Drop an unemittable document that hook grouping drops, instead of failing
+- Refuse a rendered document with a non-string top-level key
+- Check authored policy properties against their handler's schema
+- Reject a non-string health-check namespace and keep a rejected dependency policy's edges out
+- Refuse a conflicting second placement and durations Flux would reject
+- Reject a reconciliation property of the wrong type instead of skipping it
+- Read a typed or untyped null as absent in reconciliation and health-check namespace
+- Reject an empty dependency rules or dependsOn list
+- Drop a dropped-hook document whose metadata has a non-string key
+- Keep the raw step on a re-serialization error
+- Read an explicit null on the remaining optional properties as omission
+- Pin each null test's wrong-type check to its own refusal
+- Keep the key check and empty-selector refusal ahead of a null entry
+- Check a hugepage resource name before skipping its null entry
+- Refuse interval values Flux rejects in oci and helmchart
+- Re-check the docs root at write time via the shared deploy action
+- Exempt rule-synthesized components from authored reservation checks
+- Pass the release namespace and name to template renders
+- Reject trailing documents and empty environment flags
+- Reject EnvironmentSet paths that leave the file's directory
+- Resolve symlinks before accepting EnvironmentSet paths
+- Make the EnvironmentSet base directory absolute before resolving links
+- Check a sealed trait for platform-reserved values unless a checked rule emitted it
+- Check every Flux duration field in the form its CRD takes
+- Write delivery output for an empty build and validate the OCI flags
+- Refuse an --oci-repository registry without a hostname
+- Refuse delivery objects that collide with an artifact's objects
+- Check list members for delivery-object collisions
+- Refuse an identity shared by two artifacts and an overlong delivery name
+- Give collision ownership only to objects Flux applies
+- Refuse an artifact kustomize would refuse for a duplicate resource
+- Refuse a generated Flux duration outside Flux's pattern
+- Compare a cluster-scoped object without its namespace in the collision check
+- Generate each application once in a delivery build
+- Refuse a unit name past 253 characters and a registry port outside 1-65535
+- Close cnpg-cluster null, authorship and registry gaps
+- Read cnpg-cluster properties through their JSON serialization
+- Refuse cnpg-cluster values the typed spec would omit
+- Refuse only cnpg-cluster zeros the operator would replace
+- Refuse cnpg-cluster instances below the CRD minimum of 1
+- Refuse cnpg-cluster names and null misspellings CloudNativePG cannot carry
+- Repeat the cnpg-cluster name and instances refusals in Generate
+- Refuse a cnpg-cluster storage-size policy default that is not a quantity
+- Refuse a non-positive cnpg-cluster storage-size policy default
+- Refuse a cnpg-cluster resource request above its limit
+- Refuse a negative policy cpu/memory default
+- Pass deploy-docs dispatch inputs through env and validate them
+- Refuse set_latest=true with a dev label before the deploy-docs build
+- Emit a shared source from the component deployed first
+- Order the tier bundles of a multi-tier application
+- Stop persisting the job token in the deploy-docs launcher checkout
+- Close three sibling-group gaps
+- Refuse a sibling-group member object with no kind
+- Name a sibling group's component and refuse duplicate member trait sub-applications
+- Let a placement policy settle a sibling group's mixed tiers
+- Copy a generated OCI chart layer as-is and pin the helm release namespaces in the build test
+- Refuse a placement that moves a generated source out of infra, and drop a size hint CodeQL flags
+- Refuse a dependency that delays a generated source, and two spellings of one helm key
+- Emit admissible cnpg-pooler templates and refuse ObjectStore serverName
+- Check cnpg-pooler and cnpg-objectstore resources and cap pooler ephemeral claims
+- Refuse cnpg-pooler template ephemeral containers
+- Refuse the rest of the pod fields a cnpg-pooler Deployment cannot carry
+- Refuse mixed go-kure/.github pins in the merge queue
+- Generate a bundle as kure does and tell a same-named trait apart
+- Allowlist the GO-2026-6596 false positive on cilium v1.20.2
+- Extend postgresql's placement and dependency policies to every member
+- Close three issue-ref guard gaps found in review
+- Pass qualified repository names ending in launcher
+- Reject ownerless references to any repository
+- Ignore URLs, format verbs and nested link targets precisely
+- Stop URL stripping at a single quote
+- Handle shell trims, indexed verbs and quoted call arguments
+- Recognise a document rule's by-value copy of an authored trait as forwarded
+- Keep forwarding marks until a rule's output is classified, and detach empty slices
+- Keep the authored index on a trait a document rule forwards by value
+- Stamp a document-forwarded trait with the component it was authored on
+- Keep a sibling group's own pods under its component-label policy
+- Keep a sibling group's routed ports translated on its own pods
+- Ignore array trims and starred verbs, catch emphasised refs
+- Bound the emphasised-ref pattern like the ownerless one
+- Keep scanning array subscripts that hold a #
+- Compare a rendered reserved value exactly and refuse a nil intermediate map
+- Compare a rendered reserved value by the schema validation applies
+- Write a detached copy of a rendered reserved value
+- Tell signed zeros apart in a rendered reserved value and correct the schema-less rule docs
+- Keep a port-less headless service an owned Service with no routable port
+- Count capabilities a lowering rule reads in ConsumedCapabilities
+- Keep a manifest source url's credential out of its errors
+- Drop a failed fetch's cause text and an opaque url from its error
+- Name a manifest fetch or read failure by fixed text only
+- Name a manifest fetch url by scheme and host only
+- Keep a source url's credential out of every refusal
+- Drop an IPv6 zone that holds a bracket from a shown host
+- Show a refused url's host only when it is plainly a host
+- Show no host when the userinfo's @ may sit in IPv6 brackets
+- Name no url scheme, and show an ssh host from its raw authority
+- Refuse a configmap component over the 1 MiB API size limit
+- Trait decorators keep layout intent; traits keep a custom bundle order
+- A trait handler that removes an application no longer panics the transform
+- Find a trait's new sub-applications by pointer, not by the bundle's tail
+- Refuse a configmap trait ConfigMap over the 1 MiB API limit
+- A sub-application decorator may not change the bundle at all, not just its length
+- Match Flux's force selector and list expansion in the volume warning
+- Refuse a configmap trait data key the API server refuses
+- Attach a component's health check to its own application only
+- Refuse a sibling group with two pod-running members
+- Refuse a trait that replaces or removes a component's application
+- Refuse a trait that renames a component's application
+- Refuse a decorator that renames an application
+- Move trait objects a moved Flux object reads into the Flux namespace
+- Follow a chart verification Secret when sourceRef names the Flux namespace
+- Scope a sibling member's trait inputs to that member
+- Move a certificate trait a moved Flux source reads into the Flux namespace
+- Read a typed nil as null at both capability merge sites
+- Refuse an uncopyable capability default instead of sharing it
+- Read force-applied volumes after the bundle's patches
+- Trace each patched volume to the application that generated it
+- Trace patched volumes by an origin tag, not by position
+- Tag only the resources kustomize holds, trace envelope members through their envelope
+- Build bundle patches untagged, so the force verdict is Flux's
+- Fail a patched build whose result does not serialize, as Flux does
+- Read the patched objects from the build's YAML, as Flux reads them
+- Read the patched build with a mirror of Flux's ReadObjects
+- Refuse a trait sub-application's policy that renames a component's application
+- Refuse a trait or its policy renaming a sibling group member's application
+- Keep a capability rendering's Go types on both merge sites
+- Report the same refused rendering value on every run
+- Name a patched force-applied volume by the object it comes from
+- Scope the attribution fallback docs, document copy-then-delete
+- Read a group sub-application's name after its policy in the duplicate check
+- Refuse a sibling-member rename during the decoration pass
+- Name producers that read alike by count in the collision error
+- Check a component capability default against the component's schema
+- Merge a capability rendering into nested authored objects
+- Check nested Required after the capability rendering is merged
+- Refuse a schemaless capability default no trait side validates
+
+### Performance
+
+- Take entry names only for an entry with traits
+
+### Testing
+
+- Fail on any re-added optional<X> field wrapper
+- Cover the wrapper-guard dir scan, a later non-RWX claim and the scaler HPA
+- Skip nil generated objects in the topology-spread test helpers
+- Pin onPodConditions status null default and explicit values
+- Cover later-round adoption and NameOrAdopt refusals
+- Pin same-origin conflicting identity as a hard error
+- Drop an unnecessary PortNumber conversion flagged by unconvert
+- Pin the integer readers without validation in front, and the aliasing fix's content
+- Pin the NetworkPolicy selector copy for match expressions
+- Pin postgresql empty enums, pooler envelope in Endpoints, custom query paths
+- Pin postgresql empty storageSize and null bootstrap siblings
+- Adapt per-document adoption test to round-0 LowerRaws
+- Pin worker's scheduling opinions in a golden fixture
+- Re-pin worker-scheduling against the release-1 container shape
+- Evaluate whole component selectors in the label invariant
+- Validate every component selector and count app labels apart from selectors
+- Identify synthesized network policies by name in the label invariant
+- Count component lowering rules in the label invariant registry coverage
+- Pin the multi-event hook Job acceptance for both helm renders
+- Cover the helmtemplate component in the label invariant
+- Cover the Flux source components in the label invariant
+- Name the url-scheme refusal in the null test comment
+- Drop a document-rule fixture that mutated the document it was handed
+- Run the dependency delivery fixture through the real policy handler
+- Expect the reconciliation policy to refuse a sub-millisecond duration first
+- Mark the cnpg-cluster schema-shape switch exhaustive
+- Cover cnpg-cluster in the component label invariant
+- Pin cnpg-cluster in the tier and health-check registries
+- Assert the placement tier edge and refresh the dedup phase reference
+- Expect the hierarchical delivery tier Kustomizations to depend on the tier before
+- Scope the cnpg-cluster storage-size test comment and cover a walStorage template
+- Pin the postgresql endpoint label values at the longest admitted name
+- Refuse an in-document collision in a document lowered from a raw one
+- Capture postgresql's published property schema before it becomes a lowering rule
+- Pin webservice output for a trait mix and an ingress portName
+- Drop a redundant plain-Transform check from the rule-read capability test
+- Freeze the helmchart side of the helm parity oracle
+- Pin the dot at the values ConfigMap truncation boundary
+- Reach the external-backend selector conflicts without the reserved key
+- Assert each default-tier row is an explicit map entry
+- Pin the force warning for the new claim sources
+- Attribute a role claim's force warning to its sub-application
+- Pin the post-policy step copy and policy-refusal contracts
+- Require each owner decorator's annotation on the pvc trait's claim
+- Pin that the force warning's origin tag reaches no output
+- Give two test identifiers generic names
+
 ## [0.1.0-alpha.23] - 2026-09-25
 
 ### Added
