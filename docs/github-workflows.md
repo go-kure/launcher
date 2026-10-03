@@ -639,7 +639,7 @@ when the run succeeded (so a broken build never publishes a cache), and only on 
 below), so `main` writes at most one entry per job per day, plus one after a `go.mod`/`go.sum`
 change. A per-commit source hash used to sit in place of the day bucket: every Go change missed
 the exact key, so each merge to `main` saved a fresh full build cache for every Go job (about
-6 GB per merge across the five jobs, measured on the cache server, go-kure/launcher#777), although the restore-key fallback already gave every run a warm cache. The
+6 GB per merge across the measured cache variants, from the cache server, go-kure/launcher#777), although the restore-key fallback already gave every run a warm cache. The
 deps-first restore key picks the newest entry for the same `go.mod`/`go.sum` from any day; Go's
 build cache is content-addressed, so an entry from earlier in the day only costs recompiling the
 packages changed since.
@@ -664,8 +664,8 @@ saves on a miss from any ref). The `docs-build` Hugo modules cache follows the r
 also carries `~/go/pkg/mod`. So do the small tool-binary caches keyed on a pinned version (yq,
 Hugo and lychee in `ci.yml`, yq in `deploy-docs.yml`): their key changes only on a version bump,
 but on a bump the PR and merge-queue runs miss too, and the combined form saved an entry from each
-of those refs. Such an entry can never warm `main` or another PR: only a rerun of the same PR can
-restore it, and it becomes unusable once that PR merges. Their save step runs right after the install
+of those refs. These entries cannot warm `main` or another PR: a PR-scoped entry can be restored
+only by reruns of that PR, and a merge-queue entry stays scoped to its queue ref. Their save step runs right after the install
 step, so the binary is cached once the install succeeded.
 The `doc-gate` job runs only on `pull_request`, so its yq cache is restore-only; it reads the
 entry the `lint` and `docs-build` jobs save on `main`.
