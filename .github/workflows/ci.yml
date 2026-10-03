@@ -228,9 +228,11 @@ jobs:
         fi
         echo "version=$YQ_VER" >> $GITHUB_OUTPUT
 
-    - name: Cache yq
+    # Split restore + save, the save gated on main like the Go caches: the combined
+    # actions/cache also saved on a miss from PR and merge-queue refs (go-kure/launcher#777).
+    - name: Restore yq from cache
       id: yq-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/yq
         key: yq-${{ steps.yq-version.outputs.version }}-linux-amd64
@@ -243,6 +245,13 @@ jobs:
           https://github.com/mikefarah/yq/releases/download/v${{ steps.yq-version.outputs.version }}/yq_linux_amd64
         chmod +x ~/bin/yq
         echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Save yq to cache
+      if: steps.yq-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/bin/yq
+        key: ${{ steps.yq-cache.outputs.cache-primary-key }}
 
     - name: Add yq to PATH
       if: steps.yq-cache.outputs.cache-hit == 'true'
@@ -1045,9 +1054,12 @@ jobs:
         fi
         echo "version=$HUGO_VER" >> $GITHUB_OUTPUT
 
+    # Tool-binary caches in this job (Hugo, yq, lychee) are split restore + save, the save
+    # gated on main like the Go caches: the combined actions/cache also saved on a miss from
+    # PR and merge-queue refs (go-kure/launcher#777).
     - name: Restore Hugo from cache
       id: hugo-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ${{ runner.temp }}/hugo-bin
         key: hugo-${{ steps.hugo-version.outputs.version }}-linux-amd64
@@ -1061,6 +1073,13 @@ jobs:
         sudo dpkg -i ${{ runner.temp }}/hugo.deb
         mkdir -p ${{ runner.temp }}/hugo-bin
         cp /usr/local/bin/hugo ${{ runner.temp }}/hugo-bin/hugo
+
+    - name: Save Hugo to cache
+      if: steps.hugo-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ${{ runner.temp }}/hugo-bin
+        key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
     - name: Add cached Hugo to PATH
       if: steps.hugo-cache.outputs.cache-hit == 'true'
@@ -1089,9 +1108,9 @@ jobs:
         fi
         echo "version=$YQ_VER" >> $GITHUB_OUTPUT
 
-    - name: Cache yq
+    - name: Restore yq from cache
       id: yq-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/yq
         key: yq-${{ steps.yq-version.outputs.version }}-linux-amd64
@@ -1104,6 +1123,13 @@ jobs:
           https://github.com/mikefarah/yq/releases/download/v${{ steps.yq-version.outputs.version }}/yq_linux_amd64
         chmod +x ~/bin/yq
         echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Save yq to cache
+      if: steps.yq-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/bin/yq
+        key: ${{ steps.yq-cache.outputs.cache-primary-key }}
 
     - name: Add yq to PATH
       if: steps.yq-cache.outputs.cache-hit == 'true'
@@ -1171,9 +1197,9 @@ jobs:
         fi
         echo "version=$LYCHEE_VER" >> $GITHUB_OUTPUT
 
-    - name: Cache lychee
+    - name: Restore lychee from cache
       id: lychee-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/lychee
         key: lychee-${{ steps.lychee-version.outputs.version }}-linux-amd64
@@ -1187,6 +1213,13 @@ jobs:
         tar xzf /tmp/lychee.tar.gz -C /tmp
         install -m755 /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/bin/lychee
         echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Save lychee to cache
+      if: steps.lychee-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/bin/lychee
+        key: ${{ steps.lychee-cache.outputs.cache-primary-key }}
 
     - name: Add lychee to PATH
       if: steps.lychee-cache.outputs.cache-hit == 'true'
@@ -1236,9 +1269,12 @@ jobs:
         fi
         echo "version=$YQ_VER" >> $GITHUB_OUTPUT
 
-    - name: Cache yq
+    # Restore only: this job runs only on pull_request, so a save gated on main could never
+    # run. It restores the entry the lint and docs-build jobs save on main
+    # (go-kure/launcher#777).
+    - name: Restore yq from cache
       id: yq-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/yq
         key: yq-${{ steps.yq-version.outputs.version }}-linux-amd64

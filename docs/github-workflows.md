@@ -661,8 +661,13 @@ later run; it only fills the size-capped cache server, whose LRU eviction then p
 `main` entries every run actually restores. The same rule applies to any new cache step: use
 split restore/save with the save gated to `main`, never the combined `actions/cache` (which
 saves on a miss from any ref). The `docs-build` Hugo modules cache follows the rule too, since it
-also carries `~/go/pkg/mod`. Only the small tool-binary caches keyed on a pinned version (yq,
-Hugo, lychee) keep the combined form: their key rarely changes, so they write almost nothing.
+also carries `~/go/pkg/mod`. So do the small tool-binary caches keyed on a pinned version (yq,
+Hugo and lychee in `ci.yml`, yq in `deploy-docs.yml`): their key changes only on a version bump,
+but on a bump the PR and merge-queue runs miss too, and the combined form saved an entry from each
+of those refs that no later run could restore. Their save step runs right after the install
+step, so the binary is cached once the install succeeded.
+The `doc-gate` job runs only on `pull_request`, so its yq cache is restore-only; it reads the
+entry the `lint` and `docs-build` jobs save on `main`.
 
 Cache and artifact traffic routes through an in-cluster cache server. Setting
 `ACTIONS_RESULTS_URL` in the workflow `env:` block ensures upload/download-artifact and
