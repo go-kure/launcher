@@ -74,6 +74,7 @@ packages:
 # the content PR, where their repo-relative links are reworked for the site.)
 extra_mounts:
   - {source: docs/design.md, target: concepts/design.md, title: Design, weight: 10}
+  - {source: docs/delivery-scope.md, target: concepts/delivery-scope.md, title: Delivery Scope, weight: 15}
   - {source: docs/oam/design-gvk.md, target: concepts/oam-gvk.md, title: API Group & GVK, weight: 20}
   - {source: docs/oam/design-kurel-package.md, target: concepts/oam-package.md, title: Kurel Packages, weight: 30}
   - {source: docs/oam/design-cluster-profile.md, target: concepts/oam-cluster-profile.md, title: Cluster Profiles, weight: 40}
