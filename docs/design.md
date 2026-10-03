@@ -1,9 +1,10 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-10-02 | Status: Phase 3 shipped, Phase 5 gate met*
+*Date: 2026-04-19 | Updated: 2026-10-04 | Status: Phase 3 shipped, Phase 5 gate met*
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.10 | 2026-10-04 | §11 marked superseded by `docs/delivery-scope.md` (delivery-agnostic scope) |
 | 1.9 | 2026-10-02 | §9.1: the document-format lifecycle takes effect at the first stable GA release; before it, no format stability promise |
 | 1.8 | 2026-09-30 | §11: `kurel build --oci-repository` generates the Launcher Layout (per-bundle artifacts, `OCIRepository` and `Kustomization`) |
 | 1.7 | 2026-09-23 | Record the pre-release bug-fix exception to the document-format lifecycle in §9.1 |
@@ -296,6 +297,10 @@ type Policy interface {
 ---
 
 ## 11. Launcher Layout
+
+> **Superseded** by [Launcher delivery scope](delivery-scope.md) (2026-10-04): launcher becomes
+> delivery-agnostic, and the `kurel build --oci-repository` layer below is removed (ticket L1 there,
+> which also deletes this section).
 
 Launcher's GitOps output is intentionally simple:
 
