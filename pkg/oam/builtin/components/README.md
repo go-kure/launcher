@@ -2917,7 +2917,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Go types, no longer as rendered, so the "Limits" below apply to them; the namespaced ones
   (`Lease`, `EndpointSlice`, `ImageRepository`, `ImagePolicy`) gain `metadata.namespace` when
   the chart left it unset. A chart that renders a `v1` `List` or a typed list now builds, and
-  its items are held to the policy.
+  its items are held to the policy. A list of a kind the scheme does not register no longer
+  builds when a `helm.sh/hook` annotation is involved, on the list or on an item (see "Rendered
+  objects"): it built before, with a wrong output, the list's hook lost and its items emitted
+  as ordinary resources.
 
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
@@ -2954,7 +2957,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     flattened in turn, to the depth kure's parser bounds), and each item of a typed list (`DeploymentList`) as
     the kind the list holds; an item that does not decode is a build error naming its
     position. A list of a kind the scheme does not register is flattened one level, each item
-    unstructured.
+    unstructured;
+  - a list document where a `helm.sh/hook` annotation is involved is a build error naming the
+    list: the annotation on the list's own metadata, or on one of its items (for a `v1` `List`,
+    at every depth the parser flattens). Helm reads a hook on the rendered document's own
+    metadata and nowhere else, and the parser reads only a list's items. So the items of a hook
+    list would be emitted as ordinary resources, and an item's own annotation, which Helm does
+    not read, would group it as a hook or drop it. A list without the annotation builds; an
+    object that is not a list keeps its hook.
 
   A decode failure is reported as `decoding rendered manifests: …`. `Generate` returns a fresh
   copy of the decoded objects on every call, as `manifests` does, so a trait that decorates a

@@ -193,6 +193,366 @@ items:
 	assertDeepCopyable(t, objects)
 }
 
+// TestDecodeChartManifests_HookInAListIsAnError: a list document where a
+// helm.sh/hook annotation is involved is refused, naming the list and the item:
+// the annotation on the list's own metadata (Helm's hook, which the items that
+// replace the list would not carry), or on an item (which Helm does not read).
+// That holds for a `v1` List, a typed list, a list nested in a `v1` List and a
+// list of a kind the scheme does not register, wherever the document sits in
+// the stream. The same document with another annotation in the hook's place
+// builds.
+func TestDecodeChartManifests_HookInAListIsAnError(t *testing.T) {
+	const leading = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: first\n---\n"
+	cases := []struct {
+		name  string
+		doc   string
+		wants []string
+		// objects is what the control, without the hook, decodes to.
+		objects []string
+	}{
+		{
+			name: "v1 List, hook on the list",
+			doc: `apiVersion: v1
+kind: List
+metadata:
+  name: cleanup-hook
+  annotations:
+    ANNOTATION
+items:
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    name: cleanup
+`,
+			wants:   []string{`list List "cleanup-hook" carries a helm.sh/hook annotation on its own metadata`},
+			objects: []string{"cleanup"},
+		},
+		{
+			name: "typed list, hook on the list",
+			doc: `apiVersion: v1
+kind: PodList
+metadata:
+  annotations:
+    ANNOTATION
+items:
+- metadata:
+    name: cleanup
+`,
+			wants:   []string{`list PodList "" carries a helm.sh/hook annotation on its own metadata`},
+			objects: []string{"cleanup"},
+		},
+		{
+			name: "v1 List, hook on an item",
+			doc: `apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: settings
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    name: cleanup
+    annotations:
+      ANNOTATION
+`,
+			wants:   []string{`item 1 (Pod "cleanup") of list List "" carries a helm.sh/hook annotation`},
+			objects: []string{"settings", "cleanup"},
+		},
+		{
+			name: "typed list, hook on an item",
+			doc: `apiVersion: apps/v1
+kind: DeploymentList
+items:
+- metadata:
+    name: web
+    annotations:
+      ANNOTATION
+`,
+			wants:   []string{`item 0 ("web") of list DeploymentList "" carries a helm.sh/hook annotation`},
+			objects: []string{"web"},
+		},
+		{
+			name: "nested list, hook on the inner list",
+			doc: `apiVersion: v1
+kind: List
+metadata:
+  name: outer
+items:
+- apiVersion: v1
+  kind: List
+  metadata:
+    name: inner
+    annotations:
+      ANNOTATION
+  items:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: migrate
+`,
+			wants:   []string{`item 0 (List "inner") of list List "outer" carries a helm.sh/hook annotation`},
+			objects: []string{"migrate"},
+		},
+		{
+			name: "nested list, hook on an item of the inner list",
+			doc: `apiVersion: v1
+kind: List
+metadata:
+  name: outer
+items:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: settings
+- apiVersion: v1
+  kind: List
+  metadata:
+    name: inner
+  items:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: migrate
+      annotations:
+        ANNOTATION
+`,
+			wants: []string{
+				`item 1 of list List "outer"`,
+				`item 0 (Job "migrate") of list List "inner" carries a helm.sh/hook annotation`,
+			},
+			objects: []string{"settings", "migrate"},
+		},
+		{
+			name: "list of an unregistered kind, hook on the list",
+			doc: `apiVersion: example.com/v1
+kind: ThingList
+metadata:
+  annotations:
+    ANNOTATION
+items:
+- apiVersion: example.com/v1
+  kind: Thing
+  metadata:
+    name: thing
+`,
+			wants:   []string{`list ThingList "" carries a helm.sh/hook annotation on its own metadata`},
+			objects: []string{"thing"},
+		},
+		{
+			name: "list of an unregistered kind, hook on an item",
+			doc: `apiVersion: example.com/v1
+kind: ThingList
+items:
+- apiVersion: example.com/v1
+  kind: Thing
+  metadata:
+    name: thing
+    annotations:
+      ANNOTATION
+`,
+			wants:   []string{`item 0 (Thing "thing") of list ThingList "" carries a helm.sh/hook annotation`},
+			objects: []string{"thing"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tc.doc, "ANNOTATION") {
+				t.Fatal("test premise: the document has no ANNOTATION placeholder")
+			}
+			hooked := strings.Replace(tc.doc, "ANNOTATION", "helm.sh/hook: pre-delete", 1)
+			for _, stream := range []string{hooked, leading + hooked} {
+				_, err := decodeChartManifests([]byte(stream))
+				assertErrorMentions(t, err, append([]string{"decoding rendered manifests"}, tc.wants...)...)
+			}
+			if _, err := parseChartManifests([]byte(hooked)); err == nil {
+				t.Error("parseChartManifests: got no error, want the refusal")
+			}
+
+			control := strings.Replace(tc.doc, "ANNOTATION", "example.com/note: kept", 1)
+			objects, err := decodeChartManifests([]byte(control))
+			if err != nil {
+				t.Fatalf("control without the hook: %v", err)
+			}
+			if names := resourceNames(objects); !slices.Equal(names, tc.objects) {
+				t.Errorf("control without the hook decoded %v, want %v", names, tc.objects)
+			}
+		})
+	}
+}
+
+// TestDecodeChartManifests_HookInAListIsReadAsWritten: the check reads a list
+// document as the parser does, in a render that is a JSON stream too, where a
+// document can state what YAML cannot. A number no Go type holds does not make
+// the check skip the document, and a key stated twice is read in every
+// statement: the typed decode merges a repeated metadata, so an annotation in
+// the first one is on the decoded object. Each document builds without the
+// hook, which is what makes the parser's reading the one to match.
+func TestDecodeChartManifests_HookInAListIsReadAsWritten(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{
+			name: "a number beyond float64 beside the list's hook",
+			doc: `{"apiVersion": "v1", "kind": "List",
+ "metadata": {"annotations": {ANNOTATION}},
+ "extra": 1e1000,
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm"}}]}`,
+			want: `list List "" carries a helm.sh/hook annotation on its own metadata`,
+		},
+		{
+			name: "an item's hook in the first of two metadata",
+			doc: `{"apiVersion": "v1", "kind": "List",
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap",
+   "metadata": {"annotations": {ANNOTATION}},
+   "metadata": {"name": "cm"}}]}`,
+			want: `item 0 (ConfigMap "cm") of list List "" carries a helm.sh/hook annotation`,
+		},
+		{
+			name: "an item's hook in the first of two annotations",
+			doc: `{"apiVersion": "v1", "kind": "List",
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap",
+   "metadata": {"name": "cm", "annotations": {ANNOTATION}, "annotations": {"example.com/other": "x"}}}]}`,
+			want: `item 0 (ConfigMap "cm") of list List "" carries a helm.sh/hook annotation`,
+		},
+		{
+			name: "the list's hook in the first of two metadata",
+			doc: `{"apiVersion": "v1", "kind": "List",
+ "metadata": {"annotations": {ANNOTATION}},
+ "metadata": {"name": "later"},
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm"}}]}`,
+			want: `list List "later" carries a helm.sh/hook annotation on its own metadata`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hooked := strings.Replace(tc.doc, "ANNOTATION", `"helm.sh/hook": "pre-delete"`, 1)
+			_, err := decodeChartManifests([]byte(hooked))
+			assertErrorMentions(t, err, "decoding rendered manifests", tc.want)
+
+			control := strings.Replace(tc.doc, "ANNOTATION", `"example.com/note": "kept"`, 1)
+			objects, err := decodeChartManifests([]byte(control))
+			if err != nil {
+				t.Fatalf("control without the hook: %v", err)
+			}
+			if names := resourceNames(objects); !slices.Equal(names, []string{"cm"}) {
+				t.Errorf("control without the hook decoded %v, want [cm]", names)
+			}
+		})
+	}
+}
+
+// TestDecodeChartManifests_HookInAListUnderAKeyOfAnotherCase: the parser's list
+// detection reads apiVersion and kind under exactly those keys, the decoder it
+// falls back to reads them whatever their case and takes the last, and Helm
+// reads metadata whatever its case. A document that is a single object to the
+// first and a list of an unregistered kind to the second is replaced by its
+// items, so the check reads it as a list too; the same document without the
+// hook builds to its item.
+func TestDecodeChartManifests_HookInAListUnderAKeyOfAnotherCase(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{
+			name: "a later Kind makes a registered object an unregistered list, hook on the list",
+			doc: `{"apiVersion": "v1", "kind": "ConfigMap", "Kind": "ThingList",
+ "metadata": {"annotations": {ANNOTATION}},
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm"}}]}`,
+			want: `list ThingList "" carries a helm.sh/hook annotation on its own metadata`,
+		},
+		{
+			name: "a later Kind makes a registered object an unregistered list, hook on an item",
+			doc: `{"apiVersion": "v1", "kind": "ConfigMap", "Kind": "ThingList",
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm", "annotations": {ANNOTATION}}}]}`,
+			want: `item 0 (ConfigMap "cm") of list ThingList "" carries a helm.sh/hook annotation`,
+		},
+		{
+			name: "a later APIVersion makes a registered object an unregistered one that states items",
+			doc: `{"apiVersion": "v1", "kind": "ConfigMap", "APIVersion": "example.com/v1",
+ "metadata": {"annotations": {ANNOTATION}},
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm"}}]}`,
+			want: `list ConfigMap "" carries a helm.sh/hook annotation on its own metadata`,
+		},
+		{
+			name: "the list's hook under Metadata, which Helm reads",
+			doc: `{"apiVersion": "v1", "kind": "List",
+ "Metadata": {"Annotations": {ANNOTATION}},
+ "items": [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "cm"}}]}`,
+			want: `list List "" carries a helm.sh/hook annotation on its own metadata`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hooked := strings.Replace(tc.doc, "ANNOTATION", `"helm.sh/hook": "pre-delete"`, 1)
+			_, err := decodeChartManifests([]byte(hooked))
+			assertErrorMentions(t, err, "decoding rendered manifests", tc.want)
+
+			control := strings.Replace(tc.doc, "ANNOTATION", `"example.com/note": "kept"`, 1)
+			objects, err := decodeChartManifests([]byte(control))
+			if err != nil {
+				t.Fatalf("control without the hook: %v", err)
+			}
+			if names := resourceNames(objects); !slices.Equal(names, []string{"cm"}) {
+				t.Errorf("control without the hook decoded %v, want [cm]", names)
+			}
+		})
+	}
+}
+
+// TestDecodeChartManifests_HookInAListBelowTheNestingBound: the parser's
+// nesting bound is on registered lists. A list of an unregistered kind nine
+// `v1` Lists deep, one level below what the parser flattens a registered list
+// to, is still replaced by its items, so the check still reads it; the same
+// document without the hook builds.
+func TestDecodeChartManifests_HookInAListBelowTheNestingBound(t *testing.T) {
+	nest := func(annotation string) string {
+		raw := `{"apiVersion":"example.com/v1","kind":"ThingList","items":[` +
+			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm","annotations":{` + annotation + `}}}]}`
+		for range maxCheckedListNesting + 1 {
+			raw = `{"apiVersion":"v1","kind":"List","items":[` + raw + `]}`
+		}
+		return raw
+	}
+	_, err := decodeChartManifests([]byte(nest(`"helm.sh/hook":"pre-delete"`)))
+	assertErrorMentions(t, err, "decoding rendered manifests",
+		`item 0 (ConfigMap "cm") of list ThingList "" carries a helm.sh/hook annotation`)
+
+	objects, err := decodeChartManifests([]byte(nest(`"example.com/note":"kept"`)))
+	if err != nil {
+		t.Fatalf("control without the hook: %v", err)
+	}
+	if names := resourceNames(objects); !slices.Equal(names, []string{"cm"}) {
+		t.Errorf("control without the hook decoded %v, want [cm]", names)
+	}
+}
+
+// TestDecodeChartManifests_HookOnASingleObjectIsNotRefused: the refusal is for
+// lists. An object that is not one keeps its helm.sh/hook annotation and
+// decodes, a registered kind that states an items field of its own included:
+// the parser does not replace it by anything.
+func TestDecodeChartManifests_HookOnASingleObjectIsNotRefused(t *testing.T) {
+	const hook = "  annotations:\n    helm.sh/hook: pre-install\n"
+	objects, err := decodeChartManifests([]byte(
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n" + hook + "items:\n- metadata:\n    annotations:\n      helm.sh/hook: test\n" +
+			"---\napiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: thing\n" + hook))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	if names := resourceNames(objects); !slices.Equal(names, []string{"cm", "thing"}) {
+		t.Fatalf("decoded %v, want [cm thing]", names)
+	}
+	for _, o := range objects {
+		if got := o.GetAnnotations()["helm.sh/hook"]; got != "pre-install" {
+			t.Errorf("%s: helm.sh/hook = %q, want pre-install", o.GetName(), got)
+		}
+	}
+}
+
 // TestDecodeChartManifests_UndeclaredFieldIsKeptOrRefused: a field the API
 // type of a registered kind does not declare is not dropped. An object that is
 // neither a workload nor a claim comes back unstructured with the field; a
