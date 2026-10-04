@@ -51,10 +51,10 @@ type TransformContext struct {
 	// template as written: its pods carry no component label, and a synthesized policy
 	// does not select them. A HelmRelease's post-renderer overwrites instead: with a
 	// ComponentLabelKey that a Flux-installed chart's own selectors use ("app",
-	// "app.kubernetes.io/name"), the post-renderer replaces the value those selectors
-	// expect, which parts the chart's selectors from its pods wherever the chart's value
-	// is not the component's, and the cluster refuses the workload. Use a key no chart
-	// sets, such as the default.
+	// "app.kubernetes.io/name"), the post-renderer replaces the value the chart set under
+	// it. Where a chart's selector does not accept the component's value, that parts the
+	// selector from the chart's pods and the cluster refuses the workload. Use a key no
+	// chart sets, such as the default.
 	ComponentLabelKey string
 	// Domain is the label/annotation domain for derived platform keys (<domain>/tier,
 	// <domain>/component). Empty => DefaultDomain ("gokure.dev"). Non-authorable platform

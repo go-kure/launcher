@@ -304,10 +304,10 @@ once, however often the document is transformed or generated.
 
 The patch sets the pod template's label and touches no selector, and launcher does not look
 into a chart. With a `ComponentLabelKey` that a Flux-installed chart's own selectors use
-(`app`, `app.kubernetes.io/name`), the post-renderer replaces the value those selectors
-expect. Wherever the chart's value is not the component's, that parts the chart's selectors
-from its pods and the cluster refuses the workload. Use a key no chart sets, such as the
-default.
+(`app`, `app.kubernetes.io/name`), the post-renderer replaces the value the chart set under
+it. Where a chart's selector does not accept the component's value, that parts the selector
+from the chart's pods and the cluster refuses the workload. Use a key no chart sets, such as
+the default.
 
 A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
