@@ -124,20 +124,26 @@ Every object the base library can construct, and how a document reaches it
 `<package directory>.Create<Kind>`. Two tests hold the table to the code:
 
 - `TestKindInventory_CoversEveryConstructor` reads those files from the linked module and
-  fails when a constructor has no row, or a row has no constructor. A base-library bump that
-  adds a kind therefore fails until the kind is listed here.
+  fails when a constructor has no row, a row has no constructor, or a row's Kind cell is not
+  the API version, kind and scope the constructor's doc comment gives. A base-library bump
+  that adds a kind, or moves one to another API version, therefore fails until the table
+  says so.
 - `TestKindInventory_MatchesCallSites` holds the Status column to this package and
   `../traits`: a `kind` row's constructor is called here, a `trait` row's there or here (a
   trait may build through this package, as `configmap` does), and a `missing` or
-  `not authorable` row's by neither. A `component` row is not held to either, and neither is
-  the step from `trait` to `kind`: the change that adds the kind component updates the row.
+  `not authorable` row's by neither.
+
+Not held by a test: which handler makes the call, so a `kind` row passes while any component
+of this package calls its constructor, and the Type, Decode and Notes columns are checked for
+presence only; a `component` row; the step from `trait` to `kind`, which the change that adds
+the kind component makes in the row; and code outside the two packages, which is not read.
 
 Status is one of:
 
 - `kind`: a kind component projects the object; Type is its component `type`.
 - `component`: a component that is not a kind component emits it; Notes says why there is no
   kind component.
-- `trait`: only a trait emits it; Type is the trait `type`.
+- `trait`: a trait emits it and no component does; Type is the trait `type`.
 - `missing`: authorable, with no component yet. go-kure/launcher#790 adds these group by group.
 - `not authorable`: no component is planned; Notes gives the reason.
 

@@ -39,11 +39,20 @@ type inventoryRow struct {
 	kind, status, typ, decode, notes string
 }
 
+// generatedConstructor is what a generated Create<Kind> constructor says of its
+// kind: the API version its doc comment names, and whether the kind is
+// cluster-scoped.
+type generatedConstructor struct {
+	apiVersion    string
+	clusterScoped bool
+}
+
 // TestKindInventory_CoversEveryConstructor holds the README's kind inventory to
 // the base library: every generated Create<Kind> constructor of the linked
-// module has exactly one row, and every row names one. A base-library bump that
-// adds or removes a constructor fails here, naming it. It also checks what a
-// row must carry for its status.
+// module has exactly one row, every row names one, and a row's Kind cell gives
+// the constructor's API version, kind and scope. A base-library bump that adds
+// or removes a constructor, or moves a kind to another API version, fails
+// here, naming it. It also checks what a row must carry for its status.
 func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 	constructors := kureGeneratedConstructors(t)
 	rows := readKindInventory(t)
@@ -55,19 +64,19 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(rows)) {
 		row := rows[name]
-		clusterScoped, ok := constructors[name]
+		constructor, ok := constructors[name]
 		if !ok {
 			t.Errorf("README.md:%d: stale row %s: the linked %s has no such generated constructor", row.line, name, kureModulePath)
 			continue
 		}
 		// The Kind cell is "<apiVersion> <Kind>", with "(cluster-scoped)" after
-		// it exactly when the constructor takes no namespace.
-		want := []string{strings.TrimPrefix(name[strings.Index(name, ".")+1:], "Create")}
-		if clusterScoped {
+		// it exactly when the kind is.
+		want := []string{constructor.apiVersion, strings.TrimPrefix(name[strings.Index(name, ".")+1:], "Create")}
+		if constructor.clusterScoped {
 			want = append(want, "(cluster-scoped)")
 		}
-		if got := strings.Fields(row.kind); len(got) < 2 || !slices.Equal(got[1:], want) {
-			t.Errorf("README.md:%d: %s: Kind cell is %q, want \"<apiVersion> %s\"", row.line, name, row.kind, strings.Join(want, " "))
+		if got := strings.Fields(row.kind); !slices.Equal(got, want) {
+			t.Errorf("README.md:%d: %s: Kind cell is %q, want %q", row.line, name, row.kind, strings.Join(want, " "))
 		}
 		switch row.status {
 		case inventoryKind, inventoryTrait:
@@ -96,10 +105,13 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 // code: a kind row's constructor is called from this package, a trait row's
 // from ../traits or from this package, and a missing or not authorable row's
 // from neither. So a component or trait for a missing kind fails here until
-// its row says so, and a row cannot claim one that builds nothing. Two things
-// are not held: a component row (an object a non-kind component emits, or the
-// crd exception), and a trait row whose kind gains a kind component, which the
-// change adding the component updates.
+// its row says so, and a row cannot claim one that builds nothing.
+//
+// Not held: which handler makes the call (a kind row passes while any file of
+// this package calls its constructor, so the Type column is not checked); a
+// component row (an object a non-kind component emits, or the crd exception);
+// a trait row whose kind gains a kind component, which the change adding the
+// component updates; and code outside the two packages, which is not read.
 func TestKindInventory_MatchesCallSites(t *testing.T) {
 	constructors := kureGeneratedConstructors(t)
 	here := kureConstructorCalls(t, ".", constructors)
@@ -132,12 +144,14 @@ func TestKindInventory_MatchesCallSites(t *testing.T) {
 }
 
 // kureGeneratedConstructors returns the generated Create<Kind> constructors of
-// the linked base library, keyed "<package directory>.Create<Kind>", with
-// whether the constructor is for a cluster-scoped kind (it takes a name and no
-// namespace). It reads every zz_generated_create.go under the module's
-// pkg/kubernetes, at any depth, since Go cannot list a package's functions at
-// run time, and fails when the module directory or those files cannot be found.
-func kureGeneratedConstructors(t *testing.T) map[string]bool {
+// the linked base library, keyed "<package directory>.Create<Kind>", with what
+// each says of its kind. It reads every zz_generated_create.go under the
+// module's pkg/kubernetes, at any depth, since Go cannot list a package's
+// functions at run time, and fails when the module directory or those files
+// cannot be found, or when a constructor's doc comment and its parameters (a
+// name, and a namespace unless the kind is cluster-scoped) do not read as the
+// generator writes them.
+func kureGeneratedConstructors(t *testing.T) map[string]generatedConstructor {
 	t.Helper()
 	root := filepath.Join(linkedModuleDir(t, kureModulePath), filepath.FromSlash("pkg/kubernetes"))
 	const generated = "zz_generated_create.go"
@@ -155,10 +169,10 @@ func kureGeneratedConstructors(t *testing.T) map[string]bool {
 		t.Fatalf("walk %s for the %s files: %v", root, generated, err)
 	}
 
-	constructors := map[string]bool{}
+	constructors := map[string]generatedConstructor{}
 	fset := token.NewFileSet()
 	for _, file := range files {
-		parsed, err := parser.ParseFile(fset, file, nil, parser.SkipObjectResolution)
+		parsed, err := parser.ParseFile(fset, file, nil, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatalf("parse %s of %s: %v (the base library moved its generated constructors; update this test)", generated, kureModulePath, err)
 		}
@@ -179,7 +193,11 @@ func kureGeneratedConstructors(t *testing.T) map[string]bool {
 			if _, dup := constructors[key]; dup {
 				t.Fatalf("%s: a second generated constructor reads %s: two package directories share a name, so the inventory's keys are ambiguous; update this test", file, key)
 			}
-			constructors[key] = params == 1
+			constructor, ok := parseConstructorDoc(fn.Name.Name, fn.Doc.Text())
+			if !ok || constructor.clusterScoped != (params == 1) {
+				t.Fatalf("%s: %s takes %d parameter(s) and its doc comment reads %q, want \"%s returns a [cluster-scoped] <apiVersion> <Kind> ...\", cluster-scoped exactly when it takes no namespace; update this test", file, fn.Name.Name, params, strings.TrimSpace(fn.Doc.Text()), fn.Name.Name)
+			}
+			constructors[key] = constructor
 		}
 	}
 	// Vacuity guard: 128 at v0.2.0-beta.15, over nine files.
@@ -187,6 +205,53 @@ func kureGeneratedConstructors(t *testing.T) map[string]bool {
 		t.Fatalf("found %d constructors in %d %s files under %s, want >= 100 in >= 9; the walk is broken", len(constructors), len(files), generated, root)
 	}
 	return constructors
+}
+
+// parseConstructorDoc reads the doc comment the base library's generator
+// writes on the constructor name: "<name> returns a[n] [cluster-scoped]
+// <apiVersion> <Kind> carrying ...", where <Kind> is name without "Create".
+// It reports false for a comment in any other form.
+func parseConstructorDoc(name, doc string) (generatedConstructor, bool) {
+	fields := strings.Fields(doc)
+	if len(fields) < 5 || fields[0] != name || fields[1] != "returns" || (fields[2] != "a" && fields[2] != "an") {
+		return generatedConstructor{}, false
+	}
+	constructor, rest := generatedConstructor{}, fields[3:]
+	if rest[0] == "cluster-scoped" {
+		constructor.clusterScoped, rest = true, rest[1:]
+	}
+	if len(rest) < 2 || rest[1] != strings.TrimPrefix(name, "Create") {
+		return generatedConstructor{}, false
+	}
+	constructor.apiVersion = rest[0]
+	return constructor, true
+}
+
+// TestKindInventory_ConstructorDoc pins how a generated constructor's doc
+// comment is read.
+func TestKindInventory_ConstructorDoc(t *testing.T) {
+	tests := []struct {
+		name, constructor, doc string
+		want                   generatedConstructor
+		wantOK                 bool
+	}{
+		{name: "a namespaced kind", constructor: "CreateConfigMap", doc: "CreateConfigMap returns a v1 ConfigMap carrying TypeMeta and identity only.\n", want: generatedConstructor{apiVersion: "v1"}, wantOK: true},
+		{name: "a cluster-scoped kind", constructor: "CreateNamespace", doc: "CreateNamespace returns a cluster-scoped v1 Namespace carrying TypeMeta and identity only.\n", want: generatedConstructor{apiVersion: "v1", clusterScoped: true}, wantOK: true},
+		{name: "the other article", constructor: "CreateDeployment", doc: "CreateDeployment returns an apps/v1 Deployment carrying TypeMeta.\n", want: generatedConstructor{apiVersion: "apps/v1"}, wantOK: true},
+		{name: "no comment", constructor: "CreateConfigMap"},
+		{name: "another constructor's comment", constructor: "CreateConfigMap", doc: "CreateSecret returns a v1 Secret carrying TypeMeta and identity only.\n"},
+		{name: "another kind than the name's", constructor: "CreateConfigMap", doc: "CreateConfigMap returns a v1 Secret carrying TypeMeta and identity only.\n"},
+		{name: "no API version", constructor: "CreateConfigMap", doc: "CreateConfigMap returns a ConfigMap carrying TypeMeta and identity only.\n"},
+		{name: "a scope and nothing after it", constructor: "CreateNamespace", doc: "CreateNamespace returns a cluster-scoped Namespace\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseConstructorDoc(tt.constructor, tt.doc)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("parseConstructorDoc = %+v, %t, want %+v, %t", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
 }
 
 // readKindInventory returns the rows of the "Kind inventory" table in this
@@ -334,7 +399,7 @@ func TestKindInventory_TableParser(t *testing.T) {
 
 // kureConstructorCalls returns which of constructors the non-test Go files of
 // dir call, in the same "<package directory>.Create<Kind>" form.
-func kureConstructorCalls(t *testing.T, dir string, constructors map[string]bool) map[string]bool {
+func kureConstructorCalls(t *testing.T, dir string, constructors map[string]generatedConstructor) map[string]bool {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -374,7 +439,7 @@ func kureConstructorCalls(t *testing.T, dir string, constructors map[string]bool
 // It returns a problem for what it cannot attribute: a dot or blank import of
 // such a package, and a constructor that is named without being called (stored
 // in a variable, say), which may or may not run.
-func kureConstructorCallsIn(fset *token.FileSet, file *ast.File, constructors map[string]bool) (called map[string]bool, problem string) {
+func kureConstructorCallsIn(fset *token.FileSet, file *ast.File, constructors map[string]generatedConstructor) (called map[string]bool, problem string) {
 	if file.Scope == nil {
 		return nil, fmt.Sprintf("%s was parsed without identifier resolution", fset.Position(file.Pos()).Filename)
 	}
@@ -436,7 +501,7 @@ func kureConstructorCallsIn(fset *token.FileSet, file *ast.File, constructors ma
 // TestKindInventory_CallSiteWalk pins what the call-site walk counts, on
 // source it cannot find in the two packages it reads.
 func TestKindInventory_CallSiteWalk(t *testing.T) {
-	constructors := map[string]bool{"kubernetes.CreateSecret": false, "cilium.CreateCiliumNetworkPolicy": false}
+	constructors := map[string]generatedConstructor{"kubernetes.CreateSecret": {}, "cilium.CreateCiliumNetworkPolicy": {}}
 	const header = "package p\n\n"
 	tests := []struct {
 		name, src   string
