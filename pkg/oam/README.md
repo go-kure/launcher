@@ -1200,7 +1200,10 @@ A trait the author wrote, forwarded by a rule onto a component the rule emitted 
 another name, names that component and, through it, the rule and the authored
 component: `no handler for trait type "x" (on component "web-rendered", itself emitted
 by lowering rule component/role for component "web" (type "role") in document "app"
-(kind "Application"))`. Under the authored name the clause is left out.
+(kind "Application"))`. One a document rule moved to another component names the
+component it was written on: `(on component "worker", authored on component "web" (type
+"webservice") in document "app" (kind "Moving"))`. On the component the author wrote it
+on, by name, the clause is left out.
 
 The emitted form is reached only for a type the package knows and the registry holds no
 handler for, and only for a rule that does not declare the type as a target (`Seal`
