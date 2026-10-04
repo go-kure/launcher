@@ -159,6 +159,9 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 	if !ok || secretName == "" {
 		return nil, errors.New("required property 'secretName' missing or not a string")
 	}
+	if err := checkAuthoredObjectName("secretName", "the ExternalSecret", secretName); err != nil {
+		return nil, err
+	}
 	config.SecretName = secretName
 
 	rawStoreRef, _ := props["secretStoreRef"].(map[string]any)
@@ -188,6 +191,9 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 
 	config.TargetSecretName = secretName
 	if tsn, ok := props["targetSecretName"].(string); ok && tsn != "" {
+		if err := checkAuthoredObjectName("targetSecretName", "the produced Secret", tsn); err != nil {
+			return nil, err
+		}
 		config.TargetSecretName = tsn
 	}
 

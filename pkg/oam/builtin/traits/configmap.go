@@ -54,6 +54,9 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	if !ok || name == "" {
 		return errors.New("required property 'name' missing or not a string")
 	}
+	if err := checkAuthoredObjectName("name", "the ConfigMap", name); err != nil {
+		return err
+	}
 
 	var mountPath string
 	if mp, ok := props["mountPath"].(string); ok {

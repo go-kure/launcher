@@ -74,6 +74,10 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 	if !ok || sourcePVC == "" {
 		return nil, errors.New("required property 'sourcePVC' missing or not a string")
 	}
+	// The claim's name, and the base of the ReplicationSource's (<sourcePVC>-backup).
+	if err := checkAuthoredObjectName("sourcePVC", "the PersistentVolumeClaim to back up", sourcePVC); err != nil {
+		return nil, err
+	}
 
 	schedule, ok := props["schedule"].(string)
 	if !ok || schedule == "" {
@@ -93,6 +97,9 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 
 	if repo, ok := props["repository"].(string); ok && repo != "" {
+		if err := checkAuthoredObjectName("repository", "the repository Secret", repo); err != nil {
+			return nil, err
+		}
 		config.Repository = repo
 	}
 

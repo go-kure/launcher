@@ -148,12 +148,22 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 
 	// Optional: name (for multiple httproute traits on the same component)
 	if name, ok := props["name"].(string); ok && name != "" {
+		if err := checkAuthoredObjectName("name", "the HTTPRoute", name); err != nil {
+			return nil, err
+		}
 		config.Name = name
 	}
 
 	// Optional: scope — sub-app name becomes {component}-httproute-{scope} when
 	// set and name is empty, enabling multiple httproute traits per component.
 	if scope, ok := props["scope"].(string); ok && scope != "" {
+		// The scope ends the generated name only; beside an authored name it
+		// names nothing and is left to the capability binding it selects.
+		if config.Name == "" {
+			if err := checkAuthoredNamePart("scope", scope, "the HTTPRoute", app.Name+"-httproute-"+scope); err != nil {
+				return nil, err
+			}
+		}
 		config.Scope = scope
 	}
 

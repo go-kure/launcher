@@ -66,6 +66,9 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, app *
 	if !ok || name == "" {
 		return nil, errors.New("required property 'name' missing or not a string")
 	}
+	if err := checkAuthoredObjectName("name", "the CiliumNetworkPolicy", name); err != nil {
+		return nil, err
+	}
 
 	// The joint requirement counts rules, not keys. api.Rule carries Egress and
 	// Ingress as `omitempty` lists, so a null and an empty list both render no rule

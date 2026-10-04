@@ -244,10 +244,20 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 
 	if name, ok := props["name"].(string); ok && name != "" {
+		if err := checkAuthoredObjectName("name", "the Ingress", name); err != nil {
+			return nil, err
+		}
 		config.Name = name
 	}
 
 	if scope, ok := props["scope"].(string); ok && scope != "" {
+		// The scope ends the generated name only; beside an authored name it
+		// names nothing and is left to the capability binding it selects.
+		if config.Name == "" {
+			if err := checkAuthoredNamePart("scope", scope, "the Ingress", app.Name+"-ingress-"+scope); err != nil {
+				return nil, err
+			}
+		}
 		config.Scope = scope
 	}
 

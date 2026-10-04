@@ -893,9 +893,31 @@ characters (`oam.ShortenNameWithSuffix`, go-kure/launcher#793): the `scaler` HPA
 sets one), the managed TLS Secret default (`<component>-tls`), the `volsync`
 ReplicationSource (`<sourcePVC>-backup`) and the `volsync` default repository Secret name
 (`<component>-volsync-secret`). A name that fits is unchanged; a longer one keeps a prefix of
-the name before the suffix, a `-`, 10 hex characters of its sha256, and the suffix whole. An
-authored name, such as a routing trait's `name`, an `expose` `secretName` or a `volsync`
-`repository`, is used as written and never shortened.
+the name before the suffix, a `-`, 10 hex characters of its sha256, and the suffix whole.
+
+An authored name is used as written or refused: it is never shortened and never changed, and
+one that cannot be the name of its object fails the transform with the property in the error
+(go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects is
+named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
+with an alphanumeric):
+
+| Trait | Property | What it names |
+|-------|----------|---------------|
+| `ingress`, `httproute` | `name` | The Ingress or HTTPRoute. |
+| `expose` | `secretName` | The managed TLS Secret (a `ValidationError` on the component). |
+| `certificate` | `secretName` | The Certificate and the Secret it writes. |
+| `external-secret` | `secretName`, `targetSecretName` | The ExternalSecret, and the Secret it produces. |
+| `configmap` | `name` | The ConfigMap. |
+| `cilium-networkpolicy` | `name` | The CiliumNetworkPolicy. |
+| `pvc` | `name` | The PersistentVolumeClaim. |
+| `volsync` | `repository`, `sourcePVC` | The repository Secret, and the claim to back up (which also starts the ReplicationSource name). |
+
+A routing trait's `scope` is a part of a generated name, not a name: its length is never
+refused, because the name it ends is shortened, but a character an object name cannot hold is,
+checked on the name as built so the digest cannot hide it. Beside an authored `name` the scope
+is in no name and is not checked. A property that only refers to an
+object launcher never names (`issuerRef.name`, a `gatewayName`, an `ingress` `tls[].secretName`)
+is passed through as written.
 
 The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
 NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized
