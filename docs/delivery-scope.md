@@ -375,7 +375,9 @@ be closed at build time.
 
 1. **Decode:** chart output is decoded with kure's parser (`ParseYAMLWithOptions` with
    `AllowUnstructured`), so registered kinds are typed (`decodeChartManifests`,
-   `helmtemplate_render.go`). `Generate` returns a fresh copy on each call, so a
+   `helmtemplate_render.go`). The one exception is an object kept as rendered over a field
+   its type does not declare (Limits, below): it is unstructured, whatever its kind.
+   `Generate` returns a fresh copy on each call, so a
    workload-decorating trait acts on a chart's typed workload without changing the cached
    render.
 2. **Chart URL allowlist:** `HelmTemplateConfig.ApplyPolicy` checks the chart URL host
@@ -405,9 +407,12 @@ be closed at build time.
      (any object with a top-level `items` array there), are refused; a
      custom resource's pods, the archive host a Helm repository
      index names and redirects are not checked (the last two: go-kure/launcher#794, item 6).
-     The typed decode is lenient: a field the vendored API type does not declare is left out
-     of the output with no error, where the object was emitted as rendered before
-     (go-kure/launcher#794, item 7).
+     A field the vendored API type does not declare is no longer dropped: on a workload, a
+     claim or a PersistentVolume it is refused; any other registered kind is emitted as
+     rendered, as an unstructured object, with the field kept. One such field is refused on
+     every kind: a top-level `items` array on a kind that declares none, since emitted as
+     rendered the object would be a list. A key inside a type that unmarshals itself is the
+     known limit: it is not reported and is still dropped (go-kure/launcher#794, item 7).
 
 ---
 
@@ -579,5 +584,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace; items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
