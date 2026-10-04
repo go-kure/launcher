@@ -12,8 +12,8 @@ import (
 
 // chartOutput stands for what a chart renders: a Deployment whose pod template
 // already carries the component key with the chart's own value, a CronJob, a
-// ReplicaSet and a ReplicationController that do not carry it, and an object
-// with no pod template.
+// ReplicaSet and a ReplicationController that do not carry it, a bare Pod, and
+// an object that runs no pod.
 const chartOutput = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -67,6 +67,17 @@ spec:
         app: controller
 ---
 apiVersion: v1
+kind: Pod
+metadata:
+  name: chart-pod
+  labels:
+    app: pod
+spec:
+  containers:
+  - name: main
+    image: example.com/main:1
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: chart-settings
@@ -116,15 +127,15 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 		name, _, _ := unstructured.NestedString(doc, "metadata", "name")
 		byName[name] = doc
 	}
-	if len(byName) != 5 {
-		t.Fatalf("kustomize returned objects %v, want the chart's five under their own names\n%s", byName, out)
+	if len(byName) != 6 {
+		t.Fatalf("kustomize returned objects %v, want the chart's six under their own names\n%s", byName, out)
 	}
 	return byName
 }
 
 // TestComponentLabelPostRenderer_AppliedByKustomize: the component's value
-// replaces whatever the chart set, every pod template gets it, each object keeps
-// its own name, and an object without a pod template is left alone.
+// replaces whatever the chart set, every pod template and a bare Pod get it,
+// each object keeps its own name, and an object that runs no pod is left alone.
 func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	byName := applyComponentLabelPostRenderer(t, ownershipKey, "web")
 	for name, path := range map[string][]string{
@@ -132,6 +143,7 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 		"chart-cron":       {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
 		"chart-replicas":   {"spec", "template", "metadata", "labels"},
 		"chart-controller": {"spec", "template", "metadata", "labels"},
+		"chart-pod":        {"metadata", "labels"},
 	} {
 		labels, _, err := unstructured.NestedStringMap(byName[name], path...)
 		if err != nil {
@@ -152,6 +164,11 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	}
 	if len(selector) != 1 || selector["app"] != "controller" {
 		t.Errorf("chart-controller selector = %v, want the chart's own", selector)
+	}
+	// The Pod patch sets the label and nothing else: the Pod keeps its spec.
+	containers, _, err := unstructured.NestedSlice(byName["chart-pod"], "spec", "containers")
+	if err != nil || len(containers) != 1 {
+		t.Errorf("chart-pod containers = %v (%v), want the chart's one", containers, err)
 	}
 	if labels, found, _ := unstructured.NestedMap(byName["chart-settings"], "metadata", "labels"); found {
 		t.Errorf("the ConfigMap got labels %v, want it left alone", labels)

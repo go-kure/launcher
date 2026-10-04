@@ -7,7 +7,7 @@
 +    launcher.gokure.dev/component: prometheus
    name: prometheus
    namespace: default
-@@ -14,3 +16,105 @@
+@@ -14,3 +16,115 @@
        version: 69.3.2
    interval: 1h0m0s
 +  postRenderers:
@@ -111,5 +111,15 @@
 +                  launcher.gokure.dev/component: prometheus
 +        target:
 +          kind: ReplicationController
++          version: v1
++      - patch: |
++          apiVersion: v1
++          kind: Pod
++          metadata:
++            labels:
++              launcher.gokure.dev/component: prometheus
++            name: component-label
++        target:
++          kind: Pod
 +          version: v1
  

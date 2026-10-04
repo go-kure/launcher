@@ -118,6 +118,16 @@ spec:
         target:
           kind: ReplicationController
           version: v1
+      - patch: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            labels:
+              launcher.gokure.dev/component: podinfo
+            name: component-label
+        target:
+          kind: Pod
+          version: v1
   valuesFrom:
   - kind: ConfigMap
     name: podinfo-values-3f4f090c42

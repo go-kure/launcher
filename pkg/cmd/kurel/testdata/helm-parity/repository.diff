@@ -14,7 +14,7 @@
 +    launcher.gokure.dev/component: metrics
    name: metrics
    namespace: default
-@@ -19,7 +21,109 @@
+@@ -19,7 +21,119 @@
        sourceRef:
          kind: HelmRepository
 -        name: metrics
@@ -122,6 +122,16 @@
 +                  launcher.gokure.dev/component: metrics
 +        target:
 +          kind: ReplicationController
++          version: v1
++      - patch: |
++          apiVersion: v1
++          kind: Pod
++          metadata:
++            labels:
++              launcher.gokure.dev/component: metrics
++            name: component-label
++        target:
++          kind: Pod
 +          version: v1
    targetNamespace: monitoring
  

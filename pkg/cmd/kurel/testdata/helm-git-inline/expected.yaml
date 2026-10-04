@@ -127,6 +127,16 @@ spec:
         target:
           kind: ReplicationController
           version: v1
+      - patch: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            labels:
+              launcher.gokure.dev/component: podinfo
+            name: component-label
+        target:
+          kind: Pod
+          version: v1
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -245,4 +255,14 @@ spec:
                   launcher.gokure.dev/component: exporter
         target:
           kind: ReplicationController
+          version: v1
+      - patch: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            labels:
+              launcher.gokure.dev/component: exporter
+            name: component-label
+        target:
+          kind: Pod
           version: v1

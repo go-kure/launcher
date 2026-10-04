@@ -117,3 +117,13 @@ spec:
         target:
           kind: ReplicationController
           version: v1
+      - patch: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            labels:
+              launcher.gokure.dev/component: prometheus
+            name: component-label
+        target:
+          kind: Pod
+          version: v1
