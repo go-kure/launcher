@@ -272,8 +272,9 @@ NetworkPolicies select (`TransformContext.ComponentLabelKey`, else `<Domain>/com
 goes on:
 
 - every object the application generates, in `metadata.labels`;
-- the pod template of a `Deployment`, `StatefulSet`, `DaemonSet` or `Job`, and the job
-  template's pod template of a `CronJob`, typed or unstructured;
+- the pod template of a `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet` or
+  `ReplicationController`, and the job template's pod template of a `CronJob`, typed or
+  unstructured;
 - the same places in a layout the config augments (`layout.LayoutAugmenter`);
 - nothing an application without an owner generates.
 
@@ -289,7 +290,9 @@ selector that matches the template and would stop matching it with the label, by
 `DoesNotExist` on the key or a `NotIn` holding the component's value. The cluster refuses a
 workload whose selector does not match its template, so launcher does not add the label
 there. Such a workload then carries no component label on its pods, and a synthesized policy
-does not select them. The workload object itself still carries the label.
+does not select them. The workload object itself still carries the label. A
+`ReplicationController`'s selector is a plain label map, which a further label on its pods
+never fails, so its pod template always gets the label.
 
 An unstructured object's labels are read as written, on the object and on a workload's pod
 template. Null `metadata` or `labels` are absent ones, as is a null pod `template`, and a null
@@ -305,7 +308,7 @@ pod template and a `HelmRelease` with its post-renderer, beside the envelope its
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
 a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
-`CronJob`) that sets the label on the pod template. Flux applies it to whatever the chart
+`CronJob`, `ReplicaSet`, `ReplicationController`) that sets the label on the pod template. Flux applies it to whatever the chart
 rendered, so here the component's value **replaces** one the chart set. The entry is added
 once, however often the document is transformed or generated.
 

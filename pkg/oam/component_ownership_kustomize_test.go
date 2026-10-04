@@ -11,8 +11,9 @@ import (
 )
 
 // chartOutput stands for what a chart renders: a Deployment whose pod template
-// already carries the component key with the chart's own value, a CronJob that
-// does not carry it, and an object with no pod template.
+// already carries the component key with the chart's own value, a CronJob, a
+// ReplicaSet and a ReplicationController that do not carry it, and an object
+// with no pod template.
 const chartOutput = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,6 +41,31 @@ spec:
           labels:
             app: cron
 ---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: chart-replicas
+spec:
+  selector:
+    matchLabels:
+      app: replicas
+  template:
+    metadata:
+      labels:
+        app: replicas
+---
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: chart-controller
+spec:
+  selector:
+    app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -50,7 +76,7 @@ data:
 
 // applyComponentLabelPostRenderer applies the post-renderer's patches for
 // key: value the way Flux applies a HelmRelease's: as kustomize patches over
-// the chart's output. It returns the chart's three objects by name.
+// the chart's output. It returns the chart's objects by name.
 func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string]map[string]any {
 	t.Helper()
 	pr, err := componentLabelPostRenderer(key, value)
@@ -90,8 +116,8 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 		name, _, _ := unstructured.NestedString(doc, "metadata", "name")
 		byName[name] = doc
 	}
-	if len(byName) != 3 {
-		t.Fatalf("kustomize returned objects %v, want the chart's three under their own names\n%s", byName, out)
+	if len(byName) != 5 {
+		t.Fatalf("kustomize returned objects %v, want the chart's five under their own names\n%s", byName, out)
 	}
 	return byName
 }
@@ -102,8 +128,10 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	byName := applyComponentLabelPostRenderer(t, ownershipKey, "web")
 	for name, path := range map[string][]string{
-		"chart-web":  {"spec", "template", "metadata", "labels"},
-		"chart-cron": {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
+		"chart-web":        {"spec", "template", "metadata", "labels"},
+		"chart-cron":       {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
+		"chart-replicas":   {"spec", "template", "metadata", "labels"},
+		"chart-controller": {"spec", "template", "metadata", "labels"},
 	} {
 		labels, _, err := unstructured.NestedStringMap(byName[name], path...)
 		if err != nil {
@@ -115,6 +143,15 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 		if len(labels) != 2 {
 			t.Errorf("%s pod template labels = %v, want the chart's own label kept beside the component's", name, labels)
 		}
+	}
+	// A ReplicationController's selector is a plain label map; the patch leaves it
+	// as the chart wrote it.
+	selector, _, err := unstructured.NestedStringMap(byName["chart-controller"], "spec", "selector")
+	if err != nil {
+		t.Fatalf("chart-controller selector: %v", err)
+	}
+	if len(selector) != 1 || selector["app"] != "controller" {
+		t.Errorf("chart-controller selector = %v, want the chart's own", selector)
 	}
 	if labels, found, _ := unstructured.NestedMap(byName["chart-settings"], "metadata", "labels"); found {
 		t.Errorf("the ConfigMap got labels %v, want it left alone", labels)
