@@ -20,6 +20,9 @@ import (
 // among them by their own validation, a custom resource by the API server's
 // default for metadata.name.
 func checkAuthoredObjectName(property, object, name string) error {
+	if name == "" {
+		return errors.Errorf("%s is empty: write the name of %s, or leave the property out for the default", property, object)
+	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return errors.Errorf("%s %q cannot name %s: not a valid DNS-1123 subdomain: %s",
 			property, name, object, strings.Join(errs, "; "))

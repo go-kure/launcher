@@ -243,7 +243,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.ServiceName = sn
 	}
 
-	if name, ok := props["name"].(string); ok && name != "" {
+	// An authored name is used as written or refused, the empty string too: it
+	// is not a way to ask for the default (go-kure/launcher#787).
+	if name, ok := props["name"].(string); ok {
 		if err := checkAuthoredObjectName("name", "the Ingress", name); err != nil {
 			return nil, err
 		}

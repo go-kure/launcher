@@ -96,7 +96,7 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 		Repository:        oam.ShortenNameWithSuffix(app.Name, "-volsync-secret", oam.ShortenLimitSubdomain),
 	}
 
-	if repo, ok := props["repository"].(string); ok && repo != "" {
+	if repo, ok := props["repository"].(string); ok {
 		if err := checkAuthoredObjectName("repository", "the repository Secret", repo); err != nil {
 			return nil, err
 		}

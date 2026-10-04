@@ -33,7 +33,7 @@ func with(props map[string]any, key, value string) map[string]any {
 // that is a valid object name is used as written, at the full 253 characters
 // too; one that is too long or has a character an object name cannot hold is
 // refused with the property in the error, never shortened or passed on for the
-// API server to refuse.
+// API server to refuse. An authored empty string is refused as well.
 func TestAuthoredObjectName_UsedAsWrittenOrRefused(t *testing.T) {
 	app := stack.NewApplication("web", "ns", nil)
 	volsync := map[string]any{"sourcePVC": "data", "schedule": "0 3 * * *"}
@@ -139,6 +139,13 @@ func TestAuthoredObjectName_UsedAsWrittenOrRefused(t *testing.T) {
 				if !strings.Contains(err.Error(), s.property+" ") || !strings.Contains(err.Error(), "DNS-1123 subdomain") {
 					t.Errorf("%s with %s: error %q, want it to name the property and the rule", s.property, why, err)
 				}
+			}
+			// The empty string is authored too: it is refused, never read
+			// as a request for the default name.
+			if got, err := s.use(""); err == nil {
+				t.Errorf("%s = \"\" was accepted and gave %q, want it refused", s.property, got)
+			} else if !strings.Contains(err.Error(), s.property) {
+				t.Errorf("%s = \"\": error %q, want it to name the property", s.property, err)
 			}
 		})
 	}
