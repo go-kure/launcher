@@ -105,7 +105,7 @@ reads it.
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, and a workload, claim or autoscaler is held to the environment policy. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
@@ -3242,6 +3242,54 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   passed both: non-nil, so it cleared the no-object guard, and carrying no `items`, so
   it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
   the metadata it had just stamped on.
+
+  **Policy.** `ApplyPolicy` holds the object to the environment policy
+  (go-kure/launcher#794), with the check template delivery runs on the objects a chart
+  renders (`helmtemplate`'s *Every emitted workload*, above); the transform calls it with
+  `NoopPolicy` when no policy is passed. A Pod, PodTemplate, ReplicationController,
+  Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob is checked as an authored
+  workload is: host namespaces, hostPath volumes, the cpu/memory maxima, the storage
+  maximum on a generic ephemeral volume's claim, and for every init and regular container
+  the registry allowlist, the privileged, HostProcess and capability gates, and
+  `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral containers are refused.
+  The storage a PersistentVolumeClaim, or a StatefulSet's claim template, requests is held
+  to the storage maximum (`MaxStorageSize`); the replica count of a Deployment,
+  StatefulSet, ReplicaSet or ReplicationController (one when the object sets none) and the
+  `maxReplicas` of a HorizontalPodAutoscaler, in any API version, to the replica maximum
+  (`MaxReplicas`). The error is the component's policy violation and names the object and
+  the field (`passthrough: object Deployment "demo/web":
+  spec.template.spec.containers[0] "app": …`).
+
+  The object is authored as a map and the check reads Go types, so an object whose group,
+  version and kind kure's scheme registers is decoded as that kind **for the check only**.
+  What is emitted stays the authored map: a field the Go type does not declare is still
+  emitted (unlike template delivery, which emits the decoded object), and it is not read by
+  the check. `Generate` runs the check again on the object it is about to emit, once
+  `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map
+  checked need not be the map emitted.
+
+  What cannot be read is refused, not passed: an object of a registered kind that does not
+  decode as that kind (`replicas: three`), a workload kind in an API version the scheme
+  does not register (`batch/v1beta1`, `apps/v1beta2`), a HorizontalPodAutoscaler in such a
+  version whose `maxReplicas` is not an integer, and an object that does not serialize.
+
+  **Behaviour change:** before go-kure/launcher#794 a `passthrough` object reached the
+  output unchecked. A document that relied on that no longer builds when its object is a
+  workload with a privileged container, a host namespace, a hostPath volume, an image
+  outside the registry allowlist, an untagged or `:latest` image, or a value over a
+  maximum — and with no policy passed the first three are always refused, since
+  `NoopPolicy` denies them. A consumer allows what it wants allowed through its policy,
+  not per component: `AllowPrivileged()`, `AllowHostNetwork()`, `AllowHostPID()`,
+  `AllowHostIPC()` and `AllowHostPathVolumes()` for the security flags, the registry in
+  `AllowedRegistries()` (or no allowlist), the capability lists, and the maxima
+  (`MaxReplicas()`, `MaxCPU()`, `MaxMemory()`, `MaxStorageSize()`). An untagged or
+  `:latest` image has to be pinned in the object, and a workload in an API version the
+  build cannot read has to be authored in the one it can (`batch/v1`, `apps/v1`).
+
+  Not checked: an object that runs no pod; a custom resource, the pods its controller
+  creates and the replica count it sets; a `Secret`, which no check here reads. A nil
+  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
+  to) checks nothing.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
   An override outranks kure's own non-API-governed scope-table entry — a kind

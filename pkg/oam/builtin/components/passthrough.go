@@ -1,11 +1,15 @@
 package components
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 
+	kureio "github.com/go-kure/kure/pkg/io"
+	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -232,11 +236,98 @@ type PassthroughConfig struct {
 	Namespace     string
 	ClusterScoped bool
 	Object        map[string]any
+
+	// policy is the environment policy ApplyPolicy was given, kept so that
+	// Generate holds the object it emits to it again. Nil until then.
+	policy oam.Policy
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
 // provenance attribution.
 func (c *PassthroughConfig) ComponentName() string { return c.componentName }
+
+// ApplyPolicy holds the object this component emits to the environment policy
+// an authored workload is held to (enforceRenderedObjectPolicy, the check
+// template delivery runs on the objects a chart renders): the image, pod
+// security, resource, storage and replica rules, on every kind that check
+// reads. An object that runs no pod passes, a custom resource included,
+// whatever it holds: the pods its controller creates are not covered. A nil
+// policy checks nothing.
+//
+// The object is authored as a map, and the check reads Go types, so an object
+// whose group, version and kind kure's scheme registers is decoded as that kind
+// for the check alone (policyObject); what is emitted stays the authored
+// object. One that cannot be read is refused, not passed: a registered kind
+// that does not decode, and a workload kind in an API version the scheme does
+// not register.
+//
+// The policy is kept, and Generate checks the object it is about to emit
+// against it again: Object is an exported field, so the map checked here need
+// not be the one emitted.
+func (c *PassthroughConfig) ApplyPolicy(p oam.Policy) error {
+	if p == nil {
+		return nil
+	}
+	c.policy = p
+	u, err := c.emitted()
+	if err != nil {
+		return err
+	}
+	return enforcePassthroughPolicy(u, p)
+}
+
+// enforcePassthroughPolicy checks the object passthrough emits against p and
+// names the object in what it refuses; each caller adds the component.
+func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error {
+	obj, err := policyObject(u)
+	if err == nil {
+		err = enforceRenderedObjectPolicy(obj, p)
+	}
+	if err != nil {
+		return errors.Wrapf(err, "passthrough: object %s", renderedObjectRef(u))
+	}
+	return nil
+}
+
+// policyObject returns u in the form enforceRenderedObjectPolicy reads, by way
+// of its JSON form, the form it is emitted in. An object whose group, version
+// and kind kure's scheme registers comes back as the Go type of its kind,
+// decoded as the manifests component and template delivery decode a document
+// (kure's parser). That decode is the lenient one, so a field the vendored API
+// type does not declare is not read. Any other object comes back unstructured,
+// with the value types a decoded document has: the authored map holds what the
+// YAML decoder or a Go caller put there (an int, a map[string]string), which
+// the unstructured readers do not take.
+//
+// An object that does not come out so is an error, since nothing in it can be
+// read: one that does not serialize, and one of a registered kind that does not
+// decode as a single object of that kind (a field whose value has the wrong
+// type, for one).
+func policyObject(u *unstructured.Unstructured) (client.Object, error) {
+	const unreadable = "the object cannot be read, so it cannot be checked against environment policy"
+	raw, err := json.Marshal(u.Object)
+	if err != nil {
+		return nil, errors.Wrap(err, unreadable)
+	}
+	if err := kubernetes.RegisterSchemes(); err != nil {
+		return nil, errors.Wrap(err, "registering the kinds this build can read")
+	}
+	if !kubernetes.Scheme.Recognizes(u.GroupVersionKind()) {
+		var object map[string]any
+		if err := utiljson.Unmarshal(raw, &object); err != nil {
+			return nil, errors.Wrap(err, unreadable)
+		}
+		return &unstructured.Unstructured{Object: object}, nil
+	}
+	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{})
+	if err != nil {
+		return nil, errors.Wrap(err, unreadable)
+	}
+	if len(objs) != 1 {
+		return nil, errors.New(unreadable)
+	}
+	return objs[0], nil
+}
 
 // Generate emits the declared object as an unstructured resource. It deep-copies
 // the object first so the metadata fixup — and any later in-place mutation of
@@ -249,7 +340,27 @@ func (c *PassthroughConfig) ComponentName() string { return c.componentName }
 // never calls the constructor at all. Checking the map that is about to be emitted,
 // rather than trusting a check that ran on some earlier map, is what makes the
 // rejection binding instead of advisory.
+//
+// For the same reason it holds that copy to the environment policy again, once
+// ApplyPolicy has supplied one: the object checked there and the object emitted
+// here are then the same bytes.
 func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	u, err := c.emitted()
+	if err != nil {
+		return nil, err
+	}
+	if c.policy != nil {
+		if err := enforcePassthroughPolicy(u, c.policy); err != nil {
+			return nil, errors.Wrapf(err, "passthrough component %q", c.componentName)
+		}
+	}
+	out := client.Object(u)
+	return []*client.Object{&out}, nil
+}
+
+// emitted builds the object Generate emits: a validated copy of Object with the
+// metadata defaults stamped on. ApplyPolicy checks the same construction.
+func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 	// Only a config that never went through ToApplicationConfig can be here with no
 	// object — the constructor requires a non-empty apiVersion and kind. Emitting a
 	// body consisting solely of the metadata stamped below would be a resource nobody
@@ -277,9 +388,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 		}
 	}
 
-	u := &unstructured.Unstructured{Object: obj}
-	out := client.Object(u)
-	return []*client.Object{&out}, nil
+	return &unstructured.Unstructured{Object: obj}, nil
 }
 
 // deepCopyMap returns a deep copy of a decoded YAML/JSON map: nested maps and
