@@ -227,6 +227,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
 	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
 		"default": map[string]any{"cpu": "500m"}}}}},
+	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

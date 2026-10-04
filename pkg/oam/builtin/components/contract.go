@@ -112,6 +112,11 @@ func (h *NamespaceHandler) ContractMetadata() oam.ContractMetadata { return cont
 func (h *LimitRangeHandler) ContractMetadata() oam.ContractMetadata { return contract("limitrange") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ResourceQuotaHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("resourcequota")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

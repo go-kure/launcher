@@ -31,6 +31,7 @@ var coreKindSchemas = []struct {
 }{
 	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}},
 	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}},
+	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes

@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: compute
+      type: resourcequota
+      properties:
+        hard:
+          requests.cpu: "4"
+          limits.memory: 8Gi
+          persistentvolumeclaims: 10
+        scopes:
+          - NotTerminating
+        scopeSelector:
+          matchExpressions:
+            - scopeName: PriorityClass
+              operator: In
+              values:
+                - high
+    - name: limits-nothing
+      type: resourcequota
+      properties: {}
