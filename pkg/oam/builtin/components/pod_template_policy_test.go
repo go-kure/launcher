@@ -35,6 +35,12 @@ var podTemplatePolicyKinds = []podTemplatePolicyKind{
 		objectPath: "spec.template.spec", propsPath: "template.spec",
 		props: rsPlain,
 	},
+	{
+		typ: "replicationcontroller", kind: "ReplicationController", apiVersion: "v1",
+		handler:    &components.ReplicationControllerHandler{},
+		objectPath: "spec.template.spec", propsPath: "template.spec",
+		props: rcPlain,
+	},
 }
 
 // podTemplatePolicyPaths are the four ways a build produces an object of a

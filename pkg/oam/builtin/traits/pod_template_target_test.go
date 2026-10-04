@@ -54,6 +54,20 @@ var podTemplateKinds = []podTemplateKind{
 			return nil
 		},
 	},
+	{
+		typ:     "replicationcontroller",
+		handler: &components.ReplicationControllerHandler{},
+		props: map[string]any{
+			"selector": map[string]any{"tier": "web"},
+			"template": podTemplateProps(),
+		},
+		template: func(obj client.Object) *corev1.PodTemplateSpec {
+			if rc, ok := obj.(*corev1.ReplicationController); ok {
+				return rc.Spec.Template
+			}
+			return nil
+		},
+	},
 }
 
 // newPodTemplateApp builds a component of kind k the way the transform does:

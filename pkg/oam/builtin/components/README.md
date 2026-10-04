@@ -96,6 +96,7 @@ reads it.
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
 | `replicaset` | ReplicaSet | Kind-named bare ReplicaSet: the whole `ReplicaSetSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and gains the `app` label; `replicas` and the template are held to environment policy, no default filled — see below. |
+| `replicationcontroller` | ReplicationController | Kind-named bare ReplicationController: the whole `ReplicationControllerSpec`, strictly decoded; `template` is required, `selector` (a plain label map) optional. The pod template and `replicas` are held as the `replicaset` kind's are, `activeDeadlineSeconds` refused included, and the template gains the `app` label — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -212,7 +213,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
-| `kubernetes.CreateReplicationController` | v1 ReplicationController | missing | - | - | - |
+| `kubernetes.CreateReplicationController` | v1 ReplicationController | kind | `replicationcontroller` | strict decode of `ReplicationControllerSpec` | Held to environment policy by the check the rendered paths run on a ReplicationController; the pod template is held as the `replicaset` kind's is, `activeDeadlineSeconds` is refused, and the template gains the `app` label. `selector` is optional. |
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
@@ -2260,6 +2261,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `serviceAccountName` as the `pod` kind reads its own. **Not covered:** the
   ReplicaSet's own metadata, so its labels and annotations cannot be authored;
   the template's metadata is carried as authored.
+- **replicationcontroller** (go-kure/launcher#790) is the kind-named
+  projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
+  one schema key per json field of `corev1.ReplicationControllerSpec`
+  (`replicas`, `minReadySeconds`, `selector`, `template`), the property map
+  decoded strictly into that type, and one ReplicationController named after
+  the component in the build namespace, with the authored spec. What the
+  `replicaset` kind states holds here — the `app` label on the pod template
+  and the refusal of an authored one with another value, the three traits, the
+  refusals under `template.spec` (`activeDeadlineSeconds` included), the
+  replica maximum and the pod-template policy check, no policy default, the
+  known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
+  the object's own metadata not being authorable — with these differences:
+  - `selector` is a plain map of label to value, not a label selector: a
+    `matchLabels` or `matchExpressions` key is refused as not a
+    ReplicationControllerSpec field.
+  - `selector` is optional. An unset one stays unset, and the API server
+    defaults it to the pod template's labels, the `app` label included.
+  - `template` is required (`template: required`). The API type holds it by
+    pointer, so an unauthored one would be emitted without pods to create.
+  - No selector is refused against the `app` label: a map selector asks only
+    for labels to be present, which a further label on the pods cannot break.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -4410,7 +4432,7 @@ valued at `oam.ComponentLabelValue(<component>)`, never the raw component name �
 Authored values are emitted as written: an authored `selector` on a `service` component
 replaces the generated one and is not projected, and a type that emits authored objects
 (`passthrough`, for one) adds no `app` label. The one authored value that is checked is
-an `app` label on the pod template of a `replicaset` component, which gets the generated
+an `app` label on the pod template of a `replicaset` or `replicationcontroller` component, which gets the generated
 label beside its authored ones: the component's own label value is kept, another is
 refused. A component name
 is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function

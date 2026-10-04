@@ -130,6 +130,11 @@ func (h *PodHandler) ContractMetadata() oam.ContractMetadata { return contract("
 func (h *ReplicaSetHandler) ContractMetadata() oam.ContractMetadata { return contract("replicaset") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ReplicationControllerHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("replicationcontroller")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

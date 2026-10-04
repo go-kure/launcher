@@ -42,6 +42,7 @@ var coreKindSchemas = []struct {
 		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
 	}},
 	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
+	{"replicationcontroller", reflect.TypeFor[corev1.ReplicationControllerSpec](), &components.ReplicationControllerHandler{}, nil},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes

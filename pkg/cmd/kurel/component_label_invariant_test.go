@@ -251,6 +251,16 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 			"spec": map[string]any{"containers": []any{
 				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
 		labelled: true, selectors: 1},
+	// A ReplicationController name is a DNS-1123 subdomain too. Its selector is
+	// a plain label map; the `app` label is on the pod template beside the
+	// authored label the selector asks for.
+	"replicationcontroller": {props: map[string]any{
+		"selector": map[string]any{"tier": "web"},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
+		labelled: true, selectors: 1},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
@@ -1015,7 +1025,8 @@ func podSelectors(doc map[string]any) []podSelector {
 				add(fmt.Sprintf("%s.preferred[%d].labelSelector", kind, i), tm["labelSelector"])
 			}
 		}
-	case "Service":
+	case "Service", "ReplicationController":
+		// A plain label map, read as the matchLabels it is equivalent to.
 		if sel, ok := spec["selector"].(map[string]any); ok {
 			add("spec.selector", map[string]any{"matchLabels": sel})
 		}

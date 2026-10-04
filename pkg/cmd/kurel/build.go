@@ -300,12 +300,13 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"persistentvolumeclaim": &components.PersistentVolumeClaimHandler{},
 		"configmap":             &components.ConfigMapHandler{},
 
-		"namespace":        &components.NamespaceHandler{},
-		"limitrange":       &components.LimitRangeHandler{},
-		"resourcequota":    &components.ResourceQuotaHandler{},
-		"persistentvolume": &components.PersistentVolumeHandler{},
-		"pod":              &components.PodHandler{},
-		"replicaset":       &components.ReplicaSetHandler{},
+		"namespace":             &components.NamespaceHandler{},
+		"limitrange":            &components.LimitRangeHandler{},
+		"resourcequota":         &components.ResourceQuotaHandler{},
+		"persistentvolume":      &components.PersistentVolumeHandler{},
+		"pod":                   &components.PodHandler{},
+		"replicaset":            &components.ReplicaSetHandler{},
+		"replicationcontroller": &components.ReplicationControllerHandler{},
 	}
 }
 
