@@ -239,7 +239,9 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
   `ShortenNameWithSuffix(name, suffix, limit)` (`pkg/oam/shorten_name.go`;
   `pkg/oam/README.md` "Names and overrides"). A name that fits is returned unchanged. A
   longer one keeps a prefix, a `-` and the first 10 hex characters of the sha256 of the
-  whole name; a fixed suffix is kept whole. The caller passes the limit:
+  whole name; a fixed suffix is kept whole, unless it leaves less room than the digest
+  needs (a long routing `scope`): name and suffix are then shortened together. The caller
+  passes the limit:
   - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`.
   - `ShortenLimitSubdomain` (253): every object name launcher generates by default, the
     hook-group child layouts and the ordered-group bundles.
