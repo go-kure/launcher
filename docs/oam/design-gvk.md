@@ -170,8 +170,9 @@ the engine enforces; the second is a naming convention only.
 
 **Axis A — terminal vs lowerable.** A *terminal* type is served by a dispatchable handler
 (`RegisterComponent` / `RegisterTrait`) that generates or modifies the rendered configuration
-itself, with no further OAM lowering: it emits or modifies Kubernetes objects.
-A *lowerable* type is served by a
+itself, with no further OAM lowering: the built-in ones emit or modify Kubernetes objects,
+while a handler a consumer registers for a delivery trait such as `fluxcd-postbuild` may only
+set a field on the output bundle. A *lowerable* type is served by a
 lowering rule (`RegisterComponentLowering` / `RegisterTraitLowering`) and emits other OAM
 entries, never objects. Which entries depends on the rule's position: a component rule emits
 components and policies, a trait rule traits, components and policies
