@@ -34,7 +34,7 @@ func validateCnpgPoolerName(name string) error {
 // their json names, and the handler adds nothing to what was authored: unlike
 // postgresql's pooler it writes no type, instance count or pool mode of its
 // own, so the operator's defaults apply to whatever is omitted. Deep blocks are
-// open objects decoded strictly into the typed structs (decodeCnpgSpec), as in
+// open objects decoded strictly into the typed structs (decodeKindSpec), as in
 // cnpg-cluster. TestCnpgPoolerSchema_CoversPoolerSpec keeps the published key
 // set equal to the upstream json tags.
 type CnpgPoolerHandler struct{}
@@ -96,11 +96,11 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := validateCnpgPoolerName(component.Name); err != nil {
 		return nil, err
 	}
-	spec, props, err := decodeCnpgSpec[cnpgv1.PoolerSpec](component.Properties, "postgresql.cnpg.io/v1 PoolerSpec")
+	spec, props, err := decodeKindSpec[cnpgv1.PoolerSpec](component.Properties, "postgresql.cnpg.io/v1 PoolerSpec")
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedCnpgValues(props, spec, cnpgPoolerDefaultedZeroFields); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
 	cfg := &CnpgPoolerConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
