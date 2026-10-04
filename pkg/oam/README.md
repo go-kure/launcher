@@ -258,8 +258,12 @@ launcher's ownership wrapper: `ComponentName()` (`ComponentNamed`) answers the s
 it. The wrapper forwards every optional contract launcher reads on a config after the
 transform (`Validate`, the Flux namespace, Service port and routing answers,
 `ServiceAccountNamer`, the single-pod claim, pod template labels, identity target ports, the
-layout contracts), and a test fails when a new one is read and not forwarded. A caller that needs the concrete config, or a contract of
-its own, reads `UnwrapConfig(app.Config)`; the wrapper is a `ConfigWrapper`
+layout contracts). A test fails when the code asserts or switches on a new type directly on
+an application's config (`app.Config.(T)`, `switch app.Config.(type)`) and the wrapper's
+list does not account for it. It reads syntax only: a config first copied to a variable or
+passed to a function, and asserted there, is outside what it sees. A caller that needs the
+concrete config, or a contract of its own, reads `UnwrapConfig(app.Config)`; the wrapper is a
+`ConfigWrapper`
 (`WrappedApplicationConfig()`). An application a caller adds to the cluster itself has no
 wrapper and reports its `ComponentNamed` answer, else its name, as before.
 
@@ -280,12 +284,29 @@ the label authoritative: a consumer that needs every object of a component to ca
 the component's value enforces that in its own pass over the `GenerateApplications` result,
 by overwriting the key or by refusing a document whose value differs.
 
+A workload whose own selector rules the label out keeps its pod template as written: a
+selector that matches the template and would stop matching it with the label, by a
+`DoesNotExist` on the key or a `NotIn` holding the component's value. The cluster refuses a
+workload whose selector does not match its template, so launcher does not add the label
+there. Such a workload then carries no component label on its pods, and a synthesized policy
+does not select them. The workload object itself still carries the label.
+
+In an unstructured workload, a null `template`, `metadata` or `labels` is an absent one. A
+pod template label that is not a string is refused, with the workload named.
+
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
 a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
 `CronJob`) that sets the label on the pod template. Flux applies it to whatever the chart
 rendered, so here the component's value **replaces** one the chart set. The entry is added
-once, however often the document is transformed or generated. A chart rendered at build time
+once, however often the document is transformed or generated.
+
+The patch sets the pod template's label and touches no selector, and launcher does not look
+into a chart. With a `ComponentLabelKey` that a Flux-installed chart's own selectors use
+(`app`, `app.kubernetes.io/name`), the post-renderer parts the chart's selectors from its
+pods and the cluster refuses the workload. Use a key no chart sets, such as the default.
+
+A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
 are labelled like any other: where the key is absent.
 

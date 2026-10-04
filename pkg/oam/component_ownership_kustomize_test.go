@@ -48,13 +48,12 @@ data:
   k: v
 `
 
-// TestComponentLabelPostRenderer_AppliedByKustomize applies the post-renderer's
-// patches the way Flux applies a HelmRelease's: as kustomize patches over the
-// chart's output. The component's value replaces whatever the chart set, every
-// pod template gets it, each object keeps its own name, and an object without a
-// pod template is left alone.
-func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
-	pr, err := componentLabelPostRenderer(ownershipKey, "web")
+// applyComponentLabelPostRenderer applies the post-renderer's patches for
+// key: value the way Flux applies a HelmRelease's: as kustomize patches over
+// the chart's output. It returns the chart's three objects by name.
+func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string]map[string]any {
+	t.Helper()
+	pr, err := componentLabelPostRenderer(key, value)
 	if err != nil {
 		t.Fatalf("componentLabelPostRenderer: %v", err)
 	}
@@ -94,7 +93,14 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	if len(byName) != 3 {
 		t.Fatalf("kustomize returned objects %v, want the chart's three under their own names\n%s", byName, out)
 	}
+	return byName
+}
 
+// TestComponentLabelPostRenderer_AppliedByKustomize: the component's value
+// replaces whatever the chart set, every pod template gets it, each object keeps
+// its own name, and an object without a pod template is left alone.
+func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
+	byName := applyComponentLabelPostRenderer(t, ownershipKey, "web")
 	for name, path := range map[string][]string{
 		"chart-web":  {"spec", "template", "metadata", "labels"},
 		"chart-cron": {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
@@ -114,6 +120,31 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 		t.Errorf("the ConfigMap got labels %v, want it left alone", labels)
 	}
 	if _, found, _ := unstructured.NestedMap(byName["chart-settings"], "spec"); found {
-		t.Errorf("the ConfigMap got a spec:\n%s", out)
+		t.Errorf("the ConfigMap got a spec: %v", byName["chart-settings"])
+	}
+}
+
+// TestComponentLabelPostRenderer_OverwritesAKeyTheChartSelectsOn pins the
+// documented limit of the post-renderer: it overwrites whatever key is
+// configured and touches no selector. With a ComponentLabelKey the chart's own
+// selector uses ("app"), the pod template gets the component's value while the
+// selector keeps the chart's, and the two no longer match: the cluster refuses
+// such a workload. Launcher does not look into a chart to detect that; the
+// consumer picks a key no chart sets.
+func TestComponentLabelPostRenderer_OverwritesAKeyTheChartSelectsOn(t *testing.T) {
+	web := applyComponentLabelPostRenderer(t, "app", "web")["chart-web"]
+	podLabels, _, err := unstructured.NestedStringMap(web, "spec", "template", "metadata", "labels")
+	if err != nil {
+		t.Fatalf("pod template labels: %v", err)
+	}
+	if got := podLabels["app"]; got != "web" {
+		t.Errorf("pod template app = %q, want the component's value %q in place of the chart's", got, "web")
+	}
+	selector, _, err := unstructured.NestedStringMap(web, "spec", "selector", "matchLabels")
+	if err != nil {
+		t.Fatalf("selector: %v", err)
+	}
+	if got := selector["app"]; got != "chart" {
+		t.Errorf("selector app = %q, want the chart's %q: the patch touches the pod template only", got, "chart")
 	}
 }

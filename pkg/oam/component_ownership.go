@@ -11,6 +11,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -387,19 +388,22 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // A value already there stays, whatever it is: a component, a trait or an
 // author set it, and with a key a workload selects on (ComponentLabelKey "app")
 // an overwrite of the pod template's would part the selector from the template.
+// For the same reason a pod template stays as written when the workload's own
+// selector rules the label out (withComponentLabel).
 func stampComponentLabel(obj client.Object, key, value string) error {
 	obj.SetLabels(withMissing(obj.GetLabels(), map[string]string{key: value}))
 	switch o := obj.(type) {
 	case *appsv1.Deployment:
-		o.Spec.Template.Labels = withMissing(o.Spec.Template.Labels, map[string]string{key: value})
+		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
 	case *appsv1.StatefulSet:
-		o.Spec.Template.Labels = withMissing(o.Spec.Template.Labels, map[string]string{key: value})
+		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
 	case *appsv1.DaemonSet:
-		o.Spec.Template.Labels = withMissing(o.Spec.Template.Labels, map[string]string{key: value})
+		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
 	case *batchv1.Job:
-		o.Spec.Template.Labels = withMissing(o.Spec.Template.Labels, map[string]string{key: value})
+		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
 	case *batchv1.CronJob:
-		o.Spec.JobTemplate.Spec.Template.Labels = withMissing(o.Spec.JobTemplate.Spec.Template.Labels, map[string]string{key: value})
+		job := &o.Spec.JobTemplate.Spec
+		job.Template.Labels = withComponentLabel(job.Template.Labels, job.Selector, key, value)
 	case *helmv2.HelmRelease:
 		pr, err := componentLabelPostRenderer(key, value)
 		if err != nil {
@@ -417,18 +421,62 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 	return nil
 }
 
+// withComponentLabel returns a pod template's labels with key: value added.
+// They are returned as written when they carry the key already, and when the
+// workload's own selector matches them but would not match them with the label:
+// a selector that rules the key out (DoesNotExist), or this value (NotIn). The
+// API server refuses a workload whose selector does not match its template, so
+// such a workload's pods carry no component label.
+//
+// A selector that does not parse, or that does not match the template in the
+// first place, holds nothing back: neither is this function's to refuse.
+func withComponentLabel(podLabels map[string]string, selector *metav1.LabelSelector, key, value string) map[string]string {
+	if _, exists := podLabels[key]; exists {
+		return podLabels
+	}
+	if selector != nil {
+		if sel, err := metav1.LabelSelectorAsSelector(selector); err == nil && sel.Matches(labels.Set(podLabels)) {
+			labelled := make(labels.Set, len(podLabels)+1)
+			for k, v := range podLabels {
+				labelled[k] = v
+			}
+			labelled[key] = value
+			if !sel.Matches(labelled) {
+				return podLabels
+			}
+		}
+	}
+	return withMissing(podLabels, map[string]string{key: value})
+}
+
 // podTemplateKinds are the workload kinds whose pod template takes the
 // component label, in the order the HelmRelease post-renderer patches them,
-// with the path of the pod template's metadata in each.
+// with the path of the spec that holds the pod template ("template") and the
+// workload's own selector ("selector") in each.
 var podTemplateKinds = []struct {
 	group, version, kind string
-	metadata             []string
+	spec                 []string
 }{
-	{"apps", "v1", "Deployment", []string{"spec", "template", "metadata"}},
-	{"apps", "v1", "StatefulSet", []string{"spec", "template", "metadata"}},
-	{"apps", "v1", "DaemonSet", []string{"spec", "template", "metadata"}},
-	{"batch", "v1", "Job", []string{"spec", "template", "metadata"}},
-	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec", "template", "metadata"}},
+	{"apps", "v1", "Deployment", []string{"spec"}},
+	{"apps", "v1", "StatefulSet", []string{"spec"}},
+	{"apps", "v1", "DaemonSet", []string{"spec"}},
+	{"batch", "v1", "Job", []string{"spec"}},
+	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}},
+}
+
+// objectField returns the object m holds at field. YAML's explicit null is an
+// absent value: both are reported as not found. Anything else that is no
+// object is an error.
+func objectField(m map[string]any, field string) (map[string]any, bool, error) {
+	v, ok := m[field]
+	if !ok || v == nil {
+		return nil, false, nil
+	}
+	o, ok := v.(map[string]any)
+	if !ok {
+		return nil, false, errors.Errorf("%s is a %T, not an object", field, v)
+	}
+	return o, true, nil
 }
 
 // stampUnstructured is stampComponentLabel's pod template and HelmRelease work
@@ -442,19 +490,70 @@ func stampUnstructured(u *unstructured.Unstructured, key, value string) error {
 		if gvk.Group != k.group || gvk.Kind != k.kind {
 			continue
 		}
-		path := append(append([]string(nil), k.metadata...), "labels")
-		labels, _, err := unstructured.NestedStringMap(u.Object, path...)
-		if err != nil {
-			return errors.Errorf("component label: %s %q: pod template labels: %w", gvk.Kind, u.GetName(), err)
-		}
-		if _, exists := labels[key]; exists {
-			return nil
-		}
-		if err := unstructured.SetNestedField(u.Object, value, append(path, key)...); err != nil {
-			return errors.Errorf("component label: %s %q: pod template labels: %w", gvk.Kind, u.GetName(), err)
+		if err := stampUnstructuredPodTemplate(u.Object, k.spec, key, value); err != nil {
+			return errors.Errorf("component label: %s %q: pod template: %w", gvk.Kind, u.GetName(), err)
 		}
 		return nil
 	}
+	return nil
+}
+
+// stampUnstructuredPodTemplate is withComponentLabel on the pod template under
+// the spec at specPath of obj. A workload with no pod template, or a null one,
+// is left as it is; null metadata or labels on the template are absent ones.
+func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, value string) error {
+	spec := obj
+	for _, field := range specPath {
+		next, found, err := objectField(spec, field)
+		if err != nil || !found {
+			return err
+		}
+		spec = next
+	}
+	template, found, err := objectField(spec, "template")
+	if err != nil || !found {
+		return err
+	}
+	metadata, _, err := objectField(template, "metadata")
+	if err != nil {
+		return err
+	}
+	raw, _, err := objectField(metadata, "labels")
+	if err != nil {
+		return err
+	}
+	if _, exists := raw[key]; exists {
+		return nil
+	}
+	podLabels := make(map[string]string, len(raw))
+	for name, v := range raw {
+		s, ok := v.(string)
+		if !ok {
+			return errors.Errorf("label %q is a %T, not a string", name, v)
+		}
+		podLabels[name] = s
+	}
+	// A selector that does not decode holds nothing back, as one that does not
+	// parse (withComponentLabel).
+	var selector *metav1.LabelSelector
+	if rawSelector, ok := spec["selector"].(map[string]any); ok {
+		decoded := &metav1.LabelSelector{}
+		if runtime.DefaultUnstructuredConverter.FromUnstructured(rawSelector, decoded) == nil {
+			selector = decoded
+		}
+	}
+	if _, added := withComponentLabel(podLabels, selector, key, value)[key]; !added {
+		return nil
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+		template["metadata"] = metadata
+	}
+	if raw == nil {
+		raw = map[string]any{}
+		metadata["labels"] = raw
+	}
+	raw[key] = value
 	return nil
 }
 
@@ -467,18 +566,28 @@ func stampUnstructuredHelmRelease(u *unstructured.Unstructured, key, value strin
 	if err != nil {
 		return errors.Errorf("component label: HelmRelease %q: post-renderer: %w", u.GetName(), err)
 	}
-	existing, _, err := unstructured.NestedSlice(u.Object, "spec", "postRenderers")
+	spec, found, err := objectField(u.Object, "spec")
 	if err != nil {
-		return errors.Errorf("component label: HelmRelease %q: spec.postRenderers: %w", u.GetName(), err)
+		return errors.Errorf("component label: HelmRelease %q: %w", u.GetName(), err)
+	}
+	if !found {
+		spec = map[string]any{}
+		u.Object["spec"] = spec
+	}
+	var existing []any
+	switch v := spec["postRenderers"].(type) {
+	case nil:
+	case []any:
+		existing = v
+	default:
+		return errors.Errorf("component label: HelmRelease %q: spec.postRenderers is a %T, not a list", u.GetName(), v)
 	}
 	for _, e := range existing {
 		if reflect.DeepEqual(e, any(entry)) {
 			return nil
 		}
 	}
-	if err := unstructured.SetNestedSlice(u.Object, append(existing, entry), "spec", "postRenderers"); err != nil {
-		return errors.Errorf("component label: HelmRelease %q: spec.postRenderers: %w", u.GetName(), err)
-	}
+	spec["postRenderers"] = append(existing[:len(existing):len(existing)], entry)
 	return nil
 }
 
@@ -508,7 +617,7 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 		}
 		// Through the YAML encoder, which quotes a value that would read back as
 		// a number, a boolean or null: a label value is a string.
-		if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, append(append([]string(nil), k.metadata...), "labels")...); err != nil {
+		if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, append(append([]string(nil), k.spec...), "template", "metadata", "labels")...); err != nil {
 			return helmv2.PostRenderer{}, errors.Errorf("component label: post-renderer patch for %s: %w", k.kind, err)
 		}
 		raw, err := yaml.Marshal(doc)
