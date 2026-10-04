@@ -103,7 +103,7 @@ type PropertySchemaProvider interface {
 type ContractMetadata struct {
 	// Family is the contract family this handler/rule belongs to, e.g. "webservice".
 	Family string
-	// Version is the contract version within Family, e.g. "v1".
+	// Version is the contract version within Family, e.g. "v1alpha1".
 	Version string
 	// RequiredCapabilityKeys lists the ClusterProfile capability keys ("<type>" or
 	// "<type>.<scope>", see buildCapabilityKey) an entity of this contract needs in
@@ -116,19 +116,20 @@ type ContractMetadata struct {
 	DeprecationMessage string
 }
 
-// ContractDescriber is an optional interface implemented by component/trait handlers
-// and component/trait lowering rules that declare contract metadata: family,
+// ContractDescriber is an optional interface implemented by component, trait and
+// policy handlers and lowering rules that declare contract metadata: family,
 // version, required capability keys, and deprecation info. Queryable at
 // registration time alongside PropertySchema(), through
 // Transformer.HandlerContracts() — the HandlerSchemas-shaped accessor covering all
-// four registries a component/trait type can be claimed by (componentHandlers,
-// traitHandlers, componentLoweringRules, traitLoweringRules; see HandlerSchemas'
-// own comments for why the lowering-rule registries must be included, not just the
-// two dispatchable maps). Metadata rides the existing registration mechanism —
-// there is no separate contract registry. Consumers: schema publication, artifact
-// provenance in a downstream consumer, deprecation tooling. A lowering rule that
-// also implements ContractDescriber has its Version folded into the lowering-rule
-// identity Origin.Rule records (lowering.go), e.g. "trait/expose@v1".
+// six registries a component, trait or policy type can be claimed by (the three
+// handler maps and the three lowering-rule maps; see HandlerSchemas' own comments
+// for why the lowering-rule registries must be included, not just the dispatchable
+// maps). Metadata rides the existing registration mechanism — there is no separate
+// contract registry. Consumers: schema publication, artifact provenance in a
+// downstream consumer, deprecation tooling. A lowering rule that also implements
+// ContractDescriber has its Version folded into the lowering-rule identity
+// Origin.Rule records (lowering.go), e.g. "trait/expose@v1alpha1". Every built-in
+// handler and rule implements it (go-kure/launcher#789).
 type ContractDescriber interface {
 	ContractMetadata() ContractMetadata
 }

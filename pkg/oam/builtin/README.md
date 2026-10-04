@@ -47,6 +47,12 @@ matching inline expose properties), the ingress-only external-auth facts `authUR
 is validated later, on the merged trait properties, by `parseTrafficSources` in
 `pkg/oam/builtin/traits`, not by `ExposeRendering` itself).
 
+`ContractVersion` (`v1alpha1`) is the contract version every built-in handler and lowering
+rule declares in its `oam.ContractMetadata` (go-kure/launcher#789). The family is the type
+name the built-in is registered under, so the version alone is shared; a built-in rule's
+identity reads `component/webservice@v1alpha1`. See Contract metadata in
+[`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the scheme.
+
 These are internal schema types used by [`builtin/components`](components) and
 [`builtin/traits`](traits); they are not a user-facing API. The sibling
 [`builtin/policies`](policies) package holds the built-in application policy handlers

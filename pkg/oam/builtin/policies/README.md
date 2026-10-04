@@ -12,10 +12,14 @@ how components are grouped into bundles and which bundle depends on which.
 
 Handlers are registered with the transformer in `pkg/cmd/kurel` via
 `RegisterPolicy(type, handler)`, from `builtinPolicyHandlers()`. A policy type with no
-registered handler fails the transform with `no handler for policy type "<type>"`. Every
+registered handler fails the transform with `no handler for policy type "<type>" (policy
+"<name>")`. Every
 handler also implements `oam.PropertySchemaProvider` (`PropertySchema()`), with a
 `Description` on every node, so a consumer can publish and check the property surface;
 `Transformer.HandlerSchemas()` returns each registered policy's schema under `Policies`.
+Every handler implements `oam.ContractDescriber` too (go-kure/launcher#789): family is the
+policy type, version is `builtin.ContractVersion` (`v1alpha1`), and
+`Transformer.HandlerContracts()` returns it under `Policies`.
 
 ## Policy catalog
 
@@ -104,7 +108,7 @@ sets no Flux delivery field on the bundles it returns (go-kure/launcher#781; see
 document using one:
 
 ```text
-no handler for policy type "reconciliation": it configures delivery, which launcher leaves to the consumer that delivers the application; a consumer that delivers through Flux registers its own handler
+no handler for policy type "reconciliation" (policy "<name>"): it configures delivery, which launcher leaves to the consumer that delivers the application; a consumer that delivers through Flux registers its own handler
 ```
 
 A consumer that delivers through Flux registers its own handler for the type
@@ -143,7 +147,7 @@ A policy that orders one application after other applications has no meaning ins
 single-application build, which is what launcher performs: there is nothing to order the
 application against, and `PolicyResult.AppDependsOn` is not read by the transform.
 Registering a handler for it would accept the policy and drop it silently, so `kurel build`
-keeps rejecting it with `no handler for policy type "app-dependency"`. A caller that
+keeps rejecting it with `no handler for policy type "app-dependency" (policy "<name>")`. A caller that
 orchestrates several applications registers its own handler for that type and reads
 `AppDependsOn` itself.
 

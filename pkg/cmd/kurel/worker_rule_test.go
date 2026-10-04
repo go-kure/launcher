@@ -36,8 +36,8 @@ func (r originProbeRule) LowerTrait(_ *oam.Trait, lctx oam.LoweringContext) (oam
 }
 
 // TestWorkerRule_OriginRule asserts the provenance the engine stamps on the
-// deployment component the worker rule emits: Origin.Rule names the rule,
-// "component/worker", and every other Origin field still names the AUTHORED
+// deployment component the worker rule emits: Origin.Rule names the rule and its
+// contract version, "component/worker@v1alpha1", and every other Origin field still names the AUTHORED
 // worker — the move to a lowering rule changes nothing else about where the
 // component came from. The probe trait is authored on the worker and forwarded
 // by the rule, so on the next round it sees the emitted component.
@@ -61,7 +61,7 @@ func TestWorkerRule_OriginRule(t *testing.T) {
 	want := oam.Origin{
 		Document: "app", DocumentKind: "Application", Namespace: "ns",
 		Component: "w", ComponentType: "worker", Index: 0,
-		Rule: "component/worker",
+		Rule: "component/worker@v1alpha1",
 	}
 	if got != want {
 		t.Errorf("Origin = %+v\nwant   %+v", got, want)

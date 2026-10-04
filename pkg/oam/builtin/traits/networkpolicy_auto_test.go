@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
@@ -838,8 +839,15 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	// postgresql lowers onto cnpg-cluster, with a post-policy step for its defaults.
+	// The rest are the rule's other targets, which this document does not reach: a
+	// registry without them is refused.
 	tr.RegisterComponentLowering(components.PostgresqlRule{})
 	tr.RegisterComponent("cnpg-cluster", &components.CnpgClusterHandler{})
+	tr.RegisterComponent("cnpg-objectstore", &components.CnpgObjectStoreHandler{})
+	tr.RegisterComponent("cnpg-pooler", &components.CnpgPoolerHandler{})
+	tr.RegisterComponent("cnpg-database", &components.CnpgDatabaseHandler{})
+	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
+	tr.RegisterPolicy("placement", &policies.PlacementHandler{})
 
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,

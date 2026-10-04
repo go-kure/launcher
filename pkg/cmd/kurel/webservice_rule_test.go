@@ -24,8 +24,8 @@ func webserviceApp(props map[string]any, traits ...oam.Trait) *oam.Application {
 }
 
 // TestWebserviceRule_OriginRule asserts the provenance the engine stamps on the
-// deployment member the webservice rule emits: Origin.Rule names the rule,
-// "component/webservice", and every other Origin field still names the
+// deployment member the webservice rule emits: Origin.Rule names the rule and
+// its contract version, "component/webservice@v1alpha1", and every other Origin field still names the
 // AUTHORED webservice. The probe trait is a type the rule does not know, so it
 // is forwarded to the deployment member — the default for an extension's trait.
 func TestWebserviceRule_OriginRule(t *testing.T) {
@@ -48,7 +48,7 @@ func TestWebserviceRule_OriginRule(t *testing.T) {
 	want := oam.Origin{
 		Document: "app", DocumentKind: "Application", Namespace: "ns",
 		Component: "web", ComponentType: "webservice", Index: 0,
-		Rule: "component/webservice",
+		Rule: "component/webservice@v1alpha1",
 	}
 	if got != want {
 		t.Errorf("Origin = %+v\nwant   %+v", got, want)

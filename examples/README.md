@@ -74,7 +74,7 @@ Running the following command will fail:
 bin/kurel build examples/custom-capability/app.yaml \
   --profile examples/cluster-profiles/custom-capability.yaml \
   --capability-def examples/custom-capability/definitions/redis-sidecar.yaml
-# Error: transforming application: no handler for trait type "redis-sidecar"
+# Error: transforming application: no handler for trait type "redis-sidecar" (on component "api")
 ```
 
 **Two separate mechanisms are involved:**

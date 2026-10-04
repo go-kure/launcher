@@ -36,6 +36,27 @@ of its source-controller spec type and leaves the nested Flux blocks open, and e
 decodes the whole property map strictly into that type, refusing an unknown or wrongly typed key
 at any depth (see their entry under "Per-type highlights").
 
+Every built-in component handler and component lowering rule implements
+`oam.ContractDescriber` (go-kure/launcher#789): family is the component type, version is
+`builtin.ContractVersion` (`v1alpha1`), no capability key is required and none is deprecated.
+The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
+`oam.LoweringTargetDeclarer`, naming every type they lower into:
+
+| Rule | Components | Traits | Policies |
+|------|------------|--------|----------|
+| `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap` | |
+| `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database` | | `dependency`, `placement` |
+
+`Transformer.Seal`, which every transform runs first, refuses a registry that holds a rule
+without all of its targets, whatever the document: `registry incomplete: lowering rule
+component/webservice@v1alpha1 lowers into component type "service", which is not registered`.
+**Breaking library change**: a consumer that registers one of these rules with only the
+handlers its own documents reach (a `postgresql` without the pooler, say) now fails at the
+first transform, and registers the rest. See Contract metadata in
+[`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
+
 ## How to read the wrong-type notes below
 
 This document states wrong-type handling **per field**, and makes no blanket
@@ -1573,12 +1594,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Authored traits and annotations are forwarded unchanged. Worker's published
     schema, its generated output and the `app: <component-name>` selector are
     unchanged — every example and golden fixture builds byte-identically — and
-    the emitted component carries `Origin.Rule` `component/worker`. Two
+    the emitted component carries `Origin.Rule` `component/worker@v1alpha1`. Two
     differences are deliberate. A worker refused by its own parse now reads
     `component "w" (type "worker") in document …: <cause>` (the lowering
     engine's prefix) where it read `component "w": <cause>`; the cause is
     unchanged. A trait-lowering error on a worker's trait gains one chain line
-    naming the `component/worker` step; a trait handler's error reads as before.
+    naming the `component/worker@v1alpha1` step; a trait handler's error reads as before.
     The former handler's affinity label-syntax check (see Common config) runs
     in the rule, before the raw `affinity` is forwarded, with the same
     `affinity: the shorthand evaluates to an affinity the API server would
@@ -1624,7 +1645,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     pods. Webservice's published schema and its generated objects are
     unchanged, in the handler's order (Deployment, Service, ServiceAccount,
     claims). Each emitted component carries `Origin.Rule`
-    `component/webservice`. Four differences are deliberate. A refusal from
+    `component/webservice@v1alpha1`. Four differences are deliberate. A refusal from
     webservice's own parse gains the lowering engine's prefix, as on `worker`;
     the cause is unchanged. The synthesized inbound NetworkPolicy opens an
     ingress `portName: http` as the port's number, where the handler opened the
