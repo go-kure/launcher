@@ -56,14 +56,14 @@ preflight reject every valid use of the trait.
 | `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations` |
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
-| `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`) |
+| `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`), `name` (optional; the policy's name, default `<component>-allow`) |
 | `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector` (required), `ingress`/`egress` (raw Cilium rules, at least one rule between them — decoded strictly, see below) |
 
 ### Security
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
-| `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`. The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. Role/binding object names stay component-derived. |
+| `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`, `name` (optional). The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. The objects are named after the component unless `name` is authored: the one `name` names the Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding, and is the `roleRef.name` of both bindings (go-kure/launcher#787; see Conventions). It names neither the subject nor the `app` label, which stay the component's. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
@@ -78,7 +78,7 @@ preflight reject every valid use of the trait.
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
 | `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
-| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
+| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
@@ -897,12 +897,25 @@ the name before the suffix, a `-`, 10 hex characters of its sha256, and the suff
 
 An authored name is used as written or refused: it is never shortened and never changed, and
 one that cannot be the name of its object fails the transform with the property in the error
-(go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects is
-named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
+(go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects
+can be named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
 with an alphanumeric). An authored empty string is refused too. For an optional override
-(`name` on a routing trait, `targetSecretName`, `repository`) it is not a way to ask for the
+(`name` on a routing trait, on `rbac` and on `networkpolicy`, `hpaName`, `pdbName`,
+`targetSecretName`, `repository`) it is not a way to ask for the
 default: leaving the property out, or null, gets that. The `expose` `secretName` is optional
 too and gets its default when left out. The other names are required.
+
+The `rbac` `name` is held to the same subdomain rule, which is stricter than the cluster's
+own rule for the RBAC kinds: the cluster also accepts a name such as `web:reader`, and
+launcher refuses it. The name also becomes a file name and a `kustomization.yaml` entry in
+the written tree, and a colon has not been shown to be safe there. An author who needs such
+a name cannot write it today.
+
+An authored name is checked as a name, not against the other objects of the document:
+`Transform` accepts an `hpaName` equal to another component's HPA, as it accepts two
+default names that meet. `oam.GenerateApplications` and `oam.CheckInDocumentCollisions`
+report it (`kurel build` runs both; see `pkg/oam/README.md`, "Nothing above compares the
+applications inside one document").
 
 | Trait | Property | What it names |
 |-------|----------|---------------|
@@ -915,6 +928,9 @@ too and gets its default when left out. The other names are required.
 | `cilium-networkpolicy` | `name` | The CiliumNetworkPolicy. |
 | `pvc` | `name` | The PersistentVolumeClaim. |
 | `volsync` | `repository`, `sourcePVC` | The repository Secret, and the claim to back up (which also starts the ReplicationSource name). |
+| `scaler` | `hpaName`, `pdbName` | The HorizontalPodAutoscaler, and the PodDisruptionBudget (`pdbName` needs `enablePDB: true`). |
+| `rbac` | `name` | The Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding: one name for all four, and the `roleRef.name` of both bindings. |
+| `networkpolicy` | `name` | The NetworkPolicy. |
 
 A routing trait's `scope` (on `ingress`, `httproute`, and `expose`, which hands its own on) is
 a part of a generated name, not a name: its length is never

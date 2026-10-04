@@ -16,9 +16,11 @@ import (
 // (go-kure/launcher#787). property is the trait property the name was written
 // in, object what it names ("the ConfigMap").
 //
-// Every object these traits name takes a DNS-1123 subdomain: the built-in kinds
-// among them by their own validation, a custom resource by the API server's
-// default for metadata.name.
+// Every object these traits name can carry a DNS-1123 subdomain: for most
+// built-in kinds among them it is their own validation, for a custom resource
+// the API server's default for metadata.name. The cluster's rule for the RBAC
+// kinds is looser; the rbac trait's `name` is held to the subdomain all the
+// same (see the README for why).
 func checkAuthoredObjectName(property, object, name string) error {
 	if name == "" {
 		return errors.Errorf("%s is empty: write the name of %s, or leave the property out for the default", property, object)

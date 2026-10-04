@@ -41,6 +41,7 @@ func (h *RBACHandler) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 		"clusterWide": {Type: oam.PropertyTypeBoolean, Description: "When true, also generate a ClusterRole and ClusterRoleBinding for cluster-wide permissions."},
+		"name":        {Type: oam.PropertyTypeString, Description: "Name of every object the trait generates (Role, RoleBinding and, with clusterWide, ClusterRole and ClusterRoleBinding), used as written or refused; defaults to the component name."},
 	}
 }
 
@@ -97,8 +98,21 @@ func (h *RBACHandler) parseProperties(props map[string]any, app *stack.Applicati
 		}
 	}
 
+	// One authored name for all four objects, used as written or refused
+	// (go-kure/launcher#787). The check is the DNS-1123 subdomain rule, as for
+	// every other authored name: stricter than the cluster's rule for the RBAC
+	// kinds, on purpose (see the README).
+	var objectName string
+	if name, ok := props["name"].(string); ok {
+		if err := checkAuthoredObjectName("name", "the Role, RoleBinding, ClusterRole and ClusterRoleBinding", name); err != nil {
+			return nil, errors.Wrap(err, "rbac")
+		}
+		objectName = name
+	}
+
 	return &rbacTraitConfig{
 		componentName:      app.Name,
+		objectName:         objectName,
 		serviceAccountName: serviceAccountName,
 		Namespace:          app.Namespace,
 		Rules:              rules,
@@ -156,8 +170,11 @@ type rbacRule struct {
 
 type rbacTraitConfig struct {
 	componentName string
-	// serviceAccountName is the RoleBinding/ClusterRoleBinding subject; the
-	// Role/RoleBinding objects themselves stay named after the component.
+	// objectName is the authored name of every object the trait generates and
+	// of both bindings' roleRef; "" leaves them named after the component.
+	objectName string
+	// serviceAccountName is the RoleBinding/ClusterRoleBinding subject; it never
+	// names the Role/RoleBinding objects themselves.
 	serviceAccountName string
 	Namespace          string
 	Rules              []rbacRule
@@ -178,11 +195,22 @@ func (c *rbacTraitConfig) subjectName() string {
 	return c.componentName
 }
 
+// name is the name of every object the trait generates: the authored one, or
+// the component's.
+func (c *rbacTraitConfig) name() string {
+	if c.objectName != "" {
+		return c.objectName
+	}
+	return c.componentName
+}
+
 func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	name := c.name()
+
 	// A label map per object, never one map shared between them: these leave
 	// the package on objects a caller owns and edits, and a shared map turns a
 	// label added to the Role into a label on the RoleBinding as well.
-	role := kubernetes.CreateRole(c.componentName, c.Namespace)
+	role := kubernetes.CreateRole(name, c.Namespace)
 	role.Labels = componentLabels(c.componentName)
 	role.Annotations = nil
 	for _, r := range c.Rules {
@@ -193,13 +221,13 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	rb := kubernetes.CreateRoleBinding(c.componentName, c.Namespace)
+	rb := kubernetes.CreateRoleBinding(name, c.Namespace)
 	rb.Labels = componentLabels(c.componentName)
 	rb.Annotations = nil
 	rb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "Role",
-		Name:     c.componentName,
+		Name:     name,
 	}
 	kubernetes.AddRoleBindingSubject(rb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
@@ -215,7 +243,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		return objects, nil
 	}
 
-	cr := kubernetes.CreateClusterRole(c.componentName)
+	cr := kubernetes.CreateClusterRole(name)
 	cr.Labels = componentLabels(c.componentName)
 	cr.Annotations = nil
 	for _, r := range c.Rules {
@@ -226,13 +254,13 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	crb := kubernetes.CreateClusterRoleBinding(c.componentName)
+	crb := kubernetes.CreateClusterRoleBinding(name)
 	crb.Labels = componentLabels(c.componentName)
 	crb.Annotations = nil
 	crb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "ClusterRole",
-		Name:     c.componentName,
+		Name:     name,
 	}
 	kubernetes.AddClusterRoleBindingSubject(crb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
