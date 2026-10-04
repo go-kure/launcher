@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // TestPodTemplateKindsDefaultedZeros_MatchFieldDocs is
@@ -24,6 +25,7 @@ import (
 func TestPodTemplateKindsDefaultedZeros_MatchFieldDocs(t *testing.T) {
 	for _, typ := range []reflect.Type{
 		reflect.TypeFor[appsv1.ReplicaSetSpec](),
+		reflect.TypeFor[corev1.ReplicationControllerSpec](),
 	} {
 		t.Run(typ.String(), func(t *testing.T) {
 			docs := omitemptyScalarDocs(t, typ)

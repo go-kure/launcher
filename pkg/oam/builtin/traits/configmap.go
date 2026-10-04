@@ -137,7 +137,7 @@ func NewConfigMapDecorator(inner stack.ApplicationConfig, configMapName, mountPa
 }
 
 // Generate calls the inner config's Generate and mounts the ConfigMap into any
-// Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, or Pod resource found.
+// Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod resource found.
 func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object, error) {
 	objects, err := d.Inner.Generate(app)
 	if err != nil {
@@ -161,6 +161,12 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 		case *corev1.Pod:
 			podSpec = &w.Spec
 		case *appsv1.ReplicaSet:
+			podSpec = &w.Spec.Template.Spec
+		case *corev1.ReplicationController:
+			// The template is a pointer; one without it has no pod spec.
+			if w.Spec.Template == nil {
+				continue
+			}
 			podSpec = &w.Spec.Template.Spec
 		default:
 			continue
@@ -189,7 +195,7 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 	}
 
 	if !mounted {
-		return nil, errors.New("configmap mountPath requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, or Pod component; no supported workload resource was found")
+		return nil, errors.New("configmap mountPath requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod component; no supported workload resource was found")
 	}
 
 	return objects, nil

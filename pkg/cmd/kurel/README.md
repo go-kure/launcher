@@ -102,11 +102,11 @@ kind components `serviceaccount`, `persistentvolumeclaim` and `configmap`
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
 components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
-`pod` and `replicaset` (go-kure/launcher#790) are registered the same way; the
-`<type>-component` fixtures build each. The `pod` kind emits the authored spec
-and the `app` label, the `replicaset` kind the authored spec with the `app`
-label on its pod template, and neither is one of the five pod kinds named
-below. The
+`pod`, `replicaset` and `replicationcontroller` (go-kure/launcher#790) are
+registered the same way; the `<type>-component` fixtures build each. The `pod`
+kind emits the authored spec and the `app` label, the `replicaset` and
+`replicationcontroller` kinds the authored spec with the `app` label on the pod
+template, and none of them is one of the five pod kinds named below. The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
 and the synthesized `pvc` traits. The five pod kinds generate no ServiceAccount

@@ -63,12 +63,13 @@ var validComponentTypes = map[string]bool{
 
 	// The kind components for the objects no component projected
 	// (go-kure/launcher#790).
-	"namespace":        true,
-	"limitrange":       true,
-	"resourcequota":    true,
-	"persistentvolume": true,
-	"pod":              true,
-	"replicaset":       true,
+	"namespace":             true,
+	"limitrange":            true,
+	"resourcequota":         true,
+	"persistentvolume":      true,
+	"pod":                   true,
+	"replicaset":            true,
+	"replicationcontroller": true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

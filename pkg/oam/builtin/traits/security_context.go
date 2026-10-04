@@ -351,6 +351,12 @@ func extractPodSpecSC(obj client.Object) *corev1.PodSpec {
 		return &o.Spec
 	case *appsv1.ReplicaSet:
 		return &o.Spec.Template.Spec
+	case *corev1.ReplicationController:
+		// The template is a pointer; one without it has no pod spec to write.
+		if o.Spec.Template == nil {
+			return nil
+		}
+		return &o.Spec.Template.Spec
 	default:
 		return nil
 	}
