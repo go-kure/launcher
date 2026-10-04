@@ -16,7 +16,8 @@ all. Each issue links back to this document.
 **Basis.** "Current" means `main` at v0.2.0-beta.1. Paths are relative to the repository
 root. Kure paths refer to kure v0.2.0-beta.15. Everything here is pre-release: output,
 names and the library contract may change, and live-cluster upgrade effects are not a
-constraint.
+constraint. A section or row marked **Shipped** states what the code does since its ticket
+merged, in place of the target it replaced.
 
 ---
 
@@ -59,72 +60,90 @@ constraint.
    make sense. A mechanism launcher offers to consumers (such as contract metadata) is used
    by its own builtins. An asymmetry is either documented with its reason or a gap.
 
-### 1.3 What leaves launcher (go-kure/launcher#781, go-kure/launcher#782)
+### 1.3 What leaves launcher (go-kure/launcher#781 shipped, go-kure/launcher#782 open)
 
-| Today | Where | Target |
+The rows of go-kure/launcher#781 are shipped: "Now" is what the code does, and "Where it
+was" names the code before that change, most of which is gone. The last row is still a
+target.
+
+| Before | Where it was | Now |
 |---|---|---|
-| Automatic health checks on every leaf bundle, from a type table | `applyAutoHealthChecks` `pkg/oam/transform.go:1858`, table `componentHealthCheckGVK` `:1799`, `isFluxControlPlaneGVK` `:1842`, the `EmitsAutoHealthCheck` veto | **go-kure/launcher#781:** removed. Default for every step is the delivery engine's wait-for-all (`wait: true`, no health checks). An author who needs explicit checks declares them through the consumer's own policy. |
-| Reconciliation settings on bundles (interval, retry, timeout, prune, wait, force, suspend) | `applyReconciliationSettings` `transform.go:1909`; policy `pkg/oam/builtin/policies/reconciliation.go` | **go-kure/launcher#781:** removed with the policy. |
-| `health-checks` policy | `pkg/oam/builtin/policies/healthchecks.go` | **go-kure/launcher#781:** removed. |
-| `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **go-kure/launcher#781:** removed. |
-| `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **go-kure/launcher#781:** removed (breaking for a consumer that aliased them). |
-| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **go-kure/launcher#781:** removed with `bundle_patches.go`. `GeneratedApplication.Forced` loses its source (the reconciliation policy's `force`, `transform.go:1929`) and is re-sourced by go-kure/launcher#782. |
-| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; design §11 "Launcher Layout" | **go-kure/launcher#781:** removed in the same change. An engine-neutral artifact option may follow when `kurel` work resumes. |
-| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **go-kure/launcher#782:** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
+| Automatic health checks on every leaf bundle, from a type table | `applyAutoHealthChecks` `pkg/oam/transform.go:1858`, table `componentHealthCheckGVK` `:1799`, `isFluxControlPlaneGVK` `:1842`, the `EmitsAutoHealthCheck` veto | **Shipped (go-kure/launcher#781):** removed. Launcher sets no health check and no other delivery field on a bundle (`buildCluster`, `pkg/oam/transform.go`); what a step waits for is the delivering consumer's. An author who needs explicit checks declares them through the consumer's own policy. |
+| Reconciliation settings on bundles (interval, retry, timeout, prune, wait, force, suspend) | `applyReconciliationSettings` `transform.go:1909`; policy `pkg/oam/builtin/policies/reconciliation.go` | **Shipped (go-kure/launcher#781):** removed with the policy. A document with a `reconciliation` policy fails the transform with `no handler for policy type "reconciliation": it configures delivery, which launcher leaves to the consumer that delivers the application; …`, unless the consumer registers its own handler. |
+| `health-checks` policy | `pkg/oam/builtin/policies/healthchecks.go` | **Shipped (go-kure/launcher#781):** removed, and refused the same way without a consumer's handler. |
+| `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **Shipped (go-kure/launcher#781):** removed. Both types stay admitted trait types (`validTraitTypes`, `pkg/oam/validate.go`), so a consumer that delivers through Flux can register its own handler; without one the transform refuses the trait with the same "no handler" message. |
+| `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **Shipped (go-kure/launcher#781):** removed (breaking for a consumer that aliased them). `PolicyResult.Extensions` carries what a consumer's own policy handlers record; launcher neither reads nor changes it. |
+| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **Shipped (go-kure/launcher#781):** removed with `bundle_patches.go`. `GeneratedApplication.Forced` lost its source (the reconciliation policy's `force`): it is true only for a bundle whose `Force` the caller set before generating (`generateBundle`, `pkg/oam/in_document_collisions.go`), until go-kure/launcher#782 re-sources it. |
+| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; design §11 "Launcher Layout" | **Shipped (go-kure/launcher#781):** removed in the same change. `kurel build` writes plain YAML only and both flags are unknown. An engine-neutral artifact option may follow when `kurel` work resumes. |
+| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **Target (go-kure/launcher#782, open):** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
 
 What stays: `placement`, `dependency`, the tier annotation (author-declared ordering
-intent), `postProcessFluxNamespace` (`transform.go:1822`), which places authored Flux
+intent), `postProcessFluxNamespace` (`pkg/oam/transform.go`), which places authored Flux
 objects in the Flux namespace, and the Flux kinds as authorable components.
 
 ---
 
 ## 2. Ordering model (go-kure/launcher#783, go-kure/launcher#784)
 
-### 2.1 Current behaviour
+### 2.1 Before go-kure/launcher#783
 
-- **Structure choice** (`transform.go:688-694`): any `dependency` rule gives one bundle per
-  component; otherwise one tier gives a flat bundle; otherwise a hierarchy of tier bundles.
+The references name the code before that change.
+
+- **Structure choice** (`transform.go:688-694`): any `dependency` rule gave one bundle per
+  component; otherwise one tier gave a flat bundle; otherwise a hierarchy of tier bundles.
 - **Automatic tiers** (`pkg/oam/classify.go:47-79,88-141`): the `<domain>/tier` annotation
-  first; then a rule-generated Flux source goes to `infra`; then a type table (`postgresql`,
+  first; then a rule-generated Flux source went to `infra`; then a type table (`postgresql`,
   `cnpg-*` → `services`; `daemonset` → `infra`; the rest → `apps`). An authored Flux source
-  lands in `apps`, a generated one in `infra`.
+  landed in `apps`, a generated one in `infra`.
 - **Names** (`transform.go:888,903-905,909-912,936`): tier bundles `<app>-<tier>` chained by
   `dependsOn` under an umbrella `<app>`; per-component bundles `<app>-<component>`, so a
-  generated source becomes `<app>-<app>-source-<digest>`.
+  generated source became `<app>-<app>-source-<digest>`.
 - **Per-component shape** (`buildDependencyAwareCluster`, `transform.go:926`): one bundle
   per component, children of an unnamed root node.
 
-### 2.2 Target (go-kure/launcher#783)
+### 2.2 Shipped (go-kure/launcher#783): explicit ordering, one bundle shape
 
-1. **Remove the automatic category table** and the generated-source rule. Keep, in
-   `classify.go`: `DefaultDomain` (`:13`), `TierAnnotationKey` (`:38`),
-   `ComponentLabelKeyForDomain` (`:42`) and the annotation read inside
-   `ClassifyComponentWithDomain`. Ordering comes only from:
+What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transform.go`,
+`pkg/oam/README.md` "Pipeline"):
+
+1. **No automatic category.** The type table and the generated-source rule are gone.
+   `classify.go` keeps `DefaultDomain`, `TierAnnotationKey`, `ComponentLabelKeyForDomain`
+   and the annotation read in `ClassifyComponentWithDomain`, which returns no tier for a
+   component without the annotation. A component nothing places is in no tier. Order comes
+   only from:
    - the `placement` policy;
    - the tier annotation, as an author declaration;
    - the `dependency` policy;
    - a lowering rule's declaration about its own parts (below).
-2. **A lowering result can declare order between its own lowered parts.** `helm` uses it:
-   source before release.
-3. **One shape.** One application bundle. It is flat when nothing is ordered. Otherwise it
-   has ordered child groups, computed as topological levels of the declared order. This
-   replaces the per-component shape.
-4. **Generated sources** sit in the application bundle itself, ahead of its ordered groups,
-   so a shared source adopted by a later component is still applied first. The application
-   owns them (see §3.4 on labels). launcher expresses this through the shape. Applying the
-   bundle's own applications before its child groups is the delivery engine's job.
+2. **A lowering rule orders the components it emits** with `Component.OrderAfter`. `helm`
+   uses it: the release is after the source the rule generates.
+3. **One shape.** One application bundle, named after the Application. It is flat when
+   nothing is ordered. Otherwise it has ordered child groups, the topological levels of the
+   declared order, each depending on the group before it. Declarations that cannot all hold
+   (a dependency against the tier order, a cycle) fail the transform, naming each step and
+   where it was declared. The per-component shape is gone.
+4. **Generated sources** are the application bundle's own applications, ahead of its
+   ordered groups, so a shared source adopted by a later component is still applied first.
+   A generated source is a Flux source a lowering rule emitted, ordered a component after
+   and ordered after nothing, that is not a member of a same-name sibling group. The
+   application owns them (see §3.4 on labels). A document cannot place one in a tier or make
+   it wait on a component: the transform refuses both. Applying the bundle's own
+   applications before its child groups is the delivery engine's job.
 
-   A bundle with its own applications plus child groups is new for launcher. Three walks
-   skip the own applications of a bundle that has children today, and must visit them:
-   - `walkLeafBundle` (`transform.go:1951-1962`): without it `postProcessFluxNamespace`
-     does not reach the generated sources. A generated source is placed in the Flux
-     namespace when one is set;
-   - `generateBundle` (`pkg/oam/in_document_collisions.go:93-100`): without it
-     `GenerateApplications` drops them from `kurel` output, the collision check and the
-     volume warnings;
-   - `rejectLayoutAugmentersInBundle` (`pkg/cmd/kurel/build.go:459-466`).
-5. **Decide in the ticket:** the placement vocabulary (keep `infra`/`services`/`apps`, or
-   named groups) and the default child group names (§3).
+   The walks over a bundle that has its own applications and child groups:
+   - `postProcessFluxNamespace` walks every bundle (`walkBundles`), so a generated source
+     is placed in the Flux namespace when one is set;
+   - `generateBundle` (`pkg/oam/in_document_collisions.go`) generates a bundle's own
+     applications, then its children, so `GenerateApplications` returns them for `kurel`
+     output, the collision check and the volume warnings;
+   - `rejectLayoutAugmentersInBundle` (`pkg/cmd/kurel/build.go`) follows the same
+     traversal;
+   - `walkLeafBundles` still skips them, on purpose: the NetworkPolicy synthesis that uses
+     it reads workloads, and an ordered application's own bundle holds only sources.
+5. **Decided in the ticket:** the placement vocabulary stays `infra`/`services`/`apps`. A
+   group that is exactly the components of one tier is named `<application>-<tier>`, any
+   other `<application>-<NN>`, its two-digit position counted from `00`. The name is
+   shortened to 253 characters, the limit of a name that names no delivery engine (§3).
 
 ### 2.3 Target (go-kure/launcher#784): `oci` lowers to kind components
 
