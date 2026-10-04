@@ -343,7 +343,8 @@ func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 //
 // For the same reason it holds that copy to the environment policy again, once
 // ApplyPolicy has supplied one: the object checked there and the object emitted
-// here are then the same bytes.
+// here are then the same bytes. A refusal here is the component's
+// oam.ViolationError, as the transform reports one from ApplyPolicy.
 func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 	u, err := c.emitted()
 	if err != nil {
@@ -351,7 +352,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	}
 	if c.policy != nil {
 		if err := enforcePassthroughPolicy(u, c.policy); err != nil {
-			return nil, errors.Wrapf(err, "passthrough component %q", c.componentName)
+			return nil, &oam.ViolationError{Component: c.componentName, Cause: err}
 		}
 	}
 	out := client.Object(u)
