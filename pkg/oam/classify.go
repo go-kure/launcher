@@ -12,7 +12,7 @@ import (
 // embedding launcher (e.g. a downstream platform) override it via TransformContext.Domain.
 const DefaultDomain = "gokure.dev"
 
-// TierAnnotation is the OAM component annotation key for overriding the default tier.
+// TierAnnotation is the OAM component annotation key that places a component in a tier.
 //
 // Deprecated: use TierAnnotationKey(domain). Retained for source compatibility; this is
 // the library default key (== TierAnnotationKey(DefaultDomain)).
@@ -43,39 +43,6 @@ func ComponentLabelKeyForDomain(domain string) string {
 	return domainOrDefault(domain) + "/component"
 }
 
-// defaultTierMap maps OAM component types to their deployment tier.
-var defaultTierMap = map[string]Tier{
-	"postgresql":   TierServices,
-	"cnpg-cluster": TierServices,
-	"webservice":   TierApps,
-	"worker":       TierApps,
-	"cronjob":      TierApps,
-	"helm":         TierApps,
-	"helmrelease":  TierApps,
-	"helmtemplate": TierApps,
-	"daemonset":    TierInfra,
-	"statefulset":  TierApps,
-	"crd":          TierApps,
-	"manifests":    TierApps,
-	"oci":          TierApps,
-
-	// The kind-named Flux source components (go-kure/launcher#347,
-	// go-kure/launcher#351) sit with the oci component, which also emits a Flux
-	// source.
-	"helmrepository": TierApps,
-	"ocirepository":  TierApps,
-	"gitrepository":  TierApps,
-	"bucket":         TierApps,
-	"helmchart":      TierApps,
-
-	// The CloudNativePG kind components beside cnpg-cluster
-	// (go-kure/launcher#573) sit with it and with postgresql, which emits the
-	// same Pooler, Database and ObjectStore kinds.
-	"cnpg-pooler":      TierServices,
-	"cnpg-database":    TierServices,
-	"cnpg-objectstore": TierServices,
-}
-
 // validTiers is the set of valid tier values for annotation validation.
 var validTiers = map[Tier]bool{
 	TierInfra:    true,
@@ -83,40 +50,20 @@ var validTiers = map[Tier]bool{
 	TierApps:     true,
 }
 
-// ClassifyComponent returns the deployment tier for the given component, using the
-// library default domain (DefaultDomain) for the tier annotation key.
+// ClassifyComponent is ClassifyComponentWithDomain with the library default
+// domain (DefaultDomain) for the tier annotation key.
 func ClassifyComponent(c *Component) (Tier, error) {
 	return ClassifyComponentWithDomain(c, DefaultDomain)
 }
 
-// generatedSourceTypes are the Flux source component types a lowering rule emits on its
-// consumers' behalf (the helm rule's helmrepository, ocirepository, gitrepository and
-// bucket). A rule-emitted (synthesized) component of one of these types deploys in
-// TierInfra, the earliest tier:
-// the consumers keep their own tier, from an annotation or a placement policy, and a source
-// in a later tier than a consumer would be applied only after it, since that tier's
-// bundles depend on the consumer's. An authored source keeps defaultTierMap's tier. A placement
-// policy cannot move a generated one out of TierInfra, and a dependency rule cannot make it
-// wait on another component (TransformWithPolicy).
-var generatedSourceTypes = map[string]bool{
-	"helmrepository": true,
-	"ocirepository":  true,
-	"gitrepository":  true,
-	"bucket":         true,
-}
-
-// isGeneratedSource reports whether c is a Flux source a lowering rule emitted on its
-// consumers' behalf (generatedSourceTypes).
-func isGeneratedSource(c *Component) bool {
-	return c.synthesized && generatedSourceTypes[c.Type]
-}
-
-// ClassifyComponentWithDomain returns the deployment tier for the given component, reading
-// the "<domain>/tier" override annotation. It checks that annotation first, then whether
-// the component is a rule-generated source (generatedSourceTypes, TierInfra), then the
-// defaultTierMap, and falls back to TierApps. A nil component is an error; an empty domain
-// uses DefaultDomain; an invalid domain is an error (validated here independently, since
-// this is an exported helper callable outside the transform pipeline).
+// ClassifyComponentWithDomain returns the tier the component's "<domain>/tier"
+// annotation places it in, or "" when it carries none: launcher places no
+// component by its type (go-kure/launcher#783), so a component without the
+// annotation is in no tier unless a placement policy puts it in one. A nil
+// component is an error; an empty domain uses DefaultDomain; an invalid domain is
+// an error (validated here independently, since this is an exported helper
+// callable outside the transform pipeline); so is an annotation that names no
+// tier.
 func ClassifyComponentWithDomain(c *Component, domain string) (Tier, error) {
 	if c == nil {
 		return "", errors.New("nil component")
@@ -125,27 +72,13 @@ func ClassifyComponentWithDomain(c *Component, domain string) (Tier, error) {
 	if errs := validation.IsDNS1123Subdomain(domain); len(errs) > 0 {
 		return "", errors.Errorf("invalid domain %q: %s", domain, strings.Join(errs, "; "))
 	}
-	if v, ok := c.Annotations[TierAnnotationKey(domain)]; ok {
-		tier := Tier(v)
-		if !validTiers[tier] {
-			return "", errors.Errorf("invalid tier annotation %q on component %q: must be one of infra, services, apps", v, c.Name)
-		}
-		return tier, nil
+	v, ok := c.Annotations[TierAnnotationKey(domain)]
+	if !ok {
+		return "", nil
 	}
-	if isGeneratedSource(c) {
-		return TierInfra, nil
+	tier := Tier(v)
+	if !validTiers[tier] {
+		return "", errors.Errorf("invalid tier annotation %q on component %q: must be one of infra, services, apps", v, c.Name)
 	}
-	if tier, ok := defaultTierMap[c.Type]; ok {
-		return tier, nil
-	}
-	return TierApps, nil
-}
-
-// groupByTier groups component entries by their deployment tier.
-func groupByTier(entries []componentEntry) map[Tier][]componentEntry {
-	groups := make(map[Tier][]componentEntry)
-	for _, e := range entries {
-		groups[e.tier] = append(groups[e.tier], e)
-	}
-	return groups
+	return tier, nil
 }

@@ -1741,9 +1741,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   emits that object, named after the component, and nothing else, so another
   component refers to it by the component name. They are the authorable forms
   of the objects the workload kinds generate for themselves today, and they
-  carry no launcher opinions. Like `deployment` and `service`, they are
-  absent from the default tier map and deploy in the `apps` tier unless a tier
-  annotation or placement policy says otherwise.
+  carry no launcher opinions. Like every component, they are in no tier
+  unless a tier annotation or placement policy places them.
   - `serviceaccount` publishes `automountServiceAccountToken` and
     `imagePullSecrets` (`[{name}]`). An unauthored
     `automountServiceAccountToken` stays unset, which Kubernetes reads as
@@ -2121,7 +2120,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   only; the assignment is kept so the field stays empty whatever a future
   constructor does). **Annotating the component itself still does not reach the
   Job**: this component has no annotation passthrough, and a component's own
-  annotations are read only for tier classification. See the
+  annotations are read only for the tier annotation. See the
   [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
   catalogue.
 
@@ -2218,14 +2217,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of the source name. The source carries no traits and keeps its terminal's
     interval default rather than the release `interval`. The source terminal's
     registry allowlist (`ApplyPolicy`) applies to it.
-  - **The generated source deploys in the `infra` tier**, whatever the release's
-    tier (`pkg/oam` classifies a rule-emitted `helmrepository`, `ocirepository`,
-    `gitrepository` or `bucket` that way). A release moved into `infra` by a tier annotation or a `placement`
-    policy therefore never sits in an earlier tier than its source. If it did, the
-    source's tier would depend on the release's, and the source would be applied
-    only after the release that reads it. For the same reason a `placement` policy naming the
-    generated source may only keep it in `infra`, and a `dependency` rule may not
-    make it wait on any component; either fails the build.
+  - **The generated source is applied with the application bundle, ahead of
+    every group** (go-kure/launcher#783). The rule orders the release after the
+    source it generates or adopts (`Component.OrderAfter`), and `pkg/oam` puts
+    such a source among the application bundle's own applications, beside the
+    ordered groups. A source several releases share therefore exists once and
+    precedes all of them, whatever tier a release is placed in. A `placement`
+    policy or tier annotation naming the generated source, and a `dependency`
+    rule making it wait on a component, fail the build. A source the component
+    references by `source.name` is the author's own component and the rule
+    orders nothing after it.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
     `chart`, `version` and `values`. No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
@@ -2299,14 +2300,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 7 | No registration-time `valuesMode` default; `valuesMode` is never forwarded (under `configMap` the values become a `configmap` trait). |
   | 8 | *(void)* Generated sources: neither gets an automatic health check; launcher sets none (go-kure/launcher#781). |
   | 9 | The registry allowlist applies to inline sources. |
-  | 10 | Generated sources deploy in the infra tier. A tier annotation on the component places only its release; the generated source stays in infra. |
+  | 10 | Generated sources are applied with the application bundle, ahead of every group. A tier annotation on the component places only its release. |
   | 11 | Template delivery refuses `releaseName` and `targetNamespace`. |
   | 12 | `chart` is refused with an OCIRepository or HelmChart source. |
   | 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
   | 14 | `source.namespace` is refused together with `url`. |
   | 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
   | 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`) (go-kure/launcher#665). |
-  | 17 | `placement` may keep a generated source only in infra, and a `dependency` rule may not make it wait. |
+  | 17 | `placement` may not place a generated source in any tier, and a `dependency` rule may not make it wait. |
   | 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
 
   Two `helmchart` behaviours have no `helm` counterpart beyond row 18: `valuesMode: configMap`
@@ -2684,17 +2685,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   covered every object postgresql generated are forwarded to the other
   members so they still do: `prune-protection` and `force-replace` to each
   member, and `fluxcd-patches` and `fluxcd-postbuild` (not built in; a consumer
-  that delivers through Flux registers them) to each member with a
-  bundle of its own (below). Policies that name the postgresql component
-  are extended to the members the same way. A `placement` of it is repeated
+  that delivers through Flux registers them) to the first member that is
+  ordered after the Cluster (below): the members share one group, so one of
+  them carries the trait for that group's bundle. Policies that name the
+  postgresql component are extended to the members the same way. A `placement` of it is repeated
   for each member, so they stay in the Cluster's tier and, without a
   dependency policy, in its bundle. When the document orders its components
   with a `dependency` policy that has a rule, the rule adds one making the
   Pooler and the Databases depend on the Cluster, and every component the
   document makes depend on the postgresql component depend on them too:
-  that layout gives each component a bundle of its own. Without one it adds
-  no edge, since any dependency edge switches the whole document to that
-  layout. The policies it adds are named `<name>-dependencies` and
+  the members are then in a later group than the Cluster's. Without one it adds
+  no edge, since a dependency edge would order a document that never asked
+  for ordering. The policies it adds are named `<name>-dependencies` and
   `<name>-placement-<i>` (one per member), or, when a policy of the document
   already uses the name, the first free one with `-<n>` appended.
   **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
@@ -2995,8 +2997,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   limit below an authored request is refused as well. The other
   resource-name rules of the shared parser are left to the API server.
   `Endpoints` declares the same primary endpoint as `postgresql`
-  (`cnpg.io/cluster: <component-name>` on port `5432`). The kind is in the
-  `services` tier, as `postgresql` is.
+  (`cnpg.io/cluster: <component-name>` on port `5432`).
   `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
   `ClusterSpec` by reflection: each json field is published with its type or
   listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
@@ -3013,8 +3014,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `1800`, on the ObjectStore) and of two spellings of one field, and the same
   reflection tests pinning the schema and both derived lists to the linked
   modules. `Generate` emits one object named after the component in the build
-  namespace with the authored spec, and repeats the parse-time refusals. All
-  three are in the `services` tier. The fields each CRD requires are refused when
+  namespace with the authored spec, and repeats the parse-time refusals. The
+  fields each CRD requires are refused when
   unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
   (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
   `owner` on the Database; `configuration.destinationPath` on the ObjectStore.

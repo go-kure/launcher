@@ -1354,8 +1354,8 @@ func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) 
 	}
 }
 
-// go-kure/launcher#242: a backendRef whose backend component lands in a DIFFERENT tier bundle (hierarchical cluster)
-// still retargets — the allow is synthesized on the backend's pods in the backend's tier bundle.
+// go-kure/launcher#242: a backendRef whose backend component lands in a DIFFERENT group's bundle
+// still retargets — the allow is synthesized on the backend's pods in the backend's bundle.
 func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
@@ -1369,9 +1369,10 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
-					Name:       "router",
-					Type:       "webservice",
-					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Name:        "router",
+					Type:        "webservice",
+					Annotations: map[string]string{"gokure.dev/tier": "apps"},
+					Properties:  map[string]any{"image": "nginx:1.25", "port": 8080},
 					Traits: []oam.Trait{{
 						Type: "httproute",
 						Properties: map[string]any{
@@ -1383,7 +1384,7 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 					}},
 				},
 				{
-					// Annotated into the services tier so router (apps) and db (services) land in
+					// router is annotated into the apps tier and db into services, so they land in
 					// separate leaf bundles → forces the cross-bundle resolution path.
 					Name:        "db",
 					Type:        "statefulset",
@@ -1398,6 +1399,9 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if got := len(cluster.Node.Bundle.Children); got != 2 {
+		t.Fatalf("the application bundle has %d groups, want one per declared tier", got)
 	}
 	if !clusterHasApp(cluster, "db-headless-allow-ingress-traffic") {
 		t.Fatalf("expected db-headless-allow-ingress-traffic across tier bundles; apps: %v", clusterAppNames(cluster))

@@ -117,8 +117,8 @@ func (t *Transformer) ValidateAuthoredPropertiesWithCapabilities(app *Applicatio
 // accepted (go-kure/launcher#635).
 //
 // It reports exactly what Transform reports for a document whose only defect is one
-// reserved key; with several, Transform may meet another one first (a hierarchical
-// build applies traits in tier order). With lowering rules registered, that is the check at the start of the
+// reserved key; with several, Transform may meet another one first (an ordered
+// build applies traits group by group). With lowering rules registered, that is the check at the start of the
 // first lowering round (enforceAuthoredReservations, before any rule ran, so the
 // LoweringError carries no chain); a non-terminal kind no rule claims is passed over,
 // as lowerDocumentOnce passes it over. With none, it is createApplications' component

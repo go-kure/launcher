@@ -9,7 +9,8 @@ import (
 )
 
 // PlacementHandler processes OAM placement policies.
-// A placement policy overrides the automatic tier classification for a component:
+// A placement policy places a component in a tier, replacing the tier its
+// annotation names, if any:
 //
 //	policies:
 //	  - name: cache-in-infra
@@ -66,12 +67,12 @@ func (h *PlacementHandler) PropertySchema() map[string]oam.PropertySchema {
 		tiers = append(tiers, string(t))
 	}
 	return map[string]oam.PropertySchema{
-		"component": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the component whose tier classification is being overridden."},
+		"component": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the component to place."},
 		"tier": {
 			Type:        oam.PropertyTypeString,
 			Required:    true,
 			Enum:        tiers,
-			Description: "Deployment tier to place the component in, overriding automatic classification.",
+			Description: "Deployment tier to place the component in, replacing the tier its annotation names. Tiers deploy in order; a component nothing places is in no tier.",
 		},
 	}
 }

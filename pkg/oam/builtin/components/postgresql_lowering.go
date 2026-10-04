@@ -113,7 +113,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 // object the component generates, and postgresqlBundleTraits those that
 // configure how the component's bundle is delivered (launcher has no handler
 // for them; a consumer that delivers through Flux registers its own). Each
-// applied to every object or to the one bundle of a postgresql component; the
+// applied to every object or to the bundle of a postgresql component; the
 // rule keeps that by forwarding them to the members it emits beside the
 // Cluster.
 var (
@@ -125,20 +125,24 @@ var (
 // authored traits that covered its objects when postgresql generated them
 // itself: the object-decorating ones always, since each member's traits apply
 // to its own objects only; the bundle ones only when split is set (the rule
-// emitted a dependency policy, so the transformer lays out one bundle per
-// component) and only to the first member of each name, since a later
-// same-name sibling shares that member's bundle. Without split every
-// component of the tier shares the Cluster's bundle, which already carries
-// them.
+// emitted a dependency policy, so the members are ordered after the Cluster
+// and land in a later group's bundle than its own) and only to the first
+// member that is not a sibling of the Cluster: every member waits for the
+// Cluster and for nothing else, so they share one group, and a bundle trait
+// carried by two of them would configure that one bundle twice. Without split
+// nothing separates the members from the Cluster, whose bundle already
+// carries them.
 //
 // Each is a by-value copy of the authored element with the same properties
 // map, which the engine recognises as forwarded rather than built by the rule
 // (oam's isForwardedTrait): it keeps its authored classification and checks.
 func forwardMemberTraits(out []oam.Component, authored []oam.Trait, split bool) {
-	seen := map[string]bool{out[0].Name: true}
+	membersBundle := split
 	for i := 1; i < len(out); i++ {
-		ownBundle := split && !seen[out[i].Name]
-		seen[out[i].Name] = true
+		ownBundle := membersBundle && out[i].Name != out[0].Name
+		if ownBundle {
+			membersBundle = false
+		}
 		for _, t := range authored {
 			if postgresqlObjectTraits[t.Type] || (ownBundle && postgresqlBundleTraits[t.Type]) {
 				out[i].Traits = append(out[i].Traits, t)
@@ -228,19 +232,18 @@ func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members 
 // nil.
 //
 // They are emitted only when the document already orders its components with a
-// dependency policy that has a rule. That is when the transformer lays out one
-// bundle per component and orders the bundles by those edges; the members are
-// then bundles of their own, which gets them no automatic edge from or to the
-// Cluster's. Without such a policy every component of a tier shares one bundle,
-// so the objects apply together, as postgresql's did. Emitting edges
-// unconditionally would break that: any dependency edge switches the whole
-// document to the per-component layout (PolicyResult.HasDependencies), so a
-// postgresql component with a pooler would change the layout of a document that
-// never asked for ordering.
+// dependency policy that has a rule. A component the author makes wait for the
+// postgresql component must then wait for every member, not only the Cluster,
+// and the members for the Cluster. Without such a policy nothing orders the
+// members: they stay in the Cluster's group, so the objects apply together, as
+// postgresql's did. Emitting edges unconditionally would break that: a
+// dependency edge splits the application into ordered groups, so a postgresql
+// component with a pooler would order a document that never asked for
+// ordering.
 //
 // Each member waits for the Cluster. Each component an authored rule makes wait
 // for the postgresql component also waits for every member, as it waited for
-// the one bundle of all of postgresql's objects.
+// all of postgresql's objects.
 func postgresqlDependencyRules(doc *oam.Application, cluster string, members []string) []any {
 	if !documentOrdersComponents(doc) {
 		return nil

@@ -1352,6 +1352,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				}
 			}
 			inputChecked := declaresSchema || comp.synthesized
+			// The order an earlier rule gave the component (Component.OrderAfter),
+			// read before this rule can touch its copy.
+			inheritedOrder := comp.orderAfter
 			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
@@ -1382,6 +1385,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
 				result.Components[j].synthesized = inputChecked
+				// What the component became waits as the component did, whether or
+				// not the rule built its output from the component it was handed.
+				result.Components[j].inheritOrder(inheritedOrder)
 				names[j] = result.Components[j].Name
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)

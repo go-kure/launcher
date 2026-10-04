@@ -118,25 +118,11 @@ func TestBuildCommand_BuiltinPolicies(t *testing.T) {
 	}
 }
 
-// bundleHolding returns the name of the leaf bundle carrying the application
-// named component, or "" when none does.
-func bundleHolding(bundles map[string]*stack.Bundle, component string) string {
-	for name, b := range bundles {
-		for _, a := range b.Applications {
-			if a.Name == component {
-				return name
-			}
-		}
-	}
-	return ""
-}
-
-// TestBuiltinDependencyPolicy_WiresTheBundleEdge proves the dependency handler's
-// edge on its own. Both components are webservices in the same tier and there is
-// no placement policy, so automatic cross-tier wiring (which only links a bundle
-// to the preceding tier's) cannot produce shop-web -> shop-api: the edge exists
-// only because the dependency policy declared it.
-func TestBuiltinDependencyPolicy_WiresTheBundleEdge(t *testing.T) {
+// TestBuiltinDependencyPolicy_OrdersTheGroups proves the dependency handler's
+// edge on its own. There is no placement policy, so the two groups, and the
+// second one's dependsOn on the first, exist only because the dependency policy
+// declared the order.
+func TestBuiltinDependencyPolicy_OrdersTheGroups(t *testing.T) {
 	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: order
       type: dependency
       properties:
@@ -150,27 +136,41 @@ func TestBuiltinDependencyPolicy_WiresTheBundleEdge(t *testing.T) {
 	if len(result.TierOverrides) != 0 {
 		t.Fatalf("TierOverrides = %v, want none (the case must not rely on placement)", result.TierOverrides)
 	}
-
-	bundles := leafBundles(cluster.Node)
-	web, api := bundles["shop-web"], bundles["shop-api"]
-	if web == nil || api == nil {
-		t.Fatalf("want per-component bundles shop-web and shop-api (dependency-aware cluster), got %v", slices.Sorted(maps.Keys(bundles)))
-	}
-	if !slices.Contains(web.DependsOn, api) {
-		t.Errorf("shop-web does not depend on shop-api")
-	}
-	if slices.Contains(api.DependsOn, web) {
-		t.Errorf("shop-api depends on shop-web; the edge is reversed")
+	if got, want := groupNames(t, cluster), []string{"shop-00: api", "shop-01: web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
 	}
 }
 
-// TestBuiltinPlacementPolicy_RegroupsTheComponent proves the placement override is
-// consumed on its own, with no dependency policy: without it both webservices
-// share the apps tier and the cluster is a single flat bundle; with it, api moves
-// into the infra tier bundle and web stays in the apps tier bundle, and the apps
-// tier bundle depends on the infra one, so the override also moves api earlier in
-// deployment order.
-func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
+// TestBuiltinPlacementPolicy_RegroupsTheComponents proves placement is consumed
+// on its own, with no dependency policy: api placed in infra and web in apps
+// give the groups shop-infra and shop-apps, the second depending on the first.
+func TestBuiltinPlacementPolicy_RegroupsTheComponents(t *testing.T) {
+	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: api-first
+      type: placement
+      properties:
+        component: api
+        tier: infra
+    - name: web-last
+      type: placement
+      properties:
+        component: web
+        tier: apps
+`)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if result.HasDependencies() {
+		t.Fatalf("Dependencies = %v, want none (the case must not rely on a dependency policy)", result.Dependencies)
+	}
+	if got, want := groupNames(t, cluster), []string{"shop-infra: api", "shop-apps: web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+// TestBuiltinPlacementPolicy_OneTierOrdersNothing pins that a component nothing
+// places is in no tier (go-kure/launcher#783): with api alone placed, no tier
+// follows another, so the application stays one flat bundle.
+func TestBuiltinPlacementPolicy_OneTierOrdersNothing(t *testing.T) {
 	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: api-first
       type: placement
       properties:
@@ -180,26 +180,12 @@ func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	if result.HasDependencies() {
-		t.Fatalf("Dependencies = %v, want none (the case must not rely on a dependency policy)", result.Dependencies)
+	if got := result.TierOverrides["api"]; got != oam.TierInfra {
+		t.Fatalf("TierOverrides[api] = %q, want infra (the case must exercise placement)", got)
 	}
-
 	bundles := leafBundles(cluster.Node)
-	if got := bundleHolding(bundles, "api"); got != "shop-infra" {
-		t.Errorf("api is in bundle %q, want shop-infra (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
-	}
-	if got := bundleHolding(bundles, "web"); got != "shop-apps" {
-		t.Errorf("web is in bundle %q, want shop-apps (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
-	}
-	infra, apps := bundles["shop-infra"], bundles["shop-apps"]
-	if infra == nil || apps == nil {
-		t.Fatalf("want tier bundles shop-infra and shop-apps, got %v", slices.Sorted(maps.Keys(bundles)))
-	}
-	if !slices.Contains(apps.DependsOn, infra) {
-		t.Errorf("shop-apps does not depend on shop-infra")
-	}
-	if len(infra.DependsOn) != 0 {
-		t.Errorf("shop-infra depends on %d bundle(s), want none", len(infra.DependsOn))
+	if got := slices.Sorted(maps.Keys(bundles)); !slices.Equal(got, []string{"shop"}) {
+		t.Errorf("bundles = %v, want the one flat bundle shop", got)
 	}
 }
 

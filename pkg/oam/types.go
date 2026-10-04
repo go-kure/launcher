@@ -87,6 +87,10 @@ type Component struct {
 	// AfterPolicy (post_policy_step.go), in the order attached. Unexported, so a
 	// document can neither author nor carry one.
 	afterPolicy []PostPolicyStep
+	// orderAfter holds the names of the components a lowering rule ordered this
+	// one after with OrderAfter (ordering.go). Unexported, so a document can
+	// neither author nor carry one.
+	orderAfter []string
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

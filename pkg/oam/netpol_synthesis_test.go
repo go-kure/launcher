@@ -28,7 +28,7 @@ func (s *extBackendStub) BackendPorts() []intstr.IntOrString                    
 func (s *extBackendStub) BackendTargets() []netpol.BackendTarget                  { return s.targets }
 
 // twoLeafBundleCluster builds a cluster whose root node has two child leaf bundles, each holding one
-// application — the minimal multi-bundle shape a dependency-aware/hierarchical transform produces.
+// application — a minimal multi-bundle shape, as an ordered application's groups are.
 func twoLeafBundleCluster(a, b *stack.Application) *stack.Cluster {
 	return &stack.Cluster{Node: &stack.Node{Children: []*stack.Node{
 		{Bundle: &stack.Bundle{Applications: []*stack.Application{a}}},
@@ -482,7 +482,7 @@ func synthesizedNPInBundle(t *testing.T, b *stack.Bundle, name string) *networki
 }
 
 // crossBundleCluster wires router (bundle A) and backend (bundle B) into a two-leaf-bundle cluster
-// with a matching componentMap — the shape a dependency-aware/hierarchical transform produces.
+// with a matching componentMap — a multi-bundle shape, as an ordered application's groups are.
 func crossBundleCluster(router, backend *stack.Application) (*stack.Cluster, *stack.Bundle, *stack.Bundle, map[string]componentEntry) {
 	bundleA := &stack.Bundle{Applications: []*stack.Application{router}}
 	bundleB := &stack.Bundle{Applications: []*stack.Application{backend}}

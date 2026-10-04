@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -198,9 +199,9 @@ func TestPostgresqlRule_RefusesRepeatedDatabaseName(t *testing.T) {
 }
 
 // The rule orders the Pooler and the Databases after the Cluster with a
-// dependency policy only when the document already orders its components: any
-// dependency edge switches the transform to one bundle per component, which
-// would change the layout of a document that never asked for ordering.
+// dependency policy only when the document already orders its components: a
+// dependency edge splits the application into ordered groups, which would order
+// a document that never asked for ordering.
 func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) {
 	comp := oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
 		"pooler":    map[string]any{"enabled": true},
@@ -250,6 +251,62 @@ func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) 
 	bare := oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{}}
 	if res := lowerPostgresql(t, &bare, ordered); len(res.Policies) != 0 {
 		t.Errorf("no pooler or databases: emitted %+v, want none", res.Policies)
+	}
+}
+
+// A trait that configures the component's bundle is forwarded once per bundle
+// the members land in. Without a dependency policy that is the Cluster's own
+// bundle, which carries the trait already. Under one, every member waits for
+// the Cluster alone, so they share the next group: its first member carries the
+// trait, and no other does, or a consumer's handler would configure that one
+// bundle once per member. A trait that decorates objects reaches every member.
+func TestPostgresqlRule_BundleTraitOncePerBundle(t *testing.T) {
+	comp := oam.Component{Name: "db", Type: "postgresql",
+		Properties: map[string]any{
+			"pooler":      map[string]any{"enabled": true},
+			"objectStore": map[string]any{"destinationPath": "s3://backups/db"},
+			"databases": []any{
+				map[string]any{"name": "orders", "owner": "app"},
+				map[string]any{"name": "billing", "owner": "app"},
+			},
+		},
+		Traits: []oam.Trait{
+			{Type: "fluxcd-patches", Properties: map[string]any{}},
+			{Type: "prune-protection", Properties: map[string]any{}},
+		},
+	}
+	carriers := func(res oam.LoweringResult, traitType string) []string {
+		var out []string
+		for _, c := range res.Components {
+			if slices.ContainsFunc(c.Traits, func(tr oam.Trait) bool { return tr.Type == traitType }) {
+				out = append(out, c.Type+"/"+c.Name)
+			}
+		}
+		return out
+	}
+	everyObject := []string{"cnpg-cluster/db", "cnpg-objectstore/db", "cnpg-pooler/db-pooler", "cnpg-database/db-orders", "cnpg-database/db-billing"}
+
+	unordered := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
+	res := lowerPostgresql(t, &comp, unordered)
+	if got, want := carriers(res, "fluxcd-patches"), []string{"cnpg-cluster/db"}; !slices.Equal(got, want) {
+		t.Errorf("unordered: bundle trait on %v, want %v", got, want)
+	}
+	if got := carriers(res, "prune-protection"); !slices.Equal(got, everyObject) {
+		t.Errorf("unordered: object trait on %v, want %v", got, everyObject)
+	}
+
+	ordered := &oam.Application{Spec: oam.ApplicationSpec{
+		Components: []oam.Component{comp, {Name: "api", Type: "webservice"}},
+		Policies: []oam.ApplicationPolicy{{Name: "order", Type: "dependency", Properties: map[string]any{
+			"rules": []any{map[string]any{"component": "api", "dependsOn": []any{"db"}}},
+		}}},
+	}}
+	res = lowerPostgresql(t, &comp, ordered)
+	if got, want := carriers(res, "fluxcd-patches"), []string{"cnpg-cluster/db", "cnpg-pooler/db-pooler"}; !slices.Equal(got, want) {
+		t.Errorf("ordered: bundle trait on %v, want %v: the Cluster's bundle and the members' one group, once each", got, want)
+	}
+	if got := carriers(res, "prune-protection"); !slices.Equal(got, everyObject) {
+		t.Errorf("ordered: object trait on %v, want %v", got, everyObject)
 	}
 }
 

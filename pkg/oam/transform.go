@@ -634,7 +634,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		namespace = "default"
 	}
 
-	// Phase 1: create applications, apply Enforceable policy, classify tiers.
+	// Phase 1: create applications, apply Enforceable policy, read tier annotations.
 	entries, err := t.createApplications(app, namespace, ctx)
 	if err != nil {
 		return nil, nil, err
@@ -659,21 +659,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// Apply placement tier overrides before grouping. A generated source
-	// (isGeneratedSource) deploys first and waits on nothing: placed in a later
-	// tier, or made to depend on another component, it could follow one of its
-	// own consumers, which would then never become ready and hold it back forever.
+	// A placement replaces the tier a component's annotation gave it.
 	for i, entry := range entries {
-		tier, overridden := policyResult.TierOverrides[entry.component.Name]
-		if isGeneratedSource(&entry.component) {
-			if overridden && tier != TierInfra {
-				return nil, nil, errors.Errorf("placement cannot move %s %q to tier %s: a source a lowering rule generates deploys in infra, before every consumer", entry.component.Type, entry.component.Name, tier)
-			}
-			if deps := policyResult.Dependencies[entry.component.Name]; len(deps) > 0 {
-				return nil, nil, errors.Errorf("dependency cannot make %s %q wait on %s: a source a lowering rule generates deploys first, before every consumer", entry.component.Type, entry.component.Name, strings.Join(deps, ", "))
-			}
-		}
-		if overridden {
+		if tier, placed := policyResult.TierOverrides[entry.component.Name]; placed {
 			entries[i].tier = tier
 		}
 	}
@@ -681,22 +669,20 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// A shared source is emitted by the consumer that deploys first. Deciding this
-	// only now, with final tiers and dependencies known, keeps the owner from
-	// waiting on another consumer of its source, which would deadlock.
-	deduplicateSourceRefs(deploymentOrder(entries, policyResult.Dependencies))
-
-	// Phase 3: group by tier and build cluster.
-	tierGroups := groupByTier(entries)
-
-	var cluster *stack.Cluster
-	if policyResult.HasDependencies() {
-		cluster, err = t.buildDependencyAwareCluster(app, entries, policyResult.Dependencies, ctx)
-	} else if len(tierGroups) <= 1 {
-		cluster, err = t.buildFlatCluster(app, entries, ctx)
-	} else {
-		cluster, err = t.buildHierarchicalCluster(app, entries, tierGroups, ctx)
+	// Phase 3: order the components by what the document declares (placement,
+	// dependency rules, a lowering rule's own order) and build the cluster.
+	// Launcher orders nothing by itself (go-kure/launcher#783).
+	order, err := orderComponents(entries, policyResult.Dependencies)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	// A shared source is emitted by the consumer that is applied first. Deciding
+	// this only now, with the final order known, keeps the owner from waiting on
+	// another consumer of its source, which would deadlock.
+	deduplicateSourceRefs(order.sequence())
+
+	cluster, err := t.buildCluster(app, order, ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -857,141 +843,66 @@ func (t *Transformer) applyPolicies(app *Application, entries []componentEntry) 
 	return result, nil
 }
 
-// buildFlatCluster creates a single-bundle cluster when all components belong to one tier.
-func (t *Transformer) buildFlatCluster(app *Application, entries []componentEntry, ctx TransformContext) (*stack.Cluster, error) {
+// buildCluster builds the application's one bundle, named after the
+// application.
+//
+// When nothing orders the components, the bundle is flat: it holds every
+// component's application, in document order.
+//
+// Otherwise it holds the generated sources (orderComponents) as its own
+// applications and one child bundle per group, each depending on the group
+// before it. A bundle's own applications are applied before its children: that
+// is what puts a generated source ahead of every consumer, and a consumer that
+// delivers the bundle keeps to it. Nothing here sets a delivery field of a
+// bundle: how it is delivered is the consumer's (go-kure/launcher#781).
+func (t *Transformer) buildCluster(app *Application, order *componentOrder, ctx TransformContext) (*stack.Cluster, error) {
+	if !order.ordered() {
+		bundle, err := t.buildBundle(app, app.Metadata.Name, order.sequence(), ctx)
+		if err != nil {
+			return nil, err
+		}
+		return stack.NewCluster(ctx.ClusterID, &stack.Node{Name: "", Bundle: bundle}), nil
+	}
+
+	root, err := t.buildBundle(app, app.Metadata.Name, order.sources, ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i, entries := range order.groups {
+		group, err := t.buildBundle(app, order.groupName(app.Metadata.Name, i), entries, ctx)
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			group.DependsOn = append(group.DependsOn, root.Children[i-1])
+		}
+		root.Children = append(root.Children, group)
+	}
+	root.InitializeUmbrella()
+	if err := root.Validate(); err != nil {
+		return nil, &TransformError{Message: "failed to validate application bundle", Cause: err}
+	}
+
+	rootNode := &stack.Node{Name: root.Name, Bundle: root}
+	rootNode.InitializePathMap()
+	return stack.NewCluster(ctx.ClusterID, rootNode), nil
+}
+
+// buildBundle creates the bundle name holding entries' applications and applies
+// the entries' traits to it.
+func (t *Transformer) buildBundle(app *Application, name string, entries []componentEntry, ctx TransformContext) (*stack.Bundle, error) {
 	apps := make([]*stack.Application, 0, len(entries))
 	for _, e := range entries {
 		apps = append(apps, e.app)
 	}
-
-	bundle, err := stack.NewBundle(app.Metadata.Name, apps, nil)
+	bundle, err := stack.NewBundle(name, apps, nil)
 	if err != nil {
-		return nil, &TransformError{Message: "failed to create bundle", Cause: err}
+		return nil, &TransformError{Message: fmt.Sprintf("failed to create bundle %q", name), Cause: err}
 	}
-
 	if err := t.applyTraits(app, entries, bundle, ctx); err != nil {
 		return nil, err
 	}
-
-	node := &stack.Node{Name: "", Bundle: bundle}
-	return stack.NewCluster(ctx.ClusterID, node), nil
-}
-
-// buildHierarchicalCluster creates an umbrella bundle with one tier-child per populated tier.
-func (t *Transformer) buildHierarchicalCluster(app *Application, entries []componentEntry, tierGroups map[Tier][]componentEntry, ctx TransformContext) (*stack.Cluster, error) {
-	tierBundles := make([]*stack.Bundle, 0, len(tierGroups))
-	for _, tier := range TierOrder {
-		group, ok := tierGroups[tier]
-		if !ok {
-			continue
-		}
-
-		apps := make([]*stack.Application, 0, len(group))
-		for _, e := range group {
-			apps = append(apps, e.app)
-		}
-
-		bundleName := fmt.Sprintf("%s-%s", app.Metadata.Name, tier)
-		bundle, err := stack.NewBundle(bundleName, apps, nil)
-		if err != nil {
-			return nil, &TransformError{Message: fmt.Sprintf("failed to create %s bundle", tier), Cause: err}
-		}
-
-		if err := t.applyTraits(app, group, bundle, ctx); err != nil {
-			return nil, err
-		}
-
-		tierBundles = append(tierBundles, bundle)
-	}
-
-	// Deploy the tiers in order: each tier bundle depends on the populated tier
-	// before it, the same edge the dependency-aware path wires per component.
-	for i := 1; i < len(tierBundles); i++ {
-		tierBundles[i].DependsOn = append(tierBundles[i].DependsOn, tierBundles[i-1])
-	}
-
-	// The umbrella carries no delivery field either: how it is delivered is the
-	// consumer's (go-kure/launcher#781).
-	umbrella := &stack.Bundle{
-		Name:     app.Metadata.Name,
-		Children: tierBundles,
-	}
-	umbrella.InitializeUmbrella()
-	if err := umbrella.Validate(); err != nil {
-		return nil, &TransformError{Message: "failed to validate umbrella bundle", Cause: err}
-	}
-
-	rootNode := &stack.Node{Name: umbrella.Name, Bundle: umbrella}
-	rootNode.InitializePathMap()
-	return stack.NewCluster(ctx.ClusterID, rootNode), nil
-}
-
-// buildDependencyAwareCluster creates per-component bundles when explicit dependency
-// policies are present. Each component gets its own Node and Bundle, enabling arbitrary
-// DependsOn relationships.
-func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []componentEntry, deps map[string][]string, ctx TransformContext) (*stack.Cluster, error) {
-	rootNode := &stack.Node{
-		Name:     "",
-		Children: make([]*stack.Node, 0, len(entries)),
-	}
-
-	bundleMap := make(map[string]*stack.Bundle, len(entries))
-	tierBundles := make(map[Tier][]*stack.Bundle)
-
-	for _, entry := range entries {
-		bundleName := fmt.Sprintf("%s-%s", app.Metadata.Name, entry.component.Name)
-		bundle, err := stack.NewBundle(bundleName, []*stack.Application{entry.app}, nil)
-		if err != nil {
-			return nil, &TransformError{Message: fmt.Sprintf("failed to create bundle for component %q", entry.component.Name), Cause: err}
-		}
-
-		if err := t.applyTraits(app, []componentEntry{entry}, bundle, ctx); err != nil {
-			return nil, err
-		}
-
-		bundleMap[entry.component.Name] = bundle
-		tierBundles[entry.tier] = append(tierBundles[entry.tier], bundle)
-
-		childNode := &stack.Node{Name: entry.component.Name, Bundle: bundle}
-		childNode.SetParent(rootNode)
-		rootNode.Children = append(rootNode.Children, childNode)
-	}
-
-	// Wire explicit dependencies from policies.
-	for component, depNames := range deps {
-		bundle := bundleMap[component]
-		for _, depName := range depNames {
-			if depBundle := bundleMap[depName]; depBundle != nil {
-				bundle.DependsOn = append(bundle.DependsOn, depBundle)
-			}
-		}
-	}
-
-	// Wire automatic cross-tier dependencies: each bundle depends on all bundles in the
-	// immediately preceding populated tier.
-	var prevTierBundles []*stack.Bundle
-	for _, tier := range TierOrder {
-		current := tierBundles[tier]
-		if len(prevTierBundles) > 0 {
-			for _, b := range current {
-				for _, ptb := range prevTierBundles {
-					if !slices.Contains(b.DependsOn, ptb) {
-						b.DependsOn = append(b.DependsOn, ptb)
-					}
-				}
-			}
-		}
-		if len(current) > 0 {
-			prevTierBundles = current
-		}
-	}
-
-	if err := detectBundleCycles(entries, bundleMap); err != nil {
-		return nil, &TransformError{Message: "dependency cycle after applying cross-tier edges", Cause: err}
-	}
-
-	rootNode.InitializePathMap()
-	return stack.NewCluster(ctx.ClusterID, rootNode), nil
+	return bundle, nil
 }
 
 // applyTraits applies all traits for the given component entries to the bundle.
@@ -1413,7 +1324,8 @@ func decorateSubApplications(decorations []subAppDecoration) error {
 // deduplicateSourceRefs suppresses duplicate source CRD generation when multiple
 // components share the same source key (URL for HelmRepository, URL+version for
 // OCIRepository); the first component in the given order wins. Callers pass
-// deploymentOrder's result so the owner never waits on another consumer.
+// the order the components are applied in (componentOrder.sequence) so the
+// owner never waits on another consumer.
 func deduplicateSourceRefs(entries []componentEntry) {
 	seen := make(map[string]string) // sourceKey → sourceRefName
 	for _, entry := range entries {
@@ -1431,62 +1343,6 @@ func deduplicateSourceRefs(entries []componentEntry) {
 			seen[key] = dedup.GetSourceRefName()
 		}
 	}
-}
-
-// deploymentOrder returns entries in an order every Flux dependency the cluster
-// builders wire respects: a component follows the components it explicitly
-// depends on and every component of an earlier tier. Ties keep document order,
-// so an application with one tier and no dependencies comes back unchanged. On a
-// dependency cycle it returns document order; the cluster builder reports the
-// cycle.
-func deploymentOrder(entries []componentEntry, deps map[string][]string) []componentEntry {
-	pos := make(map[string]int, len(entries))
-	for i, e := range entries {
-		pos[e.component.Name] = i
-	}
-	rank := make(map[Tier]int, len(TierOrder))
-	for i, tier := range TierOrder {
-		rank[tier] = i
-	}
-
-	// Kahn's algorithm, always taking the earliest placeable entry in document order.
-	pending := make([]int, len(entries)) // predecessors not yet placed
-	successors := make([][]int, len(entries))
-	for i, e := range entries {
-		for _, name := range deps[e.component.Name] {
-			if j, ok := pos[name]; ok {
-				successors[j] = append(successors[j], i)
-				pending[i]++
-			}
-		}
-		for j, other := range entries {
-			if rank[other.tier] < rank[e.tier] {
-				successors[j] = append(successors[j], i)
-				pending[i]++
-			}
-		}
-	}
-
-	ordered := make([]componentEntry, 0, len(entries))
-	placed := make([]bool, len(entries))
-	for len(ordered) < len(entries) {
-		next := -1
-		for i := range entries {
-			if !placed[i] && pending[i] == 0 {
-				next = i
-				break
-			}
-		}
-		if next < 0 {
-			return entries
-		}
-		placed[next] = true
-		ordered = append(ordered, entries[next])
-		for _, s := range successors[next] {
-			pending[s]--
-		}
-	}
-	return ordered
 }
 
 // resolveCapability merges capability rendering into trait properties (rendering as
@@ -1703,75 +1559,17 @@ func buildCapabilityKey(trait Trait) string {
 	return trait.Type
 }
 
-// detectBundleCycles builds a name-keyed dependency graph from bundle DependsOn
-// pointers and checks for cycles.
-func detectBundleCycles(entries []componentEntry, bundleMap map[string]*stack.Bundle) error {
-	bundleToName := make(map[*stack.Bundle]string, len(entries))
-	for _, e := range entries {
-		bundleToName[bundleMap[e.component.Name]] = e.component.Name
-	}
-
-	graph := make(map[string][]string)
-	for _, e := range entries {
-		bundle := bundleMap[e.component.Name]
-		for _, dep := range bundle.DependsOn {
-			if depName, ok := bundleToName[dep]; ok {
-				graph[e.component.Name] = append(graph[e.component.Name], depName)
-			}
-		}
-	}
-
-	return detectCycles(graph)
-}
-
-// detectCycles checks for circular dependencies in a string-keyed graph using DFS.
-func detectCycles(deps map[string][]string) error {
-	const (
-		unvisited = 0
-		visiting  = 1
-		visited   = 2
-	)
-
-	state := make(map[string]int)
-
-	var visit func(node string, path []string) error
-	visit = func(node string, path []string) error {
-		if state[node] == visited {
-			return nil
-		}
-		if state[node] == visiting {
-			return fmt.Errorf("circular dependency: %v -> %s", path, node)
-		}
-		state[node] = visiting
-		path = append(path, node)
-		for _, dep := range deps[node] {
-			if err := visit(dep, path); err != nil {
-				return err
-			}
-		}
-		state[node] = visited
-		return nil
-	}
-
-	for node := range deps {
-		if state[node] == unvisited {
-			if err := visit(node, nil); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// postProcessFluxNamespace walks all leaf bundle applications and calls
+// postProcessFluxNamespace walks every bundle's own applications and calls
 // SetFluxNamespace on any config that satisfies fluxNamespaceSettable, then
 // moves the trait sub-applications those Flux objects read from their own
-// namespace (moveFluxNamespaceInputs).
+// namespace (moveFluxNamespaceInputs). It walks every bundle, not only the
+// leaves: an ordered application's own bundle holds its generated sources,
+// which are Flux objects too.
 func postProcessFluxNamespace(cluster *stack.Cluster, owned []traitSubApps, ns string) {
 	if cluster == nil || ns == "" {
 		return
 	}
-	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+	walkBundles(cluster.Node, func(bundle *stack.Bundle) {
 		for _, app := range bundle.Applications {
 			if setter, ok := app.Config.(fluxNamespaceSettable); ok {
 				setter.SetFluxNamespace(ns)
@@ -1781,7 +1579,34 @@ func postProcessFluxNamespace(cluster *stack.Cluster, owned []traitSubApps, ns s
 	moveFluxNamespaceInputs(owned, ns)
 }
 
-// walkLeafBundles calls fn for every leaf bundle reachable from node.
+// walkBundles calls fn for every bundle reachable from node, a bundle before
+// its children: the order their own applications are applied in.
+func walkBundles(node *stack.Node, fn func(*stack.Bundle)) {
+	if node == nil {
+		return
+	}
+	if node.Bundle != nil {
+		walkBundle(node.Bundle, fn)
+	}
+	for _, child := range node.Children {
+		walkBundles(child, fn)
+	}
+}
+
+func walkBundle(bundle *stack.Bundle, fn func(*stack.Bundle)) {
+	if bundle == nil {
+		return
+	}
+	fn(bundle)
+	for _, child := range bundle.Children {
+		walkBundle(child, fn)
+	}
+}
+
+// walkLeafBundles calls fn for every leaf bundle reachable from node. It skips
+// the own applications of a bundle that has children: the NetworkPolicy
+// synthesis that uses it reads workloads, and an ordered application's own
+// bundle holds only its generated sources (buildCluster).
 func walkLeafBundles(node *stack.Node, fn func(*stack.Bundle)) {
 	if node == nil {
 		return

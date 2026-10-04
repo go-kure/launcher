@@ -31,7 +31,7 @@ import (
 type webPairRule struct {
 	paused   bool
 	workload string
-	// serviceTier, when set, classifies the service member into that tier by annotation.
+	// serviceTier, when set, annotates the service member into that tier.
 	serviceTier string
 }
 
@@ -104,8 +104,8 @@ func webPairTransformer(rule webPairRule) *oam.Transformer {
 }
 
 // webPairApp authors one web-pair "web" depending on a plain deployment "db", so
-// the cluster is built per component (buildDependencyAwareCluster): one bundle,
-// node and Flux Kustomization per component name.
+// the application is ordered: db's group, then web's, each one bundle and one
+// Flux Kustomization.
 func webPairApp() *oam.Application {
 	return &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
@@ -138,7 +138,7 @@ func leafBundles(n *stack.Node) []*stack.Bundle {
 }
 
 // bundleTree returns b and its nested child bundles that hold applications;
-// a hierarchical cluster nests its tier bundles under an umbrella bundle.
+// an ordered application nests its groups under the application bundle.
 func bundleTree(b *stack.Bundle) []*stack.Bundle {
 	if b == nil {
 		return nil
@@ -238,7 +238,7 @@ func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 // TestSiblingGroup_DeploysAsOneUnit proves the group is one component to every
 // name-keyed step: one application generating the Deployment, the Service, then
 // the Deployment's other objects,
-// one bundle with a dependsOn on db, one layout
+// one bundle with a dependsOn on db's, one layout
 // directory holding both objects, and one Flux Kustomization.
 func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	cluster, _, err := webPairTransformer(webPairRule{}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
@@ -284,8 +284,9 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	if len(bundle.HealthChecks) != 0 {
 		t.Errorf("health checks = %v, want none: launcher sets no delivery field", bundle.HealthChecks)
 	}
-	if len(bundle.DependsOn) != 1 || !strings.HasSuffix(bundle.DependsOn[0].Name, "-db") {
-		t.Errorf("web bundle dependsOn = %d bundles, want exactly db's", len(bundle.DependsOn))
+	_, dbBundle := groupApp(t, cluster, "db")
+	if len(bundle.Applications) != 1 || !slices.Equal(bundle.DependsOn, []*stack.Bundle{dbBundle}) {
+		t.Errorf("web's bundle holds %d applications and depends on %d bundles, want web alone, after db's bundle", len(bundle.Applications), len(bundle.DependsOn))
 	}
 
 	ml, err := layout.WalkCluster(cluster, layout.DefaultLayoutRules())
@@ -319,7 +320,7 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	}
 	var web []string
 	for _, o := range flux {
-		if k, ok := o.(*kustv1.Kustomization); ok && strings.Contains(k.Name, "web") {
+		if k, ok := o.(*kustv1.Kustomization); ok && k.Name == bundle.Name {
 			web = append(web, k.Name)
 		}
 	}
@@ -367,9 +368,9 @@ func TestSiblingGroup_RoutingTraitOnTheServiceMember(t *testing.T) {
 	}
 }
 
-// TestSiblingGroup_PlacementSettlesMixedTiers: members classified into different
-// tiers are refused, unless a placement policy places the group, which overrides
-// classification and gives the group its one tier.
+// TestSiblingGroup_PlacementSettlesMixedTiers: members annotated into different
+// tiers are refused, unless a placement policy places the group, which replaces
+// the annotations and gives the group its one tier.
 func TestSiblingGroup_PlacementSettlesMixedTiers(t *testing.T) {
 	rule := webPairRule{serviceTier: "infra"}
 
@@ -383,6 +384,9 @@ func TestSiblingGroup_PlacementSettlesMixedTiers(t *testing.T) {
 	doc.Spec.Policies = []oam.ApplicationPolicy{{
 		Name: "web-in-infra", Type: "placement",
 		Properties: map[string]any{"component": "web", "tier": "infra"},
+	}, {
+		Name: "db-in-apps", Type: "placement",
+		Properties: map[string]any{"component": "db", "tier": "apps"},
 	}}
 	cluster, _, err := webPairTransformer(rule).TransformWithPolicy(doc, oam.TransformContext{})
 	if err != nil {
@@ -390,8 +394,8 @@ func TestSiblingGroup_PlacementSettlesMixedTiers(t *testing.T) {
 	}
 	_, web := groupApp(t, cluster, "web")
 	_, db := groupApp(t, cluster, "db")
-	if !strings.Contains(web.Name, "infra") || strings.Contains(db.Name, "infra") {
-		t.Errorf("bundles: web in %q, db in %q; want web alone in the infra tier", web.Name, db.Name)
+	if web.Name != "shop-infra" || db.Name != "shop-apps" {
+		t.Errorf("bundles: web in %q, db in %q; want web alone in the infra tier's group, db in the apps tier's", web.Name, db.Name)
 	}
 }
 

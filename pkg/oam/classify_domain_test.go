@@ -80,8 +80,8 @@ func TestClassifyComponentWithDomain_CustomDomain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if tierDefault != TierApps { // unknown type falls back to apps; example.com/tier ignored
-		t.Errorf("default-domain classify read the custom-domain annotation: got %q, want apps", tierDefault)
+	if tierDefault != "" { // no annotation under the default domain: no tier; example.com/tier ignored
+		t.Errorf("default-domain classify read the custom-domain annotation: got %q, want none", tierDefault)
 	}
 }
 

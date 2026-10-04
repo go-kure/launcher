@@ -204,8 +204,8 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 		return nil
 	}
 	// Synthesis is entirely CLUSTER-wide (not per-bundle): components of one Application share a
-	// namespace but are split across leaf bundles (dependency-aware: one per component; hierarchical:
-	// one per tier). Resolving a backendRef to its sibling component, and merging a router's injected
+	// namespace but, once anything orders them, are split across leaf bundles (one per ordered
+	// group). Resolving a backendRef to its sibling component, and merging a router's injected
 	// allow onto that component's own bundle, therefore requires cluster-wide lookups (go-kure/launcher#242) — the
 	// same model go-kure/launcher#239 uses for external backends.
 	reg := newNPSynthesisRegistry()

@@ -45,7 +45,9 @@ func (r *PolicyResult) HasDependencies() bool {
 	return len(r.Dependencies) > 0
 }
 
-// Tier classifies a component's deployment ordering.
+// Tier is a deployment tier an author places a component in (a placement
+// policy, or the tier annotation). Tiers deploy in TierOrder; a component
+// nothing places has the empty Tier and is ordered after no tier.
 type Tier string
 
 const (

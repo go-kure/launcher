@@ -31,15 +31,48 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
-The transform groups components into bundles in one of three shapes: one bundle for a
-single-tier application; one bundle per tier under an umbrella, each depending on the
-populated tier before it (`infra`, `services`, `apps`); or, once any `dependency` policy
-rule exists, one bundle per component, wired with the rules plus edges to the preceding
-tier's bundles. A Flux source shared by several components (`SourceDeduplicatable`) is
-emitted once, by the sharing component that comes first in that deployment order (tier,
-then dependencies, then document order), so its owner never waits on another consumer.
+The transform orders components only where the document declares an order
+(go-kure/launcher#783). No component type comes before another by itself. Three
+declarations order components:
 
-The tier umbrella bundle is named after the Application.
+- **A tier.** A `placement` policy, or the `<domain>/tier` annotation it replaces, puts a
+  component in `infra`, `services` or `apps`. Every component of a populated tier comes
+  after every component of the populated tier before it. A component nothing places is in
+  no tier and takes no part in that order, so one populated tier alone orders nothing.
+- **A `dependency` policy rule.**
+- **A lowering rule's order between the components it emits** (`Component.OrderAfter`).
+  The `helm` rule orders its release after the source it generates.
+
+An application is always one bundle, named after the Application. With nothing declared
+it is flat: the one bundle holds every component. Otherwise the components are split into
+ordered groups, the topological levels of the declared order: the first group holds every
+component that comes after no other, each further group the components whose predecessors
+are all in earlier groups. Each group is a child bundle of the application bundle and
+depends on the group before it. A group that is exactly the components of one tier is
+named `<application>-<tier>`; any other is `<application>-<NN>`, its two-digit position
+counted from `00`. Declarations that cannot all hold (a dependency against the tier order,
+a cycle) fail the transform, naming each step and where it was declared:
+
+```text
+components cannot be ordered: "web" is after "db" (placement: tier apps is after tier infra), "db" is after "web" (dependency policy)
+```
+
+A Flux source (`helmrepository`, `ocirepository`, `gitrepository`, `bucket`) that a
+lowering rule generates and orders a component after is in no group. It is one of the
+application bundle's own applications, beside the child groups, so a source several
+components share belongs to the application and exists once. It cannot be placed in a tier
+or made to wait on a component: the transform refuses both. A source the author wrote, or
+one a rule emits without ordering anything after it, is a component like any other.
+
+**Contract on the consumer: a bundle's own applications are applied before its child
+bundles.** Launcher expresses "sources before groups" only through that shape and cannot
+enforce it. kure's layout walker writes a bundle's applications, then its children. A
+caller that walks the tree itself must visit the own applications of a bundle that has
+children; `GenerateApplications` does.
+
+A Flux source shared by several components through `SourceDeduplicatable` is emitted once,
+by the sharing component that comes first in that order (group, then document order), so
+its owner never waits on another consumer.
 
 Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
 `Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
@@ -85,8 +118,8 @@ each a **separate** additive resource (the authored `networkpolicy` /
   the allow is **retargeted onto that backend component's pods** + the backendRef port — resolved
   by matching the backend Service name to a sibling OAM component **cluster-wide**, and the
   retargeted policy is emitted in the **backend component's own leaf bundle**. Resolution spans
-  bundles: components of one Application share a namespace but are split across leaf bundles
-  (dependency-aware = one per component, hierarchical = one per tier), so a router in one bundle
+  bundles: components of one Application share a namespace but, once anything orders them, are
+  split across leaf bundles (one per ordered group), so a router in one bundle
   correctly retargets onto a backend in another. Two components resolving to the **same** Service
   name is ambiguous and **fails the transform**. A backendRef
   that resolves to no component (a **bare external Service**) is left authored **unless**
@@ -209,7 +242,7 @@ the whole `name+suffix` is then shortened by the rule.
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
 | 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout, the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name. |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout, the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
@@ -221,8 +254,8 @@ a site that shortens and validates). The full DNS-1123 check then runs on the sh
 which is the name emitted. A role component's PVC claim name is checked the same way.
 
 A name an author writes, or an override of a generated name, is never shortened: it is used as
-written, and the validation of its own property decides whether it is accepted. Bundle names
-(`<application>-<tier>`, `<application>-<component>`) do not go through the rule yet.
+written, and the validation of its own property decides whether it is accepted. The
+application bundle carries the Application's name as written.
 
 ## Parsing
 
@@ -268,30 +301,13 @@ registry has the same shape and the same failure mode: `traitComponentRestrictio
 (which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
 `worker` and `deployment`, the kinds that report a non-RWX claim to it).
 
-**Default tiers.** `defaultTierMap` places `helmrelease` (go-kure/launcher#327),
-`helmtemplate` (go-kure/launcher#348), `oci`, the kind-named Flux source components
-`helmrepository`, `ocirepository`, `gitrepository` and `bucket` (go-kure/launcher#347) and
-`helmchart` (go-kure/launcher#351) at `TierApps`, and `cnpg-cluster`, `cnpg-pooler`,
-`cnpg-database` and `cnpg-objectstore` (go-kure/launcher#573) in the `services` tier with
-`postgresql`. `serviceaccount`, `persistentvolumeclaim` and `configmap`
-(go-kure/launcher#702), like `deployment` and `service`, are not in `defaultTierMap` and
-fall back to `TierApps`. The helm rule never emits a HelmChart, so a `helmchart` is always
-authored and keeps `defaultTierMap`'s tier.
-
-The exception is a `helmrepository`, `ocirepository`, `gitrepository` or `bucket` that a
-lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` places it in
-`TierInfra`, after
-any tier annotation and before `defaultTierMap`. The `helm` rule (go-kure/launcher#349)
-emits such a source for the releases that read it. Those releases keep their own tier, and
-a tier annotation or a `placement` policy may move them into `infra`. A source in a later
-tier than its consumer would be applied only after it, because each tier's bundles depend on
-those of the tier before it, the consumer's included. In the earliest tier, the source never
-follows a consumer, and a consumer that shares its tier is retried by helm-controller until
-the source is ready. A `placement` policy naming the generated source may only keep it in
-`infra`, and a `dependency` rule may not make it wait on any component (with its consumer
-placed in `infra` beside it, no cycle would report the deadlock); `TransformWithPolicy`
-refuses both. An authored source keeps
-`defaultTierMap`'s tier.
+**Tiers are declared, never derived from a type** (go-kure/launcher#783).
+`ClassifyComponentWithDomain` returns the tier the component's `<domain>/tier` annotation
+names, or the empty tier when it carries none; a `placement` policy replaces it. A
+component in no tier is ordered after no tier (see "Pipeline"). A component a lowering
+rule emits is read the same way, with one exception: a Flux source the rule orders a
+component after is applied with the application bundle, so a tier on it, from an
+annotation or a `placement` policy, is refused.
 
 ## Transform & extension
 
@@ -455,7 +471,7 @@ and recreates it instead of failing the apply, which can lose a claim's data. Pa
 `Transformer.WarnForcedVolumes`. It emits one warning through the warning handler
 (`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
 `kustomize.toolkit.fluxcd.io/force: enabled` (the `force-replace` trait sets it) or whose
-application is `GeneratedApplication.Forced` (its leaf bundle sets `Force`; launcher never
+application is `GeneratedApplication.Forced` (its bundle sets `Force`; launcher never
 does, so only a bundle whose `Force` the caller set before generating,
 go-kure/launcher#781). The warning names the kind,
 `namespace/name`, the producer and every reason the object is forced, in generation order:
@@ -568,8 +584,8 @@ later keeps that slot). Trait sub-applications are therefore ordered as for one
 component carrying the same traits.
 
 The build refuses a group:
-- whose members fall in different tiers, unless a placement policy places the
-  group (it then deploys in the placed tier);
+- whose members' tier annotations disagree (one of them carrying none included),
+  unless a placement policy places the group (it is then in the placed tier);
 - in which two members answer the same contract (a member that runs pods
   answers `ServiceAccountName` even with no name, since its pods run as the
   namespace's `default` account);
@@ -710,6 +726,22 @@ cannot tell one was dropped. The built-in user is the `postgresql` rule, which
 attaches a step to the `cnpg-cluster` it emits to set the values postgresql derives
 after the policy (`CnpgClusterConfig.ApplyPostgresqlDefaults`; go-kure/launcher#281,
 go-kure/launcher#729).
+
+**Order between a rule's own components.** A rule that emits components of which one
+must be applied before another declares it on the later one:
+`Component.OrderAfter(names...)` (go-kure/launcher#783). Each name is a component of the
+document once lowering has settled, usually one the same rule emits or adopts
+(`NameAllocator.NameOrAdopt`); an unknown name, or the component's own, fails the
+transform, naming the component and the rule's order. Like a post-policy step it is
+part of the component value, survives copies, is not serialized, and cannot be
+authored: an author orders components with a `dependency` policy. It survives further
+lowering too: when a component rule lowers a component that carries an order, the
+engine gives that order to every component the rule emits for it, whatever the rule
+built them from, so everything the component becomes waits as it did. A source
+generated for such a component is then ordered after something and sits in a group,
+not among the application bundle's own applications. It is one of the three ordering
+declarations described under "Pipeline". The built-in user is the `helm` rule, which
+orders the release after the source it generates or adopts.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the

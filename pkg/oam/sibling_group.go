@@ -104,11 +104,11 @@ func collapseSiblingGroups(entries []componentEntry, namespace string) ([]compon
 	return out, nil
 }
 
-// checkSiblingTiers refuses a sibling group whose members were classified into
-// different tiers, unless a placement policy places the group's name: placement
-// overrides classification, so it gives the group its one tier (the override
-// loop in Transform has already set it). A group deploys as one unit and needs
-// one tier.
+// checkSiblingTiers refuses a sibling group whose members' annotations disagree
+// on the tier (one of them in no tier included), unless a placement policy
+// places the group's name: placement replaces the annotations, so it gives the
+// group its one tier (the override loop in Transform has already set it). A
+// group deploys as one unit and needs one tier.
 func checkSiblingTiers(entries []componentEntry, overrides map[string]Tier) error {
 	for _, e := range entries {
 		if len(e.members) == 0 {
@@ -121,12 +121,21 @@ func checkSiblingTiers(entries []componentEntry, overrides map[string]Tier) erro
 		for _, m := range e.members[1:] {
 			if m.tier != first.tier {
 				return &TransformError{Message: fmt.Sprintf(
-					"sibling group %q: member %q is in tier %q but member %q is in tier %q; a group deploys as one unit and needs one tier — place the group with a placement policy",
-					e.component.Name, first.component.Type, first.tier, m.component.Type, m.tier)}
+					"sibling group %q: member %q is %s but member %q is %s; a group deploys as one unit and needs one tier — place the group with a placement policy",
+					e.component.Name, first.component.Type, tierPhrase(first.tier), m.component.Type, tierPhrase(m.tier))}
 			}
 		}
 	}
 	return nil
+}
+
+// tierPhrase reads "in tier "infra"", or "in no tier" for a component nothing
+// placed.
+func tierPhrase(tier Tier) string {
+	if tier == "" {
+		return "in no tier"
+	}
+	return fmt.Sprintf("in tier %q", tier)
 }
 
 // traitStep is traits applyEntryTraits applies, in order, on one entry's

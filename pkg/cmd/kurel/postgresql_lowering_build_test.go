@@ -73,9 +73,8 @@ const postgresqlPlacementPolicy = `    - name: where
 // TestBuild_PostgresqlPlacementReachesEveryMember: a placement of the
 // postgresql component placed all of its objects; the rule repeats it for each
 // member. Without a dependency policy the objects stay in one bundle, as they
-// were; with one, the members' bundles are in the Cluster's tier, so the tier
-// order adds no edge back to them (it made a cycle, which the transform
-// refuses).
+// were; with one, the members are in the Cluster's tier, so the tier order adds
+// no edge back to them (it made a cycle, which the transform refuses).
 func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
 	const traits = "        - type: prune-protection\n"
 	t.Run("without a dependency policy", func(t *testing.T) {
@@ -85,13 +84,37 @@ func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
 		}
 	})
 	t.Run("with a dependency policy", func(t *testing.T) {
-		bundles := postgresqlBundles(t, postgresqlMembersApp(traits, postgresqlOrderPolicy+postgresqlPlacementPolicy))
-		for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
-			if bundles[name] == nil {
-				t.Errorf("no bundle %s (have %v)", name, slices.Sorted(maps.Keys(bundles)))
-			}
+		cluster, _, err := transformWithBuiltins(t, postgresqlMembersApp(traits, postgresqlOrderPolicy+postgresqlPlacementPolicy))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		want := []string{"shop-00: db", "shop-01: db-pooler db-orders", "shop-02: api"}
+		if got := groupNames(t, cluster); !slices.Equal(got, want) {
+			t.Errorf("groups = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestBuild_PostgresqlAndWebserviceUnorderedIsOneBundle: no component type
+// orders a component (go-kure/launcher#783). A postgresql beside a webservice,
+// with no policy, is one flat bundle; the database came first only by its type
+// before.
+func TestBuild_PostgresqlAndWebserviceUnorderedIsOneBundle(t *testing.T) {
+	cluster, _, err := transformWithBuiltins(t, postgresqlMembersApp("", ""))
+	if err != nil {
+		t.Fatalf("transforming: %v", err)
+	}
+	root := cluster.Node.Bundle
+	if root == nil || root.Name != "shop" || len(root.Children) != 0 || len(cluster.Node.Children) != 0 {
+		t.Fatalf("root bundle = %v, want the one flat bundle shop", root)
+	}
+	var apps []string
+	for _, a := range root.Applications {
+		apps = append(apps, a.Name)
+	}
+	if want := []string{"db", "db-pooler", "db-orders", "api"}; !slices.Equal(apps, want) {
+		t.Errorf("applications = %v, want %v in document order", apps, want)
+	}
 }
 
 // TestBuild_PostgresqlPlacementOfALongMemberName: the placement copies are
@@ -119,9 +142,8 @@ spec:
 }
 
 // TestBuild_PostgresqlDependentWaitsForEveryMember: a component made to wait
-// for the postgresql component waited for the one bundle of all its objects;
-// it now waits for each member's bundle too, also when it shares the tier, so
-// no tier order adds those edges.
+// for the postgresql component waits for every member, so its group comes after
+// the members' group, which comes after the Cluster's.
 func TestBuild_PostgresqlDependentWaitsForEveryMember(t *testing.T) {
 	policies := postgresqlOrderPolicy + `    - name: where
       type: placement
@@ -129,18 +151,13 @@ func TestBuild_PostgresqlDependentWaitsForEveryMember(t *testing.T) {
         component: api
         tier: services
 `
-	bundles := postgresqlBundles(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
-	api := bundles["shop-api"]
-	if api == nil {
-		t.Fatalf("no bundle shop-api (have %v)", slices.Sorted(maps.Keys(bundles)))
+	cluster, _, err := transformWithBuiltins(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
+	if err != nil {
+		t.Fatalf("transforming: %v", err)
 	}
-	var names []string
-	for _, dep := range api.DependsOn {
-		names = append(names, dep.Name)
-	}
-	got := strings.Join(names, ",")
-	if want := "shop-db,shop-db-pooler,shop-db-orders"; got != want {
-		t.Errorf("shop-api dependsOn = %s, want %s", got, want)
+	want := []string{"shop-00: db", "shop-01: db-pooler db-orders", "shop-services: api"}
+	if got := groupNames(t, cluster); !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
 	}
 }
 
