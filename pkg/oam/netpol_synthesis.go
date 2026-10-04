@@ -82,7 +82,12 @@ func componentServiceName(app *stack.Application) (string, bool) {
 // networkpolicy trait.
 type componentAllowPolicyConfig struct {
 	ComponentName string
-	Rules         []trafficRule // one per collector with non-empty ports; deduplicated
+	// Owner is the authored component the entry came from, whose label value
+	// the entry's objects carry and this policy selects (selectedComponent).
+	// It differs from ComponentName for an entry a lowering rule emitted under
+	// another name. Empty => ComponentName, for a directly-built config.
+	Owner string
+	Rules []trafficRule // one per collector with non-empty ports; deduplicated
 	// PodSelectorKey is the label key selecting the component's own pods (the ingress
 	// recipients). Empty => the library default key (ComponentLabelKeyForDomain(DefaultDomain)).
 	// The transform path always passes the resolved, domain-aware key; the default here only
@@ -99,6 +104,18 @@ func (c *componentAllowPolicyConfig) podSelectorKey() string {
 	return c.PodSelectorKey
 }
 
+// selectedComponent returns the component whose label value a synthesized
+// policy selects: the authored component owner, the one the label pass stamps on
+// what the entry generates (markComponentOwnership), else the entry's own name.
+// A rule that emits several pod-running entries from one component gets
+// policies that each select the pods of all of them, as a sibling group's does.
+func selectedComponent(owner, name string) string {
+	if owner != "" {
+		return owner
+	}
+	return name
+}
+
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy
 // fields. Synthesis runs after the trait Enforceable.ApplyPolicy pass, so these
 // configs are intentionally never policy-checked (matching the downstream runtime).
@@ -109,9 +126,10 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	np.Labels = nil
 	np.Annotations = nil
 	// The value is the component's label value, not its raw name: a name over 63
-	// characters is not a valid label value (go-kure/launcher#572).
+	// characters is not a valid label value (go-kure/launcher#572). It is the
+	// authored component's, the value the label pass stamps (go-kure/launcher#788).
 	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(c.ComponentName)},
+		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(selectedComponent(c.Owner, c.ComponentName))},
 	}
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
@@ -264,7 +282,7 @@ func (r *npSynthesisRegistry) buildLookups(cluster *stack.Cluster, componentMap 
 	svcOwner := map[string]string{} // svc name → first component that claimed it
 	for _, name := range names {
 		entry := componentMap[name]
-		r.componentPlacement[name] = componentPlacement{bundle: appToBundle[entry.app], namespace: entry.app.Namespace}
+		r.componentPlacement[name] = componentPlacement{bundle: appToBundle[entry.app], namespace: entry.app.Namespace, owner: authoredComponent(entry.component)}
 		// Test the returned VALUE, not the interface's presence: every trait decorator forwards
 		// ServiceRoutingTarget unconditionally and answers a nil selector when the config it wraps
 		// is not a routing targeter — that component keeps its component-label policy.
@@ -304,7 +322,8 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 			continue
 		}
 		policyName := ingressTrafficPolicyName(compName)
-		var cfg stack.ApplicationConfig = &componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey}
+		owner := r.componentPlacement[compName].owner
+		var cfg stack.ApplicationConfig = &componentAllowPolicyConfig{ComponentName: compName, Owner: owner, Rules: rules, PodSelectorKey: labelKey}
 		if rt, ok := r.routingTargets[compName]; ok {
 			sel, retargeted, err := retargetTrafficRules(compName, rt, rules)
 			if err != nil {
@@ -316,7 +335,7 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 			if g, ok := rt.(*siblingGroupConfig); ok && g.routesToOwnPods() {
 				// The routed traffic lands on the group's own pods on the same port numbers: keep
 				// the component label as one component deploying them all does (go-kure/launcher#280).
-				cfg = &componentAllowPolicyConfig{ComponentName: compName, Rules: retargeted, PodSelectorKey: labelKey}
+				cfg = &componentAllowPolicyConfig{ComponentName: compName, Owner: owner, Rules: retargeted, PodSelectorKey: labelKey}
 			} else {
 				cfg = &backendIngressAllowPolicyConfig{ComponentName: compName, PolicyName: policyName, PodSelector: sel, Rules: retargeted}
 			}
@@ -375,6 +394,8 @@ type pendingSynthApp struct {
 type componentPlacement struct {
 	bundle    *stack.Bundle
 	namespace string
+	// owner is the authored component the entry came from (authoredComponent).
+	owner string
 }
 
 // componentInboundEntry accumulates one component's inbound-policy inputs CLUSTER-wide: its own
@@ -671,7 +692,10 @@ func trafficRuleKey(sources []netpol.TrafficSource, ports []intstr.IntOrString) 
 // is purely additive.
 type componentEgressPolicyConfig struct {
 	ComponentName string
-	Peers         []netpol.EgressPeer
+	// Owner is the authored component the entry came from, as on the inbound
+	// side (componentAllowPolicyConfig.Owner). Empty => ComponentName.
+	Owner string
+	Peers []netpol.EgressPeer
 	// PodSelectorKey is the label key selecting the component's own pods (the egress
 	// source pods this policy allows out). Empty => the library default key
 	// (ComponentLabelKeyForDomain(DefaultDomain)); the transform path always passes the
@@ -697,9 +721,10 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	np := kubernetes.CreateNetworkPolicy(egressTrafficPolicyName(c.ComponentName), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	// The component's label value, as on the inbound side (go-kure/launcher#572).
+	// The authored component's label value, as on the inbound side
+	// (go-kure/launcher#572, go-kure/launcher#788).
 	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(c.ComponentName)},
+		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(selectedComponent(c.Owner, c.ComponentName))},
 	}
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
 
@@ -799,7 +824,7 @@ func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[st
 			autoApps = append(autoApps, stack.NewApplication(
 				egressTrafficPolicyName(app.Name),
 				app.Namespace,
-				&componentEgressPolicyConfig{ComponentName: app.Name, Peers: peers, PodSelectorKey: labelKey},
+				&componentEgressPolicyConfig{ComponentName: app.Name, Owner: authoredComponent(entry.component), Peers: peers, PodSelectorKey: labelKey},
 			))
 		}
 		bundle.Applications = append(bundle.Applications, autoApps...)

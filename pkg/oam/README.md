@@ -180,8 +180,8 @@ with no caller labelling anything. A caller that sets `ComponentLabelKey` to a k
 objects already carry (e.g. `"app"`) keeps the values they carry: the label is added only
 where the key is absent.
 
-The selector **value** is `ComponentLabelValue(name)`, not the raw component name, and the
-label launcher adds has the same value. A component name is a DNS-1123
+The selector **value** is `ComponentLabelValue(name)` of the authored component, not the raw
+component name, and the label launcher adds has the same value. A component name is a DNS-1123
 subdomain (up to 253 characters), a label value at most 63: `ComponentLabelValue` returns a
 name of 63 characters or fewer unchanged and projects a longer one onto a readable prefix of at
 most 52 characters (its first 52, with trailing `-`/`.` trimmed) plus `-` and the first 10 hex
@@ -336,6 +336,15 @@ A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
 are labelled like any other: where the key is absent.
 
+**What a synthesized policy selects.** A synthesized inbound or egress policy selects the
+value its entry's objects carry: the authored component's, also for an entry a lowering rule
+emitted under a name of its own. The policy keeps the entry's name. A rule that emits several
+pod-running entries from one component therefore gets policies that each select the pods of
+all of them, as a sibling group's does. No built-in rule emits a pod-running entry under
+another name: `webservice` and `worker` emit theirs under the component's own name, as a
+same-name sibling group, and the `postgresql` pooler and databases run no pods launcher
+generates. The case is reached only through a consumer's own lowering rule.
+
 **What the label does not reach.**
 
 - Pods an operator creates from a custom resource (a CloudNativePG `Cluster`'s instance pods,
@@ -343,14 +352,6 @@ are labelled like any other: where the key is absent.
   goal. The endpoint-ingress policy selects those pods by the operator's own labels for that
   reason.
 - Pods of a kind the post-renderer has no patch for in a Flux-installed chart.
-- A synthesized inbound or egress policy selects `ComponentLabelValue` of the entry it was
-  synthesized for. For an entry a lowering rule emitted under a name of its own (the
-  `postgresql` pooler and databases), that is the entry's name, while the objects carry the
-  authored component's value: such a policy selects a value nothing carries. That is the
-  expected result, not a defect. Those entries run no pods launcher generates, so no selector
-  on the component label could match their pods either way. The built-in rules that emit a
-  pod-running part (`webservice`, `worker`) emit it under the component's own name, as a
-  same-name sibling group, so there the selector matches.
 
 **Breaking library changes** (go-kure/launcher#788):
 

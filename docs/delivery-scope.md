@@ -293,6 +293,8 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
     written, and its pods carry no component label.
   - `GeneratedApplication.Component` is the authored component for the pooler, a database,
     an object store and a component's synthesized NetworkPolicies.
+  - A synthesized inbound or egress NetworkPolicy selects the authored component's value,
+    the one stamped, also for an entry a lowering rule emitted under another name.
   - A shared generated source is owned by the application: it carries no component label
     and reports an empty component. So does the external-backend NetworkPolicy.
   - Not covered: pods an operator creates from a custom resource, and an owner label a
