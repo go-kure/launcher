@@ -2810,12 +2810,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     only `rendering chart with secretValues failed, and without them it renders; the cause is
     withheld because it can repeat a sensitive value`. To debug such a chart, render it
     with placeholder values in `values`. The second render repeats the fetch;
-  - *not covered:* an error about a rendered object. Every check that runs on what the chart
-    rendered names the object it refuses, by kind and name: the policy checks (see **Policy**),
-    which also quote the field they refuse, an image reference for one; the refusal of a field
-    the kind's type does not declare; and the transform's component label, which refuses a
-    label that is not a string. A chart that builds an object's name, or such a field, from a
-    sensitive value has it quoted in that error;
+  - *not covered:* an error about a rendered object. A check that runs on what the chart
+    rendered, once it has decoded, names the object it refuses by kind and name: the policy
+    checks (see **Policy**), and the transform's component label, which refuses a label that
+    is not a string. A policy check also quotes what it refuses and what locates it inside the
+    object: a container's or a volume's name, an image reference, a resource quantity, a
+    capability. A chart that builds an object's name, or any such part of it, from a sensitive
+    value has it quoted in that error. The refusal of a field the kind's type does not
+    declare is not among them: it is a decode failure, withheld as above;
   - *not covered:* one Helm warning. When the chart has a subchart and `secretValues` gives
     that subchart a `global` entry (`<subchart>.global.…`) whose shape conflicts with the
     parent's `global` at a key, a table on one side and a plain value on the other, Helm

@@ -366,9 +366,10 @@ Explicit values are written into a Secret by `secretValues` under Flux delivery 
 - **Limits:** a Secret in the output is base64, not encrypted: the output is as sensitive
   as the document. The Secret's name carries 40 bits of a digest of the tree. No refusal of
   the property repeats a value, and the cause of a render that fails with `secretValues` is
-  withheld. An error about a rendered object names that object, and a policy violation
-  quotes the field it refuses: a chart that renders a sensitive value into either has it
-  quoted there. One Helm warning can still print a value to the build's log (a subchart
+  withheld. An error about an object the render produced names that object, and a policy
+  violation also quotes what it refuses and what locates it (a container's or a volume's
+  name, an image reference): a chart that renders a sensitive value into any of these has
+  it quoted there. One Helm warning can still print a value to the build's log (a subchart
   `global` conflict; go-kure/launcher#794, item 9). Under template delivery, out-of-band
   secrets go through the chart's own `existingSecret`-style values.
 
