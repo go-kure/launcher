@@ -771,15 +771,14 @@ func hookInList(list json.RawMessage, nesting int) error {
 // exact read sees none where the key differs in case. To the fallback decoder
 // it is the apiVersion only of a document that states none at all.
 //
-// items is read under that exact key, as both of the parser's readers do, and
-// in every statement of it.
+// items is read under that exact key, and in the last statement of it, as both
+// of the parser's readers do: an earlier statement is in no object the parser
+// returns. A last statement that is null states no items, to the parser too;
+// one that is neither null nor an array is the parser's error.
 func flattenedItems(doc json.RawMessage) (items []json.RawMessage, generic, ok bool) {
 	stated := jsonExactMembers(doc, "items")
-	for _, value := range stated {
-		var read []json.RawMessage
-		if json.Unmarshal(value, &read) == nil {
-			items = append(items, read...)
-		}
+	if len(stated) > 0 {
+		_ = json.Unmarshal(stated[len(stated)-1], &items)
 	}
 	apiVersions := jsonStrings(doc, "apiVersion")
 	for _, kind := range jsonStrings(doc, "kind") {

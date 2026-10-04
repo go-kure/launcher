@@ -445,6 +445,47 @@ func TestDecodeChartManifests_HookInAListIsReadAsWritten(t *testing.T) {
 	}
 }
 
+// TestDecodeChartManifests_HookInARepeatedItems: of an items key stated twice
+// both of the parser's readers keep the last statement, so the check reads
+// that one. An item with a hook in the earlier statement is in no object the
+// parser returns: the document builds, to the last statement's items alone. A
+// hook in the last statement is refused.
+func TestDecodeChartManifests_HookInARepeatedItems(t *testing.T) {
+	const (
+		hooked = `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "hooked", "annotations": {"helm.sh/hook": "pre-delete"}}}`
+		plain  = `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "plain"}}`
+	)
+	heads := map[string]string{
+		"v1 List":                      `"apiVersion": "v1", "kind": "List"`,
+		"typed list":                   `"apiVersion": "v1", "kind": "ConfigMapList"`,
+		"list of an unregistered kind": `"apiVersion": "example.com/v1", "kind": "ThingList"`,
+	}
+	for name, head := range heads {
+		t.Run(name, func(t *testing.T) {
+			discarded := `{` + head + `, "items": [` + hooked + `], "items": [` + plain + `]}`
+			objects, err := decodeChartManifests([]byte(discarded))
+			if err != nil {
+				t.Fatalf("a hook in the discarded statement: %v", err)
+			}
+			if names := resourceNames(objects); !slices.Equal(names, []string{"plain"}) {
+				t.Errorf("decoded %v, want [plain]: the last statement's items alone", names)
+			}
+
+			for _, last := range []string{`[]`, `null`} {
+				emptied := `{` + head + `, "items": [` + hooked + `], "items": ` + last + `}`
+				objects, err = decodeChartManifests([]byte(emptied))
+				if err != nil || len(objects) != 0 {
+					t.Errorf("a hook in a statement that %s replaces: %v, %v; want no object and no error", last, resourceNames(objects), err)
+				}
+			}
+
+			kept := `{` + head + `, "items": [` + plain + `], "items": [` + hooked + `]}`
+			_, err = decodeChartManifests([]byte(kept))
+			assertErrorMentions(t, err, "decoding rendered manifests", `item 0 (ConfigMap "hooked") of list`, "carries a helm.sh/hook annotation")
+		})
+	}
+}
+
 // TestDecodeChartManifests_HookInAListUnderAKeyOfAnotherCase: the parser's list
 // detection reads apiVersion and kind under exactly those keys, the decoder it
 // falls back to reads them whatever their case and takes the last, and Helm
