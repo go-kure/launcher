@@ -453,11 +453,11 @@ func htHookGroupChildren(t *testing.T, srvURL, application string, traitTypes ..
 
 // TestHelmTemplate_HookGroupChildNamesIncludeApplication is the acceptance
 // test of go-kure/launcher#792, through the transform and kure's layout walker:
-// two applications that each have a helmtemplate component db get different
-// hook-group child names, and a single application's children differ from the
-// ones a config no transform told its application gets only by the application
-// name that leads them — the same groups, objects and order. A trait that wraps
-// the component's config changes none of it.
+// two differently named applications that each have a helmtemplate component db
+// get different hook-group child names, and a single application's children
+// differ from the ones a config no transform told its application gets only by
+// the application name that leads them — the same groups, objects and order. A
+// trait that wraps the component's config changes none of it.
 func TestHelmTemplate_HookGroupChildNamesIncludeApplication(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
 	objectNames := func(ml *layout.ManifestLayout) []string {

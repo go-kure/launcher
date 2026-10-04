@@ -276,9 +276,10 @@ func (r *chartRender) objects() []*client.Object {
 // A child is named after application and ml (hookGroupChildName). Component
 // names are unique only within one application, while the Kustomization CRs a
 // consumer generates for the children of every application can share one
-// namespace, so the application name is what keeps two applications with a
-// same-named component apart (go-kure/launcher#792). An empty application — a
-// config built directly — leaves the names beginning with ml.Name.
+// namespace, so the application name is what keeps two differently named
+// applications with a same-named component apart (go-kure/launcher#792). An
+// empty application — a config built directly — leaves the names beginning
+// with ml.Name.
 func (r *chartRender) partition(application string, ml *layout.ManifestLayout) {
 	if len(r.hookGroups) <= 1 {
 		return
