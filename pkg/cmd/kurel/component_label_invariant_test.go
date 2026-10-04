@@ -323,6 +323,7 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 		"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}},
 		longHost: true, longLabelled: true},
 	"configmap": {props: map[string]any{"name": "app-config", "data": map[string]any{"K": "v"}}, longHost: true, longLabelled: true},
+	"secret":    {props: map[string]any{"name": "app-creds", "stringData": map[string]any{"K": "v"}}, longHost: true, longLabelled: true},
 	"networkpolicy": {props: map[string]any{"ingress": []any{map[string]any{
 		"from":  []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"role": "frontend"}}}},
 		"ports": []any{map[string]any{"port": 8080, "protocol": "TCP"}}}}},

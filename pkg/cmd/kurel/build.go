@@ -318,6 +318,7 @@ func builtinTraitHandlers() map[string]oam.TraitHandler {
 		"pvc":                  &traits.PVCHandler{},
 		"external-secret":      &traits.ExternalSecretHandler{},
 		"configmap":            &traits.ConfigMapHandler{},
+		"secret":               &traits.SecretHandler{},
 		"networkpolicy":        &traits.NetworkPolicyHandler{},
 		"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
 		"volsync":              &traits.VolSyncHandler{},
