@@ -35,6 +35,11 @@ import (
 // registries (builtinComponentHandlers, builtinTraitHandlers,
 // builtinTraitLoweringRules), so a type registered without a fixture fails too.
 
+// kurelComponentLabel is the component label key of a kurel build: the key the
+// synthesized NetworkPolicies select and, since go-kure/launcher#788, the label
+// launcher puts on every object a component owns and on its pod templates.
+const kurelComponentLabel = kurelDomain + "/component"
+
 // labelInvariantProfile carries every capability a fixture below needs. The
 // expose rendering also injects networkPolicy.trafficSources, so the routing
 // traits exercise the synthesized ingress NetworkPolicy and its component
@@ -472,8 +477,8 @@ func childMap(t *testing.T, m map[string]any, key string) map[string]any {
 
 // networkPolicyPodSelector returns spec.podSelector of the one emitted
 // NetworkPolicy that NetworkPolicy synthesis generated for the component called
-// name (synthesized true) or of the one it did not (synthesized false), as the
-// invariant check identifies them: by resource name. It fails the test unless
+// name (synthesized true) or of the one it did not (synthesized false),
+// identified by resource name. It fails the test unless
 // exactly one such policy is emitted, so a negative case cannot silently break
 // a policy of the other class.
 func networkPolicyPodSelector(t *testing.T, docs []map[string]any, name string, synthesized bool) map[string]any {
@@ -498,9 +503,8 @@ func networkPolicyPodSelector(t *testing.T, docs []map[string]any, name string, 
 // TestComponentLabelInvariant_RejectsBrokenSelectors: the invariant check
 // fails on selector shapes it once let through — a matchExpressions value it
 // never read, an expression it never evaluated, a synthesized component-key
-// selector it skipped before validating or matching it, and an authored
-// NetworkPolicy selector requiring the component key, which it once matched
-// against the stamped pod labels only a synthesized policy may assume — so a
+// selector it skipped before validating or matching it, and a selector
+// requiring the component key over pod templates that do not carry it — so a
 // generated selector carrying any of them cannot pass the guard. Each case
 // breaks one emitted selector of a real render and names the report it must
 // produce.
@@ -589,18 +593,27 @@ func TestComponentLabelInvariant_RejectsBrokenSelectors(t *testing.T) {
 			want: []string{boundary + "-allow-ingress-traffic", "spec.podSelector", "matches no pod template"},
 		},
 		{
-			// An authored policy whose selector names the component key is still
-			// matched against the pods as emitted, which do not carry that key:
-			// only a policy synthesis generated gets the stamped templates.
-			name: "authored networkpolicy selector requires the component key", trait: "networkpolicy", props: netpol.props,
+			// A selector that names the component key is matched against the pods
+			// as emitted: it holds only because launcher put the label on the pod
+			// template (go-kure/launcher#788). Without the label it matches none.
+			name: "component key selector without the pod template label", trait: "networkpolicy", props: netpol.props,
 			mutate: func(t *testing.T, docs []map[string]any) {
 				sel := networkPolicyPodSelector(t, docs, boundary, false)
-				if got := childMap(t, sel, "matchLabels")["app"]; got != oam.ComponentLabelValue(boundary) {
-					t.Fatalf("authored NetworkPolicy spec.podSelector app = %v, want the component's app selector kept", got)
+				sel["matchExpressions"] = []any{map[string]any{"key": kurelComponentLabel, "operator": "Exists"}}
+				stripped := 0
+				for _, doc := range docs {
+					if tl := podTemplateLabels(doc); tl != nil {
+						if _, has := tl[kurelComponentLabel]; has {
+							delete(tl, kurelComponentLabel)
+							stripped++
+						}
+					}
 				}
-				sel["matchExpressions"] = []any{map[string]any{"key": kurelDomain + "/component", "operator": "Exists"}}
+				if stripped == 0 {
+					t.Fatal("no pod template carried the component label")
+				}
 			},
-			want: []string{"NetworkPolicy", "spec.podSelector", "matches no pod template"},
+			want: []string{"NetworkPolicy", "spec.podSelector", "matches no pod template", "carries no " + kurelComponentLabel + " label"},
 		},
 	}
 	for _, tc := range cases {
@@ -762,14 +775,11 @@ type invariantReporter interface {
 //     selector, before anything else — and, when the output carries pod
 //     templates, evaluated whole (matchLabels and matchExpressions), matches a
 //     pod template's labels emitted with it;
-//   - the spec.podSelector of a NetworkPolicy that NetworkPolicy synthesis
-//     generated for this component — identified by its resource name
-//     (synthesizedNetworkPolicyNames), never by what its selector contains — is
-//     evaluated against the pod templates as the platform contract leaves them:
-//     with `<domain>/component` = oam.ComponentLabelValue(name) stamped on
-//     (TransformContext.ComponentLabelKey; kurel itself stamps nothing). Every
-//     other NetworkPolicy, whatever keys it selects on, is evaluated against the
-//     pod templates as emitted.
+//   - every pod template carries `launcher.gokure.dev/component` =
+//     oam.ComponentLabelValue(name): launcher labels what a component owns
+//     (go-kure/launcher#788), so every selector above, a synthesized
+//     NetworkPolicy's component selector included, is evaluated against the pod
+//     templates exactly as emitted.
 //
 // It returns how many `app` labels it saw — label values only, never selector
 // values — and how many pod selectors it matched against a pod template, so a
@@ -777,7 +787,7 @@ type invariantReporter interface {
 func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, name string) invariantCounts {
 	t.Helper()
 	want := oam.ComponentLabelValue(name)
-	const componentKey = kurelDomain + "/component"
+	const componentKey = kurelComponentLabel
 	appLabels, selectorsMatched := 0, 0
 	checkValue := func(where, key string, v any, label bool) {
 		s, ok := v.(string)
@@ -798,19 +808,17 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 		}
 	}
 
-	synthesized := synthesizedNetworkPolicyNames(name)
-	var templates, stamped []labels.Set
+	var templates []labels.Set
 	for _, doc := range docs {
 		kind, _ := doc["kind"].(string)
 		md, _ := doc["metadata"].(map[string]any)
 		where := fmt.Sprintf("%s/%v", kind, md["name"])
 		walkLabelMaps(doc, where, checkValue)
 		if tl := podTemplateLabels(doc); tl != nil {
-			set := labelSet(tl)
-			templates = append(templates, set)
-			withStamp := maps.Clone(set)
-			withStamp[componentKey] = want
-			stamped = append(stamped, withStamp)
+			if _, has := tl[componentKey]; !has {
+				t.Errorf("%s: the pod template carries no %s label", where, componentKey)
+			}
+			templates = append(templates, labelSet(tl))
 		}
 	}
 
@@ -831,13 +839,9 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 			if len(templates) == 0 {
 				continue // no pods in this output (e.g. a Service fronting another component)
 			}
-			candidates := templates
-			if objName, _ := md["name"].(string); kind == "NetworkPolicy" && slices.Contains(synthesized, objName) {
-				candidates = stamped
-			}
 			selectorsMatched++
-			if !slices.ContainsFunc(candidates, func(tl labels.Set) bool { return sel.Matches(tl) }) {
-				t.Errorf("%s: %s %q matches no pod template emitted with it (templates: %v)", where, ps.path, sel.String(), candidates)
+			if !slices.ContainsFunc(templates, func(tl labels.Set) bool { return sel.Matches(tl) }) {
+				t.Errorf("%s: %s %q matches no pod template emitted with it (templates: %v)", where, ps.path, sel.String(), templates)
 			}
 		}
 	}
@@ -848,9 +852,7 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 // synthesis gives the policies it generates to select the pods of the component
 // called name: the routing-derived ingress allow (retargeted onto the pods a
 // Service selector picks when the component routes through one) and the
-// dependency-derived egress allow (pkg/oam/netpol_synthesis.go). Stamping only
-// adds a label, so a retargeted selector that does not name the component key
-// matches a stamped template exactly when it matches the plain one. Object
+// dependency-derived egress allow (pkg/oam/netpol_synthesis.go). Object
 // names are the raw
 // component name — only label values are projected. The external-backend
 // policy (`{service}-allow-ingress-traffic`) selects another Service's pods, not

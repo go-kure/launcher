@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: vaultwarden
+    launcher.gokure.dev/component: vaultwarden
   name: vaultwarden
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: vaultwarden
+        launcher.gokure.dev/component: vaultwarden
     spec:
       containers:
       - image: vaultwarden/server:1.32.0
@@ -36,6 +38,7 @@ kind: Service
 metadata:
   labels:
     app: vaultwarden
+    launcher.gokure.dev/component: vaultwarden
   name: vaultwarden
   namespace: default
 spec:
@@ -54,6 +57,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: vaultwarden
+    launcher.gokure.dev/component: vaultwarden
   name: vaultwarden
   namespace: default
 ---
@@ -62,6 +66,7 @@ kind: HTTPRoute
 metadata:
   labels:
     app: vaultwarden
+    launcher.gokure.dev/component: vaultwarden
   name: vaultwarden-httproute
   namespace: default
 spec:

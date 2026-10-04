@@ -1,6 +1,8 @@
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres-backups
   name: postgres-backups
   namespace: default
 spec:

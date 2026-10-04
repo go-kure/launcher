@@ -164,9 +164,13 @@ func appendIngressTrafficRules(np *networkingv1.NetworkPolicy, rules []trafficRu
 // family (and unlike endpoint-ingress), it permits namespace-wide sources, since routing
 // trafficSources are typically namespace-scoped.
 type backendIngressAllowPolicyConfig struct {
-	PolicyName  string
-	PodSelector *metav1.LabelSelector // authored backend selector (matchLabels-only)
-	Rules       []trafficRule
+	// ComponentName is the component the policy was synthesized for: a `service`
+	// component whose routed traffic lands on its selector's pods. Empty for an
+	// external backend, which belongs to no component (markComponentOwnership).
+	ComponentName string
+	PolicyName    string
+	PodSelector   *metav1.LabelSelector // authored backend selector (matchLabels-only)
+	Rules         []trafficRule
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields.
@@ -314,7 +318,7 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 				// the component label as one component deploying them all does (go-kure/launcher#280).
 				cfg = &componentAllowPolicyConfig{ComponentName: compName, Rules: retargeted, PodSelectorKey: labelKey}
 			} else {
-				cfg = &backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: sel, Rules: retargeted}
+				cfg = &backendIngressAllowPolicyConfig{ComponentName: compName, PolicyName: policyName, PodSelector: sel, Rules: retargeted}
 			}
 		}
 		// Key by namespace/name (not bare name) to preserve the go-kure/launcher#239 external-vs-component collision

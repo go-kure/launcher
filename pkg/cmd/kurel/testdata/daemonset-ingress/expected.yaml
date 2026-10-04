@@ -3,6 +3,7 @@ kind: DaemonSet
 metadata:
   labels:
     app: agent
+    launcher.gokure.dev/component: agent
   name: agent
   namespace: default
 spec:
@@ -13,6 +14,7 @@ spec:
     metadata:
       labels:
         app: agent
+        launcher.gokure.dev/component: agent
     spec:
       automountServiceAccountToken: false
       containers:
@@ -35,6 +37,7 @@ kind: Service
 metadata:
   labels:
     app: agent-http
+    launcher.gokure.dev/component: agent-http
   name: agent-http
   namespace: default
 spec:
@@ -52,6 +55,7 @@ kind: Ingress
 metadata:
   labels:
     app: agent-http
+    launcher.gokure.dev/component: agent-http
   name: agent-http-ingress
   namespace: default
 spec:

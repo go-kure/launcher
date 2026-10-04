@@ -3,6 +3,7 @@ kind: CronJob
 metadata:
   labels:
     app: cleanup
+    launcher.gokure.dev/component: cleanup
   name: cleanup
   namespace: default
 spec:
@@ -22,6 +23,7 @@ spec:
         metadata:
           labels:
             app: cleanup
+            launcher.gokure.dev/component: cleanup
         spec:
           automountServiceAccountToken: false
           containers:

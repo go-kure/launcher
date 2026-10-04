@@ -10,6 +10,8 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  labels:
+    launcher.gokure.dev/component: metrics
   name: metrics
   namespace: default
 spec:
@@ -21,4 +23,79 @@ spec:
         name: monitoring-source-3d12addc9a
       version: 69.3.2
   interval: 1h0m0s
+  postRenderers:
+  - kustomize:
+      patches:
+      - patch: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: metrics
+        target:
+          group: apps
+          kind: Deployment
+          version: v1
+      - patch: |
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: metrics
+        target:
+          group: apps
+          kind: StatefulSet
+          version: v1
+      - patch: |
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: metrics
+        target:
+          group: apps
+          kind: DaemonSet
+          version: v1
+      - patch: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: metrics
+        target:
+          group: batch
+          kind: Job
+          version: v1
+      - patch: |
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: component-label
+          spec:
+            jobTemplate:
+              spec:
+                template:
+                  metadata:
+                    labels:
+                      launcher.gokure.dev/component: metrics
+        target:
+          group: batch
+          kind: CronJob
+          version: v1
   targetNamespace: monitoring

@@ -1,6 +1,8 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres-pooler
   name: postgres-pooler
   namespace: default
 spec:

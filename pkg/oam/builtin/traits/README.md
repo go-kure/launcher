@@ -773,7 +773,10 @@ NetworkPolicies target that `<domain>/component` label by default (domain from
 `TransformContext.Domain`, library default `gokure.dev`;
 `TransformContext.ComponentLabelKey`-overridable). The accessor returns the raw name;
 the label and selector value is `oam.ComponentLabelValue` of it, which differs from
-the name only past 63 characters (see Conventions).
+the name only past 63 characters (see Conventions). The transform puts that label on
+every object a trait's sub-application generates, with its component's value
+(go-kure/launcher#788); after `Transform` the sub-application's config is the ownership
+wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapConfig`.
 
 ## Raw Cilium rules are decoded strictly
 

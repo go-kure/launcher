@@ -167,15 +167,15 @@ source pods) via a **derived `<domain>/component`** label by default — the dom
 from `TransformContext.Domain` (empty ⇒ the library default `gokure.dev`; the kurel CLI
 uses `launcher.gokure.dev`). The full key is overridable per transform through
 `TransformContext.ComponentLabelKey` (precedence: `ComponentLabelKey` > `<Domain>/component`
-> `gokure.dev/component`). This is a **platform contract**: `trafficSources` (inbound) and
-`EgressPeers` (egress) are platform inputs, so a caller that injects them must ensure its
-pods carry the derived label — a downstream platform sets its own `Domain` and stamps the
-matching `<domain>/component` on every rendered workload and helm-rendered pod — or set
-`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A caller that injects
-`trafficSources`/`EgressPeers` without either will synthesize a policy that selects nothing.
+> `gokure.dev/component`). Launcher puts that label on every object a component owns and on
+its pod templates itself (go-kure/launcher#788, [Component label and
+ownership](#component-label-and-ownership)), so the selector matches the component's pods
+with no caller labelling anything. A caller that sets `ComponentLabelKey` to a key its
+objects already carry (e.g. `"app"`) keeps the values they carry: the label is added only
+where the key is absent.
 
-The selector **value** is `ComponentLabelValue(name)`, not the raw component name, and a
-platform stamping the label must use the same function. A component name is a DNS-1123
+The selector **value** is `ComponentLabelValue(name)`, not the raw component name, and the
+label launcher adds has the same value. A component name is a DNS-1123
 subdomain (up to 253 characters), a label value at most 63: `ComponentLabelValue` returns a
 name of 63 characters or fewer unchanged and projects a longer one onto a readable prefix of at
 most 52 characters (its first 52, with trailing `-`/`.` trimmed) plus `-` and the first 10 hex
@@ -206,13 +206,15 @@ synthesizes no policy. A sibling group whose `service` member fronts its own sib
 unmapped ports keeps the component label, with the ports still translated and filtered the same
 way (see Same-name sibling groups below).
 
-Every synthesized `NetworkPolicy` carries **no labels and no annotations of its own** —
-only `metadata.name` and `metadata.namespace`, plus the spec. A consumer cannot select
-the synthesized set by label; identify it by the `{comp}-allow-*` name. No attribution
-interface is available either: these configs expose their component as a struct field
-(`ComponentName string`), which is exactly what makes a `ComponentName()` method on the
-same type impossible, and the external-backend policy config carries no component at all —
-so none of them satisfies `ComponentNamed`. Since go-kure/launcher#361 the label absence is a
+A synthesized `NetworkPolicy` is constructed with **no labels and no annotations** —
+only `metadata.name` and `metadata.namespace`, plus the spec. The one label it then gets
+is the component label of the component it was synthesized for, like every object that
+component owns (go-kure/launcher#788); the external-backend policy
+(`{service}-allow-ingress-traffic`) belongs to no component and stays unlabelled. A
+consumer attributes a policy through its application: `GeneratedApplication.Component`,
+or `ComponentName()` on the application's config, names the component, and is empty for
+the external-backend policy ([Component label and ownership](#component-label-and-ownership)).
+Since go-kure/launcher#361 the absence of other labels is a
 property of the object as constructed rather than a scrub: kure's release-1 builder
 contract (`go-kure/kure` ≥ `v0.2.0-beta.11`) makes `CreateNetworkPolicy` return TypeMeta
 and identity only, so `netpol_synthesis.go`'s `np.Labels = nil` / `np.Annotations = nil`
@@ -227,6 +229,87 @@ source, egress peer, backend or endpoint selector it came from. The inputs are r
 trait configuration, reused by every rule and every policy built from them, so a label a
 consumer stamps onto one generated policy would otherwise reach all of them
 (go-kure/launcher#396).
+
+## Component label and ownership
+
+Every application of a transformed document belongs to one authored component, or to the
+document as a whole (go-kure/launcher#788). The transform records that as its last step, and
+two things follow from it: each application reports its owner, and each object it generates
+carries the owner's component label.
+
+| Application | Owner |
+|-------------|-------|
+| A component's own application, or a same-name sibling group | The component. |
+| A component a lowering rule emitted for it, under any name (the `postgresql` pooler `<comp>-pooler`, a database, an object store) | The authored component the rule lowered. |
+| A sub-application a trait added | The trait's component. |
+| A synthesized `NetworkPolicy` (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`) | The authored component of the entry it was synthesized for. |
+| A generated source the application bundle holds (go-kure/launcher#783), which every consumer shares | None: the document as a whole. |
+| The external-backend policy (`{service}-allow-ingress-traffic`) | None. |
+
+**Provenance.** `GeneratedApplication.Component` is the owner, and empty for an application
+the document as a whole owns. After `Transform`, every `stack.Application.Config` is
+launcher's ownership wrapper: `ComponentName()` (`ComponentNamed`) answers the same value on
+it. The wrapper forwards every optional contract launcher reads on a config after the
+transform (`Validate`, the Flux namespace, Service port and routing answers,
+`ServiceAccountNamer`, the single-pod claim, pod template labels, identity target ports, the
+layout contracts), and a test fails when a new one is read and not forwarded. A caller that needs the concrete config, or a contract of
+its own, reads `UnwrapConfig(app.Config)`; the wrapper is a `ConfigWrapper`
+(`WrappedApplicationConfig()`). An application a caller adds to the cluster itself has no
+wrapper and reports its `ComponentNamed` answer, else its name, as before.
+
+**The label.** `<key>: ComponentLabelValue(<owner>)`, with the key the synthesized
+NetworkPolicies select (`TransformContext.ComponentLabelKey`, else `<Domain>/component`),
+goes on:
+
+- every object the application generates, in `metadata.labels`;
+- the pod template of a `Deployment`, `StatefulSet`, `DaemonSet` or `Job`, and the job
+  template's pod template of a `CronJob`, typed or unstructured;
+- the same places in a layout the config augments (`layout.LayoutAugmenter`);
+- nothing an application without an owner generates.
+
+It is added **only where the key is absent**. An authored object or pod template that already
+carries the key (a `manifests` or `passthrough` document, an authored pod label) keeps its
+value, as a bundle's labels never replace an object's own. Launcher therefore does not make
+the label authoritative: a consumer that needs every object of a component to carry exactly
+the component's value enforces that in its own pass over the `GenerateApplications` result,
+by overwriting the key or by refusing a document whose value differs.
+
+**Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
+label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
+a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
+`CronJob`) that sets the label on the pod template. Flux applies it to whatever the chart
+rendered, so here the component's value **replaces** one the chart set. The entry is added
+once, however often the document is transformed or generated. A chart rendered at build time
+(`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
+are labelled like any other: where the key is absent.
+
+**What the label does not reach.**
+
+- Pods an operator creates from a custom resource (a CloudNativePG `Cluster`'s instance pods,
+  a `Pooler`'s pods): the custom resource carries the label, its pods do not. This is not a
+  goal. The endpoint-ingress policy selects those pods by the operator's own labels for that
+  reason.
+- Pods of a kind other than the five above in a Flux-installed chart.
+- A synthesized inbound or egress policy selects `ComponentLabelValue` of the entry it was
+  synthesized for. For an entry a lowering rule emitted under a name of its own (the
+  `postgresql` pooler and databases), that is the entry's name, while the objects carry the
+  authored component's value: such a policy selects a value nothing carries. That is the
+  expected result, not a defect. Those entries run no pods launcher generates, so no selector
+  on the component label could match their pods either way. The built-in rules that emit a
+  pod-running part (`webservice`, `worker`) emit it under the component's own name, as a
+  same-name sibling group, so there the selector matches.
+
+**Breaking library changes** (go-kure/launcher#788):
+
+- Output: every owned object and pod template gains the component label, a `HelmRelease`
+  gains the post-renderer, and a component's synthesized NetworkPolicies gain the label.
+- `GeneratedApplication.Component` changes from the application's name to empty for a
+  generated source the application bundle holds and for the external-backend policy, and
+  from the application's own name to the authored component for a lowered component named
+  differently and for a synthesized NetworkPolicy. A collision error names those
+  applications accordingly (`sub-application "db-pooler" of component "db"`).
+- `stack.Application.Config` is the ownership wrapper after `Transform`: a type assertion on
+  a concrete config type goes through `UnwrapConfig`.
 
 ## Names and overrides
 
@@ -336,7 +419,8 @@ the built-ins. Extend the system by implementing:
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). Every built-in handler and lowering rule implements it. |
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
-| `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
+| `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. After `Transform` every application's config answers it, through the ownership wrapper: the authored component, or `""` for an application the document as a whole owns ([Component label and ownership](#component-label-and-ownership)). |
+| `ConfigWrapper` | `WrappedApplicationConfig() stack.ApplicationConfig` — a config that wraps another one and says so. The ownership wrapper is one; `UnwrapConfig(cfg)` returns the config under every such wrapper. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
 | `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |

@@ -149,13 +149,23 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 			if got := labelOf(traitClaim, "app"); got != "owner" {
 				t.Errorf("trait claim app label = %q, want the owner %q", got, "owner")
 			}
-			delete(kindClaim["metadata"].(map[string]any)["labels"].(map[string]any), "app")
-			delete(traitClaim["metadata"].(map[string]any)["labels"].(map[string]any), "app")
+			// The component label names the same owner (go-kure/launcher#788).
+			if got := labelOf(kindClaim, kurelComponentLabel); got != "data" {
+				t.Errorf("kind claim component label = %q, want %q", got, "data")
+			}
+			if got := labelOf(traitClaim, kurelComponentLabel); got != "owner" {
+				t.Errorf("trait claim component label = %q, want the owner %q", got, "owner")
+			}
+			for _, claim := range []map[string]any{kindClaim, traitClaim} {
+				labels := claim["metadata"].(map[string]any)["labels"].(map[string]any)
+				delete(labels, "app")
+				delete(labels, kurelComponentLabel)
+			}
 
 			if !reflect.DeepEqual(kindClaim, traitClaim) {
 				k, _ := yaml.Marshal(kindClaim)
 				tr, _ := yaml.Marshal(traitClaim)
-				t.Errorf("claims differ beyond the app label\nkind:\n%s\ntrait:\n%s", k, tr)
+				t.Errorf("claims differ beyond the owner's labels\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
 			// A decorator must actually reach the claim, not merely be absent on
 			// both paths. The literal wire values are what Flux matches.
@@ -215,13 +225,15 @@ func TestPVCTwin_CapabilityDefaultBothWays(t *testing.T) {
 				if got != tc.want {
 					t.Errorf("viaTrait=%v: spec.storageClassName = %#v (present %v), want %#v", viaTrait, got, present, tc.want)
 				}
-				delete(claim["metadata"].(map[string]any)["labels"].(map[string]any), "app")
+				labels := claim["metadata"].(map[string]any)["labels"].(map[string]any)
+				delete(labels, "app")
+				delete(labels, kurelComponentLabel)
 				claims = append(claims, claim)
 			}
 			if !reflect.DeepEqual(claims[0], claims[1]) {
 				k, _ := yaml.Marshal(claims[0])
 				tr, _ := yaml.Marshal(claims[1])
-				t.Errorf("claims differ beyond the app label\nkind:\n%s\ntrait:\n%s", k, tr)
+				t.Errorf("claims differ beyond the owner's labels\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
 		})
 	}

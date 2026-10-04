@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - image: ghcr.io/example/api:v1.0.0
@@ -36,6 +38,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -54,12 +57,15 @@ kind: ServiceAccount
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
+  labels:
+    launcher.gokure.dev/component: api
   name: api-allow-ingress
   namespace: default
 spec:

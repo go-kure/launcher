@@ -136,7 +136,7 @@ func volsyncSourceFromCluster(t *testing.T, cluster *stack.Cluster) *volsyncv1al
 	walk(cluster.Node)
 
 	for _, a := range apps {
-		if _, ok := a.Config.(*traits.VolsyncConfig); !ok {
+		if _, ok := oam.UnwrapConfig(a.Config).(*traits.VolsyncConfig); !ok {
 			continue
 		}
 		objs, err := a.Config.Generate(a)

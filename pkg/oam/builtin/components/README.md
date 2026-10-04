@@ -2616,6 +2616,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`) (go-kure/launcher#665). |
   | 17 | `placement` may not place a generated source in any tier, and a `dependency` rule may not make it wait. |
   | 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
+  | 19 | The HelmRelease carries the component label and a post-renderer that sets it on the chart's pod templates, as every component's output does (go-kure/launcher#788). |
 
   Two `helmchart` behaviours have no `helm` counterpart beyond row 18: `valuesMode: configMap`
   no longer makes the component a `LayoutAugmenter` (the values ConfigMap comes from a
@@ -3953,6 +3954,16 @@ characters; the `helm` values ConfigMap does (a values
 ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.
+
+The component label (`<domain>/component`) is not this package's to write: the transform
+adds it to every object a component's config generates, and to its pod templates, with the
+authored component's value, where the key is absent (go-kure/launcher#788). A lowered part
+named differently from its component (the `postgresql` pooler, a database, an object store)
+carries the component's value, not its own name. A source a lowering rule generates and the
+application bundle holds (the repository a `helm` component generates) carries none. A
+`HelmRelease` also gets a post-renderer that sets the label on the chart's pod templates.
+See "Component label and ownership" in the
+[OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
 ### Every spec field is this package's to write
 

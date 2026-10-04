@@ -41,11 +41,12 @@ type TransformContext struct {
 	// target (the component's own pods: ingress recipients / egress sources). Empty
 	// => the domain-derived key ComponentLabelKeyForDomain(Domain). Takes precedence over
 	// Domain. Validated as a Kubernetes qualified label key. Non-authorable platform input,
-	// like EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
-	// pods carry this label (the platform stamps the derived component label) or set this
-	// to a key its pods do carry (e.g. "app"). The selector value is always
-	// ComponentLabelValue(component), so a platform stamping the label uses that function
-	// too, never the raw component name.
+	// like EgressPeers. It is also the key of the label the transform puts on every
+	// object a component owns and on its pod templates, valued ComponentLabelValue(component)
+	// as the selector is, so the selector matches the component's pods with no caller
+	// labelling anything (go-kure/launcher#788). The label is added only where the key is
+	// absent: set to a key the objects already carry (e.g. "app"), the values they carry
+	// stay.
 	ComponentLabelKey string
 	// Domain is the label/annotation domain for derived platform keys (<domain>/tier,
 	// <domain>/component). Empty => DefaultDomain ("gokure.dev"). Non-authorable platform
@@ -738,6 +739,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {
 		return nil, nil, err
 	}
+	// After every step that reads a config: from here on each application's
+	// config is its ownership wrapper, which labels what the application
+	// generates with its component (go-kure/launcher#788).
+	markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey)
 
 	if len(ctx.consumedCapabilities) > 0 {
 		keys := make([]string, 0, len(ctx.consumedCapabilities))

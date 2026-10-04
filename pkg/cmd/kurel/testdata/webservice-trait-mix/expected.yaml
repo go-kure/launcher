@@ -6,6 +6,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: web
+    launcher.gokure.dev/component: web
   name: web
   namespace: default
 spec:
@@ -18,6 +19,7 @@ spec:
     metadata:
       labels:
         app: web
+        launcher.gokure.dev/component: web
     spec:
       affinity:
         podAntiAffinity:
@@ -58,6 +60,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: web
+    launcher.gokure.dev/component: web
   name: web
   namespace: default
 spec:
@@ -79,6 +82,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: web
+    launcher.gokure.dev/component: web
   name: web
   namespace: default
 ---
@@ -90,6 +94,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: web
+    launcher.gokure.dev/component: web
   name: web-ingress
   namespace: default
 spec:
@@ -113,6 +118,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: web
+    launcher.gokure.dev/component: web
   name: web-hpa
   namespace: default
 spec:
@@ -133,6 +139,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  labels:
+    launcher.gokure.dev/component: web
   name: web-allow-ingress-traffic
   namespace: default
 spec:

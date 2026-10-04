@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -22,6 +23,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - image: ghcr.io/example/api:v1.0.0
@@ -43,6 +45,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -61,6 +64,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 ---
@@ -69,6 +73,7 @@ kind: Deployment
 metadata:
   labels:
     app: batch
+    launcher.gokure.dev/component: batch
   name: batch
   namespace: default
 spec:
@@ -83,6 +88,7 @@ spec:
     metadata:
       labels:
         app: batch
+        launcher.gokure.dev/component: batch
     spec:
       containers:
       - image: ghcr.io/example/batch:v1.0.0
@@ -101,5 +107,6 @@ kind: ServiceAccount
 metadata:
   labels:
     app: batch
+    launcher.gokure.dev/component: batch
   name: batch
   namespace: default

@@ -97,7 +97,11 @@ func TestHelmValuesConfigMap_Emitted(t *testing.T) {
 			t.Fatalf("fluxNS %q: second object is %T, want the values ConfigMap", fluxNS, objs[1])
 		}
 
-		if want := map[string]string{"app": oam.ComponentLabelValue("podinfo")}; !maps.Equal(cm.Labels, want) {
+		want := map[string]string{
+			"app":               oam.ComponentLabelValue("podinfo"),
+			kurelComponentLabel: oam.ComponentLabelValue("podinfo"),
+		}
+		if !maps.Equal(cm.Labels, want) {
 			t.Errorf("fluxNS %q: ConfigMap labels %v, want %v", fluxNS, cm.Labels, want)
 		}
 		data := cm.Data["values.json"]

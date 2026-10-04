@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   labels:
     app: media
+    launcher.gokure.dev/component: media
   name: media
   namespace: default
 spec:
@@ -17,6 +18,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -29,6 +31,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - image: ghcr.io/example/api:v1.0.0
@@ -70,6 +73,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -88,6 +92,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 ---
@@ -96,6 +101,7 @@ kind: Deployment
 metadata:
   labels:
     app: indexer
+    launcher.gokure.dev/component: indexer
   name: indexer
   namespace: default
 spec:
@@ -109,6 +115,7 @@ spec:
     metadata:
       labels:
         app: indexer
+        launcher.gokure.dev/component: indexer
     spec:
       containers:
       - image: ghcr.io/example/indexer:v1.0.0
@@ -136,5 +143,6 @@ kind: ServiceAccount
 metadata:
   labels:
     app: indexer
+    launcher.gokure.dev/component: indexer
   name: indexer
   namespace: default

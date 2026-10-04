@@ -10,5 +10,6 @@ kind: ConfigMap
 metadata:
   labels:
     app: settings
+    launcher.gokure.dev/component: settings
   name: settings
   namespace: default

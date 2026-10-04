@@ -1,6 +1,8 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
   name: postgres
   namespace: default
 spec:
@@ -19,6 +21,8 @@ spec:
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
   name: postgres-myapp
   namespace: default
 spec:
@@ -30,6 +34,8 @@ spec:
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
   name: postgres-analytics
   namespace: default
 spec:

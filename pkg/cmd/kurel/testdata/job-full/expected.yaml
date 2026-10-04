@@ -3,6 +3,7 @@ kind: Job
 metadata:
   labels:
     app: migrate
+    launcher.gokure.dev/component: migrate
   name: migrate
   namespace: default
 spec:
@@ -25,6 +26,7 @@ spec:
     metadata:
       labels:
         app: migrate
+        launcher.gokure.dev/component: migrate
     spec:
       automountServiceAccountToken: false
       containers:
