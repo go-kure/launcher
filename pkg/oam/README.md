@@ -291,9 +291,11 @@ workload whose selector does not match its template, so launcher does not add th
 there. Such a workload then carries no component label on its pods, and a synthesized policy
 does not select them. The workload object itself still carries the label.
 
-In an unstructured workload, a null `template`, `metadata` or `labels` is an absent one. A
-pod template label that is not a string is refused, with the workload named, whether or not
-the template carries the key already.
+An unstructured object's labels are read as written, on the object and on a workload's pod
+template. Null `metadata` or `labels` are absent ones, as is a null pod `template`, and a null
+label value is the empty string the cluster reads it as. A label that is not a string is
+refused, with the object named, whether or not the key is there already: generation fails
+rather than drop a label an author wrote.
 
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
