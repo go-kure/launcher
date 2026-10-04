@@ -101,3 +101,17 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 		})
 	}
 }
+
+// A role component's PVC claim name is refused when it is not a DNS-1123
+// subdomain, also when the invalid character sits in the part shortening
+// replaces by the digest: a volume name long enough to be shortened with the
+// component name.
+func TestRoleClaims_InvalidNameIsRefusedBeforeShortening(t *testing.T) {
+	for _, volume := range []string{"Data", strings.Repeat("v", 250) + "_x"} {
+		props := map[string]any{"volumes": []any{map[string]any{"name": volume, "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
+		_, err := roleClaims(&oam.Component{Name: "web"}, props, oam.LoweringContext{})
+		if err == nil || !strings.Contains(err.Error(), "not a valid DNS-1123 subdomain") {
+			t.Errorf("volume name of %d characters: error = %v, want the DNS-1123 refusal", len(volume), err)
+		}
+	}
+}

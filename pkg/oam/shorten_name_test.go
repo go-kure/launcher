@@ -287,13 +287,48 @@ func TestNameAllocator_ShortenedNameTakesPartInCollisionDetection(t *testing.T) 
 }
 
 // Shortening does not make an invalid name valid: the allocator still refuses
-// a name that is not a DNS-1123 subdomain.
+// a name that is not a DNS-1123 subdomain, also when the invalid character
+// sits in the part shortening replaces by the digest.
 func TestNameAllocator_StillRefusesAnInvalidName(t *testing.T) {
 	origin := Origin{Document: "doc", Namespace: "ns"}
-	for _, base := range []string{"Upper", strings.Repeat("A", 300)} {
-		_, err := NewNameAllocator().Name(base, "pooler", origin)
-		if err == nil || !strings.Contains(err.Error(), "not a valid DNS-1123 subdomain") {
-			t.Errorf("Name(%d characters) error = %v, want the DNS-1123 refusal", len(base), err)
+	const refusal = "not a valid DNS-1123 subdomain"
+	for _, base := range []string{
+		"Upper",
+		strings.Repeat("A", 300),
+		strings.Repeat("a", 242) + "_bad", // with "-pooler" exactly 253: not shortened
+		strings.Repeat("a", 250) + "_bad",
+		strings.Repeat("a", 300) + ".",
+	} {
+		if name, err := NewNameAllocator().Name(base, "pooler", origin); err == nil || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("Name(%d characters) = (%q, %v), want the DNS-1123 refusal", len(base), name, err)
+		}
+		if name, _, err := NewNameAllocator().NameOrAdopt(base, "pooler", "identity", origin); err == nil || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("NameOrAdopt(%d characters) = (%q, %v), want the DNS-1123 refusal", len(base), name, err)
+		}
+	}
+	if _, err := NewNameAllocator().Name(strings.Repeat("a", 242), "Bad_"+strings.Repeat("s", 20), origin); err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Errorf("Name with an invalid suffix error = %v, want the DNS-1123 refusal", err)
+	}
+}
+
+// SubdomainSyntaxErrors is IsDNS1123Subdomain without the length rule: an
+// over-long name passes when its characters are valid, and an invalid
+// character is reported wherever it sits.
+func TestSubdomainSyntaxErrors(t *testing.T) {
+	for _, valid := range []string{"web", "a.b-c", strings.Repeat("a", 300), strings.Repeat("a", 300) + ".b"} {
+		if errs := SubdomainSyntaxErrors(valid); len(errs) > 0 {
+			t.Errorf("SubdomainSyntaxErrors(%d characters) = %v, want none", len(valid), errs)
+		}
+	}
+	for _, invalid := range []string{"", "Upper", "a_b", "-a", "a-", strings.Repeat("a", 300) + "_bad", strings.Repeat("a", 300) + "-"} {
+		errs := SubdomainSyntaxErrors(invalid)
+		if len(errs) != 1 {
+			t.Errorf("SubdomainSyntaxErrors(%d characters) = %v, want the syntax error alone", len(invalid), errs)
+		}
+		for _, e := range errs {
+			if strings.Contains(e, "no more than") {
+				t.Errorf("SubdomainSyntaxErrors(%d characters) reports the length: %q", len(invalid), e)
+			}
 		}
 	}
 }

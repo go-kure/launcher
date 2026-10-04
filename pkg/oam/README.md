@@ -214,8 +214,11 @@ the whole `name+suffix` is then shortened by the rule.
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
 keeps `-<suffix>`, and reserves the shortened name, so that name takes part in collision
-detection like any other. The DNS-1123 check runs on the shortened name, which is the name
-emitted; the base is expected to be a valid name already.
+detection like any other. The characters are checked on `<base>-<suffix>` as built, before it is
+shortened, so an invalid character in the part the digest replaces is still refused: only the
+length may be over (`SubdomainSyntaxErrors` is `IsDNS1123Subdomain` without the length rule, for
+a site that shortens and validates). The full DNS-1123 check then runs on the shortened name,
+which is the name emitted. A role component's PVC claim name is checked the same way.
 
 A name an author writes, or an override of a generated name, is never shortened: it is used as
 written, and the validation of its own property decides whether it is accepted. Bundle names
