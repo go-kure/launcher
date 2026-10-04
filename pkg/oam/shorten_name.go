@@ -87,6 +87,23 @@ func ShortenNameWithSuffix(name, suffix string, limit int) string {
 	return shortenName(name, room) + suffix
 }
 
+// SubdomainSyntaxErrors returns what validation.IsDNS1123Subdomain reports
+// for name, without its length rule. A site that shortens a generated name
+// and validates the result runs this on the unshortened name first: shortening
+// replaces the cut part by a digest, so an invalid character there would no
+// longer be seen, and a name that is refused when it fits would pass when it
+// is too long.
+func SubdomainSyntaxErrors(name string) []string {
+	tooLong := validation.MaxLenError(validation.DNS1123SubdomainMaxLength)
+	var errs []string
+	for _, e := range validation.IsDNS1123Subdomain(name) {
+		if e != tooLong {
+			errs = append(errs, e)
+		}
+	}
+	return errs
+}
+
 func shortenName(name string, limit int) string {
 	if len(name) <= limit {
 		return name
