@@ -149,9 +149,11 @@ type HelmTemplateConfig struct {
 	// hook-group child layout (hookGroupChildName). Empty on a config built
 	// directly, whose child names then begin with the layout's own name.
 	Application string
-	// Namespace is the application namespace, the render's .Release.Namespace;
-	// empty leaves kure's default, "default". The release name is always
-	// kure's default, "release": this terminal declares no releaseName.
+	// Namespace is the application namespace: the render's .Release.Namespace,
+	// and the namespace given to a namespaced rendered object that carries none
+	// (stampRenderedNamespaces). Empty leaves .Release.Namespace at kure's
+	// default, "default", and stamps nothing. The release name is always kure's
+	// default, "release": this terminal declares no releaseName.
 	Namespace string
 
 	// SourceURL is where the chart is fetched from: an http(s):// Helm
