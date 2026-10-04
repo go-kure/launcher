@@ -315,7 +315,9 @@ label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored
 a strategic-merge patch per kind with a pod template (`Deployment`, `StatefulSet`,
 `DaemonSet`, `Job`, `CronJob`, `ReplicaSet`, `ReplicationController`, `PodTemplate`) that
 sets the label on the pod template, and one for a bare `Pod` that sets it on the Pod's own
-labels. Flux applies it to whatever the chart rendered, so here the component's value
+labels. Each patch targets its kind in that kind's own API group: a custom resource of
+another group whose kind has the same name is left alone. Flux applies it to whatever the
+chart rendered, so here the component's value
 **replaces** one the chart set. The entry is added once, however often the document is
 transformed or generated.
 

@@ -115,6 +115,7 @@ spec:
                 labels:
                   launcher.gokure.dev/component: prometheus
         target:
+          group: ^$
           kind: ReplicationController
           version: v1
       - patch: |
@@ -127,6 +128,7 @@ spec:
               labels:
                 launcher.gokure.dev/component: prometheus
         target:
+          group: ^$
           kind: PodTemplate
           version: v1
       - patch: |
@@ -137,5 +139,6 @@ spec:
               launcher.gokure.dev/component: prometheus
             name: component-label
         target:
+          group: ^$
           kind: Pod
           version: v1
