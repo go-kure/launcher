@@ -93,6 +93,10 @@ type componentAllowPolicyConfig struct {
 	// The transform path always passes the resolved, domain-aware key; the default here only
 	// applies to directly-constructed configs (tests), which cannot know the transform domain.
 	PodSelectorKey string
+	// PolicyName is the resource name. Empty => the default,
+	// ingressTrafficPolicyName(ComponentName); the transform sets it to the name
+	// it resolved (resolveSynthesizedPolicyNames).
+	PolicyName string
 }
 
 // podSelectorKey returns the configured selector key, defaulting to the library default so a
@@ -122,7 +126,7 @@ func selectedComponent(owner, name string) string {
 func (c *componentAllowPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
 
 func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(ingressTrafficPolicyName(c.ComponentName), app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
 	// The value is the component's label value, not its raw name: a name over 63
@@ -701,6 +705,10 @@ type componentEgressPolicyConfig struct {
 	// (ComponentLabelKeyForDomain(DefaultDomain)); the transform path always passes the
 	// resolved, domain-aware key, so this default only applies to directly-built configs.
 	PodSelectorKey string
+	// PolicyName is the resource name. Empty => the default,
+	// egressTrafficPolicyName(ComponentName); the transform sets it to the name
+	// it resolved (resolveSynthesizedPolicyNames).
+	PolicyName string
 }
 
 // podSelectorKey returns the configured selector key, defaulting to the library default so a
@@ -718,7 +726,7 @@ func (c *componentEgressPolicyConfig) podSelectorKey() string {
 func (c *componentEgressPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
 
 func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(egressTrafficPolicyName(c.ComponentName), app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
 	// The authored component's label value, as on the inbound side

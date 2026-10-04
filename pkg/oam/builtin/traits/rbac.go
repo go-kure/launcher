@@ -1,9 +1,12 @@
 package traits
 
 import (
+	"strings"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -52,7 +55,14 @@ func (h *RBACHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *st
 	if err != nil {
 		return err
 	}
-	rbacApp := stack.NewApplication(app.Name+"-rbac", app.Namespace, config)
+	if err := config.resolveNames(trait); err != nil {
+		return errors.Wrap(err, "rbac")
+	}
+	subAppName, err := resolveSubApplicationName(trait, app.Name+"-rbac")
+	if err != nil {
+		return errors.Wrap(err, "rbac")
+	}
+	rbacApp := stack.NewApplication(subAppName, app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, rbacApp)
 	return nil
 }
@@ -173,6 +183,10 @@ type rbacTraitConfig struct {
 	// objectName is the authored name of every object the trait generates and
 	// of both bindings' roleRef; "" leaves them named after the component.
 	objectName string
+	// resolved holds each object's name as Apply resolved it (resolveNames), by
+	// kind: the authored one, else the consumer hook's, else the component's. A
+	// kind with no entry (a config built directly) is named by name().
+	resolved map[string]string
 	// serviceAccountName is the RoleBinding/ClusterRoleBinding subject; it never
 	// names the Role/RoleBinding objects themselves.
 	serviceAccountName string
@@ -204,13 +218,49 @@ func (c *rbacTraitConfig) name() string {
 	return c.componentName
 }
 
-func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	name := c.name()
+// rbacKinds are the kinds the trait generates, in generation order; the last
+// two only with clusterWide, and cluster-scoped.
+var rbacKinds = []string{"Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"}
 
+// resolveNames resolves the name of each object the trait generates
+// (go-kure/launcher#787). The one authored `name` names them all; the consumer
+// hook is asked once per object, so it may name each apart. A binding's roleRef
+// follows the name its role resolved to.
+func (c *rbacTraitConfig) resolveNames(trait *oam.Trait) error {
+	c.resolved = make(map[string]string, len(rbacKinds))
+	for _, kind := range rbacKinds {
+		clusterScoped := strings.HasPrefix(kind, "Cluster")
+		if clusterScoped && !c.ClusterWide {
+			continue
+		}
+		namespace := c.Namespace
+		if clusterScoped {
+			namespace = ""
+		}
+		name, err := resolveObjectName(trait, oam.NameRoleRBAC,
+			schema.GroupKind{Group: rbacv1.GroupName, Kind: kind}, namespace, "name", c.objectName, c.componentName)
+		if err != nil {
+			return err
+		}
+		c.resolved[kind] = name
+	}
+	return nil
+}
+
+// nameOf is the name of the trait's object of kind: the resolved one, or name()
+// on a config Apply did not build.
+func (c *rbacTraitConfig) nameOf(kind string) string {
+	if name, ok := c.resolved[kind]; ok {
+		return name
+	}
+	return c.name()
+}
+
+func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	// A label map per object, never one map shared between them: these leave
 	// the package on objects a caller owns and edits, and a shared map turns a
 	// label added to the Role into a label on the RoleBinding as well.
-	role := kubernetes.CreateRole(name, c.Namespace)
+	role := kubernetes.CreateRole(c.nameOf("Role"), c.Namespace)
 	role.Labels = componentLabels(c.componentName)
 	role.Annotations = nil
 	for _, r := range c.Rules {
@@ -221,13 +271,13 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	rb := kubernetes.CreateRoleBinding(name, c.Namespace)
+	rb := kubernetes.CreateRoleBinding(c.nameOf("RoleBinding"), c.Namespace)
 	rb.Labels = componentLabels(c.componentName)
 	rb.Annotations = nil
 	rb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "Role",
-		Name:     name,
+		Name:     c.nameOf("Role"),
 	}
 	kubernetes.AddRoleBindingSubject(rb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
@@ -243,7 +293,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		return objects, nil
 	}
 
-	cr := kubernetes.CreateClusterRole(name)
+	cr := kubernetes.CreateClusterRole(c.nameOf("ClusterRole"))
 	cr.Labels = componentLabels(c.componentName)
 	cr.Annotations = nil
 	for _, r := range c.Rules {
@@ -254,13 +304,13 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	crb := kubernetes.CreateClusterRoleBinding(name)
+	crb := kubernetes.CreateClusterRoleBinding(c.nameOf("ClusterRoleBinding"))
 	crb.Labels = componentLabels(c.componentName)
 	crb.Annotations = nil
 	crb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "ClusterRole",
-		Name:     name,
+		Name:     c.nameOf("ClusterRole"),
 	}
 	kubernetes.AddClusterRoleBindingSubject(crb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,

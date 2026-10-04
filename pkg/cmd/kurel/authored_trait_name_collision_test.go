@@ -3,11 +3,13 @@ package kurel
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// An authored trait object name (go-kure/launcher#787) is checked against the
-// other objects of the document by the in-document collision check, as a default
-// name is: Transform alone compares nothing across components.
+// An authored trait object name (go-kure/launcher#787) is held against the other
+// names the transform resolves, as a default name is: Transform refuses two
+// traits that name one object, and names both.
 
 // webBesideAPI is component web, whose trait is given, beside component
 // api carrying the same trait with default names.
@@ -48,51 +50,60 @@ const (
 `
 )
 
-func TestAuthoredTraitName_CollisionWithAnotherComponentReported(t *testing.T) {
-	const rbacGroup = ".rbac.authorization.k8s.io "
+// transformErr transforms appYAML with kurel's builtin transformer and ctx, and
+// returns Transform's own verdict.
+func transformErr(t *testing.T, appYAML string, ctx oam.TransformContext) error {
+	t.Helper()
+	transformer := newBuiltinTransformer()
+	app, err := oam.ParseWithExtraTypes([]byte(appYAML), nil, transformer.LowerableTypes())
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+		t.Fatalf("validating: %v", err)
+	}
+	ctx.Domain = kurelDomain
+	_, err = transformer.Transform(app, ctx)
+	return err
+}
+
+func TestAuthoredTraitName_CollisionWithAnotherComponentRefused(t *testing.T) {
 	for _, tc := range []struct {
-		name, trait, override, sub string
-		want                       []string // each object reported, as the check names it
+		name, trait, override string
+		want                  string // the first object the two traits both name, and who names it
 	}{
 		{
-			name: "scaler hpaName", trait: scalerTrait, override: "            hpaName: api-hpa\n", sub: "scaler",
-			want: []string{`HorizontalPodAutoscaler.autoscaling "default/api-hpa"`},
+			name: "scaler hpaName", trait: scalerTrait, override: "            hpaName: api-hpa\n",
+			want: `component "api" trait "scaler": name collision: HorizontalPodAutoscaler.autoscaling "default/api-hpa" is named by ` +
+				`component "web" traits[0] "scaler" (role "hpa", set by hpaName) and by component "api" traits[0] "scaler" (role "hpa", its default); give one of them another name`,
 		},
 		{
-			name: "scaler pdbName", trait: scalerTrait, override: "            pdbName: api-pdb\n", sub: "scaler",
-			want: []string{`PodDisruptionBudget.policy "default/api-pdb"`},
+			name: "scaler pdbName", trait: scalerTrait, override: "            pdbName: api-pdb\n",
+			want: `component "api" trait "scaler": name collision: PodDisruptionBudget.policy "default/api-pdb" is named by ` +
+				`component "web" traits[0] "scaler" (role "pdb", set by pdbName) and by component "api" traits[0] "scaler" (role "pdb", its default); give one of them another name`,
 		},
 		{
-			// One name for all four objects: all four collide.
-			name: "rbac name", trait: rbacTrait, override: "            name: api\n", sub: "rbac",
-			want: []string{
-				"Role" + rbacGroup + `"default/api"`,
-				"RoleBinding" + rbacGroup + `"default/api"`,
-				"ClusterRole" + rbacGroup + `"api"`,
-				"ClusterRoleBinding" + rbacGroup + `"api"`,
-			},
+			// One name for all four objects: the first of them is reported.
+			name: "rbac name", trait: rbacTrait, override: "            name: api\n",
+			want: `component "api" trait "rbac": rbac: name collision: Role.rbac.authorization.k8s.io "default/api" is named by ` +
+				`component "web" traits[0] "rbac" (role "rbac", set by name) and by component "api" traits[0] "rbac" (role "rbac", its default); give one of them another name`,
 		},
 		{
-			name: "networkpolicy name", trait: networkPolicyTrait, override: "            name: api-allow\n", sub: "networkpolicy",
-			want: []string{`NetworkPolicy.networking.k8s.io "default/api-allow"`},
+			name: "networkpolicy name", trait: networkPolicyTrait, override: "            name: api-allow\n",
+			want: `component "api" trait "networkpolicy": name collision: NetworkPolicy.networking.k8s.io "default/api-allow" is named by ` +
+				`component "web" traits[0] "networkpolicy" (role "networkpolicy", set by name) and by component "api" traits[0] "networkpolicy" (role "networkpolicy", its default); give one of them another name`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := collisionCheck(t, webBesideAPI(tc.trait, tc.trait)); err != nil {
 				t.Fatalf("default names: %v, want two components with the same trait accepted", err)
 			}
-			_, err := collisionCheck(t, webBesideAPI(tc.trait+tc.override, tc.trait))
+			err := transformErr(t, webBesideAPI(tc.trait+tc.override, tc.trait), oam.TransformContext{})
 			if err == nil {
-				t.Fatalf("an authored name equal to component api's object was accepted, want a collision on %v", tc.want)
+				t.Fatalf("an authored name equal to component api's object was accepted, want %q", tc.want)
 			}
-			producers := `is generated by both sub-application "web-` + tc.sub + `" of component "web" and sub-application "api-` + tc.sub + `" of component "api"`
-			for _, object := range tc.want {
-				if want := object + " " + producers; !strings.Contains(err.Error(), want) {
-					t.Errorf("err = %v, want it to contain %q", err, want)
-				}
-			}
-			if !strings.HasPrefix(err.Error(), "generated-object collision: ") {
-				t.Errorf("err = %v, want the in-document collision check's error", err)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v\nwant it to contain %q", err, tc.want)
 			}
 		})
 	}

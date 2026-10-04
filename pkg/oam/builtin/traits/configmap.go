@@ -72,7 +72,11 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		componentName: app.Name,
 		ConfigMap:     cm,
 	}
-	cmApp := stack.NewApplication(name, app.Namespace, cmConfig)
+	subAppName, err := resolveSubApplicationName(trait, name)
+	if err != nil {
+		return err
+	}
+	cmApp := stack.NewApplication(subAppName, app.Namespace, cmConfig)
 	bundle.Applications = append(bundle.Applications, cmApp)
 
 	if mountPath != "" {
@@ -102,9 +106,16 @@ func (c *ConfigMapConfig) ComponentName() string { return c.componentName }
 func (c *ConfigMapConfig) FluxNamespaceInput() (kind, name string) { return "ConfigMap", c.Name }
 
 // Generate builds the ConfigMap through the kind's GenerateConfigMap, under
-// the trait's name and with the owning component's labels.
+// the trait's name and with the owning component's labels. The name is Name,
+// not the sub-application's: a consumer may name the sub-application apart
+// (go-kure/launcher#787), and the mount and every reference go by Name. A
+// config built directly without one is named after its application.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return components.GenerateConfigMap(c.ConfigMap, app.Name, app.Namespace, componentLabels(c.componentName))
+	name := c.Name
+	if name == "" {
+		name = app.Name
+	}
+	return components.GenerateConfigMap(c.ConfigMap, name, app.Namespace, componentLabels(c.componentName))
 }
 
 // ConfigMapDecorator wraps an ApplicationConfig to add a volume and volumeMount

@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -124,9 +125,21 @@ func (h *NetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, b
 	if err != nil {
 		return err
 	}
+	// The policy's name: the authored one parseProperties stored, else the
+	// consumer hook's, else the default (go-kure/launcher#787).
+	config.Name, err = resolveObjectName(trait, oam.NameRoleNetworkPolicy,
+		schema.GroupKind{Group: networkingv1.GroupName, Kind: "NetworkPolicy"},
+		app.Namespace, "name", config.Name, config.defaultName())
+	if err != nil {
+		return err
+	}
+	subAppName, err := resolveSubApplicationName(trait, app.Name+"-networkpolicy")
+	if err != nil {
+		return err
+	}
 
 	npApp := stack.NewApplication(
-		app.Name+"-networkpolicy",
+		subAppName,
 		app.Namespace,
 		config,
 	)
@@ -865,8 +878,10 @@ func parseNPPort(raw any, path string) (npPort, error) {
 // NetworkPolicyConfig implements stack.ApplicationConfig for networkpolicy traits.
 type NetworkPolicyConfig struct {
 	componentName string
-	// Name is the authored name of the policy (go-kure/launcher#787), used as
-	// written; "" leaves the default, <component>-allow, shortened to fit.
+	// Name is the policy's name (go-kure/launcher#787). Apply stores the resolved
+	// one: the authored name, used as written, else the consumer hook's, else
+	// the default. "" on a config built directly leaves the default,
+	// <component>-allow, shortened to fit.
 	Name    string
 	Ingress []npIngressRule
 	Egress  []npEgressRule
@@ -905,11 +920,15 @@ type npPort struct {
 	Protocol corev1.Protocol
 }
 
+func (c *NetworkPolicyConfig) defaultName() string {
+	return oam.ShortenNameWithSuffix(c.componentName, "-allow", oam.ShortenLimitSubdomain)
+}
+
 // Generate creates a Kubernetes NetworkPolicy resource.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	name := c.Name
 	if name == "" {
-		name = oam.ShortenNameWithSuffix(c.componentName, "-allow", oam.ShortenLimitSubdomain)
+		name = c.defaultName()
 	}
 	np := kubernetes.CreateNetworkPolicy(name, app.Namespace)
 	np.Labels = componentLabels(c.componentName)

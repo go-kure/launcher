@@ -190,6 +190,18 @@ func routingObjectName(component, kind, scope string) string {
 	return oam.ShortenNameWithSuffix(component, suffix, oam.ShortenLimitSubdomain)
 }
 
+// routingObjectNameOr is the name of a routing trait's object at Generate: the
+// one Apply stored, which is also the sub-application's default name, or the
+// application's on a config built directly. The object is not named after the
+// sub-application it ends up in: a consumer may name that apart
+// (go-kure/launcher#787).
+func routingObjectNameOr(objectName string, app *stack.Application) string {
+	if objectName != "" {
+		return objectName
+	}
+	return app.Name
+}
+
 // Apply creates an Ingress resource for the component's service.
 // If the optional 'name' property is set, that value is used as the sub-application
 // name, enabling multiple ingress traits on the same component without collision.
@@ -199,9 +211,13 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	subAppName := config.Name
-	if subAppName == "" {
-		subAppName = routingObjectName(app.Name, "ingress", config.Scope)
+	config.objectName = config.Name
+	if config.objectName == "" {
+		config.objectName = routingObjectName(app.Name, "ingress", config.Scope)
+	}
+	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	if err != nil {
+		return err
 	}
 	ingressApp := stack.NewApplication(subAppName, app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, ingressApp)
@@ -465,8 +481,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 // IngressConfig implements stack.ApplicationConfig for ingress traits.
 type IngressConfig struct {
-	Name             string
-	Scope            string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
+	Name  string
+	Scope string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
+	// objectName is the Ingress's name as Apply settled it: Name, else the
+	// default. "" on a config built directly (routingObjectNameOr).
+	objectName       string
 	componentName    string
 	Annotations      map[string]string
 	IngressClassName string
@@ -529,7 +548,7 @@ type IngressTLS struct {
 
 // Generate creates a Kubernetes Ingress resource.
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	ingress := kubernetes.CreateIngress(app.Name, app.Namespace)
+	ingress := kubernetes.CreateIngress(routingObjectNameOr(c.objectName, app), app.Namespace)
 	ingress.Labels = componentLabels(c.componentName)
 	ingress.Annotations = c.Annotations
 	if c.IngressClassName != "" {

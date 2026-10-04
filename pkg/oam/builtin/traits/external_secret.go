@@ -59,8 +59,12 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 		return err
 	}
 
+	subAppName, err := resolveSubApplicationName(trait, app.Name+"-external-secret-"+config.SecretName)
+	if err != nil {
+		return err
+	}
 	esApp := stack.NewApplication(
-		app.Name+"-external-secret-"+config.SecretName,
+		subAppName,
 		app.Namespace,
 		config,
 	)

@@ -1,0 +1,365 @@
+package kurel
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
+)
+
+// These tests pin the consumer naming hook (go-kure/launcher#787) through
+// kurel's own transformer: TransformContext.Naming is asked once for each name
+// the author did not set, its answer is used as returned or refused, and two
+// names that end up naming one object fail the transform.
+
+// namingApp is a document with a name of every role: two ordered groups, and on
+// component web the scaler, rbac, networkpolicy and configmap traits. extraWeb
+// is appended to web's traits and extraComponents to the components.
+func namingApp(extraWeb, extraComponents string) string {
+	return `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: agent
+      type: daemonset
+      properties:
+        image: ghcr.io/example/agent:v1.0.0
+    - name: web
+      type: webservice
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        port: 8080
+      traits:
+        - type: scaler
+          properties:
+            minReplicas: 2
+            maxReplicas: 4
+            enablePDB: true
+        - type: rbac
+          properties:
+            rules:
+              - apiGroups: [""]
+                resources: [pods]
+                verbs: [get]
+        - type: networkpolicy
+          properties:
+            ingress: []
+        - type: configmap
+          properties:
+            name: web-config
+            data:
+              a: "1"
+` + extraWeb + extraComponents + `
+  policies:
+    - name: agent-first
+      type: placement
+      properties:
+        component: agent
+        tier: infra
+    - name: web-last
+      type: placement
+      properties:
+        component: web
+        tier: apps
+`
+}
+
+// namingContext is a transform context whose egress peers make the synthesis
+// generate a NetworkPolicy for web, and whose Naming hook is hook.
+func namingContext(hook func(oam.NameRequest) (string, bool)) oam.TransformContext {
+	return oam.TransformContext{
+		Naming: hook,
+		EgressPeers: map[string][]netpol.EgressPeer{"web": {{
+			Namespace:   "data",
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}},
+			Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+		}}},
+	}
+}
+
+// namingTransform transforms appYAML under ctx and generates the result.
+func namingTransform(t *testing.T, appYAML string, ctx oam.TransformContext) (*stack.Cluster, []oam.GeneratedApplication) {
+	t.Helper()
+	transformer := newBuiltinTransformer()
+	app, err := oam.ParseWithExtraTypes([]byte(appYAML), nil, transformer.LowerableTypes())
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+		t.Fatalf("validating: %v", err)
+	}
+	ctx.Domain = kurelDomain
+	cluster, err := transformer.Transform(app, ctx)
+	if err != nil {
+		t.Fatalf("transforming: %v", err)
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+	if err := oam.CheckInDocumentCollisions(apps); err != nil {
+		t.Fatalf("collision check: %v", err)
+	}
+	return cluster, apps
+}
+
+// generatedNames lists every bundle of cluster and every generated object as
+// "application: Kind namespace/name", in order.
+func generatedNames(cluster *stack.Cluster, apps []oam.GeneratedApplication) []string {
+	var out []string
+	var walk func(b *stack.Bundle)
+	walk = func(b *stack.Bundle) {
+		out = append(out, "bundle "+b.Name)
+		for _, child := range b.Children {
+			walk(child)
+		}
+	}
+	walk(cluster.Node.Bundle)
+	for _, a := range apps {
+		for _, p := range a.Objects {
+			if p == nil {
+				continue
+			}
+			obj := *p
+			out = append(out, fmt.Sprintf("%s: %s %s/%s", a.Name, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName()))
+		}
+	}
+	return out
+}
+
+func declineEveryName(requests *[]oam.NameRequest) func(oam.NameRequest) (string, bool) {
+	return func(req oam.NameRequest) (string, bool) {
+		*requests = append(*requests, req)
+		return "", false
+	}
+}
+
+func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
+	var requests []oam.NameRequest
+	namingTransform(t, namingApp("", ""), namingContext(declineEveryName(&requests)))
+
+	const (
+		np      = "NetworkPolicy.networking.k8s.io"
+		rbac    = ".rbac.authorization.k8s.io"
+		subApp  = oam.NameRoleSubApplication
+		synthNP = "web-allow-egress-traffic"
+	)
+	// Each name once, in the order the transform reaches it: the bundles, each
+	// trait's objects and then its sub-application, the synthesized policy last.
+	want := []oam.NameRequest{
+		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
+		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-infra"},
+		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-apps"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleHPA, Kind: "HorizontalPodAutoscaler.autoscaling", Default: "web-hpa"},
+		{Application: "shop", Component: "web", Role: oam.NameRolePDB, Kind: "PodDisruptionBudget.policy", Default: "web-pdb"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-scaler"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleRBAC, Kind: "Role" + rbac, Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleRBAC, Kind: "RoleBinding" + rbac, Default: "web"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-rbac"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleNetworkPolicy, Kind: np, Default: "web-allow"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-networkpolicy"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-config"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleNetpolSynth, Kind: np, Default: synthNP},
+		{Application: "shop", Component: "web", Role: subApp, Default: synthNP},
+	}
+	if !slices.Equal(requests, want) {
+		t.Errorf("the hook was asked\n  %+v\nwant\n  %+v", requests, want)
+	}
+
+	// The document has a name of every role, so the list above leaves none out.
+	roles := map[oam.NameRole]bool{}
+	for _, req := range want {
+		roles[req.Role] = true
+	}
+	for _, role := range oam.NameRoles() {
+		if !roles[role] {
+			t.Errorf("no request of role %q: the document must carry a name of every role", role)
+		}
+	}
+}
+
+// renameBy answers with names[Role+" "+Default] where the map has one.
+func renameBy(names map[string]string) func(oam.NameRequest) (string, bool) {
+	return func(req oam.NameRequest) (string, bool) {
+		name, ok := names[string(req.Role)+" "+req.Default]
+		return name, ok
+	}
+}
+
+func TestNamingHook_AnswerIsUsed(t *testing.T) {
+	cluster, apps := namingTransform(t, namingApp("", ""), namingContext(renameBy(map[string]string{
+		"bundle shop":                           "site",
+		"group shop-apps":                       "site-workloads",
+		"hpa web-hpa":                           "web-autoscaler",
+		"rbac web":                              "web-reader",
+		"networkpolicy web-allow":               "web-ingress",
+		"netpol-synth web-allow-egress-traffic": "web-egress",
+		// A sub-application's name is not its object's: renaming one leaves the
+		// other alone.
+		"sub-application web-config": "web-settings",
+	})))
+	got := generatedNames(cluster, apps)
+	want := []string{
+		"bundle site",
+		"bundle shop-infra",
+		"bundle site-workloads",
+		"web-scaler: HorizontalPodAutoscaler default/web-autoscaler",
+		"web-scaler: PodDisruptionBudget default/web-pdb",
+		"web-rbac: Role default/web-reader",
+		"web-rbac: RoleBinding default/web-reader",
+		"web-networkpolicy: NetworkPolicy default/web-ingress",
+		"web-settings: ConfigMap default/web-config",
+		"web-allow-egress-traffic: NetworkPolicy default/web-egress",
+	}
+	for _, line := range want {
+		if !slices.Contains(got, line) {
+			t.Errorf("missing %q in\n  %s", line, strings.Join(got, "\n  "))
+		}
+	}
+}
+
+func TestNamingHook_NotAskedForANameTheAuthorSet(t *testing.T) {
+	doc := strings.Replace(namingApp("", ""), "            enablePDB: true\n", "            enablePDB: true\n            hpaName: mine\n", 1)
+	var requests []oam.NameRequest
+	cluster, apps := namingTransform(t, doc, namingContext(declineEveryName(&requests)))
+	for _, req := range requests {
+		if req.Role == oam.NameRoleHPA {
+			t.Errorf("the hook was asked for the name hpaName sets: %+v", req)
+		}
+	}
+	if !slices.ContainsFunc(requests, func(req oam.NameRequest) bool { return req.Role == oam.NameRolePDB }) {
+		t.Error("the hook was not asked for the PodDisruptionBudget, whose name the author left out")
+	}
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "web-scaler: HorizontalPodAutoscaler default/mine") {
+		t.Errorf("the authored hpaName was not used:\n  %s", strings.Join(got, "\n  "))
+	}
+}
+
+func TestNamingHook_Refusals(t *testing.T) {
+	const api = `    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+      traits:
+        - type: scaler
+          properties:
+            minReplicas: 2
+            maxReplicas: 4
+`
+	for _, tc := range []struct {
+		name  string
+		names map[string]string
+		want  string
+	}{
+		{
+			name:  "an answer that is no subdomain",
+			names: map[string]string{"hpa web-hpa": "Web_HPA"},
+			want:  `component "web" trait "scaler": the Naming hook returned "Web_HPA" for role "hpa" in place of "web-hpa": not a valid DNS-1123 subdomain: `,
+		},
+		{
+			name:  "an empty answer",
+			names: map[string]string{"bundle shop": ""},
+			want:  `bundle name: the Naming hook returned "" for role "bundle" in place of "shop": it is empty; return a valid name, or false to keep the default`,
+		},
+		{
+			name:  "an answer over 253 characters",
+			names: map[string]string{"sub-application web-config": strings.Repeat("a", 254)},
+			want:  `for role "sub-application" in place of "web-config": not a valid DNS-1123 subdomain: must be no more than 253`,
+		},
+		{
+			name:  "one object named twice",
+			names: map[string]string{"hpa web-hpa": "shared", "hpa api-hpa": "shared"},
+			want: `name collision: HorizontalPodAutoscaler.autoscaling "default/shared" is named by ` +
+				`component "api" traits[0] "scaler" (role "hpa", returned by the Naming hook in place of "api-hpa") and by ` +
+				`component "web" traits[0] "scaler" (role "hpa", returned by the Naming hook in place of "web-hpa"); give one of them another name`,
+		},
+		{
+			name:  "a group named as the bundle",
+			names: map[string]string{"group shop-apps": "shop"},
+			want: `group name: name collision: bundle "shop" is named by the application (role "bundle", its default) and by ` +
+				`the application (role "group", returned by the Naming hook in place of "shop-apps"); give one of them another name`,
+		},
+		{
+			name:  "a synthesized policy named as the trait's",
+			names: map[string]string{"netpol-synth web-allow-egress-traffic": "web-allow"},
+			want: `synthesized NetworkPolicy "web-allow-egress-traffic": name collision: NetworkPolicy.networking.k8s.io "default/web-allow" is named by ` +
+				`component "web" traits[2] "networkpolicy" (role "networkpolicy", its default) and by ` +
+				`component "web" (role "netpol-synth", returned by the Naming hook in place of "web-allow-egress-traffic"); give one of them another name`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := transformErr(t, namingApp("", api), namingContext(renameBy(tc.names)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Two traits of one type on one component name the same objects. Transform
+// refuses them itself, naming both, where it used to leave them to
+// CheckInDocumentCollisions (go-kure/launcher#757).
+func TestTwoTraitsOfOneType_RefusedByTransform(t *testing.T) {
+	const rbacGroup = ".rbac.authorization.k8s.io"
+	for _, tc := range []struct {
+		name, trait, want string
+	}{
+		{
+			name: "scaler", trait: scalerTrait,
+			want: `component "web" trait "scaler": name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named by ` +
+				`component "web" traits[0] "scaler" (role "hpa", its default) and by component "web" traits[1] "scaler" (role "hpa", its default); give one of them another name`,
+		},
+		{
+			name: "rbac", trait: rbacTrait,
+			want: `component "web" trait "rbac": rbac: name collision: Role` + rbacGroup + ` "default/web" is named by ` +
+				`component "web" traits[0] "rbac" (role "rbac", its default) and by component "web" traits[1] "rbac" (role "rbac", its default); give one of them another name`,
+		},
+		{
+			name: "networkpolicy", trait: networkPolicyTrait,
+			want: `component "web" trait "networkpolicy": name collision: NetworkPolicy.networking.k8s.io "default/web-allow" is named by ` +
+				`component "web" traits[0] "networkpolicy" (role "networkpolicy", its default) and by component "web" traits[1] "networkpolicy" (role "networkpolicy", its default); give one of them another name`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := duplicateApp(`    - name: web
+      type: webservice
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        port: 8080
+      traits:
+`+tc.trait+tc.trait, "", "")
+			err := transformErr(t, doc, oam.TransformContext{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNamingHook_DecliningHookChangesNothing(t *testing.T) {
+	cluster, apps := namingTransform(t, namingApp("", ""), namingContext(nil))
+	without := generatedNames(cluster, apps)
+
+	var requests []oam.NameRequest
+	cluster, apps = namingTransform(t, namingApp("", ""), namingContext(declineEveryName(&requests)))
+	with := generatedNames(cluster, apps)
+
+	if len(requests) == 0 {
+		t.Fatal("the hook was never asked")
+	}
+	if !slices.Equal(without, with) {
+		t.Errorf("a hook that declines every name changed the output:\nwithout: %s\nwith:    %s",
+			strings.Join(without, "\n         "), strings.Join(with, "\n         "))
+	}
+}

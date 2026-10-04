@@ -1042,6 +1042,7 @@ var configContracts = map[string]configContract{
 	"trafficSourceCollector":    {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
 	"backendRefTargetCollector": {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
 	"fluxNamespaceInput":        {notForwarded: "a trait sub-application contract the Flux namespace pass reads before the wrap"},
+	"synthesizedPolicy":         {notForwarded: "the NetworkPolicy synthesis's own configs, which the transform names before the wrap"},
 	"*siblingGroupConfig":       {notForwarded: "the engine's own type, asserted while it builds the group"},
 	"componentOwner":            {notForwarded: "the wrapper itself"},
 }

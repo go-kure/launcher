@@ -56,8 +56,12 @@ func (h *PVCHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *sta
 		return err
 	}
 
+	subAppName, err := resolveSubApplicationName(trait, config.Name)
+	if err != nil {
+		return err
+	}
 	pvcApp := stack.NewApplication(
-		config.Name,
+		subAppName,
 		app.Namespace,
 		config,
 	)
