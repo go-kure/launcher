@@ -114,6 +114,7 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 			"A single egress rule pairing allowed peers with ports.",
 			"Peers the workload is allowed to connect to.",
 			"Destination ports the workload may connect to."),
+		"name": {Type: oam.PropertyTypeString, Description: "Name of the NetworkPolicy, used as written or refused; defaults to <component>-allow."},
 	}
 }
 
@@ -136,6 +137,16 @@ func (h *NetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, b
 func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.Application) (*NetworkPolicyConfig, error) {
 	config := &NetworkPolicyConfig{
 		componentName: app.Name,
+	}
+
+	// An authored name is used as written or refused (go-kure/launcher#787). A
+	// present string is checked, the empty one included; left out or null, the
+	// policy keeps its default name.
+	if name, ok := props["name"].(string); ok {
+		if err := checkAuthoredObjectName("name", "the NetworkPolicy", name); err != nil {
+			return nil, err
+		}
+		config.Name = name
 	}
 
 	rawIngress, hasIngress := props["ingress"]
@@ -854,8 +865,11 @@ func parseNPPort(raw any, path string) (npPort, error) {
 // NetworkPolicyConfig implements stack.ApplicationConfig for networkpolicy traits.
 type NetworkPolicyConfig struct {
 	componentName string
-	Ingress       []npIngressRule
-	Egress        []npEgressRule
+	// Name is the authored name of the policy (go-kure/launcher#787), used as
+	// written; "" leaves the default, <component>-allow, shortened to fit.
+	Name    string
+	Ingress []npIngressRule
+	Egress  []npEgressRule
 
 	// ingressSet and egressSet record that the authored document carried the key
 	// with a non-null value, including an empty list. They, not len(Ingress) or
@@ -893,7 +907,11 @@ type npPort struct {
 
 // Generate creates a Kubernetes NetworkPolicy resource.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(oam.ShortenNameWithSuffix(c.componentName, "-allow", oam.ShortenLimitSubdomain), app.Namespace)
+	name := c.Name
+	if name == "" {
+		name = oam.ShortenNameWithSuffix(c.componentName, "-allow", oam.ShortenLimitSubdomain)
+	}
+	np := kubernetes.CreateNetworkPolicy(name, app.Namespace)
 	np.Labels = componentLabels(c.componentName)
 	np.Annotations = nil
 	np.Spec.PodSelector = metav1.LabelSelector{

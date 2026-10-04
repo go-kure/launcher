@@ -32,6 +32,8 @@ func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"cpuUtilization":    {Type: oam.PropertyTypeInteger, Default: 80, Description: "Target average CPU utilization percentage (1-100) that triggers scaling."},
 		"memoryUtilization": {Type: oam.PropertyTypeInteger, Description: "Target average memory utilization percentage (1-100) that triggers scaling."},
 		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false, Description: "When true, also generate a PodDisruptionBudget (requires minReplicas >= 2)."},
+		"hpaName":           {Type: oam.PropertyTypeString, Description: "Name of the HorizontalPodAutoscaler, used as written or refused; defaults to <component>-hpa."},
+		"pdbName":           {Type: oam.PropertyTypeString, Description: "Name of the PodDisruptionBudget, used as written or refused; needs enablePDB. Defaults to <component>-pdb."},
 	}
 }
 
@@ -113,6 +115,27 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	// The enablePDB/minReplicas cross-check runs in validateEffective, since
 	// minReplicas may still be filled by a policy default.
 
+	// An authored name is used as written or refused (go-kure/launcher#787). A
+	// present string is checked, the empty one included; left out or null, the
+	// object keeps its default name.
+	if name, ok := props["hpaName"].(string); ok {
+		if err := checkAuthoredObjectName("hpaName", "the HorizontalPodAutoscaler", name); err != nil {
+			return nil, err
+		}
+		config.HPAName = name
+	}
+	if name, ok := props["pdbName"].(string); ok {
+		if err := checkAuthoredObjectName("pdbName", "the PodDisruptionBudget", name); err != nil {
+			return nil, err
+		}
+		// A name for an object the trait does not generate can be neither used
+		// nor ignored without the author being wrong about the output.
+		if !config.EnablePDB {
+			return nil, errors.Errorf("pdbName %q names no object: the trait generates a PodDisruptionBudget only with enablePDB: true; set it, or leave pdbName out", name)
+		}
+		config.PDBName = name
+	}
+
 	return config, nil
 }
 
@@ -133,6 +156,12 @@ type ScalerConfig struct {
 	CPUUtilization    *int32
 	MemoryUtilization *int32
 	EnablePDB         bool
+
+	// HPAName and PDBName are the authored object names (go-kure/launcher#787),
+	// used as written; "" leaves the default, <component>-hpa and
+	// <component>-pdb, each shortened to fit.
+	HPAName string
+	PDBName string
 
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
@@ -214,7 +243,11 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 }
 
 func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string) *autoscalingv2.HorizontalPodAutoscaler {
-	hpa := kubernetes.CreateHorizontalPodAutoscaler(oam.ShortenNameWithSuffix(c.componentName, "-hpa", oam.ShortenLimitSubdomain), app.Namespace)
+	name := c.HPAName
+	if name == "" {
+		name = oam.ShortenNameWithSuffix(c.componentName, "-hpa", oam.ShortenLimitSubdomain)
+	}
+	hpa := kubernetes.CreateHorizontalPodAutoscaler(name, app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
 	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.componentName)
@@ -229,7 +262,11 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 }
 
 func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string) *policyv1.PodDisruptionBudget {
-	pdb := kubernetes.CreatePodDisruptionBudget(oam.ShortenNameWithSuffix(c.componentName, "-pdb", oam.ShortenLimitSubdomain), app.Namespace)
+	name := c.PDBName
+	if name == "" {
+		name = oam.ShortenNameWithSuffix(c.componentName, "-pdb", oam.ShortenLimitSubdomain)
+	}
+	pdb := kubernetes.CreatePodDisruptionBudget(name, app.Namespace)
 	pdb.Labels = labels
 	pdb.Annotations = nil
 	kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))
