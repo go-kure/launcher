@@ -184,8 +184,9 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
   policy (`name`). Still none for: the `postgresql` pooler name (`<cluster>-pooler`),
   generated Helm source names (`<document>-source-<digest>`), the values ConfigMap name
   (`helmValuesConfigMapName`, `pkg/oam/builtin/components/helm.go`), bundle and ordered-group
-  names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others), Helm
-  hook-group child layouts, and the template release name.
+  names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others) and Helm
+  hook-group child layouts. The Helm release name has one under both deliveries
+  (`releaseName`, go-kure/launcher#785, §4.2).
 - **Object name = component name** for every kind component. A Service named like its
   StatefulSet is only reachable through `passthrough` or `manifests`: two kind components
   `app` are refused as a duplicate component name (`validateComponent`,
@@ -247,8 +248,7 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
     hook-group child layouts and the ordered-group bundles.
   - `ShortenLimitHelmRelease` (53): the one exception to the rule. The result is what Flux
     computes for a HelmRelease, so a release launcher renders itself is named as Flux
-    would name it. Nothing passes this limit yet: go-kure/launcher#785 is its first caller
-    (§4.2).
+    would name it. The default Helm release name passes it (go-kure/launcher#785, §4.2).
 
   The Namer shortens instead of refusing an over-length `<base>-<suffix>` (`generatedName`,
   `pkg/oam/lowering.go`). The characters are checked on the name as built, before it is
@@ -308,24 +308,35 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 
 | Path | Release name | Values |
 |---|---|---|
-| `helm` or `helmrelease`, Flux delivery, no Flux namespace | No `spec.releaseName`. Flux defaults it to the HelmRelease name, `<component>`. | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`helmValuesConfigMap`, `pkg/oam/builtin/components/helm.go`); `helmrelease` refuses the key (`helmReleaseValuesModeHint`, `helmrelease.go`). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
-| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`HelmReleaseConfig.Generate`, `helmrelease.go`). Flux then computes `<appns>-<component>`. | As above. The `helm` values ConfigMap follows the HelmRelease into the Flux namespace. |
-| `helm` with `delivery: template`, or `helmtemplate` | kure's fixed default `release` as `.Release.Name`, and the application namespace as `.Release.Namespace` (`chartSource`, `helmtemplate_render.go`); the chart's templates decide the object names. `releaseName` is refused (`helmFluxOnlyKeys`, `helm.go`; the strict decode of `helmTemplateProperties`, `helmtemplate.go`). | Inline values, rendered into the output. `valuesFrom` is refused: a build cannot read a cluster object. |
+| `helm` or `helmrelease`, Flux delivery, no Flux namespace | `spec.releaseName` is always written: the authored `releaseName`, else `<component>`, shortened when over 53 characters (`HelmReleaseConfig.releaseName`, `helmrelease.go`; §4.2). | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`helmValuesConfigMap`, `pkg/oam/builtin/components/helm.go`); `helmrelease` refuses the key (`helmReleaseValuesModeHint`, `helmrelease.go`). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
+| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`HelmReleaseConfig.Generate`, `helmrelease.go`). The release name is the one of the row above: `spec.releaseName` is written, so Flux does not compute `<appns>-<component>`. | As above. The `helm` values ConfigMap follows the HelmRelease into the Flux namespace. |
+| `helm` with `delivery: template`, or `helmtemplate` | The same name as `.Release.Name`: the authored `releaseName`, which must be a valid Helm release name, else the default a HelmRelease gets (`templateReleaseName`, `helmtemplate_render.go`; §4.2). The application namespace as `.Release.Namespace` (`chartSource`, `helmtemplate_render.go`); the chart's templates decide the object names. | Inline values, rendered into the output. `valuesFrom` is refused: a build cannot read a cluster object. |
 
 No path writes explicit values into a Secret.
 
-### 4.2 Target (go-kure/launcher#785): release name
+### 4.2 Shipped (go-kure/launcher#785): release name
 
-- Default release name `<component>` under both deliveries, written explicitly:
-  `spec.releaseName` on every HelmRelease, and the template render's release name, as in
-  [go-kure/launcher#778](https://github.com/go-kure/launcher/pull/778).
-- The `helmrelease` kind sets the default, so a directly authored `helmrelease` gets it
-  too, as the kind already defaults `targetNamespace` (`HelmReleaseConfig.Generate`).
-- Shortened with the shipped rule of go-kure/launcher#793 at `ShortenLimitHelmRelease`
-  (53 characters), which reproduces Flux's own algorithm for that limit (§3.3). This
-  ticket is the limit's first caller.
-- The author's `releaseName` overrides it under both deliveries. The consumer override
-  comes from go-kure/launcher#787.
+- **Before:** launcher wrote no `spec.releaseName` unless one was authored, so Flux named
+  the release `<component>`, or `<targetNamespace>-<component>` where a target namespace
+  was set, as a Flux namespace sets one by default. A template render used kure's fixed
+  default `release` and refused `releaseName`.
+- **Now:** the default release name is `<component>` under both deliveries, written
+  explicitly (`defaultHelmReleaseName`,
+  `pkg/oam/builtin/components/helmtemplate_render.go`):
+  - `spec.releaseName` on every HelmRelease. The `helmrelease` kind sets it, so a directly
+    authored `helmrelease` gets it too, as the kind already defaults `targetNamespace`
+    (`HelmReleaseConfig.Generate`).
+  - The template render's `.Release.Name` (`templateReleaseName`).
+  - Shortened with the rule of go-kure/launcher#793 at `ShortenLimitHelmRelease`
+    (53 characters), which reproduces Flux's own algorithm for that limit (§3.3). A
+    default Helm would refuse is a build error that names `releaseName` as the remedy.
+  - The author's `releaseName` overrides it under both deliveries: written as it is on a
+    HelmRelease, and held to Helm's release name rule under template delivery. The
+    consumer override comes from go-kure/launcher#787.
+  - Output change: with a target namespace and no authored `releaseName`, the release
+    name changes from `<targetNamespace>-<component>` to `<component>`, and Flux installs
+    a new release instead of renaming the installed one. A template render no longer runs
+    under `release`. The components README states how to keep an installed release.
 
 ### 4.3 Target (go-kure/launcher#786): Secret values
 
@@ -570,7 +581,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | Open | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
 | [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | Shipped | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Open | — |
-| [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Open | go-kure/launcher#793 |
+| [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
