@@ -2625,8 +2625,32 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   is kure's default `release`; the terminal declares neither, so neither can be set. Flux derives
   a HelmRelease's default release name differently (`<name>`, or `<targetNamespace>-<name>` when
   a target namespace is set), so a chart whose object names embed the release name renders them
-  differently under the two deliveries. Nothing stamps `metadata.namespace` on rendered objects,
-  so a chart that leaves it unset renders namespace-less objects.
+  differently under the two deliveries.
+
+  **Namespace.** A namespaced rendered object that carries no `metadata.namespace` is given the
+  application namespace, where a Helm install into that namespace would create it
+  (go-kure/launcher#794, item 4). Each object's scope is resolved as the `manifests` component
+  resolves it (kure's `manifest.Scope`): kure's scope table — the kinds kure registers, in any
+  API version, and a few cluster-scoped built-ins it does not — plus the scope a
+  `CustomResourceDefinition` among the emitted objects declares for the kind it defines. Unlike
+  `manifests`, the render refuses nothing here, since the application does not author a chart:
+  - a namespace the chart wrote is kept, on a cluster-scoped object too, as Helm keeps it;
+  - a cluster-scoped object without one stays without;
+  - an object of unknown scope without one is left as rendered, with no namespace and no error:
+    a kind kure does not register — a custom resource, or a built-in such as `Lease` or
+    `EndpointSlice` at the pinned kure version — with no CRD for it among the emitted objects.
+    Whoever applies the output decides where it lands (Flux's `targetNamespace`, a client's
+    default namespace). A chart's `crds/` directory is not rendered, and a CRD under a dropped
+    hook is not emitted, so neither gives a kind a scope; there is no `scopeOverrides` on this
+    component (go-kure/launcher#794, item 11).
+
+  The policy check runs on the stamped objects, so a violation names an object with the
+  namespace it is emitted in. A `HelmTemplateConfig` built directly with an empty `Namespace`
+  has none to give and stamps nothing.
+
+  **Breaking output change** (go-kure/launcher#794): such objects gain `metadata.namespace` in
+  the output. Before, a chart that left it unset rendered namespace-less objects, which landed
+  wherever the applying client defaulted them.
 
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.

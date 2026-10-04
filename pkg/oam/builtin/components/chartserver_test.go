@@ -22,26 +22,27 @@ var identityChart = map[string]string{
 }
 
 // renderedIdentity generates cfg and returns the identity ConfigMap's name and
-// namespace, failing if the bare ConfigMap gained a namespace: nothing stamps
-// metadata.namespace after the render.
+// namespace, failing unless the bare ConfigMap carries that same namespace: a
+// namespaced object rendered without metadata.namespace is given the render's.
 func renderedIdentity(t *testing.T, cfg stack.ApplicationConfig) (name, namespace string) {
 	t.Helper()
 	objs, err := cfg.Generate(stack.NewApplication("app", "ignored", cfg))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	found := false
+	found, bareFound, bareNamespace := false, false, ""
 	for _, o := range objs {
 		if (*o).GetName() == "bare" {
-			if ns := (*o).GetNamespace(); ns != "" {
-				t.Errorf("bare ConfigMap namespace = %q, want none (no stamping)", ns)
-			}
+			bareFound, bareNamespace = true, (*o).GetNamespace()
 			continue
 		}
 		name, namespace, found = (*o).GetName(), (*o).GetNamespace(), true
 	}
-	if !found {
-		t.Fatalf("identity ConfigMap not rendered; got %d objects", len(objs))
+	if !found || !bareFound {
+		t.Fatalf("identity and bare ConfigMaps not both rendered; got %d objects", len(objs))
+	}
+	if bareNamespace != namespace {
+		t.Errorf("bare ConfigMap namespace = %q, want %q (the render's namespace, stamped)", bareNamespace, namespace)
 	}
 	return name, namespace
 }
