@@ -420,10 +420,9 @@ func TestTransform_MultiTier_Hierarchical(t *testing.T) {
 }
 
 // TestTransform_MultiTier_UmbrellaHasNoWait pins that the tier umbrella leaves
-// Wait unset. kure gives an umbrella Kustomization one health check per child
-// Kustomization, and kustomize-controller ignores health checks when wait is
-// enabled (api/v1 KustomizationSpec.Wait: "When enabled, the HealthChecks are
-// ignored"), so an umbrella with Wait would be Ready without its children.
+// Wait unset: launcher sets no delivery field on a bundle, the umbrella
+// included (go-kure/launcher#781). How the umbrella waits on its children is
+// the consumer's to decide.
 func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{
@@ -445,7 +444,7 @@ func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
 		t.Fatal("expected umbrella bundle at root")
 	}
 	if umbrella.Wait != nil {
-		t.Errorf("umbrella Wait = %v, want nil: wait makes its child health checks inert", *umbrella.Wait)
+		t.Errorf("umbrella Wait = %v, want nil: launcher sets no delivery field", *umbrella.Wait)
 	}
 }
 

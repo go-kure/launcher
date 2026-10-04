@@ -167,8 +167,7 @@ const helmDependsOn = `  policies:
 
 // assertNoConsumerPrecedesSource checks, on a dependency-aware cluster, that the
 // source's bundle depends (transitively) on no release's bundle: a source
-// applied only after one of its consumers became ready would never be applied,
-// since that consumer waits on its own health check.
+// would otherwise be applied only after a consumer that needs it first.
 func assertNoConsumerPrecedesSource(t *testing.T, cluster *stack.Cluster) {
 	t.Helper()
 	bundles := leafBundles(cluster.Node)
