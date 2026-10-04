@@ -1381,13 +1381,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
+			// What the component became waits as the component did, whether or not
+			// the rule built its output from the component it was handed.
+			inheritOrder(result.Components, inheritedOrder)
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
 				result.Components[j].synthesized = inputChecked
-				// What the component became waits as the component did, whether or
-				// not the rule built its output from the component it was handed.
-				result.Components[j].inheritOrder(inheritedOrder)
 				names[j] = result.Components[j].Name
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)

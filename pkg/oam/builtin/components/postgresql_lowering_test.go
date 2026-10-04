@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -307,6 +308,46 @@ func TestPostgresqlRule_BundleTraitOncePerBundle(t *testing.T) {
 	}
 	if got := carriers(res, "prune-protection"); !slices.Equal(got, everyObject) {
 		t.Errorf("ordered: object trait on %v, want %v", got, everyObject)
+	}
+
+	// A policy of the document that orders or places one member on its own
+	// could move it out of the members' group, where the one forwarded copy
+	// does not reach: refused, rather than the trait silently lost there.
+	lower := func(c oam.Component, policies ...oam.ApplicationPolicy) error {
+		doc := &oam.Application{Spec: oam.ApplicationSpec{
+			Components: ordered.Spec.Components,
+			Policies:   append(slices.Clone(ordered.Spec.Policies), policies...),
+		}}
+		_, err := components.PostgresqlRule{}.LowerComponent(&c, oam.LoweringContext{Document: doc, Namer: oam.NewNameAllocator()})
+		return err
+	}
+	memberAfterMember := oam.ApplicationPolicy{Name: "members", Type: "dependency", Properties: map[string]any{
+		"rules": []any{map[string]any{"component": "db-orders", "dependsOn": []any{"db-pooler"}}},
+	}}
+	memberPlaced := oam.ApplicationPolicy{Name: "pooler-last", Type: "placement", Properties: map[string]any{"component": "db-pooler", "tier": "apps"}}
+	for _, tc := range []struct {
+		policy oam.ApplicationPolicy
+		want   string
+	}{
+		{memberAfterMember, `trait "fluxcd-patches" configures the bundle of every object this component generates, but dependency policy "members" names "db-orders", a component generated for it, on its own`},
+		{memberPlaced, `trait "fluxcd-patches" configures the bundle of every object this component generates, but placement policy "pooler-last" names "db-pooler", a component generated for it, on its own`},
+	} {
+		if err := lower(comp, tc.policy); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("policy %q: error = %v, want it to contain %q", tc.policy.Name, err, tc.want)
+		}
+	}
+	// Without a bundle trait nothing is forwarded per bundle, so a member may
+	// be ordered or placed on its own; so may another component after a member.
+	plain := comp
+	plain.Traits = []oam.Trait{{Type: "prune-protection", Properties: map[string]any{}}}
+	if err := lower(plain, memberAfterMember, memberPlaced); err != nil {
+		t.Errorf("no bundle trait: %v, want the member policies accepted", err)
+	}
+	afterMember := oam.ApplicationPolicy{Name: "api-late", Type: "dependency", Properties: map[string]any{
+		"rules": []any{map[string]any{"component": "api", "dependsOn": []any{"db-orders"}}},
+	}}
+	if err := lower(comp, afterMember); err != nil {
+		t.Errorf("another component after a member: %v, want it accepted", err)
 	}
 }
 

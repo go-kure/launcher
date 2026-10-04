@@ -31,8 +31,9 @@ import (
 // AfterPolicy is: it survives copies of the component, but not serialization,
 // so a RawDocumentLoweringRule cannot use it. It survives further lowering
 // too: when a ComponentLoweringRule lowers a component carrying one, the
-// engine gives the order to every component that rule emits for it, whatever
-// the rule built them from, so the whole of what the component became waits.
+// engine gives the order to the components that rule emits for it, whatever
+// the rule built them from, so what the component became waits as it did
+// (inheritOrder).
 //
 // Declaring never changes another copy of c: each call gives c a new slice.
 func (c *Component) OrderAfter(names ...string) {
@@ -42,12 +43,35 @@ func (c *Component) OrderAfter(names ...string) {
 	c.orderAfter = append(slices.Clip(c.orderAfter), names...)
 }
 
-// inheritOrder orders c after each of names it is not ordered after yet: the
-// order of the component c was lowered from (lowerDocumentBody).
-func (c *Component) inheritOrder(names []string) {
-	for _, name := range names {
-		if !slices.Contains(c.orderAfter, name) {
-			c.OrderAfter(name)
+// inheritOrder orders the components a rule emitted for one component after
+// each of names, the components that one was ordered after, so what it became
+// waits as it did (lowerDocumentBody).
+//
+// A Flux source the rule ordered another of the emitted components after is
+// left as it is. Such a source is the application's, not the component's: every
+// component that names the same source adopts it, and it is applied with the
+// application bundle, before every group (orderComponents). Made to wait on
+// what one of its consumers waits on, it could wait on another of its
+// consumers, which waits on it.
+func inheritOrder(emitted []Component, names []string) {
+	if len(names) == 0 {
+		return
+	}
+	prerequisite := map[string]bool{}
+	for i := range emitted {
+		for _, name := range emitted[i].orderAfter {
+			prerequisite[name] = true
+		}
+	}
+	for i := range emitted {
+		c := &emitted[i]
+		if generatedSourceTypes[c.Type] && prerequisite[c.Name] {
+			continue
+		}
+		for _, name := range names {
+			if !slices.Contains(c.orderAfter, name) {
+				c.OrderAfter(name)
+			}
 		}
 	}
 }

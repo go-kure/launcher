@@ -2687,7 +2687,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   member, and `fluxcd-patches` and `fluxcd-postbuild` (not built in; a consumer
   that delivers through Flux registers them) to the first member that is
   ordered after the Cluster (below): the members share one group, so one of
-  them carries the trait for that group's bundle. Policies that name the
+  them carries the trait for that group's bundle. For that reason a document
+  that authors one of these two traits on the postgresql component may not
+  order or place a member on its own (a `dependency` rule or a `placement`
+  whose component is the Pooler's or a Database's generated name): the
+  member could leave the group the trait reaches, so the rule refuses it and
+  asks for the postgresql component's name instead. Policies that name the
   postgresql component are extended to the members the same way. A `placement` of it is repeated
   for each member, so they stay in the Cluster's tier and, without a
   dependency policy, in its bundle. When the document orders its components
