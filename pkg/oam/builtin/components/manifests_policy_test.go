@@ -409,10 +409,48 @@ func TestManifestConfig_ApplyPolicy_NilIsANoOp(t *testing.T) {
 	}
 }
 
+// TestManifestConfig_GenerateRechecksInlineSource: generation holds an inline
+// source to the kept policy too, although the policy step already checked it.
+// The source passes the policy step under a policy that allows a privileged
+// container; the policy stops allowing it before generation, which is the only
+// way the two checks of one inline source can differ.
+func TestManifestConfig_GenerateRechecksInlineSource(t *testing.T) {
+	cfg, err := (&components.ManifestsHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "raw", Type: "manifests", Properties: mfInline(ptDeployment(
+			"containers:\n  - name: app\n    image: registry.example/team/app:1.2.3\n    securityContext:\n      privileged: true\n")),
+	}, "demo")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	policy := &stubPolicy{allowPrivileged: true}
+	if err := cfg.(oam.Enforceable).ApplyPolicy(policy); err != nil {
+		t.Fatalf("ApplyPolicy under a policy allowing privileged containers: %v", err)
+	}
+	if _, err := cfg.Generate(nil); err != nil {
+		t.Fatalf("control: Generate under the policy the source passed: %v", err)
+	}
+	policy.allowPrivileged = false
+	_, err = cfg.Generate(nil)
+	if err == nil {
+		t.Fatal("Generate emitted a privileged workload under a policy that refuses it")
+	}
+	var v *oam.ViolationError
+	if !errors.As(err, &v) {
+		t.Fatalf("error is %T, want it to wrap *oam.ViolationError: %v", err, err)
+	}
+	if v.Component != "raw" {
+		t.Errorf("violation names component %q, want %q", v.Component, "raw")
+	}
+	for _, f := range []string{`manifest source: object Deployment "demo/thing"`, "securityContext.privileged is not allowed"} {
+		if !strings.Contains(err.Error(), f) {
+			t.Errorf("error %q lacks %q", err, f)
+		}
+	}
+}
+
 // TestManifestConfig_GenerateChecksWhatItEmits: once a policy is applied,
-// generation holds the objects it emits to it, whatever the source. For an
-// inline source that repeats the check of the policy step; the refusal is the
-// component's policy violation either way.
+// generation holds the objects of a url source to it, which is where they are
+// first known; the refusal is the component's policy violation.
 func TestManifestConfig_GenerateChecksWhatItEmits(t *testing.T) {
 	srv, _ := mfServe(t, ptDeployment("hostNetwork: true\n"+htPlainPod))
 	cfg, err := (&components.ManifestsHandler{}).ToApplicationConfig(&oam.Component{
