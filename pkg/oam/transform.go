@@ -705,11 +705,6 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// A shared source is emitted by the consumer that is applied first. Deciding
-	// this only now, with the final order known, keeps the owner from waiting on
-	// another consumer of its source, which would deadlock.
-	deduplicateSourceRefs(order.sequence())
-
 	cluster, err := t.buildCluster(app, order, ctx)
 	if err != nil {
 		return nil, nil, err
@@ -1359,30 +1354,6 @@ func decorateSubApplications(decorations []subAppDecoration) error {
 }
 
 // --- Helpers ---
-
-// deduplicateSourceRefs suppresses duplicate source CRD generation when multiple
-// components share the same source key (URL for HelmRepository, URL+version for
-// OCIRepository); the first component in the given order wins. Callers pass
-// the order the components are applied in (componentOrder.sequence) so the
-// owner never waits on another consumer.
-func deduplicateSourceRefs(entries []componentEntry) {
-	seen := make(map[string]string) // sourceKey → sourceRefName
-	for _, entry := range entries {
-		dedup, ok := entry.app.Config.(SourceDeduplicatable)
-		if !ok {
-			continue
-		}
-		key := dedup.GetSourceKey()
-		if key == "" {
-			continue
-		}
-		if existingName, found := seen[key]; found {
-			dedup.SuppressSourceGeneration(existingName)
-		} else {
-			seen[key] = dedup.GetSourceRefName()
-		}
-	}
-}
 
 // resolveCapability merges capability rendering into trait properties (rendering as
 // defaults, OAM inline values win), recursively into nested objects

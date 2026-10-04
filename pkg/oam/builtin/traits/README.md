@@ -719,8 +719,6 @@ keep a sibling group able to tell a `service` member routing to its own `deploym
 `portName` on a decorated component held to its Service port's name (the first port, on a
 `service` component), the same rule a port number is held to. A config that implements none of them gets the zero
 answer (`nil`, `0`, `""`, `false`), which every reader treats as "not set".
-`oam.SourceDeduplicatable` is not forwarded: shared-source dedup runs on the component
-configs after policies and before any trait wraps them, so it never sees a decorator.
 
 `augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s
 `GenerateCoversAugmentLayout() bool` — the interface `kurel build`'s guard consults before

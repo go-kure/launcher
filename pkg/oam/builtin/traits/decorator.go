@@ -60,12 +60,10 @@ type identityPortMapper interface {
 // and identityPortMapper (oam/sibling_group.go ServiceRoutingTarget), and
 // oam.ComponentNamed (oam/in_document_collisions.go generateBundle), which a
 // trait sub-application decorated by the engine's sub-application pass
-// (oam.SubApplicationDecorator) must keep. Enforceable and
-// SourceDeduplicatable are deliberately absent: the former is asserted only on
-// trait sub-apps as their trait creates them (Transformer.applyEntryTraits),
-// before the sub-application pass wraps them, the latter on component configs
-// after policies and before any trait runs (deduplicateSourceRefs in
-// Transformer.TransformWithPolicy), so neither can see a decorator. So are the
+// (oam.SubApplicationDecorator) must keep. Enforceable is deliberately
+// absent: it is asserted only on trait sub-apps as their trait creates them
+// (Transformer.applyEntryTraits), before the sub-application pass wraps them,
+// so it cannot see a decorator. So are the
 // NetworkPolicy synthesis collectors (trafficSourceCollector,
 // backendRefTargetCollector): synthesis runs before the sub-application pass,
 // and forwarding them would make every decorated component a router. One more,

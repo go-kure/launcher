@@ -39,7 +39,7 @@ func TestClassifyComponent_NoTierFromType(t *testing.T) {
 		"statefulset", "daemonset", "postgresql", "cnpg-cluster", "cnpg-pooler",
 		"cnpg-database", "cnpg-objectstore", "crd", "manifests", "oci",
 		"helmrepository", "ocirepository", "gitrepository", "bucket", "helmchart",
-		"unknown-type",
+		"fluxcd-kustomization", "unknown-type",
 	}
 	for _, typ := range types {
 		for _, synthesized := range []bool{false, true} {

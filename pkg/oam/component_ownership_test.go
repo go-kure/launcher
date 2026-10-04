@@ -1039,7 +1039,6 @@ var configContracts = map[string]configContract{
 	"identityPortMapper":           {method: "IdentityTargetPorts"},
 
 	"Enforceable":               {notForwarded: "asserted as each config is created, before the wrap"},
-	"SourceDeduplicatable":      {notForwarded: "asserted on component configs before any trait runs"},
 	"trafficSourceCollector":    {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
 	"backendRefTargetCollector": {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
 	"fluxNamespaceInput":        {notForwarded: "a trait sub-application contract the Flux namespace pass reads before the wrap"},

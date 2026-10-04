@@ -35,7 +35,10 @@ const ociType = "oci"
 // source belongs to the application rather than to whichever component comes
 // first: it is emitted once, named <document>-source-<digest> and claimed
 // through NameAllocator.NameOrAdopt, as the helm rule's generated source is,
-// and each component lowers to its fluxcd-kustomization alone, referencing it.
+// and each component lowers to its fluxcd-kustomization alone, referencing it
+// and ordered after it (Component.OrderAfter). That order makes it a generated
+// source, which pkg/oam keeps out of the ordered groups and applies with the
+// application bundle itself, so every consumer follows it wherever it is placed.
 // The source identity is the url, the version and the effective interval
 // (ociSourceIdentity): components share only when all three are equal, so a
 // component with its own interval keeps its own source. The identity differs
@@ -308,6 +311,10 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		result.Components = append(result.Components, source)
 	}
 	kustomization.Properties = props.kustomizationProperties(name)
+	// The shared source is the application's (see OCIRule): ordered after it,
+	// whether this component generated or adopted it, the Kustomization makes
+	// it a generated source, held by the application bundle ahead of every group.
+	kustomization.OrderAfter(name)
 	result.Components = append(result.Components, kustomization)
 	return result, nil
 }
