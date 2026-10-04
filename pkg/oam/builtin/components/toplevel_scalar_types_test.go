@@ -40,12 +40,12 @@ var wrongTopLevel = []struct {
 	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"cronjob", &components.CronjobHandler{}, cronBase, "restartPolicy", 1, "restartPolicy: must be a string, got int"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "serviceName", 3, "serviceName: must be a string, got int"},
-	{"oci", &components.OCIHandler{}, ociBase, "path", 3, "path: must be a string, got int"},
-	{"oci", &components.OCIHandler{}, ociBase, "prune", "false", "prune: must be a boolean, got string"},
-	{"oci", &components.OCIHandler{}, ociBase, "interval", 10, "interval: must be a string, got int"},
-	{"oci", &components.OCIHandler{}, ociBase, "targetNamespace", true, "targetNamespace: must be a string, got bool"},
-	{"oci", &components.OCIHandler{}, ociBase, "wait", "false", "wait: must be a boolean, got string"},
-	{"oci", &components.OCIHandler{}, ociBase, "healthChecks", "apps/v1/Deployment/app", "healthChecks: must be an array, got string"},
+	{"oci", ociViaRule{}, ociBase, "path", 3, "path: must be a string, got int"},
+	{"oci", ociViaRule{}, ociBase, "prune", "false", "prune: must be a boolean, got string"},
+	{"oci", ociViaRule{}, ociBase, "interval", 10, "interval: must be a string, got int"},
+	{"oci", ociViaRule{}, ociBase, "targetNamespace", true, "targetNamespace: must be a string, got bool"},
+	{"oci", ociViaRule{}, ociBase, "wait", "false", "wait: must be a boolean, got string"},
+	{"oci", ociViaRule{}, ociBase, "healthChecks", "apps/v1/Deployment/app", "healthChecks: must be an array, got string"},
 }
 
 func TestTopLevelOptional_WrongTypeIsRejected(t *testing.T) {
@@ -123,17 +123,17 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 	})
 	t.Run("oci prune false and empty path", func(t *testing.T) {
 		props := withProp(withProp(ociBase, "prune", false), "path", "")
-		cfg, err := (&components.OCIHandler{}).ToApplicationConfig(
+		cfg, err := ociViaRule{}.ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "oci", Properties: props}, "default")
 		if err != nil {
 			t.Fatal(err)
 		}
-		oc := cfg.(*components.OCIConfig)
-		if oc.Prune {
+		spec := cfg.(*ociViaRuleConfig).kustomization.Spec
+		if spec.Prune {
 			t.Error("Prune = true, want false")
 		}
-		if oc.Path != "./" {
-			t.Errorf("Path = %q, want the ./ default", oc.Path)
+		if spec.Path != "./" {
+			t.Errorf("Path = %q, want the ./ default", spec.Path)
 		}
 	})
 }

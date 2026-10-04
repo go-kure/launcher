@@ -82,6 +82,129 @@ func isOwned(owned []string, key string) bool {
 	return slices.ContainsFunc(owned, func(o string) bool { return strings.EqualFold(o, key) })
 }
 
+// UnknownJSONFieldPath returns the path of the first key of src that
+// DecodeStrictJSON[T] called with the same owned keys refuses as unknown: the
+// keys from the root joined by ".", a list element as "[i]", for example
+// sourceRef.tag or patches[0].target.kinds. encoding/json's own error names
+// only the key, which reads as a different field when T declares the same key
+// elsewhere. A caller that got an unknown-field error from the decode uses it
+// to name where the key sits.
+//
+// It returns "" when it finds no such key. It walks src along T's fields and
+// asks encoding/json itself whether each struct accepts each key, so it cannot
+// call a key unknown that the decoder accepts. It does not look inside a value
+// whose type decodes itself (UnmarshalJSON, UnmarshalText), where the decoder
+// does not check keys either. Keys are visited in sorted order at each level,
+// the order DecodeStrictJSON's marshalled input has.
+func UnknownJSONFieldPath[T any](src map[string]any, owned ...string) string {
+	rest := make(map[string]any, len(src))
+	for k, v := range src {
+		if !isOwned(owned, k) {
+			rest[k] = v
+		}
+	}
+	data, err := json.Marshal(rest)
+	if err != nil {
+		return ""
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return ""
+	}
+	return unknownJSONFieldPath(reflect.TypeFor[T](), value)
+}
+
+// unknownJSONFieldPath is UnknownJSONFieldPath for one decoded JSON value and
+// the type it decodes into. A panic from reflection over an unusual type (a
+// field behind an unexported embedded pointer) counts as nothing found.
+func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
+	defer func() {
+		if recover() != nil {
+			path = ""
+		}
+	}()
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	pt := reflect.PointerTo(t)
+	named := func(name string) bool {
+		_, found := pt.MethodByName(name)
+		return found
+	}
+	if pt.Implements(reflect.TypeFor[json.Unmarshaler]()) || pt.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) || named("UnmarshalJSONFrom") {
+		return ""
+	}
+	join := func(head, rest string) string {
+		if strings.HasPrefix(rest, "[") {
+			return head + rest
+		}
+		return head + "." + rest
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		if t.Kind() == reflect.Struct {
+			var fields []jsonField
+			var hidden []string
+			collectJSONFields(t, nil, nil, "", &fields, &hidden)
+			for _, k := range keys {
+				if !decodesKey(t, k) {
+					return k
+				}
+				if ft, ok := jsonFieldType(t, fields, k); ok {
+					if sub := unknownJSONFieldPath(ft, v[k]); sub != "" {
+						return join(k, sub)
+					}
+				}
+			}
+		} else if t.Kind() == reflect.Map {
+			for _, k := range keys {
+				if sub := unknownJSONFieldPath(t.Elem(), v[k]); sub != "" {
+					return join(k, sub)
+				}
+			}
+		}
+	case []any:
+		if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
+			return ""
+		}
+		for i, item := range v {
+			if sub := unknownJSONFieldPath(t.Elem(), item); sub != "" {
+				return join("["+strconv.Itoa(i)+"]", sub)
+			}
+		}
+	}
+	return ""
+}
+
+// jsonFieldType returns the type of the field of t that encoding/json fills
+// from key: the field keyed exactly so, else one equal ignoring case, the
+// shallowest when several match.
+func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type, bool) {
+	var best *jsonField
+	exact := false
+	for i := range fields {
+		f := &fields[i]
+		if !strings.EqualFold(f.key, key) {
+			continue
+		}
+		isExact := f.key == key
+		if best == nil || (isExact && !exact) || (isExact == exact && len(f.index) < len(best.index)) {
+			best, exact = f, isExact
+		}
+	}
+	if best == nil {
+		return nil, false
+	}
+	return t.FieldByIndex(best.index).Type, true
+}
+
 // UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
 // embedded ones included, that an author cannot set through DecodeStrictJSON called
 // with the same owned keys.

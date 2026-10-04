@@ -1,0 +1,40 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: platform
+spec:
+  components:
+    # Nothing but the source and the version: every default.
+    - name: podinfo
+      type: oci
+      properties:
+        source:
+          url: oci://ghcr.io/stefanprodan/manifests/podinfo
+        version: 6.7.0
+    # A digest, and every optional property.
+    - name: ingress
+      type: oci
+      properties:
+        source:
+          url: oci://registry.example.com/platform/ingress
+        version: sha256:0f5b6a1f3c8d2e4b7a9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a
+        path: ./overlays/production
+        prune: false
+        interval: 10m
+        targetNamespace: ingress
+        healthChecks:
+          - apiVersion: apps/v1
+            kind: Deployment
+            name: ingress-controller
+            namespace: ingress
+          - apiVersion: networking.k8s.io/v1
+            kind: IngressClass
+            name: public
+    - name: monitoring
+      type: oci
+      properties:
+        source:
+          url: oci://registry.example.com/platform/monitoring
+        version: 2.1.0
+        wait: true

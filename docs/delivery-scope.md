@@ -43,7 +43,7 @@ target it replaced; one marked **Target** is not in the code.
    or Flux annotations. Delivery-relevant intent (ordering, prune protection, force replace)
    is carried in kure's model, not in the YAML. launcher still emits Flux objects when an
    author writes them as components (`helmrelease`, the source kinds, `helmchart`, and the
-   new `fluxcd-kustomization` kind).
+   `fluxcd-kustomization` kind).
 2. **Nothing implicit.** Ordering inside an application exists only where the author
    declares it (`placement`, `dependency`) or a component declares it about its own parts
    (`helm`: source before release). Readiness defaults to waiting for every applied
@@ -149,25 +149,42 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
    other `<application>-<NN>`, its two-digit position counted from `00`. The name is
    shortened to 253 characters, the limit of a name that names no delivery engine (§3).
 
-### 2.3 Target (go-kure/launcher#784): `oci` lowers to kind components
+### 2.3 `oci` lowers to kind components (go-kure/launcher#784, done)
 
-- New kind component `fluxcd-kustomization`: one Flux Kustomization, with strict decode of
-  the upstream `KustomizationSpec` (the pattern of `helmrelease`:
-  `HelmReleaseHandler.ToApplicationConfig`,
-  `pkg/oam/builtin/components/helmrelease.go`). The type name follows the naming
-  decision in [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352).
-- `oci` becomes an upper-level component that lowers into `ocirepository` plus
-  `fluxcd-kustomization`. The `OCIHandler` kind goes.
-- `oci` today misses most of the Kustomization spec (`patches`, `postBuild`, `force`,
-  `dependsOn`, `timeout`, `serviceAccountName` and more). The new kind closes that gap.
-- Keep the explicit-registry rule for a non-empty allowlist (`OCIConfig.ApplyPolicy`,
-  `oci.go`, through `ociNamesRegistry`) on the `ocirepository` path.
-- `SourceDeduplicatable` (`pkg/oam/handler.go`) has one implementer today, `OCIConfig`
-  (`OCIConfig.GetSourceKey`, `oci.go`). After go-kure/launcher#784 it has none: remove it,
-  or document why it stays.
-- **Decide in the ticket:** the name of a source shared by two `oci` components. Today the
-  first component's name is kept (`deduplicateSourceRefs`, `pkg/oam/transform.go`), while
-  `helm` names a generated source `<document>-source-<digest>`.
+- Kind component `fluxcd-kustomization` (`pkg/oam/builtin/components/fluxcd_kustomization.go`):
+  one Flux Kustomization, with strict decode of the upstream `KustomizationSpec` (the
+  pattern of `helmrelease`). The type name follows the naming decision in
+  [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352). It is an
+  authored Flux object, not a delivery mechanism (§1.2), and it closes the gap `oci` had
+  against the spec (`patches`, `postBuild`, `force`, `dependsOn`, `timeout`,
+  `serviceAccountName` and more). An unknown field is refused with its path from the
+  property root.
+- `oci` is an upper-level component: `OCIRule` (`oci.go`) lowers it into `ocirepository`
+  plus `fluxcd-kustomization`. The `OCIHandler` kind and its `OCIConfig` are gone. A
+  document with one `oci` component per artifact renders the same two objects as before,
+  byte for byte.
+- The explicit-registry rule for a non-empty allowlist is the `ocirepository` terminal's
+  (`fluxsource.go`), so its refusals name that kind and its `url` field.
+
+Decided in the ticket:
+
+- **Tier of the component's own source.** A component alone on its artifact lowers to a
+  same-name sibling group. Its `ocirepository` member takes its type's tier instead of the
+  `infra` tier of a generated source (`isGeneratedSource`, `classify.go`), so the group
+  stays in one tier and a tier annotation, `placement` or `dependency` naming the component
+  moves both objects. Temporary: go-kure/launcher#783 deletes that function with the tier
+  model.
+- **A shared source belongs to the application.** When two or more `oci` components of a
+  document have the same source, it is emitted once as a generated source named
+  `<document>-source-<digest>`, `helm`'s scheme, and no longer under the name of the
+  component deployed first. The identity is the url, the version and the effective
+  interval: components whose intervals differ keep a source each, so no component's
+  interval is replaced by another's. An `oci` and a `helm` component on one artifact do not
+  share.
+- **`SourceDeduplicatable`** (`pkg/oam/handler.go`) has no builtin implementer left. The
+  interface and the engine's call stay until go-kure/launcher#783 removes them.
+- `targetNamespace` is never defaulted on `fluxcd-kustomization`, for the reason `oci`
+  never defaulted it (§7).
 - The name of an authored Kustomization against a delivery Kustomization a consumer
   generates is a kure check, not launcher's.
 
@@ -532,8 +549,9 @@ and the disposition of every item. The four this document started from:
   (`HelmReleaseConfig.Generate`). The difference is deliberate: a Kustomization's
   `targetNamespace` overrides the namespace of every namespaced object in the artifact,
   where the HelmRelease default only says where the release installs. The `oci` property's
-  description says so (`OCIHandler.PropertySchema`, `pkg/oam/builtin/components/oci.go`).
-  The `fluxcd-kustomization` kind of go-kure/launcher#784 follows `oci`.
+  description says so (`OCIRule.PropertySchema`, `pkg/oam/builtin/components/oci.go`).
+  The `fluxcd-kustomization` kind sets none either, for the same reason
+  (`FluxcdKustomizationHandler.PropertySchema`, `fluxcd_kustomization.go`).
 - **Environment policy on unbuilt objects (items 2 and 10): shipped for `passthrough` and
   `manifests`.** Both are held to the check template delivery runs on a rendered object
   (`enforceRenderedObjectPolicy`, `helmtemplate_policy.go`): the image, pod security,
@@ -590,7 +608,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781) | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | Shipped | — |
 | [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | Open | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
 | [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | Shipped | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
-| [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Open | — |
+| [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides | go-kure/launcher#783, go-kure/launcher#793 |
