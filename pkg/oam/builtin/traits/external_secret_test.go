@@ -83,6 +83,8 @@ func podSpecOf(t *testing.T, objs []*client.Object) *corev1.PodSpec {
 			return &w.Spec.Template.Spec
 		case *corev1.Pod:
 			return &w.Spec
+		case *appsv1.ReplicaSet:
+			return &w.Spec.Template.Spec
 		}
 	}
 	t.Fatalf("no supported workload found in %d objects", len(objs))
@@ -546,8 +548,8 @@ func TestExternalSecret_EnvFrom_AddsSecretRefToDeployment(t *testing.T) {
 	}
 }
 
-// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all six supported
-// workload kinds (Deployment, StatefulSet, DaemonSet, Job, CronJob, Pod) crossed with
+// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all seven supported
+// workload kinds (Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, Pod) crossed with
 // the three consumption modes (envFrom only, mountPath only, both), asserting the
 // exact injected objects on the PodSpec each kind exposes.
 func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
@@ -558,6 +560,15 @@ func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
 		{"Deployment", newWorkerStubConfig(t)},
 		{"StatefulSet", &stubStatefulSetConfig{}},
 		{"DaemonSet", &stubDaemonSetConfig{}},
+		{"ReplicaSet", &components.ReplicaSetConfig{Spec: appsv1.ReplicaSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "web"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"tier": "web"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "app", Image: "registry.example/team/app:1.2.3"}},
+				},
+			},
+		}}},
 		{"Job", newJobStubConfig(t)},
 		{"CronJob", newCronJobStubConfig(t)},
 		{"Pod", &components.PodConfig{Spec: corev1.PodSpec{
@@ -698,7 +709,7 @@ func TestExternalSecret_UnsupportedComponent_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")
 	}
-	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, Job, CronJob, or Pod") {
+	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, or Pod") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

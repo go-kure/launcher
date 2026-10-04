@@ -305,6 +305,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"resourcequota":    &components.ResourceQuotaHandler{},
 		"persistentvolume": &components.PersistentVolumeHandler{},
 		"pod":              &components.PodHandler{},
+		"replicaset":       &components.ReplicaSetHandler{},
 	}
 }
 

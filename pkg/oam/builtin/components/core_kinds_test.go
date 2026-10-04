@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,6 +41,7 @@ var coreKindSchemas = []struct {
 		"priority":            "the Priority admission controller derives it from priorityClassName and rejects a differing value",
 		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
 	}},
+	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes
@@ -135,8 +137,9 @@ func coreKindErr(h oam.ComponentHandler, typ, name string, props map[string]any)
 // generateCoreKind converts one component, applies a restrictive policy and no
 // policy, and generates. It checks what every core kind promises: exactly one
 // object, named after the component, with no annotation of launcher's and no
-// label, except the `app` label on a Pod. The caller checks the namespace,
-// which depends on the kind's scope.
+// label, except the `app` label on a Pod. A kind that holds a pod template
+// labels the template, not the object. The caller checks the namespace, which
+// depends on the kind's scope.
 func generateCoreKind(t *testing.T, h oam.ComponentHandler, typ, name string, props map[string]any) client.Object {
 	t.Helper()
 	one := int32(1)
