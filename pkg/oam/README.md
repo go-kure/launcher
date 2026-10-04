@@ -584,7 +584,12 @@ component label as its pod selector, as one component deploying both would, whil
 its ports still go through the routing target: a routed Service port name becomes
 its number and a non-TCP port is dropped. A member that remaps a port or names a
 `targetPort` gets the Service `selector` policy, so it opens the port the pods
-listen on.
+listen on. A member reports its pod template labels through an optional method on
+its config, `PodTemplateLabels() map[string]string`; a member without it counts as
+running no pods. Of the built-in pod kinds only `deployment` has it, the one pod
+kind a lowering rule emits into a group (go-kure/launcher#794, item 3). A rule that
+emits another pod kind into a group must add the method to that kind's config, or
+a routing member selecting its pods gets the Service `selector` policy.
 
 Traits run per member, against that member's own config: the rule decides which
 member carries each trait. A routing trait (ingress, Gateway API routes) belongs on

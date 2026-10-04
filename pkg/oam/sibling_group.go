@@ -414,7 +414,10 @@ func (g *siblingGroupConfig) selectsSibling(i int, sel *metav1.LabelSelector) bo
 // podTemplateLabeler is optionally implemented by a component config whose
 // workload runs pods: it returns the labels its pod template carries. A sibling
 // group reads it to tell a member's routing target that selects its own sibling's
-// pods (selectsSibling).
+// pods (selectsSibling). A member without it counts as running no pods. Of the
+// built-in pod kinds only deployment implements it, the one pod kind a lowering
+// rule emits into a group; a rule that emits another pod kind into a group must
+// add the method to that kind's config.
 type podTemplateLabeler interface {
 	PodTemplateLabels() map[string]string
 }

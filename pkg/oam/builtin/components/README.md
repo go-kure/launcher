@@ -1492,7 +1492,11 @@ per-pod claims from `volumeClaimTemplates`, so the question differs.
 **`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
 same-name sibling group can tell that a `service` member selects this
 Deployment's own pods, which the group's component-label policy already
-covers (see `pkg/oam` "Same-name sibling groups").
+covers (see `pkg/oam` "Same-name sibling groups"). `statefulset`, `daemonset`,
+`job` and `cronjob` do not have the method, deliberately (go-kure/launcher#794,
+item 3): its one reader is that group check, and `deployment` is the only pod
+kind a lowering rule emits into a group (`webservice`, `worker`). A rule that
+emits another pod kind into a group must add the method to that kind.
 
 | Property | Type | Effect | Compatibility |
 |----------|------|--------|---------------|
@@ -1931,13 +1935,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
     none.
+  - **No policy check.** `service` has no `ApplyPolicy`, deliberately
+    (go-kure/launcher#794, item 2): none of its properties maps to an
+    environment-policy method, so there is nothing to enforce. The policy
+    makes no statement about a Service's `type`, so `NodePort` and
+    `LoadBalancer` build under every policy.
 - **serviceaccount**, **persistentvolumeclaim**, **configmap**
   (go-kure/launcher#702) are kind-named projections of one object each. Each
   emits that object, named after the component, and nothing else, so another
   component refers to it by the component name. They are the authorable forms
   of the objects the workload kinds generate for themselves today, and they
   carry no launcher opinions. Like every component, they are in no tier
-  unless a tier annotation or placement policy places them.
+  unless a tier annotation or placement policy places them. `serviceaccount`
+  and `configmap` have no `ApplyPolicy`, deliberately (go-kure/launcher#794,
+  item 2): none of their properties maps to an environment-policy method
+  (`imagePullSecrets` names Secrets, not a registry), so there is nothing to
+  enforce. `persistentvolumeclaim` has one, for the storage default and
+  maximum.
   - `serviceaccount` publishes `automountServiceAccountToken` and
     `imagePullSecrets` (`[{name}]`). An unauthored
     `automountServiceAccountToken` stays unset, which Kubernetes reads as
@@ -2614,6 +2628,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
   `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the
   release still installs there rather than into the Flux namespace; an authored value wins.
+  The Kustomization `oci` emits has no such default, deliberately (go-kure/launcher#794,
+  item 1): a HelmRelease's `targetNamespace` only says where the release installs, while a
+  Kustomization's overrides the namespace of every namespaced object in the artifact (see
+  `oci` below).
   The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
   `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
   helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
@@ -2767,8 +2785,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   say — is left out of the output, with no error. Before go-kure/launcher#791 the object was
   emitted as rendered. go-kure/launcher#794 (item 7) decides between refusing such a document,
   keeping the field, and leaving the loss documented. A chart that emits a `v1` `List` does not
-  build; go-kure/kure#981 decides whether kure's parser flattens a typed list into its items,
-  and once it does such a chart parses. A workload or claim in an API version kure's scheme
+  build: at the pinned kure version the parser does not flatten a typed list into its items.
+  A workload or claim in an API version kure's scheme
   does not register
   (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
   is refused rather than passed unchecked; so is a list left inside such a list, whose items the
@@ -2777,7 +2795,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   custom resource's controller creates, and the replica count a custom resource sets; the host of the chart archive a Helm repository's index
   points at, and any redirect, which kure's renderer follows (go-kure/launcher#794, item 6,
   decides whether those are held to the allowlist). A nil policy (a direct
-  `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing. A chart
+  `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing, and
+  `ApplyPolicy(nil)` withdraws no policy applied before. A chart
   delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under `delivery: flux`) is rendered
   on the cluster, so nothing it renders can be checked at build time; only the host of a source
   component in the document is.
@@ -2840,7 +2859,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   kustomize-controller does not fill in its own namespace for an object that
   still has none. Author `targetNamespace` when namespaced objects are left
   without a namespace after that build: they otherwise fail at apply with
-  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmrelease`, which under a Flux namespace default
+  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmrelease`, which under a Flux namespace defaults
   `targetNamespace` to the application namespace. A Kustomization's
   `targetNamespace` sets or overrides the namespace of every namespaced object
   it applies, Flux custom resources included, so a default would move the
@@ -3532,7 +3551,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Not checked: an object that runs no pod; a custom resource, the pods its controller
   creates and the replica count it sets; a `Secret`, which no check here reads. A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
-  to) checks nothing.
+  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
   An override outranks kure's own non-API-governed scope-table entry — a kind
@@ -3593,7 +3612,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   told there by a top-level `items` array, so a custom resource that names a field
   `items` is refused in that position too. An object of another kind inside a list of an
   unregistered kind still builds. A source that holds a `v1` `List` did not build before
-  this check and does not now (go-kure/kure#981 decides whether kure's parser flattens a
+  this check and does not now (at the pinned kure version the parser does not flatten a
   typed list into its items).
 
   **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
@@ -3610,7 +3629,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Not checked: an object that runs no pod; a custom resource, the pods its controller
   creates and the replica count it sets; a `Secret`, which no check here reads. A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
-  to) checks nothing.
+  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
 
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme and host only
