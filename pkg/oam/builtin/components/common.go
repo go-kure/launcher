@@ -513,10 +513,10 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 // both for every pod spec, templates included (validateFileKeyRefVolumes,
 // called from ValidatePodSpec in k8s.io/kubernetes
 // pkg/apis/core/validation/validation.go). Only the component's own volumes
-// count: no trait the build evaluates adds an emptyDir volume. A raw
-// fluxcd-patches patch is outside the build's view (Flux applies it later, and
-// any component in the bundle may target this workload), so a volume only a
-// patch supplies is not seen, as for checkContainerVolumeModes' volumeDevices.
+// count: no trait the build evaluates adds an emptyDir volume. A patch a
+// consumer applies at delivery is outside the build's view (it is applied
+// after the build, and may target any workload it delivers), so a volume only
+// a patch supplies is not seen, as for checkContainerVolumeModes' volumeDevices.
 func checkFileKeyRefVolumes(volumes []corev1.Volume, mainEnv []corev1.EnvVar, inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
 	emptyDir := make(map[string]bool, len(volumes))
 	for _, v := range volumes {
