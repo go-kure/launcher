@@ -1,10 +1,6 @@
 package oam
 
-import (
-	"fmt"
-
-	"github.com/go-kure/kure/pkg/stack"
-)
+import "fmt"
 
 // PolicyHandler dispatches a single OAM policy document during pipeline execution.
 type PolicyHandler interface {
@@ -14,11 +10,16 @@ type PolicyHandler interface {
 
 // PolicyResult accumulates the effects of all OAM policy handlers.
 type PolicyResult struct {
-	TierOverrides          map[string]Tier
-	Dependencies           map[string][]string
-	AppDependsOn           []string
-	HealthCheckOverrides   []stack.HealthCheck
-	ReconciliationSettings *ReconciliationSettings
+	TierOverrides map[string]Tier
+	Dependencies  map[string][]string
+	AppDependsOn  []string
+	// Extensions carries what a consumer's own policy handlers record: launcher
+	// neither reads nor changes it, and TransformWithPolicy returns it as the
+	// handlers left it. A handler writes under a key it owns (a domain-qualified
+	// name, as a label key is) a value of any type; the consumer reads that key
+	// back and asserts its own type. This is where a consumer that delivers the
+	// application keeps what its delivery policies say (go-kure/launcher#781).
+	Extensions map[string]any
 	// ConsumedCapabilities is the sorted, deduped capability keys this app's traits
 	// actually resolved against ctx.Capabilities, that its components' handlers took
 	// defaults from (ComponentCapabilityDefaults, go-kure/launcher#742), and that its
@@ -35,6 +36,7 @@ func NewPolicyResult() *PolicyResult {
 	return &PolicyResult{
 		TierOverrides: make(map[string]Tier),
 		Dependencies:  make(map[string][]string),
+		Extensions:    make(map[string]any),
 	}
 }
 
@@ -54,17 +56,6 @@ const (
 
 // TierOrder defines the deployment order from earliest to latest.
 var TierOrder = []Tier{TierInfra, TierServices, TierApps}
-
-// ReconciliationSettings holds Flux reconciliation overrides from a reconciliation policy.
-type ReconciliationSettings struct {
-	Interval      string
-	RetryInterval string
-	Timeout       string
-	Prune         *bool
-	Wait          *bool
-	Force         *bool
-	Suspend       *bool
-}
 
 // ViolationError is returned when an Enforceable config rejects the current Policy.
 type ViolationError struct {

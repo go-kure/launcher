@@ -101,21 +101,26 @@ type fluxNamespaceSettable interface {
 	SetFluxNamespace(string)
 }
 
-// autoHealthCheckEmitter is implemented by ApplicationConfig types whose
-// auto health-check (from componentHealthCheckGVK) is only meaningful for some
-// of the documents they accept. Two shapes qualify, and both return false:
-//
-//   - the config emits no object for the check to reference for some
-//     documents. No built-in config takes this shape today.
-//   - the config emits the object, but the document instructs the workload not
-//     to progress, so a readiness gate on it is not a health signal. Deployment
-//     returns false for paused: true, job and helmrelease for suspend: true.
-//
-// Decorators that wrap such configs must forward this call (mirroring
-// fluxNamespaceSettable). Configs that do not implement it are assumed to emit
-// an object that can reach a ready state.
-type autoHealthCheckEmitter interface {
-	EmitsAutoHealthCheck() bool
+// deliveryPolicyTypes and deliveryTraitTypes are the policy and trait types that
+// say how an application is delivered rather than what it consists of: health
+// checks and reconciliation settings of the delivering object, and patches and
+// post-build substitution it applies. Launcher has no handler for them and sets
+// none of those fields on a bundle (go-kure/launcher#781); a consumer that
+// delivers through Flux registers its own. They are named here only so the "no
+// handler" error can say that.
+var (
+	deliveryPolicyTypes = map[string]bool{"health-checks": true, "reconciliation": true}
+	deliveryTraitTypes  = map[string]bool{"fluxcd-patches": true, "fluxcd-postbuild": true}
+)
+
+// noHandlerMessage is the "no handler" error for a policy or trait type, with a
+// hint when the type is one of delivery.
+func noHandlerMessage(position, typ string, delivery map[string]bool) string {
+	msg := fmt.Sprintf("no handler for %s type %q", position, typ)
+	if delivery[typ] {
+		msg += ": it configures delivery, which launcher leaves to the consumer that delivers the application; a consumer that delivers through Flux registers its own handler"
+	}
+	return msg
 }
 
 // Transformer is the core OAM runtime. Handlers are registered at startup;
@@ -701,13 +706,14 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// Phase 4: post-build bundle decorations.
+	// Phase 4: post-build bundle decorations. None of them sets a Flux delivery
+	// field of a bundle (health checks, interval, prune, wait, timeout, retry
+	// interval, force, suspend, patches, post-build): those belong to the consumer
+	// that delivers the application (go-kure/launcher#781).
 	componentMap := make(map[string]componentEntry, len(entries))
 	for _, e := range entries {
 		componentMap[e.component.Name] = e
 	}
-	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides, ctx.FluxNamespace)
-	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
 	labelKey := ctx.ComponentLabelKey
 	if labelKey == "" {
 		labelKey = ComponentLabelKeyForDomain(ctx.Domain)
@@ -841,7 +847,7 @@ func (t *Transformer) applyPolicies(app *Application, entries []componentEntry) 
 	for _, p := range app.Spec.Policies {
 		handler := t.findPolicyHandler(p.Type)
 		if handler == nil {
-			return nil, &TransformError{Message: fmt.Sprintf("no handler for policy type %q", p.Type)}
+			return nil, &TransformError{Message: noHandlerMessage("policy", p.Type, deliveryPolicyTypes)}
 		}
 		if err := handler.Apply(&p, componentNames, result); err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("policy %q", p.Name), Cause: err}
@@ -904,8 +910,8 @@ func (t *Transformer) buildHierarchicalCluster(app *Application, entries []compo
 		tierBundles[i].DependsOn = append(tierBundles[i].DependsOn, tierBundles[i-1])
 	}
 
-	// No Wait: kure gives an umbrella one health check per child Kustomization,
-	// and Flux ignores health checks when wait is enabled.
+	// The umbrella carries no delivery field either: how it is delivered is the
+	// consumer's (go-kure/launcher#781).
 	umbrella := &stack.Bundle{
 		Name:     app.Metadata.Name,
 		Children: tierBundles,
@@ -1109,12 +1115,12 @@ type entryAppStep struct {
 
 // checkEntryApplications fails when trait traitType of component component, at
 // step, left a bundle entry's application out of the bundle, by pointer, or
-// renamed it or a sibling group member's from names. The Phase-4 automatic
-// health check and NetworkPolicy synthesis find a component's application by
-// its name and then its pointer, so a replaced, removed or renamed one would
-// silently get neither; a renamed member would generate its objects under a
-// name the group's health check does not name (go-kure/launcher#734,
-// go-kure/launcher#752, go-kure/launcher#763). A member is checked by name only:
+// renamed it or a sibling group member's from names. The Phase-4 NetworkPolicy
+// synthesis finds a component's application by its name and then its pointer,
+// so a replaced, removed or renamed one would silently get no policy; a renamed
+// member would generate its objects under a name the group does not carry
+// (go-kure/launcher#734, go-kure/launcher#752, go-kure/launcher#763). A member
+// is checked by name only:
 // the bundle holds the group's application, and a trait is handed the member's
 // application, never the group's list of them.
 func checkEntryApplications(entries []componentEntry, names entryAppNames, bundle *stack.Bundle, component, traitType string, step entryAppStep) error {
@@ -1224,7 +1230,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
-				return nil, &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
+				return nil, &TransformError{Message: noHandlerMessage("trait", trait.Type, deliveryTraitTypes)}
 			}
 			// A sealed trait was emitted by a lowering rule, which already merged
 			// capability rendering into it (D5) before the fixpoint settled — the
@@ -1368,12 +1374,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 // The bundle's order is final by then, so a decorator must leave its
 // applications exactly as they are. They are compared by pointer and position
 // rather than by count, so a removal followed by an append is caught too, and
-// by name: the automatic health check and NetworkPolicy synthesis have already
-// named their objects after the applications (go-kure/launcher#734). The
-// snapshot is a copy because a removal shifts the shared backing array in
-// place. A sibling group member's application is not in the bundle, so its
-// name is checked against the entries' (checkEntryApplications): the group's
-// health check already names it (go-kure/launcher#763).
+// by name: the NetworkPolicy synthesis has already named its objects after
+// the applications (go-kure/launcher#734). The snapshot is a copy because a
+// removal shifts the shared backing array in place. A sibling group member's
+// application is not in the bundle, so its name is checked against the
+// entries' (checkEntryApplications, go-kure/launcher#763).
 func decorateSubApplications(decorations []subAppDecoration) error {
 	for _, d := range decorations {
 		names := snapshotEntryAppNames(d.entries)
@@ -1758,63 +1763,6 @@ func detectCycles(deps map[string][]string) error {
 	return nil
 }
 
-// componentHealthCheckGVK maps OAM component types to their primary workload GVK.
-// Types not listed are skipped.
-//
-// `job` is listed and `cronjob` is not, and the difference is not that one is
-// ephemeral: it is that a Job reaches a terminal state a health check can wait
-// on and a CronJob never does. kstatus reads a Job's `Complete` condition as
-// Current and its `Failed` condition as failed (fluxcd/cli-utils
-// pkg/kstatus/status/core.go, jobConditions), so a Kustomization that depends on
-// a migration job waits for the migration to finish and fails when it fails —
-// which is the whole point of declaring the dependency. A CronJob owns no pods
-// between schedules and has no such condition, so a check on one would wait for
-// something that never arrives.
-//
-// The obvious objection — that a job with ttlSecondsAfterFinished is garbage
-// collected and the health check then names a missing object — does not hold:
-// kustomize-controller extracts jobs carrying a TTL and passes them to the
-// waiter as JobsWithTTL so their disappearance is not a failure
-// (fluxcd/kustomize-controller, checkHealth). The case that does need handling
-// is `suspend: true`, and JobConfig vetoes its own check there via
-// autoHealthCheckEmitter, exactly as deployment does for `paused: true`.
-// HelmReleaseConfig vetoes for its own `suspend: true` the same way: a
-// suspended HelmRelease is not reconciled, so its Ready condition cannot report
-// on it.
-//
-// The kind-named Flux source components (go-kure/launcher#347, and helmchart,
-// go-kure/launcher#351) are listed: each
-// emits exactly one source CR whose Ready condition kstatus reads, so a
-// Kustomization that depends on a source waits until the source is ready. Each
-// vetoes its check for `suspend: true`, the same shape as job's veto: the
-// document tells source-controller not to reconcile. helmrepository also vetoes
-// for `type: oci`, which Flux treats as a static object with no artifact, so
-// there is no reconcile to wait on. The GVK is a *.toolkit.fluxcd.io kind, so
-// the check follows the CR to the Flux namespace when one is set.
-//
-// cnpg-pooler, cnpg-database and cnpg-objectstore (go-kure/launcher#573) are
-// not listed: the Pooler, Database and ObjectStore statuses carry no condition
-// kstatus reads, so a check would report Current without waiting on anything.
-// postgresql, which emits the same kinds, checks only its Cluster.
-var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
-	"webservice":   {"apps/v1", "Deployment"},
-	"worker":       {"apps/v1", "Deployment"},
-	"deployment":   {"apps/v1", "Deployment"},
-	"statefulset":  {"apps/v1", "StatefulSet"},
-	"daemonset":    {"apps/v1", "DaemonSet"},
-	"job":          {"batch/v1", "Job"},
-	"helmrelease":  {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
-	"postgresql":   {"postgresql.cnpg.io/v1", "Cluster"},
-	"cnpg-cluster": {"postgresql.cnpg.io/v1", "Cluster"},
-	"oci":          {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
-
-	"helmrepository": {"source.toolkit.fluxcd.io/v1", "HelmRepository"},
-	"ocirepository":  {"source.toolkit.fluxcd.io/v1", "OCIRepository"},
-	"gitrepository":  {"source.toolkit.fluxcd.io/v1", "GitRepository"},
-	"bucket":         {"source.toolkit.fluxcd.io/v1", "Bucket"},
-	"helmchart":      {"source.toolkit.fluxcd.io/v1", "HelmChart"},
-}
-
 // postProcessFluxNamespace walks all leaf bundle applications and calls
 // SetFluxNamespace on any config that satisfies fluxNamespaceSettable, then
 // moves the trait sub-applications those Flux objects read from their own
@@ -1831,108 +1779,6 @@ func postProcessFluxNamespace(cluster *stack.Cluster, owned []traitSubApps, ns s
 		}
 	})
 	moveFluxNamespaceInputs(owned, ns)
-}
-
-// isFluxControlPlaneGVK reports whether an auto health-check GVK targets a Flux
-// control-plane CR (a *.toolkit.fluxcd.io kind, e.g. HelmRelease) that
-// postProcessFluxNamespace relocates to the flux namespace. Workload kinds
-// (Deployment/StatefulSet/…) and app-namespace CRs (CNPG Cluster) stay in the
-// app namespace even when their config is wrapped by a fluxNamespaceSettable
-// decorator, so the namespace switch must be gated on this.
-func isFluxControlPlaneGVK(apiVersion string) bool {
-	group, _, _ := strings.Cut(apiVersion, "/")
-	return strings.HasSuffix(group, ".toolkit.fluxcd.io")
-}
-
-// applyAutoHealthChecks walks all leaf bundles and appends inferred health check
-// references based on each component's type, followed by any explicit overrides.
-//
-// The synthesized check's namespace must point at the namespace where the
-// referenced object actually lands. For Flux-CR configs (helmrelease →
-// HelmRelease) the object is relocated to the flux namespace by
-// postProcessFluxNamespace, so the check must carry the same flux namespace —
-// this mirrors that function's predicate exactly (fluxNamespaceSettable +
-// non-empty fluxNamespace) so the check always follows its object. Configs that
-// veto their check (helmrelease with suspend: true) are skipped via
-// autoHealthCheckEmitter.
-func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]componentEntry, overrides []stack.HealthCheck, fluxNamespace string) {
-	if cluster == nil {
-		return
-	}
-	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
-		for _, app := range bundle.Applications {
-			// Match the component's own application by identity, not by name: a
-			// trait's sub-application (a `pvc` trait's claim `<component>-<volume>`)
-			// can share its name with another component, and must not get that
-			// component's check (go-kure/launcher#702).
-			entry, ok := componentMap[app.Name]
-			if !ok || app != entry.app {
-				continue
-			}
-			gvk, ok := componentHealthCheckGVK[entry.component.Type]
-			if !ok {
-				continue
-			}
-			// Skip when the config vetoes its check (autoHealthCheckEmitter).
-			if e, ok := app.Config.(autoHealthCheckEmitter); ok && !e.EmitsAutoHealthCheck() {
-				continue
-			}
-			// Mirror postProcessFluxNamespace: a config that re-stamps the flux
-			// namespace on its object emits that object in the flux namespace, so
-			// its health check must reference the flux namespace too. Gate on the
-			// target being a Flux control-plane CR (e.g. HelmRelease): wrappers
-			// (configmap/prune-protection) implement fluxNamespaceSettable even
-			// when wrapping a workload whose Deployment stays in the app namespace,
-			// so the settable check alone is too broad.
-			// A sibling group's config takes the namespace for every member, so
-			// whether the checked object follows it is the primary member's answer:
-			// the check names the primary's kind.
-			ns := app.Namespace
-			if fluxNamespace != "" && isFluxControlPlaneGVK(gvk.APIVersion) {
-				if _, settable := entry.healthCheckConfig().(fluxNamespaceSettable); settable {
-					ns = fluxNamespace
-				}
-			}
-			bundle.HealthChecks = append(bundle.HealthChecks, stack.HealthCheck{
-				APIVersion: gvk.APIVersion,
-				Kind:       gvk.Kind,
-				Name:       app.Name,
-				Namespace:  ns,
-			})
-		}
-		bundle.HealthChecks = append(bundle.HealthChecks, overrides...)
-	})
-}
-
-// applyReconciliationSettings applies Flux reconciliation overrides from a
-// reconciliation policy to all leaf bundles.
-func applyReconciliationSettings(cluster *stack.Cluster, _ map[string]componentEntry, settings *ReconciliationSettings) {
-	if cluster == nil || settings == nil {
-		return
-	}
-	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
-		if settings.Interval != "" {
-			bundle.Interval = settings.Interval
-		}
-		if settings.RetryInterval != "" {
-			bundle.RetryInterval = settings.RetryInterval
-		}
-		if settings.Timeout != "" {
-			bundle.Timeout = settings.Timeout
-		}
-		if settings.Prune != nil {
-			bundle.Prune = settings.Prune
-		}
-		if settings.Wait != nil {
-			bundle.Wait = settings.Wait
-		}
-		if settings.Force != nil {
-			bundle.Force = settings.Force
-		}
-		if settings.Suspend != nil {
-			bundle.Suspend = settings.Suspend
-		}
-	})
 }
 
 // walkLeafBundles calls fn for every leaf bundle reachable from node.

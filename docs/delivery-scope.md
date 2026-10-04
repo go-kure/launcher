@@ -7,8 +7,8 @@ cross-library scope review of kure, launcher and a downstream cluster engine tha
 both. For each area it states launcher's current behaviour, with `file:line` references,
 and the target behaviour of the ticket that changes it.
 
-It supersedes [§11 "Launcher Layout"](design.md#11-launcher-layout) of the design
-document. Ticket go-kure/launcher#781 deletes that section.
+It supersedes §11 "Launcher Layout" of the [design document](design.md), which
+go-kure/launcher#781 deleted with the `kurel` layer it described.
 
 **Tickets.** Each target names the go-kure/launcher issue that implements it; §8 lists them
 all. Each issue links back to this document.
@@ -69,7 +69,7 @@ constraint.
 | `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **go-kure/launcher#781:** removed. |
 | `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **go-kure/launcher#781:** removed (breaking for a consumer that aliased them). |
 | `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **go-kure/launcher#781:** removed with `bundle_patches.go`. `GeneratedApplication.Forced` loses its source (the reconciliation policy's `force`, `transform.go:1929`) and is re-sourced by go-kure/launcher#782. |
-| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; [design §11](design.md#11-launcher-layout) | **go-kure/launcher#781:** removed in the same change. An engine-neutral artifact option may follow when `kurel` work resumes. |
+| `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; design §11 "Launcher Layout" | **go-kure/launcher#781:** removed in the same change. An engine-neutral artifact option may follow when `kurel` work resumes. |
 | `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **go-kure/launcher#782:** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
 
 What stays: `placement`, `dependency`, the tier annotation (author-declared ordering

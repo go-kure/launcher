@@ -248,8 +248,7 @@ func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
 // go-kure/launcher#734: the Phase-4 passes find a component's application by
 // its name and then the pointer its entry holds, so a trait that replaces,
 // removes or renames one, its own or another component's in the bundle, fails
-// the transform instead of silently costing that component its NetworkPolicies
-// and health check.
+// the transform instead of silently costing that component its NetworkPolicies.
 func TestApplyTraits_RefusesReplacedComponentApplication(t *testing.T) {
 	const contract = `; a TraitHandler mutates the application it is given and appends sub-applications, it must not replace, remove or rename a component's application`
 	replaced := `component "web" trait "reorder0" replaced or removed the application of component %q` + contract
@@ -427,8 +426,7 @@ func (pairRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResu
 // on a sibling group runs on a member's application, which the bundle does not
 // hold (the group's does), so a member is checked by its name. A trait or a
 // trait sub-application's policy that renames it fails the transform: the
-// member would generate its objects under a name the group's health check does
-// not name.
+// member would generate its objects under a name the group does not carry.
 func TestApplyTraits_RefusesRenamedSiblingMember(t *testing.T) {
 	const member = `renamed the application of member "webservice" of sibling group "web" from "web" to "web-renamed"; `
 	for name, tc := range map[string]struct {
@@ -600,8 +598,8 @@ func (bundleEditTraitHandler) DecoratesSubApplications() bool { return true }
 // sub-application is refused. The pass runs after the build's other steps, so
 // they would never see an added application, and the order is already final.
 // A removal followed by an append leaves the length unchanged, and is refused
-// all the same. So is a rename (go-kure/launcher#734): the health check and
-// NetworkPolicies already carry the name.
+// all the same. So is a rename (go-kure/launcher#734): the NetworkPolicies
+// already carry the name.
 func TestDecorateSubApplications_RefusesBundleChange(t *testing.T) {
 	for _, edit := range []string{"append", "remove-and-append", "replace", "rename", "reorder"} {
 		t.Run(edit, func(t *testing.T) {

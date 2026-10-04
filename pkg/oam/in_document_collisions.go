@@ -12,24 +12,17 @@ import (
 
 // GeneratedApplication is one application's generated output, as a caller that
 // generates a transformed document holds it: the stack.Application's name, the OAM
-// component it belongs to, every object it generated, whether its bundle
-// force-applies them, and the patches its bundle's Kustomization applies to them.
+// component it belongs to, every object it generated, and whether its bundle
+// force-applies them.
 type GeneratedApplication struct {
 	Name      string // the stack.Application's name
 	Component string // the OAM component it belongs to (ComponentNamed), else Name
 	Objects   []*client.Object
 	// Forced reports that the application's leaf bundle sets Force, so its Flux
 	// Kustomization (spec.force) force-applies every object, annotated or not.
+	// Launcher never sets a bundle's Force (go-kure/launcher#781), so this is true
+	// only for a bundle whose Force the caller set before generating.
 	Forced bool
-	// Patches are the leaf bundle's patches (stack.Bundle.Patches, which the
-	// fluxcd-patches trait sets): its Flux Kustomization's spec.patches, applied
-	// to every object of the bundle before Flux applies them.
-	Patches []stack.Patch
-
-	// bundle is the leaf bundle GenerateApplications generated it from, so the
-	// applications of one bundle are patched together; nil for an application a
-	// caller built, which is patched on its own.
-	bundle *stack.Bundle
 }
 
 // String names the application as a collision error names its producer: a
@@ -112,8 +105,7 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		// Copied at once, as Bundle.Generate appends each result at once: a config
 		// that reuses its result slice must not change an earlier application's.
 		objs = append([]*client.Object(nil), objs...)
-		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs, Forced: forced,
-			Patches: bundle.Patches, bundle: bundle})
+		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs, Forced: forced})
 	}
 	// Merged after every application of the bundle has generated, as
 	// Bundle.Generate merges them: an application may change an object another

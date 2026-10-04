@@ -43,7 +43,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"verify":             fluxSourceObject("GitRepository spec.verify: commit signature verification."),
 		"proxySecretRef":     fluxSourceObject("GitRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
 		"ignore":             fluxSourceString("GitRepository spec.ignore: exclusion patterns in .sourceignore format."),
-		"suspend":            fluxSourceBool("GitRepository spec.suspend: stop reconciling the source. Also skips the auto health check."),
+		"suspend":            fluxSourceBool("GitRepository spec.suspend: stop reconciling the source."),
 		"recurseSubmodules":  fluxSourceBool("GitRepository spec.recurseSubmodules: initialise submodules in the clone."),
 		"include": {
 			Type:        oam.PropertyTypeArray,
@@ -112,11 +112,6 @@ func (c *GitRepositoryConfig) ApplyPolicy(p oam.Policy) error {
 // SetFluxNamespace moves the GitRepository to ns. Satisfies
 // pkg/oam.fluxNamespaceSettable.
 func (c *GitRepositoryConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
-
-// EmitsAutoHealthCheck vetoes the auto health check for `suspend: true`, where
-// the document tells source-controller not to reconcile the source. Satisfies
-// pkg/oam.autoHealthCheckEmitter.
-func (c *GitRepositoryConfig) EmitsAutoHealthCheck() bool { return !c.Spec.Suspend }
 
 // Generate emits the GitRepository.
 func (c *GitRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, error) {

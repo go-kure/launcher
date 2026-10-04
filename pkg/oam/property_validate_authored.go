@@ -51,7 +51,7 @@ import (
 //     its type, or of the PolicyLoweringRule claiming it — the same lookup
 //     validateEmittedPolicy uses. The built-in policy handlers kurel registers
 //     (pkg/oam/builtin/policies) each declare one, so a misspelt or wrongly typed
-//     key on a `dependency`, `placement`, `reconciliation` or `health-checks`
+//     key on a `dependency` or `placement`
 //     policy is a build error rather than a setting the handler silently never
 //     reads. A handler that declares no schema accepts anything, as at the other
 //     positions, and a policy type with nothing registered for it is passed over

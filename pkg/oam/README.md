@@ -39,9 +39,13 @@ tier's bundles. A Flux source shared by several components (`SourceDeduplicatabl
 emitted once, by the sharing component that comes first in that deployment order (tier,
 then dependencies, then document order), so its owner never waits on another consumer.
 
-The tier umbrella bundle is named after the Application and leaves `Wait` unset: kure gives
-its Kustomization one health check per child Kustomization, and Flux ignores health checks
-when `wait` is enabled, so the umbrella is Ready only when every child Kustomization is.
+The tier umbrella bundle is named after the Application.
+
+Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
+`Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
+stay unset (go-kure/launcher#781). How an application is delivered (which Flux
+Kustomization applies it, how readiness is judged, how often it reconciles) belongs to the
+consumer that delivers it; see `docs/delivery-scope.md`.
 
 Within a bundle, each component's application is followed by the sub-applications its traits
 created, in creation order, so a trait's objects are emitted with their own component's rather
@@ -226,70 +230,20 @@ is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
-`ParseWithExtraTypes`, the same entry point `kurel build` uses. Two other per-type
-registries have the same shape and the same failure mode — `traitComponentRestrictions`
+`ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
+registry has the same shape and the same failure mode: `traitComponentRestrictions`
 (which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
-`worker` and `deployment`, the kinds that report a non-RWX claim to it) and `componentHealthCheckGVK` (the workload GVK
-a component type's auto health check targets; an unlisted type is skipped silently, so
-its bundle simply carries one health check fewer). The auto check is attached only
-to the component's own application, matched by identity: a trait sub-application
-that shares another component's name (a `pvc` trait's claim `<component>-<volume>`)
-never takes that component's check (go-kure/launcher#702).
+`worker` and `deployment`, the kinds that report a non-RWX claim to it).
 
-**Membership in `componentHealthCheckGVK` follows what kstatus can actually read, not
-whether the workload has a steady ready state.** `job` is listed: kstatus's `jobConditions`
-maps a Job's `Complete` condition to `CurrentStatus` and `Failed` to failed, so a Job is a
-terminal signal Flux can wait on even though it never becomes `Ready`. Flux accommodates the
-one shape that looked like a counter-argument — a Job deleted by `ttlSecondsAfterFinished`
-before the wait finishes — by extracting TTL-bearing Jobs up front and passing them as
-`JobsWithTTL` to its wait options.
-
-`cronjob` stays absent, and for a reason that does not generalise to `job`: a CronJob owns
-no pods between schedules and carries no condition that ever reports completion, so there is
-nothing for a health check to read. The other unlisted types — `passthrough`, `crd`,
-`manifests` and `helmtemplate` — are absent for a third reason: they emit whatever the document
-carries, or for `helmtemplate` whatever the chart it renders client-side carries (and no
-HelmRelease), so there is no single GVK to name. When adding a component type, decide which
-group it falls in and say so; silence here reads the same either way. `helmtemplate`
-(go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmrelease`.
-`cnpg-cluster` is listed: it emits one CloudNativePG `Cluster`, the same object
-`postgresql`'s check already targets, so it gets the same check (and, in `defaultTierMap`,
-the same `services` tier). `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`
-(go-kure/launcher#573) are absent for a fourth reason: their `Pooler`, `Database` and
-`ObjectStore` statuses carry no condition kstatus reads, so a check would report them ready
-without waiting on anything — `postgresql`, which emits the same kinds, checks only its
-`Cluster`. They sit in the `services` tier with `cnpg-cluster`. `serviceaccount`,
-`persistentvolumeclaim` and `configmap` (go-kure/launcher#702) are absent as well.
-kstatus reports a ServiceAccount or a ConfigMap current as soon as it exists, so a check
-would wait on nothing. A claim whose class binds on first consumer stays `Pending` until a
-pod mounts it, so a check would hold the tier on a claim nothing mounts yet. The workload
-that mounts it already carries the check that matters. Like `deployment` and `service`, the
-three are not in `defaultTierMap` and fall back to `TierApps`.
-
-`helmrelease` (go-kure/launcher#327) is listed, with the `helm.toolkit.fluxcd.io/v2`
-`HelmRelease` GVK: it always emits exactly one HelmRelease, whose Ready
-condition kstatus reads directly. Because the GVK is a `*.toolkit.fluxcd.io` kind and its
-config accepts a Flux namespace, the check moves to that namespace with the object. It sits
-in `defaultTierMap` at `TierApps`. It declines its check for
-`suspend: true` (below).
-
-The kind-named Flux source components `helmrepository`, `ocirepository`, `gitrepository` and
-`bucket` (go-kure/launcher#347) are listed, each with its own `source.toolkit.fluxcd.io/v1`
-GVK: each emits exactly one source CR, whose Ready condition kstatus reads, so a dependent
-Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.fluxcd.io` kind
-and each config accepts a Flux namespace, the check moves to that namespace with the object.
-They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmrelease`.
-
-`helmchart` (go-kure/launcher#351), the kind-named component for Flux's `HelmChart`, is listed
-the same way, with the `source.toolkit.fluxcd.io/v1` `HelmChart` GVK, and sits at `TierApps`.
-kstatus reads a HelmChart exactly as it reads a Bucket. Neither kind has a kind-specific rule:
-`legacyTypes` lists only core kinds (fluxcd/cli-utils v1.2.3 `pkg/kstatus/status/core.go:22-39`,
-looked up by `GetLegacyConditionsFn`, `:57-65`). Both are read by the generic rules
-(`generic.go:22`, `checkGenericProperties`): `status.observedGeneration` against
-`metadata.generation` (`:82-95`), then a true `Reconciling` or `Stalled` condition (`:51`,
-`:54`). Both statuses carry those two fields (source-controller api v1.9.5
-`helmchart_types.go:123` and `:143`, `bucket_types.go:198` and `:202`). The helm rule never
-emits a HelmChart, so a `helmchart` is always authored and keeps `defaultTierMap`'s tier.
+**Default tiers.** `defaultTierMap` places `helmrelease` (go-kure/launcher#327),
+`helmtemplate` (go-kure/launcher#348), `oci`, the kind-named Flux source components
+`helmrepository`, `ocirepository`, `gitrepository` and `bucket` (go-kure/launcher#347) and
+`helmchart` (go-kure/launcher#351) at `TierApps`, and `cnpg-cluster`, `cnpg-pooler`,
+`cnpg-database` and `cnpg-objectstore` (go-kure/launcher#573) in the `services` tier with
+`postgresql`. `serviceaccount`, `persistentvolumeclaim` and `configmap`
+(go-kure/launcher#702), like `deployment` and `service`, are not in `defaultTierMap` and
+fall back to `TierApps`. The helm rule never emits a HelmChart, so a `helmchart` is always
+authored and keeps `defaultTierMap`'s tier.
 
 The exception is a `helmrepository`, `ocirepository`, `gitrepository` or `bucket` that a
 lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` places it in
@@ -297,27 +251,14 @@ lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` p
 any tier annotation and before `defaultTierMap`. The `helm` rule (go-kure/launcher#349)
 emits such a source for the releases that read it. Those releases keep their own tier, and
 a tier annotation or a `placement` policy may move them into `infra`. A source in a later
-tier than its consumer would never be applied, because each tier waits on the health checks
-of the tier before it, including the consumer's. In the earliest tier, the source never
+tier than its consumer would be applied only after it, because each tier's bundles depend on
+those of the tier before it, the consumer's included. In the earliest tier, the source never
 follows a consumer, and a consumer that shares its tier is retried by helm-controller until
 the source is ready. A `placement` policy naming the generated source may only keep it in
 `infra`, and a `dependency` rule may not make it wait on any component (with its consumer
 placed in `infra` beside it, no cycle would report the deadlock); `TransformWithPolicy`
 refuses both. An authored source keeps
 `defaultTierMap`'s tier.
-
-A listed type can still decline its check per document by implementing
-`EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
-pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
-long as the document asks it to stay suspended. This is the same shape as `deployment`'s veto
-for `paused: true`: the document instructs the workload not to progress, so waiting on it is
-not a health signal but a guaranteed timeout. `helmrelease` declines it for `suspend: true`
-too: helm-controller does not reconcile a suspended HelmRelease, and the Ready condition the
-check reads is written by a reconciliation, so a newly created suspended release never acquires
-one. The HelmRelease is still emitted; only the check is skipped. The five Flux source components veto for their
-own `suspend: true` for the same reason — the document tells source-controller not to reconcile
-— and `helmrepository` also vetoes for `type: oci`, which Flux treats as a static object with
-no artifact, so there is no reconcile to wait on.
 
 ## Transform & extension
 
@@ -328,8 +269,8 @@ the built-ins. Extend the system by implementing:
 | Interface | Role |
 |-----------|------|
 | `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components). |
-| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there, its own or any other component's of the bundle, including one whose traits already ran: the transform fails, naming the trait and the component, because the automatic health check and NetworkPolicy synthesis find a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get neither (go-kure/launcher#734). Nor may it rename a sibling group member's application: the member would generate its objects under a name the group's health check does not name, so the transform fails, naming the trait, the group and the member's type (go-kure/launcher#752). |
-| `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
+| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there, its own or any other component's of the bundle, including one whose traits already ran: the transform fails, naming the trait and the component, because NetworkPolicy synthesis finds a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get no policy (go-kure/launcher#734). Nor may it rename a sibling group member's application: the member would generate its objects under a name the group does not carry, so the transform fails, naming the trait, the group and the member's type (go-kure/launcher#752). |
+| `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges), or its own data under `PolicyResult.Extensions`, on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies (go-kure/launcher#772). Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
 | `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
@@ -340,6 +281,17 @@ the built-ins. Extend the system by implementing:
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
 | `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
+
+`PolicyResult.Extensions` is a `map[string]any` a consumer's policy handler writes its own
+result into, under a key it owns (a domain-qualified name, as a label key is). Launcher
+neither reads nor changes it: `TransformWithPolicy` returns it as the handlers left it, and
+no built-in handler writes one (go-kure/launcher#781). A consumer that delivers through Flux
+uses it to carry what its own `reconciliation` or `health-checks` handler read. Launcher has
+no handler for those two policy types, nor for the `fluxcd-patches` and `fluxcd-postbuild`
+traits: a document using one fails the transform with `no handler for policy type
+"reconciliation": it configures delivery, which launcher leaves to the consumer that
+delivers the application; a consumer that delivers through Flux registers its own handler`
+(`no handler for trait type …` for the two traits).
 
 `PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
 app's traits actually resolved against `ctx.Capabilities` during the transform — a real
@@ -470,8 +422,9 @@ and recreates it instead of failing the apply, which can lose a claim's data. Pa
 `Transformer.WarnForcedVolumes`. It emits one warning through the warning handler
 (`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
 `kustomize.toolkit.fluxcd.io/force: enabled` (the `force-replace` trait sets it) or whose
-application is `GeneratedApplication.Forced` (its leaf bundle sets `Force`, which a
-`reconciliation` policy's `force: true` does). The warning names the kind,
+application is `GeneratedApplication.Forced` (its leaf bundle sets `Force`; launcher never
+does, so only a bundle whose `Force` the caller set before generating,
+go-kure/launcher#781). The warning names the kind,
 `namespace/name`, the producer and every reason the object is forced, in generation order:
 `PersistentVolumeClaim shop/data (component "db") is force-applied
 (kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field,
@@ -482,34 +435,9 @@ a list envelope still in the output stands for its members — Kustomize's build
 kind ending in `List` whose `items` is an array, recursively, then Flux expands any
 remaining object whose `items` is an array, one level only — and a member is forced by its
 own metadata, not the envelope's. An object generated more than once is warned once,
-naming its first producer and every reason any copy is forced. A bundle's patches
-(`GeneratedApplication.Patches`, which the `fluxcd-patches` trait sets) are applied first,
-as Flux applies its Kustomization's `spec.patches` (go-kure/launcher#728): the objects of a
-leaf bundle with patches are built with kustomize (krusty, with kustomize-controller's
-options, serialized and with a panic recovered) and the patched copies are read exactly as Flux
-builds and reads them (fluxcd/pkg/ssa `ReadObjects`: a list stands for its members, and any other
-document without a name, kind and apiVersion, or that is a kustomize config, is skipped), so a
-patched volume is warned exactly when Flux force-applies it. A patch can add the force key,
-remove or disable it, delete or rename the volume, or add one to a list envelope.
-A force-applied patched volume is named by the generated object it comes from, even when a patch
-renames or swaps it (go-kure/launcher#745): a bundle with one is built a second time from objects
-tagged with their origin under a launcher annotation, and the tags are used only where that
-build, untagged, is byte for byte and in order the first; it only names, never changes which
-volumes warn, and a bundle with no force-applied volume is not built again. Known limit: a volume that cannot be traced
-is named by the first application that generates a volume of its final identity, else by its
-bundle, with its force key named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
-patches` unless a generated volume of that identity carried it, after the bundle's traced
-volumes in kustomize's build order. That covers every volume of a bundle whose second build
-differs from the first (a patch that `test`s a whole annotations map, or `copy`s one into another
-field), a volume whose annotations a patch replaces, one a patch adds, and both volumes when a
-patch copies one's annotations onto the other; the bundle's other volumes are still traced.
-When a patch copies annotations onto a volume and then deletes their source, the copy alone
-carries the source's tag and is named as the source: by its application, with its force key,
-in its place. A patch set that does not build, or whose
-result Flux cannot read (a list member that is not an object), is warned once, naming the bundle's first application and the build error, and that bundle is
-checked as generated. Every caller and build gets this; postBuild substitution and anything
-the cluster changes on apply are not modelled. An application a caller built rather than
-`GenerateApplications` is patched on its own. It
+naming its first producer and every reason any copy is forced. Objects are read as
+generated: what a consumer's delivery changes afterwards (patches, post-build substitution)
+and anything the cluster changes on apply are not modelled. It
 covers every generated claim alike — a `webservice`/`worker` `volumes` entry (a
 synthesized `pvc` trait, so named as a sub-application of its component,
 go-kure/launcher#702), the `pvc` trait, the `persistentvolumeclaim` component, a `manifests` component's objects — and changes no
@@ -575,8 +503,8 @@ a caller to pass into `ParseWithExtraTypes` ahead of a transform that will lower
 under one name, each of a distinct type that has a component handler (no lowering
 rule claims it). They form one sibling group, which deploys as a single component.
 Each member keeps its own config, policy defaults, traits and objects. The group has
-one tier, one bundle, one `dependency` node, one auto health check (for the first
-member's kind) and one layout directory. Its application generates each member's
+one tier, one bundle, one `dependency` node and one layout directory. Its application
+generates each member's
 first object in emission order, then every member's remaining objects in the same
 order, as a single component generating all of them orders them. `webservice`
 lowers to a deployment, a service and a serviceaccount member, which give
@@ -866,7 +794,7 @@ is the same check for a caller with no profile.
 Authored policies are checked the same way, after every component, in document order:
 against the `PolicyHandler` registered for the type, else the `PolicyLoweringRule`
 claiming it. The built-in policy handlers each declare a `PropertySchema`, so a
-misspelt `reconciliation` key such as `prunee` is a build error rather than a
+misspelt `placement` key such as `teir` is a build error rather than a
 setting the handler never reads.
 
 Three positions are exempt, each because there is no schema to check against: a

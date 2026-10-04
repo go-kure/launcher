@@ -41,7 +41,7 @@ packages:
     mount: {target: api-reference/oam-traits.md, title: Trait Handlers, weight: 24, group: OAM, desc: "Built-in traits (ingress, certificate, scaler, externalsecret, …)"}
   - path: pkg/oam/builtin/policies
     readme: pkg/oam/builtin/policies/README.md
-    mount: {target: api-reference/oam-policies.md, title: Policy Handlers, weight: 26, group: OAM, desc: "Built-in application policies (dependency, placement, reconciliation, health-checks)"}
+    mount: {target: api-reference/oam-policies.md, title: Policy Handlers, weight: 26, group: OAM, desc: "Built-in application policies (dependency, placement)"}
 
   # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin
@@ -55,7 +55,7 @@ packages:
   - path: pkg/oam/internal/fluxduration
     readme: pkg/oam/internal/fluxduration/README.md
     mounted: false
-    reason: "Internal Flux duration check shared by the Flux components and the reconciliation policy."
+    reason: "Internal Flux duration check used by the Flux components."
   - path: pkg/cmd/shared
     readme: pkg/cmd/shared/README.md
     mounted: false

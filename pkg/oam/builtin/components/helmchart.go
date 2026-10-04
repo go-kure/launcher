@@ -70,7 +70,7 @@ func (h *HelmChartHandler) PropertySchema() map[string]oam.PropertySchema {
 			Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "One values file path, relative to the source."},
 		},
 		"ignoreMissingValuesFiles": fluxSourceBool("HelmChart spec.ignoreMissingValuesFiles: skip a missing values file instead of failing."),
-		"suspend":                  fluxSourceBool("HelmChart spec.suspend: stop reconciling the chart. Also skips the auto health check."),
+		"suspend":                  fluxSourceBool("HelmChart spec.suspend: stop reconciling the chart."),
 		"verify":                   fluxSourceObject("HelmChart spec.verify: signature verification of an OCI chart (provider, secretRef, matchOIDCIdentity). Flux accepts it only with a HelmRepository source."),
 	}
 }
@@ -163,11 +163,6 @@ func (c *HelmChartConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 // SetFluxNamespace moves the HelmChart to ns. Satisfies
 // pkg/oam.fluxNamespaceSettable.
 func (c *HelmChartConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
-
-// EmitsAutoHealthCheck vetoes the auto health check for `suspend: true`, where
-// the document tells source-controller not to reconcile the chart. Satisfies
-// pkg/oam.autoHealthCheckEmitter.
-func (c *HelmChartConfig) EmitsAutoHealthCheck() bool { return !c.Spec.Suspend }
 
 // Generate emits the HelmChart.
 func (c *HelmChartConfig) Generate(_ *stack.Application) ([]*client.Object, error) {

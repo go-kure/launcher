@@ -170,8 +170,8 @@ the engine enforces; the second is a naming convention only.
 
 **Axis A — terminal vs lowerable.** A *terminal* type is served by a dispatchable handler
 (`RegisterComponent` / `RegisterTrait`) that generates or modifies the rendered configuration
-itself, with no further OAM lowering: most emit or modify Kubernetes objects, while a trait like
-`fluxcd-postbuild` only sets a field on the output bundle. A *lowerable* type is served by a
+itself, with no further OAM lowering: it emits or modifies Kubernetes objects.
+A *lowerable* type is served by a
 lowering rule (`RegisterComponentLowering` / `RegisterTraitLowering`) and emits other OAM
 entries, never objects. Which entries depends on the rule's position: a component rule emits
 components and policies, a trait rule traits, components and policies
@@ -257,7 +257,7 @@ successfully. Those maps are instead checked against the handler's own declared
 `PropertySchema` by `Transformer.ValidateAuthoredPropertiesWithCapabilities`, which the build
 calls after parsing and evaluating the profile (`pkg/cmd/kurel/build.go`). For a policy, the handler is the `PolicyHandler`
 registered for its type, or the `PolicyLoweringRule` claiming it; the built-in handlers
-`kurel build` registers (`dependency`, `placement`, `reconciliation`, `health-checks`, in
+`kurel build` registers (`dependency` and `placement`, in
 `pkg/oam/builtin/policies`) each declare one. A policy type with nothing registered for it is
 not checked here and fails the transform with `no handler for policy type`. An undeclared key
 is a build error naming the allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
@@ -439,7 +439,7 @@ Launcher's native model borrows the following OAM concepts:
 | Component type | Lowered by a registered `ComponentLoweringRule`, or dispatched to a registered `ComponentHandler` once lowering settles (see Two Axes of a Type) |
 | Trait | Same shape (type, properties); attached to components |
 | Trait type | Lowered by a registered `TraitLoweringRule`, or dispatched to a registered `TraitHandler` once lowering settles (see Two Axes of a Type) |
-| Policy | Same shape (name, type, properties) in `spec.policies`; lowered by a registered `PolicyLoweringRule`, or dispatched to a registered `PolicyHandler` (built-ins: `dependency`, `placement`, `reconciliation`, `health-checks`) |
+| Policy | Same shape (name, type, properties) in `spec.policies`; lowered by a registered `PolicyLoweringRule`, or dispatched to a registered `PolicyHandler` (built-ins: `dependency`, `placement`) |
 
 Concepts not adopted in Phase 0:
 - OAM `WorkloadDefinition` / `ComponentDefinition` / `TraitDefinition` — launcher

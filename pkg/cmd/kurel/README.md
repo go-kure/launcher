@@ -51,13 +51,17 @@ for it. `helm` lowers to a `helmrelease` (plus a generated
 `helmrepository`, `ocirepository`, `gitrepository` or `bucket` for an inline
 source, shared within the document)
 or, under `delivery: template`, to a `helmtemplate`. The built-in application policy
-handlers are registered too (`builtinPolicyHandlers()` — `dependency`, `placement`,
-`reconciliation` and `health-checks`, registered via `RegisterPolicy`). Every registered handler and rule
+handlers are registered too (`builtinPolicyHandlers()` — `dependency` and `placement`,
+registered via `RegisterPolicy`). Every registered handler and rule
 declares a `PropertySchema` for its user-facing properties, so every authored
 component's, trait's and policy's properties are validated against it before dispatch
-(a misspelt policy key such as `prunee` fails the build). A policy type with no built-in handler —
+(a misspelt policy key such as `teir` fails the build). A policy type with no built-in handler —
 including `app-dependency`, which orders one application after others and has nothing to
 order against in a single-application build — fails with `no handler for policy type`.
+The `reconciliation` and `health-checks` policies and the `fluxcd-patches` and
+`fluxcd-postbuild` traits configure how Flux delivers an application, which launcher leaves
+to the consumer that delivers it (go-kure/launcher#781): `build` has no handler for them, and
+the `no handler for policy type` or `no handler for trait type` error says so.
 Policies shape the bundle tree and its Flux settings, which `kurel build`'s manifest
 output does not include; see
 [Policy Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies).
@@ -156,8 +160,6 @@ and precedence rules.
 | `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). Scalars only: an `array` or `object` parameter set this way is refused; use `--values` or the parameter's default. |
 | `--capability-def` | Additional `CapabilityDefinition` file (repeatable). |
 | `--strict-capabilities` | Error (instead of warn) on unvalidated custom capabilities. |
-| `--oci-repository` | `oci://registry/prefix` URL: also write the Flux delivery output (below). Requires `--output`; the URL is checked as described there. |
-| `--oci-tag` | Tag the generated `OCIRepository` objects pull (`spec.ref.tag`); must be a valid OCI tag. Unset leaves `spec.ref` out, so Flux pulls `latest`. Requires `--oci-repository`. |
 
 With `--output`, the written file is named `<app.Metadata.Name>.yaml` inside that
 directory. `Metadata.Name` is safe to use unescaped here because parsing already
@@ -216,8 +218,7 @@ of its applications generate the same object (API group, kind, namespace and nam
 component and another component's trait, two components, or two traits, which would each
 deploy that object, the last applied winning. The error names the object and both
 producers, and nothing is written (go-kure/launcher#646). That generation never
-constructs or walks a kure `layout.ManifestLayout`. (Only the Flux delivery output below walks one, via
-`layout.WalkCluster`.) A component whose config implements the optional
+constructs or walks a kure `layout.ManifestLayout`. A component whose config implements the optional
 `layout.LayoutAugmenter` interface fails the build outright, naming the
 component, **unless** it also implements `oam.LayoutAugmentationCoverage` and
 its `GenerateCoversAugmentLayout()` returns `true` — meaning its plain
@@ -234,102 +235,21 @@ this opt-out existed. A `helm` component under `valuesMode: configMap` is not a
 on the `helmrelease` it lowers to, ordinary trait output, so `build` emits it
 after the HelmRelease.
 
-### Flux delivery output
+### Warnings
 
-With `--oci-repository`, `build -o <dir>` also writes the delivery layer of the
-design's Launcher Layout (`docs/design.md` §11): one OCI artifact directory, one
-`OCIRepository` and one Flux `Kustomization` per bundle.
+A build that renders no objects warns `no resources generated` on stderr and writes no
+`<app>.yaml` (one an earlier build wrote stays). A build also warns, on stderr and with
+unchanged output, once per PersistentVolume or PersistentVolumeClaim that carries the
+`force-replace` trait's annotation, because Flux then deletes and recreates it on an
+immutable-field change (go-kure/launcher#720; `force_warning_test.go`).
 
-- `<dir>/<bundle>/` — one flat directory per bundle, named by the bundle
-  (reconciliation unit) name: `<app>` for a single-tier application; `<app>` (the tier
-  umbrella) plus one `<app>-<tier>` per populated tier for a multi-tier one; one
-  `<app>-<component>` per component, with no umbrella, for an application with a
-  `dependency` policy, whatever its tiers. A tier umbrella's children are siblings of it,
-  never nested inside it. Each holds `manifests.yaml`
-  (exactly that bundle's objects, encoded as the stdout build encodes them) and a
-  `kustomization.yaml` listing it. The tier umbrella renders no objects: its directory
-  holds only a `kustomization.yaml` with `resources: []`.
-- `<dir>/<app>.flux.yaml` — the `OCIRepository` and `Kustomization` of every bundle,
-  generated by kure's Flux resource generator, so names, `dependsOn`, health checks and
-  interval/prune/wait come from the bundle as kure renders them. Each `OCIRepository`
-  pulls `<oci-repository>/<bundle>` (at `--oci-tag` when set); each `Kustomization`
-  references that source and builds the artifact root, `spec.path: ./`. The tier
-  umbrella's `Kustomization` is Ready only when every child `Kustomization` is: it carries
-  one health check per child and no `wait` (Flux ignores health checks when `wait` is enabled).
-- `<dir>/<app>.yaml` — still written, unchanged: `-o` keeps its contract.
+### No delivery output
 
-Every object of the stdout build is in exactly one artifact, and the artifacts together
-hold exactly the stdout build's objects. The layout-augmenter check above runs first, so
-a component it refuses fails the build before anything is written. Output is
-byte-identical across runs. A build that renders no objects still warns `no resources
-generated` and writes no `<app>.yaml` (one an earlier build wrote stays). A build also
-warns, on stderr and with unchanged output, once per PersistentVolume or
-PersistentVolumeClaim that Flux would force-apply — through the `force-replace` trait or a
-`reconciliation` policy's `force: true` — because an immutable-field change then deletes
-and recreates it (go-kure/launcher#720; `force_warning_test.go`). With `--oci-repository` it writes the delivery
-output: every bundle's artifact directory holds only the empty `kustomization.yaml`, and a
-`manifests.yaml` an earlier build left there is removed.
-
-A build is refused, before anything is written, when an artifact carries an object with
-the API group, kind, namespace and name of one of the generated `OCIRepository` or
-`Kustomization` objects — for example an `oci` component named like its bundle in an
-application whose namespace is `flux-system`: reconciling that artifact would overwrite
-its own source or `Kustomization`. An object inside a list counts too when reconciliation
-applies it: kustomize expands a `*List` kind's `items` at any depth, then kustomize-controller
-expands one more `items` array of any kind and applies its members as they are, while a
-list either one expands is not applied itself. Rename the component
-or the application. The same holds for one object (API group, kind, namespace and name,
-where a namespace on a kind kustomize knows to be cluster-scoped is ignored, as the API
-server ignores it) in two artifacts, such as `configmap` traits of one name on components in different
-tiers, whose `Kustomization`s would fight over it, or twice in one artifact. An artifact
-kustomize would refuse to build is refused too: one that carries two resources with one
-kustomize resource id (API group, version, kind, name and namespace, where no namespace
-reads as `default` and a namespace on a kind kustomize knows to be cluster-scoped is
-ignored), even resources
-kustomize-controller would not apply, such as two identical kustomize config
-`Kustomization`s. A build is also refused when `<app>.flux.yaml` (an
-application name over 245 characters) would exceed the 255-byte file name limit, when a
-reconciliation unit name (its artifact directory and its `OCIRepository` and
-`Kustomization` name, such as `<app>-services`) is not a DNS-1123 subdomain of at most 253
-characters, and when a generated `Kustomization` or `OCIRepository` duration
-is written outside Flux's duration pattern (units `ms`, `s`, `m`, `h`): durations are
-written in normalized form, so a `reconciliation` policy value that normalizes to
-microseconds or nanoseconds, such as `0.5ms` (written `500µs`), is refused. Use at
-least `1ms`. A zero duration is written `0s` and is accepted.
-
-The flags are checked before the build reads anything, and each bundle's url before
-anything is written:
-
-- `--oci-repository` must be `oci://<registry>[/<path>]` (a trailing `/` is ignored). The
-  registry is a `host[:port]` that names itself explicitly — `localhost`, or containing
-  `.` or `:` — because Flux resolves any other first segment against Docker Hub. The host
-  is required: a DNS name, an IPv4 address or a bracketed IPv6 address, and a port is a
-  number from 1 to 65535, so `oci://:5000/apps`, `oci://registry.example.com:/apps` or
-  `oci://registry.example.com:70000/apps` is refused. The path
-  is `/`-separated OCI distribution-spec components (lowercase letters and digits, joined
-  by `.`, `_`, `__` or `-`), so a query, fragment, whitespace, empty segment or uppercase
-  letter is refused. Each bundle's `<oci-repository>/<bundle>` must also stay within 255
-  characters of path.
-- `--oci-tag` must match the OCI tag grammar `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`.
-
-Limits:
-
-- The registry is set with the flag only; there is no `ClusterProfile` field for it.
-- The Flux objects' namespace is always `flux-system`; there is no flag for it.
-- `kurel` does not publish artifacts: push each `<dir>/<bundle>/` to
-  `<oci-repository>/<bundle>` yourself (for example with `flux push artifact`). OCI
-  publishing is Phase 5 of the design roadmap.
-- `--output` is not cleared first: a directory of a bundle a later build no longer
-  generates stays behind, so build into a fresh directory. (An empty artifact's stale
-  `manifests.yaml` is removed.)
-- An artifact holds the same flat object list the stdout build emits: a `helmtemplate`
-  component's (or a `helm` `delivery: template` one's) Helm hook groups are not split
-  into ordered sub-directories.
-- A namespaced object the build renders without `metadata.namespace` (for example from a
-  `helmtemplate` chart, or `helm` with `delivery: template`) is written as is. The
-  generated `Kustomization` sets no `targetNamespace`, so kustomize-controller refuses it
-  ("namespace not specified"). Rendering the chart with the release namespace is tracked
-  in [go-kure/launcher#602](https://github.com/go-kure/launcher/issues/602).
+`build` writes the application's objects and nothing that delivers them. The
+`--oci-repository` and `--oci-tag` flags are gone, with the per-bundle artifact directories
+and the Flux `OCIRepository` and `Kustomization` objects they wrote
+(go-kure/launcher#781): how an application is delivered belongs to the consumer that
+delivers it, see `docs/delivery-scope.md`.
 
 ## Global flags
 
@@ -359,8 +279,4 @@ kurel build ./mypackage --profile profiles/prod.yaml -o out/ \
 
 # Render the prod environment declared in ./mypackage/environments.yaml
 kurel build ./mypackage --environment prod -o out/
-
-# Also write per-bundle OCI artifact directories and their Flux objects
-kurel build ./app.yaml --profile profiles/prod.yaml -o out/ \
-  --oci-repository oci://registry.example.com/apps --oci-tag v1.2.0
 ```

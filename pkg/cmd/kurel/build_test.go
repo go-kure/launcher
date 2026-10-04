@@ -1395,7 +1395,7 @@ func TestBuildCommand_RefusesInDocumentObjectCollision(t *testing.T) {
 		for _, toDir := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s, output directory %t", tt.name, toDir), func(t *testing.T) {
 				appPath := writeTempFile(t, t.TempDir(), "app.yaml", fmt.Sprintf(collisionAppYAML, "shop", tt.components))
-				args := []string{"build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml")}
+				args := []string{"build", appPath, "--profile", emptyProfilePath}
 				out := filepath.Join(t.TempDir(), "out")
 				if toDir {
 					args = append(args, "-o", out)

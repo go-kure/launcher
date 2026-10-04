@@ -47,7 +47,7 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ignore":             fluxSourceString("OCIRepository spec.ignore: exclusion patterns in .sourceignore format."),
 		"insecure":           fluxSourceBool("OCIRepository spec.insecure: allow a non-TLS registry."),
-		"suspend":            fluxSourceBool("OCIRepository spec.suspend: stop reconciling the source. Also skips the auto health check."),
+		"suspend":            fluxSourceBool("OCIRepository spec.suspend: stop reconciling the source."),
 	}
 }
 
@@ -107,11 +107,6 @@ func (c *OCIRepositoryConfig) ApplyPolicy(p oam.Policy) error {
 // SetFluxNamespace moves the OCIRepository to ns. Satisfies
 // pkg/oam.fluxNamespaceSettable.
 func (c *OCIRepositoryConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
-
-// EmitsAutoHealthCheck vetoes the auto health check for `suspend: true`, where
-// the document tells source-controller not to reconcile the source. Satisfies
-// pkg/oam.autoHealthCheckEmitter.
-func (c *OCIRepositoryConfig) EmitsAutoHealthCheck() bool { return !c.Spec.Suspend }
 
 // Generate emits the OCIRepository.
 func (c *OCIRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, error) {

@@ -567,54 +567,6 @@ func TestJobHandler_CronJobOnlyProperties_Rejected(t *testing.T) {
 	}
 }
 
-// TestJobHandler_SuspendVetoesAutoHealthCheck is the job counterpart of
-// deployment's paused veto. A suspended job creates no pods, so it reaches
-// neither Complete nor Failed and a Kustomization waiting on it would block for
-// as long as the document says to stay suspended.
-//
-// The pipeline reaches this method by type assertion, so the assertion below is
-// the load-bearing half: a method whose name or signature drifts stops being
-// seen there without any call site failing to compile.
-func TestJobHandler_SuspendVetoesAutoHealthCheck(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		props map[string]any
-		want  bool
-	}{
-		{"suspend true vetoes the check", map[string]any{"suspend": true}, false},
-		{"suspend false keeps it", map[string]any{"suspend": false}, true},
-		{"suspend unauthored keeps it", map[string]any{}, true},
-		// parallelism: 0 reaches the same dead end by a different route — zero
-		// is the maximum pods the job may run, so no completion ever accrues.
-		// Unlike suspension it does not stop the ActiveDeadlineSeconds timer,
-		// so a deadline makes Failed reachable and the check meaningful again.
-		{"zero parallelism vetoes the check", map[string]any{"parallelism": 0}, false},
-		{"zero parallelism with a deadline keeps it", map[string]any{"parallelism": 0, "activeDeadlineSeconds": 60}, true},
-		{"nonzero parallelism keeps it", map[string]any{"parallelism": 1}, true},
-		{"zero parallelism on a suspended job still vetoes", map[string]any{"parallelism": 0, "activeDeadlineSeconds": 60, "suspend": true}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
-			for k, v := range tc.props {
-				full[k] = v
-			}
-			cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
-				Name: "batch", Type: "job", Properties: full,
-			}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			e, ok := cfg.(interface{ EmitsAutoHealthCheck() bool })
-			if !ok {
-				t.Fatal("JobConfig does not satisfy the autoHealthCheckEmitter shape the transform asserts on")
-			}
-			if got := e.EmitsAutoHealthCheck(); got != tc.want {
-				t.Errorf("EmitsAutoHealthCheck() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // TestJobHandler_ExplicitNullReadsAsOmission pins the null handling on the
 // properties go-kure/launcher#344 introduced. `key: null` in YAML is an author
 // writing "leave this unset" — pkg/oam's own validatePropertyValue reads it that

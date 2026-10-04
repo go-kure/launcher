@@ -124,38 +124,6 @@ func TestRoleKinds_DeploymentSpecUnauthoredLeavesTheConstructorValue(t *testing.
 	}
 }
 
-// TestRoleKinds_PausedVetoesAutoHealthCheck: the transform pipeline reaches
-// these configs by type assertion, so the assertion is the load-bearing half —
-// a method whose name or signature drifts stops being seen there without any
-// call site failing to compile.
-func TestRoleKinds_PausedVetoesAutoHealthCheck(t *testing.T) {
-	for _, k := range roleKinds {
-		for _, tc := range []struct {
-			name  string
-			props map[string]any
-			want  bool
-		}{
-			{"paused true vetoes the check", map[string]any{"image": "nginx:1.27", "paused": true}, false},
-			{"paused false keeps it", map[string]any{"image": "nginx:1.27", "paused": false}, true},
-			{"paused unauthored keeps it", map[string]any{"image": "nginx:1.27"}, true},
-		} {
-			t.Run(k.name+"/"+tc.name, func(t *testing.T) {
-				cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: tc.props}, "default")
-				if err != nil {
-					t.Fatalf("ToApplicationConfig: %v", err)
-				}
-				e, ok := cfg.(interface{ EmitsAutoHealthCheck() bool })
-				if !ok {
-					t.Fatalf("%s config does not satisfy the autoHealthCheckEmitter shape the transform asserts on", k.name)
-				}
-				if got := e.EmitsAutoHealthCheck(); got != tc.want {
-					t.Errorf("EmitsAutoHealthCheck() = %v, want %v", got, tc.want)
-				}
-			})
-		}
-	}
-}
-
 // TestRoleKinds_NonRWXConstraint: these kinds now share the deployment kind's
 // guard instead of carrying their own inline copy. The forced Recreate and the
 // replica ceiling are the pre-existing behaviour; the refusal of a

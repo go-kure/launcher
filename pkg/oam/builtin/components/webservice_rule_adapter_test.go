@@ -18,8 +18,7 @@ import (
 // components it emits, then the synthesized topology-spread and pvc traits
 // (traits.TopologySpreadHandler, traits.PVCHandler) on the deployment member
 // when the rule attached them. The config it returns is the deployment member's own, so
-// ApplyPolicy, ServiceAccountName, NonRWXClaim and EmitsAutoHealthCheck are
-// DeploymentConfig's; ServicePort and ServicePortName are the service
+// ApplyPolicy, ServiceAccountName and NonRWXClaim are DeploymentConfig's; ServicePort and ServicePortName are the service
 // member's, as the sibling group answers them.
 //
 // Authored traits are not applied here: the tests using this adapter as a

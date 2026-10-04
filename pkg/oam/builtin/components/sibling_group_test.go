@@ -83,7 +83,6 @@ func webPairServiceProps(name string) map[string]any {
 type (
 	saNamer        interface{ ServiceAccountName() (string, bool) }
 	nonRWXClaimer  interface{ NonRWXClaim() string }
-	healthEmitter  interface{ EmitsAutoHealthCheck() bool }
 	portProvider   interface{ ServicePort() int32 }
 	portNamer      interface{ ServicePortName() (string, bool) }
 	backendNamer   interface{ BackendServiceName() string }
@@ -196,7 +195,7 @@ func memberConfig(t *testing.T, h oam.ComponentHandler, typ string, props map[st
 
 // TestSiblingGroup_ForwardsEachContractToItsMember proves the group's one config
 // answers every forwarded contract with the member that owns it: the Deployment's
-// ServiceAccount, single-pod claim and health-check veto, the Service's port, port
+// ServiceAccount and single-pod claim, the Service's port, port
 // name and routing target, and no backend Service name, which neither member sets.
 func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 	cluster, _, err := webPairTransformer(webPairRule{}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
@@ -217,9 +216,6 @@ func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 	if got := cfg.(nonRWXClaimer).NonRWXClaim(); wantClaim == "" || got != wantClaim {
 		t.Errorf("NonRWXClaim = %q, want the deployment's %q", got, wantClaim)
 	}
-	if got := cfg.(healthEmitter).EmitsAutoHealthCheck(); !got {
-		t.Error("EmitsAutoHealthCheck = false for an unpaused deployment")
-	}
 	if got, want := cfg.(portProvider).ServicePort(), svc.(portProvider).ServicePort(); want != 80 || got != want {
 		t.Errorf("ServicePort = %d, want the service's %d", got, want)
 	}
@@ -239,28 +235,10 @@ func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 	}
 }
 
-// TestSiblingGroup_HealthCheckVetoIsTheDeployments shows the veto is read from
-// the primary member, not defaulted: a paused Deployment emits no health check.
-func TestSiblingGroup_HealthCheckVetoIsTheDeployments(t *testing.T) {
-	cluster, _, err := webPairTransformer(webPairRule{paused: true}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
-	if err != nil {
-		t.Fatalf("TransformWithPolicy: %v", err)
-	}
-	app, bundle := groupApp(t, cluster, "web")
-	if app.Config.(healthEmitter).EmitsAutoHealthCheck() {
-		t.Error("EmitsAutoHealthCheck = true for a paused deployment member")
-	}
-	for _, hc := range bundle.HealthChecks {
-		if hc.Name == "web" {
-			t.Errorf("paused group still carries health check %+v", hc)
-		}
-	}
-}
-
 // TestSiblingGroup_DeploysAsOneUnit proves the group is one component to every
 // name-keyed step: one application generating the Deployment, the Service, then
 // the Deployment's other objects,
-// one bundle with one Deployment health check and a dependsOn on db, one layout
+// one bundle with a dependsOn on db, one layout
 // directory holding both objects, and one Flux Kustomization.
 func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	cluster, _, err := webPairTransformer(webPairRule{}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
@@ -303,12 +281,8 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 		t.Errorf("group generates %v, want %v", got, want)
 	}
 
-	var checks []string
-	for _, hc := range bundle.HealthChecks {
-		checks = append(checks, hc.Kind+"/"+hc.Name)
-	}
-	if want := []string{"Deployment/web"}; !reflect.DeepEqual(checks, want) {
-		t.Errorf("health checks = %v, want %v", checks, want)
+	if len(bundle.HealthChecks) != 0 {
+		t.Errorf("health checks = %v, want none: launcher sets no delivery field", bundle.HealthChecks)
 	}
 	if len(bundle.DependsOn) != 1 || !strings.HasSuffix(bundle.DependsOn[0].Name, "-db") {
 		t.Errorf("web bundle dependsOn = %d bundles, want exactly db's", len(bundle.DependsOn))

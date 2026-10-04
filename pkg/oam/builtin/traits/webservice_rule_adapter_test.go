@@ -31,8 +31,8 @@ func registerWebservice(tr *oam.Transformer) {
 // LowerComponent, then DeploymentHandler and ServiceHandler for the two
 // components it emits, then the synthesized topology-spread and pvc traits on
 // the deployment member when the rule attached them. The config it returns is the
-// deployment member's own, so ServiceAccountName, NonRWXClaim and
-// EmitsAutoHealthCheck are DeploymentConfig's; ServicePort and ServicePortName
+// deployment member's own, so ServiceAccountName and NonRWXClaim are
+// DeploymentConfig's; ServicePort and ServicePortName
 // are the service member's, as the sibling group answers them.
 //
 // components_test carries the same adapter (webservice_rule_adapter_test.go

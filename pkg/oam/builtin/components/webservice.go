@@ -21,8 +21,8 @@ import (
 // of its pods, and launcher's own opinions, and `deployment` and `service` are
 // the unopinionated projections of those two API kinds, so what webservice
 // adds is the opinions — and those are what this rule evaluates. The group
-// deploys as one component (pkg/oam sibling groups): one tier, one bundle, one
-// health check on the Deployment, its objects in the order the handler
+// deploys as one component (pkg/oam sibling groups): one tier, one bundle,
+// its objects in the order the handler
 // generated them (Deployment, Service, ServiceAccount, claims).
 //
 // LowerComponent first runs webservice's full parse (parseWebservice, the
@@ -70,7 +70,7 @@ import (
 //     pods.
 //
 // Everything past the parse is the members' own: ApplyPolicy, NonRWXClaim,
-// ServiceAccountName and EmitsAutoHealthCheck are DeploymentConfig's, and the
+// and ServiceAccountName are DeploymentConfig's, and the
 // Service port, port name and routing target are ServiceConfig's; the group
 // answers each from the one member that has a value. The synthesized inbound
 // NetworkPolicy keeps the component label as its pod selector, because the
