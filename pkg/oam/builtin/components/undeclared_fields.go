@@ -219,9 +219,13 @@ func keepUndeclaredFields(doc []byte, objs []client.Object) ([]client.Object, er
 
 // refuseUndeclaredWorkloadFields refuses u when it is a workload or a claim of
 // a registered kind that sets fields the Go type of that kind does not declare:
-// the fields the policy check, which reads that type, cannot see. Any other
-// object passes, and so does one that does not decode as its kind, which the
-// policy check refuses on its own account.
+// the fields the policy check, which reads that type, cannot see. A workload or
+// a claim whose record of strict errors is full is refused too, since such a
+// field cannot be ruled out. An object of any other kind passes whatever the
+// strict decode says of it, a full record included: passthrough emits the
+// authored map, so nothing the object sets is dropped, and no check reads it
+// for a field its type does not declare. So does one that does not decode as
+// its kind, which the policy check refuses on its own account.
 func refuseUndeclaredWorkloadFields(u *unstructured.Unstructured) error {
 	gvk := u.GroupVersionKind()
 	if !isWorkloadGVK(gvk) {
