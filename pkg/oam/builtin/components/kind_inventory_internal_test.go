@@ -94,10 +94,12 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 
 // TestKindInventory_MatchesCallSites holds the inventory's Status column to the
 // code: a kind row's constructor is called from this package, a trait row's
-// from ../traits and not from here, and a missing or not authorable row's from
-// neither. So a new kind component fails here until its row says so, and a row
-// cannot claim a component that builds nothing. A component row (an object a
-// non-kind component emits, or the crd exception) is not held to either.
+// from ../traits or from this package, and a missing or not authorable row's
+// from neither. So a component or trait for a missing kind fails here until
+// its row says so, and a row cannot claim one that builds nothing. Two things
+// are not held: a component row (an object a non-kind component emits, or the
+// crd exception), and a trait row whose kind gains a kind component, which the
+// change adding the component updates.
 func TestKindInventory_MatchesCallSites(t *testing.T) {
 	constructors := kureGeneratedConstructors(t)
 	here := kureConstructorCalls(t, ".", constructors)
@@ -116,11 +118,10 @@ func TestKindInventory_MatchesCallSites(t *testing.T) {
 				t.Errorf("README.md:%d: %s has status %q, but no file of this package calls it", row.line, name, row.status)
 			}
 		case inventoryTrait:
-			if !traits[name] {
-				t.Errorf("README.md:%d: %s has status %q, but no file of ../traits calls it", row.line, name, row.status)
-			}
-			if here[name] {
-				t.Errorf("README.md:%d: %s has status %q, but this package calls it: the row is %q or %q now", row.line, name, row.status, inventoryKind, inventoryComponent)
+			// A trait may build through a generator of this package, as the
+			// configmap trait does, so either package's call satisfies the row.
+			if !traits[name] && !here[name] {
+				t.Errorf("README.md:%d: %s has status %q, but no file of ../traits or of this package calls it", row.line, name, row.status)
 			}
 		case inventoryMissing, inventoryNotAuthorable:
 			if here[name] || traits[name] {
