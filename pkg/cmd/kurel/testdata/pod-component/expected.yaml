@@ -1,6 +1,9 @@
 apiVersion: v1
 kind: Pod
 metadata:
+  labels:
+    app: minimal
+    launcher.gokure.dev/component: minimal
   name: minimal
   namespace: default
 spec:
@@ -12,6 +15,9 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
+  labels:
+    app: migrate
+    launcher.gokure.dev/component: migrate
   name: migrate
   namespace: default
 spec:

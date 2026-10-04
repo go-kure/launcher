@@ -134,9 +134,9 @@ func coreKindErr(h oam.ComponentHandler, typ, name string, props map[string]any)
 
 // generateCoreKind converts one component, applies a restrictive policy and no
 // policy, and generates. It checks what every core kind promises: exactly one
-// object, named after the component, with no label and no annotation of
-// launcher's. The caller checks the namespace, which depends on the kind's
-// scope.
+// object, named after the component, with no annotation of launcher's and no
+// label, except the `app` label on a Pod. The caller checks the namespace,
+// which depends on the kind's scope.
 func generateCoreKind(t *testing.T, h oam.ComponentHandler, typ, name string, props map[string]any) client.Object {
 	t.Helper()
 	one := int32(1)
@@ -171,8 +171,14 @@ func generateCoreKindUnder(t *testing.T, h oam.ComponentHandler, typ, name strin
 	if obj.GetName() != name {
 		t.Errorf("name = %q, want the component name %q", obj.GetName(), name)
 	}
-	if len(obj.GetLabels()) != 0 || len(obj.GetAnnotations()) != 0 {
-		t.Errorf("labels = %v, annotations = %v; want none", obj.GetLabels(), obj.GetAnnotations())
+	// The pod kind is the one core kind that labels its object: a Pod is what
+	// traits and Services select, so it carries the `app` label.
+	var wantLabels map[string]string
+	if typ == "pod" {
+		wantLabels = map[string]string{"app": oam.ComponentLabelValue(name)}
+	}
+	if !maps.Equal(obj.GetLabels(), wantLabels) || len(obj.GetAnnotations()) != 0 {
+		t.Errorf("labels = %v, annotations = %v; want labels %v and no annotation", obj.GetLabels(), obj.GetAnnotations(), wantLabels)
 	}
 	return obj
 }

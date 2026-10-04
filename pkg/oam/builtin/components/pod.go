@@ -17,9 +17,11 @@ import (
 // strictly (decodeKindSpec), less the three no pod can be created with:
 // ephemeralContainers, priority and overhead (validateAuthoredPodSpec). It
 // emits the Pod, named after the component in the build namespace, with the
-// authored spec and nothing else: no label, no annotation, no ServiceAccount
-// and no default of launcher's. TestCoreKindSchemas_CoverSpec keeps the
-// published key set equal to the upstream json tags, less those three.
+// authored spec and the `app` label every workload kind gives its pods, which
+// launcher's traits and Services select on. Nothing else is added: no
+// annotation, no ServiceAccount and no default of launcher's.
+// TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
+// upstream json tags, less those three.
 type PodHandler struct{}
 
 // CanHandle returns true for the pod component type.
@@ -231,14 +233,17 @@ func (c *PodConfig) ApplyPolicy(p oam.Policy) error {
 	return enforcePodTemplatePolicy("", &c.Spec, p)
 }
 
-// Generate emits the Pod: kure's identity-only constructor plus a deep copy of
-// the spec. The parse-time refusals the typed spec can show are repeated,
-// since the config is exported.
+// Generate emits the Pod: kure's identity-only constructor, the `app` label
+// (appLabels) and a deep copy of the spec. The label is what a trait's
+// NetworkPolicy selects, so the pod is a trait target like a workload kind's
+// pods. The parse-time refusals the typed spec can show are repeated, since
+// the config is exported.
 func (c *PodConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if err := validateAuthoredPodSpec("", &c.Spec); err != nil {
 		return nil, err
 	}
 	pod := kubernetes.CreatePod(app.Name, app.Namespace)
+	pod.Labels = appLabels(app.Name)
 	c.Spec.DeepCopyInto(&pod.Spec)
 	obj := client.Object(pod)
 	return []*client.Object{&obj}, nil

@@ -82,8 +82,8 @@ containers:
 
 // TestPodHandler_EmitsAuthoredSpec: the Pod is named after the component in
 // the build namespace and its spec is the authored one, field for field, with
-// nothing added: no label, no annotation, no ServiceAccount token setting and
-// no resources of launcher's.
+// nothing added: no annotation, no ServiceAccount token setting and no
+// resources of launcher's. Its one label is the `app` label.
 func TestPodHandler_EmitsAuthoredSpec(t *testing.T) {
 	var want corev1.PodSpec
 	if err := yaml.UnmarshalStrict([]byte(podRich), &want); err != nil {
@@ -101,6 +101,23 @@ func TestPodHandler_EmitsAuthoredSpec(t *testing.T) {
 	}
 	if q := pod.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; q.String() != "1" {
 		t.Errorf("cpu limit = %s, want 1", q.String())
+	}
+	if want := map[string]string{"app": "runner"}; !reflect.DeepEqual(pod.Labels, want) {
+		t.Errorf("labels = %v, want %v and nothing else", pod.Labels, want)
+	}
+}
+
+// TestPodHandler_AppLabel: the Pod carries the `app` label every workload kind
+// gives its pods, with the component's label value: the name itself up to 63
+// characters, its projection beyond. It is the label a trait's NetworkPolicy
+// selects.
+func TestPodHandler_AppLabel(t *testing.T) {
+	for _, name := range []string{"runner", "runner-" + strings.Repeat("a", 63)} {
+		pod := generateCoreKindUnder(t, &components.PodHandler{}, "pod", name, ptObject(t, htPlainPod), nil).(*corev1.Pod)
+		want := map[string]string{"app": oam.ComponentLabelValue(name)}
+		if !reflect.DeepEqual(pod.Labels, want) {
+			t.Errorf("%s: labels = %v, want %v", name, pod.Labels, want)
+		}
 	}
 }
 
