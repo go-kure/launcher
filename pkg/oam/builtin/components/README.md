@@ -116,6 +116,166 @@ ServiceAccount, and only when the component does not author
 (go-kure/launcher#702). See "Pod-level properties" and "Referencing an existing
 claim" below.
 
+## Kind inventory
+
+Every object the base library can construct, and how a document reaches it
+(go-kure/launcher#790). A row is one of the base library's generated constructors
+(`pkg/kubernetes/**/zz_generated_create.go` in `github.com/go-kure/kure`), written
+`<package directory>.Create<Kind>`. Two tests hold the table to the code:
+
+- `TestKindInventory_CoversEveryConstructor` reads those files from the linked module and
+  fails when a constructor has no row, or a row has no constructor. A base-library bump that
+  adds a kind therefore fails until the kind is listed here.
+- `TestKindInventory_MatchesCallSites` holds the Status column to this package and
+  `../traits`: a `kind` row's constructor is called here, a `trait` row's only there, and a
+  `missing` or `not authorable` row's by neither. A `component` row is not held to either.
+
+Status is one of:
+
+- `kind`: a kind component projects the object; Type is its component `type`.
+- `component`: a component that is not a kind component emits it; Notes says why there is no
+  kind component.
+- `trait`: only a trait emits it; Type is the trait `type`.
+- `missing`: authorable, with no component yet. go-kure/launcher#790 adds these group by group.
+- `not authorable`: no component is planned; Notes gives the reason.
+
+Decode is how the properties become the object: `hand-written parser` (a schema and parser this
+package or `../traits` maintains) or a strict decode into the named upstream type, where an
+unknown or wrongly typed key is an error at every depth the decoder reaches. It does not reach
+inside an upstream type that unmarshals itself, where an unknown nested key is dropped: the
+CiliumNetworkPolicy row names two such fields, and the list is not held by a test.
+
+| Constructor | Kind | Status | Type | Decode | Notes |
+|---|---|---|---|---|---|
+| `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
+| `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
+| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
+| `kubernetes.CreateCSIStorageCapacity` | storage.k8s.io/v1 CSIStorageCapacity | not authorable | - | - | Written by a CSI driver's provisioner. |
+| `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateClusterRoleBinding` | rbac.authorization.k8s.io/v1 ClusterRoleBinding (cluster-scoped) | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateComponentStatus` | v1 ComponentStatus (cluster-scoped) | not authorable | - | - | Read-only: the API server computes it. |
+| `kubernetes.CreateConfigMap` | v1 ConfigMap | kind | `configmap` | hand-written parser | The `configmap` trait builds through the same path. |
+| `kubernetes.CreateControllerRevision` | apps/v1 ControllerRevision | not authorable | - | - | Written by the StatefulSet and DaemonSet controllers. |
+| `kubernetes.CreateCronJob` | batch/v1 CronJob | kind | `cronjob` | hand-written parser | - |
+| `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
+| `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
+| `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
+| `kubernetes.CreateEndpoints` | v1 Endpoints | missing | - | - | - |
+| `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
+| `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
+| `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | missing | - | - | - |
+| `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | missing | - | - | - |
+| `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | trait | `httproute` | hand-written parser | `expose` lowers onto it. |
+| `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
+| `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
+| `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
+| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
+| `kubernetes.CreateLimitRange` | v1 LimitRange | missing | - | - | - |
+| `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | missing | - | - | - |
+| `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
+| `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
+| `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
+| `kubernetes.CreatePod` | v1 Pod | missing | - | - | - |
+| `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
+| `kubernetes.CreatePodTemplate` | v1 PodTemplate | missing | - | - | - |
+| `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
+| `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
+| `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | missing | - | - | - |
+| `kubernetes.CreateReplicationController` | v1 ReplicationController | missing | - | - | - |
+| `kubernetes.CreateResourceQuota` | v1 ResourceQuota | missing | - | - | - |
+| `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateSecret` | v1 Secret | missing | - | - | - |
+| `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
+| `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
+| `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
+| `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
+| `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | missing | - | - | - |
+| `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | missing | - | - | - |
+| `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
+| `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | missing | - | - | - |
+| `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | trait | `certificate` | hand-written parser | - |
+| `certmanager.CreateCertificateRequest` | cert-manager.io/v1 CertificateRequest | not authorable | - | - | A one-shot request cert-manager creates for a Certificate. |
+| `certmanager.CreateChallenge` | acme.cert-manager.io/v1 Challenge | not authorable | - | - | Created by cert-manager's ACME issuer. |
+| `certmanager.CreateClusterIssuer` | cert-manager.io/v1 ClusterIssuer (cluster-scoped) | missing | - | - | - |
+| `certmanager.CreateIssuer` | cert-manager.io/v1 Issuer | missing | - | - | - |
+| `certmanager.CreateOrder` | acme.cert-manager.io/v1 Order | not authorable | - | - | Created by cert-manager's ACME issuer. |
+| `cilium.CreateCiliumBGPAdvertisement` | cilium.io/v2 CiliumBGPAdvertisement (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumBGPClusterConfig` | cilium.io/v2 CiliumBGPClusterConfig (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumBGPNodeConfig` | cilium.io/v2 CiliumBGPNodeConfig (cluster-scoped) | not authorable | - | - | Generated by the Cilium operator from a CiliumBGPClusterConfig. |
+| `cilium.CreateCiliumBGPNodeConfigOverride` | cilium.io/v2 CiliumBGPNodeConfigOverride (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumBGPPeerConfig` | cilium.io/v2 CiliumBGPPeerConfig (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumCIDRGroup` | cilium.io/v2 CiliumCIDRGroup (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumClusterwideEnvoyConfig` | cilium.io/v2 CiliumClusterwideEnvoyConfig (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumClusterwideNetworkPolicy` | cilium.io/v2 CiliumClusterwideNetworkPolicy (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumEgressGatewayPolicy` | cilium.io/v2 CiliumEgressGatewayPolicy (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumEndpoint` | cilium.io/v2 CiliumEndpoint | not authorable | - | - | Written by the Cilium agent. |
+| `cilium.CreateCiliumEnvoyConfig` | cilium.io/v2 CiliumEnvoyConfig | missing | - | - | - |
+| `cilium.CreateCiliumIdentity` | cilium.io/v2 CiliumIdentity (cluster-scoped) | not authorable | - | - | Written by Cilium when it allocates an identity. |
+| `cilium.CreateCiliumLoadBalancerIPPool` | cilium.io/v2 CiliumLoadBalancerIPPool (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumLocalRedirectPolicy` | cilium.io/v2 CiliumLocalRedirectPolicy | missing | - | - | - |
+| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | trait | `cilium-networkpolicy` | strict decode of each rule into the Cilium `Rule` | An unknown key nested inside `endpointSelector` or `icmps` is dropped: both types unmarshal themselves. |
+| `cilium.CreateCiliumNode` | cilium.io/v2 CiliumNode (cluster-scoped) | not authorable | - | - | Written by the Cilium agent for its node. |
+| `cilium.CreateCiliumNodeConfig` | cilium.io/v2 CiliumNodeConfig | missing | - | - | - |
+| `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | missing | - | - | - |
+| `cnpg.CreateCluster` | postgresql.cnpg.io/v1 Cluster | kind | `cnpg-cluster` | strict decode of `ClusterSpec` | `postgresql` lowers onto it. |
+| `cnpg.CreateClusterImageCatalog` | postgresql.cnpg.io/v1 ClusterImageCatalog (cluster-scoped) | missing | - | - | - |
+| `cnpg.CreateDatabase` | postgresql.cnpg.io/v1 Database | kind | `cnpg-database` | strict decode of `DatabaseSpec` | `postgresql` lowers onto it. |
+| `cnpg.CreateDatabaseRole` | postgresql.cnpg.io/v1 DatabaseRole | missing | - | - | - |
+| `cnpg.CreateFailoverQuorum` | postgresql.cnpg.io/v1 FailoverQuorum | not authorable | - | - | Written by the CloudNativePG operator. |
+| `cnpg.CreateImageCatalog` | postgresql.cnpg.io/v1 ImageCatalog | missing | - | - | - |
+| `cnpg.CreateObjectStore` | barmancloud.cnpg.io/v1 ObjectStore | kind | `cnpg-objectstore` | strict decode of `ObjectStoreSpec` | `postgresql` lowers onto it. |
+| `cnpg.CreatePooler` | postgresql.cnpg.io/v1 Pooler | kind | `cnpg-pooler` | strict decode of `PoolerSpec` | `postgresql` lowers onto it. |
+| `cnpg.CreatePublication` | postgresql.cnpg.io/v1 Publication | missing | - | - | - |
+| `cnpg.CreateScheduledBackup` | postgresql.cnpg.io/v1 ScheduledBackup | missing | - | - | - |
+| `cnpg.CreateSubscription` | postgresql.cnpg.io/v1 Subscription | missing | - | - | - |
+| `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | missing | - | - | - |
+| `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | missing | - | - | - |
+| `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | trait | `external-secret` | hand-written parser | - |
+| `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | missing | - | - | - |
+| `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | missing | - | - | - |
+| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | missing | - | - | - |
+| `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
+| `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
+| `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | missing | - | - | - |
+| `fluxcd.CreateFluxReport` | fluxcd.controlplane.io/v1 FluxReport | not authorable | - | - | Written by the Flux operator. |
+| `fluxcd.CreateGitRepository` | source.toolkit.fluxcd.io/v1 GitRepository | kind | `gitrepository` | strict decode of `GitRepositorySpec` | - |
+| `fluxcd.CreateHelmChart` | source.toolkit.fluxcd.io/v1 HelmChart | kind | `helmchart` | strict decode of `HelmChartSpec` | - |
+| `fluxcd.CreateHelmRelease` | helm.toolkit.fluxcd.io/v2 HelmRelease | kind | `helmrelease` | strict decode of `HelmReleaseSpec` | `helm` lowers onto it. |
+| `fluxcd.CreateHelmRepository` | source.toolkit.fluxcd.io/v1 HelmRepository | kind | `helmrepository` | strict decode of `HelmRepositorySpec` | - |
+| `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | missing | - | - | - |
+| `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | component | `oci` | hand-written parser | `oci` emits it beside its OCIRepository; a kind component is the subject of go-kure/launcher#784. |
+| `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` emits one too. |
+| `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | missing | - | - | - |
+| `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | missing | - | - | - |
+| `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | missing | - | - | - |
+| `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
+| `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | missing | - | - | - |
+| `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | missing | - | - | - |
+| `metallb.CreateBGPPeer` | metallb.io/v1beta1 BGPPeer | missing | - | - | - |
+| `metallb.CreateCommunity` | metallb.io/v1beta1 Community | missing | - | - | - |
+| `metallb.CreateConfigurationState` | metallb.io/v1beta1 ConfigurationState | not authorable | - | - | Status MetalLB writes. |
+| `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | missing | - | - | - |
+| `metallb.CreateL2Advertisement` | metallb.io/v1beta1 L2Advertisement | missing | - | - | - |
+| `metallb.CreateServiceBGPStatus` | metallb.io/v1beta1 ServiceBGPStatus | not authorable | - | - | Status MetalLB writes. |
+| `metallb.CreateServiceL2Status` | metallb.io/v1beta1 ServiceL2Status | not authorable | - | - | Status MetalLB writes. |
+| `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | missing | - | - | - |
+| `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | missing | - | - | - |
+| `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | missing | - | - | - |
+| `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | missing | - | - | - |
+| `prometheus.CreatePrometheusRule` | monitoring.coreos.com/v1 PrometheusRule | missing | - | - | - |
+| `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | missing | - | - | - |
+| `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | missing | - | - | - |
+| `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | missing | - | - | - |
+| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | trait | `volsync` | hand-written parser | - |
+
 ## Common config
 
 `env`, `command`, `args`, `initContainers`, `sidecars` and `affinity` each read
