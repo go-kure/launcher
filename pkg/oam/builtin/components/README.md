@@ -3266,7 +3266,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   emitted (unlike template delivery, which emits the decoded object), and it is not read by
   the check. `Generate` runs the check again on the object it is about to emit, once
   `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map
-  checked need not be the map emitted.
+  checked need not be the map emitted; a refusal there is the same
+  `*oam.ViolationError`, naming the component.
 
   What cannot be read is refused, not passed: an object of a registered kind that does not
   decode as that kind (`replicas: three`), a workload kind in an API version the scheme

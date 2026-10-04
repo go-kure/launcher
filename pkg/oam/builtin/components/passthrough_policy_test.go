@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -81,6 +82,7 @@ func ptStrictPolicy() *stubPolicy {
 		allowedRegistries:      []string{"registry.example"},
 		forbiddenContainerCaps: []string{"NET_ADMIN"},
 		maxCPU:                 "2",
+		maxMemory:              "1Gi",
 		maxStorageSize:         "10Gi",
 		maxReplicas:            int32ptr(3),
 	}
@@ -249,6 +251,30 @@ func TestPassthrough_ObjectViolations(t *testing.T) {
 			object: ptDeployment(
 				"containers:\n  - name: app\n    image: registry.example/team/app:1.2.3\n    resources:\n      limits:\n        cpu: \"8\"\n"),
 			want: []string{`object Deployment "demo/thing"`, `cpu limit "8" exceeds enforced maximum "2"`},
+		},
+		{
+			name: "memory limit over the maximum",
+			object: ptDeployment(
+				"containers:\n  - name: app\n    image: registry.example/team/app:1.2.3\n    resources:\n      limits:\n        memory: 8Gi\n"),
+			want: []string{`object Deployment "demo/thing"`, `memory limit "8Gi" exceeds enforced maximum "1Gi"`},
+		},
+		{
+			name: "HostProcess container",
+			object: ptDeployment(
+				"containers:\n  - name: app\n    image: registry.example/team/app:1.2.3\n    securityContext:\n      windowsOptions:\n        hostProcess: true\n"),
+			want: []string{`object Deployment "demo/thing"`, `spec.template.spec.containers[0] "app"`, "hostProcess"},
+		},
+		{
+			name: "HostProcess pod",
+			object: ptDeployment(
+				"securityContext:\n  windowsOptions:\n    hostProcess: true\n" + htPlainPod),
+			want: []string{`object Deployment "demo/thing"`, "hostProcess"},
+		},
+		{
+			name: "generic ephemeral volume over the storage maximum",
+			object: ptDeployment(
+				"volumes:\n  - name: scratch\n    ephemeral:\n      volumeClaimTemplate:\n        spec:\n          resources:\n            requests:\n              storage: 1Ti\n" + htPlainPod),
+			want: []string{`object Deployment "demo/thing"`, `volume "scratch"`, `"1Ti" exceeds enforced maximum "10Gi"`},
 		},
 	}
 	for _, tc := range cases {
@@ -427,7 +453,17 @@ func TestPassthrough_GenerateRechecksTheEmittedObject(t *testing.T) {
 	if err == nil {
 		t.Fatal("Generate emitted an object replaced after the policy was applied, unchecked")
 	}
-	for _, f := range []string{`passthrough component "my-res"`, `object Deployment "demo/thing"`, "hostNetwork is not allowed"} {
+	// The refusal is the component's policy violation, as the one the transform
+	// reports from ApplyPolicy is: a library caller tells it from any other
+	// generation error by its type.
+	var v *oam.ViolationError
+	if !errors.As(err, &v) {
+		t.Fatalf("error is %T, want it to wrap *oam.ViolationError: %v", err, err)
+	}
+	if v.Component != "my-res" {
+		t.Errorf("violation names component %q, want %q", v.Component, "my-res")
+	}
+	for _, f := range []string{`component "my-res"`, `passthrough: object Deployment "demo/thing"`, "hostNetwork is not allowed"} {
 		if !strings.Contains(err.Error(), f) {
 			t.Errorf("error %q lacks %q", err, f)
 		}
