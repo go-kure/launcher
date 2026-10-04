@@ -352,6 +352,28 @@ func TestTransform_MissingTraitHandlerNamesTheComponentAndTheRule(t *testing.T) 
 			t.Errorf("err = %v\nwant  %s", err, want)
 		}
 	})
+	// A document rule may move an authored trait to another component: the trait's
+	// own origin keeps the component it was written on.
+	t.Run("moved to another component by a document rule", func(t *testing.T) {
+		for name, byValue := range map[string]bool{"copy": true, "pointer": false} {
+			t.Run(name, func(t *testing.T) {
+				tr := NewTransformer(map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}}, nil)
+				tr.RegisterDocumentLowering(movingDocRule{byValue: byValue})
+				if byValue {
+					// The rule's own trait, placed ahead of the forwarded one.
+					tr.RegisterBuiltinTrait("topology-spread", &stubTraitHandler{typ: "topology-spread"})
+				}
+				app := forwardingDocApp("configmap", map[string]any{})
+				app.Kind = "Moving"
+				_, err := tr.Transform(app, TransformContext{})
+				const want = `no handler for trait type "configmap" (on component "worker", authored on component "web" ` +
+					`(type "webservice") in document "myapp" (kind "Moving"))`
+				if err == nil || err.Error() != want {
+					t.Errorf("err = %v\nwant  %s", err, want)
+				}
+			})
+		}
+	})
 	// Under the authored name the author wrote the trait and the name: no clause.
 	t.Run("forwarded onto a component of the authored name", func(t *testing.T) {
 		tr := NewTransformer(handlers, nil)
