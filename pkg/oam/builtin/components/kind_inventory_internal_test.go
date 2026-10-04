@@ -107,34 +107,52 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 // from neither. So a component or trait for a missing kind fails here until
 // its row says so, and a row cannot claim one that builds nothing.
 //
-// Not held: which handler makes the call (a kind row passes while any file of
-// this package calls its constructor, so the Type column is not checked); a
-// component row (an object a non-kind component emits, or the crd exception);
-// a trait row whose kind gains a kind component, which the change adding the
-// component updates; and code outside the two packages, which is not read.
+// It holds the Type column to the handlers: a kind or component row's Type is
+// a type this package declares contract metadata for, a trait row's one
+// ../traits does. So a row cannot name a type no handler has, and stops
+// passing when its handler is removed.
+//
+// Not held: which handler makes the call (a kind row passes while its Type has
+// a handler and any file of this package calls its constructor); whether a
+// component row's constructor is called; a trait row whose kind gains a kind
+// component, which the change adding the component updates; and code outside
+// the two packages, which is not read.
 func TestKindInventory_MatchesCallSites(t *testing.T) {
 	constructors := kureGeneratedConstructors(t)
-	here := kureConstructorCalls(t, ".", constructors)
-	traits := kureConstructorCalls(t, filepath.Join("..", "traits"), constructors)
+	hereFiles, traitFiles := parsePackageFiles(t, "."), parsePackageFiles(t, filepath.Join("..", "traits"))
+	here := kureConstructorCalls(t, hereFiles, constructors)
+	traits := kureConstructorCalls(t, traitFiles, constructors)
+	hereTypes := contractFamilies(t, hereFiles)
+	traitTypes := contractFamilies(t, traitFiles)
 	// Vacuity guards: a walk that resolves no import finds no call, and every
-	// missing row would then pass. Both packages call far more than this.
-	if len(here) < 10 || len(traits) < 5 {
-		t.Fatalf("found %d constructors called here and %d in ../traits, want >= 10 and >= 5; the call-site walk is broken", len(here), len(traits))
+	// missing row would then pass. Both packages hold far more than this.
+	if len(here) < 10 || len(traits) < 5 || len(hereTypes) < 10 || len(traitTypes) < 5 {
+		t.Fatalf("found %d constructors called and %d types declared here, %d and %d in ../traits, want >= 10 here and >= 5 there; the walk is broken", len(here), len(hereTypes), len(traits), len(traitTypes))
 	}
 	rows := readKindInventory(t)
 	for _, name := range slices.Sorted(maps.Keys(rows)) {
 		row := rows[name]
+		// A Type cell is one type in backticks; the status says whose.
+		checkType := func(types map[string]bool, where string) {
+			if typ := strings.Trim(row.typ, "`"); row.typ != "`"+typ+"`" || !types[typ] {
+				t.Errorf("README.md:%d: %s has status %q and Type %q, want one type in backticks that a handler or lowering rule of %s declares contract metadata for", row.line, name, row.status, row.typ, where)
+			}
+		}
 		switch row.status {
 		case inventoryKind:
 			if !here[name] {
 				t.Errorf("README.md:%d: %s has status %q, but no file of this package calls it", row.line, name, row.status)
 			}
+			checkType(hereTypes, "this package")
+		case inventoryComponent:
+			checkType(hereTypes, "this package")
 		case inventoryTrait:
 			// A trait may build through a generator of this package, as the
 			// configmap trait does, so either package's call satisfies the row.
 			if !traits[name] && !here[name] {
 				t.Errorf("README.md:%d: %s has status %q, but no file of ../traits or of this package calls it", row.line, name, row.status)
 			}
+			checkType(traitTypes, "../traits")
 		case inventoryMissing, inventoryNotAuthorable:
 			if here[name] || traits[name] {
 				t.Errorf("README.md:%d: %s has status %q, but this package or ../traits calls it: update the row", row.line, name, row.status)
@@ -397,33 +415,182 @@ func TestKindInventory_TableParser(t *testing.T) {
 	}
 }
 
-// kureConstructorCalls returns which of constructors the non-test Go files of
-// dir call, in the same "<package directory>.Create<Kind>" form.
-func kureConstructorCalls(t *testing.T, dir string, constructors map[string]generatedConstructor) map[string]bool {
+// packageFiles is the parsed non-test Go files of one package directory.
+type packageFiles struct {
+	fset  *token.FileSet
+	files []*ast.File
+}
+
+// parsePackageFiles parses the non-test Go files of dir, with the parser's
+// identifier resolution.
+func parsePackageFiles(t *testing.T, dir string) packageFiles {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)
 	}
-	called := map[string]bool{}
-	fset := token.NewFileSet()
+	pkg := packageFiles{fset: token.NewFileSet()}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		// Mode 0: the parser resolves identifiers, which the walk relies on.
-		parsed, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		// Mode 0: the parser resolves identifiers, which the walks rely on.
+		parsed, err := parser.ParseFile(pkg.fset, filepath.Join(dir, name), nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", filepath.Join(dir, name), err)
 		}
-		calls, problem := kureConstructorCallsIn(fset, parsed, constructors)
+		pkg.files = append(pkg.files, parsed)
+	}
+	return pkg
+}
+
+// kureConstructorCalls returns which of constructors the files of pkg call, in
+// the same "<package directory>.Create<Kind>" form.
+func kureConstructorCalls(t *testing.T, pkg packageFiles, constructors map[string]generatedConstructor) map[string]bool {
+	t.Helper()
+	called := map[string]bool{}
+	for _, file := range pkg.files {
+		calls, problem := kureConstructorCallsIn(pkg.fset, file, constructors)
 		if problem != "" {
 			t.Fatalf("%s; this walk cannot tell whether the constructor is called, update this test", problem)
 		}
 		maps.Copy(called, calls)
 	}
 	return called
+}
+
+// contractFamilies returns the types the files of pkg declare contract
+// metadata for, failing on a declaration it cannot read.
+func contractFamilies(t *testing.T, pkg packageFiles) map[string]bool {
+	t.Helper()
+	families, problem := contractFamiliesIn(pkg.fset, pkg.files)
+	if problem != "" {
+		t.Fatalf("%s; this walk cannot read the type it declares, update this test", problem)
+	}
+	return families
+}
+
+// contractFamiliesIn returns the first argument of every call the files of one
+// package make to its function contract, through which each handler and
+// lowering rule of the two packages declares its contract metadata under the
+// type it handles. The argument is a string literal or a package-level
+// constant declared as one; it returns a problem for any other.
+//
+// A local declaration named contract is not the function: the parser's
+// identifier resolution gives the callee no object in a file that only uses
+// the function, and a function object in the file that declares it.
+func contractFamiliesIn(fset *token.FileSet, files []*ast.File) (families map[string]bool, problem string) {
+	stringLiteral := func(expr ast.Expr) (string, bool) {
+		lit, ok := expr.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return "", false
+		}
+		value, err := strconv.Unquote(lit.Value)
+		return value, err == nil
+	}
+	consts := map[string]string{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				spec := spec.(*ast.ValueSpec)
+				for i, name := range spec.Names {
+					if i >= len(spec.Values) {
+						continue
+					}
+					if value, ok := stringLiteral(spec.Values[i]); ok {
+						consts[name.Name] = value
+					}
+				}
+			}
+		}
+	}
+
+	families = map[string]bool{}
+	for _, file := range files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			callee, ok := ast.Unparen(call.Fun).(*ast.Ident)
+			if !ok || callee.Name != "contract" || (callee.Obj != nil && callee.Obj.Kind != ast.Fun) {
+				return true
+			}
+			family, ok := "", false
+			if len(call.Args) > 0 {
+				switch arg := call.Args[0].(type) {
+				case *ast.BasicLit:
+					family, ok = stringLiteral(arg)
+				case *ast.Ident:
+					// A package-level constant has no object in a file that
+					// only uses it, and a constant object in the file that
+					// declares it; a parameter or a variable is neither.
+					if arg.Obj == nil || arg.Obj.Kind == ast.Con {
+						family, ok = consts[arg.Name]
+					}
+				}
+			}
+			if !ok && problem == "" {
+				problem = fmt.Sprintf("%s: contract is called with a first argument that is neither a string literal nor a package-level string constant", fset.Position(call.Pos()))
+			}
+			if ok {
+				families[family] = true
+			}
+			return true
+		})
+	}
+	if problem != "" {
+		return nil, problem
+	}
+	return families, ""
+}
+
+// TestKindInventory_ContractFamilies pins which calls declare a type.
+func TestKindInventory_ContractFamilies(t *testing.T) {
+	const declares = "package p\n\nconst helmType = \"helm\"\n\nfunc contract(typ string, keys ...string) string { return typ }\n\n"
+	tests := []struct {
+		name        string
+		srcs        []string
+		want        []string
+		wantProblem string
+	}{
+		{name: "literals, with and without further arguments", srcs: []string{declares + `var _, _ = contract("configmap"), contract("certificate", "cert-manager")`}, want: []string{"certificate", "configmap"}},
+		{name: "a constant, in its own file and in another", srcs: []string{declares + `var _ = contract(helmType)`, "package p\n\n" + `func f() string { return contract(helmType) + contract("job") }`}, want: []string{"helm", "job"}},
+		{name: "a local function value of that name", srcs: []string{"package p\n\n" + `func f() string { contract := func(string) string { return "" }; return contract("job") }`}},
+		{name: "a parameter", srcs: []string{declares + `func f(typ string) string { return contract(typ) }`}, wantProblem: "neither a string literal nor a package-level string constant"},
+		{name: "a constant that is not a string literal", srcs: []string{declares + "const other = helmType + \"x\"\n\n" + `var _ = contract(other)`}, wantProblem: "neither a string literal nor a package-level string constant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			var files []*ast.File
+			for i, src := range tt.srcs {
+				file, err := parser.ParseFile(fset, fmt.Sprintf("src%d.go", i), src, 0)
+				if err != nil {
+					t.Fatalf("parse: %v", err)
+				}
+				files = append(files, file)
+			}
+			got, problem := contractFamiliesIn(fset, files)
+			if tt.wantProblem != "" {
+				if !strings.Contains(problem, tt.wantProblem) {
+					t.Fatalf("problem = %q, want it to contain %q", problem, tt.wantProblem)
+				}
+				return
+			}
+			if problem != "" {
+				t.Fatalf("unexpected problem: %s", problem)
+			}
+			if families := slices.Sorted(maps.Keys(got)); !slices.Equal(families, tt.want) {
+				t.Errorf("families = %v, want %v", families, tt.want)
+			}
+		})
+	}
 }
 
 // kureConstructorCallsIn returns which of constructors one file calls. A call
