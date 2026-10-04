@@ -282,8 +282,8 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | missing | - | - | - |
 | `fluxcd.CreateImageRepository` | image.toolkit.fluxcd.io/v1 ImageRepository | missing | - | - | - |
 | `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | missing | - | - | - |
-| `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | component | `oci` | hand-written parser | `oci` emits it beside its OCIRepository; a kind component is the subject of go-kure/launcher#784. |
-| `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` emits one too. |
+| `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | kind | `fluxcd-kustomization` | strict decode of `KustomizationSpec` | `oci` lowers onto it. `targetNamespace` is never defaulted. |
+| `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` lowers onto it. |
 | `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | missing | - | - | - |
 | `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | missing | - | - | - |
 | `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | missing | - | - | - |
