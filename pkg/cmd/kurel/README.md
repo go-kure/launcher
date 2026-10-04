@@ -92,7 +92,11 @@ opinion-free projection of a CloudNativePG `Cluster` — is registered in
 `Pooler`, `Database` or Barman Cloud `ObjectStore` each) are registered the same
 way; the `cnpg-<kind>-minimal` and `cnpg-<kind>-full` fixtures build each. The
 kind components `serviceaccount`, `persistentvolumeclaim` and `configmap`
-(go-kure/launcher#702) are registered the same way. Fixtures with the same names
+(go-kure/launcher#702) are registered the same way. The `secret` trait
+(go-kure/launcher#786), which emits one `Secret` beside its component, is
+registered in both `builtinTraitHandlers()` and `pkg/oam`'s trait allowlist;
+`helm_secret_values_test.go` builds it authored and as the `helm` component's
+`secretValues` lowering. Fixtures with the same names
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
 components `namespace`, `limitrange`, `resourcequota` and `persistentvolume`
@@ -240,7 +244,9 @@ helmtemplate section. Any other `LayoutAugmenter` that doesn't implement
 this opt-out existed. A `helm` component under `valuesMode: configMap` is not a
 `LayoutAugmenter` either: its values `ConfigMap` comes from a `configmap` trait
 on the `helmrelease` it lowers to, ordinary trait output, so `build` emits it
-after the HelmRelease.
+after the HelmRelease. The same holds for `secretValues`: its values `Secret`
+comes from a `secret` trait and is written to the output in clear form (base64),
+so a build's output is as sensitive as the `secretValues` it was given.
 
 ### Warnings
 
