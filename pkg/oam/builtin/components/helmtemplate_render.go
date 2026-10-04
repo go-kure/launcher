@@ -7,8 +7,11 @@ import (
 	"strings"
 
 	kureio "github.com/go-kure/kure/pkg/io"
+	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -46,7 +49,8 @@ type chartSource struct {
 
 // renderOptions turns the namespace into a kure render option when set. It
 // only sets .Release.Namespace: kure stamps no metadata.namespace, so a chart
-// that omits it still renders namespace-less objects.
+// that omits it still renders namespace-less objects. chartRender.render
+// stamps those afterwards (stampRenderedNamespaces).
 func (s chartSource) renderOptions() []helm.RenderOption {
 	var opts []helm.RenderOption
 	if s.Namespace != "" {
@@ -166,8 +170,10 @@ type chartRender struct {
 // name, under either caller.
 //
 // The render uses src's release identity (chartSource.renderOptions), which
-// each caller decides. Nothing stamps metadata.namespace afterwards, so a chart
-// that leaves it unset renders namespace-less objects whatever the namespace.
+// each caller decides. A namespaced object the chart rendered without
+// metadata.namespace is then given src.Namespace (stampRenderedNamespaces), so
+// the cached groups — what ApplyPolicy checks and what objects and partition
+// hand out — already carry it.
 func (r *chartRender) render(renderFn renderChartFunc, componentType, name string, src chartSource) error {
 	if r.rendered {
 		return nil
@@ -183,9 +189,51 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	if err != nil {
 		return err
 	}
+	stampRenderedNamespaces(src.Namespace, groups)
 	r.hookGroups = groups
 	r.rendered = true
 	return nil
+}
+
+// stampRenderedNamespaces sets namespace on every emitted object that is
+// namespaced and carries no metadata.namespace, which is where a Helm install
+// into that namespace would create it. It resolves each object's scope as the
+// manifests component does (manifest.Scope): kure's scope table, plus the
+// scope a CustomResourceDefinition among the emitted objects declares for the
+// kind it defines. A chart's crds/ directory is not rendered, so a CRD shipped
+// there defines no scope here.
+//
+// Unlike the manifests component, it refuses nothing, since a chart is not
+// authored by the application:
+//
+//   - a namespace the chart wrote is kept, on a cluster-scoped object too, as
+//     Helm keeps it;
+//   - an object whose scope is unknown — a kind kure does not register, custom
+//     or built-in, with no CRD for it among the emitted objects — is left as
+//     rendered, namespace-less: stamping it would be a guess, and a
+//     cluster-scoped object must not carry a namespace;
+//   - a cluster-scoped object is left as rendered.
+//
+// An empty namespace (a config built directly, with none) stamps nothing.
+func stampRenderedNamespaces(namespace string, groups []helm.HookGroup) {
+	if namespace == "" {
+		return
+	}
+	crdScopes := map[schema.GroupKind]apiextv1.ResourceScope{}
+	for _, g := range groups {
+		for _, o := range g.Resources {
+			if gk, scope, ok := manifest.CRDScope(o); ok {
+				crdScopes[gk] = scope
+			}
+		}
+	}
+	for _, g := range groups {
+		for _, o := range g.Resources {
+			if o.GetNamespace() == "" && manifest.Scope(o, crdScopes) == manifest.ScopeNamespaced {
+				o.SetNamespace(namespace)
+			}
+		}
+	}
 }
 
 // objects flattens a deep copy of hookGroups in execution order, and records

@@ -235,39 +235,39 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 		{
 			name:      "host network in a DaemonSet",
 			templates: map[string]string{"d.yaml": podIn("DaemonSet", "apps/v1", "spec.template.spec", "hostNetwork: true\n"+htPlainPod)},
-			want:      []string{`rendered DaemonSet "thing"`, "hostNetwork is not allowed"},
+			want:      []string{`rendered DaemonSet "demo/thing"`, "hostNetwork is not allowed"},
 		},
 		{
 			name: "hostPath volume in a StatefulSet",
 			templates: map[string]string{"d.yaml": podIn("StatefulSet", "apps/v1", "spec.template.spec",
 				"volumes:\n  - name: host\n    hostPath:\n      path: /etc\n"+htPlainPod)},
-			want: []string{`rendered StatefulSet "thing"`, `volume "host": hostPath volumes are not allowed`},
+			want: []string{`rendered StatefulSet "demo/thing"`, `volume "host": hostPath volumes are not allowed`},
 		},
 		{
 			name:      "privileged container in a CronJob",
 			templates: map[string]string{"d.yaml": podIn("CronJob", "batch/v1", "spec.jobTemplate.spec.template.spec", "restartPolicy: Never\n"+privileged)},
-			want:      []string{`rendered CronJob "thing"`, `spec.jobTemplate.spec.template.spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
+			want:      []string{`rendered CronJob "demo/thing"`, `spec.jobTemplate.spec.template.spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name:      "privileged container in a kept hook Job",
 			templates: map[string]string{"d.yaml": strings.Replace(podIn("Job", "batch/v1", "spec.template.spec", "restartPolicy: Never\n"+privileged), "  name: thing\n", "  name: thing\n  annotations:\n    helm.sh/hook: post-install\n", 1)},
-			want:      []string{`rendered Job "thing"`, "securityContext.privileged is not allowed"},
+			want:      []string{`rendered Job "demo/thing"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name:      "privileged container in a bare Pod",
 			templates: map[string]string{"d.yaml": podIn("Pod", "v1", "spec", privileged)},
-			want:      []string{`rendered Pod "thing"`, `spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
+			want:      []string{`rendered Pod "demo/thing"`, `spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name:      "privileged container in a ReplicaSet",
 			templates: map[string]string{"d.yaml": podIn("ReplicaSet", "apps/v1", "spec.template.spec", privileged)},
-			want:      []string{`rendered ReplicaSet "thing"`, "securityContext.privileged is not allowed"},
+			want:      []string{`rendered ReplicaSet "demo/thing"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name: "Pod inside a list of an unregistered kind",
 			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
 				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(htPlainPod, "      ")},
-			want: []string{`rendered Pod "inner"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
+			want: []string{`rendered Pod "demo/inner"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
 		},
 		{
 			name: "list left inside a list of an unregistered kind",
@@ -287,20 +287,20 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 		{
 			name:      "privileged container in a PodTemplate",
 			templates: map[string]string{"d.yaml": podIn("PodTemplate", "v1", "template.spec", privileged)},
-			want:      []string{`rendered PodTemplate "thing"`, `template.spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
+			want:      []string{`rendered PodTemplate "demo/thing"`, `template.spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name: "StatefulSet claim template over the storage maximum",
 			templates: map[string]string{"d.yaml": "apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: thing\nspec:\n" +
 				"  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        resources:\n          requests:\n            storage: 1Ti\n" +
 				"  template:\n    spec:\n" + htIndent(htPlainPod, "      ")},
-			want: []string{`rendered StatefulSet "thing"`, `spec.volumeClaimTemplates[0] "data" spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
+			want: []string{`rendered StatefulSet "demo/thing"`, `spec.volumeClaimTemplates[0] "data" spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
 		},
 		{
 			name: "PersistentVolumeClaim over the storage maximum",
 			templates: map[string]string{"d.yaml": "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: thing\nspec:\n" +
 				"  resources:\n    requests:\n      storage: 1Ti\n"},
-			want: []string{`rendered PersistentVolumeClaim "thing"`, `spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
+			want: []string{`rendered PersistentVolumeClaim "demo/thing"`, `spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
 		},
 		{
 			name: "Deployment over the replica maximum",
@@ -312,19 +312,19 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			name: "StatefulSet over the replica maximum",
 			templates: map[string]string{"d.yaml": strings.Replace(podIn("StatefulSet", "apps/v1", "spec.template.spec", htPlainPod),
 				"spec:\n", "spec:\n  replicas: 4\n", 1)},
-			want: []string{`rendered StatefulSet "thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
+			want: []string{`rendered StatefulSet "demo/thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
 		},
 		{
 			name: "ReplicaSet over the replica maximum",
 			templates: map[string]string{"d.yaml": strings.Replace(podIn("ReplicaSet", "apps/v1", "spec.template.spec", htPlainPod),
 				"spec:\n", "spec:\n  replicas: 4\n", 1)},
-			want: []string{`rendered ReplicaSet "thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
+			want: []string{`rendered ReplicaSet "demo/thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
 		},
 		{
 			name: "HorizontalPodAutoscaler over the replica maximum",
 			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
 				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  minReplicas: 1\n  maxReplicas: 9\n"},
-			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
+			want: []string{`rendered HorizontalPodAutoscaler "demo/thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
 		},
 		{
 			// autoscaling/v1 is not in kure's scheme, so the object arrives
@@ -332,18 +332,18 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			name: "HorizontalPodAutoscaler in an unregistered API version over the replica maximum",
 			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
 				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: 9\n"},
-			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
+			want: []string{`rendered HorizontalPodAutoscaler "demo/thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
 		},
 		{
 			name: "HorizontalPodAutoscaler in an unregistered API version with an unreadable maximum",
 			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
 				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: \"9\"\n"},
-			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas is not an integer", "cannot be checked against environment policy"},
+			want: []string{`rendered HorizontalPodAutoscaler "demo/thing"`, "spec.maxReplicas is not an integer", "cannot be checked against environment policy"},
 		},
 		{
 			name:      "workload in an API version the build cannot read",
 			templates: map[string]string{"d.yaml": podIn("CronJob", "batch/v1beta1", "spec.jobTemplate.spec.template.spec", "restartPolicy: Never\n"+htPlainPod)},
-			want:      []string{`rendered CronJob "thing"`, `apiVersion "batch/v1beta1"`, "cannot be checked against environment policy"},
+			want:      []string{`rendered CronJob "demo/thing"`, `apiVersion "batch/v1beta1"`, "cannot be checked against environment policy"},
 		},
 		{
 			name: "ephemeral container",
