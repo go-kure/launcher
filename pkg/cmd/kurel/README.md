@@ -98,7 +98,7 @@ build each one, and the `pvc-volume-claimname` fixture mounts a
 components `namespace`, `limitrange`, `resourcequota`, `persistentvolume` and
 `pod` (go-kure/launcher#790) are registered the same way; the
 `<type>-component` fixtures build each. The `pod` kind emits the authored spec
-alone and is not one of the five pod kinds named below. The
+and the `app` label, and is not one of the five pod kinds named below. The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
 and the synthesized `pvc` traits. The five pod kinds generate no ServiceAccount
