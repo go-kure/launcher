@@ -189,7 +189,6 @@ func TestStampComponentLabel_MalformedPodTemplateLabel(t *testing.T) {
 		"key present":                {map[string]any{ownershipKey: "web", "app": int64(1)}, "app"},
 		"the key's own value":        {map[string]any{ownershipKey: int64(1)}, ownershipKey},
 		"the first of two, by name":  {map[string]any{"a": int64(1), "b": true}, "a"},
-		"a null value is no string":  {map[string]any{"app": nil}, "app"},
 		"a nested object is refused": {map[string]any{"app": map[string]any{}}, "app"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -202,6 +201,102 @@ func TestStampComponentLabel_MalformedPodTemplateLabel(t *testing.T) {
 				t.Fatalf("error = %v, want one naming the CronJob and the label %q", err, tc.label)
 			}
 		})
+	}
+}
+
+// TestStampComponentLabel_MalformedObjectLabels: an unstructured object whose
+// own labels hold a value that is no string is refused with the object and the
+// label named, and keeps every label its author wrote. The accessor answers
+// nil for such a map, so setting the label through it would replace them all
+// with the component's alone.
+func TestStampComponentLabel_MalformedObjectLabels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		metadata any
+		want     string
+	}{
+		"a number beside a string": {map[string]any{"name": "c", "labels": map[string]any{"app": "web", "n": int64(1)}}, `label "n"`},
+		"with the key present":     {map[string]any{"name": "c", "labels": map[string]any{ownershipKey: "web", "n": true}}, `label "n"`},
+		"the key's own value":      {map[string]any{"name": "c", "labels": map[string]any{ownershipKey: int64(1)}}, `label "` + ownershipKey + `"`},
+		"labels that are a list":   {map[string]any{"name": "c", "labels": []any{"app"}}, "labels is a"},
+		"metadata that is a text":  {"oops", "metadata is a"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": tc.metadata}}
+			want := u.DeepCopy()
+			err := stampComponentLabel(u, ownershipKey, "web")
+			if err == nil || !strings.Contains(err.Error(), "ConfigMap") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want one naming the ConfigMap and %s", err, tc.want)
+			}
+			if !reflect.DeepEqual(u.Object, want.Object) {
+				t.Errorf("object = %v, want it as written: %v", u.Object, want.Object)
+			}
+		})
+	}
+}
+
+// TestStampComponentLabel_UnstructuredObjectLabels: the label goes into the
+// labels as written. Null metadata or labels are absent ones, a null value is
+// the empty string the cluster reads it as and stays as written, and an object
+// with no content at all gets the label too.
+func TestStampComponentLabel_UnstructuredObjectLabels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		object map[string]any
+		want   map[string]any
+	}{
+		"labels beside others": {
+			map[string]any{"metadata": map[string]any{"name": "c", "labels": map[string]any{"app": "web"}}},
+			map[string]any{"name": "c", "labels": map[string]any{"app": "web", ownershipKey: "web"}},
+		},
+		"null labels": {
+			map[string]any{"metadata": map[string]any{"name": "c", "labels": nil}},
+			map[string]any{"name": "c", "labels": map[string]any{ownershipKey: "web"}},
+		},
+		"null metadata": {
+			map[string]any{"metadata": nil},
+			map[string]any{"labels": map[string]any{ownershipKey: "web"}},
+		},
+		"a null value": {
+			map[string]any{"metadata": map[string]any{"labels": map[string]any{"app": nil}}},
+			map[string]any{"labels": map[string]any{"app": nil, ownershipKey: "web"}},
+		},
+		"the key as a null value": {
+			map[string]any{"metadata": map[string]any{"labels": map[string]any{ownershipKey: nil}}},
+			map[string]any{"labels": map[string]any{ownershipKey: nil}},
+		},
+		"an authored value": {
+			map[string]any{"metadata": map[string]any{"labels": map[string]any{ownershipKey: "authored"}}},
+			map[string]any{"labels": map[string]any{ownershipKey: "authored"}},
+		},
+		"no content": {nil, map[string]any{"labels": map[string]any{ownershipKey: "web"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := &unstructured.Unstructured{Object: tc.object}
+			for range 2 {
+				if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+					t.Fatalf("stampComponentLabel: %v", err)
+				}
+			}
+			if got := u.Object["metadata"]; !reflect.DeepEqual(got, any(tc.want)) {
+				t.Errorf("metadata = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStampComponentLabel_NullPodTemplateLabelValue: a null label value on a
+// pod template is the empty string the cluster reads it as, not a malformed
+// one: the template gets the label and keeps the value as written.
+func TestStampComponentLabel_NullPodTemplateLabelValue(t *testing.T) {
+	u := unstructuredWorkload("apps/v1", "Deployment")
+	if err := unstructured.SetNestedField(u.Object, map[string]any{"app": nil}, "spec", "template", "metadata", "labels"); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+		t.Fatalf("stampComponentLabel: %v", err)
+	}
+	got, _, _ := unstructured.NestedMap(u.Object, "spec", "template", "metadata", "labels")
+	if want := map[string]any{"app": nil, ownershipKey: "web"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("pod template labels = %#v, want %#v", got, want)
 	}
 }
 

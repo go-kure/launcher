@@ -393,6 +393,11 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // For the same reason a pod template stays as written when the workload's own
 // selector rules the label out (withComponentLabel).
 func stampComponentLabel(obj client.Object, key, value string) error {
+	// An unstructured object's labels are read as written, not through its
+	// accessor (stampUnstructured).
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		return stampUnstructured(u, key, value)
+	}
 	obj.SetLabels(withMissing(obj.GetLabels(), map[string]string{key: value}))
 	switch o := obj.(type) {
 	case *appsv1.Deployment:
@@ -417,8 +422,6 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 			}
 		}
 		o.Spec.PostRenderers = append(o.Spec.PostRenderers, pr)
-	case *unstructured.Unstructured:
-		return stampUnstructured(o, key, value)
 	}
 	return nil
 }
@@ -481,10 +484,69 @@ func objectField(m map[string]any, field string) (map[string]any, bool, error) {
 	return o, true, nil
 }
 
-// stampUnstructured is stampComponentLabel's pod template and HelmRelease work
-// on an unstructured object, told by its API group and kind.
+// labelsOf reads the labels under holder's metadata as written: an object's own
+// (holder is the object) or a pod template's. Null metadata or labels are
+// absent ones, and a null value is the empty string, as the cluster reads it. A
+// value that is no string is an error, the first by name.
+func labelsOf(holder map[string]any) (map[string]string, error) {
+	metadata, _, err := objectField(holder, "metadata")
+	if err != nil {
+		return nil, err
+	}
+	raw, _, err := objectField(metadata, "labels")
+	if err != nil {
+		return nil, err
+	}
+	read := make(map[string]string, len(raw))
+	for _, name := range slices.Sorted(maps.Keys(raw)) {
+		switch v := raw[name].(type) {
+		case nil:
+			read[name] = ""
+		case string:
+			read[name] = v
+		default:
+			return nil, errors.Errorf("label %q is a %T, not a string", name, v)
+		}
+	}
+	return read, nil
+}
+
+// setLabel writes key: value into the labels under holder's metadata, which
+// labelsOf has read. It makes the metadata and the labels where they are absent
+// or null and leaves every other label as written.
+func setLabel(holder map[string]any, key, value string) {
+	metadata, _ := holder["metadata"].(map[string]any)
+	if metadata == nil {
+		metadata = map[string]any{}
+		holder["metadata"] = metadata
+	}
+	raw, _ := metadata["labels"].(map[string]any)
+	if raw == nil {
+		raw = map[string]any{}
+		metadata["labels"] = raw
+	}
+	raw[key] = value
+}
+
+// stampUnstructured is stampComponentLabel on an unstructured object, its kind
+// told by its API group and kind.
+//
+// The object's own labels are read as written (labelsOf), not through its
+// accessor: GetLabels answers nil for labels that hold a value that is no
+// string, so setting the label through it would replace every label the author
+// wrote with the component's alone. Such an object is refused instead.
 func stampUnstructured(u *unstructured.Unstructured, key, value string) error {
 	gvk := u.GroupVersionKind()
+	own, err := labelsOf(u.Object)
+	if err != nil {
+		return errors.Errorf("component label: %s %q: %w", gvk.Kind, u.GetName(), err)
+	}
+	if _, exists := own[key]; !exists {
+		if u.Object == nil {
+			u.Object = map[string]any{}
+		}
+		setLabel(u.Object, key, value)
+	}
 	if gvk.Group == helmv2.GroupVersion.Group && gvk.Kind == helmv2.HelmReleaseKind {
 		return stampUnstructuredHelmRelease(u, key, value)
 	}
@@ -502,9 +564,9 @@ func stampUnstructured(u *unstructured.Unstructured, key, value string) error {
 
 // stampUnstructuredPodTemplate is withComponentLabel on the pod template under
 // the spec at specPath of obj. A workload with no pod template, or a null one,
-// is left as it is; null metadata or labels on the template are absent ones. A
-// label that is no string is an error, the first by name, whether or not the
-// template gets the label.
+// is left as it is. The template's labels are read as the object's own are
+// (labelsOf): a label that is no string is an error whether or not the template
+// gets the label.
 func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, value string) error {
 	spec := obj
 	for _, field := range specPath {
@@ -518,23 +580,11 @@ func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, va
 	if err != nil || !found {
 		return err
 	}
-	metadata, _, err := objectField(template, "metadata")
-	if err != nil {
-		return err
-	}
-	raw, _, err := objectField(metadata, "labels")
-	if err != nil {
-		return err
-	}
 	// Every label is read before the key is looked for: a template that carries
 	// the key already is held to string labels like any other.
-	podLabels := make(map[string]string, len(raw))
-	for _, name := range slices.Sorted(maps.Keys(raw)) {
-		s, ok := raw[name].(string)
-		if !ok {
-			return errors.Errorf("label %q is a %T, not a string", name, raw[name])
-		}
-		podLabels[name] = s
+	podLabels, err := labelsOf(template)
+	if err != nil {
+		return err
 	}
 	if _, exists := podLabels[key]; exists {
 		return nil
@@ -548,18 +598,9 @@ func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, va
 			selector = decoded
 		}
 	}
-	if _, added := withComponentLabel(podLabels, selector, key, value)[key]; !added {
-		return nil
+	if _, added := withComponentLabel(podLabels, selector, key, value)[key]; added {
+		setLabel(template, key, value)
 	}
-	if metadata == nil {
-		metadata = map[string]any{}
-		template["metadata"] = metadata
-	}
-	if raw == nil {
-		raw = map[string]any{}
-		metadata["labels"] = raw
-	}
-	raw[key] = value
 	return nil
 }
 
