@@ -2521,7 +2521,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Hook-group layout.** For a layout-walking consumer (the `layout.LayoutAugmenter` path), more
   than one hook group makes `AugmentLayout` clear the component's flat `Resources` and replace
-  them with one child `ManifestLayout` per group, named `<component>-NN-<phase-slug>`, written to
+  them with one child `ManifestLayout` per group, named
+  `<application>-<component>-NN-<phase-slug>`, written to
   its own directory `<component dir>/<child>` (its `Namespace` is the component layout's own path,
   which kure joins with the child's name, so a hook-group directory is never nested twice) and
   chained via `DependsOn`, listing each child's preceding sibling in the order kure's
@@ -2545,15 +2546,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
-  behavioural benefit. Known limitation: the child directory name's shortening to 253
-  characters (the one shortening rule, `oam.ShortenNameWithSuffix`, which `helm` uses for its
-  values ConfigMap name: a prefix of the component name plus 10 hex digits of its sha256, 8
-  before go-kure/launcher#793) makes
-  same-name collisions vanishingly unlikely *within* one Application, but two different
-  Applications with a same-named component still collide — component names are unique only
-  within one Application, while emitted Kustomization CRs for hook-group children share one
-  controller namespace; a pre-existing gap (inherited from a downstream consumer's reference
-  implementation) that this partitioning exposes. `GenerateCoversAugmentLayout` is always true —
+  behavioural benefit. The child name begins with the application name
+  (go-kure/launcher#792): component names are unique only within one Application, while the
+  Kustomization CRs a consumer generates for the hook-group children of every application can
+  share one namespace, so two Applications that each have a component `db` get
+  `<application>-db-NN-<phase-slug>` children that differ. The transform hands the config its
+  application (`oam.ApplicationNameSetter`, the `Application` field); a `HelmTemplateConfig`
+  built directly, outside a transform, has none unless the caller sets the field, and its
+  children are then named `<layout name>-NN-<phase-slug>`. **Breaking output change**: every
+  hook-group child name, and so its directory and the Flux Kustomization a consumer derives
+  from it, gains the leading `<application>-`. A name over 253 characters is shortened by the
+  one shortening rule (`oam.ShortenNameWithSuffix`, which `helm` uses for its values ConfigMap
+  name): the `-NN-<phase-slug>` suffix is kept whole and `<application>-<component>` becomes
+  its own beginning plus 10 hex digits of its sha256 (8 before go-kure/launcher#793), so two
+  long names that differ anywhere almost never shorten to the same one. Known limitation: the
+  two names are joined by a plain `-`, which either may contain, so application `a-b` with
+  component `c` and application `a` with component `b-c` still get the same child names. No
+  property overrides a child name yet (go-kure/launcher#787). `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,

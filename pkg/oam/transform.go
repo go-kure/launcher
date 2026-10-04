@@ -785,6 +785,11 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}
 
+		// Here, on the handler's own config: a trait decorator wraps it later.
+		if named, ok := config.(ApplicationNameSetter); ok {
+			named.SetApplicationName(app.Metadata.Name)
+		}
+
 		if enforceable, ok := config.(Enforceable); ok {
 			if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 				return nil, &ViolationError{Component: component.Name, Cause: err}

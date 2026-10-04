@@ -22,6 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 func TestDecodeChartManifests_ErrorOnMalformedYAML(t *testing.T) {
@@ -556,7 +558,7 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 
 	namesA := make([]string, len(groups))
 	for i, g := range groups {
-		dn := hookGroupChildName(mlNameA, i, g)
+		dn := hookGroupChildName("", mlNameA, i, g)
 		if len(dn) > 253 {
 			t.Errorf("group %d: len(%q) = %d, want <= 253", i, dn, len(dn))
 		}
@@ -584,11 +586,54 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 		t.Fatal("test setup: mlNameA and mlNameB must differ")
 	}
 	for i, g := range groups {
-		dnA := hookGroupChildName(mlNameA, i, g)
-		dnB := hookGroupChildName(mlNameB, i, g)
+		dnA := hookGroupChildName("", mlNameA, i, g)
+		dnB := hookGroupChildName("", mlNameB, i, g)
 		if dnA == dnB {
 			t.Errorf("group %d: hookGroupChildName collided across ml.Names: mlNameA=%q mlNameB=%q both produced %q", i, mlNameA, mlNameB, dnA)
 		}
+	}
+}
+
+// TestHookGroupChildName_IncludesApplication pins go-kure/launcher#792 on the
+// name itself: the application leads it, an empty application leaves the name
+// as it was, and an application and a component that together exceed the
+// limit are shortened as one prefix, with the suffix whole and the digest
+// taken over both — so two applications whose long names differ only past the
+// cut, each with the same component, still get different child names.
+func TestHookGroupChildName_IncludesApplication(t *testing.T) {
+	pre := helm.HookGroup{Phase: "pre-install"}
+	if got, want := hookGroupChildName("shop", "db", 0, pre), "shop-db-00-pre-install"; got != want {
+		t.Errorf("with an application = %q, want %q", got, want)
+	}
+	if got, want := hookGroupChildName("", "db", 0, pre), "db-00-pre-install"; got != want {
+		t.Errorf("without an application = %q, want %q", got, want)
+	}
+	if a, b := hookGroupChildName("shop", "db", 0, pre), hookGroupChildName("billing", "db", 0, pre); a == b {
+		t.Errorf("two applications with a component db both gave %q", a)
+	}
+
+	shared := strings.Repeat("a", 240)
+	appA := shared + "." + strings.Repeat("b", 12) // 253 characters, a valid application name
+	appB := shared + "." + strings.Repeat("c", 12)
+	component := strings.Repeat("d", 253)
+	const suffix = "-00-pre-install"
+	gotA, gotB := hookGroupChildName(appA, component, 0, pre), hookGroupChildName(appB, component, 0, pre)
+	for app, got := range map[string]string{appA: gotA, appB: gotB} {
+		if want := wantShortened(app+"-"+component, suffix, oam.ShortenLimitSubdomain); got != want {
+			t.Errorf("shortened = %q, want %q", got, want)
+		}
+		if len(got) > oam.ShortenLimitSubdomain {
+			t.Errorf("len(%q) = %d, over 253", got, len(got))
+		}
+		if !strings.HasSuffix(got, suffix) {
+			t.Errorf("%q lost its suffix %q", got, suffix)
+		}
+		if errs := validation.IsDNS1123Subdomain(got); len(errs) > 0 {
+			t.Errorf("IsDNS1123Subdomain(%q) = %v, want no errors", got, errs)
+		}
+	}
+	if gotA == gotB {
+		t.Errorf("two applications sharing their first 240 characters both gave %q", gotA)
 	}
 }
 

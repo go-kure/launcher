@@ -156,6 +156,18 @@ type ComponentNamed interface {
 	ComponentName() string
 }
 
+// ApplicationNameSetter is an optional interface for component ApplicationConfig
+// types that build a name out of the OAM application they belong to, so that the
+// name stays unique when two applications each have a component of the same name
+// (a helmtemplate component's hook-group child layouts). The transform calls
+// SetApplicationName once, right after ToApplicationConfig and before policy and
+// traits, with the name of the document it transforms — the name the
+// application's bundle carries. A config built directly, outside a transform, is
+// never told one.
+type ApplicationNameSetter interface {
+	SetApplicationName(name string)
+}
+
 // ServiceAccountNamer is an optional interface for component ApplicationConfig
 // types. name is the ServiceAccount the component's pods run as: the authored
 // `serviceAccountName`, or "" when none was authored — no pod kind generates a
