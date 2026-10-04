@@ -848,9 +848,11 @@ The build refuses a group:
   the name the `Naming` hook gave them are compared by their defaults instead: the hook
   may give two different sub-applications one name, and the same trait on both members
   is refused whatever the hook answers. A name is the hook's when the hook answered,
-  also when its answer is the default. A name the hook gave that meets, on another
-  member, one it did not give (a trait's own, or one a policy renamed onto it) is
-  refused by name (go-kure/launcher#787).
+  also when its answer is the default. Several sub-applications of one name that one
+  trait creates cannot be told apart: they are the hook's only when the hook named
+  every one of them, and are then compared by all their defaults. A name the hook gave
+  that meets, on another member, one it did not give (a trait's own, or one a policy
+  renamed onto it) is refused by name (go-kure/launcher#787).
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -1142,9 +1143,12 @@ func entryAppRefusal(component, traitType string, step entryAppStep) (by, contra
 type groupSubApp struct {
 	app    *stack.Application
 	member string
-	// hookName is the name the Naming hook gave the sub-application in place of
-	// def, its default; both are empty when the hook gave it none.
-	hookName, def string
+	// hookName is the name the Naming hook gave the sub-application, and defs the
+	// defaults it gave that name in place of, for this trait: one, unless the
+	// trait created several sub-applications of that name (hookDefaults). Both
+	// are empty when the name is not the hook's.
+	hookName string
+	defs     []string
 }
 
 // checkGroupSubApplications fails when traits on two members of sibling group
@@ -1161,6 +1165,10 @@ type groupSubApp struct {
 // they are outside a group. Every other pair is compared by name as before: one
 // the hook named against one it did not name, or against one a policy renamed
 // since (go-kure/launcher#787).
+//
+// A trait that created several sub-applications of one name has them compared
+// by all the defaults of that name (hookDefaults): any shared with the other
+// member's refuses the pair.
 func checkGroupSubApplications(group string, subApps []groupSubApp) error {
 	for i, s := range subApps {
 		for _, prior := range subApps[:i] {
@@ -1169,10 +1177,12 @@ func checkGroupSubApplications(group string, subApps []groupSubApp) error {
 			}
 			switch {
 			case prior.hookNamed() && s.hookNamed():
-				if prior.def == s.def {
-					return &TransformError{Message: fmt.Sprintf(
-						"sibling group %q: traits on members %q and %q both create sub-application %q (named %q by the Naming hook); carry the trait on one member",
-						group, prior.member, s.member, s.def, s.hookName)}
+				for _, def := range s.defs {
+					if slices.Contains(prior.defs, def) {
+						return &TransformError{Message: fmt.Sprintf(
+							"sibling group %q: traits on members %q and %q both create sub-application %q (named %q by the Naming hook); carry the trait on one member",
+							group, prior.member, s.member, def, s.hookName)}
+					}
 				}
 			case prior.app.Name == s.app.Name:
 				hooked := prior
@@ -1184,9 +1194,13 @@ func checkGroupSubApplications(group string, subApps []groupSubApp) error {
 						"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
 						group, prior.member, s.member, s.app.Name)}
 				}
+				defs := make([]string, len(hooked.defs))
+				for j, def := range hooked.defs {
+					defs[j] = strconv.Quote(def)
+				}
 				return &TransformError{Message: fmt.Sprintf(
-					"sibling group %q: traits on members %q and %q both create sub-application %q (the Naming hook's name for %q on member %q); carry the trait on one member, or return another name from the hook",
-					group, prior.member, s.member, s.app.Name, hooked.def, hooked.member)}
+					"sibling group %q: traits on members %q and %q both create sub-application %q (the Naming hook's name for %s on member %q); carry the trait on one member, or return another name from the hook",
+					group, prior.member, s.member, s.app.Name, strings.Join(defs, " and "), hooked.member)}
 			}
 		}
 	}
@@ -1336,10 +1350,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			// trait gave them: a policy may rename one below.
 			var created []groupSubApp
 			if len(e.members) > 0 {
+				names := resolved.naming.takeSubAppNames()
+				ofName := make(map[string]int, len(added))
+				for _, newApp := range added {
+					ofName[newApp.Name]++
+				}
 				for _, newApp := range added {
 					s := groupSubApp{app: newApp, member: entry.component.Type}
-					if def, hooked := resolved.naming.takeHookSubApp(newApp.Name); hooked {
-						s.hookName, s.def = newApp.Name, def
+					if defs := hookDefaults(names[newApp.Name], ofName[newApp.Name]); len(defs) > 0 {
+						s.hookName, s.defs = newApp.Name, defs
 					}
 					created = append(created, s)
 				}

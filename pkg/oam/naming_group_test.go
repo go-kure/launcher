@@ -232,10 +232,48 @@ func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 			}
 		})
 	}
-	t.Run("a policy renaming one of a trait's two sub-applications leaves the other its default", func(t *testing.T) {
+	// A trait's two sub-applications of one name are the hook's only when the hook
+	// named both. Here the first is the author's, or one the trait never resolved,
+	// and a policy renames the second, the one the hook named: what is left meets
+	// member b's by name.
+	for _, first := range []string{"authored", "unresolved"} {
+		t.Run("a trait's "+first+" sub-application beside one the hook gave the same name", func(t *testing.T) {
+			tr := namingGroupTransformer(
+				[]Trait{{Type: "mixedsub", Properties: map[string]any{"first": first, "name": "web-config"}}},
+				[]Trait{named("", "web-route")})
+			tr.RegisterTrait("mixedsub", mixedSubTrait{})
+			_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{
+				Naming: func(req NameRequest) (string, bool) {
+					return "web-config", req.Role == NameRoleSubApplication
+				},
+			})
+			want := `sibling group "web": traits on members "a" and "b" both create sub-application "web-config" (the Naming hook's name for "web-route" on member "b"); carry the trait on one member, or return another name from the hook`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, want)
+			}
+		})
+	}
+	t.Run("a trait's two sub-applications and another member's, all given one name, are accepted", func(t *testing.T) {
+		tr := namingGroupTransformer(
+			[]Trait{{Type: "twosub", Properties: map[string]any{"first": "web-x", "second": "web-y"}}},
+			[]Trait{named("", "web-z")})
+		tr.RegisterTrait("twosub", twoSubTrait{})
+		cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
+		if err != nil {
+			t.Fatalf("TransformWithPolicy: %v", err)
+		}
+		var names []string
+		for _, a := range cluster.Node.Bundle.Applications[1:] {
+			names = append(names, a.Name)
+		}
+		if want := []string{"moved", "shared", "shared"}; !slices.Equal(names, want) {
+			t.Errorf("trait sub-applications = %v, want %v", names, want)
+		}
+	})
+	t.Run("a policy renaming one of a trait's two sub-applications leaves the other the hook's", func(t *testing.T) {
 		// Member a's trait is given "shared" for both its sub-applications, and a
-		// policy renames the first. The second is still the hook's name for
-		// "web-y", which member b's trait creates too.
+		// policy renames the first. The one left is the hook's name for "web-x" or
+		// for "web-y", and member b's trait creates "web-y" too.
 		tr := namingGroupTransformer(
 			[]Trait{{Type: "twosub", Properties: map[string]any{"first": "web-x", "second": "web-y"}}},
 			[]Trait{named("", "web-y")})
@@ -266,6 +304,36 @@ func (twoSubTrait) Apply(trait *Trait, app *stack.Application, b *stack.Bundle) 
 	moved := stack.NewApplication(names[0], app.Namespace, nil)
 	moved.SetConfig(&renamingSubStub{own: moved, to: "moved"})
 	b.Applications = append(b.Applications, moved, stack.NewApplication(names[1], app.Namespace, &siblingStub{}))
+	return nil
+}
+
+// mixedSubTrait appends two sub-applications of the name in property "name".
+// The first is the author's (property "first" is "authored": resolved from the
+// authored property "name") or the trait's own ("unresolved": never resolved).
+// The second is resolved with that name for its default, and its ApplyPolicy
+// renames it to "moved".
+type mixedSubTrait struct{}
+
+func (mixedSubTrait) CanHandle(t string) bool { return t == "mixedsub" }
+func (mixedSubTrait) Apply(trait *Trait, app *stack.Application, b *stack.Bundle) error {
+	name := trait.Properties["name"].(string)
+	spec := NameSpec{Role: NameRoleSubApplication, Default: name}
+	first := name
+	if trait.Properties["first"] == "authored" {
+		authored := spec
+		authored.Property, authored.Authored = "name", name
+		var err error
+		if first, err = trait.ResolveName(authored); err != nil {
+			return err
+		}
+	}
+	second, err := trait.ResolveName(spec)
+	if err != nil {
+		return err
+	}
+	moved := stack.NewApplication(second, app.Namespace, nil)
+	moved.SetConfig(&renamingSubStub{own: moved, to: "moved"})
+	b.Applications = append(b.Applications, stack.NewApplication(first, app.Namespace, &siblingStub{}), moved)
 	return nil
 }
 
