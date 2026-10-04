@@ -69,7 +69,7 @@ func renderedObjectRef(obj client.Object) string {
 }
 
 // enforceRenderedObjectPolicy holds one rendered object to the policy an
-// authored workload is held to. An object that runs no pod passes.
+// authored workload is held to. An object of a kind not named here passes.
 //
 // A workload — a Pod, a PodTemplate, a ReplicationController, a Deployment,
 // StatefulSet, DaemonSet or ReplicaSet, a Job or CronJob — has its pod spec
@@ -83,10 +83,14 @@ func renderedObjectRef(obj client.Object) string {
 // each of a StatefulSet's claim templates' — is held to the storage maximum,
 // as the persistentvolumeclaim and statefulset kinds hold theirs, and the
 // replica count a controller or a HorizontalPodAutoscaler asks for to the
-// replica maximum (enforceRenderedReplicas).
+// replica maximum (enforceRenderedReplicas). A PersistentVolume is held to
+// what the persistentvolume kind holds its own to
+// (enforcePersistentVolumePolicy): a hostPath or local source needs the policy
+// to allow hostPath volumes, and spec.capacity.storage is held to the storage
+// maximum.
 //
 // What reached the build untyped and may hold a workload is refused, since
-// nothing in it can be read: a workload kind in an API version kure's scheme
+// nothing in it can be read: a checked kind in an API version kure's scheme
 // does not register (apps/v1beta2, batch/v1beta1) or an item of a list whose
 // kind it does not, and a list left inside such a list, whose own items the
 // parser does not unpack. A list is told by a top-level items array, as
@@ -98,6 +102,9 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	}
 	if err := enforceRenderedReplicas(obj, p); err != nil {
 		return err
+	}
+	if pv, ok := obj.(*corev1.PersistentVolume); ok {
+		return enforcePersistentVolumePolicy("spec.", &pv.Spec, p)
 	}
 	path, ps := renderedPodSpec(obj)
 	if ps == nil {
@@ -237,12 +244,14 @@ func renderedPodSpec(obj client.Object) (string, *corev1.PodSpec) {
 }
 
 // workloadGroups and workloadKinds are the API groups and kinds of the
-// objects renderedPodSpec and enforceRenderedClaims read, in any version.
+// objects renderedPodSpec, enforceRenderedClaims and the PersistentVolume
+// check read, in any version.
 var (
 	workloadGroups = map[string]bool{"": true, "apps": true, "batch": true, "extensions": true}
 	workloadKinds  = map[string]bool{
 		"Pod": true, "PodTemplate": true, "ReplicationController": true, "Deployment": true, "StatefulSet": true,
 		"DaemonSet": true, "ReplicaSet": true, "Job": true, "CronJob": true, "PersistentVolumeClaim": true,
+		"PersistentVolume": true,
 	}
 )
 

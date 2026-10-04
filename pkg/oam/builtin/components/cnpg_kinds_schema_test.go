@@ -30,31 +30,44 @@ var cnpgKindSchemas = []struct {
 	{"cnpg-objectstore", reflect.TypeFor[barmanv1.ObjectStoreSpec](), &components.CnpgObjectStoreHandler{}},
 }
 
-// specJSONFields is clusterSpecJSONFields for any spec type.
+// specJSONFields is clusterSpecJSONFields for any spec type. It also walks an
+// embedded struct that carries no json name (PersistentVolumeSpec's volume
+// source), whose fields encoding/json promotes to the embedding object. Two
+// fields under one name, which encoding/json resolves by depth, fail the test
+// rather than being resolved here; so does any other embedding.
 func specJSONFields(t *testing.T, typ reflect.Type) map[string]reflect.Type {
 	t.Helper()
 	fields := make(map[string]reflect.Type, typ.NumField())
+	collectSpecJSONFields(t, typ, fields)
+	if len(fields) == 0 {
+		t.Fatalf("found no json fields on %s; the reflection walk is broken", typ)
+	}
+	return fields
+}
+
+func collectSpecJSONFields(t *testing.T, typ reflect.Type, fields map[string]reflect.Type) {
+	t.Helper()
 	for i := range typ.NumField() {
 		f := typ.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if f.Anonymous {
-			t.Fatalf("%s embeds %s; walk its promoted fields before trusting this coverage test", typ, f.Name)
-		}
-		if !f.IsExported() {
+			if name != "" || f.Type.Kind() != reflect.Struct || !f.IsExported() {
+				t.Fatalf("%s embeds %s other than as an untagged exported struct; walk it before trusting this coverage test", typ, f.Name)
+			}
+			collectSpecJSONFields(t, f.Type, fields)
 			continue
 		}
-		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "-" {
+		if !f.IsExported() || name == "-" {
 			continue
 		}
 		if name == "" {
 			name = f.Name
 		}
+		if _, dup := fields[name]; dup {
+			t.Fatalf("%s reaches two fields named %q; resolve the promotion before trusting this coverage test", typ, name)
+		}
 		fields[name] = f.Type
 	}
-	if len(fields) == 0 {
-		t.Fatalf("found no json fields on %s; the reflection walk is broken", typ)
-	}
-	return fields
 }
 
 // TestCnpgKindSchemas_CoverSpec is TestCnpgClusterSchema_CoversClusterSpec for

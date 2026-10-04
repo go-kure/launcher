@@ -92,6 +92,7 @@ reads it.
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
+| `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -192,7 +193,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
-| `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
 | `kubernetes.CreatePod` | v1 Pod | missing | - | - | - |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
@@ -1226,7 +1227,10 @@ policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
 seven kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
 an arbitrary path from the node's own filesystem into the Pod, so an
 unenforced policy denial here is a container-escape-adjacent gap, not merely
-a style one.
+a style one. The same switch gates a PersistentVolume's `hostPath` and `local`
+sources, on every path that produces the object (see **persistentvolume**
+below): both name a path on the node, which a pod reaches by binding the
+volume through a claim.
 
 Setting any `securityContext` field makes the container's `SecurityContext`
 non-nil, which opts it out of the `security-context` trait's nil-only
@@ -2042,6 +2046,56 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     as a number is emitted in its canonical string form
     (`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
     namespace may hold in total; the environment policy is not applied to it.
+- **persistentvolume** (go-kure/launcher#790) is the kind-named projection of
+  a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
+  `resourcequota` above: one schema key per json field of
+  `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
+  type, two spellings of one field refused, and one object named after the
+  component, with the authored spec, no label and no annotation. The spec
+  embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
+  `hostPath`, …) is a top-level property, as it is a top-level field of the
+  object's spec. A PersistentVolume is cluster-scoped: the object carries no
+  namespace, whatever namespace the application is built for. The API requires
+  `capacity`, `accessModes` and exactly one source; those and the other value
+  rules are left to the API server, so a component with no properties builds a
+  volume the server refuses. A quantity written as a number is emitted in its
+  canonical string form. **Not covered:** the object's metadata, so its labels
+  and annotations cannot be authored.
+
+  **Policy.** Unlike the three kinds above, a PersistentVolume is held to the
+  environment policy (`enforcePersistentVolumePolicy`):
+  - A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
+    allows it. Both name a path on the node (`local` a disk, partition or
+    directory there), and a pod that binds the volume through a claim reads
+    and writes that path, as it does through a `hostPath` volume of its own.
+  - `capacity.storage` is held to the storage maximum (`MaxStorageSize()`), as
+    the storage a claim requests is.
+
+  One check covers every path that can produce the object: this kind, and the
+  rendered-object check that template delivery (`helmtemplate`), `passthrough`
+  and `manifests` run, where the refusal names the object (`passthrough: object
+  PersistentVolume "data": spec.hostPath: …`). On those three paths a
+  PersistentVolume in an API version the build cannot read is refused, since
+  its source and capacity cannot be checked.
+
+  Of the other source types of `corev1.PersistentVolumeSource` (k8s.io/api
+  v0.37.1, `core/v1/types.go`), all but `csi` and `flexVolume` name a remote
+  endpoint or disk, not a path on the node, and are not gated. **Not covered:** a `csi` or
+  `flexVolume` source. Each names a driver and options only the driver
+  interprets, and no field says whether a node path is exposed; a pod's `csi`
+  and `flexVolume` volumes are unchecked for the same reason. A driver that
+  exposes a node path therefore passes the gate. Whether the environment
+  policy gets a statement about driver-defined volumes, on pods and
+  PersistentVolumes alike, is item 12 of go-kure/launcher#794, not decided.
+
+  **Breaking:** before this kind, a PersistentVolume that a chart rendered, a
+  `passthrough` component held or a `manifests` source yielded reached the
+  output unchecked. One with a `hostPath` or `local` source, or with
+  `capacity.storage` over the storage maximum, is now refused where it built
+  before — and with no policy passed a `hostPath` or `local` one is always
+  refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
+  through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
+  component.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -2769,7 +2823,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Deployment, StatefulSet, ReplicaSet or ReplicationController (one when the chart sets none)
     and the `maxReplicas` of a HorizontalPodAutoscaler, in any API version, are held to the
     replica maximum (`MaxReplicas`), as the `deployment` and `statefulset` kinds and the
-    `scaler` trait hold theirs. The error names the rendered
+    `scaler` trait hold theirs. A PersistentVolume is held to what the `persistentvolume`
+    kind holds its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`,
+    and `spec.capacity.storage` is held to the storage maximum (breaking for a chart that
+    renders one; see **persistentvolume** above). The error names the rendered
     object and the field (`helmtemplate: rendered Deployment "demo/web":
     spec.template.spec.containers[0] "app": …`).
 
@@ -2786,7 +2843,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   emitted as rendered. go-kure/launcher#794 (item 7) decides between refusing such a document,
   keeping the field, and leaving the loss documented. A chart that emits a `v1` `List` does not
   build: at the pinned kure version the parser does not flatten a typed list into its items.
-  A workload or claim in an API version kure's scheme
+  A workload, claim or PersistentVolume in an API version kure's scheme
   does not register
   (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
   is refused rather than passed unchecked; so is a list left inside such a list, whose items the
@@ -3517,7 +3574,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   to the storage maximum (`MaxStorageSize`); the replica count of a Deployment,
   StatefulSet, ReplicaSet or ReplicationController (one when the object sets none) and the
   `maxReplicas` of a HorizontalPodAutoscaler, in any API version, to the replica maximum
-  (`MaxReplicas`). The error is the component's policy violation and names the object and
+  (`MaxReplicas`). A PersistentVolume is held to what the `persistentvolume` kind holds
+  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
+  `spec.capacity.storage` is held to the storage maximum (breaking for a document that
+  holds one; see **persistentvolume** above). The error is the component's policy violation and names the object and
   the field (`passthrough: object Deployment "demo/web":
   spec.template.spec.containers[0] "app": …`).
 
@@ -3531,8 +3591,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `*oam.ViolationError`, naming the component.
 
   What cannot be read is refused, not passed: an object of a registered kind that does not
-  decode as that kind (`replicas: three`), a workload kind in an API version the scheme
-  does not register (`batch/v1beta1`, `apps/v1beta2`), a HorizontalPodAutoscaler in such a
+  decode as that kind (`replicas: three`), a workload kind, a claim or a PersistentVolume
+  in an API version the scheme does not register (`batch/v1beta1`, `apps/v1beta2`), a
+  HorizontalPodAutoscaler in such a
   version whose `maxReplicas` is not an integer, and an object that does not serialize.
 
   **Behaviour change:** before go-kure/launcher#794 a `passthrough` object reached the
@@ -3548,7 +3609,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `:latest` image has to be pinned in the object, and a workload in an API version the
   build cannot read has to be authored in the one it can (`batch/v1`, `apps/v1`).
 
-  Not checked: an object that runs no pod; a custom resource, the pods its controller
+  Not checked: an object of a kind not named above; a custom resource, the pods its controller
   creates and the replica count it sets; a `Secret`, which no check here reads. A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
   to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
@@ -3590,7 +3651,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   HostProcess and capability gates, `ValidateImageRef`, no ephemeral containers), a
   PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
   maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
-  replica maximum. The error names the object and the field (`manifest source: object
+  replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds
+  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
+  `spec.capacity.storage` is held to the storage maximum (breaking for a source that
+  holds one; see **persistentvolume** above). The error names the object and the field (`manifest source: object
   Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
   holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
   before.
@@ -3605,9 +3669,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   own error and is not a policy violation. `Generate` also checks an `inline` source
   again, on what it emits.
 
-  What cannot be read is refused, not passed: a workload or claim in an API version
-  kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`); a workload or claim
-  inside a list of an unregistered kind, which the parser unpacks into untyped objects;
+  What cannot be read is refused, not passed: a workload, claim or PersistentVolume in
+  an API version kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`); a
+  workload, claim or PersistentVolume inside a list of an unregistered kind, which the parser unpacks into untyped objects;
   and a list left inside such a list, whose items the parser does not unpack. A list is
   told there by a top-level `items` array, so a custom resource that names a field
   `items` is refused in that position too. An object of another kind inside a list of an
@@ -3626,7 +3690,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and a workload in an API version the build cannot read has to be authored in the one
   it can (`batch/v1`, `apps/v1`).
 
-  Not checked: an object that runs no pod; a custom resource, the pods its controller
+  Not checked: an object of a kind not named above; a custom resource, the pods its controller
   creates and the replica count it sets; a `Secret`, which no check here reads. A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
   to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.

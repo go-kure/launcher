@@ -1,0 +1,36 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: shared-data
+      type: persistentvolume
+      properties:
+        capacity:
+          storage: 10Gi
+        accessModes:
+          - ReadWriteMany
+        persistentVolumeReclaimPolicy: Retain
+        storageClassName: shared
+        mountOptions:
+          - nfsvers=4.1
+        nfs:
+          server: nfs.example.com
+          path: /exports/data
+    - name: block-data
+      type: persistentvolume
+      properties:
+        capacity:
+          storage: 20Gi
+        accessModes:
+          - ReadWriteOnce
+        volumeMode: Block
+        claimRef:
+          namespace: default
+          name: block-data
+        csi:
+          driver: csi.example.com
+          volumeHandle: vol-0123
+          fsType: ext4

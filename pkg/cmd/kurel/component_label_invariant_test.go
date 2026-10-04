@@ -228,6 +228,11 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
 		"default": map[string]any{"cpu": "500m"}}}}},
 	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
+	// A PersistentVolume name is a DNS-1123 subdomain, so the 200-character
+	// name is accepted.
+	"persistentvolume": {props: map[string]any{
+		"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteMany"},
+		"nfs": map[string]any{"server": "nfs.example.com", "path": "/exports/data"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
