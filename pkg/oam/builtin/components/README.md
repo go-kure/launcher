@@ -100,13 +100,13 @@ reads it.
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
-| `oci` | via `ocirepository` + `fluxcd-kustomization` | Role-named: sync manifests from an OCI artifact (Flux). Lowered to the two kind-named terminals (`OCIRule`): a same-name group, or one shared source per artifact when several `oci` components of a document reconcile it. See below. |
-| `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source. An authored Flux object, not how an application is delivered. |
+| `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. |
+| `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source; what `oci` lowers to beside an `ocirepository` (`OCIRule`, see below). An authored Flux object, not how an application is delivered. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `cnpg-cluster` | CNPG Cluster | Operator-CR kind component: the whole `postgresql.cnpg.io/v1` `ClusterSpec`, strictly decoded, with no launcher opinions — see below. |
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
