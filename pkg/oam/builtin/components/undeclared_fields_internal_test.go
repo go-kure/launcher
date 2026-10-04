@@ -80,8 +80,10 @@ func TestUndeclaredFields_EveryWorkloadKindIsRefused(t *testing.T) {
 // TestUndeclaredFields_RefuseSetIsWhatThePolicyReads: every registered kind
 // whose pod spec, claims or volume source the policy check reads as a Go type
 // is one whose documents are refused over an undeclared field. A kind added to
-// renderedPodSpec or enforceRenderedClaims and not to workloadKinds fails
-// here: the check would read its Go type and miss what that type drops.
+// renderedPodSpec and not to workloadKinds fails here: the check would read
+// its Go type and miss what that type drops. The kinds enforceRenderedClaims
+// and the volume source check read are named below by hand, so a kind added
+// to either of those has to be added to this probe as well.
 func TestUndeclaredFields_RefuseSetIsWhatThePolicyReads(t *testing.T) {
 	if err := kubernetes.RegisterSchemes(); err != nil {
 		t.Fatalf("RegisterSchemes: %v", err)
