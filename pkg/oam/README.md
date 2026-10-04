@@ -57,13 +57,16 @@ a cycle) fail the transform, naming each step and where it was declared:
 components cannot be ordered: "web" is after "db" (placement: tier apps is after tier infra), "db" is after "web" (dependency policy)
 ```
 
-A Flux source (`helmrepository`, `ocirepository`, `gitrepository`, `bucket`) that a
-lowering rule generates and orders a component after is in no group. It is one of the
+A *generated source* is in no group: a Flux source (`helmrepository`, `ocirepository`,
+`gitrepository`, `bucket`) that a lowering rule generates, orders a component after, and
+does not itself order after anything. It is one of the
 application bundle's own applications, beside the child groups, so a source several
 components share belongs to the application and exists once. It waits on nothing, not even
-on what the component it was generated for waits on. It cannot be placed in a tier
-or made to wait on a component: the transform refuses both. A source the author wrote, or
-one a rule emits without ordering anything after it, is a component like any other.
+on what the component it was generated for waits on. A document cannot place it in a tier
+or make it wait on a component: the transform refuses both. Every other source is a
+component like any other, in a group: one the author wrote, one a rule emits without
+ordering anything after it, one the rule itself orders after a component, and one emitted
+as a member of a same-name sibling group.
 
 **Contract on the consumer: a bundle's own applications are applied before its child
 bundles.** Launcher expresses "sources before groups" only through that shape and cannot
@@ -739,13 +742,13 @@ authored: an author orders components with a `dependency` policy. It survives fu
 lowering too: when a component rule lowers a component that carries an order, the
 engine gives that order to the components the rule emits for it, whatever the rule
 built them from, so what the component becomes waits as it did. One kind of component
-is left out: a Flux source the rule generates and orders another of those components
-after, the source "Pipeline" describes as being in no group. It does not wait with
+is left out: a generated source, as "Pipeline" defines it (the rule orders another of
+those components after it and orders it after nothing; it is not a member of a
+same-name sibling group). It does not wait with
 the component: it is the application's, shared by every component that names the same
-source, and stays among the application bundle's own applications. A source the rule
-emits without ordering anything after it, or orders after a component itself, is a
-component like any other and takes the order. `OrderAfter` is one of the three
-ordering declarations described under "Pipeline".
+source, and stays among the application bundle's own applications. Any other source the
+rule emits is a component like any other and takes the order. `OrderAfter` is one of
+the three ordering declarations described under "Pipeline".
 The built-in user is the `helm` rule, which orders the release after the source it
 generates or adopts.
 
