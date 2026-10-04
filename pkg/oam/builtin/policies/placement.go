@@ -49,8 +49,7 @@ func (h *PlacementHandler) Apply(policy *oam.ApplicationPolicy, components []str
 	}
 
 	// A second placement for the same component is an error rather than a silent
-	// override, as for a second reconciliation policy; repeating the same tier is
-	// harmless and accepted.
+	// override; repeating the same tier is harmless and accepted.
 	if prev, placed := result.TierOverrides[component]; placed && prev != tier {
 		return errors.Errorf("policy %q: component %q is already placed in tier %q by an earlier placement policy, cannot also place it in %q",
 			policy.Name, component, prev, tier)

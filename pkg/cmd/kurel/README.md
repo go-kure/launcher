@@ -62,7 +62,7 @@ The `reconciliation` and `health-checks` policies and the `fluxcd-patches` and
 `fluxcd-postbuild` traits configure how Flux delivers an application, which launcher leaves
 to the consumer that delivers it (go-kure/launcher#781): `build` has no handler for them, and
 the `no handler for policy type` or `no handler for trait type` error says so.
-Policies shape the bundle tree and its Flux settings, which `kurel build`'s manifest
+Policies shape the bundle tree, which `kurel build`'s manifest
 output does not include; see
 [Policy Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies).
 See
