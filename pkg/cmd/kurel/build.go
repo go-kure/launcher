@@ -303,6 +303,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"limitrange":       &components.LimitRangeHandler{},
 		"resourcequota":    &components.ResourceQuotaHandler{},
 		"persistentvolume": &components.PersistentVolumeHandler{},
+		"pod":              &components.PodHandler{},
 	}
 }
 

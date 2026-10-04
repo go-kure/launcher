@@ -4,6 +4,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -20,19 +21,25 @@ import (
 // them strictly, and emits one object carrying identity and the authored spec.
 
 // coreKindSchemas lists those components with the upstream spec type each
-// projects. Every field of each spec type is authorable, so none has an
-// exclusion list.
+// projects. excluded names the json fields of the type the component refuses,
+// each with its reason; every other field is authorable.
 var coreKindSchemas = []struct {
 	component string
 	typ       reflect.Type
 	handler   interface {
 		PropertySchema() map[string]oam.PropertySchema
 	}
+	excluded map[string]string
 }{
-	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}},
-	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}},
-	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}},
-	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}},
+	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
+	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
+	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}, nil},
+	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}, nil},
+	{"pod", reflect.TypeFor[corev1.PodSpec](), &components.PodHandler{}, map[string]string{
+		"ephemeralContainers": "a pod cannot be created with ephemeral containers; they are added through its ephemeralcontainers subresource",
+		"priority":            "the Priority admission controller derives it from priorityClassName and rejects a differing value",
+		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
+	}},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes
@@ -68,25 +75,37 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 }
 
 // TestCoreKindSchemas_CoverSpec is TestCnpgKindSchemas_CoverSpec for the core
-// kinds: the schema publishes exactly the spec type's json fields, each with
-// the type its Go field decodes from. A dependency bump that adds, removes or
-// retypes a top-level field fails here, naming it.
+// kinds: the schema publishes exactly the spec type's json fields, less the
+// excluded ones, each with the type its Go field decodes from. A dependency
+// bump that adds, removes or retypes a top-level field fails here, naming it.
 func TestCoreKindSchemas_CoverSpec(t *testing.T) {
 	for _, tt := range coreKindSchemas {
 		t.Run(tt.component, func(t *testing.T) {
 			fields := specJSONFields(t, tt.typ)
 			schema := tt.handler.PropertySchema()
 			for _, name := range slices.Sorted(maps.Keys(fields)) {
-				prop, ok := schema[name]
-				if !ok {
-					t.Errorf("%s field %q is not published in the %s schema", tt.typ, name, tt.component)
-					continue
+				reason, excluded := tt.excluded[name]
+				prop, published := schema[name]
+				switch {
+				case published && excluded:
+					t.Errorf("%s field %q is both published in the %s schema and excluded (%q); pick one", tt.typ, name, tt.component, reason)
+				case !published && !excluded:
+					t.Errorf("%s field %q is neither published in the %s schema nor excluded with a reason", tt.typ, name, tt.component)
+				case published:
+					checkCoreKindProperty(t, name, prop, fields[name])
 				}
-				checkCoreKindProperty(t, name, prop, fields[name])
 			}
 			for _, key := range slices.Sorted(maps.Keys(schema)) {
 				if _, ok := fields[key]; !ok {
 					t.Errorf("schema key %q has no %s json field; the strict decode would refuse every value", key, tt.typ)
+				}
+			}
+			for _, name := range slices.Sorted(maps.Keys(tt.excluded)) {
+				if _, ok := fields[name]; !ok {
+					t.Errorf("excluded field %q is stale: %s has no such field", name, tt.typ)
+				}
+				if strings.TrimSpace(tt.excluded[name]) == "" {
+					t.Errorf("excluded field %q has no reason", name)
 				}
 			}
 		})

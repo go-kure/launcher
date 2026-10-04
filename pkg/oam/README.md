@@ -451,8 +451,8 @@ registering a `ComponentHandler` in `pkg/cmd/kurel` does *not* by itself make it
 name authorable — the name must also be added here. A type registered on one side only
 is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
-The kind components `namespace`, `limitrange`, `resourcequota` and `persistentvolume`
-(go-kure/launcher#790) are on this list.
+The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume` and
+`pod` (go-kure/launcher#790) are on this list.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
