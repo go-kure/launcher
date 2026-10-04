@@ -241,14 +241,16 @@ func TestHelmReleaseHandler_Identity(t *testing.T) {
 
 // TestHelmReleaseHandler_TargetNamespaceUnderFluxNamespace (C20): with a Flux
 // namespace and no authored targetNamespace, the release still installs into
-// the application namespace; an authored value wins.
+// the application namespace; an authored value wins. The release keeps the
+// component's name: spec.releaseName is set, so Flux does not prefix the target
+// namespace (go-kure/launcher#785).
 func TestHelmReleaseHandler_TargetNamespaceUnderFluxNamespace(t *testing.T) {
 	hr := hrGenerate(t, hrConfig(t, "web", map[string]any{"chart": hrChart()}), "flux-system")
 	if hr.Spec.TargetNamespace != "demo" {
 		t.Errorf("targetNamespace = %q, want the application namespace demo", hr.Spec.TargetNamespace)
 	}
-	if got := hr.GetReleaseName(); got != "demo-web" {
-		t.Errorf("Flux default release name = %q, want demo-web", got)
+	if got := hr.GetReleaseName(); got != "web" {
+		t.Errorf("release name = %q, want web", got)
 	}
 
 	hr = hrGenerate(t, hrConfig(t, "web", map[string]any{"chart": hrChart(), "targetNamespace": "elsewhere"}), "flux-system")
