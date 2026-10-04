@@ -128,15 +128,18 @@ Every object the base library can construct, and how a document reaches it
   the API version, kind and scope the constructor's doc comment gives. A base-library bump
   that adds a kind, or moves one to another API version, therefore fails until the table
   says so.
-- `TestKindInventory_MatchesCallSites` holds the Status column to this package and
+- `TestKindInventory_MatchesCallSites` holds the Status and Type columns to this package and
   `../traits`: a `kind` row's constructor is called here, a `trait` row's there or here (a
   trait may build through this package, as `configmap` does), and a `missing` or
-  `not authorable` row's by neither.
+  `not authorable` row's by neither. A `kind` or `component` row's Type is a type a handler
+  or lowering rule of this package declares contract metadata for, a `trait` row's one of
+  `../traits`, so a row stops passing when its handler is removed.
 
-Not held by a test: which handler makes the call, so a `kind` row passes while any component
-of this package calls its constructor, and the Type, Decode and Notes columns are checked for
-presence only; a `component` row; the step from `trait` to `kind`, which the change that adds
-the kind component makes in the row; and code outside the two packages, which is not read.
+Not held by a test: which handler makes the call, so a `kind` row passes while its Type has a
+handler and any component of this package calls its constructor; whether a `component` row's
+constructor is called; the step from `trait` to `kind`, which the change that adds the kind
+component makes in the row; the Decode and Notes columns, checked for presence only; and code
+outside the two packages, which is not read.
 
 Status is one of:
 
