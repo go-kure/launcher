@@ -416,7 +416,7 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 		}
 		return nil
 	}
-	obj.SetLabels(withMissing(obj.GetLabels(), map[string]string{key: value}))
+	obj.SetLabels(ownLabels(obj.GetLabels(), key, value))
 	switch o := obj.(type) {
 	case *appsv1.Deployment:
 		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
@@ -477,7 +477,19 @@ func withComponentLabel(podLabels map[string]string, selector *metav1.LabelSelec
 			}
 		}
 	}
-	return withMissing(podLabels, map[string]string{key: value})
+	return ownLabels(podLabels, key, value)
+}
+
+// ownLabels returns labels with key: value added where key is absent, in a map
+// of its own. The map given stays as it is: a config may use one map for an
+// object's labels, its selector and its pod template, and a selector that
+// gained the key through it would differ from the one the cluster already
+// holds, which a workload does not allow.
+func ownLabels(labels map[string]string, key, value string) map[string]string {
+	if _, exists := labels[key]; exists {
+		return labels
+	}
+	return withMissing(maps.Clone(labels), map[string]string{key: value})
 }
 
 // podTemplateKinds are the workload kinds whose pod template takes the
@@ -548,7 +560,8 @@ func labelsOf(holder map[string]any) (map[string]string, error) {
 
 // setLabel writes key: value into the labels under holder's metadata, which
 // labelsOf has read. It makes the metadata and the labels where they are absent
-// or null and leaves every other label as written.
+// or null and leaves every other label as written. The labels it writes are a
+// copy: the map that was there may be shared (ownLabels) and stays as it is.
 func setLabel(holder map[string]any, key, value string) {
 	metadata, _ := holder["metadata"].(map[string]any)
 	if metadata == nil {
@@ -556,11 +569,10 @@ func setLabel(holder map[string]any, key, value string) {
 		holder["metadata"] = metadata
 	}
 	raw, _ := metadata["labels"].(map[string]any)
-	if raw == nil {
-		raw = map[string]any{}
-		metadata["labels"] = raw
-	}
-	raw[key] = value
+	labelled := make(map[string]any, len(raw)+1)
+	maps.Copy(labelled, raw)
+	labelled[key] = value
+	metadata["labels"] = labelled
 }
 
 // stampUnstructured is stampComponentLabel on an unstructured object, its kind

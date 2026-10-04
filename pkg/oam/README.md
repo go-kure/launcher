@@ -285,6 +285,10 @@ the label authoritative: a consumer that needs every object of a component to ca
 the component's value enforces that in its own pass over the `GenerateApplications` result,
 by overwriting the key or by refusing a document whose value differs.
 
+The label is written into a label map of the object's, or the pod template's, own. A config
+that uses one map for an object's labels, its selector and its pod template keeps that map
+as it is, so a selector never gains the key.
+
 A workload whose own selector rules the label out keeps its pod template as written: a
 selector that matches the template and would stop matching it with the label, by a
 `DoesNotExist` on the key or a `NotIn` holding the component's value. The cluster refuses a

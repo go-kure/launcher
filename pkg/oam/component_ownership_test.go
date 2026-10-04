@@ -388,6 +388,87 @@ func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 	}
 }
 
+// TestStampComponentLabel_SharedLabelMap: a workload built with one label map
+// for its own labels, its selector and its pod template keeps that map as it
+// is. The label goes into maps of the object's and the template's own, so the
+// selector never gains the key: a selector is immutable on a workload the
+// cluster already runs.
+func TestStampComponentLabel_SharedLabelMap(t *testing.T) {
+	want := map[string]string{"app": "web"}
+
+	t.Run("typed Deployment", func(t *testing.T) {
+		shared := map[string]string{"app": "web"}
+		dep := &appsv1.Deployment{}
+		dep.Labels = shared
+		dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: shared}
+		dep.Spec.Template.Labels = shared
+		if err := stampComponentLabel(dep, ownershipKey, "web"); err != nil {
+			t.Fatalf("stampComponentLabel: %v", err)
+		}
+		if got := dep.Labels[ownershipKey]; got != "web" {
+			t.Errorf("object label = %q, want web", got)
+		}
+		if got := dep.Spec.Template.Labels[ownershipKey]; got != "web" {
+			t.Errorf("pod template label = %q, want web", got)
+		}
+		if !reflect.DeepEqual(dep.Spec.Selector.MatchLabels, want) {
+			t.Errorf("selector = %v, want it as written: %v", dep.Spec.Selector.MatchLabels, want)
+		}
+		if !reflect.DeepEqual(shared, want) {
+			t.Errorf("the shared map = %v, want it as written: %v", shared, want)
+		}
+	})
+
+	t.Run("typed ReplicationController", func(t *testing.T) {
+		shared := map[string]string{"app": "web"}
+		rc := &corev1.ReplicationController{}
+		rc.Spec.Selector = shared
+		rc.Spec.Template = &corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: shared}}
+		if err := stampComponentLabel(rc, ownershipKey, "web"); err != nil {
+			t.Fatalf("stampComponentLabel: %v", err)
+		}
+		if got := rc.Spec.Template.Labels[ownershipKey]; got != "web" {
+			t.Errorf("pod template label = %q, want web", got)
+		}
+		if !reflect.DeepEqual(rc.Spec.Selector, want) {
+			t.Errorf("selector = %v, want it as written: %v", rc.Spec.Selector, want)
+		}
+	})
+
+	t.Run("unstructured Deployment", func(t *testing.T) {
+		shared := map[string]any{"app": "web"}
+		u := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": "w", "labels": shared},
+			"spec": map[string]any{
+				"selector": map[string]any{"matchLabels": shared},
+				"template": map[string]any{"metadata": map[string]any{"labels": shared}},
+			},
+		}}
+		if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+			t.Fatalf("stampComponentLabel: %v", err)
+		}
+		if got := u.GetLabels()[ownershipKey]; got != "web" {
+			t.Errorf("object label = %q, want web", got)
+		}
+		podLabels, _ := podTemplateLabelsOf(t, u)
+		if got := podLabels[ownershipKey]; got != "web" {
+			t.Errorf("pod template label = %q, want web", got)
+		}
+		selector, _, err := unstructured.NestedStringMap(u.Object, "spec", "selector", "matchLabels")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(selector, want) {
+			t.Errorf("selector = %v, want it as written: %v", selector, want)
+		}
+		if len(shared) != 1 {
+			t.Errorf("the shared map = %v, want it as written", shared)
+		}
+	})
+}
+
 // excludingSelector matches pods labelled app=web that do not carry the
 // component key: the selector of a workload whose author rules the key out.
 func excludingSelector() *metav1.LabelSelector {
