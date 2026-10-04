@@ -218,7 +218,7 @@ func kureGeneratedConstructors(t *testing.T) map[string]generatedConstructor {
 			constructors[key] = constructor
 		}
 	}
-	// Vacuity guard: 128 at v0.2.0-beta.15, over nine files.
+	// Vacuity guard: 141 at kure main 97dce7a4b760, over nine files.
 	if len(files) < 9 || len(constructors) < 100 {
 		t.Fatalf("found %d constructors in %d %s files under %s, want >= 100 in >= 9; the walk is broken", len(constructors), len(files), generated, root)
 	}

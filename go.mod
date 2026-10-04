@@ -17,7 +17,7 @@ require (
 	github.com/fluxcd/pkg/apis/kustomize v1.21.0
 	github.com/fluxcd/pkg/apis/meta v1.32.0
 	github.com/fluxcd/source-controller/api v1.9.5
-	github.com/go-kure/kure v0.2.0-beta.15
+	github.com/go-kure/kure v0.2.0-beta.15.0.20261004180425-97dce7a4b760
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/spf13/cobra v1.10.2
@@ -62,6 +62,7 @@ require (
 	github.com/extism/go-sdk v1.7.1 // indirect
 	github.com/fluxcd/flux2/v2 v2.9.5 // indirect
 	github.com/fluxcd/image-automation-controller/api v1.2.5 // indirect
+	github.com/fluxcd/image-reflector-controller/api v1.2.5 // indirect
 	github.com/fluxcd/notification-controller/api v1.9.4 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.11.0 // indirect
 	github.com/fluxcd/pkg/envsubst v1.7.1 // indirect
@@ -182,6 +183,7 @@ require (
 	k8s.io/cli-runtime v0.37.1 // indirect
 	k8s.io/client-go v0.37.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
+	k8s.io/kube-aggregator v0.37.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20260821135717-be32def86098 // indirect
 	k8s.io/streaming v0.37.1 // indirect
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
