@@ -176,9 +176,10 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 ### 3.1 Current behaviour
 
 - **Consumer knobs:** `ClusterID`, `Namespace`, `FluxNamespace`, `Domain`,
-  `ComponentLabelKey`. No hook for any object, application, bundle or source name.
-  `LoweringContext.Namer` is a concrete `*NameAllocator` the engine builds itself
-  (`NewNameAllocator`, `pkg/oam/lowering.go`).
+  `ComponentLabelKey`, and the `Naming` hook for the names of a closed set of roles
+  (go-kure/launcher#787, §3.2). No hook yet for a component's own object name, a
+  lowering-rule name or a source name: `LoweringContext.Namer` is a concrete
+  `*NameAllocator` the engine builds itself (`NewNameAllocator`, `pkg/oam/lowering.go`).
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
   (`hpaName`, `pdbName`), the `rbac` objects (`name`) and the `networkpolicy` trait's
   policy (`name`). Still none for: the `postgresql` pooler name (`<cluster>-pooler`),
@@ -216,23 +217,34 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
     held to the subdomain rule, which is stricter than the cluster's own rule for the RBAC
     kinds: a name with a colon, which a cluster accepts, is refused.
   - `networkpolicy` `name` (`NetworkPolicyHandler`, `traits/networkpolicy.go`).
-- **Shipped limit:** an authored name is not checked against other objects at the
-  transform. Two objects of one kind, namespace and name are reported by
-  `CheckInDocumentCollisions` over `GenerateApplications`, as for a default name.
+- **Shipped: a consumer naming hook** on `TransformContext` (`Naming`, a
+  `func(NameRequest) (string, bool)`; `pkg/oam/naming.go`, `pkg/oam/README.md` "Name roles
+  and the `Naming` hook"). A name is the author's property, else the hook's answer, else
+  the default.
+  - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
+    group's bundle, each sub-application a trait or a synthesized policy adds, each
+    synthesized NetworkPolicy, and the `scaler` HPA and PDB, the `rbac` objects and the
+    `networkpolicy` trait's policy. A trait handler resolves its names with
+    `(*Trait).ResolveName`.
+  - An override from the hook is held to the rule for an authored name: never shortened,
+    a DNS-1123 subdomain, refused when invalid or too long. Only launcher's own defaults
+    go through the shortening rule (§3.3).
+  - A sub-application's name is no longer its object's: a hook that renames the
+    sub-application of a `configmap`, `ingress`, `httproute` or `volsync` trait leaves
+    the object's name alone.
+- **Shipped: the transform keeps the names of those roles apart.** Two that name one
+  object, or one bundle, fail the transform, naming both and where each came from. Every
+  other name is still compared only by `CheckInDocumentCollisions` over
+  `GenerateApplications`: a component's own objects, lowering-rule names, and the objects
+  of a trait outside the roles.
 - **Target, author:** an override for each remaining name of §3.1, plus an object name
   separate from the component name. The latter allows a Service named like its StatefulSet
   as kind components (rule 4 permits different kinds to share a name).
-- **Target, consumer:** an optional naming hook on `TransformContext`, keyed by owning
-  component and role, falling back to the default.
+- **Target, consumer:** the hook reaches the remaining sites.
   - The `Namer` (`NameAllocator.Name` and `NameOrAdopt`, `pkg/oam/lowering.go`) consults
     it for lowering-rule names.
-  - Most generated names are **not** built by the Namer: trait objects (`scaler`, `rbac`,
-    `networkpolicy`), synthesized NetworkPolicies, the values ConfigMap, hook-group
-    children and bundle names. The hook must reach each of these sites. The ticket lists
-    the roles.
-  - An override from the hook is held to the shipped rule for an authored name: never
-    shortened, validated for its target, refused when invalid or too long. Only
-    launcher's own defaults go through the shortening rule (§3.3).
+  - The names not built by the Namer that have no role yet: a component's own object
+    name, the values ConfigMap and the hook-group children.
 
 ### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
@@ -588,7 +600,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Open | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota` and `persistentvolume` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
