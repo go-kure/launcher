@@ -312,9 +312,14 @@ pod template and a `HelmRelease` with its post-renderer, beside the envelope its
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
 a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
-`CronJob`, `ReplicaSet`, `ReplicationController`) that sets the label on the pod template. Flux applies it to whatever the chart
-rendered, so here the component's value **replaces** one the chart set. The entry is added
-once, however often the document is transformed or generated.
+`CronJob`, `ReplicaSet`, `ReplicationController`) that sets the label on the pod template,
+and one for a bare `Pod` that sets it on the Pod's own labels. Flux applies it to whatever
+the chart rendered, so here the component's value **replaces** one the chart set. The entry
+is added once, however often the document is transformed or generated.
+
+The post-renderer reaches what Helm hands it. Whether that includes a chart's hook and test
+Pods depends on the Helm version the helm-controller runs, and launcher has not verified
+it: such a Pod may carry no component label.
 
 The patch sets the pod template's label and touches no selector, and launcher does not look
 into a chart. With a `ComponentLabelKey` that a Flux-installed chart's own selectors use

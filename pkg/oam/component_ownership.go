@@ -691,10 +691,15 @@ func stampUnstructuredHelmRelease(u *unstructured.Unstructured, key, value strin
 const componentLabelPostRendererName = "component-label"
 
 // componentLabelPostRenderer builds the Flux post-renderer that puts key: value
-// on the pod template of every workload a chart renders. A Flux post-renderer
-// offers kustomize patches and images only, so it is one strategic merge patch
-// per workload kind (podTemplateKinds), each targeting the kind in its own API
-// group; a chart that renders none of a kind is left alone by that patch.
+// on the pod template of every workload a chart renders, and on a bare Pod. A
+// Flux post-renderer offers kustomize patches and images only, so it is one
+// strategic merge patch per workload kind (podTemplateKinds) and one for Pod,
+// each targeting the kind in its own API group; a chart that renders none of a
+// kind is left alone by that patch.
+//
+// It reaches what Helm hands a post-renderer. Whether that includes a chart's
+// hook and test Pods depends on the Helm the helm-controller runs, and is not
+// verified here.
 //
 // A strategic merge sets the value: unlike the label on an object launcher
 // generates itself, this one replaces a value the chart gave the key.
@@ -702,8 +707,20 @@ const componentLabelPostRendererName = "component-label"
 // The result depends on key and value only, so a HelmRelease stamped again gets
 // an equal post-renderer, which stampComponentLabel does not add twice.
 func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) {
-	patches := make([]kustomize.Patch, 0, len(podTemplateKinds))
+	type target struct {
+		group, version, kind string
+		labels               []string
+	}
+	targets := make([]target, 0, len(podTemplateKinds)+1)
 	for _, k := range podTemplateKinds {
+		targets = append(targets, target{k.group, k.version, k.kind, append(append([]string(nil), k.spec...), "template", "metadata", "labels")})
+	}
+	// A bare Pod has no pod template: its own labels are its pod's. Its target
+	// names no group either, as the ReplicationController's (podTemplateKinds).
+	targets = append(targets, target{"", "v1", "Pod", []string{"metadata", "labels"}})
+
+	patches := make([]kustomize.Patch, 0, len(targets))
+	for _, k := range targets {
 		doc := map[string]any{
 			"apiVersion": schema.GroupVersion{Group: k.group, Version: k.version}.String(),
 			"kind":       k.kind,
@@ -711,7 +728,7 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 		}
 		// Through the YAML encoder, which quotes a value that would read back as
 		// a number, a boolean or null: a label value is a string.
-		if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, append(append([]string(nil), k.spec...), "template", "metadata", "labels")...); err != nil {
+		if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, k.labels...); err != nil {
 			return helmv2.PostRenderer{}, errors.Errorf("component label: post-renderer patch for %s: %w", k.kind, err)
 		}
 		raw, err := yaml.Marshal(doc)

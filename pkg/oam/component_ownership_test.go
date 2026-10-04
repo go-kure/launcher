@@ -603,7 +603,8 @@ func authoredPostRenderer() helmv2.PostRenderer {
 
 // assertComponentPostRenderer checks pr is the component label post-renderer:
 // one patch per workload kind, each a strategic merge setting only the label on
-// the kind's pod template, the value a string whatever it looks like.
+// the kind's pod template, and one for a bare Pod setting it on the Pod itself,
+// the value a string whatever it looks like.
 func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, value string) {
 	t.Helper()
 	if pr.Kustomize == nil || len(pr.Kustomize.Images) != 0 {
@@ -617,8 +618,9 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		{Group: "batch", Version: "v1", Kind: "CronJob"},
 		{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
 		{Version: "v1", Kind: "ReplicationController"},
+		{Version: "v1", Kind: "Pod"},
 	}
-	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1"}
+	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1", "v1"}
 	if len(pr.Kustomize.Patches) != len(wantTargets) {
 		t.Fatalf("patches = %d, want %d", len(pr.Kustomize.Patches), len(wantTargets))
 	}
@@ -632,8 +634,14 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 			t.Fatalf("patch %d is not YAML: %v\n%s", i, err, p.Patch)
 		}
 		path := []string{"spec", "template", "metadata", "labels"}
-		if wantTargets[i].Kind == "CronJob" {
+		switch wantTargets[i].Kind {
+		case "CronJob":
 			path = []string{"spec", "jobTemplate", "spec", "template", "metadata", "labels"}
+		case "Pod":
+			path = []string{"metadata", "labels"}
+			if _, found := doc["spec"]; found {
+				t.Errorf("patch %d has a spec, want the Pod's own labels only\n%s", i, p.Patch)
+			}
 		}
 		labels, found, err := unstructured.NestedMap(doc, path...)
 		if err != nil || !found {

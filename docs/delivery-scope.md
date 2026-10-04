@@ -237,11 +237,12 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
   `pkg/oam/README.md` "Component label and ownership").
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per workload kind (Deployment,
-    StatefulSet, DaemonSet, Job, CronJob, ReplicaSet, ReplicationController). It replaces
-    a value the chart set and touches
-    no selector: with a `ComponentLabelKey` the chart's own selectors use, that parts a
-    selector from the chart's pods where it does not accept the component's value. The key
-    to use is one no chart sets, such as the default.
+    StatefulSet, DaemonSet, Job, CronJob, ReplicaSet, ReplicationController) and one for a
+    bare Pod. It replaces a value the chart set and touches no selector: with a
+    `ComponentLabelKey` the chart's own selectors use, that parts a selector from the
+    chart's pods where it does not accept the component's value. The key to use is one no
+    chart sets, such as the default. Whether a chart's hook and test Pods pass through a
+    post-renderer is not verified.
   - Chart output under template delivery: labels added to the rendered objects, where the
     key is absent.
   - A generated workload whose own selector rules the label out keeps its pod template as
