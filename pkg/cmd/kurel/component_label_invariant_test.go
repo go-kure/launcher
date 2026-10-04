@@ -141,6 +141,10 @@ type componentLabelFixture struct {
 	// match against its own pod template (0 for a type with no pods, or a Job
 	// kind, which authors no spec.selector).
 	selectors int
+	// storedTemplates is the number of stored pod templates (a PodTemplate's)
+	// each render must have read for the component label; 0 for every type that
+	// emits no PodTemplate.
+	storedTemplates int
 }
 
 const (
@@ -261,6 +265,14 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 			"spec": map[string]any{"containers": []any{
 				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
 		labelled: true, selectors: 1},
+	// A PodTemplate name is a DNS-1123 subdomain too. The template is stored,
+	// not run: it gets no `app` label, and nothing selects it. It still carries
+	// the component label, on a template authored without labels.
+	"podtemplate": {props: map[string]any{
+		"template": map[string]any{
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
+		storedTemplates: 1},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
@@ -421,6 +433,9 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 			if n.selectors < fx.selectors {
 				t.Errorf("%s at the boundary name matched %d pod selectors against its pod template, want at least %d", typ, n.selectors, fx.selectors)
 			}
+			if n.storedTemplates != fx.storedTemplates {
+				t.Errorf("%s at the boundary name: read %d stored pod templates for the component label, want %d", typ, n.storedTemplates, fx.storedTemplates)
+			}
 
 			app = labelInvariantApp(long, typ, props, "", nil)
 			if fx.longRefusal != "" {
@@ -435,10 +450,44 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 			}
 			// A labelled type must keep its label past 63 characters too:
 			// omitting it would pass the value checks vacuously.
-			if n := checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long); fx.labelled {
+			n = checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long)
+			if fx.labelled {
 				requireAppLabel(t, n, typ+" with the 200-character name")
 			}
+			if n.storedTemplates != fx.storedTemplates {
+				t.Errorf("%s with the 200-character name: read %d stored pod templates for the component label, want %d", typ, n.storedTemplates, fx.storedTemplates)
+			}
 		})
+	}
+}
+
+// TestComponentLabelInvariant_RejectsUnlabelledStoredTemplate: the invariant
+// check reads the pod template a PodTemplate stores, which sits at the object's
+// root where podTemplateLabels does not look, and fails when that template
+// lost its component label. The fixture authors no template label, so the
+// stripped template has no labels at all: the check must not read "no labels"
+// as "nothing to check".
+func TestComponentLabelInvariant_RejectsUnlabelledStoredTemplate(t *testing.T) {
+	name := longLabelComponentName(t)
+	docs := renderLabelInvariant(t, labelInvariantApp(name, "podtemplate", componentLabelFixtures["podtemplate"].props, "", nil))
+
+	var clean recordingReporter
+	if n := checkComponentLabelInvariant(&clean, docs, name); len(clean.errs) != 0 || n.storedTemplates != 1 {
+		t.Fatalf("unbroken render: errors %v, %d stored pod templates read; want none and 1", clean.errs, n.storedTemplates)
+	}
+
+	md := childMap(t, childMap(t, findDoc(t, docs, "PodTemplate"), "template"), "metadata")
+	lbls := childMap(t, md, "labels")
+	if _, has := lbls[kurelComponentLabel]; !has || len(lbls) != 1 {
+		t.Fatalf("stored template labels = %v, want only %s", lbls, kurelComponentLabel)
+	}
+	delete(md, "labels")
+
+	var got recordingReporter
+	checkComponentLabelInvariant(&got, docs, name)
+	want := "the stored pod template carries no " + kurelComponentLabel + " label"
+	if !slices.ContainsFunc(got.errs, func(e string) bool { return strings.Contains(e, "PodTemplate") && strings.Contains(e, want) }) {
+		t.Errorf("stripped render: errors %v, want one naming the PodTemplate and %q", got.errs, want)
 	}
 }
 
@@ -807,16 +856,18 @@ type invariantReporter interface {
 //     oam.ComponentLabelValue(name): launcher labels what a component owns
 //     (go-kure/launcher#788), so every selector above, a synthesized
 //     NetworkPolicy's component selector included, is evaluated against the pod
-//     templates exactly as emitted.
+//     templates exactly as emitted;
+//   - the pod template a PodTemplate object stores carries that label too. It
+//     runs no pods, so no selector is evaluated against it.
 //
 // It returns how many `app` labels it saw — label values only, never selector
-// values — and how many pod selectors it matched against a pod template, so a
-// caller can reject a vacuous pass.
+// values — how many pod selectors it matched against a pod template, and how
+// many stored pod templates it read, so a caller can reject a vacuous pass.
 func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, name string) invariantCounts {
 	t.Helper()
 	want := oam.ComponentLabelValue(name)
 	const componentKey = kurelComponentLabel
-	appLabels, selectorsMatched := 0, 0
+	appLabels, selectorsMatched, storedTemplates := 0, 0, 0
 	checkValue := func(where, key string, v any, label bool) {
 		s, ok := v.(string)
 		if !ok {
@@ -848,6 +899,12 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 			}
 			templates = append(templates, labelSet(tl))
 		}
+		if tl, stored := storedPodTemplateLabels(doc); stored {
+			storedTemplates++
+			if _, has := tl[componentKey]; !has {
+				t.Errorf("%s: the stored pod template carries no %s label", where, componentKey)
+			}
+		}
 	}
 
 	for _, doc := range docs {
@@ -873,7 +930,7 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 			}
 		}
 	}
-	return invariantCounts{appLabels: appLabels, selectors: selectorsMatched}
+	return invariantCounts{appLabels: appLabels, selectors: selectorsMatched, storedTemplates: storedTemplates}
 }
 
 // synthesizedNetworkPolicyNames returns the resource names NetworkPolicy
@@ -919,6 +976,9 @@ type invariantCounts struct {
 	// label it targets was emitted.
 	appLabels int
 	selectors int // pod selectors compared with an emitted pod template
+	// storedTemplates counts the pod templates a PodTemplate object stores that
+	// were read for the component label.
+	storedTemplates int
 }
 
 // walkLabelMaps calls check for every value of every map found under a
@@ -977,6 +1037,25 @@ func podTemplateLabels(doc map[string]any) map[string]any {
 	md, _ := tmpl["metadata"].(map[string]any)
 	labels, _ := md["labels"].(map[string]any)
 	return labels
+}
+
+// storedPodTemplateLabels returns the labels of the pod template a PodTemplate
+// object stores, and whether doc is such an object holding one. The template
+// sits at the object's root, not under a spec, and runs no pods: it carries
+// the component label and is no match for a pod selector, so it is read here
+// and kept out of podTemplateLabels. A template without labels reads as
+// stored, with a nil map.
+func storedPodTemplateLabels(doc map[string]any) (map[string]any, bool) {
+	if doc["kind"] != "PodTemplate" {
+		return nil, false
+	}
+	tmpl, ok := doc["template"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	md, _ := tmpl["metadata"].(map[string]any)
+	labels, _ := md["labels"].(map[string]any)
+	return labels, true
 }
 
 // podSelector is one emitted selector that picks the component's pods, decoded

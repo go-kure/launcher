@@ -97,6 +97,7 @@ reads it.
 | `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
 | `replicaset` | ReplicaSet | Kind-named bare ReplicaSet: the whole `ReplicaSetSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and gains the `app` label; `replicas` and the template are held to environment policy, no default filled — see below. |
 | `replicationcontroller` | ReplicationController | Kind-named bare ReplicationController: the whole `ReplicationControllerSpec`, strictly decoded; `template` is required, `selector` (a plain label map) optional. The pod template and `replicas` are held as the `replicaset` kind's are, `activeDeadlineSeconds` refused included, and the template gains the `app` label — see below. |
+| `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -208,7 +209,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
 | `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
-| `kubernetes.CreatePodTemplate` | v1 PodTemplate | missing | - | - | - |
+| `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
 | `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
@@ -2282,6 +2283,48 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     pointer, so an unauthored one would be emitted without pods to create.
   - No selector is refused against the `app` label: a map selector asks only
     for labels to be present, which a further label on the pods cannot break.
+- **podtemplate** (go-kure/launcher#790) is the kind-named projection of a v1
+  PodTemplate. The object has no spec: beside its identity it holds one field,
+  `template`, and that is the component's one property, decoded strictly into
+  `corev1.PodTemplateSpec`. It emits one PodTemplate named after the component
+  in the build namespace, with the authored template. Any other property is
+  refused, the object's own `kind`, `apiVersion` and `metadata` included
+  (`properties do not decode into a v1 PodTemplate …`).
+
+  **It is stored, not run.** No controller creates pods from a PodTemplate, so
+  the handler adds no `app` label to the template (an authored `app` label is
+  carried as written), the config reports no ServiceAccount
+  (`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
+  component name), and it is not a trait target: a `configmap` trait's
+  `mountPath` and an `external-secret` trait's `envFrom`/`mountPath` are
+  refused on it, naming the kinds they apply to, and `security-context`
+  writes nothing to it (that trait skips a kind it does not know, which
+  go-kure/launcher#794, item 14, tracks). The transform still sets the
+  component label on the object and its template, as on every object a
+  component owns (go-kure/launcher#788).
+
+  **Refused when the component is read**, with or without a policy: under
+  `template.spec`, what the `pod` kind refuses of its own spec, by the same
+  checks and named by path (`template.spec.containers: required`, which an
+  unauthored `template` also gives; `template.spec.priority: not authorable
+  …`; the image rule; a probe timing written as `0`).
+  `template.spec.activeDeadlineSeconds` is allowed, unlike on a
+  `replicaset` or `replicationcontroller`: the API server accepts it on a
+  PodTemplate. The API's other value rules are left to the API server.
+
+  **Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
+  runs (`enforcePodTemplatePolicy`), naming a field by its path in the
+  properties (`template.spec: hostNetwork is not allowed by environment
+  policy`), since whatever reads the template creates pods from it. It fills
+  no policy default. The three rendered paths run the same check on a
+  PodTemplate they emit and name the field the same way (`template.spec…`).
+
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
+  emit; the API server decides there. They do refuse ephemeral containers and
+  an untagged or `:latest` image. **Not covered:** the PodTemplate's own
+  metadata, so its labels and annotations cannot be authored; the template's
+  metadata is carried as authored.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of

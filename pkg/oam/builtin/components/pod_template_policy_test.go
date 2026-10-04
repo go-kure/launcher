@@ -14,12 +14,14 @@ import (
 // podTemplatePolicyKind is a kind component whose object holds a pod template.
 // objectPath is where the pod spec sits in the object, propsPath where it sits
 // in the component's properties, and props the smallest component running the
-// given pod spec.
+// given pod spec. controller says the object is a controller that keeps its
+// pods running, whose template may set no activeDeadlineSeconds.
 type podTemplatePolicyKind struct {
 	typ, kind, apiVersion string
 	handler               oam.ComponentHandler
 	objectPath, propsPath string
 	props                 func(podSpec string) string
+	controller            bool
 }
 
 // object is the YAML of the kind's object running podSpec, as a chart, a
@@ -33,13 +35,19 @@ var podTemplatePolicyKinds = []podTemplatePolicyKind{
 		typ: "replicaset", kind: "ReplicaSet", apiVersion: "apps/v1",
 		handler:    &components.ReplicaSetHandler{},
 		objectPath: "spec.template.spec", propsPath: "template.spec",
-		props: rsPlain,
+		props: rsPlain, controller: true,
 	},
 	{
 		typ: "replicationcontroller", kind: "ReplicationController", apiVersion: "v1",
 		handler:    &components.ReplicationControllerHandler{},
 		objectPath: "spec.template.spec", propsPath: "template.spec",
-		props: rcPlain,
+		props: rcPlain, controller: true,
+	},
+	{
+		typ: "podtemplate", kind: "PodTemplate", apiVersion: "v1",
+		handler:    &components.PodTemplateHandler{},
+		objectPath: "template.spec", propsPath: "template.spec",
+		props: podTemplatePlain,
 	},
 }
 
@@ -163,32 +171,35 @@ func TestPodTemplateKindsPolicy_AllowedOnEveryPath(t *testing.T) {
 // image and ephemeral containers are refused on every path. priority, overhead
 // and, on a kind whose controller keeps its pods running, activeDeadlineSeconds
 // are refused by the kind only: the three paths that take an object written
-// elsewhere pass them, and the API server decides.
+// elsewhere pass them, and the API server decides. A PodTemplate is no such
+// controller, so activeDeadlineSeconds builds on all four of its paths.
 func TestPodTemplateKindsPolicy_ReadTimeRefusalsAndTheRenderedPaths(t *testing.T) {
 	cases := []struct {
-		name     string
-		spec     string
-		want     string
-		rendered bool // refused on the three rendered paths too
+		name           string
+		spec           string
+		want           string
+		rendered       bool // refused on the three rendered paths too
+		controllerOnly bool // refused by the kind of a controller only
 	}{
-		{"untagged image", "containers:\n  - name: app\n    image: registry.example/team/app\n", `containers[0] "app": image "registry.example/team/app" rejected`, true},
-		{"ephemeral containers", htPlainPod + "ephemeralContainers:\n  - name: debug\n    image: registry.example/team/debug:1.0.0\n", "ephemeralContainers: not supported", true},
-		{"priority", htPlainPod + "priority: 1000\n", "priority: not authorable", false},
-		{"overhead", htPlainPod + "overhead:\n  cpu: 100m\n", "overhead: not authorable", false},
-		{"active deadline", htPlainPod + "activeDeadlineSeconds: 600\n", "activeDeadlineSeconds: not supported", false},
+		{"untagged image", "containers:\n  - name: app\n    image: registry.example/team/app\n", `containers[0] "app": image "registry.example/team/app" rejected`, true, false},
+		{"ephemeral containers", htPlainPod + "ephemeralContainers:\n  - name: debug\n    image: registry.example/team/debug:1.0.0\n", "ephemeralContainers: not supported", true, false},
+		{"priority", htPlainPod + "priority: 1000\n", "priority: not authorable", false, false},
+		{"overhead", htPlainPod + "overhead:\n  cpu: 100m\n", "overhead: not authorable", false, false},
+		{"active deadline", htPlainPod + "activeDeadlineSeconds: 600\n", "activeDeadlineSeconds: not supported", false, true},
 	}
 	for _, k := range podTemplatePolicyKinds {
 		for _, path := range podTemplatePolicyPaths {
 			for _, tc := range cases {
 				t.Run(k.typ+"/"+path.name+"/"+tc.name, func(t *testing.T) {
 					_, err := path.build(t, k, tc.spec, ptStrictPolicy())
+					refusedByKind := path.rendered == "" && (k.controller || !tc.controllerOnly)
 					switch {
-					case path.rendered == "" || tc.rendered:
+					case refusedByKind || tc.rendered:
 						if err == nil || !strings.Contains(err.Error(), tc.want) {
 							t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
 						}
 					case err != nil:
-						t.Fatalf("refused: %v; the rendered paths do not refuse this field (update the README's stated difference if they now do)", err)
+						t.Fatalf("refused: %v; this path does not refuse this field (update the README's stated difference if it now does)", err)
 					}
 				})
 			}

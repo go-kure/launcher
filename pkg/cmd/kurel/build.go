@@ -307,6 +307,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"pod":                   &components.PodHandler{},
 		"replicaset":            &components.ReplicaSetHandler{},
 		"replicationcontroller": &components.ReplicationControllerHandler{},
+		"podtemplate":           &components.PodTemplateHandler{},
 	}
 }
 

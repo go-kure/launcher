@@ -43,6 +43,13 @@ var coreKindSchemas = []struct {
 	}},
 	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
 	{"replicationcontroller", reflect.TypeFor[corev1.ReplicationControllerSpec](), &components.ReplicationControllerHandler{}, nil},
+	// A PodTemplate has no spec type: the component projects the object, less
+	// its identity.
+	{"podtemplate", reflect.TypeFor[corev1.PodTemplate](), &components.PodTemplateHandler{}, map[string]string{
+		"kind":       "launcher emits a v1 PodTemplate; the object's type is not authored",
+		"apiVersion": "launcher emits a v1 PodTemplate; the object's type is not authored",
+		"metadata":   "launcher sets the object's name and namespace, as on every kind component; the pods' metadata is template.metadata",
+	}},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes

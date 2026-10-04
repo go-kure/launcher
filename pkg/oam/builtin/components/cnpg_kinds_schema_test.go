@@ -32,9 +32,11 @@ var cnpgKindSchemas = []struct {
 
 // specJSONFields is clusterSpecJSONFields for any spec type. It also walks an
 // embedded struct that carries no json name (PersistentVolumeSpec's volume
-// source), whose fields encoding/json promotes to the embedding object. Two
-// fields under one name, which encoding/json resolves by depth, fail the test
-// rather than being resolved here; so does any other embedding.
+// source), whose fields encoding/json promotes to the embedding object. An
+// embedded struct that does carry a json name (PodTemplate's metadata) is one
+// field under that name, as encoding/json reads it. Two fields under one name,
+// which encoding/json resolves by depth, fail the test rather than being
+// resolved here; so does any other embedding.
 func specJSONFields(t *testing.T, typ reflect.Type) map[string]reflect.Type {
 	t.Helper()
 	fields := make(map[string]reflect.Type, typ.NumField())
@@ -50,9 +52,9 @@ func collectSpecJSONFields(t *testing.T, typ reflect.Type, fields map[string]ref
 	for i := range typ.NumField() {
 		f := typ.Field(i)
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if f.Anonymous {
-			if name != "" || f.Type.Kind() != reflect.Struct || !f.IsExported() {
-				t.Fatalf("%s embeds %s other than as an untagged exported struct; walk it before trusting this coverage test", typ, f.Name)
+		if f.Anonymous && name == "" {
+			if f.Type.Kind() != reflect.Struct || !f.IsExported() {
+				t.Fatalf("%s embeds %s other than as an exported struct; walk it before trusting this coverage test", typ, f.Name)
 			}
 			collectSpecJSONFields(t, f.Type, fields)
 			continue
