@@ -39,6 +39,9 @@ var validComponentTypes = map[string]bool{
 	"manifests":    true,
 	"oci":          true,
 
+	// The Flux Kustomization kind component (go-kure/launcher#784).
+	"fluxcd-kustomization": true,
+
 	// The kind-named Flux source components (go-kure/launcher#347,
 	// go-kure/launcher#351).
 	"helmrepository": true,

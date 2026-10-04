@@ -255,7 +255,12 @@ spec:
           type: object
 `}},
 	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
-	"oci":       {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
+	// Lowers to the ocirepository and fluxcd-kustomization terminals below,
+	// both named after the component.
+	"oci": {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
+	// Emits only the Kustomization, which carries no `app` label.
+	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
+		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
 	// The kind-named Flux sources each emit one source CR named after the
 	// component: no `app` label, no pods, and a name up to a DNS-1123 subdomain.
 	"helmrepository": {props: map[string]any{"url": "https://charts.example.com"}},

@@ -283,7 +283,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"passthrough":  &components.PassthroughHandler{},
 		"crd":          &components.CRDHandler{},
 		"manifests":    &components.ManifestsHandler{},
-		"oci":          &components.OCIHandler{},
+
+		"fluxcd-kustomization": &components.FluxcdKustomizationHandler{},
 
 		"helmrepository": &components.HelmRepositoryHandler{},
 		"ocirepository":  &components.OCIRepositoryHandler{},
@@ -348,6 +349,7 @@ func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 		"worker":     components.WorkerRule{},
 		"helm":       components.HelmRule{},
 		"postgresql": components.PostgresqlRule{},
+		"oci":        components.OCIRule{},
 	}
 }
 
@@ -380,7 +382,10 @@ func newBuiltinTransformer() *oam.Transformer {
 	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
 	// an inline URL, and "postgresql" into the CNPG kinds ("cnpg-cluster" with a
 	// post-policy step for its policy-dependent defaults, "cnpg-objectstore",
-	// "cnpg-pooler", "cnpg-database"). None may also appear in
+	// "cnpg-pooler", "cnpg-database"), and "oci" into a same-name "ocirepository"
+	// and "fluxcd-kustomization" pair, or into the "fluxcd-kustomization" alone
+	// beside a generated "ocirepository" that several "oci" components share.
+	// None may also appear in
 	// builtinComponentHandlers — RegisterComponentLowering panics on that
 	// collision.
 	for _, r := range builtinComponentLoweringRules() {

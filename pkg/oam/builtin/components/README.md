@@ -34,7 +34,8 @@ The kind-named Flux source components (`helmrepository`, `ocirepository`, `gitre
 `bucket`, `helmchart`) reach the same strictness another way: each schema declares exactly the top-level keys
 of its source-controller spec type and leaves the nested Flux blocks open, and each handler
 decodes the whole property map strictly into that type, refusing an unknown or wrongly typed key
-at any depth (see their entry under "Per-type highlights").
+at any depth (see their entry under "Per-type highlights"). `fluxcd-kustomization` does the same
+with kustomize-controller's `KustomizationSpec`.
 
 ## How to read the wrong-type notes below
 
@@ -73,7 +74,8 @@ reads it.
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly — see below. |
-| `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
+| `oci` | via `ocirepository` + `fluxcd-kustomization` | Role-named: sync manifests from an OCI artifact (Flux). Lowered to the two kind-named terminals (`OCIRule`): a same-name group, or one shared source per artifact when several `oci` components of a document reconcile it. See below. |
+| `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source. An authored Flux object, not how an application is delivered. |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
@@ -2493,6 +2495,61 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
+
+  **Lowering (go-kure/launcher#784).** `oci` is a role-named component: `OCIRule`
+  lowers it to the two kind-named terminals it stands for, an `ocirepository`
+  (`url`, `ref.tag` from `version`, or `ref.digest` for a `sha256:` value, and
+  the authored `interval`) and a `fluxcd-kustomization` (`path`, `prune`,
+  `sourceRef`, and `interval`, `targetNamespace`, `wait` and `healthChecks`
+  when set). No handler is registered for `oci`. The rule runs the checks
+  below first, with their `oci:` messages; everything past them is the
+  terminals' own.
+  - *A component alone on its artifact* lowers to a same-name group: both
+    objects are named after the component and deploy as one unit, the
+    OCIRepository first. This is the pair of objects `oci` has always emitted,
+    byte for byte. Annotations go to both members, so a tier annotation, a
+    `placement` policy or a `dependency` rule naming the component acts on the
+    pair. `prune-protection` and `force-replace` decorate both objects; every
+    other trait goes to the Kustomization.
+  - *Two or more `oci` components of one document on the same source* share
+    it. The source then belongs to the document, not to the component that
+    comes first: it is emitted once, named `<document>-source-<digest>` (the
+    10-hex digest of the source identity, through
+    `NameAllocator.NameOrAdopt`, which shortens a name over 253 characters by
+    the one rule), and each component lowers to its Kustomization alone,
+    referencing it. Like a source `helm` generates, it deploys in the `infra`
+    tier, carries no trait and no annotation of any consumer, may be placed
+    only in `infra` and may not be made to wait on a component.
+  - *The source identity* is the `url`, the `version` and the effective
+    `interval`. Unset, `0s`, `60m` and `1h` are one interval. Components
+    whose intervals differ do not share: each keeps a source of its own,
+    polling at its own interval, as a component alone on its artifact does.
+    An `oci` and a `helm` component on one artifact never share either: the
+    identities differ, and a Helm source copies the chart layer instead of
+    extracting it.
+
+  **Output changes.** For a document in which several `oci` components
+  reconcile one artifact, the OCIRepository is renamed from the name of the
+  component deployed first to `<document>-source-<digest>`. It deploys in the
+  `infra` tier instead of that component's, and no longer carries that
+  component's `prune-protection` or `force-replace` decoration. The rename also happens when a second consumer
+  is added to a document that had one, and is undone when it is removed.
+  Components that shared one source while their intervals differed now emit
+  one source each. `interval: 0s` now emits the 60m default on both objects,
+  since both terminals read a zero interval as unset; it used to be emitted
+  as `0s`. Nothing else changes.
+
+  Sharing is decided among the `oci` components the document holds when the
+  rule runs: an `oci` component a third-party rule emits in a later lowering
+  round is not counted as a consumer of a source lowered before it.
+
+  **Messages.** The checks the rule runs keep their `oci:` text. A lowering
+  refusal is reported with the component and its document
+  (`component "x" (type "oci") in document …: oci: version is required …`).
+  The registry allowlist is the `ocirepository` terminal's check, so its
+  refusals name that kind and its field (`ocirepository: url: …`) rather
+  than `oci: source.url`.
+
   `targetNamespace` has no default (go-kure/launcher#622). Unset, the
   Kustomization emits no `spec.targetNamespace` and each object keeps the
   namespace the artifact's own kustomize build gives it: the one it carries,
@@ -2535,6 +2592,54 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   allowlist, accepts every `oci://` url.
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
   for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph above.
+- **fluxcd-kustomization** — the kind-named terminal for Flux's `Kustomization`
+  (go-kure/launcher#784). Its properties are exactly the top-level JSON keys of
+  `KustomizationSpec` in the kustomize-controller API version `go.mod` links; a
+  test ties the published schema to that struct, so a bump that adds or drops a
+  spec field fails the suite until the schema follows. It is an authored Flux
+  object, like `helmrelease`: it does not deliver the application it is part
+  of, and it creates no source — `sourceRef` names one that exists, authored
+  beside it (`ocirepository`, `gitrepository`, `bucket`) or already on the
+  cluster. The type is `fluxcd-kustomization` rather than `kustomization`,
+  which would read as the `kustomization.yaml` file (go-kure/launcher#352).
+
+  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON`
+  into `KustomizationSpec`, so `patches`, `postBuild`, `dependsOn`, `force`,
+  `timeout`, `serviceAccountName`, `decryption`, `kubeConfig` and every other
+  field are emitted as authored. A key the struct does not declare, at any
+  depth, is refused with its path from the property root
+  (`unknown field "patches[0].target.kinds"`,
+  `builtin.UnknownJSONFieldPath`): the spec declares `kind`, `name` and
+  `namespace` in several places, so the bare key would not say where. A
+  wrongly typed value is refused too. Keys match case-insensitively, as in
+  `encoding/json`; schema validation, which a `kurel build` runs first, is
+  exact.
+
+  **Defaults and checks.** `interval` defaults to `60m` when unset (a zero
+  duration counts as unset); Flux requires the field. `interval`,
+  `retryInterval` and `timeout`, when set, must be durations Flux accepts,
+  checked as on `helmrelease`. `sourceRef.kind` is required and one of
+  `OCIRepository`, `GitRepository`, `Bucket`, `ExternalArtifact`, the CRD's
+  enum; `sourceRef.name` is required. `prune` is a required field of the
+  spec with no default here: unset, `false` is emitted (`oci` passes `true`
+  unless told otherwise). `targetNamespace` is never defaulted, with or
+  without a Flux namespace, for the reason given under **oci**. Nothing else
+  is checked: the enums and the cross-field rules are left to the
+  Kustomization CRD's own admission, and `wait: true` beside `healthChecks`,
+  which `oci` refuses, is emitted as authored (kustomize-controller then
+  ignores the list). Whether the source exists is known only on the cluster. The checks run again in `Generate`,
+  for a config built directly.
+
+  **Identity and namespaces.** The Kustomization is named after the component
+  and lands in the Flux namespace when one is configured, else in the
+  application namespace (`SetFluxNamespace`). The ConfigMaps and Secrets it
+  reads from its own namespace — `decryption.secretRef`,
+  `kubeConfig.secretRef` / `configMapRef` and each `postBuild.substituteFrom`
+  entry — must live there too: a `configmap`, `external-secret` or
+  `certificate` trait on the component whose object one of them names moves
+  with the Kustomization (`FluxNamespaceReads`, go-kure/launcher#740).
+  `ApplyPolicy` checks nothing: a Kustomization fetches nothing itself, and
+  the registry allowlist applies where its source is authored.
 - **helmrepository / ocirepository / gitrepository / bucket / helmchart** — the kind-named
   terminals for Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family
   redesign go-kure/launcher#336) and for its `HelmChart` (go-kure/launcher#351), which builds a

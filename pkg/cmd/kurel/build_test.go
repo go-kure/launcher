@@ -459,14 +459,17 @@ spec:
 // entry and still green, while every document using that type stops building.
 // Each name is also the user-facing contract published in the component docs, so
 // a rename is a document-format change, not an internal one — moving a type from
-// one registry to the other (worker and webservice, go-kure/launcher#280) is not.
+// one registry to the other (worker and webservice, go-kure/launcher#280; oci,
+// go-kure/launcher#784) is not.
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
 		"cnpg-cluster", "crd", "cronjob", "daemonset", "deployment", "helmrelease", "helmtemplate", "job", "manifests",
-		"oci", "passthrough", "service", "statefulset",
+		"passthrough", "service", "statefulset",
 		// The kind-named Flux source components (go-kure/launcher#347,
 		// go-kure/launcher#351).
 		"bucket", "gitrepository", "helmchart", "helmrepository", "ocirepository",
+		// The Flux Kustomization kind component (go-kure/launcher#784).
+		"fluxcd-kustomization",
 		// The CloudNativePG kind components beside cnpg-cluster (go-kure/launcher#573).
 		"cnpg-database", "cnpg-objectstore", "cnpg-pooler",
 		// The kind components for the objects the workload kinds generated
@@ -474,7 +477,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"configmap", "persistentvolumeclaim", "serviceaccount",
 	}
 	sort.Strings(wantHandlers)
-	wantRules := []string{"helm", "postgresql", "webservice", "worker"}
+	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}
 
 	got := make([]string, 0, len(builtinComponentHandlers()))
 	for name, h := range builtinComponentHandlers() {

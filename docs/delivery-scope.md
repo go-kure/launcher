@@ -38,7 +38,7 @@ constraint.
    or Flux annotations. Delivery-relevant intent (ordering, prune protection, force replace)
    is carried in kure's model, not in the YAML. launcher still emits Flux objects when an
    author writes them as components (`helmrelease`, the source kinds, `helmchart`, and the
-   new `fluxcd-kustomization` kind).
+   `fluxcd-kustomization` kind).
 2. **Nothing implicit.** Ordering inside an application exists only where the author
    declares it (`placement`, `dependency`) or a component declares it about its own parts
    (`helm`: source before release). Readiness defaults to waiting for every applied
@@ -126,23 +126,42 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
 5. **Decide in the ticket:** the placement vocabulary (keep `infra`/`services`/`apps`, or
    named groups) and the default child group names (§3).
 
-### 2.3 Target (go-kure/launcher#784): `oci` lowers to kind components
+### 2.3 `oci` lowers to kind components (go-kure/launcher#784, done)
 
-- New kind component `fluxcd-kustomization`: one Flux Kustomization, with strict decode of
-  the upstream `KustomizationSpec` (the pattern of `helmrelease`,
-  `pkg/oam/builtin/components/helmrelease.go:167-168`). The type name follows the naming
-  decision in [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352).
-- `oci` becomes an upper-level component that lowers into `ocirepository` plus
-  `fluxcd-kustomization`. The `OCIHandler` kind goes.
-- `oci` today misses most of the Kustomization spec (`patches`, `postBuild`, `force`,
-  `dependsOn`, `timeout`, `serviceAccountName` and more). The new kind closes that gap.
-- Keep the explicit-registry rule for a non-empty allowlist (`oci.go:258-279`) on the
-  `ocirepository` path.
-- `SourceDeduplicatable` (`pkg/oam/handler.go`) has one implementer today, `OCIConfig`
-  (`oci.go:287`). After go-kure/launcher#784 it has none: remove it, or document why it stays.
-- **Decide in the ticket:** the name of a source shared by two `oci` components. Today the
-  first component's name is kept (`deduplicateSourceRefs`, `transform.go:1412-1429`), while
-  `helm` names a generated source `<document>-source-<digest>`.
+- Kind component `fluxcd-kustomization` (`pkg/oam/builtin/components/fluxcd_kustomization.go`):
+  one Flux Kustomization, with strict decode of the upstream `KustomizationSpec` (the
+  pattern of `helmrelease`). The type name follows the naming decision in
+  [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352). It is an
+  authored Flux object, not a delivery mechanism (§1.2), and it closes the gap `oci` had
+  against the spec (`patches`, `postBuild`, `force`, `dependsOn`, `timeout`,
+  `serviceAccountName` and more). An unknown field is refused with its path from the
+  property root.
+- `oci` is an upper-level component: `OCIRule` (`oci.go`) lowers it into `ocirepository`
+  plus `fluxcd-kustomization`. The `OCIHandler` kind and its `OCIConfig` are gone. A
+  document with one `oci` component per artifact renders the same two objects as before,
+  byte for byte.
+- The explicit-registry rule for a non-empty allowlist is the `ocirepository` terminal's
+  (`fluxsource.go`), so its refusals name that kind and its `url` field.
+
+Decided in the ticket:
+
+- **Tier of the component's own source.** A component alone on its artifact lowers to a
+  same-name sibling group. Its `ocirepository` member takes its type's tier instead of the
+  `infra` tier of a generated source (`isGeneratedSource`, `classify.go`), so the group
+  stays in one tier and a tier annotation, `placement` or `dependency` naming the component
+  moves both objects. Temporary: go-kure/launcher#783 deletes that function with the tier
+  model.
+- **A shared source belongs to the application.** When two or more `oci` components of a
+  document have the same source, it is emitted once as a generated source named
+  `<document>-source-<digest>`, `helm`'s scheme, and no longer under the name of the
+  component deployed first. The identity is the url, the version and the effective
+  interval: components whose intervals differ keep a source each, so no component's
+  interval is replaced by another's. An `oci` and a `helm` component on one artifact do not
+  share.
+- **`SourceDeduplicatable`** (`pkg/oam/handler.go`) has no builtin implementer left. The
+  interface and the engine's call stay until go-kure/launcher#783 removes them.
+- `targetNamespace` is never defaulted on `fluxcd-kustomization`, for the reason `oci`
+  never defaulted it (§7).
 - The name of an authored Kustomization against a delivery Kustomization a consumer
   generates is a kure check, not launcher's.
 
@@ -354,8 +373,8 @@ consumer that passes a `Policy` gets it.
 
 Fix or document each:
 
-- `oci` sets no `targetNamespace` default; `helmrelease` does under a Flux namespace
-  (`oci.go:44`).
+- `oci` and `fluxcd-kustomization` set no `targetNamespace` default; `helmrelease` does
+  under a Flux namespace (`fluxcd_kustomization.go`, `Generate`).
 - No `ApplyPolicy` on `service`, `serviceaccount`, `configmap`, `passthrough`. (`crd` has
   one through `manifestConfig`, `crd.go:34`, `manifestsource.go:435-442`.)
 - Pod-template labels (`PodTemplateLabels`) only on `deployment`, not on `statefulset`,

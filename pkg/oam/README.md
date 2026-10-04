@@ -96,7 +96,7 @@ the transform, after the Phase-4 synthesis below, applies it to each of them. Th
 that synthesis adds are no component's sub-applications and stay undecorated.
 
 Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxNamespace`: the
-`helmrelease`, `oci` and Flux source kinds) moves its Flux objects there, and a trait
+`helmrelease`, `fluxcd-kustomization` and Flux source kinds) moves its Flux objects there, and a trait
 sub-application of that component follows only when the Flux object reads it by name from its own
 namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespaceReads`: a
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
@@ -109,7 +109,7 @@ claim, a NetworkPolicy, a route — stays in the application namespace with the
 workloads, where a HelmRelease installs them (`targetNamespace`). A ConfigMap or Secret the Flux
 object names moves even when the chart's pods read it as well: the Flux object cannot reconcile
 without it, and a reference through the chart's values is invisible here. Every built-in config
-that takes the Flux namespace reports its reads, possibly none (`oci`); decorators and sibling
+that takes the Flux namespace reports its reads, possibly none; decorators and sibling
 groups forward them.
 
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
@@ -313,6 +313,15 @@ rule emits is read the same way, with one exception: a Flux source the rule orde
 component after is applied with the application bundle, so a tier on it, from an
 annotation or a `placement` policy, is refused.
 
+The `oci` rule (go-kure/launcher#784) emits a source in two ways. The `ocirepository`
+several `oci` components share is a generated source like the `helm` rule's, with the tier
+and the two refusals above. The `ocirepository` of a component alone on its artifact is a
+member of that component's same-name sibling group, beside the `fluxcd-kustomization` that
+reads it: it is the component's own source, so it takes its type's tier (`TierApps`) like
+any other member, and a tier annotation, a `placement` policy or a `dependency` rule naming
+the component acts on the group as one. In the `infra` tier a group would span two tiers
+and be refused.
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
@@ -329,7 +338,7 @@ the built-ins. Extend the system by implementing:
 | `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
-| `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
+| `SourceDeduplicatable` | Collapse duplicate sources emitted by several component configs. No builtin implements it since go-kure/launcher#784 (`oci` shares its source through its lowering rule, as `helm` does); go-kure/launcher#783 removes it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
 | `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
