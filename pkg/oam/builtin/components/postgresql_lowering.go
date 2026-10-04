@@ -105,10 +105,8 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 
 	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents)
 	split := slices.ContainsFunc(policies, func(p oam.ApplicationPolicy) bool { return p.Type == "dependency" })
-	if split {
-		if err := postgresqlMembersShareBundle(lctx.Document, comp, dependents); err != nil {
-			return oam.LoweringResult{}, err
-		}
+	if err := postgresqlMembersShareBundle(lctx.Document, comp, dependents); err != nil {
+		return oam.LoweringResult{}, err
 	}
 	forwardMemberTraits(out, comp.Traits, split)
 	return oam.LoweringResult{Components: out, Policies: policies}, nil

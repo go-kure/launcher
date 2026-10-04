@@ -737,11 +737,15 @@ transform, naming the component and the rule's order. Like a post-policy step it
 part of the component value, survives copies, is not serialized, and cannot be
 authored: an author orders components with a `dependency` policy. It survives further
 lowering too: when a component rule lowers a component that carries an order, the
-engine gives that order to every component the rule emits for it, whatever the rule
-built them from, so what the component becomes waits as it did. A source generated
-for such a component does not wait with it: it is the application's, shared by every
-component that names the same source, and stays among the application bundle's own
-applications. It is one of the three ordering declarations described under "Pipeline".
+engine gives that order to the components the rule emits for it, whatever the rule
+built them from, so what the component becomes waits as it did. One kind of component
+is left out: a Flux source the rule generates and orders another of those components
+after, the source "Pipeline" describes as being in no group. It does not wait with
+the component: it is the application's, shared by every component that names the same
+source, and stays among the application bundle's own applications. A source the rule
+emits without ordering anything after it, or orders after a component itself, is a
+component like any other and takes the order. `OrderAfter` is one of the three
+ordering declarations described under "Pipeline".
 The built-in user is the `helm` rule, which orders the release after the source it
 generates or adopts.
 

@@ -91,6 +91,21 @@ func (r chartsRule) LowerComponent(comp *Component, _ LoweringContext) (Lowering
 	return LoweringResult{Components: []Component{earlier, later}}, nil
 }
 
+// seededChartRule lowers a "seeded-chart" component into a "release" ordered
+// after a "helmrepository" it emits, which it orders after the document's
+// "seed" component: a source that waits is not a generated source.
+type seededChartRule struct{}
+
+func (seededChartRule) ComponentType() string                     { return "seeded-chart" }
+func (seededChartRule) PropertySchema() map[string]PropertySchema { return map[string]PropertySchema{} }
+func (seededChartRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	source := Component{Name: comp.Name + "-src", Type: "helmrepository"}
+	source.OrderAfter("seed")
+	release := Component{Name: comp.Name, Type: "release"}
+	release.OrderAfter(source.Name)
+	return LoweringResult{Components: []Component{source, release}}, nil
+}
+
 // relayRule lowers a "relay" component into "<name>" and "<name>-extra", both
 // built from scratch: it copies nothing from the component it was handed, as
 // the built-in rules do not.
@@ -153,6 +168,8 @@ func orderingTransformer(deps map[string][]string, tiers map[string]Tier) (*Tran
 	tr.RegisterComponentLowering(orderedPairRule{typ: "pair", second: "webservice"})
 	tr.RegisterComponentLowering(orderedPairRule{typ: "relayed-pair", second: "relay"})
 	tr.RegisterComponentLowering(orderedPairRule{typ: "chart-pair", second: "chart"})
+	tr.RegisterComponentLowering(orderedPairRule{typ: "seeded-pair", second: "seeded-chart"})
+	tr.RegisterComponentLowering(seededChartRule{})
 	tr.RegisterComponentLowering(relayRule{})
 	tr.RegisterComponentLowering(chartsRule{typ: "charts-later-first", laterFirst: true})
 	tr.RegisterComponentLowering(chartsRule{typ: "charts-earlier-first"})
@@ -463,6 +480,25 @@ func TestOrdering_RuleOrder_GeneratedSourceDoesNotWait(t *testing.T) {
 	assertOrdered(t, cluster, []string{"myapp-source"}, []group{
 		{name: "myapp-00", applications: []string{"two-first"}},
 		{name: "myapp-01", applications: []string{"two"}, dependsOn: []string{"myapp-00"}},
+	})
+}
+
+// TestOrdering_RuleOrder_SourceThatWaitsInheritsTheOrder: a source its rule
+// orders after a component is not hoisted, so it is a component like any other
+// and waits as the component it was emitted for did. "two" waits on
+// "two-first", which waits on "seed": the source follows both, not "seed" only.
+func TestOrdering_RuleOrder_SourceThatWaitsInheritsTheOrder(t *testing.T) {
+	tr, _ := orderingTransformer(map[string][]string{"two-first": {"seed"}}, nil)
+	app := orderingApp(makeComponent("seed", "webservice"), makeComponent("two", "seeded-pair"))
+	cluster, err := tr.Transform(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	assertOrdered(t, cluster, nil, []group{
+		{name: "myapp-00", applications: []string{"seed"}},
+		{name: "myapp-01", applications: []string{"two-first"}, dependsOn: []string{"myapp-00"}},
+		{name: "myapp-02", applications: []string{"two-src"}, dependsOn: []string{"myapp-01"}},
+		{name: "myapp-03", applications: []string{"two"}, dependsOn: []string{"myapp-02"}},
 	})
 }
 
