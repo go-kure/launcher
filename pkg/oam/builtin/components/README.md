@@ -2484,7 +2484,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral
     containers are refused. The storage a PersistentVolumeClaim, or a StatefulSet's claim
     template, requests is held to the storage maximum (`MaxStorageSize`), as the
-    `persistentvolumeclaim` and `statefulset` kinds hold theirs. The error names the rendered
+    `persistentvolumeclaim` and `statefulset` kinds hold theirs. The replica count of a
+    Deployment, StatefulSet, ReplicaSet or ReplicationController (one when the chart sets none)
+    and the `maxReplicas` of a HorizontalPodAutoscaler, in any API version, are held to the
+    replica maximum (`MaxReplicas`), as the `deployment` and `statefulset` kinds and the
+    `scaler` trait hold theirs. The error names the rendered
     object and the field (`helmtemplate: rendered Deployment "demo/web":
     spec.template.spec.containers[0] "app": …`).
 
@@ -2495,13 +2499,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without a tag, or
   tagged `:latest`, has to be pinned through the chart's values.
 
-  Limits. A workload or claim in an API version kure's scheme does not register
+  Limits. A rendered object of a registered kind is emitted as its Go type holds it, not as the
+  chart wrote it: a field that type does not declare — one a newer Kubernetes version added,
+  say — is left out of the output, with no error. Before go-kure/launcher#791 the object was
+  emitted as rendered. go-kure/launcher#794 (item 7) decides between refusing such a document,
+  keeping the field, and leaving the loss documented. A chart that emits a `v1` `List` does not
+  build; go-kure/kure#981 decides whether kure's parser flattens a typed list into its items,
+  and once it does such a chart parses. A workload or claim in an API version kure's scheme
+  does not register
   (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
   is refused rather than passed unchecked; so is a list left inside such a list, whose items the
   parser does not unpack. A list is told there by a top-level `items` array, so a custom resource
   that names a field `items` is refused in that position too. Not checked: an object of a dropped hook (never emitted); the pods a
-  custom resource's controller creates; the host of the chart archive a Helm repository's index
-  points at, and any redirect, which kure's renderer follows. A nil policy (a direct
+  custom resource's controller creates, and the replica count a custom resource sets; the host of the chart archive a Helm repository's index
+  points at, and any redirect, which kure's renderer follows (go-kure/launcher#794, item 6,
+  decides whether those are held to the allowlist). A nil policy (a direct
   `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing. A chart
   delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under `delivery: flux`) is rendered
   on the cluster, so nothing it renders can be checked at build time; only the host of a source
@@ -3221,6 +3233,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   any scope source) that authors `metadata.namespace` is rejected rather than
   emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
   object, so letting it through would only defer the failure to apply time.
+  Both components decode a document of a registered kind into its Go type, with the
+  parser `helmtemplate` uses, and that decode is lenient: a field the type does not
+  declare — one a newer Kubernetes version added, say — is left out of the emitted
+  object, with no error (go-kure/launcher#794, item 7, decides between refusing such a
+  document, keeping the field, and leaving the loss documented).
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme and host only
   (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its

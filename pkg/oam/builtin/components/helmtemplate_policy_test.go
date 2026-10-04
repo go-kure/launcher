@@ -303,6 +303,44 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			want: []string{`rendered PersistentVolumeClaim "thing"`, `spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
 		},
 		{
+			name: "Deployment over the replica maximum",
+			templates: map[string]string{"d.yaml": strings.Replace(htPolicyDeployment(htPlainPod),
+				"spec:\n", "spec:\n  replicas: 5\n", 1)},
+			want: []string{`rendered Deployment "demo/web"`, "spec.replicas: replicas 5 exceeds enforced maximum 3"},
+		},
+		{
+			name: "StatefulSet over the replica maximum",
+			templates: map[string]string{"d.yaml": strings.Replace(podIn("StatefulSet", "apps/v1", "spec.template.spec", htPlainPod),
+				"spec:\n", "spec:\n  replicas: 4\n", 1)},
+			want: []string{`rendered StatefulSet "thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
+		},
+		{
+			name: "ReplicaSet over the replica maximum",
+			templates: map[string]string{"d.yaml": strings.Replace(podIn("ReplicaSet", "apps/v1", "spec.template.spec", htPlainPod),
+				"spec:\n", "spec:\n  replicas: 4\n", 1)},
+			want: []string{`rendered ReplicaSet "thing"`, "spec.replicas: replicas 4 exceeds enforced maximum 3"},
+		},
+		{
+			name: "HorizontalPodAutoscaler over the replica maximum",
+			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
+				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  minReplicas: 1\n  maxReplicas: 9\n"},
+			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
+		},
+		{
+			// autoscaling/v1 is not in kure's scheme, so the object arrives
+			// unstructured; spec.maxReplicas sits at the same path in every version.
+			name: "HorizontalPodAutoscaler in an unregistered API version over the replica maximum",
+			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
+				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: 9\n"},
+			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3"},
+		},
+		{
+			name: "HorizontalPodAutoscaler in an unregistered API version with an unreadable maximum",
+			templates: map[string]string{"d.yaml": "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
+				"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: \"9\"\n"},
+			want: []string{`rendered HorizontalPodAutoscaler "thing"`, "spec.maxReplicas is not an integer", "cannot be checked against environment policy"},
+		},
+		{
 			name:      "workload in an API version the build cannot read",
 			templates: map[string]string{"d.yaml": podIn("CronJob", "batch/v1beta1", "spec.jobTemplate.spec.template.spec", "restartPolicy: Never\n"+htPlainPod)},
 			want:      []string{`rendered CronJob "thing"`, `apiVersion "batch/v1beta1"`, "cannot be checked against environment policy"},
@@ -334,6 +372,7 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 				forbiddenContainerCaps: []string{"NET_ADMIN"},
 				maxCPU:                 "2",
 				maxStorageSize:         "10Gi",
+				maxReplicas:            int32ptr(3),
 			}
 			_, err := htTransform(srvURL, policy)
 			htWantViolation(t, err, append([]string{"helmtemplate: "}, tc.want...)...)
