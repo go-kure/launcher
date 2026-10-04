@@ -1200,9 +1200,10 @@ var errOwnershipValidate = &TransformError{Message: "inner validate"}
 // config does, and as "not one" over a config that implements none.
 func TestOwnedConfig_Forwards(t *testing.T) {
 	inner := &ownershipForwards{}
-	w, ok := wrapOwnedConfig(inner, "web", ownershipKey).(*ownedConfig)
+	wrapped := wrapOwnedConfig(inner, "web", ownershipKey)
+	w, ok := wrapped.(*ownedConfig)
 	if !ok {
-		t.Fatalf("wrapOwnedConfig over a non-augmenter = %T, want *ownedConfig", w)
+		t.Fatalf("wrapOwnedConfig over a non-augmenter = %T, want *ownedConfig", wrapped)
 	}
 	if err := w.Validate(); !errors.Is(err, errOwnershipValidate) {
 		t.Errorf("Validate = %v, want the inner error", err)
