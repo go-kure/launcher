@@ -349,13 +349,11 @@ func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 // kubernetesDecodeChart renders a hook-free ConfigMap that the decode reads as
 // Kubernetes does, not as a generic YAML reader: an unquoted timestamp with a
 // UTC offset of 24 hours, which RFC 3339 cannot express, stays the string the
-// chart wrote; an unquoted 1 as a data key is the string "1"; and a top-level
-// key ConfigMap does not declare is dropped.
+// chart wrote, and an unquoted 1 as a data key is the string "1".
 const kubernetesDecodeChart = `apiVersion: v1
 kind: ConfigMap
 metadata:
   name: stamped
-stray: x
 data:
   at: 2001-12-14T21:59:43+24:00
   1: one
@@ -363,7 +361,7 @@ data:
 
 // TestHelmTemplateConfig_DecodesAsKubernetesDoes: the rendered ConfigMap of
 // kubernetesDecodeChart builds, typed, with its timestamp and its integer key
-// as strings, and is written without the key its kind does not declare.
+// as strings.
 func TestHelmTemplateConfig_DecodesAsKubernetesDoes(t *testing.T) {
 	cfg := helmTemplateFixture(t, stubRender(kubernetesDecodeChart))
 	objects, err := cfg.Generate(nil)
@@ -381,8 +379,36 @@ func TestHelmTemplateConfig_DecodesAsKubernetesDoes(t *testing.T) {
 	if !reflect.DeepEqual(cm.Data, want) {
 		t.Errorf("data = %v, want %v", cm.Data, want)
 	}
-	if written := writtenYAML(t, cm); strings.Contains(written, "stray") {
-		t.Errorf("written ConfigMap carries the undeclared key:\n%s", written)
+}
+
+// TestHelmTemplateConfig_UndeclaredFieldIsWritten: a rendered ConfigMap with a
+// top-level key its kind does not declare builds, and is written with that key
+// and with the values the typed decode gives the rest: the document as
+// rendered, in the application's namespace.
+func TestHelmTemplateConfig_UndeclaredFieldIsWritten(t *testing.T) {
+	chart := strings.Replace(kubernetesDecodeChart, "data:\n", "stray: x\ndata:\n", 1)
+	cfg := helmTemplateFixture(t, stubRender(chart))
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("Generate returned %d objects, want 1", len(objects))
+	}
+	u, ok := (*objects[0]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("object = %T, want *unstructured.Unstructured", *objects[0])
+	}
+	data, _, _ := unstructured.NestedStringMap(u.Object, "data")
+	if want := map[string]string{"at": "2001-12-14T21:59:43+24:00", "1": "one"}; !reflect.DeepEqual(data, want) {
+		t.Errorf("data = %v, want %v", data, want)
+	}
+	written := writtenYAML(t, u)
+	if !strings.Contains(written, "stray: x\n") {
+		t.Errorf("written ConfigMap lacks the key its kind does not declare:\n%s", written)
+	}
+	if want := "namespace: " + cfg.Namespace + "\n"; cfg.Namespace == "" || !strings.Contains(written, want) {
+		t.Errorf("written ConfigMap lacks %q, the application namespace:\n%s", want, written)
 	}
 }
 

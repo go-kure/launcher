@@ -2791,11 +2791,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (go-kure/launcher#791). An object of a kind kure's scheme registers is emitted as its Go type —
   a Deployment as `*appsv1.Deployment`, a hook Job as `*batchv1.Job` — and any other as
   unstructured. What follows from reading a document as the API server does:
-  - a field the registered type does not declare is dropped, and a value of the wrong type (an
-    unquoted `true` as an annotation value) is a build error;
+  - a field the registered type does not declare is not dropped, as the parser alone would drop
+    it: the object is refused or emitted as rendered (*Undeclared fields*, below). A value of
+    the wrong type (an unquoted `true` as an annotation value) is a build error;
   - YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping key that is not
     a string (`1:`) becomes its string form, and an unquoted timestamp stays the string the chart
-    wrote; in an unstructured object an integer beyond 64 bits becomes a float;
+    wrote; in an unstructured object an integer an int64 cannot hold becomes a float;
+  - a large integer does not survive the write. Kure's manifest writer reads the numbers of
+    every object as floats, so an integer above 2^53 (`9007199254740992`) is written rounded:
+    `9007199254740993` as `9007199254740992`, `9223372036854775807` as `9223372036854776000`.
+    That holds for every object launcher writes, typed or unstructured, whichever component
+    emitted it; a value that large has to be a string in a field that takes one;
   - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}`, a
     mapping without `apiVersion` and `kind`, and a `v1` `List` are build errors — in a document
     of a dropped hook as well, since the render is decoded before hooks are grouped;
@@ -2841,11 +2847,54 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without a tag, or
   tagged `:latest`, has to be pinned through the chart's values.
 
-  Limits. A rendered object of a registered kind is emitted as its Go type holds it, not as the
-  chart wrote it: a field that type does not declare — one a newer Kubernetes version added,
-  say — is left out of the output, with no error. Before go-kure/launcher#791 the object was
-  emitted as rendered. go-kure/launcher#794 (item 7) decides between refusing such a document,
-  keeping the field, and leaving the loss documented. A chart that emits a `v1` `List` does not
+  **Undeclared fields** (go-kure/launcher#794, item 7). Kure's parser decodes a registered kind
+  leniently: a field the vendored API type does not declare — one a newer Kubernetes version
+  added, say — is dropped, with no error. The policy check reads that type, so it would pass a
+  workload whose undeclared pod spec field it never saw, and the object would be written
+  without the field. Template delivery, `manifests`, `crd` and `passthrough` therefore decode
+  each document of a registered kind once more, strictly, over the same scheme, and act on
+  what that reports:
+  - *A workload or a claim* — the kinds the policy check reads as Go types: Pod, PodTemplate,
+    ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+    PersistentVolumeClaim and PersistentVolume, which "a workload or a claim" stands for
+    wherever this rule is cited — that sets an undeclared field is refused, under any policy
+    and with none. A kind the check comes to read as its Go type joins them. The error names the object and the path of every such field (`decoding rendered
+    manifests: Deployment "demo/web": undeclared field
+    spec.template.spec.fieldOfALaterVersion: the apps/v1 Deployment type this build reads the
+    object with does not declare it, so the object cannot be checked against environment
+    policy`).
+  - *Any other registered kind* is emitted as the document was rendered, unstructured, the
+    field kept. A HorizontalPodAutoscaler is one of these: the check reads its `maxReplicas`
+    from the unstructured object as it does from the Go type. One shape is refused: a
+    top-level `items` array on a kind that declares none, since written out the object is a
+    list to whatever applies it, and its items would be applied in its place.
+
+  A key written twice is not an undeclared field and is read as before (the last value
+  stands). One case of it is refused, whatever the kind: a JSON document that writes so
+  many keys twice that the strict decode's record of errors, which holds a hundred, is
+  full without naming an undeclared field. Whether such a document also sets one cannot
+  be told. (A document whose undeclared field is recorded before the record fills is
+  treated as any other: refused as a workload or a claim, kept as another kind.)
+
+  Whether a cluster accepts a kept field its own version does not know is not verified
+  here; the object reaches it as the chart wrote it.
+
+  **Breaking**, in two ways. A chart that renders a workload or a claim with an undeclared
+  field built before, the field dropped from the output, and no longer builds: the field has
+  to go, or wait for a launcher whose pinned API types declare it. And the output of every
+  other registered kind gains the fields the typed decode had dropped since
+  go-kure/launcher#791; such an object is written from the document and not from its Go type,
+  so the rest of it is as the chart wrote it too.
+
+  Known limit: a type that unmarshals itself decodes its own keys, so an undeclared key inside
+  one is not reported and is still dropped. A CustomResourceDefinition's `items` schema is
+  such a type — the limit the kind inventory records for `CiliumNetworkPolicy`, whose
+  `endpointSelector` and `icmps` unmarshal themselves. A key next to `properties` in the same
+  schema is reported and kept. No type under a workload or a claim does this beyond scalar
+  leaves (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`; a test
+  walks those types and fails when one starts to.
+
+  Limits. A chart that emits a `v1` `List` does not
   build: at the pinned kure version the parser does not flatten a typed list into its items.
   A workload, claim or PersistentVolume in an API version kure's scheme
   does not register
@@ -3587,9 +3636,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   The object is authored as a map and the check reads Go types, so an object whose group,
   version and kind kure's scheme registers is decoded as that kind **for the check only**.
-  What is emitted stays the authored map: a field the Go type does not declare is still
-  emitted (unlike template delivery, which emits the decoded object), and it is not read by
-  the check. `Generate` runs the check again on the object it is about to emit, once
+  What is emitted stays the authored map, so a field the Go type does not declare is
+  emitted with it, and a large integer is emitted as authored (the writer's rounding above
+  2^53, under `helmtemplate`'s *Rendered objects*, applies to it as to any object). The check
+  cannot read such a field, so a workload or a claim that sets one is refused, as template
+  delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
+  component is built and again by `Generate`, under any policy and with none
+  (`passthrough component "web": object Deployment "demo/web": undeclared field
+  spec.template.spec.fieldOfALaterVersion: …`). An object of any other kind is emitted with
+  the field. **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
+  undeclared field was emitted unchecked before and no longer builds.
+  `Generate` runs the check again on the object it is about to emit, once
   `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map
   checked need not be the map emitted; a refusal there is the same
   `*oam.ViolationError`, naming the component.
@@ -3642,10 +3699,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
   object, so letting it through would only defer the failure to apply time.
   Both components decode a document of a registered kind into its Go type, with the
-  parser `helmtemplate` uses, and that decode is lenient: a field the type does not
-  declare — one a newer Kubernetes version added, say — is left out of the emitted
-  object, with no error (go-kure/launcher#794, item 7, decides between refusing such a
-  document, keeping the field, and leaving the loss documented).
+  decode `helmtemplate` gives a rendered chart, and treat a field that type does not
+  declare — one a newer Kubernetes version added, say — as it does (`helmtemplate`'s
+  *Undeclared fields*): a workload or a claim that sets one is refused, under any policy
+  and with none (`manifest source: parse manifests: Deployment "demo/web": undeclared
+  field spec.template.spec.fieldOfALaterVersion: …`), an inline source when the component
+  is built and a url source when it is fetched; an object of any other registered kind is
+  emitted as written, unstructured, the field kept, and a `CustomResourceDefinition` kept
+  so still passes `crd` and still gives its scope to the resources beside it. **Breaking**
+  (go-kure/launcher#794, item 7), in the same two ways: a source with such a workload or
+  claim no longer builds, and the output of other kinds gains the fields that had been
+  dropped. The same known limit applies (a key inside a type that unmarshals itself, a
+  CRD's `items` schema for one, is still dropped).
+  An integer above 2^53 (`9007199254740992`) is written rounded, here as everywhere
+  (`9007199254740993` as `9007199254740992`): kure's manifest writer reads the numbers of
+  every object, typed or unstructured, as floats. In an unstructured object an integer an
+  int64 cannot hold is a float from the decode on.
 
   **Policy.** Every object a `manifests` or `crd` source yields is checked against the
   environment policy with the check template delivery (`helmtemplate`) and `passthrough`

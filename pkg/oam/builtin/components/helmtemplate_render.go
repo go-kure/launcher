@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 
-	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
@@ -576,20 +575,24 @@ func hookGroupDir(g helm.HookGroup) string {
 
 // decodeChartManifests decodes multi-doc YAML from RenderChart into Kubernetes
 // objects with kure's parser, unstructured objects allowed — the decode the
-// manifests component gives a fetched document. An object whose group, version
-// and kind kure's scheme registers is its Go type (*appsv1.Deployment,
-// *batchv1.Job); any other is *unstructured.Unstructured, and an unregistered
-// list kind is replaced by its items. An empty or comment-only document is
-// skipped (kure filters NOTES.txt upstream).
+// manifests component gives a fetched document (decodeManifestDocuments). An
+// object whose group, version and kind kure's scheme registers is its Go type
+// (*appsv1.Deployment, *batchv1.Job); any other is *unstructured.Unstructured,
+// and an unregistered list kind is replaced by its items. An empty or
+// comment-only document is skipped (kure filters NOTES.txt upstream).
 //
 // Every document that does not decode is an error, and the parser reports them
 // together: invalid YAML; a document that is not a mapping; one without
 // apiVersion or kind; a field of a registered kind whose value has the wrong
 // type; and a registered kind that is not a single object, a `v1` List
-// included. The typed decode is the lenient one: a field the vendored API type
-// does not declare is dropped, not refused.
+// included.
+//
+// A field the vendored API type of a registered kind does not declare is not
+// dropped, as the parser alone would drop it: a workload or a claim that sets
+// one is an error naming the object and the field, and an object of any other
+// registered kind comes back unstructured, as rendered, the field kept.
 func decodeChartManifests(raw []byte) ([]client.Object, error) {
-	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{AllowUnstructured: true})
+	objs, err := decodeManifestDocuments(raw)
 	if err != nil {
 		return nil, errors.Wrap(err, "decoding rendered manifests")
 	}
