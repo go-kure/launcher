@@ -11,6 +11,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -177,6 +178,7 @@ func TestScalerPDBName_NeedsEnablePDB(t *testing.T) {
 // Deployment.
 func TestNameOverride_WorkloadIdentityUnchanged(t *testing.T) {
 	want := componentLabels("web")
+	wantSelector := metav1.LabelSelector{MatchLabels: want}
 	seen := map[string]bool{}
 	for _, tc := range []struct {
 		h     oam.TraitHandler
@@ -193,24 +195,30 @@ func TestNameOverride_WorkloadIdentityUnchanged(t *testing.T) {
 			if (*p).GetName() != "edge" {
 				t.Errorf("%T is named %q, want the authored edge", *p, (*p).GetName())
 			}
+			if got := (*p).GetNamespace(); got != "ns" {
+				t.Errorf("%T: namespace %q, want the component's (ns)", *p, got)
+			}
 			if got := (*p).GetLabels(); !maps.Equal(got, want) {
 				t.Errorf("%T: labels %v, want the component's %v", *p, got, want)
 			}
+			// Whole values, not single fields: a selector is compared with its
+			// matchExpressions, a target with its apiVersion.
 			switch o := (*p).(type) {
 			case *autoscalingv2.HorizontalPodAutoscaler:
 				seen["hpa"] = true
-				if ref := o.Spec.ScaleTargetRef; ref.Kind != "Deployment" || ref.Name != "web" {
-					t.Errorf("HPA scaleTargetRef %s %q, want Deployment web", ref.Kind, ref.Name)
+				wantRef := autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"}
+				if o.Spec.ScaleTargetRef != wantRef {
+					t.Errorf("HPA scaleTargetRef %+v, want %+v", o.Spec.ScaleTargetRef, wantRef)
 				}
 			case *policyv1.PodDisruptionBudget:
 				seen["pdb"] = true
-				if o.Spec.Selector == nil || !maps.Equal(o.Spec.Selector.MatchLabels, want) {
-					t.Errorf("PDB selector %v, want matchLabels %v", o.Spec.Selector, want)
+				if !reflect.DeepEqual(o.Spec.Selector, &wantSelector) {
+					t.Errorf("PDB selector %v, want %v", o.Spec.Selector, wantSelector)
 				}
 			case *networkingv1.NetworkPolicy:
 				seen["networkpolicy"] = true
-				if got := o.Spec.PodSelector.MatchLabels; !maps.Equal(got, want) {
-					t.Errorf("NetworkPolicy podSelector %v, want matchLabels %v", got, want)
+				if !reflect.DeepEqual(o.Spec.PodSelector, wantSelector) {
+					t.Errorf("NetworkPolicy podSelector %v, want %v", o.Spec.PodSelector, wantSelector)
 				}
 			default:
 				t.Errorf("unexpected object %T", *p)
