@@ -2498,7 +2498,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Limits. A workload or claim in an API version kure's scheme does not register
   (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
   is refused rather than passed unchecked; so is a list left inside such a list, whose items the
-  parser does not unpack. Not checked: an object of a dropped hook (never emitted); the pods a
+  parser does not unpack. A list is told there by a top-level `items` array, so a custom resource
+  that names a field `items` is refused in that position too. Not checked: an object of a dropped hook (never emitted); the pods a
   custom resource's controller creates; the host of the chart archive a Helm repository's index
   points at, and any redirect, which kure's renderer follows. A nil policy (a direct
   `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing. A chart

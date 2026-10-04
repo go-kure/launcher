@@ -315,7 +315,8 @@ be closed at build time.
      workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
      `AllowHostIPC` and `AllowHostPathVolumes` allow one.
    - **Limits:** a workload or claim that cannot be decoded typed (an API version kure's
-     scheme does not register), and a list nested in an unregistered list, are refused; a
+     scheme does not register), and a list nested in an unregistered list (any object with a
+     top-level `items` array there), are refused; a
      custom resource's pods, the archive host a Helm repository
      index names and redirects are not checked.
 

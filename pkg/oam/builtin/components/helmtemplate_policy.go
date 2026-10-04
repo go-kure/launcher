@@ -85,7 +85,9 @@ func renderedObjectRef(obj client.Object) string {
 // nothing in it can be read: a workload kind in an API version kure's scheme
 // does not register (apps/v1beta2, batch/v1beta1) or an item of a list whose
 // kind it does not, and a list left inside such a list, whose own items the
-// parser does not unpack.
+// parser does not unpack. A list is told by a top-level items array, as
+// apimachinery tells one, so a custom resource that names a field so is
+// refused there too; rendered on its own the parser already reads it as a list.
 func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	if err := enforceRenderedClaims(obj, p); err != nil {
 		return err
@@ -97,7 +99,7 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 		case !ok:
 			return nil
 		case u.IsList():
-			return errors.New("the object is a list inside a list, so the objects in it cannot be checked against environment policy")
+			return errors.New("the object has a top-level items list and sits inside a list of an unregistered kind, so it is read as a list whose objects cannot be checked against environment policy")
 		case isWorkloadKind(u):
 			return errors.Errorf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion())
 		}

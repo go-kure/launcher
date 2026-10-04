@@ -274,7 +274,15 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
 				"  - apiVersion: v1\n    kind: List\n    metadata:\n      name: wrapped\n    items:\n" +
 				"      - apiVersion: v1\n        kind: Pod\n        metadata:\n          name: inner\n        spec:\n" + htIndent(privileged, "          ")},
-			want: []string{`rendered List "wrapped"`, "is a list inside a list", "cannot be checked against environment policy"},
+			want: []string{`rendered List "wrapped"`, "has a top-level items list", "cannot be checked against environment policy"},
+		},
+		{
+			// A list is told by its items array alone, so a custom resource
+			// with a field of that name is refused in the same position.
+			name: "custom resource with an items field inside a list of an unregistered kind",
+			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: CatalogList\nitems:\n" +
+				"  - apiVersion: example.io/v1\n    kind: Catalog\n    metadata:\n      name: colors\n    items: [blue, green]\n"},
+			want: []string{`rendered Catalog "colors"`, "has a top-level items list", "cannot be checked against environment policy"},
 		},
 		{
 			name:      "privileged container in a PodTemplate",
