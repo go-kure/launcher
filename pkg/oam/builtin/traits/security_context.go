@@ -347,6 +347,8 @@ func extractPodSpecSC(obj client.Object) *corev1.PodSpec {
 		return &o.Spec.Template.Spec
 	case *batchv1.CronJob:
 		return &o.Spec.JobTemplate.Spec.Template.Spec
+	case *corev1.Pod:
+		return &o.Spec
 	default:
 		return nil
 	}

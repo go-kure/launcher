@@ -81,6 +81,8 @@ func podSpecOf(t *testing.T, objs []*client.Object) *corev1.PodSpec {
 			return &w.Spec.JobTemplate.Spec.Template.Spec
 		case *batchv1.Job:
 			return &w.Spec.Template.Spec
+		case *corev1.Pod:
+			return &w.Spec
 		}
 	}
 	t.Fatalf("no supported workload found in %d objects", len(objs))
@@ -544,8 +546,8 @@ func TestExternalSecret_EnvFrom_AddsSecretRefToDeployment(t *testing.T) {
 	}
 }
 
-// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all five supported
-// workload kinds (Deployment, StatefulSet, DaemonSet, Job, CronJob) crossed with
+// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all six supported
+// workload kinds (Deployment, StatefulSet, DaemonSet, Job, CronJob, Pod) crossed with
 // the three consumption modes (envFrom only, mountPath only, both), asserting the
 // exact injected objects on the PodSpec each kind exposes.
 func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
@@ -558,6 +560,9 @@ func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
 		{"DaemonSet", &stubDaemonSetConfig{}},
 		{"Job", newJobStubConfig(t)},
 		{"CronJob", newCronJobStubConfig(t)},
+		{"Pod", &components.PodConfig{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "registry.example/team/app:1.2.3"}},
+		}}},
 	}
 	modes := []struct {
 		name      string
@@ -693,7 +698,7 @@ func TestExternalSecret_UnsupportedComponent_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")
 	}
-	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, Job, or CronJob") {
+	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, Job, CronJob, or Pod") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

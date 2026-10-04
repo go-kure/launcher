@@ -93,7 +93,7 @@ reads it.
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
-| `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled — see below. |
+| `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -2104,11 +2104,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the same recipe: one schema key per json field of `corev1.PodSpec`, the
   property map decoded strictly into that type, two spellings of one field
   refused, and one Pod named after the component in the build namespace, with
-  the authored spec, no label and no annotation. It is a bare Pod: no
-  controller recreates it, and it is not the workload shape of `webservice`,
-  `worker` or `deployment` — a property of those (`image`, `ports`, `env` at
-  the top level) is refused as not a PodSpec field. Nothing is added: no
-  ServiceAccount, no `automountServiceAccountToken`, no resources, no probe.
+  the authored spec. The handler adds the `app` label and nothing else: no
+  annotation, no ServiceAccount, no `automountServiceAccountToken`, no
+  resources, no probe. The `app` label (`app: <component>`, see "The `app`
+  label") is the one every workload kind gives its pods and the one launcher's
+  traits and Services select on: a `networkpolicy` trait's policy matches the
+  Pod by it, and a `service` component reaches it with `selector: {app:
+  <component>}`. The transform
+  then sets the component label, as on every object a component owns
+  (go-kure/launcher#788). It is a bare Pod: no controller recreates it, and it
+  is not the workload shape of `webservice`, `worker` or `deployment` — a
+  property of those (`image`, `ports`, `env` at the top level) is refused as
+  not a PodSpec field.
+
+  **Traits.** The pod is a trait target: `security-context`, a `configmap`
+  trait's `mountPath` and an `external-secret` trait's `envFrom`/`mountPath`
+  change its spec as they change a workload kind's pod template.
+  `topology-spread` is Deployment-only and refuses a `pod` component.
 
   **Refused when the component is read**, with or without a policy:
   - `ephemeralContainers`, `priority` and `overhead`, with the texts the
@@ -2157,7 +2169,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `serviceAccountName`, or the deprecated `serviceAccount` where that one is
   unset, as the API server reads the two; with neither, the namespace's
   `default` account. **Not covered:** the object's metadata, so the Pod's
-  labels and annotations cannot be authored.
+  labels and annotations cannot be authored; it carries the `app` label and
+  the component label only.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
