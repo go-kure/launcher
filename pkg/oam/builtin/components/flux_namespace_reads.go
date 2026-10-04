@@ -67,6 +67,35 @@ func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) 
 	return r.configMaps, r.secrets
 }
 
+// FluxNamespaceReads reports the Kustomization's decryption Secret, its
+// kubeConfig ConfigMap or Secret, and the ConfigMaps and Secrets its
+// postBuild.substituteFrom names.
+func (c *FluxcdKustomizationConfig) FluxNamespaceReads() (configMaps, secrets []string) {
+	var r fluxReads
+	if d := c.Spec.Decryption; d != nil {
+		r.secretRef(d.SecretRef)
+	}
+	if k := c.Spec.KubeConfig; k != nil {
+		if k.ConfigMapRef != nil {
+			r.configMap(k.ConfigMapRef.Name)
+		}
+		if k.SecretRef != nil {
+			r.secret(k.SecretRef.Name)
+		}
+	}
+	if pb := c.Spec.PostBuild; pb != nil {
+		for _, from := range pb.SubstituteFrom {
+			switch from.Kind {
+			case "ConfigMap":
+				r.configMap(from.Name)
+			case "Secret":
+				r.secret(from.Name)
+			}
+		}
+	}
+	return r.configMaps, r.secrets
+}
+
 // FluxNamespaceReads reports the HelmRepository's secretRef and certSecretRef.
 func (c *HelmRepositoryConfig) FluxNamespaceReads() (configMaps, secrets []string) {
 	var r fluxReads
@@ -123,7 +152,3 @@ func (c *HelmChartConfig) FluxNamespaceReads() (configMaps, secrets []string) {
 	}
 	return r.configMaps, r.secrets
 }
-
-// FluxNamespaceReads reports nothing: the oci component's OCIRepository and
-// Kustomization name no ConfigMap or Secret.
-func (c *OCIConfig) FluxNamespaceReads() (configMaps, secrets []string) { return nil, nil }

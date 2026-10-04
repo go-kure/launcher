@@ -17,7 +17,11 @@ fields) are split off and returned to the caller, and the rest is JSON-decoded i
 rather than a dropped field; a number in an interface-typed field stays an exact `json.Number`.
 It decodes only: no defaulting, no semantic checks. It shares one limitation with
 `encoding/json`: unknown keys nested inside a type that has its own `UnmarshalJSON` are still
-dropped. `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
+dropped. Its unknown-key error is `encoding/json`'s, which names the key without where it sits;
+`UnknownJSONFieldPath[T](props, owned...)` returns the path of the first such key from the
+property root (`sourceRef.tag`, `patches[0].target.kinds`), or `""` when it finds none, for a
+caller whose type declares the same key in several places (go-kure/launcher#784; used by
+`fluxcd-kustomization`). `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
 way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
 shadowed by an owned key, or behind an unexported embedded pointer the decoder cannot set),
 including embedded ones; each key is probed against `encoding/json`, so the list agrees with

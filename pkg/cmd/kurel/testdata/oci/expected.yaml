@@ -1,0 +1,93 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo
+  name: podinfo
+  namespace: platform
+spec:
+  interval: 1h0m0s
+  ref:
+    tag: 6.7.0
+  url: oci://ghcr.io/stefanprodan/manifests/podinfo
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo
+  name: podinfo
+  namespace: platform
+spec:
+  interval: 1h0m0s
+  path: ./
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: podinfo
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  labels:
+    launcher.gokure.dev/component: ingress
+  name: ingress
+  namespace: platform
+spec:
+  interval: 10m0s
+  ref:
+    digest: sha256:0f5b6a1f3c8d2e4b7a9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a
+  url: oci://registry.example.com/platform/ingress
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  labels:
+    launcher.gokure.dev/component: ingress
+  name: ingress
+  namespace: platform
+spec:
+  healthChecks:
+  - apiVersion: apps/v1
+    kind: Deployment
+    name: ingress-controller
+    namespace: ingress
+  - apiVersion: networking.k8s.io/v1
+    kind: IngressClass
+    name: public
+  interval: 10m0s
+  path: ./overlays/production
+  prune: false
+  sourceRef:
+    kind: OCIRepository
+    name: ingress
+  targetNamespace: ingress
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  labels:
+    launcher.gokure.dev/component: monitoring
+  name: monitoring
+  namespace: platform
+spec:
+  interval: 1h0m0s
+  ref:
+    tag: 2.1.0
+  url: oci://registry.example.com/platform/monitoring
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  labels:
+    launcher.gokure.dev/component: monitoring
+  name: monitoring
+  namespace: platform
+spec:
+  interval: 1h0m0s
+  path: ./
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: monitoring
+  wait: true

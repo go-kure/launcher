@@ -130,6 +130,21 @@ func TestFluxNamespace_ReadInputsFollow(t *testing.T) {
 			map[string]any{"chart": hrChart(map[string]any{"kind": "HelmRepository", "name": "example"},
 				map[string]any{"provider": "cosign", "secretRef": secretRef("creds")})},
 			es, "HelmRelease/c", "ExternalSecret/creds"},
+		{"fluxcd-kustomization decryption secretRef", "fluxcd-kustomization",
+			map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("creds")}},
+			es, "Kustomization/c", "ExternalSecret/creds"},
+		{"fluxcd-kustomization kubeConfig secretRef", "fluxcd-kustomization",
+			map[string]any{"kubeConfig": map[string]any{"secretRef": secretRef("creds")}},
+			es, "Kustomization/c", "ExternalSecret/creds"},
+		{"fluxcd-kustomization kubeConfig configMapRef", "fluxcd-kustomization",
+			map[string]any{"kubeConfig": map[string]any{"configMapRef": secretRef("kc")}},
+			configMapTrait("kc"), "Kustomization/c", "ConfigMap/kc"},
+		{"fluxcd-kustomization postBuild substituteFrom ConfigMap", "fluxcd-kustomization",
+			map[string]any{"postBuild": map[string]any{"substituteFrom": []any{map[string]any{"kind": "ConfigMap", "name": "vars"}}}},
+			configMapTrait("vars"), "Kustomization/c", "ConfigMap/vars"},
+		{"fluxcd-kustomization postBuild substituteFrom Secret", "fluxcd-kustomization",
+			map[string]any{"postBuild": map[string]any{"substituteFrom": []any{map[string]any{"kind": "Secret", "name": "creds"}}}},
+			es, "Kustomization/c", "ExternalSecret/creds"},
 		{"helmrepository secretRef", "helmrepository", map[string]any{"secretRef": secretRef("creds")},
 			es, "HelmRepository/c", "ExternalSecret/creds"},
 		{"helmrepository certSecretRef", "helmrepository", map[string]any{"certSecretRef": secretRef("creds")},
@@ -304,10 +319,25 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 			t.Errorf("%s: %T moves to the Flux namespace but does not report FluxNamespaceReads", typ, cfg)
 		}
 	}
-	want := []string{"bucket", "gitrepository", "helmchart", "helmrelease", "helmrepository", "oci", "ocirepository"}
+	want := []string{"bucket", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository", "ocirepository"}
 	for _, typ := range want {
 		if !slices.Contains(moving, typ) {
 			t.Errorf("%s: config does not move to the Flux namespace; moving types: %v", typ, moving)
+		}
+	}
+}
+
+// TestFluxNamespace_OCIMovesBothObjects: an oci component lowers to an
+// ocirepository and a fluxcd-kustomization deployed as one unit, and both of
+// its objects move to the Flux namespace, the Kustomization still naming no
+// targetNamespace.
+func TestFluxNamespace_OCIMovesBothObjects(t *testing.T) {
+	got := fluxNSObjects(t, fluxNSComponent(t, "c", "oci", nil))
+	for _, key := range []string{"OCIRepository/c", "Kustomization/c"} {
+		if ns, ok := got[key]; !ok {
+			t.Errorf("no %s emitted; got %v", key, got)
+		} else if ns != fluxNSTarget {
+			t.Errorf("%s namespace = %q, want %q", key, ns, fluxNSTarget)
 		}
 	}
 }

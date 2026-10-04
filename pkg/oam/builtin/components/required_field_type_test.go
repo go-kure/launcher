@@ -61,7 +61,7 @@ func runManifests(props map[string]any) error {
 }
 
 func runOCI(props map[string]any) error {
-	_, err := (&components.OCIHandler{}).ToApplicationConfig(
+	_, err := ociViaRule{}.ToApplicationConfig(
 		&oam.Component{Name: "checkout", Type: "oci", Properties: props}, "checkout")
 	return err
 }

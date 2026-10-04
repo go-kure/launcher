@@ -131,6 +131,101 @@ func TestDecodeStrictJSON_NilSource(t *testing.T) {
 	}
 }
 
+type pathLeaf struct {
+	Name string `json:"name"`
+}
+
+type pathEmbedded struct {
+	Shared string `json:"shared"`
+}
+
+type pathTarget struct {
+	pathEmbedded
+	Ref    *pathLeaf               `json:"ref"`
+	Items  []pathLeaf              `json:"items"`
+	ByName map[string]pathLeaf     `json:"byName"`
+	Nested [][]pathLeaf            `json:"nested"`
+	Opaque *time.Time              `json:"opaque"`
+	Free   map[string]any          `json:"free"`
+	Raw    json.RawMessage         `json:"raw"`
+	Deep   map[string][]pathTarget `json:"deep"`
+}
+
+// TestUnknownJSONFieldPath: the path names where the key the strict decode
+// refuses sits, through pointers, lists, maps and embedded structs; it finds
+// nothing in a document the decode accepts, in an owned key, or inside a value
+// the decoder does not check.
+func TestUnknownJSONFieldPath(t *testing.T) {
+	leaf := func(extra string) map[string]any { return map[string]any{"name": "n", extra: 1} }
+	cases := []struct {
+		name  string
+		src   map[string]any
+		owned []string
+		want  string
+	}{
+		{"valid", map[string]any{"shared": "s", "ref": map[string]any{"name": "n"}, "items": []any{map[string]any{"name": "a"}}}, nil, ""},
+		{"nil", nil, nil, ""},
+		{"top level", map[string]any{"bogus": 1}, nil, "bogus"},
+		{"through a pointer", map[string]any{"ref": leaf("tag")}, nil, "ref.tag"},
+		{"list element", map[string]any{"items": []any{map[string]any{"name": "a"}, leaf("x")}}, nil, "items[1].x"},
+		{"map value", map[string]any{"byName": map[string]any{"a": map[string]any{"name": "n"}, "b": leaf("x")}}, nil, "byName.b.x"},
+		{"list of lists", map[string]any{"nested": []any{[]any{}, []any{leaf("x")}}}, nil, "nested[1][0].x"},
+		{"recursive type", map[string]any{"deep": map[string]any{"k": []any{map[string]any{"ref": leaf("x")}}}}, nil, "deep.k[0].ref.x"},
+		{"promoted key is known", map[string]any{"shared": "s", "Shared2": 1}, nil, "Shared2"},
+		{"case-folded parent", map[string]any{"REF": leaf("tag")}, nil, "REF.tag"},
+		{"first in sorted order", map[string]any{"zzz": 1, "ref": leaf("tag")}, nil, "ref.tag"},
+		{"owned key is not unknown", map[string]any{"mode": "x", "ref": map[string]any{"name": "n"}}, []string{"Mode"}, ""},
+		{"self-decoding value is not walked", map[string]any{"opaque": map[string]any{"x": 1}}, nil, ""},
+		{"free-form map is not walked", map[string]any{"free": map[string]any{"x": map[string]any{"y": 1}}}, nil, ""},
+		{"raw message is not walked", map[string]any{"raw": map[string]any{"x": 1}}, nil, ""},
+		{"wrong shape is not an unknown key", map[string]any{"items": "x", "ref": []any{1}}, nil, ""},
+		{"unmarshalable source", map[string]any{"ref": math.NaN()}, nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := builtin.UnknownJSONFieldPath[pathTarget](tc.src, tc.owned...); got != tc.want {
+				t.Errorf("UnknownJSONFieldPath = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUnknownJSONFieldPath_AgreesWithDecoder: on a Flux spec type, a path is
+// found exactly when the strict decode reports an unknown field, and its last
+// key is the one the decoder names.
+func TestUnknownJSONFieldPath_AgreesWithDecoder(t *testing.T) {
+	chart := map[string]any{"spec": map[string]any{"chart": "p", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "p"}}}
+	cases := map[string]struct {
+		src  map[string]any
+		want string
+	}{
+		"valid":               {map[string]any{"chart": chart, "values": map[string]any{"any": map[string]any{"thing": 1}}}, ""},
+		"top level":           {map[string]any{"chart": chart, "chartt": 1}, "chartt"},
+		"nested":              {map[string]any{"chart": map[string]any{"spec": map[string]any{"chart": "p", "chartVersion": "1"}}}, "chart.spec.chartVersion"},
+		"list item":           {map[string]any{"chart": chart, "valuesFrom": []any{map[string]any{"kind": "Secret", "name": "s"}, map[string]any{"kind": "Secret", "name": "s", "key": "x"}}}, "valuesFrom[1].key"},
+		"wrong type, no path": {map[string]any{"chart": "podinfo"}, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := builtin.UnknownJSONFieldPath[helmv2.HelmReleaseSpec](tc.src)
+			if got != tc.want {
+				t.Fatalf("UnknownJSONFieldPath = %q, want %q", got, tc.want)
+			}
+			_, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](tc.src)
+			unknown := err != nil && strings.Contains(err.Error(), "unknown field")
+			if unknown != (got != "") {
+				t.Fatalf("decoder error %v, path %q: they must agree on whether a key is unknown", err, got)
+			}
+			if got != "" {
+				leaf := got[strings.LastIndex(got, ".")+1:]
+				if !strings.Contains(err.Error(), fmt.Sprintf("unknown field %q", leaf)) {
+					t.Errorf("decoder names %v, path ends in %q", err, leaf)
+				}
+			}
+		})
+	}
+}
+
 type reachInner struct {
 	Promoted string `json:"promoted"`
 }

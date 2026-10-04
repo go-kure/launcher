@@ -201,7 +201,7 @@ func TestOCIHandler_WaitAndHealthChecksRejections(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := convert(&components.OCIHandler{}, "oci", withProp(validOCIProps(), tc.key, tc.val))
+			err := convert(ociViaRule{}, "oci", withProp(validOCIProps(), tc.key, tc.val))
 			if err == nil {
 				t.Fatalf("%s=%#v converted without error", tc.key, tc.val)
 			}
@@ -216,7 +216,7 @@ func TestOCIHandler_WaitAndHealthChecksRejections(t *testing.T) {
 // both would ship a list that is never read.
 func TestOCIHandler_WaitTrueWithHealthChecksIsRejected(t *testing.T) {
 	props := withProp(withProp(validOCIProps(), "wait", true), "healthChecks", ociHealthChecks())
-	err := convert(&components.OCIHandler{}, "oci", props)
+	err := convert(ociViaRule{}, "oci", props)
 	if err == nil {
 		t.Fatal("wait: true with healthChecks converted without error; the health checks would be silently ignored")
 	}
@@ -228,7 +228,7 @@ func TestOCIHandler_WaitTrueWithHealthChecksIsRejected(t *testing.T) {
 }
 
 func TestOCIHandler_WaitAndHealthChecksSchema(t *testing.T) {
-	schema := (&components.OCIHandler{}).PropertySchema()
+	schema := components.OCIRule{}.PropertySchema()
 	if w := schema["wait"]; w.Type != oam.PropertyTypeBoolean || w.Required || w.Default != nil || w.Description == "" {
 		t.Errorf("wait schema = %+v, want an optional boolean with no default and a description", w)
 	}
@@ -255,13 +255,14 @@ func TestOCIHandler_WaitAndHealthChecksSchema(t *testing.T) {
 // document and refuses the malformed shapes at one layer or the other.
 func TestOCIHandler_WaitAndHealthChecksAuthoredPipeline(t *testing.T) {
 	build := func(props map[string]any) error {
-		tr := oam.NewTransformer(map[string]oam.ComponentHandler{"oci": &components.OCIHandler{}}, nil)
+		tr := oam.NewTransformer(nil, nil)
+		tr.RegisterComponentLowering(components.OCIRule{})
 		comp := oam.Component{Name: "checkout", Type: "oci", Properties: props}
 		app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
 		if err := tr.ValidateAuthoredProperties(app); err != nil {
 			return err
 		}
-		_, err := (&components.OCIHandler{}).ToApplicationConfig(&comp, "checkout")
+		_, err := ociViaRule{}.ToApplicationConfig(&comp, "checkout")
 		return err
 	}
 	if err := build(withProp(validOCIProps(), "healthChecks", ociHealthChecks())); err != nil {

@@ -20,7 +20,7 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 	handlers := map[string]oam.ComponentHandler{
 		"crd":            &components.CRDHandler{},
 		"manifests":      &components.ManifestsHandler{},
-		"oci":            &components.OCIHandler{},
+		"oci":            ociViaRule{},
 		"helmrepository": &components.HelmRepositoryHandler{},
 		"ocirepository":  &components.OCIRepositoryHandler{},
 		"gitrepository":  &components.GitRepositoryHandler{},
@@ -106,9 +106,10 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{"gitrepository: url must start with"}},
 
 		// The explicit-registry rule: a token as the user leaves a first segment
-		// with no "." or ":", which Flux reads as a Docker Hub namespace.
+		// with no "." or ":", which Flux reads as a Docker Hub namespace. The oci
+		// component's refusal is its ocirepository terminal's.
 		{"oci, implicit registry", "oci", ociSrc("oci://s3cr3t@registry/app"), []string{"registry"},
-			[]string{"oci: source.url: " + implicit}},
+			[]string{"ocirepository: url: " + implicit}},
 		{"helmrepository, implicit registry", "helmrepository", url("oci://s3cr3t@registry"), []string{"registry"},
 			[]string{"helmrepository: url: " + implicit}},
 		{"ocirepository, implicit registry", "ocirepository", url("oci://s3cr3t@registry/x"), []string{"registry"},

@@ -1,14 +1,13 @@
 package components
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"maps"
 	"strings"
 
-	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/fluxcd/pkg/apis/meta"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1"
-	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
-	"github.com/go-kure/kure/pkg/stack"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -17,17 +16,56 @@ import (
 // digestPrefix marks an OCI reference as a digest rather than a tag.
 const digestPrefix = "sha256:"
 
-// OCIHandler handles the `oci` OAM component type: it emits an OCIRepository
-// source CR plus a per-component Flux Kustomization that reconciles the artifact.
-// The OCIRepository participates in source dedup (URL+version); the Kustomization
-// is always emitted, one per component. Both land in the Flux namespace.
-type OCIHandler struct{}
+// ociType is the oci component type. It prefixes every error the rule raises
+// itself.
+const ociType = "oci"
 
-// CanHandle returns true for the oci component type.
-func (h *OCIHandler) CanHandle(componentType string) bool { return componentType == "oci" }
+// OCIRule lowers an "oci" component (D1 component position,
+// oam.ComponentLoweringRule) to the two kind-named Flux terminals it stands
+// for (go-kure/launcher#784): an `ocirepository`, the source of the artifact,
+// and a `fluxcd-kustomization` that reconciles it.
+//
+// A component whose source no other oci component of the document shares
+// lowers to a same-name sibling group: the ocirepository member and the
+// fluxcd-kustomization member, both named after the component and deployed as
+// one unit, OCIRepository first. That is the pair of objects the former
+// OCIHandler generated.
+//
+// When two or more oci components of a document have the same source, the
+// source belongs to the application rather than to whichever component comes
+// first: it is emitted once, named <document>-source-<digest> and claimed
+// through NameAllocator.NameOrAdopt, as the helm rule's generated source is,
+// and each component lowers to its fluxcd-kustomization alone, referencing it.
+// The source identity is the url, the version and the effective interval
+// (ociSourceIdentity): components share only when all three are equal, so a
+// component with its own interval keeps its own source. The identity differs
+// from the helm rule's, so an oci and a helm component on one artifact never
+// share a source; the helm one copies the chart layer instead of extracting
+// it. Sharing is decided among the oci components the document holds in the
+// round the rule runs in.
+//
+// LowerComponent first runs the oci parse (parseOCI, the former
+// OCIHandler.ToApplicationConfig sequence), so every input the handler refused
+// is still refused, with the same cause text. Everything past the parse is the
+// terminals' own: the allowed-registries policy is the ocirepository's
+// (OCIRepositoryConfig.ApplyPolicy), and both kinds treat a zero interval as
+// unset.
+//
+// Annotations go to both members of a group, so a tier override places the
+// group as one; the fluxcd-kustomization alone carries them in the shared
+// case. `prune-protection` and `force-replace` decorate every object a
+// component generates, so both members carry them; every other authored trait
+// goes to the fluxcd-kustomization. A shared source carries neither
+// annotations nor traits.
+type OCIRule struct{}
+
+// ComponentType claims the "oci" component type at the component lowering
+// position. build.go registers this rule via RegisterComponentLowering; no
+// dispatchable handler exists for "oci".
+func (OCIRule) ComponentType() string { return ociType }
 
 // PropertySchema declares the oci component's user-facing properties.
-func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
+func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
 			Type:        oam.PropertyTypeObject,
@@ -64,9 +102,25 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 // fields of Flux's NamespacedObjectKindReference. Any other key is refused.
 var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
 
-// ToApplicationConfig converts an OAM oci component to an OCIConfig.
-//
-// Properties:
+// ociProperties is an oci component's properties as parseOCI read them.
+type ociProperties struct {
+	url     string // oci:// artifact URL
+	version string // tag, or sha256:<digest>
+
+	path            string
+	prune           bool
+	interval        string // as authored; "" when unset
+	targetNamespace string
+
+	// wait sets the Kustomization's spec.wait; false emits nothing.
+	wait bool
+	// healthChecks become the Kustomization's spec.healthChecks, in order.
+	// Never non-empty while wait is true: kustomize-controller ignores
+	// healthChecks when wait is true, so parseOCI refuses the pair.
+	healthChecks []meta.NamespacedObjectKindReference
+}
+
+// parseOCI reads an oci component's properties.
 //
 //	source:
 //	  url: oci://registry.example.com/org/artifact   # required, oci:// scheme
@@ -89,15 +143,8 @@ var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
 // healthChecks emits its checks even beside wait: false. wait: true together
 // with a non-empty healthChecks is refused, because kustomize-controller
 // ignores healthChecks when wait is true.
-func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	cfg := &OCIConfig{
-		Name:      component.Name,
-		Namespace: namespace,
-		Path:      "./",
-		Prune:     true,
-	}
-
-	props := component.Properties
+func parseOCI(props map[string]any) (*ociProperties, error) {
+	out := &ociProperties{path: "./", prune: true}
 
 	src, ok := props["source"].(map[string]any)
 	if !ok {
@@ -112,8 +159,8 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if !present {
 		return nil, errors.New("oci: source.url is required")
 	}
-	cfg.URL = srcURL
-	if !strings.HasPrefix(cfg.URL, "oci://") {
+	out.url = srcURL
+	if !strings.HasPrefix(out.url, "oci://") {
 		// Not quoted: the url can carry a credential (userinfo, a query).
 		return nil, errors.New("oci: source.url must use the oci:// scheme")
 	}
@@ -125,25 +172,25 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if !present {
 		return nil, errors.New("oci: version is required (a tag, or sha256:<digest>)")
 	}
-	cfg.Version = version
+	out.version = version
 
 	if p, present, err := parseStringField(props, "path", "path"); err != nil {
 		return nil, err
 	} else if present {
-		cfg.Path = p
+		out.path = p
 	}
 	if pr, err := parseBoolField(props, "prune", "prune"); err != nil {
 		return nil, err
 	} else if pr != nil {
-		cfg.Prune = *pr
+		out.prune = *pr
 	}
 	interval, _, err := parseStringField(props, "interval", "interval")
 	if err != nil {
 		return nil, err
 	}
-	cfg.Interval = interval
-	if cfg.Interval != "" {
-		if err := validateFluxInterval("oci", cfg.Interval); err != nil {
+	out.interval = interval
+	if out.interval != "" {
+		if err := validateFluxInterval(ociType, out.interval); err != nil {
 			return nil, err
 		}
 	}
@@ -151,23 +198,23 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err != nil {
 		return nil, err
 	}
-	cfg.TargetNamespace = targetNamespace
+	out.targetNamespace = targetNamespace
 
 	if w, err := parseBoolField(props, "wait", "wait"); err != nil {
 		return nil, err
 	} else if w != nil {
-		cfg.Wait = *w
+		out.wait = *w
 	}
 	healthChecks, err := parseOCIHealthChecks(props)
 	if err != nil {
 		return nil, err
 	}
-	cfg.HealthChecks = healthChecks
-	if cfg.Wait && len(cfg.HealthChecks) > 0 {
+	out.healthChecks = healthChecks
+	if out.wait && len(out.healthChecks) > 0 {
 		return nil, errors.New("oci: wait: true and healthChecks are mutually exclusive: kustomize-controller ignores healthChecks when wait is true, so the listed checks would never run; drop wait to check only the listed objects, or drop healthChecks to wait for everything applied")
 	}
 
-	return cfg, nil
+	return out, nil
 }
 
 // parseOCIHealthChecks reads the optional `healthChecks` list. Absent, null or
@@ -215,165 +262,146 @@ func parseOCIHealthChecks(props map[string]any) ([]meta.NamespacedObjectKindRefe
 	return refs, nil
 }
 
-// OCIConfig implements stack.ApplicationConfig for oci components.
-type OCIConfig struct {
-	Name      string
-	Namespace string
+// LowerComponent validates comp as an oci component and emits its
+// ocirepository and fluxcd-kustomization components (see OCIRule).
+func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+	props, err := parseOCI(comp.Properties)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
+	identity, err := props.sourceIdentity()
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
 
-	URL     string // oci:// artifact URL
-	Version string // tag, or sha256:<digest>
+	kustomization := oam.Component{
+		Name:        comp.Name,
+		Type:        fluxcdKustomizationType,
+		Traits:      comp.Traits,
+		Annotations: maps.Clone(comp.Annotations),
+	}
+	source := oam.Component{Type: "ocirepository", Properties: props.sourceProperties()}
 
-	Path            string
-	Prune           bool
-	Interval        string
-	TargetNamespace string
+	if ociSourceConsumers(lctx.Document, identity) < 2 {
+		// The component's own source: a same-name sibling group, the source
+		// first, as the former handler generated the two objects.
+		source.Name = comp.Name
+		source.Annotations = maps.Clone(comp.Annotations)
+		for _, t := range comp.Traits {
+			if roleObjectTraits[t.Type] {
+				source.Traits = append(source.Traits, t)
+			}
+		}
+		kustomization.Properties = props.kustomizationProperties(source.Name)
+		return oam.LoweringResult{Components: []oam.Component{source, kustomization}}, nil
+	}
 
-	// Wait sets the Kustomization's spec.wait; false emits nothing.
-	Wait bool
-	// HealthChecks become the Kustomization's spec.healthChecks, in order.
-	// Never non-empty while Wait is true: kustomize-controller ignores
-	// healthChecks when wait is true, so ToApplicationConfig refuses the pair.
-	HealthChecks []meta.NamespacedObjectKindReference
-
-	// dedup state: when another component owns an identical OCIRepository,
-	// this config suppresses its own source CR and the Kustomization references
-	// the shared source by name instead.
-	suppressSource bool
-	sharedSrcName  string
-
-	// fluxNS overrides the namespace for the emitted Flux control-plane CRs
-	// (OCIRepository, Kustomization). Set by postProcessFluxNamespace via
-	// TransformContext.FluxNamespace. Empty means use c.Namespace.
-	fluxNS string
+	sum := sha256.Sum256([]byte(identity))
+	digest := hex.EncodeToString(sum[:])[:helmSourceDigestLen]
+	name, adopted, err := lctx.Namer.NameOrAdopt(lctx.Origin.Document, "source-"+digest, identity, lctx.Origin)
+	if err != nil {
+		return oam.LoweringResult{}, errors.Wrapf(err, "%s: naming the shared source", ociType)
+	}
+	var result oam.LoweringResult
+	if !adopted {
+		source.Name = name
+		result.Components = append(result.Components, source)
+	}
+	kustomization.Properties = props.kustomizationProperties(name)
+	result.Components = append(result.Components, kustomization)
+	return result, nil
 }
 
-// ApplyPolicy rejects a disallowed OCI registry host. It reads the allowlist
-// through the oam.Policy interface (AllowedRegistries) so any policy
-// implementation enforces correctly; no policy, or an empty allowlist, permits
-// every url.
-//
-// Under a non-empty allowlist the url must name its registry explicitly
-// (ociNamesRegistry): oci://<registry>/<repository> with a non-empty
-// repository and a registry segment that is localhost or contains "." or ":".
-// Flux's source-controller parses the url with go-containerregistry's
-// name.NewRepository, which treats any other first segment as part of a Docker
-// Hub repository — oci://ghcr.io and oci://registry/app are pulled from Docker
-// Hub — so matching that segment against the allowlist would authorize a
-// registry the policy never listed. An explicit registry is then checked by
-// exact host match (enforceAllowedURLHosts).
-func (c *OCIConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
-		return nil
+// sourceIdentity is the content identity of the component's source: every
+// input that shapes the OCIRepository, namely the url, the version and the
+// effective interval, as JSON so that no separator inside a url can make two
+// identities collide. The interval is the parsed duration, so 60m, 1h and
+// unset (the default, and zero, which the terminals read as unset) are one
+// identity. The "oci-artifact:" prefix keeps it apart from the helm rule's
+// identity for an OCI chart (helmSourceIdentity).
+func (p *ociProperties) sourceIdentity() (string, error) {
+	interval := parseDuration(effectiveInterval(p.interval))
+	defaultFluxSourceInterval(&interval)
+	b, err := json.Marshal(struct {
+		URL      string `json:"url"`
+		Version  string `json:"version"`
+		Interval string `json:"interval"`
+	}{p.url, p.version, interval.Duration.String()})
+	if err != nil {
+		return "", errors.Wrapf(err, "%s: encoding the source identity", ociType)
 	}
-	allowed := p.AllowedRegistries()
-	if len(allowed) == 0 {
-		return nil
-	}
-	if !ociNamesRegistry(c.URL, true) {
-		// Not quoted: the first segment can be userinfo, which can carry a credential.
-		return errors.New("oci: source.url: the url does not name its registry explicitly, so Flux may resolve it against Docker Hub: " +
-			"under an allowed-registries policy write oci://<registry>/<repository> with a registry that is localhost or contains \".\" or \":\" " +
-			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)")
-	}
-	return enforceAllowedURLHosts(c.URL, allowed)
+	return "oci-artifact:" + string(b), nil
 }
 
-// GetSourceKey returns the dedup key for the OCIRepository source CR,
-// "oci:<url>:<version>", shared only by oci components naming one artifact.
-// The component deployed first emits the shared source (see
-// oam.SourceDeduplicatable). A helm component over OCI on the same artifact
-// gets its own generated source, which copies the chart layer instead of
-// extracting it.
-func (c *OCIConfig) GetSourceKey() string {
-	return "oci:" + c.URL + ":" + c.Version
+// ociSourceConsumers counts the oci components of doc whose source has the
+// given identity, the component being lowered included. A component that does
+// not parse counts for nothing: its own lowering refuses it. A nil doc (a rule
+// driven directly, outside the engine) has only the component at hand.
+func ociSourceConsumers(doc *oam.Application, identity string) int {
+	if doc == nil {
+		return 1
+	}
+	n := 0
+	for i := range doc.Spec.Components {
+		c := &doc.Spec.Components[i]
+		if c.Type != ociType {
+			continue
+		}
+		props, err := parseOCI(c.Properties)
+		if err != nil {
+			continue
+		}
+		if other, err := props.sourceIdentity(); err == nil && other == identity {
+			n++
+		}
+	}
+	return n
 }
 
-// GetSourceRefName returns the name used to reference this component's source CR.
-func (c *OCIConfig) GetSourceRefName() string { return c.Name }
-
-// SuppressSourceGeneration instructs this config to skip emitting its own
-// OCIRepository and reference the named shared source instead.
-func (c *OCIConfig) SuppressSourceGeneration(refName string) {
-	c.suppressSource = true
-	c.sharedSrcName = refName
+// sourceProperties are the ocirepository component's properties: the url, the
+// version as ref.tag, or ref.digest for a sha256: value, and the authored
+// interval; unset, the terminal applies its own 60m default.
+func (p *ociProperties) sourceProperties() map[string]any {
+	ref := map[string]any{"tag": p.version}
+	if strings.HasPrefix(p.version, digestPrefix) {
+		ref = map[string]any{"digest": p.version}
+	}
+	out := map[string]any{"url": p.url, "ref": ref}
+	if p.interval != "" {
+		out["interval"] = p.interval
+	}
+	return out
 }
 
-// SetFluxNamespace re-stamps the namespace for the OCIRepository and
-// Kustomization. Satisfies pkg/oam.fluxNamespaceSettable.
-func (c *OCIConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
-
-// fluxNamespace returns the namespace for the emitted Flux control-plane CRs.
-func (c *OCIConfig) fluxNamespace() string {
-	if c.fluxNS != "" {
-		return c.fluxNS
+// kustomizationProperties are the fluxcd-kustomization component's properties,
+// its sourceRef naming the OCIRepository source.
+func (p *ociProperties) kustomizationProperties(source string) map[string]any {
+	out := map[string]any{
+		"path":      p.path,
+		"prune":     p.prune,
+		"sourceRef": map[string]any{"kind": "OCIRepository", "name": source},
 	}
-	return c.Namespace
-}
-
-// Generate emits the OCIRepository (unless deduped away) and a per-component
-// Flux Kustomization referencing it. Both land in the Flux namespace.
-func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
-	// Re-check at the emission boundary what ToApplicationConfig already checked
-	// at parse time. This type and its Interval field are exported, so a config
-	// built directly by a library consumer — never parsed — reaches
-	// parseDuration below, which discards the parse error: a signed or
-	// sub-millisecond value would be emitted in a form Flux rejects, and text
-	// that is no duration at all as 0s.
-	if err := validateFluxInterval("oci", effectiveInterval(c.Interval)); err != nil {
-		return nil, err
-	}
-
-	var objects []*client.Object
-	interval := parseDuration(effectiveInterval(c.Interval))
-
-	srcName := c.Name
-	if c.suppressSource && c.sharedSrcName != "" {
-		srcName = c.sharedSrcName
-	}
-
-	if !c.suppressSource {
-		repo := fluxcd.CreateOCIRepository(c.Name, c.fluxNamespace())
-		repo.Spec.URL = c.URL
-		repo.Spec.Interval = interval
-		fluxcd.SetOCIRepositoryReference(repo, ociRef(c.Version))
-		obj := client.Object(repo)
-		objects = append(objects, &obj)
-	}
-
-	kz := fluxcd.CreateKustomization(c.Name, c.fluxNamespace())
-	kz.Spec.Interval = interval
-	kz.Spec.Path = c.Path
-	kz.Spec.Prune = c.Prune
-	kz.Spec.SourceRef = kustv1.CrossNamespaceSourceReference{
-		Kind: "OCIRepository",
-		Name: srcName,
+	if p.interval != "" {
+		out["interval"] = p.interval
 	}
 	// No default, unlike helmrelease: a Kustomization targetNamespace
 	// overrides every object's namespace (go-kure/launcher#622).
-	if c.TargetNamespace != "" {
-		kz.Spec.TargetNamespace = c.TargetNamespace
+	if p.targetNamespace != "" {
+		out["targetNamespace"] = p.targetNamespace
 	}
-	// kure has no Kustomization wait setter. spec.wait is omitempty, so false
-	// leaves the emitted document unchanged either way.
-	if c.Wait {
-		kz.Spec.Wait = true
+	if p.wait {
+		out["wait"] = true
 	}
-	// Appended one by one onto the fresh Kustomization's nil slice, so a render
-	// never shares a backing array with the config (Generate may run again).
-	for _, ref := range c.HealthChecks {
-		fluxcd.AddKustomizationHealthCheck(kz, ref)
+	if len(p.healthChecks) > 0 {
+		checks := make([]any, 0, len(p.healthChecks))
+		for _, ref := range p.healthChecks {
+			check := map[string]any{"apiVersion": ref.APIVersion, "kind": ref.Kind, "name": ref.Name}
+			if ref.Namespace != "" {
+				check["namespace"] = ref.Namespace
+			}
+			checks = append(checks, check)
+		}
+		out["healthChecks"] = checks
 	}
-	obj := client.Object(kz)
-	objects = append(objects, &obj)
-
-	return objects, nil
-}
-
-// ociRef builds an OCIRepositoryRef from a version string: a sha256: prefix
-// selects a digest, otherwise the value is treated as a tag.
-func ociRef(version string) *sourcev1.OCIRepositoryRef {
-	if strings.HasPrefix(version, digestPrefix) {
-		return &sourcev1.OCIRepositoryRef{Digest: version}
-	}
-	return &sourcev1.OCIRepositoryRef{Tag: version}
+	return out
 }

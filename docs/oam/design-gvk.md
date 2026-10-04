@@ -212,8 +212,9 @@ role-named; `expose` is lowerable and role-named. The layering the Helm-family r
 2. Any other type takes a role name.
 3. A vendor prefix, `<vendor>-<kind>`, is added only when the bare kind name is already taken
    by something a reader would plausibly mean instead. Precedent: `cilium-networkpolicy`
-   alongside core `networkpolicy`. Under this rule the Flux `Kustomization` CR becomes
-   `fluxcd-kustomization`, because bare `kustomization` collides with `kustomization.yaml`.
+   alongside core `networkpolicy`. Under this rule the Flux `Kustomization` CR is
+   `fluxcd-kustomization` (a builtin since go-kure/launcher#784), because bare
+   `kustomization` collides with `kustomization.yaml`.
 
 A name this rule produces is still subject to the reservation covenant above. One former
 builtin predated the rule: `helmchart` was a role-level composite (a HelmRelease plus its
