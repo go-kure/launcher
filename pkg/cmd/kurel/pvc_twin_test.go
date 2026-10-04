@@ -13,17 +13,17 @@ import (
 // (go-kure/launcher#741): the same properties build the same claim on both
 // paths, through the real `kurel build` entry point. Only the ownership fields
 // may differ — the claim's `app` label names the owning component on the trait
-// path and the claim itself on the kind path — and the owner's decorators reach
-// the trait's claim as the kind's own decorators reach its claim.
+// path and the claim itself on the kind path — and the owner's delivery traits
+// cover the trait's claim as the kind's own cover its claim.
 
 // pvcTwinApp returns an Application holding the claim both ways: the kind
 // path as a persistentvolumeclaim component named name, or the trait path as a
-// pvc trait of that name on a job component named "owner". decorators are
+// pvc trait of that name on a job component named "owner". ownerTraits are
 // trait types added to the component that owns the claim on either path.
-func pvcTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, decorators ...string) string {
+func pvcTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, ownerTraits ...string) string {
 	t.Helper()
 	var decs []any
-	for _, d := range decorators {
+	for _, d := range ownerTraits {
 		decs = append(decs, map[string]any{"type": d})
 	}
 	var comp map[string]any
@@ -113,9 +113,9 @@ func claimDoc(t *testing.T, docs []map[string]any, name string) map[string]any {
 // which names the owner there.
 func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 	cases := []struct {
-		name       string
-		props      map[string]any
-		decorators []string
+		name        string
+		props       map[string]any
+		ownerTraits []string
 	}{
 		{name: "size only", props: map[string]any{"size": "5Gi"}},
 		{name: "storage class", props: map[string]any{"size": "5Gi", "storageClassName": "fast"}},
@@ -126,16 +126,16 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 		{name: "null access modes", props: map[string]any{"size": "1Gi", "accessModes": nil}},
 		{name: "block volume mode", props: map[string]any{"size": "1Gi", "volumeMode": "Block"}},
 		{name: "null volume mode", props: map[string]any{"size": "1Gi", "volumeMode": nil}},
-		{name: "force-replace decorator", props: map[string]any{"size": "1Gi"}, decorators: []string{"force-replace"}},
-		{name: "prune-protection decorator", props: map[string]any{"size": "1Gi"}, decorators: []string{"prune-protection"}},
+		{name: "force-replace on the owner", props: map[string]any{"size": "1Gi"}, ownerTraits: []string{"force-replace"}},
+		{name: "prune-protection on the owner", props: map[string]any{"size": "1Gi"}, ownerTraits: []string{"prune-protection"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			kindDocs, kindErr, err := buildPVCDocs(t, pvcTwinApp(t, false, "data", tc.props, tc.decorators...))
+			kindDocs, kindErr, err := buildPVCDocs(t, pvcTwinApp(t, false, "data", tc.props, tc.ownerTraits...))
 			if err != nil {
 				t.Fatalf("kind path: %v\n%s", err, kindErr)
 			}
-			traitDocs, traitErr, err := buildPVCDocs(t, pvcTwinApp(t, true, "data", tc.props, tc.decorators...))
+			traitDocs, traitErr, err := buildPVCDocs(t, pvcTwinApp(t, true, "data", tc.props, tc.ownerTraits...))
 			if err != nil {
 				t.Fatalf("trait path: %v\n%s", err, traitErr)
 			}
@@ -167,21 +167,15 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 				tr, _ := yaml.Marshal(traitClaim)
 				t.Errorf("claims differ beyond the owner's labels\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
-			// A decorator must actually reach the claim, not merely be absent on
-			// both paths. The literal wire values are what Flux matches.
-			decoratorAnnotation := map[string][2]string{
-				"force-replace":    {"kustomize.toolkit.fluxcd.io/force", "enabled"},
-				"prune-protection": {"kustomize.toolkit.fluxcd.io/prune", "disabled"},
-			}
-			for _, d := range tc.decorators {
-				want, ok := decoratorAnnotation[d]
-				if !ok {
-					t.Fatalf("no expected annotation recorded for decorator %q", d)
-				}
-				if v, _ := docAnnotation(traitClaim, want[0]); v != want[1] {
-					t.Errorf("%s on the owner did not reach the trait's claim: %s = %q, want %q", d, want[0], v, want[1])
-				}
-			}
+			// A delivery trait must actually cover the claim, not merely leave
+			// both paths alike. It writes nothing on the claim: it sets an intent
+			// on the application that holds it (go-kure/launcher#782), which on
+			// the trait path is a sub-application the engine carries the owner's
+			// intent to.
+			assertTwinDeliveryIntent(t, "data", tc.ownerTraits,
+				pvcTwinApp(t, false, "data", tc.props, tc.ownerTraits...),
+				pvcTwinApp(t, true, "data", tc.props, tc.ownerTraits...))
+			assertNoFluxObjectKeys(t, kindClaim, traitClaim)
 		})
 	}
 }

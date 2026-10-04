@@ -25,7 +25,8 @@ type TraitHandler interface {
 }
 
 // SubApplicationDecorator is an optional interface for TraitHandlers whose Apply
-// decorates an application's objects (prune-protection, force-replace). When
+// covers everything a component owns: prune-protection and force-replace, which
+// set a delivery intent on the application (stack.Application.Delivery). When
 // DecoratesSubApplications returns true, the engine also applies the trait to
 // every sub-application the component's other traits appended to the bundle
 // (a pvc trait's claim, an ingress trait's Ingress), whichever order the traits

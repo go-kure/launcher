@@ -83,7 +83,8 @@ JobSpec-level surface with `cronjob`'s job template — and the
 `security-context` trait were added in this release. The `topology-spread`
 trait (launcher's default spread constraints on any typed Deployment a
 component generates, from its post-policy replica count) is registered the
-same way. The `force-replace` trait (opt-in Flux force-apply, e.g. so a `job`
+same way. The `force-replace` trait (opt-in: it lets the delivering engine
+replace an object on an immutable-field change, e.g. so a `job`
 can be updated in place) is registered in both `builtinTraitHandlers()` and
 `pkg/oam`'s trait allowlist, and `force_replace_build_test.go` builds a `job`
 with and without it. The kind-named Flux source components — `helmrepository`,
@@ -257,9 +258,10 @@ after the HelmRelease.
 
 A build that renders no objects warns `no resources generated` on stderr and writes no
 `<app>.yaml` (one an earlier build wrote stays). A build also warns, on stderr and with
-unchanged output, once per PersistentVolume or PersistentVolumeClaim that carries the
-`force-replace` trait's annotation, because Flux then deletes and recreates it on an
-immutable-field change (go-kure/launcher#720; `force_warning_test.go`).
+unchanged output, once per PersistentVolume or PersistentVolumeClaim that the
+`force-replace` trait covers or that carries the Flux force annotation itself, because
+Flux then deletes and recreates it on an immutable-field change (go-kure/launcher#720;
+`force_warning_test.go`).
 
 ### No delivery output
 
@@ -268,6 +270,11 @@ immutable-field change (go-kure/launcher#720; `force_warning_test.go`).
 and the Flux `OCIRepository` and `Kustomization` objects they wrote
 (go-kure/launcher#781): how an application is delivered belongs to the consumer that
 delivers it, see `docs/delivery-scope.md`.
+
+The `prune-protection` and `force-replace` traits state a delivery intent on the
+application (`Application.Delivery`, go-kure/launcher#782), which this output has no
+place for: the two traits no longer show in it. A consumer that applies the output
+through a Kustomization of its own reads `Application.Delivery` or loses the effect.
 
 ## Global flags
 

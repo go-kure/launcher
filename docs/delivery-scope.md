@@ -64,11 +64,10 @@ target it replaced; one marked **Target** is not in the code.
    make sense. A mechanism launcher offers to consumers (such as contract metadata) is used
    by its own builtins. An asymmetry is either documented with its reason or a gap.
 
-### 1.3 What leaves launcher (go-kure/launcher#781 shipped, go-kure/launcher#782 open)
+### 1.3 What leaves launcher (go-kure/launcher#781 and go-kure/launcher#782 shipped)
 
-The rows of go-kure/launcher#781 are shipped: "Now" is what the code does, and "Where it
-was" names the code before that change, most of which is gone. The last row is still a
-target.
+Every row is shipped: "Now" is what the code does, and "Where it was" names the code
+before that change, most of which is gone.
 
 | Before | Where it was | Now |
 |---|---|---|
@@ -77,9 +76,9 @@ target.
 | `health-checks` policy | `pkg/oam/builtin/policies/healthchecks.go` | **Shipped (go-kure/launcher#781):** removed, and refused the same way without a consumer's handler. |
 | `fluxcd-patches`, `fluxcd-postbuild` traits | `pkg/oam/builtin/traits/patches.go`, `postbuild.go`, `pkg/oam/bundle_patches.go` | **Shipped (go-kure/launcher#781):** removed. Both types stay admitted trait types (`validTraitTypes`, `pkg/oam/validate.go`), so a consumer that delivers through Flux can register its own handler; without one the transform refuses the trait with the same "no handler" message. |
 | `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **Shipped (go-kure/launcher#781):** removed (breaking for a consumer that aliased them). `PolicyResult.Extensions` carries what a consumer's own policy handlers record; launcher neither reads nor changes it. |
-| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **Shipped (go-kure/launcher#781):** removed with `bundle_patches.go`. `GeneratedApplication.Forced` lost its source (the reconciliation policy's `force`): it is true only for a bundle whose `Force` the caller set before generating (`generateBundle`, `pkg/oam/in_document_collisions.go`), until go-kure/launcher#782 re-sources it. |
+| `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **Shipped (go-kure/launcher#781):** removed with `bundle_patches.go`. `GeneratedApplication.Forced` lost its source (the reconciliation policy's `force`): it is true only for a bundle whose `Force` the caller set before generating (`generateBundle`, `pkg/oam/in_document_collisions.go`). go-kure/launcher#782 added a second source: the application's `ForceReplace` delivery intent. |
 | `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; design §11 "Launcher Layout" | **Shipped (go-kure/launcher#781):** removed in the same change. `kurel build` writes plain YAML only and both flags are unknown. An engine-neutral artifact option may follow when `kurel` work resumes. |
-| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | Still there: `ForceReplaceHandler` (`pkg/oam/builtin/traits/forcereplace.go`), `PruneProtectionHandler` (`pruneprotection.go`) | **Target (go-kure/launcher#782, open):** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
+| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | The config decorators of `ForceReplaceHandler` (`pkg/oam/builtin/traits/forcereplace.go`) and `PruneProtectionHandler` (`pruneprotection.go`), with a post-augment hook for what a layout augmenter adds | **Shipped (go-kure/launcher#782):** both traits stay, and set the engine-neutral delivery intent on the kure `Application` instead (`stack.Application.Delivery`; kure's Flux workflow maps it to the annotation). Launcher's objects carry neither annotation, and `kurel build`'s output shows neither trait. A sibling group's application takes the intent of any member. The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent through `GeneratedApplication.Forced`. |
 
 What stays: `placement`, `dependency`, the tier annotation (author-declared ordering
 intent), `postProcessFluxNamespace` (`pkg/oam/transform.go`), which places authored Flux
@@ -647,7 +646,7 @@ section says which part), or **open** (nothing of it).
 | Issue | Ticket | Section | State | Needs |
 |---|---|---|---|---|
 | [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781) | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | Shipped | — |
-| [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | Open | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
+| [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | Shipped | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
 | [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | Shipped | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |

@@ -55,8 +55,9 @@ import (
 // default already produced constraints, and still does nothing when it did
 // not. Annotations (the tier override, among others) are forwarded too, to
 // both members; the serviceaccount member also gets the authored
-// `prune-protection` and `force-replace` traits, which decorate every object
-// the component generates.
+// `prune-protection` and `force-replace` traits, which cover every object the
+// component generates: they set a delivery intent on each member's application,
+// and the group's one application takes the intent any member has.
 //
 // Everything past the parse is the deployment component's: ApplyPolicy,
 // NonRWXClaim, ServiceAccountName, labels and the

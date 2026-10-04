@@ -59,7 +59,7 @@ func TestDecorators_ForwardLayoutIntent(t *testing.T) {
 	t.Run("Chain/false", func(t *testing.T) {
 		called := false
 		app := stack.NewApplication("app", "ns", traits.NewConfigMapDecorator(&intentStub{called: &called}, "c", "/etc/c"))
-		applyPruneProtection(t, app)
+		applySecurityContext(t, app)
 		assertIntent(t, app.Config, false)
 	})
 
@@ -75,15 +75,21 @@ func TestDecorators_ForwardLayoutIntent(t *testing.T) {
 	})
 }
 
-// TestPruneProtection_KeepsFlatPlacementOfIntentAugmenter is the issue's
+// TestDecorator_KeepsFlatPlacementOfIntentAugmenter is the issue's
 // reproduction: under ApplicationGrouping flat, an augmenter that does not
 // want its own layout is merged into its bundle's layout and is not augmented.
 // A decorator that drops WantsOwnLayout turns that into a child layout of its
-// own, augmented.
-func TestPruneProtection_KeepsFlatPlacementOfIntentAugmenter(t *testing.T) {
+// own, augmented. The issue showed it with prune-protection, which was a
+// decorator then; it sets a delivery intent now (go-kure/launcher#782), and is
+// applied here as well to pin that the intent does not change the placement.
+func TestDecorator_KeepsFlatPlacementOfIntentAugmenter(t *testing.T) {
 	called := false
 	app := stack.NewApplication("intent", "ns", &intentStub{called: &called})
+	applySecurityContext(t, app)
 	applyPruneProtection(t, app)
+	if _, bare := app.Config.(*intentStub); bare {
+		t.Fatal("the config is not decorated; the placement assertions below would be vacuous")
+	}
 	cluster := &stack.Cluster{Name: "c", Node: &stack.Node{
 		Name:   "root",
 		Bundle: &stack.Bundle{Name: "root", Applications: []*stack.Application{app}},
@@ -131,8 +137,9 @@ func (h intentSubAppHandler) Apply(_ *oam.Trait, app *stack.Application, bundle 
 }
 
 // TestPruneProtection_SubApplicationKeepsLayoutIntent covers the engine's
-// sub-application pass: prune-protection decorating a trait sub-application
-// whose config is a LayoutIntentAugmenter keeps its answer.
+// sub-application pass: prune-protection reaches a trait sub-application whose
+// config is a LayoutIntentAugmenter, sets its delivery intent, and the config
+// keeps its layout answer.
 func TestPruneProtection_SubApplicationKeepsLayoutIntent(t *testing.T) {
 	called := false
 	tr := oam.NewTransformer(nil, map[string]oam.TraitHandler{
@@ -176,8 +183,8 @@ func TestPruneProtection_SubApplicationKeepsLayoutIntent(t *testing.T) {
 	if sub == nil {
 		t.Fatal("no web-intent sub-application in the cluster")
 	}
-	if _, bare := sub.Config.(*intentStub); bare {
-		t.Fatal("prune-protection did not decorate the sub-application; the intent assertion below would be vacuous")
+	if want := (stack.DeliveryIntent{PruneProtection: true}); sub.Delivery != want {
+		t.Fatalf("sub-application Delivery = %+v, want %+v: the engine did not apply prune-protection to it", sub.Delivery, want)
 	}
 	assertIntent(t, sub.Config, false)
 }

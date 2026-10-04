@@ -59,8 +59,10 @@ import (
 //
 //   - `expose`, `ingress` and `httproute` to the service member: they route to
 //     the component's Service and read its port, port name and name;
-//   - `prune-protection` and `force-replace` to every member: they decorate
-//     every object a component generates, and each member generates its own;
+//   - `prune-protection` and `force-replace` to every member: they cover
+//     every object a component generates, by a delivery intent on the
+//     application, and the group's one application takes the intent any member
+//     has;
 //   - every other trait to the deployment member: the workload traits read the
 //     pods, the ServiceAccount or the claims, and the delivery traits
 //     (`fluxcd-patches`, `fluxcd-postbuild`) configure how the group's one

@@ -1,9 +1,7 @@
-warning: PersistentVolumeClaim default/queue--worker-shared (sub-application "queue--worker-shared" of component "queue-worker") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data
+warning: PersistentVolumeClaim default/queue--worker-shared (sub-application "queue--worker-shared" of component "queue-worker") is force-applied (its application sets the force-replace delivery intent): when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: queue-worker
     launcher.gokure.dev/component: queue-worker
@@ -60,8 +58,6 @@ apiVersion: v1
 automountServiceAccountToken: false
 kind: ServiceAccount
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: queue-worker
     launcher.gokure.dev/component: queue-worker
@@ -71,8 +67,6 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: queue-worker
     launcher.gokure.dev/component: queue-worker

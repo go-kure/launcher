@@ -2645,12 +2645,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   for long batch work a re-run should be the author's explicit choice.
 
   To opt in, add the **`force-replace` trait** (no properties) to the component.
-  It stamps `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
+  It sets the `ForceReplace` delivery intent on the component's application
+  (go-kure/launcher#782). kure's Flux workflow turns that into
+  `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
   component emits — the Job — which kustomize-controller
   reads as its apply `ForceSelector`: on an immutable-field error it deletes and
   recreates the object, so an update re-runs the Job, **stopping any run in
-  progress**. The trait sets the annotation after `createJob` returns,
-  which matters because `createJob` clears the generated Job's annotations
+  progress**. The workflow annotates the Job once it is generated,
+  so the annotation is not lost when `createJob` clears the generated Job's annotations
   wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
   because kure's `Create<Kind>` constructors now return TypeMeta and identity
   only; the assignment is kept so the field stays empty whatever a future
@@ -3320,8 +3322,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     OCIRepository first. This is the pair of objects `oci` has always emitted,
     byte for byte. Annotations go to both members, so a tier annotation, a
     `placement` policy or a `dependency` rule naming the component acts on the
-    pair. `prune-protection` and `force-replace` decorate both objects; every
-    other trait goes to the Kustomization.
+    pair. `prune-protection` and `force-replace` cover both objects (the
+    pair's application takes the delivery intent); every other trait goes to
+    the Kustomization.
   - *Two or more `oci` components of one document on the same source* share
     it. The source then belongs to the document, not to the component that
     comes first: it is emitted once, named `<document>-source-<digest>` (the
@@ -3346,8 +3349,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component deployed first to `<document>-source-<digest>`. It is applied
   with the application bundle, ahead of every group, instead of with that
   component, so the application has an ordered group even when the document
-  declares no order. It no longer carries that
-  component's `prune-protection` or `force-replace` decoration. The rename also happens when a second consumer
+  declares no order. That component's `prune-protection` or `force-replace`
+  no longer covers it. The rename also happens when a second consumer
   is added to a document that had one, and is undone when it is removed.
   Components that shared one source while their intervals differed now emit
   one source each. `interval: 0s` now emits the 60m default on both objects,

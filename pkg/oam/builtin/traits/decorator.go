@@ -49,7 +49,7 @@ type identityPortMapper interface {
 // phase.
 //
 // The twelve forwarded interfaces are exactly those type-asserted on app.Config
-// AFTER traits run: stack.Validator (kure pkg/stack/application.go:51),
+// AFTER traits run: stack.Validator (kure stack.Application.Generate),
 // fluxNamespaceSettable (oam/transform.go postProcessFluxNamespace),
 // fluxNamespaceReader (oam/flux_namespace_inputs.go moveFluxNamespaceInputs),
 // servicePortProvider and serviceBackendNamer
@@ -59,14 +59,13 @@ type identityPortMapper interface {
 // serviceRoutingTargeter (oam/netpol_synthesis.go:257), and podTemplateLabeler
 // and identityPortMapper (oam/sibling_group.go ServiceRoutingTarget), and
 // oam.ComponentNamed (oam/in_document_collisions.go generateBundle), which a
-// trait sub-application decorated by the engine's sub-application pass
-// (oam.SubApplicationDecorator) must keep. Enforceable is deliberately
+// decorated config must keep naming its component. Enforceable is deliberately
 // absent: it is asserted only on trait sub-apps as their trait creates them
-// (Transformer.applyEntryTraits), before the sub-application pass wraps them,
+// (Transformer.applyEntryTraits), and no decorator wraps a sub-application,
 // so it cannot see a decorator. So are the
 // NetworkPolicy synthesis collectors (trafficSourceCollector,
-// backendRefTargetCollector): synthesis runs before the sub-application pass,
-// and forwarding them would make every decorated component a router. One more,
+// backendRefTargetCollector): they are trait sub-application contracts, and
+// forwarding them would make every decorated component a router. One more,
 // kure's layout.LayoutAugmenter, is forwarded separately — see wrapIfAugmenter
 // below — because unlike these twelve it must NOT be present unconditionally;
 // so is its extension layout.LayoutIntentAugmenter, for the same reason.
@@ -148,8 +147,8 @@ func (d decoratorBase) ServicePortName() (string, bool) {
 // ServiceAccountName forwards the inner config's ServiceAccount name and
 // runsPods flag (oam.ServiceAccountNamer), or "" and false when the inner
 // config does not implement it. Without this forward, a decorating trait
-// declared before `rbac` (security-context, configmap, external-secret,
-// prune-protection) hides the workload's authored serviceAccountName, and
+// declared before `rbac` (security-context, configmap, external-secret)
+// hides the workload's authored serviceAccountName, and
 // rbac.go could no longer tell a pod without one (refused) from a config that
 // runs no pods.
 func (d decoratorBase) ServiceAccountName() (string, bool) {
@@ -162,8 +161,8 @@ func (d decoratorBase) ServiceAccountName() (string, bool) {
 // NonRWXClaim forwards the inner config's single-pod claim (nonRWXClaimer), or
 // "" when the inner config names none. Without this forward, a decorating
 // trait declared before `scaler` (configmap with a mountPath, security-context,
-// external-secret, prune-protection) hides the claim and the scaler's
-// maxReplicas check silently passes.
+// external-secret) hides the claim and the scaler's maxReplicas check silently
+// passes.
 func (d decoratorBase) NonRWXClaim() string {
 	if n, ok := d.Inner.(nonRWXClaimer); ok {
 		return n.NonRWXClaim()
@@ -174,8 +173,8 @@ func (d decoratorBase) NonRWXClaim() string {
 // ServiceRoutingTarget forwards the inner config's routing target
 // (serviceRoutingTargeter), or a nil selector and no ports when the inner
 // config is not one. Without this forward, a decorating trait on a `service`
-// component (prune-protection, for one) hides its selector and the synthesized
-// ingress allow selects the component label, which no pod carries.
+// component hides its selector and the synthesized ingress allow selects the
+// component label, which no pod carries.
 func (d decoratorBase) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
 	if t, ok := d.Inner.(serviceRoutingTargeter); ok {
 		return t.ServiceRoutingTarget(servicePorts)
@@ -207,9 +206,8 @@ func (d decoratorBase) IdentityTargetPorts() bool {
 // ComponentName forwards the inner config's component (oam.ComponentNamed), or
 // "" when the inner config does not name one. Callers must treat "" as "fall
 // back to the application name" — generateBundle does. Without this forward, a
-// trait sub-application decorated by prune-protection or force-replace loses its
-// component, and the in-document collision check attributes its objects to the
-// sub-application's own name.
+// decorated config that names its component loses it, and a caller reading
+// ComponentNamed attributes its objects to the application's own name.
 func (d decoratorBase) ComponentName() string {
 	if n, ok := d.Inner.(oam.ComponentNamed); ok {
 		return n.ComponentName()
@@ -302,31 +300,14 @@ type augmentingDecorator struct {
 	augmenter layout.LayoutAugmenter
 }
 
-// layoutPostAugmenter is implemented by a decorator whose per-resource
-// processing must also reach resources the wrapped LayoutAugmenter adds in
-// AugmentLayout — resources the decorator's own Generate never sees, because
-// the inner augmenter creates them after Generate has returned. Unexported and
-// opt-in: a decorator that only rewrites what its inner Generate returns (e.g.
-// security-context patching a PodSpec) has nothing to do here and does not
-// implement it.
-type layoutPostAugmenter interface {
-	postAugmentLayout(l *layout.ManifestLayout) error
-}
-
-// AugmentLayout forwards to the inner config's LayoutAugmenter implementation,
-// then gives the outer decorator a chance to post-process the augmented layout
-// when it implements layoutPostAugmenter. The hook runs at every level of an
-// N-deep wrap chain, because each level's augmenter is the next inner
-// augmentingDecorator: the innermost augmenter adds its resources first, and
-// every decorator above it then sees them regardless of trait order.
+// AugmentLayout forwards to the inner config's LayoutAugmenter implementation.
+// No decorator processes the augmented layout: every one rewrites only what its
+// inner Generate returns (security-context patching a PodSpec, for one). What
+// must reach the objects an augmenter adds is stated as a delivery intent on
+// the application instead (prune-protection, force-replace), which the
+// delivering workflow applies to the whole layout (go-kure/launcher#782).
 func (a augmentingDecorator) AugmentLayout(l *layout.ManifestLayout) error {
-	if err := a.augmenter.AugmentLayout(l); err != nil {
-		return err
-	}
-	if p, ok := a.decoratedConfig.(layoutPostAugmenter); ok {
-		return p.postAugmentLayout(l)
-	}
-	return nil
+	return a.augmenter.AugmentLayout(l)
 }
 
 // GenerateCoversAugmentLayout forwards to the inner augmenter's

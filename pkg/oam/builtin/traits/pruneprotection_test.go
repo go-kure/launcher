@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +13,52 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
+
+// fluxObjectKeyPrefix is the prefix of every key kustomize-controller reads on
+// an object (prune, force, ssa, reconcile). It is written out literally: the
+// tests below pin that launcher writes none of them, whatever a constant says.
+const fluxObjectKeyPrefix = "kustomize.toolkit.fluxcd.io/"
+
+// assertNoFluxObjectKeys fails for every object that carries a
+// kustomize-controller key as an annotation or a label: launcher states a
+// delivery intent on the application and leaves the keys to the workflow that
+// delivers it (go-kure/launcher#782).
+func assertNoFluxObjectKeys(t *testing.T, objs ...client.Object) {
+	t.Helper()
+	if len(objs) == 0 {
+		t.Fatal("no objects; the assertion would be vacuous")
+	}
+	for _, o := range objs {
+		for _, m := range []map[string]string{o.GetAnnotations(), o.GetLabels()} {
+			for k, v := range m {
+				if strings.HasPrefix(k, fluxObjectKeyPrefix) {
+					t.Errorf("%T %q carries %s=%q; launcher writes no kustomize-controller key", o, o.GetName(), k, v)
+				}
+			}
+		}
+	}
+}
+
+// generatedObjects runs app.Generate and returns the objects.
+func generatedObjects(t *testing.T, app *stack.Application) []client.Object {
+	t.Helper()
+	ptrs, err := app.Generate()
+	if err != nil {
+		t.Fatalf("%s Generate: %v", app.Name, err)
+	}
+	out := make([]client.Object, 0, len(ptrs))
+	for _, p := range ptrs {
+		out = append(out, *p)
+	}
+	return out
+}
+
+func applyPruneProtection(t *testing.T, app *stack.Application) {
+	t.Helper()
+	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
+		t.Fatalf("prune-protection Apply: %v", err)
+	}
+}
 
 func TestPruneProtectionHandler_CanHandle(t *testing.T) {
 	h := &traits.PruneProtectionHandler{}
@@ -30,76 +77,57 @@ func TestPruneProtectionHandler_CanHandle(t *testing.T) {
 	}
 }
 
-func TestPruneProtectionHandler_Apply_AnnotatesResources(t *testing.T) {
-	h := &traits.PruneProtectionHandler{}
-
-	app := stack.NewApplication("topolvm", "storage", &cmStub{name: "topolvm", namespace: "storage"})
+// TestPruneProtectionHandler_Apply_SetsDeliveryIntent pins what the trait is
+// since go-kure/launcher#782: the PruneProtection delivery intent on the
+// application, and nothing else. The config is the component's own, not a
+// wrapper around it, and the objects it generates carry no Flux annotation.
+func TestPruneProtectionHandler_Apply_SetsDeliveryIntent(t *testing.T) {
+	cfg := &cmStub{name: "topolvm", namespace: "storage"}
+	app := stack.NewApplication("topolvm", "storage", cfg)
 	bundle := newBundle()
 
-	if err := h.Apply(&oam.Trait{Type: "prune-protection"}, app, bundle); err != nil {
+	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	resources, err := app.Generate()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
+	if got, want := app.Delivery, (stack.DeliveryIntent{PruneProtection: true}); got != want {
+		t.Errorf("Delivery = %+v, want %+v", got, want)
 	}
-	if len(resources) == 0 {
-		t.Fatal("Generate returned no resources")
+	if got, ok := app.Config.(*cmStub); !ok || got != cfg {
+		t.Errorf("Config = %T, want the component's own config, unwrapped", app.Config)
 	}
-
-	for _, r := range resources {
-		ann := (*r).GetAnnotations()
-		got := ann[stack.AnnotationFluxPruneKey]
-		if got != stack.AnnotationFluxPruneDisabled {
-			t.Errorf("resource %q: annotation %q = %q, want %q",
-				(*r).GetName(), stack.AnnotationFluxPruneKey, got, stack.AnnotationFluxPruneDisabled)
-		}
+	if len(bundle.Applications) != 0 {
+		t.Errorf("Apply added %d applications to the bundle, want none", len(bundle.Applications))
 	}
+	assertNoFluxObjectKeys(t, generatedObjects(t, app)...)
 }
 
+// TestPruneProtectionHandler_Apply_OnlyTargetApp pins both the opt-in default
+// (an application without the trait has no intent) and the narrow scope (the
+// trait on one application does not reach another).
 func TestPruneProtectionHandler_Apply_OnlyTargetApp(t *testing.T) {
-	h := &traits.PruneProtectionHandler{}
-
 	protected := stack.NewApplication("protected", "ns", &cmStub{name: "protected", namespace: "ns"})
 	unprotected := stack.NewApplication("unprotected", "ns", &cmStub{name: "unprotected", namespace: "ns"})
-	bundle := newBundle()
+	applyPruneProtection(t, protected)
 
-	if err := h.Apply(&oam.Trait{Type: "prune-protection"}, protected, bundle); err != nil {
-		t.Fatalf("Apply: %v", err)
+	if !protected.Delivery.PruneProtection {
+		t.Error("the application with the trait has no PruneProtection intent")
 	}
-
-	protectedResources, err := protected.Generate()
-	if err != nil {
-		t.Fatalf("protected.Generate: %v", err)
-	}
-	unprotectedResources, err := unprotected.Generate()
-	if err != nil {
-		t.Fatalf("unprotected.Generate: %v", err)
-	}
-
-	for _, r := range protectedResources {
-		ann := (*r).GetAnnotations()
-		if ann[stack.AnnotationFluxPruneKey] != stack.AnnotationFluxPruneDisabled {
-			t.Errorf("protected resource %q: missing prune annotation", (*r).GetName())
-		}
-	}
-	for _, r := range unprotectedResources {
-		ann := (*r).GetAnnotations()
-		if v, exists := ann[stack.AnnotationFluxPruneKey]; exists {
-			t.Errorf("unprotected resource %q: unexpectedly has prune annotation %q", (*r).GetName(), v)
-		}
+	if !unprotected.Delivery.IsZero() {
+		t.Errorf("the application without the trait has the intent %+v, want none", unprotected.Delivery)
 	}
 }
 
-// TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps pins that Apply
-// itself annotates only the application it is handed. The sub-applications
-// other trait handlers append to bundle.Applications (e.g. rbac) are reached by
-// the engine instead, which calls Apply on each of them once every trait has run
-// (oam.SubApplicationDecorator; the pvc-trait-prune-protection fixture).
-func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
-	rbacH := &traits.RBACHandler{}
+// TestPruneProtectionHandler_Apply_LeavesSubApplicationsToTheEngine pins that
+// Apply sets the intent only on the application it is handed. The
+// sub-applications other trait handlers append to the bundle (rbac here) are
+// reached by the engine instead, which calls Apply on each of them once every
+// trait has run (oam.SubApplicationDecorator).
+func TestPruneProtectionHandler_Apply_LeavesSubApplicationsToTheEngine(t *testing.T) {
 	prune := &traits.PruneProtectionHandler{}
+	if !prune.DecoratesSubApplications() {
+		t.Fatal("DecoratesSubApplications() = false: the engine would not cover the component's sub-applications")
+	}
 
 	app := stack.NewApplication("api", "default", &cmStub{name: "api", namespace: "default"})
 	bundle := newBundle()
@@ -112,51 +140,21 @@ func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
 			"verbs":     []any{"get"},
 		}},
 	}}
-	if err := rbacH.Apply(rbacTrait, app, bundle); err != nil {
+	if err := (&traits.RBACHandler{}).Apply(rbacTrait, app, bundle); err != nil {
 		t.Fatalf("rbac.Apply: %v", err)
 	}
 	if err := prune.Apply(&oam.Trait{Type: "prune-protection"}, app, bundle); err != nil {
 		t.Fatalf("prune.Apply: %v", err)
 	}
 
-	// Main app resources ARE annotated.
-	mainResources, err := app.Generate()
-	if err != nil {
-		t.Fatalf("app.Generate: %v", err)
+	if !app.Delivery.PruneProtection {
+		t.Error("the component's application has no PruneProtection intent")
 	}
-	for _, r := range mainResources {
-		if (*r).GetAnnotations()[stack.AnnotationFluxPruneKey] != stack.AnnotationFluxPruneDisabled {
-			t.Errorf("main app resource %q: expected prune annotation", (*r).GetName())
-		}
+	if len(bundle.Applications) != 2 {
+		t.Fatalf("bundle holds %d applications, want the component's and the rbac sub-application", len(bundle.Applications))
 	}
-
-	// Sibling (rbac) resources are NOT annotated by Apply alone.
-	rbacApp := bundle.Applications[1]
-	rbacResources, err := rbacApp.Config.Generate(rbacApp)
-	if err != nil {
-		t.Fatalf("rbacApp.Generate: %v", err)
-	}
-	for _, r := range rbacResources {
-		if _, ok := (*r).GetAnnotations()[stack.AnnotationFluxPruneKey]; ok {
-			t.Errorf("rbac sibling resource %q: should NOT have prune annotation from Apply alone", (*r).GetName())
-		}
-	}
-}
-
-func TestPruneProtectionHandler_Apply_ForwardsSetFluxNamespace(t *testing.T) {
-	// fluxNSCapture is defined in configmap_test.go in the same package traits_test.
-	inner := &fluxNSCapture{}
-	app := stack.NewApplication("myapp", "default", inner)
-	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	setter, ok := app.Config.(interface{ SetFluxNamespace(string) })
-	if !ok {
-		t.Fatal("pruneProtectedConfig does not implement SetFluxNamespace")
-	}
-	setter.SetFluxNamespace("custom-flux")
-	if inner.lastNS != "custom-flux" {
-		t.Errorf("inner.lastNS = %q, want %q", inner.lastNS, "custom-flux")
+	if sub := bundle.Applications[1]; !sub.Delivery.IsZero() {
+		t.Errorf("rbac sub-application %q has the intent %+v from Apply alone, want none", sub.Name, sub.Delivery)
 	}
 }
 

@@ -734,6 +734,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err := checkSiblingGroups(entries); err != nil {
 		return nil, nil, err
 	}
+	// A trait sets a delivery intent on the member it ran on; the group's one
+	// application, which is what is delivered, takes it (go-kure/launcher#782).
+	adoptMemberDeliveryIntents(entries)
 
 	// Phase 4: post-build bundle decorations. None of them sets a Flux delivery
 	// field of a bundle (health checks, interval, prune, wait, timeout, retry
