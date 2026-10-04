@@ -139,29 +139,44 @@ const (
 )
 
 // nameOwner is the one thing a name was resolved for. Two resolutions with equal
-// owners are the same name asked for again (a trait the engine applies a second
-// time), never two names.
+// owners are the same name asked for again (a decorating trait the engine
+// applies a second time), never two names.
 type nameOwner struct {
 	component string
 	role      NameRole
 	// trait is the trait type, empty for a name no trait resolves. slot is then
 	// the trait's place among its component's traits: the authored index when
 	// the trait was forwarded from an authored one (authored), else its position
-	// where it was applied.
+	// where it was applied. member is the type of the sibling group member the
+	// trait was applied on, empty outside a group.
 	trait    string
+	member   string
 	slot     int
 	authored bool
+	// apply numbers the trait the engine applied (nameResolver.forTrait), zero for
+	// a name no trait resolves. The slot does not tell two traits apart: a trait
+	// rule's outputs keep their input's slot, and a trait forwarded to two
+	// members of a sibling group is applied on each.
+	apply int
 	// def is the default: what tells apart two names of one component and role.
 	def string
 }
 
-func (o nameOwner) describe(source nameSource, property string) string {
+// describe says who resolved the name and where it came from. A trait a rule
+// gave a sibling group member is described with the member, whose traits its
+// slot counts; a trait forwarded from an authored one is described by its
+// authored slot alone, unless withMember asks for the member as well.
+func (o nameOwner) describe(source nameSource, property string, withMember bool) string {
 	var who string
 	switch {
+	case o.component == "" && o.role == NameRoleNetpolSynth:
+		who = "an external backend Service"
 	case o.component == "":
 		who = "the application"
 	case o.trait == "":
 		who = fmt.Sprintf("component %q", o.component)
+	case o.member != "" && (withMember || !o.authored):
+		who = fmt.Sprintf("component %q member %q traits[%d] %q", o.component, o.member, o.slot, o.trait)
 	default:
 		who = fmt.Sprintf("component %q traits[%d] %q", o.component, o.slot, o.trait)
 	}
@@ -208,8 +223,12 @@ func (n *NameAllocator) claimName(key nameClaimKey, claim resolvedNameClaim) err
 		if prior.owner == claim.owner {
 			return nil
 		}
-		return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name",
-			key, prior.owner.describe(prior.source, prior.property), claim.owner.describe(claim.source, claim.property))
+		first, second := prior.owner.describe(prior.source, prior.property, false), claim.owner.describe(claim.source, claim.property, false)
+		if first == second {
+			// One authored trait forwarded to two members of a sibling group.
+			first, second = prior.owner.describe(prior.source, prior.property, true), claim.owner.describe(claim.source, claim.property, true)
+		}
+		return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
 	}
 	if n.resolved == nil {
 		n.resolved = make(map[nameClaimKey]resolvedNameClaim)
@@ -225,6 +244,8 @@ type nameResolver struct {
 	hook        func(NameRequest) (string, bool)
 	application string
 	claims      *NameAllocator
+	// applied counts the traits forTrait was asked about.
+	applied int
 }
 
 // traitNaming is what the engine attaches to a trait before it applies it: the
@@ -232,8 +253,25 @@ type nameResolver struct {
 type traitNaming struct {
 	resolver  *nameResolver
 	component string
+	member    string
 	slot      int
 	authored  bool
+	apply     int
+	// hookSubApps holds, for each sub-application name the hook gave this trait,
+	// the defaults it replaced, in the order they were resolved.
+	hookSubApps map[string][]string
+}
+
+// takeHookSubApp returns the default the hook replaced with name, a
+// sub-application name this trait resolved, and whether there is one. Each
+// resolution is returned once.
+func (n *traitNaming) takeHookSubApp(name string) (string, bool) {
+	if n == nil || len(n.hookSubApps[name]) == 0 {
+		return "", false
+	}
+	def := n.hookSubApps[name][0]
+	n.hookSubApps[name] = n.hookSubApps[name][1:]
+	return def, true
 }
 
 // ResolveName returns the name to use for spec, in this order: the author's
@@ -253,8 +291,16 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 	if t.naming == nil {
 		return (*nameResolver)(nil).resolve(owner, spec)
 	}
-	owner.component, owner.slot, owner.authored = t.naming.component, t.naming.slot, t.naming.authored
-	return t.naming.resolver.resolve(owner, spec)
+	owner.component, owner.member = t.naming.component, t.naming.member
+	owner.slot, owner.authored, owner.apply = t.naming.slot, t.naming.authored, t.naming.apply
+	name, err := t.naming.resolver.resolve(owner, spec)
+	if err == nil && spec.Role == NameRoleSubApplication && name != spec.Default {
+		if t.naming.hookSubApps == nil {
+			t.naming.hookSubApps = make(map[string][]string)
+		}
+		t.naming.hookSubApps[name] = append(t.naming.hookSubApps[name], spec.Default)
+	}
+	return name, err
 }
 
 func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {

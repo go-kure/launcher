@@ -144,6 +144,8 @@ func tierPhrase(tier Tier) string {
 type traitStep struct {
 	entry  componentEntry
 	traits []Trait
+	// first is the place traits[0] holds among the traits of entry's component.
+	first int
 }
 
 // traitSteps returns the traits applyEntryTraits applies, in order: an entry's own
@@ -160,8 +162,8 @@ func (e componentEntry) traitSteps(app *Application) []traitStep {
 	}
 	var steps []traitStep
 	for _, m := range e.members {
-		for _, trait := range app.Spec.Components[m.index].Traits {
-			steps = append(steps, traitStep{entry: m, traits: []Trait{trait}})
+		for i, trait := range app.Spec.Components[m.index].Traits {
+			steps = append(steps, traitStep{entry: m, traits: []Trait{trait}, first: i})
 		}
 	}
 	sort.SliceStable(steps, func(i, j int) bool {

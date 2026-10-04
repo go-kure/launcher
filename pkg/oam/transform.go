@@ -1142,6 +1142,9 @@ func entryAppRefusal(component, traitType string, step entryAppStep) (by, contra
 type groupSubApp struct {
 	app    *stack.Application
 	member string
+	// hookName is the name the Naming hook gave the sub-application in place of
+	// def, its default; both are empty when the hook gave it none.
+	hookName, def string
 }
 
 // checkGroupSubApplications fails when traits on two members of sibling group
@@ -1150,15 +1153,33 @@ type groupSubApp struct {
 // would deploy one name twice. The names are read as they are now, after the
 // ApplyPolicy of every sub-application created so far, since a policy may rename
 // its own sub-application or an earlier one (go-kure/launcher#755).
+//
+// A sub-application still under the name the Naming hook gave it is compared by
+// its default instead, and only with others the hook named: the hook is asked
+// the same question for the same trait on two members, so their defaults meet
+// whatever it answers, while two different sub-applications it gave one name
+// are accepted as they are outside a group (go-kure/launcher#787).
 func checkGroupSubApplications(group string, subApps []groupSubApp) error {
-	byName := make(map[string]string, len(subApps))
+	type subAppKey struct {
+		byHook bool
+		name   string
+	}
+	seen := make(map[subAppKey]string, len(subApps))
 	for _, s := range subApps {
-		if member, dup := byName[s.app.Name]; dup && member != s.member {
-			return &TransformError{Message: fmt.Sprintf(
-				"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
-				group, member, s.member, s.app.Name)}
+		key := subAppKey{name: s.app.Name}
+		if s.hookName != "" && s.app.Name == s.hookName {
+			key = subAppKey{byHook: true, name: s.def}
 		}
-		byName[s.app.Name] = s.member
+		if member, dup := seen[key]; dup && member != s.member {
+			named := ""
+			if key.byHook {
+				named = fmt.Sprintf(" (named %q by the Naming hook)", s.hookName)
+			}
+			return &TransformError{Message: fmt.Sprintf(
+				"sibling group %q: traits on members %q and %q both create sub-application %q%s; carry the trait on one member",
+				group, member, s.member, key.name, named)}
+		}
+		seen[key] = s.member
 	}
 	return nil
 }
@@ -1279,7 +1300,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			// What the trait's handler resolves its names through. A decorating
 			// trait keeps it for its later Apply calls (decorateSubApplications),
 			// which then resolve the same names for the same owner.
-			resolved.naming = ctx.names.forTrait(entry.component.Name, trait, position)
+			member := ""
+			if len(e.members) > 0 {
+				member = entry.component.Type
+			}
+			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
 			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{
@@ -1306,7 +1331,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			}
 			if len(e.members) > 0 {
 				for _, newApp := range added {
-					groupSubApps = append(groupSubApps, groupSubApp{app: newApp, member: entry.component.Type})
+					s := groupSubApp{app: newApp, member: entry.component.Type}
+					if def, hooked := resolved.naming.takeHookSubApp(newApp.Name); hooked {
+						s.hookName, s.def = newApp.Name, def
+					}
+					groupSubApps = append(groupSubApps, s)
 				}
 				if err := checkGroupSubApplications(entry.component.Name, groupSubApps); err != nil {
 					return nil, err
