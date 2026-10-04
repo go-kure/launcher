@@ -1,17 +1,23 @@
 package components
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/url"
 	"strings"
 
 	kureio "github.com/go-kure/kure/pkg/io"
+	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -578,22 +584,261 @@ func hookGroupDir(g helm.HookGroup) string {
 // objects with kure's parser, unstructured objects allowed — the decode the
 // manifests component gives a fetched document. An object whose group, version
 // and kind kure's scheme registers is its Go type (*appsv1.Deployment,
-// *batchv1.Job); any other is *unstructured.Unstructured, and an unregistered
-// list kind is replaced by its items. An empty or comment-only document is
-// skipped (kure filters NOTES.txt upstream).
+// *batchv1.Job); any other is *unstructured.Unstructured. A list is replaced
+// by its items: those of a `v1` List each decoded as a document of its own
+// (a nested list flattened in turn, to the depth kure's parser bounds), those
+// of a typed list (DeploymentList) as the kind the list holds, and those of a
+// list kind the scheme does not register one level deep, unstructured. An
+// empty or comment-only document is skipped (kure filters NOTES.txt
+// upstream).
 //
 // Every document that does not decode is an error, and the parser reports them
 // together: invalid YAML; a document that is not a mapping; one without
 // apiVersion or kind; a field of a registered kind whose value has the wrong
-// type; and a registered kind that is not a single object, a `v1` List
-// included. The typed decode is the lenient one: a field the vendored API type
-// does not declare is dropped, not refused.
+// type; and a list item that does not decode, named by its position. The typed
+// decode is the lenient one: a field the vendored API type does not declare is
+// dropped, not refused.
+//
+// A list where a helm.sh/hook annotation is involved is refused before the
+// parse (refuseHookInList): the parser reads only a list's items, so the hook
+// Helm reads on the list would be lost.
 func decodeChartManifests(raw []byte) ([]client.Object, error) {
+	if err := refuseHookInList(raw); err != nil {
+		return nil, errors.Wrap(err, "decoding rendered manifests")
+	}
 	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{AllowUnstructured: true})
 	if err != nil {
 		return nil, errors.Wrap(err, "decoding rendered manifests")
 	}
 	return objs, nil
+}
+
+// helmHookAnnotation is the annotation Helm reads a hook from.
+const helmHookAnnotation = "helm.sh/hook"
+
+// genericListGVK is the `v1` List, the one list whose items are documents of
+// any kind.
+var genericListGVK = schema.GroupVersionKind{Version: "v1", Kind: "List"}
+
+// refuseHookInList returns an error for the first list document of raw where a
+// helm.sh/hook annotation is involved: on the list's own metadata, or on one
+// of its items.
+//
+// Helm reads a hook from the metadata of the rendered document, whatever its
+// kind, and from nowhere else. kure's parser replaces a list by its items and
+// reads only those. So a list that carries the annotation is a hook to Helm,
+// and its items would be emitted as ordinary resources; an item that carries
+// it inside a list that is no hook is an ordinary resource to Helm, and would
+// be grouped as a hook here (or dropped, in an excluded phase). Neither can be
+// rendered as Helm installs it.
+//
+// The documents are split as the parser splits them, and each is read as the
+// JSON the parser decodes, value by value as written (jsonMembers): the check
+// must not skip, or read differently, a document the parser accepts. One the
+// parser will report (invalid YAML, not a mapping) is left to it, and ends the
+// check: the build fails on it.
+func refuseHookInList(raw []byte) error {
+	if err := kubernetes.RegisterSchemes(); err != nil {
+		return errors.Wrap(err, "registering kure's scheme")
+	}
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)
+	var doc runtime.RawExtension
+	for decoder.Decode(&doc) == nil {
+		if err := hookInList(doc.Raw, 0); err != nil {
+			return err
+		}
+		doc = runtime.RawExtension{}
+	}
+	return nil
+}
+
+// maxCheckedListNesting is the deepest a `v1` List may sit inside `v1` Lists
+// for hookInList to follow its items: the depth kure's parser flattens a
+// registered list to (its maxListNesting). A registered list nested deeper is
+// a build error there, so nothing below it is emitted. The bound also keeps
+// the check's cost linear in the document: each level reads what it holds
+// again.
+const maxCheckedListNesting = 8
+
+// hookInList is refuseHookInList's check of one document, nesting `v1` Lists
+// deep. The items of a `v1` List are documents of their own, so a list among
+// them is checked in turn; the parser flattens no other list inside a list.
+// The list itself and its items are checked at any depth: the parser's bound
+// is on registered lists only, and a list of an unregistered kind below it is
+// still flattened.
+func hookInList(list json.RawMessage, nesting int) error {
+	items, generic, ok := flattenedItems(list)
+	if !ok {
+		return nil
+	}
+	if hasHelmHook(list) {
+		return errors.Errorf("list %s carries a %s annotation on its own metadata: Helm reads the hook there, and the items that replace the list do not carry it",
+			docRef(list), helmHookAnnotation)
+	}
+	for i, item := range items {
+		if hasHelmHook(item) {
+			return errors.Errorf("item %d (%s) of list %s carries a %s annotation: Helm reads a hook only on the rendered document's own metadata, so it installs the item as an ordinary resource",
+				i, docRef(item), docRef(list), helmHookAnnotation)
+		}
+		if !generic || nesting > maxCheckedListNesting {
+			continue
+		}
+		if err := hookInList(item, nesting+1); err != nil {
+			return errors.Errorf("item %d of list %s: %w", i, docRef(list), err)
+		}
+	}
+	return nil
+}
+
+// flattenedItems reports whether kure's parser may replace doc by its items,
+// and returns the items it would read. The parser does so for a list kind
+// kure's scheme registers (the `v1` List, for which generic is true, or a typed
+// list), and for a kind the scheme does not register when doc states items.
+//
+// The parser does not read doc's type in one way. Its list detection reads
+// apiVersion and kind under exactly those keys; the decoder it falls back to
+// reads them whatever their case (Kind, APIVERSION), and takes the last one
+// stated. So a document may be a single object to the first and a list of an
+// unregistered kind to the second. flattenedItems does not follow either: it
+// holds doc for a list when any pairing of an apiVersion and a kind doc
+// states, under any case of the key, is one the parser flattens. The result is
+// every document the parser flattens, and beside those only documents that
+// state their type more than once.
+//
+// An apiVersion left out is one more pairing for the list detection, whose
+// exact read sees none where the key differs in case. To the fallback decoder
+// it is the apiVersion only of a document that states none at all.
+//
+// items is read under that exact key, as both of the parser's readers do, and
+// in every statement of it.
+func flattenedItems(doc json.RawMessage) (items []json.RawMessage, generic, ok bool) {
+	stated := jsonExactMembers(doc, "items")
+	for _, value := range stated {
+		var read []json.RawMessage
+		if json.Unmarshal(value, &read) == nil {
+			items = append(items, read...)
+		}
+	}
+	apiVersions := jsonStrings(doc, "apiVersion")
+	for _, kind := range jsonStrings(doc, "kind") {
+		if kind == "" {
+			continue
+		}
+		for i, apiVersion := range append(apiVersions[:len(apiVersions):len(apiVersions)], "") {
+			gv, err := schema.ParseGroupVersion(apiVersion)
+			if err != nil {
+				continue
+			}
+			gvk := gv.WithKind(kind)
+			obj, err := kubernetes.Scheme.New(gvk)
+			if err != nil {
+				leftOut := i == len(apiVersions)
+				if len(stated) > 0 && (!leftOut || len(apiVersions) == 0) {
+					ok = true
+				}
+				continue
+			}
+			if _, single := obj.(client.Object); single || !meta.IsListType(obj) {
+				continue
+			}
+			ok = true
+			generic = generic || gvk == genericListGVK
+		}
+	}
+	if !ok {
+		return nil, false, false
+	}
+	return items, generic, true
+}
+
+// hasHelmHook reports whether doc's own metadata carries the helm.sh/hook
+// annotation, with any value. Every metadata and every annotations doc states
+// is read, under any case of those two keys: a JSON document may state a key
+// more than once, the typed decode merges the statements and the unstructured
+// one keeps the last, and Helm reads both keys whatever their case. A hook in
+// any of them is one Helm or the decoded object may carry. The annotation's
+// own key is a map key, which every reader matches exactly.
+func hasHelmHook(doc json.RawMessage) bool {
+	for _, metadata := range jsonMembers(doc, "metadata") {
+		for _, annotations := range jsonMembers(metadata, "annotations") {
+			if len(jsonExactMembers(annotations, helmHookAnnotation)) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// docRef names doc in an error: its kind and its quoted name, as far as it
+// states them.
+func docRef(doc json.RawMessage) string {
+	name := ""
+	if metadata := jsonMembers(doc, "metadata"); len(metadata) > 0 {
+		name = jsonString(metadata[len(metadata)-1], "name")
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s %q", jsonString(doc, "kind"), name))
+}
+
+// jsonMembers returns every value the JSON object raw states under key, in the
+// order it states them, and nil when raw is not an object. Each value is
+// returned as written, undecoded, so one no Go type holds (a number beyond
+// float64) does not fail the read, and a key stated twice yields both values.
+// The key is matched whatever its case, as a decode into a Go struct matches
+// it (Helm's read of a document's head, the Kubernetes decoder's read of
+// apiVersion and kind): Metadata and KIND are members too.
+func jsonMembers(raw json.RawMessage, key string) []json.RawMessage {
+	return jsonMembersMatching(raw, func(name string) bool { return strings.EqualFold(name, key) })
+}
+
+// jsonExactMembers is jsonMembers for a key that is matched exactly: a map key
+// (an annotation), or a field every reader matches by its exact name (items).
+func jsonExactMembers(raw json.RawMessage, key string) []json.RawMessage {
+	return jsonMembersMatching(raw, func(name string) bool { return name == key })
+}
+
+func jsonMembersMatching(raw json.RawMessage, match func(name string) bool) []json.RawMessage {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		return nil
+	}
+	var values []json.RawMessage
+	for dec.More() {
+		name, err := dec.Token()
+		if err != nil {
+			return values
+		}
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return values
+		}
+		if key, isString := name.(string); isString && match(key) {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+// jsonStrings returns every string the JSON object raw states under key,
+// whatever the key's case, in the order it states them. A value that is not a
+// string is left out.
+func jsonStrings(raw json.RawMessage, key string) []string {
+	var values []string
+	for _, value := range jsonMembers(raw, key) {
+		var s string
+		if json.Unmarshal(value, &s) == nil {
+			values = append(values, s)
+		}
+	}
+	return values
+}
+
+// jsonString returns the last of jsonStrings, "" when there is none.
+func jsonString(raw json.RawMessage, key string) string {
+	values := jsonStrings(raw, key)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[len(values)-1]
 }
 
 // hookGroupChildName computes partition's dirName for hook group i:
