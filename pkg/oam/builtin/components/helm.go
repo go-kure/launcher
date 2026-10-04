@@ -41,6 +41,15 @@ var helmPassthroughKeys = []string{"values", "interval", "releaseName", "targetN
 // template refuses each one, in this order, naming the key.
 var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "driftDetection", "install", "upgrade", "valuesFrom"}
 
+// helmSecretValuesKey is the property holding the sensitive part of the values
+// tree. Like the passthrough keys it is split off before the strict decode, so
+// its content never reaches a decode error; unlike them it is never forwarded to
+// the helmrelease (see helmSecretValuesTrait).
+const helmSecretValuesKey = "secretValues"
+
+// helmOwnedKeys are the keys decodeHelm splits off before the strict decode.
+var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKey)
+
 // HelmRule lowers a "helm" component (D1 component position,
 // oam.ComponentLoweringRule) to the kind-named Flux terminals, the role-named
 // successor to the removed helmchart composite (go-kure/launcher#336,
@@ -81,6 +90,16 @@ var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "d
 // configMap with non-empty values the rule moves the values into a configmap
 // trait on the helmrelease and prepends a valuesFrom entry for it
 // (helmValuesConfigMap).
+//
+// secretValues is the sensitive part of the values tree (go-kure/launcher#786)
+// and is never written into the HelmRelease or a ConfigMap. Under delivery: flux
+// it becomes a secret trait on the helmrelease and a valuesFrom entry of kind
+// Secret, placed after the values ConfigMap's entry and before the authored ones
+// (helmSecretValuesTrait). Under delivery: template it is forwarded to the
+// helmtemplate, which merges it over values for the render. A path set in both
+// values and secretValues is refused, so the result does not depend on which of
+// the two a delivery or values mode would let win. No message the rule raises
+// carries a value of secretValues.
 type HelmRule struct{}
 
 // ComponentType claims the "helm" component type at the component lowering
@@ -89,7 +108,7 @@ type HelmRule struct{}
 func (HelmRule) ComponentType() string { return helmType }
 
 // PropertySchema declares the helm component's properties: exactly the keys
-// helmProperties decodes plus helmPassthroughKeys. A test ties the two.
+// helmProperties decodes plus helmOwnedKeys. A test ties the two.
 func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 	str := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeString, Description: desc}
@@ -129,6 +148,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 		"values":          object("Helm values tree. Must be representable as JSON."),
+		"secretValues":    object("Sensitive part of the Helm values tree, kept out of the HelmRelease and of any ConfigMap. Under delivery: flux it is emitted as a Secret (base64-encoded, not encrypted) by a secret trait on the HelmRelease, referenced by a valuesFrom entry placed after the values ConfigMap's and before the authored ones; under delivery: template it is merged over values for the render. A path set in both values and secretValues is refused. An environment policy may forbid it."),
 		"valuesMode":      {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves non-empty values into a ConfigMap emitted by a configmap trait on the HelmRelease, referenced by a valuesFrom entry placed before the authored ones. Unset means inline. configMap is refused under delivery: template."},
 		"interval":        str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
 		"releaseName":     str("HelmRelease spec.releaseName. Refused under delivery: template."),
@@ -142,8 +162,8 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// helmProperties is what the strict decode checks; helmPassthroughKeys are
-// split off before it.
+// helmProperties is what the strict decode checks; helmOwnedKeys are split off
+// before it.
 type helmProperties struct {
 	Chart      string      `json:"chart"`
 	Version    string      `json:"version"`
@@ -191,15 +211,15 @@ func (s *helmSource) inlineBucket() bool { return s.Kind == "Bucket" && s.Name =
 // LowerComponent decodes comp as a helm component and emits its terminal
 // components (see HelmRule).
 func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	props, passthrough, err := decodeHelm(comp.Properties)
+	props, passthrough, secretValues, err := decodeHelm(comp.Properties)
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
 	switch props.Delivery {
 	case "", "flux":
-		return lowerHelmFlux(comp, lctx, props, passthrough)
+		return lowerHelmFlux(comp, lctx, props, passthrough, secretValues)
 	case "template":
-		return lowerHelmTemplate(comp, props, passthrough)
+		return lowerHelmTemplate(comp, props, passthrough, secretValues)
 	default:
 		return oam.LoweringResult{}, errors.Errorf("%s: unsupported delivery %q; supported values: flux, template", helmType, props.Delivery)
 	}
@@ -210,81 +230,98 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 // an endpoint and bucketName), each source key only in the form that reads it,
 // and a known valuesMode. The
 // passthrough keys come back in their own map under their declared spelling,
-// without nulls (absent). The strict decode matches keys case-insensitively, as
-// encoding/json does, so two spellings of one key, at the top level or in
-// source, are refused rather than one silently winning.
-func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
+// without nulls (absent), and secretValues on its own: nil when absent or null,
+// refused when it is not an object. The strict decode matches keys
+// case-insensitively, as encoding/json does, so two spellings of one key, at the
+// top level or in source, are refused rather than one silently winning.
+func decodeHelm(src map[string]any) (*helmProperties, map[string]any, map[string]any, error) {
+	fail := func(err error) (*helmProperties, map[string]any, map[string]any, error) {
+		return nil, nil, nil, err
+	}
 	if err := refuseFoldedKeys("", src); err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
 	for k, v := range src {
 		if s, ok := v.(map[string]any); ok && strings.EqualFold(k, "source") {
 			if err := refuseFoldedKeys("source.", s); err != nil {
-				return nil, nil, err
+				return fail(err)
 			}
 			for rk, rv := range s {
 				if r, ok := rv.(map[string]any); ok && strings.EqualFold(rk, "ref") {
 					if err := refuseFoldedKeys("source.ref.", r); err != nil {
-						return nil, nil, err
+						return fail(err)
 					}
 				}
 			}
 		}
 	}
-	props, owned, err := builtin.DecodeStrictJSON[helmProperties](src, helmPassthroughKeys...)
+	props, owned, err := builtin.DecodeStrictJSON[helmProperties](src, helmOwnedKeys...)
 	if err != nil {
-		return nil, nil, errors.Errorf("%s: properties do not decode: %w", helmType, err)
+		return fail(errors.Errorf("%s: properties do not decode: %w", helmType, err))
 	}
 	passthrough := make(map[string]any, len(owned))
+	var secretValues map[string]any
 	for _, k := range slices.Sorted(maps.Keys(owned)) {
-		i := slices.IndexFunc(helmPassthroughKeys, func(key string) bool { return strings.EqualFold(key, k) })
-		key := helmPassthroughKeys[i] // owned holds only keys that fold onto one of these
-		if v := owned[k]; v != nil {
-			passthrough[key] = v
+		i := slices.IndexFunc(helmOwnedKeys, func(key string) bool { return strings.EqualFold(key, k) })
+		key := helmOwnedKeys[i] // owned holds only keys that fold onto one of these
+		v := owned[k]
+		if key != helmSecretValuesKey {
+			if v != nil {
+				passthrough[key] = v
+			}
+			continue
 		}
+		if oam.IsNullValue(v) {
+			continue
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			return fail(errors.Errorf("%s: %s: must be an object, got %T", helmType, helmSecretValuesKey, v))
+		}
+		secretValues = m
 	}
 	if props.Source == nil {
-		return nil, nil, errors.Errorf("%s: source is required", helmType)
+		return fail(errors.Errorf("%s: source is required", helmType))
 	}
 	s := props.Source
 	switch {
 	case s.URL != "" && s.Name != "":
-		return nil, nil, errors.Errorf("%s: source.url and source.name are mutually exclusive", helmType)
+		return fail(errors.Errorf("%s: source.url and source.name are mutually exclusive", helmType))
 	case s.inlineBucket():
 		if s.URL != "" {
-			return nil, nil, errors.Errorf("%s: source.kind Bucket takes source.endpoint and source.bucketName, not source.url", helmType)
+			return fail(errors.Errorf("%s: source.kind Bucket takes source.endpoint and source.bucketName, not source.url", helmType))
 		}
 		if s.Endpoint == "" || s.BucketName == "" {
-			return nil, nil, errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType)
+			return fail(errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType))
 		}
 		// Only a bare host[:port] or an https:// URL of a host and port is
 		// accepted, so user info, a signed query or anything else an endpoint
 		// could smuggle is refused. The value is not quoted back.
 		if !plainBucketEndpoint(s.Endpoint) {
-			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port, any port in 1-65535; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)", helmType)
+			return fail(errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port, any port in 1-65535; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)", helmType))
 		}
 	case s.URL == "" && s.Name == "":
-		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)
+		return fail(errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType))
 	}
 	if s.Name == "" && s.Namespace != "" {
-		return nil, nil, errors.Errorf("%s: source.namespace is only valid with source.name", helmType)
+		return fail(errors.Errorf("%s: source.namespace is only valid with source.name", helmType))
 	}
 	if !s.inlineBucket() {
 		for _, f := range [][2]string{{"endpoint", s.Endpoint}, {"bucketName", s.BucketName}, {"provider", s.Provider}, {"region", s.Region}, {"prefix", s.Prefix}} {
 			if f[1] != "" {
-				return nil, nil, errors.Errorf("%s: source.%s is only valid with an inline source.kind Bucket", helmType, f[0])
+				return fail(errors.Errorf("%s: source.%s is only valid with an inline source.kind Bucket", helmType, f[0]))
 			}
 		}
 	}
 	if s.Ref != nil && (s.Kind != "GitRepository" || s.URL == "") {
-		return nil, nil, errors.Errorf("%s: source.ref is only valid with an inline source.kind GitRepository", helmType)
+		return fail(errors.Errorf("%s: source.ref is only valid with an inline source.kind GitRepository", helmType))
 	}
 	switch props.ValuesMode {
 	case "", "inline", "configMap":
 	default:
-		return nil, nil, errors.Errorf("%s: unsupported valuesMode %q; supported values: inline, configMap", helmType, props.ValuesMode)
+		return fail(errors.Errorf("%s: unsupported valuesMode %q; supported values: inline, configMap", helmType, props.ValuesMode))
 	}
-	return props, passthrough, nil
+	return props, passthrough, secretValues, nil
 }
 
 // refuseFoldedKeys refuses two keys of m that are equal under Unicode case
@@ -310,18 +347,33 @@ const fluxUserinfoRemedy = ", which would be written in plain text into the gene
 // lowerHelmFlux emits the helmrelease component and, for an inline source, the
 // source it references (unless another helm component of the document already
 // emitted the same one).
-func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
+func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough, secretValues map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
 	release := maps.Clone(passthrough)
 	traits := comp.Traits
+	// The generated valuesFrom entries, in merge order: the values ConfigMap,
+	// then the values Secret. Both go ahead of the authored entries.
+	var generated []any
+	secretTrait, secretEntry, err := helmSecretValuesTrait(comp.Name, release["values"], secretValues)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
 	if props.ValuesMode == "configMap" {
-		trait, err := helmValuesConfigMap(comp.Name, release)
+		trait, entry, err := helmValuesConfigMap(comp.Name, release)
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
 		if trait != nil {
-			traits = append(slices.Clone(comp.Traits), *trait)
+			traits = append(slices.Clone(traits), *trait)
+			generated = append(generated, entry)
 		}
+	}
+	if secretTrait != nil {
+		traits = append(slices.Clone(traits), *secretTrait)
+		generated = append(generated, secretEntry)
+	}
+	if err := helmPrependValuesFrom(release, generated); err != nil {
+		return oam.LoweringResult{}, err
 	}
 
 	kind := src.Kind
@@ -433,11 +485,12 @@ const helmValuesHashLen = 10
 
 // helmValuesConfigMap implements valuesMode: configMap on release, the
 // helmrelease properties lowerHelmFlux builds. It removes values and, when
-// they are non-empty, prepends a valuesFrom entry for a ConfigMap named
-// helmValuesConfigMapName and returns the configmap trait that emits it, for
-// the helmrelease to carry. The entry goes ahead of the authored ones, so an
-// authored entry still wins on a shared key, as Flux merges valuesFrom in
-// order. Absent or empty values return a nil trait and no entry.
+// they are non-empty, returns the configmap trait that emits a ConfigMap named
+// helmValuesConfigMapName, for the helmrelease to carry, and the valuesFrom
+// entry naming it. lowerHelmFlux puts the entry ahead of the authored ones
+// (helmPrependValuesFrom), so an authored entry still wins on a shared key, as
+// Flux merges valuesFrom in order. Absent or empty values return a nil trait
+// and no entry.
 //
 // The trait is the configmap trait as authored documents use it, so the
 // ConfigMap follows the HelmRelease to a Flux namespace (it reads the
@@ -451,36 +504,52 @@ const helmValuesHashLen = 10
 // content does: the HelmRelease's spec changes with it, which makes Flux
 // reconcile a values-only edit, and two components with identical values
 // carry the same hash.
-func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error) {
+func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, map[string]any, error) {
 	raw, ok := release["values"]
 	delete(release, "values")
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
+		return nil, nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
 	}
 	values, err := helmReleaseValuesMap(&apiextensionsv1.JSON{Raw: encoded})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(values) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	data, err := json.MarshalIndent(values, "", "  ")
 	if err != nil {
-		return nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
+		return nil, nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
 	}
 	sum := sha256.Sum256(data)
 	cmName := helmValuesConfigMapName(name, hex.EncodeToString(sum[:]))
 
 	entry := map[string]any{"kind": "ConfigMap", "name": cmName, "valuesKey": helmValuesKey}
+	return &oam.Trait{
+		Type: "configmap",
+		Properties: map[string]any{
+			"name": cmName,
+			"data": map[string]any{helmValuesKey: string(data)},
+		},
+	}, entry, nil
+}
+
+// helmPrependValuesFrom puts the generated valuesFrom entries, in order, ahead
+// of the authored ones on release. With no generated entry release is left as
+// it is.
+func helmPrependValuesFrom(release map[string]any, generated []any) error {
+	if len(generated) == 0 {
+		return nil
+	}
 	switch authored := release["valuesFrom"].(type) {
 	case nil:
-		release["valuesFrom"] = []any{entry}
+		release["valuesFrom"] = generated
 	case []any:
-		release["valuesFrom"] = append([]any{entry}, authored...)
+		release["valuesFrom"] = append(generated, authored...)
 	default:
 		// A library caller may pass a typed list ([]map[string]any,
 		// []helmv2.ValuesReference). The helmrelease decodes valuesFrom through
@@ -495,24 +564,18 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error
 			err = json.Unmarshal(encoded, &list)
 		}
 		if err != nil {
-			return nil, errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
+			return errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
 		}
 		if _, _, err := builtin.DecodeStrictJSON[helmValuesFromSpec](map[string]any{"valuesFrom": authored}); err != nil {
-			return nil, errors.Errorf("%s: valuesFrom: %w", helmType, err)
+			return errors.Errorf("%s: valuesFrom: %w", helmType, err)
 		}
-		release["valuesFrom"] = append([]any{entry}, list...)
+		release["valuesFrom"] = append(generated, list...)
 	}
-	return &oam.Trait{
-		Type: "configmap",
-		Properties: map[string]any{
-			"name": cmName,
-			"data": map[string]any{helmValuesKey: string(data)},
-		},
-	}, nil
+	return nil
 }
 
 // helmValuesFromSpec is the valuesFrom field of HelmReleaseSpec alone, for
-// helmValuesConfigMap's strict decode of a typed list.
+// helmPrependValuesFrom's strict decode of a typed list.
 type helmValuesFromSpec struct {
 	ValuesFrom []helmv2.ValuesReference `json:"valuesFrom"`
 }
@@ -710,7 +773,7 @@ func helmGeneratedSourceIdentity(kind string, src *helmSource, version string) (
 
 // lowerHelmTemplate emits the helmtemplate component after refusing what a
 // client-side render cannot honour.
-func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
+func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, secretValues map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
 	if src.Name != "" {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template requires an inline source URL; source.name is not supported", helmType)
@@ -748,6 +811,17 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough m
 	}
 	if values, ok := passthrough["values"]; ok {
 		rendered["values"] = values
+	}
+	// The helmtemplate merges secretValues over values for the render and
+	// refuses a shared path itself; it is refused here first, so the message
+	// names the component type the author wrote.
+	if len(secretValues) > 0 {
+		if values, ok := passthrough["values"].(map[string]any); ok {
+			if err := refuseSharedValuePath(helmType, values, secretValues); err != nil {
+				return oam.LoweringResult{}, err
+			}
+		}
+		rendered[helmSecretValuesKey] = secretValues
 	}
 	return oam.LoweringResult{Components: []oam.Component{{
 		Name:        comp.Name,

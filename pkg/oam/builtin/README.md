@@ -4,7 +4,7 @@
 
 Package `builtin` holds the rendering-schema types shared by the built-in capability
 handlers (e.g. `CertificateRendering`, `ExposeRendering`, `ExternalSecretRendering`,
-`NetworkPolicyRendering`, `ConfigmapRendering`, `TopologySpreadRendering`, `VolSyncRendering`,
+`NetworkPolicyRendering`, `ConfigmapRendering`, `SecretRendering`, `TopologySpreadRendering`, `VolSyncRendering`,
 `PVCRendering`) and the `DecodeStrict[T]` helper used by handlers to decode capability
 properties.
 

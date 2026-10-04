@@ -98,10 +98,11 @@ metadata:
 // TestHelmTemplateHandler_SchemaMatchesProperties ties the published schema to
 // what the strict decode accepts: every JSON key of helmTemplateProperties, at
 // every depth, with the property type its Go field encodes as, plus the values
-// key split off before the decode — no more and no fewer. It also pins which
-// nodes are required, the two the handler itself refuses when missing.
+// and secretValues keys split off before the decode — no more and no fewer. It
+// also pins which nodes are required, the two the handler itself refuses when
+// missing.
 func TestHelmTemplateHandler_SchemaMatchesProperties(t *testing.T) {
-	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject}
+	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject, helmSecretValuesKey: oam.PropertyTypeObject}
 	var walk func(prefix string, st reflect.Type)
 	walk = func(prefix string, st reflect.Type) {
 		for f := range st.Fields() {
@@ -148,12 +149,13 @@ func TestHelmTemplateHandler_SchemaMatchesProperties(t *testing.T) {
 }
 
 // TestHelmTemplateHandler_EveryFieldReachable: no field of the decoded structs
-// is shadowed by the split-off values key or otherwise unreachable through the
-// strict decode. The exclusion list is explicit and must stay empty.
+// is shadowed by a split-off key (values, secretValues) or otherwise
+// unreachable through the strict decode. The exclusion list is explicit and
+// must stay empty.
 func TestHelmTemplateHandler_EveryFieldReachable(t *testing.T) {
 	excluded := []string{}
 	for _, typ := range []reflect.Type{reflect.TypeFor[helmTemplateProperties](), reflect.TypeFor[helmTemplateSource]()} {
-		if got := builtin.UnreachableJSONFields(typ, helmTemplateValuesKey); !slices.Equal(got, excluded) {
+		if got := builtin.UnreachableJSONFields(typ, helmTemplateValuesKey, helmSecretValuesKey); !slices.Equal(got, excluded) {
 			t.Errorf("unreachable %s fields: %v, want %v", typ.Name(), got, excluded)
 		}
 	}

@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
@@ -19,9 +20,10 @@ import (
 // which the render code returns unprefixed (chartRender.render).
 const helmTemplateType = "helmtemplate"
 
-// helmTemplateValuesKey is the one property the strict decode splits off: the
-// Helm values tree, which reaches the render exactly as authored (see
-// helmTemplateValues).
+// helmTemplateValuesKey is the Helm values tree, which the strict decode splits
+// off and which reaches the render exactly as authored (see
+// helmTemplateObject). helmSecretValuesKey, the sensitive part of the tree, is
+// split off the same way, so its content never reaches a decode error.
 const helmTemplateValuesKey = "values"
 
 // HelmTemplateHandler handles the kind-named `helmtemplate` component: a Helm
@@ -38,9 +40,9 @@ func (h *HelmTemplateHandler) CanHandle(componentType string) bool {
 }
 
 // PropertySchema declares exactly the keys helmTemplateProperties decodes plus
-// values, so authored-property validation and the handler's strict decode
-// admit the same set: source (url, kind), chart, version and values. A test
-// ties this schema to the struct.
+// values and secretValues, so authored-property validation and the handler's
+// strict decode admit the same set: source (url, kind), chart, version, values
+// and secretValues. A test ties this schema to the struct.
 func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
@@ -55,11 +57,15 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 		"chart":   {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
 		"version": {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
 		"values":  {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		helmSecretValuesKey: {
+			Type: oam.PropertyTypeObject, AdditionalProperties: true,
+			Description: "Sensitive part of the Helm values tree, merged over values for the client-side render and written nowhere else by this component; whatever the chart renders from it is in the output in clear form. A path set in both values and secretValues is refused. Must be representable as JSON. An environment policy may forbid it.",
+		},
 	}
 }
 
 // helmTemplateProperties is the property surface the strict decode checks,
-// values excepted. Any key it does not declare, at any depth, is refused — in
+// values and secretValues excepted. Any key it does not declare, at any depth, is refused — in
 // particular a release identity (releaseName, targetNamespace; this terminal
 // renders into the application namespace under kure's default release name),
 // every property only a Flux-reconciled release reads (interval,
@@ -79,16 +85,21 @@ type helmTemplateSource struct {
 }
 
 // ToApplicationConfig decodes the component's properties strictly, with values
-// split off first, and checks the inline source: source.url required, the kind
-// inferred from or checked against the URL scheme, chart required for a
-// HelmRepository, version required for an OCIRepository, values an object that
-// encodes as JSON.
+// and secretValues split off first, and checks the inline source: source.url
+// required, the kind inferred from or checked against the URL scheme, chart
+// required for a HelmRepository, version required for an OCIRepository, values
+// and secretValues each an object that encodes as JSON, with no path set in
+// both.
 func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](component.Properties, helmTemplateValuesKey)
+	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](component.Properties, helmTemplateValuesKey, helmSecretValuesKey)
 	if err != nil {
 		return nil, errors.Errorf("%s: properties do not decode: %w", helmTemplateType, err)
 	}
-	values, err := helmTemplateValues(owned)
+	values, err := helmTemplateObject(owned, helmTemplateValuesKey)
+	if err != nil {
+		return nil, err
+	}
+	secretValues, err := helmTemplateObject(owned, helmSecretValuesKey)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +107,15 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 		return nil, errors.Errorf("%s: source is required", helmTemplateType)
 	}
 	cfg := &HelmTemplateConfig{
-		Name:        component.Name,
-		Namespace:   namespace,
-		SourceURL:   props.Source.URL,
-		SourceKind:  props.Source.Kind,
-		Chart:       props.Chart,
-		Version:     props.Version,
-		Values:      values,
-		renderChart: helm.RenderChart,
+		Name:         component.Name,
+		Namespace:    namespace,
+		SourceURL:    props.Source.URL,
+		SourceKind:   props.Source.Kind,
+		Chart:        props.Chart,
+		Version:      props.Version,
+		Values:       values,
+		SecretValues: secretValues,
+		renderChart:  helm.RenderChart,
 	}
 	src, err := cfg.source()
 	if err != nil {
@@ -114,27 +126,33 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	return cfg, nil
 }
 
-// helmTemplateValues reads the values key split off before the strict decode.
-// Absent, or null (typed or not), means no values; anything else must be an
-// object. The map is kept exactly as authored, with the YAML-decoded value
+// helmTemplateObject reads key, values or secretValues, from the keys split off
+// before the strict decode. Absent, or null (typed or not), means none; anything
+// else must be an object, and a refusal names the value's type, never the
+// value. The map is kept exactly as authored, with the YAML-decoded value
 // types, rather than taken from the strict decoder, whose json.Number numbers a chart template would compare and
 // print differently. The owned split matches keys case-insensitively, so two
 // spellings of the key are refused rather than one silently winning.
-func helmTemplateValues(owned map[string]any) (map[string]any, error) {
-	if len(owned) > 1 {
-		return nil, errors.Errorf("%s: %s is given more than once", helmTemplateType, helmTemplateValuesKey)
-	}
-	for _, v := range owned {
-		if oam.IsNullValue(v) {
-			return nil, nil
+func helmTemplateObject(owned map[string]any, key string) (map[string]any, error) {
+	var found []any
+	for k, v := range owned {
+		if strings.EqualFold(k, key) {
+			found = append(found, v)
 		}
-		m, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("%s: %s: must be an object, got %T", helmTemplateType, helmTemplateValuesKey, v)
-		}
-		return m, nil
 	}
-	return nil, nil
+	switch {
+	case len(found) == 0:
+		return nil, nil
+	case len(found) > 1:
+		return nil, errors.Errorf("%s: %s is given more than once", helmTemplateType, key)
+	case oam.IsNullValue(found[0]):
+		return nil, nil
+	}
+	m, ok := found[0].(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: %s: must be an object, got %T", helmTemplateType, key, found[0])
+	}
+	return m, nil
 }
 
 // HelmTemplateConfig implements stack.ApplicationConfig for helmtemplate
@@ -169,6 +187,12 @@ type HelmTemplateConfig struct {
 	// Values is the Helm values tree handed to the render as-is. It must be
 	// representable as JSON.
 	Values map[string]any
+	// SecretValues is the sensitive part of the values tree
+	// (go-kure/launcher#786), merged over Values for the render and kept out of
+	// every error this config returns. It must be representable as JSON and
+	// share no path with Values. A policy that forbids explicit secrets refuses
+	// a config that sets it (ApplyPolicy).
+	SecretValues map[string]any
 
 	// renderChart renders the chart. ToApplicationConfig sets helm.RenderChart,
 	// which a nil value also means; tests inject a stub.
@@ -197,7 +221,16 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 	if _, err := json.Marshal(c.Values); err != nil {
 		return chartSource{}, errors.Errorf("%s: values is not representable as JSON: %w", helmTemplateType, err)
 	}
-	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace}, nil
+	if len(c.SecretValues) > 0 {
+		// Neither message carries a value: the encoding error is not wrapped.
+		if _, err := json.Marshal(c.SecretValues); err != nil {
+			return chartSource{}, errors.Errorf("%s: %s is not representable as JSON", helmTemplateType, helmSecretValuesKey)
+		}
+		if err := refuseSharedValuePath(helmTemplateType, c.Values, c.SecretValues); err != nil {
+			return chartSource{}, err
+		}
+	}
+	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, SecretValues: c.SecretValues, Namespace: c.Namespace}, nil
 }
 
 // ensureRendered checks c and renders its chart, once: Generate and

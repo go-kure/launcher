@@ -102,7 +102,7 @@ namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespa
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
 `secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
 sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the
-`configmap` trait's ConfigMap, the Secret an `external-secret` trait's ExternalSecret or a
+`configmap` trait's ConfigMap, the `secret` trait's Secret, the Secret an `external-secret` trait's ExternalSecret or a
 `certificate` trait's Certificate writes). Both kind and name must match. Every other trait object —
 a ConfigMap or Secret the Flux object does not name, a Certificate whose Secret it does not name, a
 claim, a NetworkPolicy, a route — stays in the application namespace with the
@@ -246,7 +246,7 @@ the whole `name+suffix` is then shortened by the rule.
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
 | 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap and values Secret, a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
@@ -1181,7 +1181,7 @@ type. The built-in rules declare:
 |------|------------|--------|----------|
 | `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
-| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap` | |
+| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database` | | `dependency`, `placement` |
 | `expose` (trait) | | `ingress`, `httproute` | |
 
@@ -1233,6 +1233,15 @@ sub-application runs its `ApplyPolicy` after the trait's `Apply` and is held to 
 as the `TraitHandler`: it must not replace, remove or rename a component's application in the
 bundle, nor rename a sibling group member's. The transform fails, naming the trait, its
 component and the sub-application (go-kure/launcher#752).
+
+**Optional policy interfaces.** A check that not every consumer needs is asked through an
+interface a `Policy` may also implement, so adding one breaks no implementation.
+`ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`, go-kure/launcher#786) says whether a
+document may carry secret values itself: the `secret` trait, the `helm` component's
+`secretValues` and the `helmtemplate` kind's. `ExplicitSecretsAllowed(policy)` is how a handler
+asks. **A policy that does not implement it allows them**, as does no policy at all: this is
+the permissive side, so a consumer that must keep secrets out of documents has to implement the
+interface and answer `false`. A refusal is a `ViolationError` naming the component.
 
 Handlers apply values with the precedence **authored > policy default > handler default**,
 then enforce the limits on the resulting effective value — for cpu/memory this explicitly

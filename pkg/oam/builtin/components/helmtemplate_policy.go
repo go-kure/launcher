@@ -34,9 +34,19 @@ import (
 // Not covered: the archive a Helm repository's index names and any redirect,
 // which kure's renderer follows to whatever host they point at; and a pod a
 // custom resource's controller creates.
+//
+// Before either step, a config that sets SecretValues is refused under a policy
+// that forbids explicit secrets (oam.ExplicitSecretPolicy); a policy that does
+// not implement that interface allows it. A violation on a rendered object is
+// reported as for any chart: it names the object and quotes what the policy
+// refuses in it (an image reference, a quantity), which the chart may have
+// rendered from a sensitive value.
 func (c *HelmTemplateConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
+	}
+	if len(c.SecretValues) > 0 && !oam.ExplicitSecretsAllowed(p) {
+		return errors.Errorf("%s: %s is set and the environment policy forbids explicit secrets; have the chart read a Secret created out of band instead", helmTemplateType, helmSecretValuesKey)
 	}
 	src, err := c.source()
 	if err != nil {

@@ -28,6 +28,12 @@ func TestTraitConfigs_ComponentName(t *testing.T) {
 			trait:   &oam.Trait{Type: "configmap", Properties: map[string]any{"name": "cfg"}},
 		},
 		{
+			name:    "secret",
+			handler: &traits.SecretHandler{},
+			app:     newApp(component, "default"),
+			trait:   &oam.Trait{Type: "secret", Properties: map[string]any{"name": "creds"}},
+		},
+		{
 			name:    "scaler",
 			handler: &traits.ScalerHandler{},
 			app:     newApp(component, "default"),
