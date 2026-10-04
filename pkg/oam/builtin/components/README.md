@@ -95,6 +95,7 @@ reads it.
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
+| `replicaset` | ReplicaSet | Kind-named bare ReplicaSet: the whole `ReplicaSetSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and gains the `app` label; `replicas` and the template are held to environment policy, no default filled — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -210,7 +211,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
-| `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | missing | - | - | - |
+| `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
 | `kubernetes.CreateReplicationController` | v1 ReplicationController | missing | - | - | - |
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
@@ -2186,6 +2187,79 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `default` account. **Not covered:** the object's metadata, so the Pod's
   labels and annotations cannot be authored; it carries the `app` label and
   the component label only.
+- **replicaset** (go-kure/launcher#790) is the kind-named projection of an
+  apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
+  `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
+  `template`), the property map decoded strictly into that type, and one
+  ReplicaSet named after the component in the build namespace, with the
+  authored spec. It is the bare controller: no rollout, which a `deployment`
+  component gives, and none of that kind's shorthand — a property of the
+  workload kinds (`image`, `ports`, `strategy`) is refused as not a
+  ReplicaSetSpec field.
+
+  **The `app` label.** The handler adds one thing: `app: <component>` on the
+  pod template's labels, beside the authored ones (see "The `app` label"). It
+  is the label every workload kind gives its pods and the one launcher's
+  traits and Services select on, so a `networkpolicy` trait's policy and a
+  `service` component with `selector: {app: <component>}` reach the pods. The
+  selector is emitted as authored, and the ReplicaSet itself gets no label of
+  the handler's; the transform then sets the component label on the object and
+  its template, as on every object a component owns (go-kure/launcher#788).
+  - An authored `template.metadata.labels.app` with the component's own label
+    value is kept. Any other value is refused, naming the component
+    (``template.metadata.labels.app: "frontend" is not the `app` label of
+    component "web" ("web")``): the label cannot say something else than what
+    the traits select.
+  - A selector that matches the authored template labels and would stop
+    matching once the label is added (`app` under `DoesNotExist`, or `NotIn`
+    the label value) is refused (``selector: rules out the label `app: web`
+    …``). A selector on `app: <component>` is satisfied by the added label, so
+    the template needs no label of its own for it. A selector that cannot be
+    read as one (an unknown operator, a key or value that is no label) cannot
+    be compared and is refused with apimachinery's reason.
+
+  **Traits.** A trait target as the `pod` kind is: `security-context`, a
+  `configmap` trait's `mountPath` and an `external-secret` trait's
+  `envFrom`/`mountPath` change its pod template. `topology-spread` and
+  `scaler` are not available on it.
+
+  **Refused when the component is read**, with or without a policy:
+  - An unauthored `selector`. The Go type cannot omit it, so it would be
+    written as `null`, and launcher derives none. Whether it matches the
+    template's labels, like the API's other value rules (an empty selector,
+    `restartPolicy` other than `Always`, a negative `replicas`), is left to
+    the API server.
+  - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+    same checks and named by path (`template.spec.containers: required`,
+    `template.spec.priority: not authorable …`, the image rule, a probe timing
+    written as `0`). A test holds the probe list to every non-pointer
+    `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
+    states a non-zero default, the template's metadata included.
+  - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
+    ReplicaSet's pod template, whose pods are replaced for as long as the
+    controller exists; a `pod` or a Job may set it.
+
+  **Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
+  one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
+  maximum 3`), and the pod template to the check the `pod` kind runs
+  (`enforcePodTemplatePolicy`), naming a field by its path in the properties
+  (`template.spec: hostNetwork is not allowed by environment policy`,
+  `template.spec.containers[0] "app": …`). It fills no policy default: an
+  unset `replicas` stays unset and a container without resources stays
+  without. The three rendered paths run the same checks on a ReplicaSet they
+  emit and name the field under the object (`spec.replicas`,
+  `spec.template.spec…`).
+
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
+  on a ReplicaSet they emit, do not require a selector and add no `app` label;
+  the API server decides there. They do refuse ephemeral containers and an
+  untagged or `:latest` image.
+
+  The config implements `oam.ServiceAccountNamer`, reading the template's
+  `serviceAccountName` as the `pod` kind reads its own. **Not covered:** the
+  ReplicaSet's own metadata, so its labels and annotations cannot be authored;
+  the template's metadata is carried as authored.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -4300,7 +4374,10 @@ valued at `oam.ComponentLabelValue(<component>)`, never the raw component name �
 `appLabels` and `deploymentComponentLabels` call it, and nothing else writes the value.
 Authored values are emitted as written: an authored `selector` on a `service` component
 replaces the generated one and is not projected, and a type that emits authored objects
-(`passthrough`, for one) adds no `app` label. A component name
+(`passthrough`, for one) adds no `app` label. The one authored value that is checked is
+an `app` label on the pod template of a `replicaset` component, which gets the generated
+label beside its authored ones: the component's own label value is kept, another is
+refused. A component name
 is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function
 returns a name of 63 characters or fewer unchanged, so output for those names is
 byte-identical, and projects a longer one onto a readable prefix of at most 52 characters

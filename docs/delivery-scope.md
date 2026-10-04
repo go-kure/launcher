@@ -528,6 +528,19 @@ be closed at build time.
     `flexVolume` source is not checked (go-kure/launcher#794, item 12, not decided).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
+- **Shipped: the pod kinds** `pod` and `replicaset` (`pod.go`, `replicaset.go`,
+  `pod_template.go`), on the same recipe.
+  - `pod` projects `PodSpec`, `replicaset` projects `ReplicaSetSpec`. The pod spec, the
+    one under a ReplicaSet's `template` included, refuses `ephemeralContainers`,
+    `priority` and `overhead`, an untagged or `:latest` image and a probe timing written
+    as `0`; a ReplicaSet's template also refuses `activeDeadlineSeconds`.
+  - Both are held to environment policy by the check the rendered paths run on the same
+    object (`enforcePodTemplatePolicy`, and the replica maximum on a ReplicaSet), and
+    fill no policy default.
+  - A Pod carries the `app` label; a ReplicaSet's pod template gains it beside the
+    authored labels, and an authored `app` with another value is refused. Both are
+    targets of `security-context`, a `configmap` mount and an `external-secret`
+    injection.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: `tolerations`, `topologySpreadConstraints`;
   - `daemonset`: `affinity`, `topologySpreadConstraints`;
@@ -627,7 +640,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota` and `persistentvolume` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod` and `replicaset` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

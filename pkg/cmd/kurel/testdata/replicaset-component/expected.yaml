@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  labels:
+    launcher.gokure.dev/component: minimal
+  name: minimal
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: minimal
+  template:
+    metadata:
+      labels:
+        app: minimal
+        launcher.gokure.dev/component: minimal
+    spec:
+      containers:
+      - image: ghcr.io/example/app:v1.0.0
+        name: app
+        resources: {}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  labels:
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  minReadySeconds: 5
+  replicas: 3
+  selector:
+    matchExpressions:
+    - key: track
+      operator: In
+      values:
+      - stable
+      - canary
+    matchLabels:
+      tier: web
+  template:
+    metadata:
+      annotations:
+        example.com/scrape: "true"
+      labels:
+        app: web
+        launcher.gokure.dev/component: web
+        tier: web
+        track: stable
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - image: ghcr.io/example/web:v2.1.0
+        name: web
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /scratch
+          name: scratch
+      initContainers:
+      - args:
+        - --for
+        - db
+        image: ghcr.io/example/wait:v0.3.1
+        name: wait
+        resources: {}
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        fsGroup: 2000
+        runAsNonRoot: true
+      serviceAccountName: web
+      terminationGracePeriodSeconds: 0
+      volumes:
+      - emptyDir: {}
+        name: scratch

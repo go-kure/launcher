@@ -349,6 +349,8 @@ func extractPodSpecSC(obj client.Object) *corev1.PodSpec {
 		return &o.Spec.JobTemplate.Spec.Template.Spec
 	case *corev1.Pod:
 		return &o.Spec
+	case *appsv1.ReplicaSet:
+		return &o.Spec.Template.Spec
 	default:
 		return nil
 	}

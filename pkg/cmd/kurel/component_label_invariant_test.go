@@ -242,6 +242,15 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// and the `app` label; it is a pod, not a selector over pods.
 	"pod": {props: map[string]any{"containers": []any{
 		map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}, labelled: true},
+	// A ReplicaSet name is a DNS-1123 subdomain too. The `app` label is on the
+	// pod template, beside the authored label the authored selector picks.
+	"replicaset": {props: map[string]any{
+		"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
+		labelled: true, selectors: 1},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
@@ -985,7 +994,7 @@ func podSelectors(doc map[string]any) []podSelector {
 	}
 	spec, _ := doc["spec"].(map[string]any)
 	switch doc["kind"] {
-	case "Deployment", "StatefulSet", "DaemonSet":
+	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
 		add("spec.selector", spec["selector"])
 		tmpl, _ := spec["template"].(map[string]any)
 		ps, _ := tmpl["spec"].(map[string]any)
