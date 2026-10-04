@@ -22,6 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -173,6 +174,190 @@ func TestStampComponentLabel_MalformedPodTemplate(t *testing.T) {
 	err := stampComponentLabel(u, ownershipKey, "web")
 	if err == nil || !strings.Contains(err.Error(), `Deployment "w"`) {
 		t.Fatalf("error = %v, want one naming the Deployment", err)
+	}
+}
+
+// TestStampComponentLabel_MalformedPodTemplateLabel: a pod template label that
+// is no string is refused too.
+func TestStampComponentLabel_MalformedPodTemplateLabel(t *testing.T) {
+	u := unstructuredWorkload("batch/v1", "CronJob")
+	if err := unstructured.SetNestedField(u.Object, map[string]any{"app": int64(1)}, "spec", "jobTemplate", "spec", "template", "metadata", "labels"); err != nil {
+		t.Fatal(err)
+	}
+	err := stampComponentLabel(u, ownershipKey, "web")
+	if err == nil || !strings.Contains(err.Error(), `CronJob "w"`) || !strings.Contains(err.Error(), `"app"`) {
+		t.Fatalf("error = %v, want one naming the CronJob and the label", err)
+	}
+}
+
+// TestStampComponentLabel_NullPodTemplateMetadata: YAML's explicit null is an
+// absent value. A pod template whose metadata or labels are null gets the
+// label; a workload with no pod template, or a null one, is left as it is.
+func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
+	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}} {
+		spec := []string{"spec"}
+		if kind.kind == "CronJob" {
+			spec = []string{"spec", "jobTemplate", "spec"}
+		}
+		template := append(append([]string(nil), spec...), "template")
+		for name, null := range map[string][]string{
+			"labels":   append(append([]string(nil), template...), "metadata", "labels"),
+			"metadata": append(append([]string(nil), template...), "metadata"),
+		} {
+			t.Run(kind.kind+" with null "+name, func(t *testing.T) {
+				u := unstructuredWorkload(kind.apiVersion, kind.kind)
+				if err := unstructured.SetNestedField(u.Object, nil, null...); err != nil {
+					t.Fatal(err)
+				}
+				if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+					t.Fatalf("stampComponentLabel: %v", err)
+				}
+				labels, _ := podTemplateLabelsOf(t, u)
+				if want := map[string]string{ownershipKey: "web"}; !reflect.DeepEqual(labels, want) {
+					t.Errorf("pod template labels = %v, want %v", labels, want)
+				}
+			})
+		}
+		for name, null := range map[string][]string{"template": template, "spec": spec[:1]} {
+			t.Run(kind.kind+" with null "+name, func(t *testing.T) {
+				u := unstructuredWorkload(kind.apiVersion, kind.kind)
+				if err := unstructured.SetNestedField(u.Object, nil, null...); err != nil {
+					t.Fatal(err)
+				}
+				want := u.DeepCopy()
+				want.SetLabels(map[string]string{ownershipKey: "web"})
+				if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+					t.Fatalf("stampComponentLabel: %v", err)
+				}
+				if !reflect.DeepEqual(u.Object, want.Object) {
+					t.Errorf("object = %v, want only its own label added: %v", u.Object, want.Object)
+				}
+			})
+		}
+	}
+}
+
+// excludingSelector matches pods labelled app=web that do not carry the
+// component key: the selector of a workload whose author rules the key out.
+func excludingSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchLabels:      map[string]string{"app": "web"},
+		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: metav1.LabelSelectorOpDoesNotExist}},
+	}
+}
+
+// TestStampComponentLabel_SelectorThatRulesTheLabelOut: a workload whose own
+// selector matches its pod template, and would not with the label, keeps the
+// template as written: the API server refuses a workload whose selector does not
+// match its template. The object itself is still labelled.
+func TestStampComponentLabel_SelectorThatRulesTheLabelOut(t *testing.T) {
+	podLabels := func() map[string]string { return map[string]string{"app": "web"} }
+	dep := &appsv1.Deployment{}
+	dep.Spec.Selector, dep.Spec.Template.Labels = excludingSelector(), podLabels()
+	sts := &appsv1.StatefulSet{}
+	sts.Spec.Selector, sts.Spec.Template.Labels = excludingSelector(), podLabels()
+	ds := &appsv1.DaemonSet{}
+	ds.Spec.Selector, ds.Spec.Template.Labels = excludingSelector(), podLabels()
+	job := &batchv1.Job{}
+	job.Spec.Selector, job.Spec.Template.Labels = excludingSelector(), podLabels()
+	cron := &batchv1.CronJob{}
+	cron.Spec.JobTemplate.Spec.Selector, cron.Spec.JobTemplate.Spec.Template.Labels = excludingSelector(), podLabels()
+
+	rawSelector, err := runtime.DefaultUnstructuredConverter.ToUnstructured(excludingSelector())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstructuredWith := func(apiVersion, kind string, spec ...string) *unstructured.Unstructured {
+		u := unstructuredWorkload(apiVersion, kind)
+		if err := unstructured.SetNestedMap(u.Object, rawSelector, append(append([]string(nil), spec...), "selector")...); err != nil {
+			t.Fatal(err)
+		}
+		if err := unstructured.SetNestedStringMap(u.Object, podLabels(), append(append([]string(nil), spec...), "template", "metadata", "labels")...); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+
+	for name, obj := range map[string]client.Object{
+		"typed Deployment":        dep,
+		"typed StatefulSet":       sts,
+		"typed DaemonSet":         ds,
+		"typed Job":               job,
+		"typed CronJob":           cron,
+		"unstructured Deployment": unstructuredWith("apps/v1", "Deployment", "spec"),
+		"unstructured CronJob":    unstructuredWith("batch/v1", "CronJob", "spec", "jobTemplate", "spec"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := stampComponentLabel(obj, ownershipKey, "web"); err != nil {
+				t.Fatalf("stampComponentLabel: %v", err)
+			}
+			if got := obj.GetLabels()[ownershipKey]; got != "web" {
+				t.Errorf("object label = %q, want web", got)
+			}
+			labels, _ := podTemplateLabelsOf(t, obj)
+			if !reflect.DeepEqual(labels, podLabels()) {
+				t.Errorf("pod template labels = %v, want them as written: the selector rules the key out", labels)
+			}
+		})
+	}
+}
+
+// TestStampComponentLabel_SelectorThatAllowsTheLabel is the control: a selector
+// that names the key without ruling this value out, one that does not match the
+// template in the first place, and one that does not parse do not hold the label
+// back.
+func TestStampComponentLabel_SelectorThatAllowsTheLabel(t *testing.T) {
+	for name, selector := range map[string]*metav1.LabelSelector{
+		"another value ruled out": {MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: metav1.LabelSelectorOpNotIn, Values: []string{"other"}}}},
+		"no match before":         {MatchLabels: map[string]string{"app": "elsewhere"}, MatchExpressions: excludingSelector().MatchExpressions},
+		"invalid":                 {MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: "Sometimes"}}},
+		"empty":                   {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dep := &appsv1.Deployment{}
+			dep.Spec.Selector = selector
+			dep.Spec.Template.Labels = map[string]string{"app": "web"}
+			if err := stampComponentLabel(dep, ownershipKey, "web"); err != nil {
+				t.Fatalf("stampComponentLabel: %v", err)
+			}
+			if got := dep.Spec.Template.Labels[ownershipKey]; got != "web" {
+				t.Errorf("pod template label = %q, want web", got)
+			}
+		})
+	}
+}
+
+// TestStampComponentLabel_UnstructuredHelmReleaseNulls: a null spec or
+// postRenderers on an unstructured HelmRelease is an absent one.
+func TestStampComponentLabel_UnstructuredHelmReleaseNulls(t *testing.T) {
+	for name, spec := range map[string]any{
+		"null postRenderers": map[string]any{"postRenderers": nil},
+		"null spec":          nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "helm.toolkit.fluxcd.io/v2",
+				"kind":       "HelmRelease",
+				"metadata":   map[string]any{"name": "r"},
+				"spec":       spec,
+			}}
+			if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+				t.Fatalf("stampComponentLabel: %v", err)
+			}
+			entries, _, err := unstructured.NestedSlice(u.Object, "spec", "postRenderers")
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("spec.postRenderers = %v (%v), want the label's one entry", entries, err)
+			}
+		})
+	}
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "helm.toolkit.fluxcd.io/v2",
+		"kind":       "HelmRelease",
+		"metadata":   map[string]any{"name": "r"},
+		"spec":       map[string]any{"postRenderers": "oops"},
+	}}
+	if err := stampComponentLabel(u, ownershipKey, "web"); err == nil || !strings.Contains(err.Error(), `HelmRelease "r"`) {
+		t.Fatalf("error = %v, want one naming the HelmRelease", err)
 	}
 }
 
@@ -454,9 +639,38 @@ var configContracts = map[string]configContract{
 	"componentOwner":            {notForwarded: "the wrapper itself"},
 }
 
+// onConfigSelector reports whether assertion is made on a selector named
+// Config: app.Config.(T), or the app.Config.(type) of a type switch.
+func onConfigSelector(assertion *ast.TypeAssertExpr) bool {
+	if assertion == nil {
+		return false
+	}
+	sel, ok := assertion.X.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Config"
+}
+
+// typeSwitchSubject returns the x.(type) of a type switch, written bare or as
+// the right side of "v := x.(type)".
+func typeSwitchSubject(s *ast.TypeSwitchStmt) *ast.TypeAssertExpr {
+	var x ast.Expr
+	switch assign := s.Assign.(type) {
+	case *ast.ExprStmt:
+		x = assign.X
+	case *ast.AssignStmt:
+		if len(assign.Rhs) == 1 {
+			x = assign.Rhs[0]
+		}
+	}
+	subject, _ := x.(*ast.TypeAssertExpr)
+	return subject
+}
+
 // assertedConfigTypes parses every non-test Go file under each root and returns
-// the types asserted on a selector named Config (app.Config.(T)), with the
-// package qualifier of launcher's own oam package dropped.
+// the types asserted on a selector named Config, by a type assertion
+// (app.Config.(T)) or as a case of a type switch (switch app.Config.(type)),
+// with the package qualifier of launcher's own oam package dropped. It reads
+// syntax only: a config first copied to a variable, or passed to a function,
+// and asserted there is not seen.
 func assertedConfigTypes(t *testing.T, roots ...string) map[string][]string {
 	t.Helper()
 	found := map[string][]string{}
@@ -473,17 +687,30 @@ func assertedConfigTypes(t *testing.T, roots ...string) map[string][]string {
 			if err != nil {
 				return err
 			}
+			record := func(typ ast.Expr) {
+				name := strings.TrimPrefix(types.ExprString(typ), "oam.")
+				found[name] = append(found[name], fset.Position(typ.Pos()).String())
+			}
 			ast.Inspect(file, func(n ast.Node) bool {
-				assertion, ok := n.(*ast.TypeAssertExpr)
-				if !ok || assertion.Type == nil {
-					return true
+				switch n := n.(type) {
+				case *ast.TypeAssertExpr:
+					// A type switch's own x.(type) has no Type; its cases are read below.
+					if n.Type != nil && onConfigSelector(n) {
+						record(n.Type)
+					}
+				case *ast.TypeSwitchStmt:
+					if !onConfigSelector(typeSwitchSubject(n)) {
+						return true
+					}
+					for _, stmt := range n.Body.List {
+						for _, typ := range stmt.(*ast.CaseClause).List {
+							if ident, ok := typ.(*ast.Ident); ok && ident.Name == "nil" {
+								continue
+							}
+							record(typ)
+						}
+					}
 				}
-				sel, ok := assertion.X.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Config" {
-					return true
-				}
-				name := strings.TrimPrefix(types.ExprString(assertion.Type), "oam.")
-				found[name] = append(found[name], fset.Position(assertion.Pos()).String())
 				return true
 			})
 			return nil
@@ -495,11 +722,14 @@ func assertedConfigTypes(t *testing.T, roots ...string) map[string][]string {
 	return found
 }
 
-// TestOwnedConfig_ForwardsEveryConfigContract fails when the code asserts a
-// type on an application's config that configContracts does not account for,
-// and when a contract it calls forwarded has no method on the wrapper. A new
-// optional config interface therefore cannot be added without deciding whether
-// the wrapper, the outermost config after the transform, forwards it.
+// TestOwnedConfig_ForwardsEveryConfigContract fails when the code asserts or
+// switches on a type directly on an application's config (app.Config) that
+// configContracts does not account for, and when a contract it calls forwarded
+// has no method on the wrapper. A new optional config interface read that way
+// therefore cannot be added without deciding whether the wrapper, the outermost
+// config after the transform, forwards it. A read through a variable or a
+// function parameter is outside what the scan sees (assertedConfigTypes): the
+// ones the code has today are all made before the wrap.
 func TestOwnedConfig_ForwardsEveryConfigContract(t *testing.T) {
 	asserted := assertedConfigTypes(t, ".", filepath.Join("..", "cmd", "kurel"))
 	if len(asserted) < 10 {

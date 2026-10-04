@@ -237,9 +237,13 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
   `pkg/oam/README.md` "Component label and ownership").
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per workload kind (Deployment,
-    StatefulSet, DaemonSet, Job, CronJob). It replaces a value the chart set.
+    StatefulSet, DaemonSet, Job, CronJob). It replaces a value the chart set and touches
+    no selector: a `ComponentLabelKey` the chart's own selectors use parts them from its
+    pods, so the key must be one no chart sets, such as the default.
   - Chart output under template delivery: labels added to the rendered objects, where the
     key is absent.
+  - A generated workload whose own selector rules the label out keeps its pod template as
+    written, and its pods carry no component label.
   - `GeneratedApplication.Component` is the authored component for the pooler, a database,
     an object store and a component's synthesized NetworkPolicies.
   - A shared generated source is owned by the application: it carries no component label
