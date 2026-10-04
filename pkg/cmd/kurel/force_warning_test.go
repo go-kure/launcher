@@ -14,7 +14,7 @@ import (
 // These tests pin go-kure/launcher#720 through kurel's own transformer: every
 // PersistentVolumeClaim the force-replace trait annotates gets one warning,
 // whichever source built the claim (a component's `volumes` entry, a `pvc` trait,
-// a persistentvolumeclaim component or a list a manifests component generates),
+// a persistentvolumeclaim component or a manifests component),
 // and the output is unchanged. kurel sets no bundle's Force (go-kure/launcher#781),
 // so the annotation is the only way a claim it builds is forced; the bundle-level
 // reason is covered in pkg/oam.
@@ -125,12 +125,13 @@ spec:
 	}
 }
 
-// TestWarnForcedVolumes_ListMembers pins that a claim inside a list a `manifests`
-// component generates is warned about as Flux applies it: by its own annotation,
-// not the envelope's. The manifest parser expands the outer list itself, so the
-// claims sit in a nested one, which reaches the generated output as a list
-// envelope that Kustomize and Flux expand at apply time.
-func TestWarnForcedVolumes_ListMembers(t *testing.T) {
+// TestWarnForcedVolumes_ManifestsClaims pins that a claim a `manifests` component
+// emits is warned about by its own annotation. A claim inside a list envelope
+// no longer builds through `manifests`: an object left untyped inside a list is
+// one the environment policy cannot read, and it refuses it. The warning for
+// the members of an envelope, which a caller's own handler can still emit, is
+// covered in pkg/oam.
+func TestWarnForcedVolumes_ManifestsClaims(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -142,27 +143,19 @@ spec:
       type: manifests
       properties:
         inline: |
-          apiVersion: example.com/v1
-          kind: Widget
-          items:
-            - apiVersion: example.com/v1
-              kind: ClaimList
-              metadata:
-                name: claims
-                namespace: default
-              items:
-                - apiVersion: v1
-                  kind: PersistentVolumeClaim
-                  metadata:
-                    name: annotated
-                    namespace: default
-                    annotations:
-                      kustomize.toolkit.fluxcd.io/force: enabled
-                - apiVersion: v1
-                  kind: PersistentVolumeClaim
-                  metadata:
-                    name: plain
-                    namespace: default
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: annotated
+            namespace: default
+            annotations:
+              kustomize.toolkit.fluxcd.io/force: enabled
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: plain
+            namespace: default
 `
 	want := []string{`PersistentVolumeClaim default/annotated (component "raw") is force-applied (` + forceAnnotationReason + `)` + forcedWarningTail}
 	if got := forcedVolumeWarnings(t, app); !slices.Equal(got, want) {
