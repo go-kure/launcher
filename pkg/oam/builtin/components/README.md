@@ -2504,12 +2504,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   for long batch work a re-run should be the author's explicit choice.
 
   To opt in, add the **`force-replace` trait** (no properties) to the component.
-  It stamps `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
+  It sets the `ForceReplace` delivery intent on the component's application
+  (go-kure/launcher#782). kure's Flux workflow turns that into
+  `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
   component emits — the Job — which kustomize-controller
   reads as its apply `ForceSelector`: on an immutable-field error it deletes and
   recreates the object, so an update re-runs the Job, **stopping any run in
-  progress**. The trait sets the annotation after `createJob` returns,
-  which matters because `createJob` clears the generated Job's annotations
+  progress**. The workflow annotates the Job once it is generated,
+  so the annotation is not lost when `createJob` clears the generated Job's annotations
   wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
   because kure's `Create<Kind>` constructors now return TypeMeta and identity
   only; the assignment is kept so the field stays empty whatever a future

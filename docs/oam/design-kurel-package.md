@@ -166,9 +166,9 @@ runtime:
 | `volsync` | no | VolSync ReplicationSource |
 | `configmap` | no | ConfigMap with optional volume mount |
 | `topology-spread` | no | Launcher-native (not ported from the downstream runtime): stamps launcher's default topology spread constraints — the `webservice`/`worker` `topologySpread` opinion — onto the component's Deployment from its post-policy replica count. Takes no properties and no capability rendering. |
-| `force-replace` | no | Launcher-native (not ported from the downstream runtime): opt-in; annotates the component's generated objects, its trait sub-applications' included, with `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a Job's pod template). Replacing a Job re-runs it. Takes no properties and no capability rendering. |
+| `force-replace` | no | Launcher-native (not ported from the downstream runtime): opt-in; sets the `ForceReplace` delivery intent on the component's applications, its trait sub-applications included (go-kure/launcher#782). kure's Flux workflow turns it into `kustomize.toolkit.fluxcd.io/force: enabled` on their objects, so Flux deletes and recreates an object whose update fails on an immutable field (a Job's pod template). Replacing a Job re-runs it. Takes no properties and no capability rendering. |
 | `scaler` | no | HPA + optional PDB |
-| `prune-protection` | no | Annotates the component's generated objects, its trait sub-applications' included, with `kustomize.toolkit.fluxcd.io/prune: disabled`, so Flux never garbage-collects them. Takes no properties. |
+| `prune-protection` | no | Sets the `PruneProtection` delivery intent on the component's applications, its trait sub-applications included (go-kure/launcher#782). kure's Flux workflow turns it into `kustomize.toolkit.fluxcd.io/prune: disabled` on their objects, so Flux never garbage-collects them. Takes no properties. |
 
 `pkg/oam/builtin/traits/README.md` is the authoritative trait catalog; its tables list each
 trait's key properties, not every accepted field. The one

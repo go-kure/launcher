@@ -478,6 +478,23 @@ func checkSiblingGroups(entries []componentEntry) error {
 	return nil
 }
 
+// adoptMemberDeliveryIntents gives each sibling group's application the delivery
+// intent of its members, once traits have run: a trait sets its intent on the
+// member it ran on (prune-protection, force-replace), and a member's application
+// is not in the bundle, so nothing would deliver it. The group deploys as one
+// application and takes each intent that any member has, which then covers every
+// member's objects: an intent cannot be kept to one member of a group. The
+// built-in lowering rules forward both traits to every member, so for them the
+// group's intent is each member's (go-kure/launcher#782).
+func adoptMemberDeliveryIntents(entries []componentEntry) {
+	for _, e := range entries {
+		for _, m := range e.members {
+			e.app.Delivery.PruneProtection = e.app.Delivery.PruneProtection || m.app.Delivery.PruneProtection
+			e.app.Delivery.ForceReplace = e.app.Delivery.ForceReplace || m.app.Delivery.ForceReplace
+		}
+	}
+}
+
 // siblingAnswers names each value-forwarded contract cfg answers with a non-zero
 // value, or, for ServiceAccountName, for pods it runs.
 func siblingAnswers(cfg stack.ApplicationConfig) []string {

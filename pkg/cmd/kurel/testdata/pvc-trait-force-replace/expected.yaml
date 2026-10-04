@@ -1,9 +1,7 @@
-warning: PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data
+warning: PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (its application sets the force-replace delivery intent): when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: api
     launcher.gokure.dev/component: api
@@ -39,8 +37,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: api
     launcher.gokure.dev/component: api
@@ -60,8 +56,6 @@ apiVersion: v1
 automountServiceAccountToken: false
 kind: ServiceAccount
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: api
     launcher.gokure.dev/component: api
@@ -71,8 +65,6 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  annotations:
-    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app: api
     launcher.gokure.dev/component: api

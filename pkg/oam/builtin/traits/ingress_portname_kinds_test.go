@@ -44,14 +44,14 @@ func TestTransform_WorkloadKinds_ImplicitBackendPortName(t *testing.T) {
 		}{
 			{"matching name", []oam.Trait{ingressTrait(map[string]any{"path": "/", "portName": k.portName})}, ""},
 			{"matching name, self-named backend", []oam.Trait{ingressTrait(map[string]any{"path": "/", "backend": k.self, "portName": k.portName})}, ""},
-			{"matching name behind a decorator", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": k.portName})}, ""},
+			{"matching name after prune-protection", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": k.portName})}, ""},
 			{"unknown name", []oam.Trait{ingressTrait(map[string]any{"path": "/", "portName": "nope"})},
 				`cannot route implicit backend to port "nope"`},
 			{"another kind's name", []oam.Trait{ingressTrait(map[string]any{"path": "/", "portName": k.other})},
 				`cannot route implicit backend to port "` + k.other + `"`},
 			{"unknown name, self-named backend", []oam.Trait{ingressTrait(map[string]any{"path": "/", "backend": k.self, "portName": "nope"})},
 				`cannot route implicit backend to port "nope"`},
-			{"unknown name behind a decorator", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": "nope"})},
+			{"unknown name after prune-protection", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": "nope"})},
 				`cannot route implicit backend to port "nope"`},
 			{"unknown name on an explicit other backend", []oam.Trait{ingressTrait(map[string]any{"path": "/", "backend": "elsewhere", "portName": "nope"})}, ""},
 		}

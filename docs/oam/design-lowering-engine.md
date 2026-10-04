@@ -559,7 +559,7 @@ For `pvc` the kind's code path is `components.ParseClaimProperties`,
   namespace (go-kure/launcher#740 moves only the objects a moved Flux object reads by
   name).
 - **Bundle and provenance**: the claim joins the owner's bundle, so the owner's
-  decorators (`force-replace`, `prune-protection`) reach it, and provenance names the
+  delivery traits (`force-replace`, `prune-protection`) cover it, and provenance names the
   owner.
 Input is not among them: a ClusterProfile `pvc` capability supplies an unauthored
 `storageClassName` to both, to the trait through its rendering merge and to the kind
@@ -572,8 +572,8 @@ it too, through the handler's `ComponentCapabilityFiller` (go-kure/launcher#761)
 `pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
 claims apart from the `app` label, the same capability default on both paths, on
 a role kind's `pvc` volume and on a claim template, the
-same refusals for malformed properties on both paths, and a decorator on the owner
-that reaches the trait's claim.
+same refusals for malformed properties on both paths, and a delivery trait on the owner
+that covers the trait's claim.
 
 For `configmap` the kind's code path is `components.ParseConfigMapProperties` and
 `GenerateConfigMap`, and these are the ownership fields:
@@ -584,7 +584,7 @@ For `configmap` the kind's code path is `components.ParseConfigMapProperties` an
   the owner's Flux object when that object reads it by name (go-kure/launcher#740);
   the kind's ConfigMap stays in the application namespace.
 - **Bundle and provenance**: the ConfigMap joins the owner's bundle, so the owner's
-  decorators (`prune-protection`) reach it, and provenance names the owner.
+  delivery traits (`prune-protection`) cover it, and provenance names the owner.
 - **Mount**: the trait's optional `mountPath` mounts the ConfigMap into the owner's
   workload; a workload reads the kind's through a `configMap` volume or `envFrom`.
 

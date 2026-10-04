@@ -134,13 +134,13 @@ func TestSiblingGroup_OwnPodsOnRemappedPortsTargetSelectorPods(t *testing.T) {
 
 // A trait decorator wrapping either member must not hide what the group reads.
 func TestSiblingGroup_OwnPodsDecoratedMembersKeepComponentPolicy(t *testing.T) {
-	prune := oam.Trait{Type: "prune-protection", Properties: map[string]any{}}
+	decorator := decoratingTrait()
 	t.Run("deployment member", func(t *testing.T) {
-		np := ownPodsPolicy(t, ownPodsRule{ports: identityPorts, depTraits: []oam.Trait{prune}})
+		np := ownPodsPolicy(t, ownPodsRule{ports: identityPorts, depTraits: []oam.Trait{decorator}})
 		assertAllow(t, np, componentLabel, intstr.FromInt32(8080))
 	})
 	t.Run("service member", func(t *testing.T) {
-		np := ownPodsPolicy(t, ownPodsRule{ports: identityPorts}, prune)
+		np := ownPodsPolicy(t, ownPodsRule{ports: identityPorts}, decorator)
 		assertAllow(t, np, componentLabel, intstr.FromInt32(8080))
 	})
 }

@@ -22,7 +22,7 @@ func rbacPodsTrait() *oam.Trait {
 }
 
 // rbacApp builds the component's application, optionally wraps it in the
-// force-replace decorator, and applies rbac to it.
+// security-context decorator, and applies rbac to it.
 func rbacApp(t *testing.T, h oam.ComponentHandler, typ string, props map[string]any, decorate bool) (*stack.Bundle, error) {
 	t.Helper()
 	cfg, err := h.ToApplicationConfig(&oam.Component{Name: "api", Type: typ, Properties: props}, "default")
@@ -33,8 +33,9 @@ func rbacApp(t *testing.T, h oam.ComponentHandler, typ string, props map[string]
 	bundle := newBundle()
 	bundle.Applications = append(bundle.Applications, app)
 	if decorate {
-		if err := (&traits.ForceReplaceHandler{}).Apply(&oam.Trait{Type: "force-replace"}, app, bundle); err != nil {
-			t.Fatalf("force-replace Apply: %v", err)
+		applySecurityContext(t, app)
+		if app.Config == cfg {
+			t.Fatal("the config is not decorated; the decorated cases would be vacuous")
 		}
 	}
 	return bundle, (&traits.RBACHandler{}).Apply(rbacPodsTrait(), app, bundle)

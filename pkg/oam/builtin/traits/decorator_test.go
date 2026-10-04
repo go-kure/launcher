@@ -192,25 +192,9 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 		assertForwards(t, app.Config, &called)
 	})
 
-	t.Run("PruneProtectionHandler", func(t *testing.T) {
-		called := false
-		app := stack.NewApplication("app", "default", &augmenterStub{called: &called})
-		if err := (&traits.PruneProtectionHandler{}).Apply(
-			&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
-			t.Fatalf("Apply: %v", err)
-		}
-		assertForwards(t, app.Config, &called)
-	})
-
-	t.Run("ForceReplaceHandler", func(t *testing.T) {
-		called := false
-		app := stack.NewApplication("app", "default", &augmenterStub{called: &called})
-		if err := (&traits.ForceReplaceHandler{}).Apply(
-			&oam.Trait{Type: "force-replace"}, app, &stack.Bundle{}); err != nil {
-			t.Fatalf("Apply: %v", err)
-		}
-		assertForwards(t, app.Config, &called)
-	})
+	// prune-protection and force-replace are no construction site: they set a
+	// delivery intent and leave the config as it is (go-kure/launcher#782,
+	// TestDeliveryIntentTraits_LeaveAugmentLayoutResourcesAlone).
 
 	// NewConfigMapDecorator/RealHelmTemplate* below is the end-to-end proof that
 	// presence-based forwarding fires for a production component (a real
@@ -394,12 +378,28 @@ type namedAugmentingSubAppStub struct{ namedSubAppStub }
 
 func (s *namedAugmentingSubAppStub) AugmentLayout(l *layout.ManifestLayout) error { return nil }
 
-// TestDecorators_ForwardComponentName pins that prune-protection and
-// force-replace keep the component a trait sub-application names
-// (go-kure/launcher#712: the engine decorates sub-applications with them), on
-// both wrap paths, and answer "" for an inner that names none.
+// TestDecorators_ForwardComponentName pins that a trait decorator keeps the
+// component its inner config names (oam.ComponentNamed, go-kure/launcher#712),
+// on both wrap paths, and answers "" for an inner that names none. The engine
+// reads the name through whatever decorators a config carries when it labels a
+// trait sub-application's objects.
 func TestDecorators_ForwardComponentName(t *testing.T) {
-	handlers := []oam.TraitHandler{&traits.PruneProtectionHandler{}, &traits.ForceReplaceHandler{}}
+	decorators := []struct {
+		name string
+		wrap func(stack.ApplicationConfig) stack.ApplicationConfig
+	}{
+		{"configmap", func(in stack.ApplicationConfig) stack.ApplicationConfig {
+			return traits.NewConfigMapDecorator(in, "c", "/etc/c")
+		}},
+		{"external-secret", func(in stack.ApplicationConfig) stack.ApplicationConfig {
+			return traits.NewExternalSecretDecorator(in, "s", "", false)
+		}},
+		{"security-context", func(in stack.ApplicationConfig) stack.ApplicationConfig {
+			app := stack.NewApplication("shared-data", "default", in)
+			applySecurityContext(t, app)
+			return app.Config
+		}},
+	}
 	inners := []struct {
 		name  string
 		inner stack.ApplicationConfig
@@ -409,18 +409,18 @@ func TestDecorators_ForwardComponentName(t *testing.T) {
 		{name: "named augmenting", inner: &namedAugmentingSubAppStub{namedSubAppStub{component: "api"}}, want: "api"},
 		{name: "unnamed", inner: &nakedStub{}, want: ""},
 	}
-	for _, h := range handlers {
+	for _, d := range decorators {
 		for _, in := range inners {
-			app := stack.NewApplication("shared-data", "default", in.inner)
-			if err := h.Apply(&oam.Trait{}, app, &stack.Bundle{}); err != nil {
-				t.Fatalf("%T %s: Apply: %v", h, in.name, err)
+			cfg := d.wrap(in.inner)
+			if cfg == in.inner {
+				t.Fatalf("%s %s: the config was not decorated; the assertion below would be vacuous", d.name, in.name)
 			}
-			named, ok := app.Config.(oam.ComponentNamed)
+			named, ok := cfg.(oam.ComponentNamed)
 			if !ok {
-				t.Fatalf("%T %s: decorated config does not implement oam.ComponentNamed", h, in.name)
+				t.Fatalf("%s %s: decorated config does not implement oam.ComponentNamed", d.name, in.name)
 			}
 			if got := named.ComponentName(); got != in.want {
-				t.Errorf("%T %s: ComponentName() = %q, want %q", h, in.name, got, in.want)
+				t.Errorf("%s %s: ComponentName() = %q, want %q", d.name, in.name, got, in.want)
 			}
 		}
 	}

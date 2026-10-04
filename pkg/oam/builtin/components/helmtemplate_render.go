@@ -336,9 +336,8 @@ func (r *chartRender) objects() []*client.Object {
 // decoratorBase-embedding types) only mutates the objects its inner Generate
 // returns in place and never appends a new one; a trait's own additional
 // resources (e.g. a ConfigMap or Secret) are emitted as a separate
-// stack.Application and never merged into this Application's ml.Resources (see
-// traits/pruneprotection.go's "narrow scope" doc comment for the same
-// convention stated explicitly). A future decorator that broke this convention
+// stack.Application and never merged into this Application's ml.Resources. A
+// future decorator that broke this convention
 // would have its addition silently dropped here. Each group becomes a child
 // ManifestLayout written to a numbered sub-directory in execution order,
 // chained via DependsOn so kure's FluxCD integrator (in FluxIntegratedPerLayout

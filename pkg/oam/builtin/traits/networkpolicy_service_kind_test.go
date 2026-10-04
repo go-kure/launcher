@@ -26,8 +26,15 @@ func serviceKindTransformer() *oam.Transformer {
 	registerWebservice(tr) // also registers "service" and "deployment"
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
-	tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
+	tr.RegisterBuiltinTrait("security-context", &traits.SecurityContextHandler{})
 	return tr
+}
+
+// decoratingTrait is a trait that wraps the config of the component it is on:
+// the tests below put it in front of a routing trait to pin that a decorator
+// does not hide what the routing trait reads.
+func decoratingTrait() oam.Trait {
+	return oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "baseline"}}
 }
 
 // apiServiceComponent is a service named "api" in front of the deployment "api-server": http
@@ -111,7 +118,7 @@ func TestTransform_ServiceKind_DecoratedStillTargetsSelectorPods(t *testing.T) {
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			apiServerComponent(),
 			apiServiceComponent(
-				oam.Trait{Type: "prune-protection", Properties: map[string]any{}},
+				decoratingTrait(),
 				ingressTrait(map[string]any{"path": "/"}),
 			),
 		}},
@@ -183,7 +190,7 @@ func TestTransform_ServiceKind_NonFirstPortNeedsExplicitBackend(t *testing.T) {
 // accepted. A decorating trait declared first must not hide the port names, and naming the
 // service itself as the backend is still the implicit backend.
 func TestTransform_ServiceKind_ImplicitBackendPortName(t *testing.T) {
-	pruneFirst := oam.Trait{Type: "prune-protection", Properties: map[string]any{}}
+	decoratorFirst := decoratingTrait()
 	tests := []struct {
 		name    string
 		traits  []oam.Trait
@@ -196,9 +203,9 @@ func TestTransform_ServiceKind_ImplicitBackendPortName(t *testing.T) {
 			`cannot route implicit backend to port "nope"`},
 		{"later port by name, self-named backend", []oam.Trait{ingressTrait(map[string]any{"path": "/", "backend": "api", "portName": "dns"})},
 			`cannot route implicit backend to port "dns"`},
-		{"later port by name behind a decorator", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": "dns"})},
+		{"later port by name behind a decorator", []oam.Trait{decoratorFirst, ingressTrait(map[string]any{"path": "/", "portName": "dns"})},
 			`cannot route implicit backend to port "dns"`},
-		{"first port by name behind a decorator", []oam.Trait{pruneFirst, ingressTrait(map[string]any{"path": "/", "portName": "http"})}, ""},
+		{"first port by name behind a decorator", []oam.Trait{decoratorFirst, ingressTrait(map[string]any{"path": "/", "portName": "http"})}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

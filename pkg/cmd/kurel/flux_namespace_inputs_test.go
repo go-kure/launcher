@@ -263,12 +263,12 @@ func TestFluxNamespace_NonMovingComponentInputsStay(t *testing.T) {
 }
 
 // TestFluxNamespace_ReadsSurviveDecoration: a decorating trait on the
-// helmrelease (prune-protection wraps its config) still forwards what the
+// helmrelease (security-context wraps its config) still forwards what the
 // release reads, so the read ConfigMap follows it.
 func TestFluxNamespace_ReadsSurviveDecoration(t *testing.T) {
 	hr := fluxNSComponent(t, "c", "helmrelease",
 		map[string]any{"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "vals"}}},
-		oam.Trait{Type: "prune-protection"}, configMapTrait("vals"))
+		oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "baseline"}}, configMapTrait("vals"))
 	got := fluxNSObjects(t, hr)
 	if ns := got["ConfigMap/vals"]; ns != fluxNSTarget {
 		t.Errorf("ConfigMap/vals namespace = %q, want %q", ns, fluxNSTarget)

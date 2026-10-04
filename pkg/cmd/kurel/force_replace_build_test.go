@@ -2,9 +2,11 @@ package kurel
 
 import (
 	"bytes"
+	"maps"
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"sigs.k8s.io/yaml"
 )
 
@@ -12,7 +14,9 @@ import (
 // real `kurel build` entry point. That path is what proves the trait is
 // registered on BOTH sides: pkg/oam's validTraitTypes allowlist (else parsing
 // rejects the document) and builtinTraitHandlers (else the transform has no
-// handler to dispatch it to).
+// handler to dispatch it to). The trait sets a delivery intent on the
+// application (go-kure/launcher#782); kurel's flat output has no place for it,
+// so the output is the same with and without the trait.
 
 const forceReplaceJobYAML = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -65,40 +69,48 @@ func docAnnotation(obj map[string]any, key string) (string, bool) {
 	return v, ok
 }
 
-// TestBuildCommand_JobWithForceReplaceTrait: with the trait, every object the
-// job component emits — the Job; it generates no ServiceAccount
-// (go-kure/launcher#702) — carries
-// kustomize.toolkit.fluxcd.io/force: enabled, and the Job keeps the component
-// name.
+// TestBuildCommand_JobWithForceReplaceTrait: with the trait, the job
+// component's application carries the force-replace delivery intent, the Job
+// keeps the component name, and the output is byte for byte what the component
+// builds without the trait: no object carries a Flux annotation.
 func TestBuildCommand_JobWithForceReplaceTrait(t *testing.T) {
-	docs, out, err := buildDocs(t, forceReplaceJobYAML+"      traits:\n        - type: force-replace\n")
+	appYAML := forceReplaceJobYAML + "      traits:\n        - type: force-replace\n"
+	docs, out, err := buildDocs(t, appYAML)
 	if err != nil {
 		t.Fatalf("build failed: %v\noutput: %s", err, out)
 	}
-	kinds := map[string]bool{}
+	jobs := 0
 	for _, d := range docs {
-		kind, _ := d["kind"].(string)
-		kinds[kind] = true
-		if kind == "Job" {
+		if kind, _ := d["kind"].(string); kind == "Job" {
+			jobs++
 			md, _ := d["metadata"].(map[string]any)
 			if md["name"] != "migrate" {
 				t.Errorf("Job name = %v, want %q (force-replace must not rename the Job)", md["name"], "migrate")
 			}
 		}
-		if v, _ := docAnnotation(d, "kustomize.toolkit.fluxcd.io/force"); v != "enabled" {
-			t.Errorf("%s: kustomize.toolkit.fluxcd.io/force = %q, want \"enabled\"\noutput:\n%s", kind, v, out)
-		}
 	}
-	for _, k := range []string{"Job"} {
-		if !kinds[k] {
-			t.Errorf("output has no %s; the annotation assertion is vacuous for it\noutput:\n%s", k, out)
-		}
+	if jobs != 1 {
+		t.Errorf("output has %d Job(s), want 1\noutput:\n%s", jobs, out)
+	}
+	assertNoFluxObjectKeys(t, docs...)
+	_, plain, err := buildDocs(t, forceReplaceJobYAML)
+	if err != nil {
+		t.Fatalf("build without the trait failed: %v\noutput: %s", err, plain)
+	}
+	if out != plain {
+		t.Errorf("the trait changed kurel's output\nwith:\n%s\nwithout:\n%s", out, plain)
+	}
+
+	want := map[string]stack.DeliveryIntent{"migrate": {ForceReplace: true}}
+	if got := deliveryIntents(t, appYAML); !maps.Equal(got, want) {
+		t.Errorf("delivery intents = %+v, want %+v", got, want)
 	}
 }
 
 // TestBuildCommand_JobWithoutForceReplaceTrait pins the unchanged default: a
-// job component without the trait emits no force annotation, so a pod-level
-// update stays an apply error rather than a silent delete-and-recreate.
+// job component without the trait states no intent and emits no force
+// annotation, so a pod-level update stays an apply error rather than a silent
+// delete-and-recreate.
 func TestBuildCommand_JobWithoutForceReplaceTrait(t *testing.T) {
 	docs, out, err := buildDocs(t, forceReplaceJobYAML)
 	if err != nil {
@@ -111,6 +123,10 @@ func TestBuildCommand_JobWithoutForceReplaceTrait(t *testing.T) {
 		if v, ok := docAnnotation(d, "kustomize.toolkit.fluxcd.io/force"); ok {
 			t.Errorf("%v: carries kustomize.toolkit.fluxcd.io/force=%q without the trait", d["kind"], v)
 		}
+	}
+	want := map[string]stack.DeliveryIntent{"migrate": {}}
+	if got := deliveryIntents(t, forceReplaceJobYAML); !maps.Equal(got, want) {
+		t.Errorf("delivery intents = %+v, want %+v", got, want)
 	}
 }
 
