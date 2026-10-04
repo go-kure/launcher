@@ -432,7 +432,8 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
-all for a name the author set. `NameRequest` carries the Application's name, the component
+all for a name the author set. `NameRequest` carries the Application's name (the lowered one
+where a `DocumentLoweringRule` renamed the document, as the defaults use it), the component
 (empty for the bundle, a group and an external backend's policy), the role, the object's kind
 as `Kind` or `Kind.group` (empty for a role that names no object) and the default as launcher
 would use it: already shortened where launcher shortens a name (a group's bundle, the `hpa`,

@@ -93,7 +93,9 @@ func classOfNameRole(role NameRole) (nameClass, bool) {
 // NameRequest is what a TransformContext.Naming hook is asked: one name
 // launcher is about to use, and the name it uses when the hook declines.
 type NameRequest struct {
-	// Application is the name of the document being transformed.
+	// Application is the name of the document being transformed: the name the
+	// defaults are built from, which is the lowered one where a document
+	// lowering rule renamed the document.
 	Application string
 	// Component is the component the name belongs to. It is empty for a name the
 	// document as a whole owns: the bundle, a group, and the NetworkPolicy
