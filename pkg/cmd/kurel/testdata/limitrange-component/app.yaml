@@ -1,0 +1,31 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: container-defaults
+      type: limitrange
+      properties:
+        limits:
+          - type: Container
+            default:
+              cpu: 500m
+              memory: 256Mi
+            defaultRequest:
+              cpu: 100m
+              memory: 128Mi
+            max:
+              cpu: 2
+            min:
+              cpu: 50m
+            maxLimitRequestRatio:
+              cpu: "4"
+          - type: PersistentVolumeClaim
+            max:
+              storage: 10Gi
+    - name: enforces-nothing
+      type: limitrange
+      properties:
+        limits: []
