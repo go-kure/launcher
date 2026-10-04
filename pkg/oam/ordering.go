@@ -169,11 +169,14 @@ func (e componentEntry) ruleOrder() []string {
 // rule declared (Component.OrderAfter).
 //
 // A generated source is a Flux source (generatedSourceTypes) a lowering rule
-// emitted, ordered a component after, and ordered after nothing itself. It is
+// emitted, ordered a component after, and ordered after nothing itself, that is
+// not a member of a same-name sibling group. It is
 // kept out of the groups, for the application bundle to hold: a bundle's own
 // applications are applied before its children, so every consumer follows it
-// wherever the consumer is placed. For the same reason nothing can place it in
-// a tier or make it wait, and an order after it needs no group.
+// wherever the consumer is placed. For the same reason no placement or
+// dependency policy can place it in a tier or make it wait, and an order after
+// it needs no group. A source that fails one of those conditions is a
+// component like any other, in a group.
 //
 // A dependency on a name no component has is ignored, as it always was: the
 // dependency policy refuses one itself. A rule's order after such a name, or
