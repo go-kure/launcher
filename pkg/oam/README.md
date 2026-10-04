@@ -414,6 +414,71 @@ transform with the property in the error, so the cluster never has to refuse it
 listed in the trait handlers' README (`pkg/oam/builtin/traits/README.md`). The application
 bundle carries the Application's name as written.
 
+### Name roles and the `Naming` hook
+
+A consumer changes a name launcher generates through `TransformContext.Naming`, a
+`func(NameRequest) (string, bool)` (go-kure/launcher#787). Every name of the roles below is
+resolved in one order: the author's own property when the author wrote it, else the hook's
+answer, else the default. The roles are a closed set, `NameRoles()`.
+
+| Role | What it names | Default | Author property | Hook asked |
+|------|---------------|---------|-----------------|------------|
+| `bundle` | The application's bundle. | The Application's `metadata.name`. | none | always |
+| `group` | The bundle of one ordered group, a child of the application's. | `<application>-<tier>` or `<application>-<NN>`, shortened to 253. | none | always |
+| `sub-application` | An application launcher adds beside a component's own: each one a trait creates, and the one holding each synthesized NetworkPolicy. It is no object. | What the trait or the synthesis names it (`<component>-scaler`, `<component>-rbac`, the policy's default name, …). | none | always |
+| `netpol-synth` | A synthesized NetworkPolicy. | `{owner}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`. | none | always |
+| `hpa` | The `scaler` trait's HorizontalPodAutoscaler. | `<component>-hpa` | `hpaName` | unless `hpaName` is set |
+| `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
+| `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
+| `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
+
+The hook sees every role. It is asked once for each name the transform resolves, and not at
+all for a name the author set. `NameRequest` carries the Application's name, the component
+(empty for the bundle, a group and an external backend's policy), the role, the object's kind
+as `Kind` or `Kind.group` (empty for a role that names no object) and the default, already
+shortened. The default is what tells apart several names of one component and role. Returning
+`false` keeps the default. Answers are not cached: a hook must give the same answer to the
+same request. A component's own application, whose name is the component's, and an
+application a component adds itself (the `helm` values ConfigMap's) are not roles, and the
+hook is not asked for them.
+
+A name that is not the default (the author's or the hook's) must be a DNS-1123 subdomain of
+at most 253 characters, in every role, and is used as given or refused, never shortened. For
+an object that is the rule of its kind. For `bundle`, `group` and `sub-application` it is
+launcher's own rule, on these grounds: a bundle's and a group's name is written as the name
+of a Flux Kustomization, all three become a directory segment in a written tree, and their
+defaults are built from an Application or component name launcher already holds to that
+rule. The cost: a hook cannot return a name with an upper-case letter or an underscore for
+them. A default is used as it is, 253 characters at most where launcher shortens it.
+
+The transform keeps the names it resolved apart. Two that name one object (group, kind,
+namespace and name) or one bundle (the application's and the groups' share one space) fail
+the transform, naming both: who resolved each, and whether it is the default, an authored
+property or the hook's answer.
+
+```
+name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named by component "web" traits[0] "scaler" (role "hpa", its default) and by component "web" traits[1] "scaler" (role "hpa", its default); give one of them another name
+```
+
+This knows only the names resolved this way: the roles above. An object a component
+generates, one a lowering rule names, and the object of a trait that is not in the table are
+not in it, so `CheckInDocumentCollisions` (below) is still what compares every generated
+object. The component and lowering-rule names join it in later changes of
+go-kure/launcher#787.
+
+A sub-application's name is resolved and validated but not kept apart: it is not unique. A
+`configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
+holding a ConfigMap and one a PersistentVolumeClaim, and that is accepted. A sub-application's
+name is also not its object's: a hook that renames the sub-application leaves the object's name
+alone. A consumer that read a sub-application's `Name` to learn the name of its ConfigMap,
+Ingress, HTTPRoute or ReplicationSource must read the generated object instead.
+
+A trait handler resolves a name with `(*Trait).ResolveName(NameSpec)`, on the trait its
+`Apply` received. Only a trait the engine applies has a hook and a claim space: on a trait
+built outside a transform (a handler's `Apply` called directly) `ResolveName` validates an
+authored name and returns it or the default, the hook is not consulted and nothing is kept
+apart.
+
 ## Parsing
 
 | Function | Purpose |
@@ -612,7 +677,9 @@ Nothing above compares the applications inside one document: a component and ano
 component's trait, two components, or two traits can each generate the same object, and
 both pass `Transform` (go-kure/launcher#646). That includes one component's own: two of
 its traits, or a trait and an application the component generates itself (a `helm`
-component's values ConfigMap), rendering one object (go-kure/launcher#757). `Transform` alone refuses none of these, so a
+component's values ConfigMap), rendering one object (go-kure/launcher#757). `Transform` alone refuses only those whose
+names it resolves under a name role (see "Name roles and the `Naming` hook": two `scaler`,
+two `rbac` or two `networkpolicy` traits naming one object, on one component or on two), so a
 library caller must run both steps below on every transformed document, as `kurel build`
 does. After transforming a document, generate it
 with `GenerateApplications(cluster)` and pass the result to `CheckInDocumentCollisions`. It

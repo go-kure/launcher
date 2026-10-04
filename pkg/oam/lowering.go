@@ -331,6 +331,11 @@ type NameAllocator struct {
 	// a later round cannot be safely told apart from a genuinely different
 	// sibling colliding with an earlier one.
 	round int
+	// resolved is the second claim space (go-kure/launcher#787): every object
+	// and bundle name resolved through the name resolver, by what it names
+	// (claimName, naming.go). It is separate from taken, which holds the names
+	// lowering rules reserve by namespace and name alone. Created on first claim.
+	resolved map[nameClaimKey]resolvedNameClaim
 }
 
 // nameClaim records which origin claimed a generated name, and in which round, so

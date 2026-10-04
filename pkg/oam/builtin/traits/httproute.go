@@ -34,9 +34,13 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		return err
 	}
 
-	subAppName := config.Name
-	if subAppName == "" {
-		subAppName = routingObjectName(app.Name, "httproute", config.Scope)
+	config.objectName = config.Name
+	if config.objectName == "" {
+		config.objectName = routingObjectName(app.Name, "httproute", config.Scope)
+	}
+	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	if err != nil {
+		return err
 	}
 	routeApp := stack.NewApplication(
 		subAppName,
@@ -944,8 +948,11 @@ func isAllowedRedirectStatus(code int) bool {
 
 // HTTPRouteConfig implements stack.ApplicationConfig for httproute traits.
 type HTTPRouteConfig struct {
-	Name          string // optional, overrides sub-app name for multi-httproute components
-	Scope         string // optional; sub-app name becomes {component}-httproute-{scope} when set and Name is empty
+	Name  string // optional, overrides sub-app name for multi-httproute components
+	Scope string // optional; sub-app name becomes {component}-httproute-{scope} when set and Name is empty
+	// objectName is the HTTPRoute's name as Apply settled it: Name, else the
+	// default. "" on a config built directly (routingObjectNameOr).
+	objectName    string
 	componentName string
 	ParentRefs    []ParentRef
 	Hostnames     []string
@@ -1136,7 +1143,7 @@ type BackendRef struct {
 
 // Generate creates a Gateway API HTTPRoute resource.
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	route := kubernetes.CreateHTTPRoute(app.Name, app.Namespace)
+	route := kubernetes.CreateHTTPRoute(routingObjectNameOr(c.objectName, app), app.Namespace)
 	route.Labels = componentLabels(c.componentName)
 	route.Annotations = c.Annotations
 

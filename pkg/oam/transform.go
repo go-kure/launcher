@@ -66,6 +66,19 @@ type TransformContext struct {
 	// ports) and the sources allowed to reach it. Non-authorable, like EgressPeers. nil on the
 	// kurel path, where endpoint-ingress synthesis is a no-op.
 	IngressPeers map[string][]netpol.IngressPeer
+	// Naming is the consumer's say in the names launcher generates
+	// (go-kure/launcher#787). It is asked once for each name of a role in
+	// NameRoles that the author did not set: return a name and true to use it in
+	// place of NameRequest.Default, or false to keep the default. A returned name
+	// must be a DNS-1123 subdomain; it is used as returned or refused, never
+	// shortened. Two names that end up naming one object, or one bundle, fail the
+	// transform with both named. nil asks nothing: every name is the author's or
+	// the default. Non-authorable platform input.
+	Naming func(NameRequest) (string, bool)
+	// names resolves and claims every name of this transform. Internal only: nil
+	// on a caller-constructed ctx; TransformWithPolicy sets it. A pointer, so
+	// every by-value ctx copy shares the one claim space.
+	names *nameResolver
 	// consumedCapabilities accumulates keys traits actually resolved against
 	// Capabilities (go-kure/launcher#290) — populated by resolveCapability's call sites,
 	// and by LoweringContext.Capability for a key a lowering rule reads
@@ -564,9 +577,11 @@ type componentEntry struct {
 
 // Transform converts an OAM Application to a kure Cluster.
 //
-// It does not refuse two applications of the document that generate one
-// object, two traits of one component included (go-kure/launcher#757): a
-// caller runs GenerateApplications and CheckInDocumentCollisions on the result.
+// It refuses two names it resolved under a name role (NameRoles) that name one
+// object or one bundle (go-kure/launcher#787). It does not compare the other
+// objects two applications of the document generate, two traits of one
+// component included (go-kure/launcher#757): a caller runs GenerateApplications
+// and CheckInDocumentCollisions on the result.
 func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.Cluster, error) {
 	cluster, _, err := t.TransformWithPolicy(app, ctx)
 	return cluster, err
@@ -587,6 +602,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}
+	ctx.names = &nameResolver{hook: ctx.Naming, application: app.Metadata.Name, claims: NewNameAllocator()}
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -741,6 +757,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
+	if err := ctx.names.resolveSynthesizedPolicyNames(cluster); err != nil {
+		return nil, nil, err
+	}
 	postProcessFluxNamespace(cluster, *ctx.traitSubApps, ctx.FluxNamespace)
 	// Last: a decorator hides the interfaces the steps above read on a trait
 	// sub-application (the NetworkPolicy synthesis collectors among them).
@@ -894,20 +913,28 @@ func (t *Transformer) applyPolicies(app *Application, entries []componentEntry) 
 // delivers the bundle keeps to it. Nothing here sets a delivery field of a
 // bundle: how it is delivered is the consumer's (go-kure/launcher#781).
 func (t *Transformer) buildCluster(app *Application, order *componentOrder, ctx TransformContext) (*stack.Cluster, error) {
+	bundleName, err := ctx.names.resolveBundleName(NameRoleBundle, app.Metadata.Name)
+	if err != nil {
+		return nil, err
+	}
 	if !order.ordered() {
-		bundle, err := t.buildBundle(app, app.Metadata.Name, order.sequence(), ctx)
+		bundle, err := t.buildBundle(app, bundleName, order.sequence(), ctx)
 		if err != nil {
 			return nil, err
 		}
 		return stack.NewCluster(ctx.ClusterID, &stack.Node{Name: "", Bundle: bundle}), nil
 	}
 
-	root, err := t.buildBundle(app, app.Metadata.Name, order.sources, ctx)
+	root, err := t.buildBundle(app, bundleName, order.sources, ctx)
 	if err != nil {
 		return nil, err
 	}
 	for i, entries := range order.groups {
-		group, err := t.buildBundle(app, order.groupName(app.Metadata.Name, i), entries, ctx)
+		groupName, err := ctx.names.resolveBundleName(NameRoleGroup, order.groupName(app.Metadata.Name, i))
+		if err != nil {
+			return nil, err
+		}
+		group, err := t.buildBundle(app, groupName, entries, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1176,7 +1203,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 	}
 	for _, step := range steps {
 		entry := step.entry
-		for _, trait := range step.traits {
+		for position, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
 				where := traitLocation(&entry.component, trait.origin)
@@ -1254,6 +1281,10 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					}
 				}
 			}
+			// What the trait's handler resolves its names through. A decorating
+			// trait keeps it for its later Apply calls (decorateSubApplications),
+			// which then resolve the same names for the same owner.
+			resolved.naming = ctx.names.forTrait(entry.component.Name, trait, position)
 			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{

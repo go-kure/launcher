@@ -49,8 +49,12 @@ func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Applicat
 		return err
 	}
 
+	subAppName, err := resolveSubApplicationName(trait, config.Name)
+	if err != nil {
+		return err
+	}
 	cnpApp := stack.NewApplication(
-		config.Name,
+		subAppName,
 		app.Namespace,
 		config,
 	)

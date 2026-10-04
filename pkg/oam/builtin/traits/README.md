@@ -914,11 +914,19 @@ launcher refuses it. The name also becomes a file name and a `kustomization.yaml
 the written tree, and a colon has not been shown to be safe there. An author who needs such
 a name cannot write it today.
 
-An authored name is checked as a name, not against the other objects of the document:
-`Transform` accepts an `hpaName` equal to another component's HPA, as it accepts two
-default names that meet. `oam.GenerateApplications` and `oam.CheckInDocumentCollisions`
-report it (`kurel build` runs both; see `pkg/oam/README.md`, "Nothing above compares the
-applications inside one document").
+The names of the `scaler`, `rbac` and `networkpolicy` objects are resolved under a name role
+(`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the author's property, else the
+consumer's `TransformContext.Naming` hook, else the default. `Transform` keeps those names
+apart and refuses two that name one object, naming both: an `hpaName` equal to another
+component's HPA, or two `scaler` traits on one component. Every other authored name in the
+table below is checked as a name, not against the other objects of the document:
+`oam.GenerateApplications` and `oam.CheckInDocumentCollisions` report those (`kurel build`
+runs both; see `pkg/oam/README.md`, "Nothing above compares the applications inside one
+document").
+
+Every trait's sub-application name is resolved under the `sub-application` role, so the hook
+can rename it. That name is not the object's: the `configmap`, `ingress`, `httproute` and
+`volsync` objects keep their own name when their sub-application is renamed.
 
 | Trait | Property | What it names |
 |-------|----------|---------------|

@@ -149,6 +149,11 @@ type Trait struct {
 	// trait never forwarded that way, nor lowered from one. It does not stamp the
 	// trait: a forwarded trait stays unstamped, exactly as authored.
 	authoredIndex *int
+	// naming is what ResolveName resolves a name with (naming.go): the transform's
+	// resolver and where this trait stands. The engine sets it on the copy it
+	// hands a handler's Apply; nil on any other trait, whose ResolveName then
+	// consults no hook and claims nothing.
+	naming *traitNaming
 }
 
 // Origin returns the trait's authored provenance and whether the lowering engine ever

@@ -87,8 +87,12 @@ func (h *CertificateHandler) Apply(trait *oam.Trait, app *stack.Application, bun
 		return err
 	}
 
+	subAppName, err := resolveSubApplicationName(trait, app.Name+"-certificate")
+	if err != nil {
+		return err
+	}
 	certApp := stack.NewApplication(
-		app.Name+"-certificate",
+		subAppName,
 		app.Namespace,
 		config,
 	)

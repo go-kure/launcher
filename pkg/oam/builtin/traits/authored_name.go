@@ -3,6 +3,7 @@ package traits
 import (
 	"strings"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -30,6 +31,27 @@ func checkAuthoredObjectName(property, object, name string) error {
 			property, name, object, strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// resolveObjectName resolves the name of an object a trait generates
+// (oam.Trait.ResolveName): the authored one, else the consumer hook's, else
+// def, launcher's default already shortened to fit. authored is the value of
+// property as the handler parsed it, "" when the author left the property out;
+// an empty authored string is refused before it gets here
+// (checkAuthoredObjectName), so "" never stands for one.
+func resolveObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (string, error) {
+	spec := oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, Default: def}
+	if authored != "" {
+		spec.Property, spec.Authored = property, authored
+	}
+	return trait.ResolveName(spec)
+}
+
+// resolveSubApplicationName resolves the name of the sub-application a trait
+// adds to the bundle: the consumer hook's, else def. No author property names
+// a sub-application.
+func resolveSubApplicationName(trait *oam.Trait, def string) (string, error) {
+	return trait.ResolveName(oam.NameSpec{Role: oam.NameRoleSubApplication, Default: def})
 }
 
 // checkAuthoredNamePart refuses an authored value that is one part of a

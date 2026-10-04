@@ -6,6 +6,7 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,14 +44,54 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	if err != nil {
 		return err
 	}
+	if err := config.resolveNames(trait, app.Namespace); err != nil {
+		return err
+	}
+	subAppName, err := resolveSubApplicationName(trait, app.Name+"-scaler")
+	if err != nil {
+		return err
+	}
 
 	scalerApp := stack.NewApplication(
-		app.Name+"-scaler",
+		subAppName,
 		app.Namespace,
 		config,
 	)
 	bundle.Applications = append(bundle.Applications, scalerApp)
 	return nil
+}
+
+// resolveNames resolves the name of each object the trait generates
+// (go-kure/launcher#787): the authored one parseProperties stored, else the
+// consumer hook's, else the default. A PodDisruptionBudget is named only when
+// the trait generates one.
+func (c *ScalerConfig) resolveNames(trait *oam.Trait, namespace string) error {
+	hpa, err := resolveObjectName(trait, oam.NameRoleHPA,
+		schema.GroupKind{Group: autoscalingv2.GroupName, Kind: "HorizontalPodAutoscaler"},
+		namespace, "hpaName", c.HPAName, c.defaultHPAName())
+	if err != nil {
+		return err
+	}
+	c.HPAName = hpa
+	if !c.EnablePDB {
+		return nil
+	}
+	pdb, err := resolveObjectName(trait, oam.NameRolePDB,
+		schema.GroupKind{Group: policyv1.GroupName, Kind: "PodDisruptionBudget"},
+		namespace, "pdbName", c.PDBName, c.defaultPDBName())
+	if err != nil {
+		return err
+	}
+	c.PDBName = pdb
+	return nil
+}
+
+func (c *ScalerConfig) defaultHPAName() string {
+	return oam.ShortenNameWithSuffix(c.componentName, "-hpa", oam.ShortenLimitSubdomain)
+}
+
+func (c *ScalerConfig) defaultPDBName() string {
+	return oam.ShortenNameWithSuffix(c.componentName, "-pdb", oam.ShortenLimitSubdomain)
 }
 
 func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Application) (*ScalerConfig, error) {
@@ -157,9 +198,10 @@ type ScalerConfig struct {
 	MemoryUtilization *int32
 	EnablePDB         bool
 
-	// HPAName and PDBName are the authored object names (go-kure/launcher#787),
-	// used as written; "" leaves the default, <component>-hpa and
-	// <component>-pdb, each shortened to fit.
+	// HPAName and PDBName are the object names (go-kure/launcher#787). Apply
+	// stores the resolved name: the authored one, used as written, else the
+	// consumer hook's, else the default. "" on a config built directly leaves
+	// the default, <component>-hpa and <component>-pdb, each shortened to fit.
 	HPAName string
 	PDBName string
 
@@ -245,7 +287,7 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string) *autoscalingv2.HorizontalPodAutoscaler {
 	name := c.HPAName
 	if name == "" {
-		name = oam.ShortenNameWithSuffix(c.componentName, "-hpa", oam.ShortenLimitSubdomain)
+		name = c.defaultHPAName()
 	}
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(name, app.Namespace)
 	hpa.Labels = labels
@@ -264,7 +306,7 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string) *policyv1.PodDisruptionBudget {
 	name := c.PDBName
 	if name == "" {
-		name = oam.ShortenNameWithSuffix(c.componentName, "-pdb", oam.ShortenLimitSubdomain)
+		name = c.defaultPDBName()
 	}
 	pdb := kubernetes.CreatePodDisruptionBudget(name, app.Namespace)
 	pdb.Labels = labels

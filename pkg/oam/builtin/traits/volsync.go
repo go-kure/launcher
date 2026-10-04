@@ -59,12 +59,17 @@ func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	// Sub-app name uses sourcePVC as identifier (not component name) to match
+	// The name uses sourcePVC as identifier (not component name) to match
 	// the downstream runtime's stable naming. Two components with the same PVC name in the same
 	// bundle would collide; OAM authors are expected to use unique PVC names.
-	// It is the ReplicationSource's name, so one over 253 characters is shortened.
-	rsName := oam.ShortenNameWithSuffix(config.SourcePVC, "-backup", oam.ShortenLimitSubdomain)
-	rsApp := stack.NewApplication(rsName, app.Namespace, config)
+	// It is the ReplicationSource's name, so one over 253 characters is
+	// shortened, and the sub-application's default name.
+	config.objectName = oam.ShortenNameWithSuffix(config.SourcePVC, "-backup", oam.ShortenLimitSubdomain)
+	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	if err != nil {
+		return err
+	}
+	rsApp := stack.NewApplication(subAppName, app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, rsApp)
 	return nil
 }
@@ -154,7 +159,11 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 
 // VolsyncConfig implements stack.ApplicationConfig for volsync traits.
 type VolsyncConfig struct {
-	componentName           string
+	componentName string
+	// objectName is the ReplicationSource's name as Apply settled it,
+	// <sourcePVC>-backup shortened to fit. "" on a config built directly
+	// (routingObjectNameOr).
+	objectName              string
 	SourcePVC               string
 	Schedule                string
 	Repository              string
@@ -205,7 +214,7 @@ func (c *VolsyncConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	}
 
 	schedule := c.Schedule
-	rs := kurevol.CreateReplicationSource(app.Name, app.Namespace)
+	rs := kurevol.CreateReplicationSource(routingObjectNameOr(c.objectName, app), app.Namespace)
 	rs.Spec.SourcePVC = c.SourcePVC
 	rs.Spec.Trigger = &volsyncv1alpha1.ReplicationSourceTriggerSpec{Schedule: &schedule}
 	rs.Spec.Restic = mover
