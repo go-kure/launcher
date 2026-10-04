@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -164,6 +167,59 @@ func TestScalerPDBName_NeedsEnablePDB(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), `pdbName "edge" names no object`) || !strings.Contains(err.Error(), "enablePDB") {
 			t.Errorf("%s: error %q, want it to name pdbName and enablePDB", how, err)
+		}
+	}
+}
+
+// An override names the object and nothing else: with every name authored, the
+// labels, the HPA's scale target and the selectors still identify component web.
+// A selector or target that followed the name would select no pod and scale no
+// Deployment.
+func TestNameOverride_WorkloadIdentityUnchanged(t *testing.T) {
+	want := componentLabels("web")
+	seen := map[string]bool{}
+	for _, tc := range []struct {
+		h     oam.TraitHandler
+		props map[string]any
+	}{
+		{&ScalerHandler{}, map[string]any{"minReplicas": 2, "maxReplicas": 4, "enablePDB": true, "hpaName": "edge", "pdbName": "edge"}},
+		{&NetworkPolicyHandler{}, map[string]any{"ingress": []any{}, "name": "edge"}},
+	} {
+		objs, err := generatedByTrait(tc.h, tc.props)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range objs {
+			if (*p).GetName() != "edge" {
+				t.Errorf("%T is named %q, want the authored edge", *p, (*p).GetName())
+			}
+			if got := (*p).GetLabels(); !maps.Equal(got, want) {
+				t.Errorf("%T: labels %v, want the component's %v", *p, got, want)
+			}
+			switch o := (*p).(type) {
+			case *autoscalingv2.HorizontalPodAutoscaler:
+				seen["hpa"] = true
+				if ref := o.Spec.ScaleTargetRef; ref.Kind != "Deployment" || ref.Name != "web" {
+					t.Errorf("HPA scaleTargetRef %s %q, want Deployment web", ref.Kind, ref.Name)
+				}
+			case *policyv1.PodDisruptionBudget:
+				seen["pdb"] = true
+				if o.Spec.Selector == nil || !maps.Equal(o.Spec.Selector.MatchLabels, want) {
+					t.Errorf("PDB selector %v, want matchLabels %v", o.Spec.Selector, want)
+				}
+			case *networkingv1.NetworkPolicy:
+				seen["networkpolicy"] = true
+				if got := o.Spec.PodSelector.MatchLabels; !maps.Equal(got, want) {
+					t.Errorf("NetworkPolicy podSelector %v, want matchLabels %v", got, want)
+				}
+			default:
+				t.Errorf("unexpected object %T", *p)
+			}
+		}
+	}
+	for _, kind := range []string{"hpa", "pdb", "networkpolicy"} {
+		if !seen[kind] {
+			t.Errorf("no %s was generated, so nothing was checked for it", kind)
 		}
 	}
 }
