@@ -24,6 +24,12 @@ func (r *nameResolver) forTrait(component, member string, trait Trait, position 
 	if trait.authoredIndex != nil {
 		naming.slot, naming.authored = *trait.authoredIndex, true
 	}
+	if r.outputs == nil {
+		r.outputs = make(map[traitPlace]int)
+	}
+	place := traitPlace{component: component, member: member, trait: trait.Type, slot: naming.slot, authored: naming.authored}
+	r.outputs[place]++
+	naming.nth = r.outputs[place]
 	return naming
 }
 
@@ -106,8 +112,14 @@ func (r *nameResolver) resolveSynthesizedPolicyNames(cluster *stack.Cluster) err
 				continue
 			}
 			component, def := policy.synthesizedFor(), policy.policyName()
+			// An external backend's policy is owned by its Service: two Services
+			// whose shortened default names meet are two owners, and are refused.
+			service := ""
+			if external, ok := policy.(*backendIngressAllowPolicyConfig); ok {
+				service = external.Service
+			}
 			name, err := r.resolve(
-				nameOwner{component: component, role: NameRoleNetpolSynth, def: def},
+				nameOwner{component: component, service: service, role: NameRoleNetpolSynth, def: def},
 				NameSpec{Role: NameRoleNetpolSynth, Kind: kind, Namespace: app.Namespace, Default: def})
 			if err == nil {
 				policy.setPolicyName(name)
