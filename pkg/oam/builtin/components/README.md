@@ -2570,8 +2570,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   behavioural benefit. The child name begins with the application name
   (go-kure/launcher#792): component names are unique only within one Application, while the
   Kustomization CRs a consumer generates for the hook-group children of every application can
-  share one namespace, so two Applications that each have a component `db` get
-  `<application>-db-NN-<phase-slug>` children that differ. The transform hands the config its
+  share one namespace, so two differently named Applications that each have a component `db`
+  get `<application>-db-NN-<phase-slug>` children that differ. The transform hands the config its
   application (`oam.ApplicationNameSetter`, the `Application` field); a `HelmTemplateConfig`
   built directly, outside a transform, has none unless the caller sets the field, and its
   children are then named `<layout name>-NN-<phase-slug>`. **Breaking output change**: every
@@ -2582,8 +2582,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   its own beginning plus 10 hex digits of its sha256 (8 before go-kure/launcher#793), so two
   long names that differ anywhere almost never shorten to the same one. Known limitation: the
   two names are joined by a plain `-`, which either may contain, so application `a-b` with
-  component `c` and application `a` with component `b-c` still get the same child names. No
-  property overrides a child name yet (go-kure/launcher#787). `GenerateCoversAugmentLayout` is always true —
+  component `c` and application `a` with component `b-c` still get the same child names. The
+  default carries no namespace either: like the bundle name, a child name is built from the
+  application's name alone, so two Applications with one name in different namespaces get the
+  same child names. Keeping those apart is the consumer's, through the naming hook of
+  go-kure/launcher#787; no property or hook overrides a child name yet. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
