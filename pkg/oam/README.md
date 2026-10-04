@@ -366,8 +366,10 @@ generates. The case is reached only through a consumer's own lowering rule.
   with force where the deployer supports it. A `CronJob` is not affected: its job template
   may change, and the Jobs it creates afterwards carry the label. The rule is read from
   Kubernetes 1.37's Job update validation (`validatePodTemplateUpdate` in
-  `pkg/apis/batch/validation`), not run against a cluster here; its one exception is a
-  suspended Job that never started, whose template labels may change.
+  `pkg/apis/batch/validation`), not run against a cluster here. Its exception is a suspended
+  Job with no active pods, whose template labels may change: in 1.37 one that never started
+  or that carries the `JobSuspended` condition, in a cluster without the
+  `MutableSchedulingDirectivesForSuspendedJobs` feature only one that never started.
 - `GeneratedApplication.Component` changes from the application's name to empty for a
   generated source the application bundle holds and for the external-backend policy, and
   from the application's own name to the authored component for a lowered component named
