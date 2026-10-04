@@ -220,6 +220,7 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 		return fmt.Sprintf("%s (role %q, set by %s)", who, o.role, property)
 	case nameFromHook:
 		return fmt.Sprintf("%s (role %q, returned by the Naming hook in place of %q)", who, o.role, o.def)
+	case nameFromDefault:
 	}
 	return fmt.Sprintf("%s (role %q, its default)", who, o.role)
 }
