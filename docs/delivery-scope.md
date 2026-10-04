@@ -15,9 +15,11 @@ go-kure/launcher#781 deleted with the `kurel` layer it described.
 all. Each issue links back to this document.
 
 **Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
-Paths are relative to the repository root. Kure paths refer to kure v0.2.0-beta.15, the
-version `go.mod` pins. Everything here is pre-release: output, names and the library
-contract may change, and live-cluster upgrade effects are not a constraint. A section or
+Paths are relative to the repository root. Kure paths refer to the kure commit `go.mod`
+pins, `v0.2.0-beta.15.0.20261004180425-97dce7a4b760`: a commit of kure's `main` after
+v0.2.0-beta.15, pinned while both libraries are being worked on. Everything here is
+pre-release: output, names and the library contract may change, and live-cluster upgrade
+effects are not a constraint. A section or
 row marked **Shipped** states what the code does since its ticket merged, in place of the
 target it replaced; one marked **Target** is not in the code.
 
@@ -424,6 +426,9 @@ be closed at build time.
      every kind: a top-level `items` array on a kind that declares none, since emitted as
      rendered the object would be a list. A key inside a type that unmarshals itself is the
      known limit: it is not reported and is still dropped (go-kure/launcher#794, item 7).
+     A `v1` `List` and a typed list are replaced by their items, and each item is held to
+     the check and to the undeclared-field rule as a document of its own is
+     (go-kure/launcher#790, with the kure commit that reads such lists).
 
 ---
 
