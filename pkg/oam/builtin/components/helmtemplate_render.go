@@ -108,7 +108,7 @@ func templateReleaseName(owner, releaseName, componentName string) (string, erro
 // component type.
 func defaultHelmReleaseName(owner, componentName string) (string, error) {
 	if componentName == "" {
-		return "", errors.Errorf("%s: no release name: releaseName is unset and the component has no name to derive it from; set ReleaseName or Name", owner)
+		return "", errors.Errorf("%s: no release name: releaseName is unset and the component has no name to derive it from; set releaseName or the component name", owner)
 	}
 	name := oam.ShortenName(componentName, oam.ShortenLimitHelmRelease)
 	if !validHelmReleaseName(name) {

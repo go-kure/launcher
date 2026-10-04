@@ -267,7 +267,7 @@ func TestHelmTemplateConfig_DirectConfigCheckedBeforeRender(t *testing.T) {
 		{"non-finite values", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", Values: map[string]any{"x": math.Inf(1)}}, "not representable as JSON"},
 		{"invalid release name", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", ReleaseName: "Web"}, `releaseName "Web" must be a DNS-1123 subdomain`},
 		{"invalid default release name", &components.HelmTemplateConfig{Name: htDotAtCut, SourceURL: "https://charts.example.com", Chart: "podinfo"}, "set releaseName"},
-		{"neither ReleaseName nor Name", &components.HelmTemplateConfig{SourceURL: "https://charts.example.com", Chart: "podinfo"}, "set ReleaseName or Name"},
+		{"neither ReleaseName nor Name", &components.HelmTemplateConfig{SourceURL: "https://charts.example.com", Chart: "podinfo"}, "set releaseName or the component name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

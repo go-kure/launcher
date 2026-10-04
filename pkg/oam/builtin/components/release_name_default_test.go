@@ -152,7 +152,7 @@ func TestHelmReleaseHandler_ReleaseNameDefault(t *testing.T) {
 	hrGenerate(t, hrConfig(t, htDotAtCut, map[string]any{"chart": hrChart(), "releaseName": "web"}), "")
 
 	direct.Name = ""
-	wantErr = "helmrelease: no release name: releaseName is unset and the component has no name to derive it from; set ReleaseName or Name"
+	wantErr = "helmrelease: no release name: releaseName is unset and the component has no name to derive it from; set releaseName or the component name"
 	if _, err := direct.Generate(nil); err == nil || err.Error() != wantErr {
 		t.Errorf("Generate without a Name: error = %v, want %q", err, wantErr)
 	}
