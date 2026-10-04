@@ -92,6 +92,22 @@ func TestResolveName_EveryAppliedTraitIsItsOwnOwner(t *testing.T) {
 			want: collision + `component "web" member "a" traits[0] "named", output 1 of its lowering (role "hpa", its default) and by ` +
 				`component "web" member "a" traits[0] "named", output 2 of its lowering (role "hpa", its default); give one of them another name`,
 		},
+		{
+			// The rule's own trait stands first among the lowered component's, where
+			// the forwarded one stood in the document: both are traits[0].
+			name: "a trait a rule added before the forwarded one",
+			tr:   prependingTransformer(named("web-hpa", "web-first")),
+			doc:  Component{Name: "web", Type: "solo", Traits: []Trait{named("web-hpa", "web-second")}},
+			want: collision + `component "web" traits[0] "named" after lowering (role "hpa", its default) and by ` +
+				`component "web" traits[0] "named" (role "hpa", its default); give one of them another name`,
+		},
+		{
+			name: "one trait naming two of its objects alike",
+			tr:   prependingTransformer(Trait{Type: "twice", Properties: map[string]any{}}),
+			doc:  Component{Name: "web", Type: "solo"},
+			want: `name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named twice by ` +
+				`component "web" traits[0] "twice" (role "hpa", set by name); give one of them another name`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := tc.tr.TransformWithPolicy(siblingDoc(tc.doc), TransformContext{Namespace: "default"})
@@ -100,6 +116,34 @@ func TestResolveName_EveryAppliedTraitIsItsOwnOwner(t *testing.T) {
 			}
 		})
 	}
+}
+
+// prependingTransformer has component "a", the "named" and "twice" traits, and
+// rule "solo" lowering a component to one "a" component carrying first before
+// the authored traits.
+func prependingTransformer(first Trait) *Transformer {
+	tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0)},
+		map[string]TraitHandler{"named": namedTrait{}, "twice": twiceNamedTrait{}})
+	tr.RegisterComponentLowering(emitRule{"solo", func(c *Component) []Component {
+		return []Component{{Name: c.Name, Type: "a", Properties: map[string]any{}, Traits: append([]Trait{first}, c.Traits...)}}
+	}})
+	return tr
+}
+
+// twiceNamedTrait resolves one authored name for two objects of one kind, whose
+// defaults differ.
+type twiceNamedTrait struct{}
+
+func (twiceNamedTrait) CanHandle(t string) bool { return t == "twice" }
+func (twiceNamedTrait) Apply(trait *Trait, _ *stack.Application, _ *stack.Bundle) error {
+	for _, def := range []string{"web-one", "web-two"} {
+		spec := hpaSpec(def)
+		spec.Property, spec.Authored = "name", "web-hpa"
+		if _, err := trait.ResolveName(spec); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // A sub-application's name is not unique, in a sibling group as outside one:
@@ -122,6 +166,26 @@ func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 			names = append(names, a.Name)
 		}
 		if want := []string{"shared", "shared"}; !slices.Equal(names, want) {
+			t.Errorf("trait sub-applications = %v, want %v", names, want)
+		}
+	})
+	t.Run("a name the hook gave that is one's default is still the hook's", func(t *testing.T) {
+		// The hook answers "web-config" for both: member a's default, and member
+		// b's "web-route". Both are names the hook gave, of two sub-applications.
+		tr := namingGroupTransformer([]Trait{named("", "web-config")}, []Trait{named("", "web-route")})
+		cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{
+			Naming: func(req NameRequest) (string, bool) {
+				return "web-config", req.Role == NameRoleSubApplication
+			},
+		})
+		if err != nil {
+			t.Fatalf("TransformWithPolicy: %v", err)
+		}
+		var names []string
+		for _, a := range cluster.Node.Bundle.Applications[1:] {
+			names = append(names, a.Name)
+		}
+		if want := []string{"web-config", "web-config"}; !slices.Equal(names, want) {
 			t.Errorf("trait sub-applications = %v, want %v", names, want)
 		}
 	})

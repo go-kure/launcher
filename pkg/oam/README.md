@@ -469,8 +469,11 @@ Every trait the transform applies is its own owner, whatever its place: two trai
 rule lowered one authored trait to collide like two authored ones. The error tells the two
 apart in the fewest words that do. A trait a rule gave a sibling group member is named with
 the member (`component "web" member "deployment" traits[0] "scaler"`), and so is one authored
-trait forwarded to two members; two traits a trait rule lowered one trait to are named
-`…, output 1 of its lowering` and `…, output 2 of its lowering`. A synthesized policy is named
+trait forwarded to two members; a trait a rule added, where its place among the lowered
+traits is the place an authored one holds in the document, is named `… traits[0] "scaler"
+after lowering`; two traits a trait rule lowered one trait to are named
+`…, output 1 of its lowering` and `…, output 2 of its lowering`. One trait that resolves one
+name for two of its objects is refused as naming it twice. A synthesized policy is named
 by its component, or by its Service (`external backend Service "db"`): two external Services
 whose shortened default policy names meet are refused too.
 
@@ -848,7 +851,8 @@ The build refuses a group:
   away from is free (go-kure/launcher#755). Two sub-applications that both still carry
   the name the `Naming` hook gave them are compared by their defaults instead: the hook
   may give two different sub-applications one name, and the same trait on both members
-  is refused whatever the hook answers. A name the hook gave that meets, on another
+  is refused whatever the hook answers. A name is the hook's when the hook answered,
+  also when its answer is the default. A name the hook gave that meets, on another
   member, one it did not give (a trait's own, or one a policy renamed onto it) is
   refused by name (go-kure/launcher#787).
 

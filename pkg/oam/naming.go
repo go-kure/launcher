@@ -182,13 +182,18 @@ const (
 	// describeMember adds the member it was applied on: one authored trait
 	// forwarded to two members.
 	describeMember
+	// describeOrigin says of a trait that was not forwarded from an authored one
+	// that its slot counts the traits after lowering: a trait a rule added, at
+	// the place an authored one holds in the document.
+	describeOrigin
 	// describeOutput adds which output of its lowering it is: one trait a trait
 	// rule lowered to two of one type.
 	describeOutput
 )
 
 // describe says who resolved the name and where it came from, in as much
-// detail as asked (describeSlot, describeMember, describeOutput).
+// detail as asked (describeSlot, describeMember, describeOrigin,
+// describeOutput).
 func (o nameOwner) describe(source nameSource, property string, detail int) string {
 	var who string
 	switch {
@@ -202,6 +207,9 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 		who = fmt.Sprintf("component %q member %q traits[%d] %q", o.component, o.member, o.slot, o.trait)
 	default:
 		who = fmt.Sprintf("component %q traits[%d] %q", o.component, o.slot, o.trait)
+	}
+	if o.trait != "" && !o.authored && detail >= describeOrigin {
+		who += " after lowering"
 	}
 	if o.trait != "" && detail >= describeOutput {
 		who += fmt.Sprintf(", output %d of its lowering", o.nth)
@@ -256,6 +264,11 @@ func (n *NameAllocator) claimName(key nameClaimKey, claim resolvedNameClaim) err
 			if first != second {
 				break
 			}
+		}
+		if first == second {
+			// One trait that resolved one name for two of its objects.
+			return errors.Errorf("name collision: %s is named twice by %s; give one of them another name",
+				key, claim.owner.describe(claim.source, claim.property, describeSlot))
 		}
 		return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
 	}
@@ -336,8 +349,10 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 	owner.component, owner.member = t.naming.component, t.naming.member
 	owner.slot, owner.authored = t.naming.slot, t.naming.authored
 	owner.apply, owner.nth = t.naming.apply, t.naming.nth
-	name, err := t.naming.resolver.resolve(owner, spec)
-	if err == nil && spec.Role == NameRoleSubApplication && name != spec.Default {
+	name, source, err := t.naming.resolver.resolveFrom(owner, spec)
+	// A name the hook gave is recorded as the hook's even when it is the default:
+	// what the sibling-group check asks is who named it.
+	if err == nil && spec.Role == NameRoleSubApplication && source == nameFromHook {
 		if t.naming.hookSubApps == nil {
 			t.naming.hookSubApps = make(map[string][]string)
 		}
@@ -347,25 +362,31 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 }
 
 func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {
+	name, _, err := r.resolveFrom(owner, spec)
+	return name, err
+}
+
+// resolveFrom is resolve, also returning where the name came from.
+func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, nameSource, error) {
 	class, known := classOfNameRole(spec.Role)
 	if !known {
-		return "", errors.Errorf("naming: %q is not a name role (the roles: %s)", spec.Role, joinNameRoles())
+		return "", nameFromDefault, errors.Errorf("naming: %q is not a name role (the roles: %s)", spec.Role, joinNameRoles())
 	}
 	if isObject := class == nameClassObject; isObject != (spec.Kind.Kind != "") {
 		if isObject {
-			return "", errors.Errorf("naming: role %q names an object, and its NameSpec has no Kind", spec.Role)
+			return "", nameFromDefault, errors.Errorf("naming: role %q names an object, and its NameSpec has no Kind", spec.Role)
 		}
-		return "", errors.Errorf("naming: role %q names no object, and its NameSpec has Kind %q", spec.Role, spec.Kind)
+		return "", nameFromDefault, errors.Errorf("naming: role %q names no object, and its NameSpec has Kind %q", spec.Role, spec.Kind)
 	}
 	if spec.Default == "" {
-		return "", errors.Errorf("naming: role %q has no default name", spec.Role)
+		return "", nameFromDefault, errors.Errorf("naming: role %q has no default name", spec.Role)
 	}
 
 	name, source := spec.Default, nameFromDefault
 	switch {
 	case spec.Property != "":
 		if problem := overrideNameProblem(spec.Authored); problem != "" {
-			return "", errors.Errorf("%s %q cannot be the name for role %q: %s; write a valid name, or leave the property out for the default %q",
+			return "", nameFromDefault, errors.Errorf("%s %q cannot be the name for role %q: %s; write a valid name, or leave the property out for the default %q",
 				spec.Property, spec.Authored, spec.Role, problem, spec.Default)
 		}
 		name, source = spec.Authored, nameFromAuthor
@@ -379,7 +400,7 @@ func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {
 		})
 		if ok {
 			if problem := overrideNameProblem(answer); problem != "" {
-				return "", errors.Errorf("the Naming hook returned %q for role %q in place of %q: %s; return a valid name, or false to keep the default",
+				return "", nameFromDefault, errors.Errorf("the Naming hook returned %q for role %q in place of %q: %s; return a valid name, or false to keep the default",
 					answer, spec.Role, spec.Default, problem)
 			}
 			name, source = answer, nameFromHook
@@ -387,16 +408,16 @@ func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {
 	}
 
 	if r == nil || r.claims == nil || class == nameClassSubApplication {
-		return name, nil
+		return name, source, nil
 	}
 	key := nameClaimKey{class: class, objectIdentity: objectIdentity{name: name}}
 	if class == nameClassObject {
 		key.group, key.kind, key.namespace = spec.Kind.Group, spec.Kind.Kind, spec.Namespace
 	}
 	if err := r.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: spec.Property}); err != nil {
-		return "", err
+		return "", source, err
 	}
-	return name, nil
+	return name, source, nil
 }
 
 // overrideNameProblem returns why name cannot be an authored or hook-given
