@@ -54,8 +54,8 @@ Kubernetes manifests (here a Deployment, Service, and ServiceAccount).
 
 - Add traits (ingress, certificate, scaler) — see the [Trait Handlers](../api-reference/oam-traits/).
 - Explore component types — see the [Component Handlers](../api-reference/oam-components/).
-- Declare component ordering, tier placement and Flux reconciliation settings with
-  application policies (dependency, placement, reconciliation, health-checks) — see the
+- Declare component ordering and tier placement with
+  application policies (dependency, placement) — see the
   [Policy Handlers](../api-reference/oam-policies/). `kurel build` validates them, but its
   manifest output does not show their effect: they shape the bundle tree a caller renders
   into Flux resources.

@@ -322,10 +322,6 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "10Gi", "mountPath": "/data"}}})},
 	"rbac": {props: map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"get"}}},
 		"clusterWide": true}, longHost: true, longLabelled: true},
-	"fluxcd-patches": {props: map[string]any{"patches": []any{map[string]any{
-		"patch":  "- op: add\n  path: /metadata/annotations/example.com~1patched\n  value: \"true\"\n",
-		"target": map[string]any{"kind": "ConfigMap"}}}}, longHost: true},
-	"fluxcd-postbuild": {props: map[string]any{"substitute": map[string]any{"CLUSTER": "local"}}, longHost: true},
 	"prune-protection": {longHost: true},
 	"force-replace":    {longHost: true},
 	"security-context": {props: map[string]any{"psaLevel": "restricted"}},

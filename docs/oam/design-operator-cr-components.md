@@ -19,7 +19,7 @@ component does not name is out of reach, and each new one is a code change.
 
 The alternative, `passthrough`, reaches every field but gives up everything a
 component provides: no schema, no environment policy, no endpoints for network
-policy synthesis, no health check.
+policy synthesis.
 
 ## Decision
 
@@ -211,7 +211,7 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
 ## Consequences
 
 - An author who needs a CR field the semantic component does not publish uses
-  the kind component directly, and keeps policy, endpoints and health checks.
+  the kind component directly, and keeps policy and endpoints.
 - A new upstream field is authorable as soon as the dependency is bumped and the
   coverage test is satisfied; no hand-written property parser is involved.
 - The kind's schema documents the top level only. Authors read the operator's
@@ -223,9 +223,6 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
 
 ## What this does not cover
 
-- Health checks for `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`: their
-  status carries no condition kstatus reads, so a check would report the object
-  ready without waiting on anything. `postgresql` checks only its `Cluster`.
 - The CRDs' validation rules (CEL) are left to the API server, except the
   `ObjectStore`'s ban on `configuration.serverName`, which `cnpg-objectstore`
   refuses because the shared Barman type invites it. `postgresql` carries its

@@ -246,8 +246,8 @@ path-safety convention; once the component's `volumes` are parsed,
 the main container, an init container or a sidecar naming an undeclared
 volume (a statefulset claim template included) or a non-`emptyDir` one is
 refused, as real admission's `validateFileKeyRefVolumes` refuses it (no
-trait the build evaluates adds an `emptyDir` volume; a raw `fluxcd-patches`
-patch is outside the build's view, so a volume only a patch supplies is not
+trait the build evaluates adds an `emptyDir` volume; a patch a consumer
+applies at delivery is outside the build's view, so a volume only a patch supplies is not
 seen — declare the `emptyDir` volume on the component itself; see
 `checkFileKeyRefVolumes` in `common.go`); a
 key other than `volumeName`/`path`/`key`/`optional` is rejected outright too,
@@ -1303,7 +1303,7 @@ covers (see `pkg/oam` "Same-name sibling groups").
 | `strategy.rollingUpdate` (both knobs zero) | — | Rejected: `ValidateRollingUpdateDeployment` refuses `maxUnavailable: 0` together with `maxSurge: 0`, a pair that can make no progress. It rejects **only** that pair — unlike the DaemonSet rule, which also rejects both being non-zero. `SetDefaults_Deployment` guards each field with its own `== nil` check, so authoring one knob does not suppress the other's 25% default and a lone authored zero is always legal. | additive |
 | `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. Must stay **below** the effective `progressDeadlineSeconds`, whose own API default is 600 — so `minReadySeconds: 600` alone is rejected here, exactly as the apiserver would reject the defaulted pair. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Old ReplicaSets retained. `0` is meaningful (retain none) and distinguishable from unset. | additive |
-| `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `EmitsAutoHealthCheck` on each of the three configs, the `pkg/oam` seam a suspended `helmrelease` also uses. | additive |
+| `paused` | bool | Pauses rollouts of the Deployment. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
 | any of the five `DeploymentSpec` properties above, authored as `null` (on `deployment`, `webservice` and `worker` alike); **and, on `deployment` only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `deployment` kind's alone: there it covers the kind's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. Since go-kure/launcher#394 this is no longer specific to `deployment` for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. Since go-kure/launcher#570 it also covers the top-level keys that were still answered with a bare lookup and then type-checked — `cronjob`'s `timeZone`, `successfulJobsHistoryLimit` and `failedJobsHistoryLimit`; `completionMode` on `job` and `cronjob`; `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
@@ -1604,8 +1604,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
     then re-expresses the component as a same-name sibling group (see `pkg/oam`
     "Same-name sibling groups"): a `deployment` and then a `service`, both named
-    after the component, deployed as one component — one tier, one bundle, one
-    health check. The `deployment` member gets the authored properties
+    after the component, deployed as one component — one tier, one
+    bundle. The `deployment` member gets the authored properties
     webservice declares except `port`, `topologySpread` and `affinity`, plus
     the main container's one port `{name: http, containerPort: <port>}`; the
     `affinity` shorthand and `topologySpread` are handled as on `worker`. The
@@ -1614,8 +1614,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     authored trait is forwarded unchanged, in authored order, to the member it
     acts on: `expose`, `ingress` and `httproute` go to the `service`;
     `prune-protection` and `force-replace` go to both; every other trait goes
-    to the `deployment`. That includes the bundle traits (`fluxcd-patches`,
-    `fluxcd-postbuild`), which act on the group's one Kustomization, and any
+    to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
+    (not built in; a consumer that delivers through Flux registers them) and any
     trait type an extension registered, since the `deployment` member holds the
     pods. Webservice's published schema and its generated objects are
     unchanged, in the handler's order (Deployment, Service, ServiceAccount,
@@ -1739,8 +1739,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of the objects the workload kinds generate for themselves today, and they
   carry no launcher opinions. Like `deployment` and `service`, they are
   absent from the default tier map and deploy in the `apps` tier unless a tier
-  annotation or placement policy says otherwise. None has an auto health check
-  (see `pkg/oam` "componentHealthCheckGVK").
+  annotation or placement policy says otherwise.
   - `serviceaccount` publishes `automountServiceAccountToken` and
     `imagePullSecrets` (`[{name}]`). An unauthored
     `automountServiceAccountToken` stays unset, which Kubernetes reads as
@@ -1961,8 +1960,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   |----------|------|--------|---------------|
   | `backoffLimit` | int ≥ 0 | Retries before the job is marked failed. API default 6, or 2147483647 when `backoffLimitPerIndex` is set. | additive |
   | `completions` | int ≥ 0 | Successful pods required. Required under `completionMode: Indexed`. | additive |
-  | `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. `0` runs no pods at all, so it additionally suppresses the **auto health check** unless `activeDeadlineSeconds` is authored (see below). | additive |
-  | `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. Also the field that makes a `parallelism: 0` job reach `Failed`, and so keeps its auto health check. | additive |
+  | `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. `0` runs no pods at all. | additive |
+  | `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. | additive |
   | `ttlSecondsAfterFinished` | int ≥ 0 | Seconds after finishing before the job and its pods are deleted. | additive |
   | `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
   | `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
@@ -1971,7 +1970,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
   | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
   | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
-  | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". `suspend: true` additionally suppresses this component's **auto health check** (see below). | additive |
+  | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
   | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. | **Behavior-changing** (see below) |
   | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
 
@@ -2111,8 +2110,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component emits — the Job — which kustomize-controller
   reads as its apply `ForceSelector`: on an immutable-field error it deletes and
   recreates the object, so an update re-runs the Job, **stopping any run in
-  progress**. The Job keeps the component's name, so the auto health check below
-  still targets it. The trait sets the annotation after `createJob` returns,
+  progress**. The trait sets the annotation after `createJob` returns,
   which matters because `createJob` clears the generated Job's annotations
   wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
   because kure's `Create<Kind>` constructors now return TypeMeta and identity
@@ -2128,24 +2126,6 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   before redelivering avoids the error without either. `cronjob` does not have
   this problem: a CronJob's `jobTemplate` is mutable, and each run creates a
   fresh Job.
-
-  `suspend: true` suppresses the **auto health check** the transform pipeline
-  would otherwise synthesize, the same seam `deployment` uses for `paused: true`
-  (`JobConfig.EmitsAutoHealthCheck`). A suspended Job creates no pods, so it
-  reaches neither `Complete` nor `Failed` and a Kustomization gated on it would
-  block for exactly as long as the document says to stay suspended.
-  `parallelism: 0` is vetoed for the same reason by a different route — zero is
-  the maximum pods the Job may run, so no completion ever accrues — but only when
-  no `activeDeadlineSeconds` is authored: unlike suspension, zero parallelism does
-  not stop the deadline timer, so a Job with a deadline does reach `Failed` and
-  the check reports a real result. An
-  unsuspended `job` **does** get a check — `batch/v1 Job` is in
-  `componentHealthCheckGVK` — because kstatus reads a Job's `Complete` condition
-  as current and `Failed` as failed, and Flux passes TTL-bearing Jobs through its
-  wait options so a Job deleted by `ttlSecondsAfterFinished` does not strand the
-  wait. This is the one place `job` and `cronjob` diverge on health checks:
-  a CronJob owns no pods between schedules and reports no completion, so it stays
-  unlisted.
 
   The generated `Job` carries `app: <component>` as its own labels and its pod
   template's, carries no annotations at all, and leaves `spec.selector` unset for
@@ -2231,13 +2211,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Different documents never share or collide, because the document name is part
     of the source name. The source carries no traits and keeps its terminal's
     interval default rather than the release `interval`. The source terminal's
-    registry allowlist (`ApplyPolicy`) and auto health check apply to it.
+    registry allowlist (`ApplyPolicy`) applies to it.
   - **The generated source deploys in the `infra` tier**, whatever the release's
     tier (`pkg/oam` classifies a rule-emitted `helmrepository`, `ocirepository`,
     `gitrepository` or `bucket` that way). A release moved into `infra` by a tier annotation or a `placement`
     policy therefore never sits in an earlier tier than its source. If it did, the
-    release's health check would hold back the source's tier, and the source
-    would never be applied. For the same reason a `placement` policy naming the
+    source's tier would depend on the release's, and the source would be applied
+    only after the release that reads it. For the same reason a `placement` policy naming the
     generated source may only keep it in `infra`, and a `dependency` rule may not
     make it wait on any component; either fails the build.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
@@ -2311,7 +2291,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace (go-kure/launcher#625). |
   | 6 | A generated source keeps its terminal's default interval, not the release interval. |
   | 7 | No registration-time `valuesMode` default; `valuesMode` is never forwarded (under `configMap` the values become a `configmap` trait). |
-  | 8 | Generated sources get the automatic source health check. |
+  | 8 | *(void)* Generated sources: neither gets an automatic health check; launcher sets none (go-kure/launcher#781). |
   | 9 | The registry allowlist applies to inline sources. |
   | 10 | Generated sources deploy in the infra tier. A tier annotation on the component places only its release; the generated source stays in infra. |
   | 11 | Template delivery refuses `releaseName` and `targetNamespace`. |
@@ -2362,8 +2342,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   practice any value of `0s` or at least `1ms` is accepted. The check runs on the authored
   text, which also refuses a positive value that would decode to zero and be replaced by the
   default, and again in `Generate` on the decoded duration's emitted form, for a config built
-  directly. It lives in the internal `pkg/oam/internal/fluxduration`, shared with the
-  `reconciliation` policy. Its other duration fields are checked
+  directly. It lives in the internal `pkg/oam/internal/fluxduration`. Its other
+  duration fields are checked
   the same way, in the same form (go-kure/launcher#606): `timeout`, `chart.spec.interval`,
   `install.timeout`, `upgrade.timeout`, `test.timeout`, `rollback.timeout`,
   `uninstall.timeout`, and `install.strategy.retryInterval` and
@@ -2400,18 +2380,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`shop-web` for a component `web` in namespace `shop`), not `<name>`. Author
   `releaseName` when a specific release name matters — for instance when taking over a
   release installed under another name. Helm keeps its release state in the HelmRelease's
-  own namespace unless `storageNamespace` says otherwise (Flux's default). The inferred
-  auto health check references the HelmRelease where it lands.
-
-  **`suspend: true` suppresses the auto health check**
-  (`HelmReleaseConfig.EmitsAutoHealthCheck`), the same veto `job` applies for its own
-  `suspend: true` and `deployment` for `paused: true`. helm-controller does not reconcile a
-  suspended HelmRelease, and the Ready condition the check reads is written by a
-  reconciliation, so a newly created suspended release never acquires one: the check would
-  either hold the enclosing Kustomization until it times out, on a state the document asked
-  for, or pass without observing anything. The HelmRelease is still emitted and applied; only
-  the readiness gate on it is skipped, so `suspend: true` stays a usable way to stage a
-  release. Trait decorators forward the veto.
+  own namespace unless `storageNamespace` says otherwise (Flux's default).
 
   **Values in a ConfigMap.** The HelmRelease is the only object `helmrelease` emits.
   Until go-kure/launcher#702 it took a launcher-owned `valuesMode: configMap` and emitted
@@ -2423,7 +2392,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
   role-named `helm` rule lowers to under `delivery: template`.
   It fetches and renders the chart at build time and emits the rendered manifests. It creates
-  no source CR and no `HelmRelease`, so it carries no auto health check.
+  no source CR and no `HelmRelease`.
 
   **Properties.** `source` is
   required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
@@ -2674,13 +2643,6 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`FluxNamespaceReads`, go-kure/launcher#740); a trait object no reference names stays in the
   application namespace.
 
-  **Health check.** The inferred auto health check references the CR
-  (`source.toolkit.fluxcd.io/v1`, in the namespace the CR lands in). `suspend: true` skips it,
-  as `job` does for its own `suspend: true`, and so does a `helmrepository` with `type: oci`,
-  which Flux treats as a static object with no artifact to wait for. kstatus reads a HelmChart
-  as it reads the four sources, through its `Ready`, `Reconciling` and `Stalled` conditions and
-  `observedGeneration` (cites in `pkg/oam/README.md`).
-
   **Generated by the `helm` rule.** An inline source on a `helm` component generates one of
   these components: a `helmrepository` for an `http(s)://` URL; an `ocirepository` for an
   `oci://` URL, with a `ref.tag` from `version` and a `layerSelector` copying the Helm chart
@@ -2713,7 +2675,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   maximum "512Mi"`). Authored traits go to the Cluster, and those that
   covered every object postgresql generated are forwarded to the other
   members so they still do: `prune-protection` and `force-replace` to each
-  member, and `fluxcd-patches` and `fluxcd-postbuild` to each member with a
+  member, and `fluxcd-patches` and `fluxcd-postbuild` (not built in; a consumer
+  that delivers through Flux registers them) to each member with a
   bundle of its own (below). Policies that name the postgresql component
   are extended to the members the same way. A `placement` of it is repeated
   for each member, so they stay in the Cluster's tier and, without a
@@ -3025,8 +2988,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   resource-name rules of the shared parser are left to the API server.
   `Endpoints` declares the same primary endpoint as `postgresql`
   (`cnpg.io/cluster: <component-name>` on port `5432`). The kind is in the
-  `services` tier and its auto health check targets the `Cluster`, as for
-  `postgresql`. `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
+  `services` tier, as `postgresql` is.
+  `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
   `ClusterSpec` by reflection: each json field is published with its type or
   listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
   schema key with no field or a stale exclusion also fails, so a CNPG bump
@@ -3043,8 +3006,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   reflection tests pinning the schema and both derived lists to the linked
   modules. `Generate` emits one object named after the component in the build
   namespace with the authored spec, and repeats the parse-time refusals. All
-  three are in the `services` tier and carry no auto health check: their status
-  has no condition kstatus reads. The fields each CRD requires are refused when
+  three are in the `services` tier. The fields each CRD requires are refused when
   unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
   (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
   `owner` on the Database; `configuration.destinationPath` on the ObjectStore.

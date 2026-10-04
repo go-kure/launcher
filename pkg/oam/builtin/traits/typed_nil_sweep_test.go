@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
-
-	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // The sites below are the typed-nil holes the go-kure/launcher#465 sweep found in
@@ -75,25 +73,6 @@ func TestTypedNilSweep(t *testing.T) {
 			props := map[string]any{"annotations": v, "sslRedirect": true}
 			setSSLRedirectAnnotations(props)
 			return props["annotations"], nil
-		})
-	})
-
-	t.Run("fluxcd-patches patches", func(t *testing.T) {
-		sameNullAnswer(t, nilList, func(v any) (any, error) {
-			bundle := &stack.Bundle{}
-			err := (&FluxCDPatchesHandler{}).Apply(&oam.Trait{Type: "fluxcd-patches",
-				Properties: map[string]any{"patches": v}}, sweepApp(), bundle)
-			return bundle.Patches, err
-		})
-	})
-
-	t.Run("fluxcd-patches patches[0].target", func(t *testing.T) {
-		sameNullAnswer(t, nilMap, func(v any) (any, error) {
-			bundle := &stack.Bundle{}
-			err := (&FluxCDPatchesHandler{}).Apply(&oam.Trait{Type: "fluxcd-patches",
-				Properties: map[string]any{"patches": []any{map[string]any{"patch": "p", "target": v}}}},
-				sweepApp(), bundle)
-			return bundle.Patches, err
 		})
 	})
 
@@ -327,12 +306,6 @@ func TestTypedNilSweepFollowUp(t *testing.T) {
 			return (&RBACHandler{}).parseProperties(map[string]any{"rules": []any{map[string]any{
 				"apiGroups": v, "resources": []any{"pods"}, "verbs": []any{"get"}}}}, sweepApp())
 		}},
-		{"fluxcd-patches patches[0]", nilMap, func(v any) (any, error) {
-			bundle := &stack.Bundle{}
-			err := (&FluxCDPatchesHandler{}).Apply(&oam.Trait{Type: "fluxcd-patches",
-				Properties: map[string]any{"patches": []any{v}}}, sweepApp(), bundle)
-			return bundle.Patches, err
-		}},
 		{"certificate issuerRef", nilMap, func(v any) (any, error) {
 			return (&CertificateHandler{}).parseProperties(map[string]any{
 				"secretName": "tls", "issuerRef": v, "dnsNames": []any{"web.example.com"}}, sweepApp())
@@ -341,26 +314,4 @@ func TestTypedNilSweepFollowUp(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { sameNullAnswer(t, tc.typed, tc.run) })
 	}
-
-	postbuild := func(props map[string]any) (any, error) {
-		bundle := &stack.Bundle{}
-		err := (&PostBuildHandler{}).Apply(&oam.Trait{Type: "fluxcd-postbuild", Properties: props}, sweepApp(), bundle)
-		return bundle.PostBuild, err
-	}
-	validFrom := []any{map[string]any{"kind": "ConfigMap", "name": "vars"}}
-	t.Run("fluxcd-postbuild substitute beside substituteFrom", func(t *testing.T) {
-		sameNullAnswer(t, nilMap, func(v any) (any, error) {
-			return postbuild(map[string]any{"substitute": v, "substituteFrom": validFrom})
-		})
-	})
-	t.Run("fluxcd-postbuild substituteFrom beside substitute", func(t *testing.T) {
-		sameNullAnswer(t, nilList, func(v any) (any, error) {
-			return postbuild(map[string]any{"substitute": map[string]any{"A": "1"}, "substituteFrom": v})
-		})
-	})
-	t.Run("fluxcd-postbuild substituteFrom[0]", func(t *testing.T) {
-		sameNullAnswer(t, nilMap, func(v any) (any, error) {
-			return postbuild(map[string]any{"substituteFrom": []any{v}})
-		})
-	})
 }

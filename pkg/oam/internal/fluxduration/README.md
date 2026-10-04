@@ -52,7 +52,4 @@ In practice the accepted values are `0s` and anything of at least `1ms`; under
 `SourceTimeout`, as authored, without `h`. The kind-named Flux components (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`) check every duration
 field this way, and the `oci` component its `interval`, at parse
-time and again when the config generates its objects. The `reconciliation` policy
-checks its `interval`, `retryInterval` and `timeout` with the package-level
-`ValidateEmitted`: the Flux `Kustomization` generated from each bundle carries them
-as `metav1.Duration`, and all three take the `Interval` form.
+time and again when the config generates its objects.

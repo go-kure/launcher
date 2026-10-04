@@ -269,36 +269,6 @@ type JobConfig struct {
 	PodSpec PodSpecConfig
 }
 
-// EmitsAutoHealthCheck vetoes the auto health check for the two documents that
-// instruct the job not to run, the same shape as deployment's veto for
-// `paused: true`: waiting on such a workload is not a health signal but a
-// guaranteed timeout. A job that does run reaches Complete or Failed, which is
-// what makes the check meaningful — see componentHealthCheckGVK's note in
-// transform.go.
-//
-// The two cases are not one. `suspend: true` is the explicit one: the controller
-// creates no pods at all (batchv1 JobSpec.Suspend's field doc), and suspending
-// also resets the ActiveDeadlineSeconds timer, so a suspended job cannot fail by
-// deadline either — the veto is unconditional.
-//
-// `parallelism: 0` reaches the same place by a different route: it is the
-// "maximum desired number of pods the job should run at any given time", so zero
-// pods run, no completion accrues, and Complete is unreachable. The difference
-// is that such a job is *active*, so the ActiveDeadlineSeconds timer does run
-// (the field doc measures it "relative to the startTime ... continuously
-// active", and only suspension stops it). With a deadline authored, the job does
-// reach Failed and the health check reports a real — if slow — result, so the
-// veto is conditional on there being no deadline to fail against.
-func (c *JobConfig) EmitsAutoHealthCheck() bool {
-	if c.Suspend != nil && *c.Suspend {
-		return false
-	}
-	if c.JobSpec.Parallelism != nil && *c.JobSpec.Parallelism == 0 && c.JobSpec.ActiveDeadlineSeconds == nil {
-		return false
-	}
-	return true
-}
-
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
 // serviceAccountName, or "" when the pods run as no named account.
 func (c *JobConfig) ServiceAccountName() (string, bool) {

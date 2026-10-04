@@ -69,7 +69,7 @@ func docAnnotation(obj map[string]any, key string) (string, bool) {
 // job component emits — the Job; it generates no ServiceAccount
 // (go-kure/launcher#702) — carries
 // kustomize.toolkit.fluxcd.io/force: enabled, and the Job keeps the component
-// name (which is what the auto health check targets).
+// name.
 func TestBuildCommand_JobWithForceReplaceTrait(t *testing.T) {
 	docs, out, err := buildDocs(t, forceReplaceJobYAML+"      traits:\n        - type: force-replace\n")
 	if err != nil {

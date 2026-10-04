@@ -17,8 +17,7 @@ import (
 // DeploymentHandler for the component it emits, then the synthesized
 // topology-spread trait (traits.TopologySpreadHandler) when the rule attached
 // one. The config it returns is the deployment component's own, so
-// ApplyPolicy, ServiceAccountName, NonRWXClaim and EmitsAutoHealthCheck are
-// DeploymentConfig's; only Generate is wrapped, to apply that trait.
+// ApplyPolicy, ServiceAccountName and NonRWXClaim are DeploymentConfig's; only Generate is wrapped, to apply that trait.
 //
 // components_test carries the same adapter (worker_rule_adapter_test.go there):
 // the two external test packages cannot share a test file.

@@ -739,42 +739,6 @@ func TestBucket_ApplyPolicyProvider(t *testing.T) {
 	}
 }
 
-// TestFluxSourceHandlers_EmitsAutoHealthCheck: every source emits its check
-// unless suspended, and a helmrepository of type oci never does.
-func TestFluxSourceHandlers_EmitsAutoHealthCheck(t *testing.T) {
-	emits := func(t *testing.T, k fluxSourceKind, props map[string]any) bool {
-		t.Helper()
-		e, ok := fluxSrcConfig(t, k, props).(interface{ EmitsAutoHealthCheck() bool })
-		if !ok {
-			t.Fatalf("%s config does not satisfy the autoHealthCheckEmitter shape the transform asserts on", k.typ)
-		}
-		return e.EmitsAutoHealthCheck()
-	}
-	for _, k := range fluxSourceKinds() {
-		t.Run(k.typ, func(t *testing.T) {
-			props := fluxSrcProps(t, k.minimal)
-			if !emits(t, k, props) {
-				t.Error("unsuspended source vetoes its health check")
-			}
-			props["suspend"] = false
-			if !emits(t, k, props) {
-				t.Error("suspend: false vetoes the health check")
-			}
-			props["suspend"] = true
-			if emits(t, k, props) {
-				t.Error("suspend: true keeps the health check")
-			}
-		})
-	}
-	helm := fluxSourceKinds()[0]
-	if !emits(t, helm, map[string]any{"url": "https://charts.example.com", "type": "default"}) {
-		t.Error("helmrepository type default vetoes its health check")
-	}
-	if emits(t, helm, map[string]any{"url": "oci://ghcr.io/org/charts", "type": "oci"}) {
-		t.Error("helmrepository type oci keeps its health check")
-	}
-}
-
 // TestFluxSourceHandlers_GenerateDoesNotAlias: rendering twice gives equal,
 // independent output, and editing one render leaves the config untouched.
 func TestFluxSourceHandlers_GenerateDoesNotAlias(t *testing.T) {
@@ -855,8 +819,7 @@ type fluxSrcPolicy struct {
 func (p fluxSrcPolicy) AllowedRegistries() []string { return p.allowed }
 
 // TestTransform_FluxSources runs the transform pipeline over all five source
-// components with a Flux namespace: each CR lands there, the auto health check
-// references it there, and the suspended one carries none. The same document
+// components with a Flux namespace: each CR lands there. The same document
 // under a policy whose allowed registries miss one fetch host fails the build,
 // naming that component.
 func TestTransform_FluxSources(t *testing.T) {
@@ -885,14 +848,12 @@ func TestTransform_FluxSources(t *testing.T) {
 		t.Fatalf("Transform: %v", err)
 	}
 	found := map[string]bool{}
-	var checks []stack.HealthCheck
 	var walk func(*stack.Node)
 	walk = func(n *stack.Node) {
 		if n == nil {
 			return
 		}
 		if n.Bundle != nil {
-			checks = append(checks, n.Bundle.HealthChecks...)
 			for _, a := range n.Bundle.Applications {
 				obj := fluxSrcRender(t, a.Config, "")
 				found[a.Name] = true
@@ -909,10 +870,6 @@ func TestTransform_FluxSources(t *testing.T) {
 	for _, k := range fluxSourceKinds() {
 		if !found[k.typ] {
 			t.Errorf("%s application not found", k.typ)
-		}
-		want := stack.HealthCheck{APIVersion: "source.toolkit.fluxcd.io/v1", Kind: k.kind, Name: k.typ, Namespace: "flux-system"}
-		if got := slices.Contains(checks, want); got != (k.typ != "gitrepository") {
-			t.Errorf("%s: health check present = %v, suspended only for gitrepository; checks %+v", k.typ, got, checks)
 		}
 	}
 

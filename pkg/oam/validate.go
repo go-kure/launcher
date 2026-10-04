@@ -60,6 +60,11 @@ var validComponentTypes = map[string]bool{
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.
+//
+// fluxcd-patches and fluxcd-postbuild stay admitted although launcher has no
+// handler for them (deliveryTraitTypes, transform.go): a consumer that delivers
+// through Flux registers its own, and without one the transform refuses the trait
+// with a "no handler" error that says so.
 var validTraitTypes = map[string]bool{
 	"expose":               true,
 	"ingress":              true,

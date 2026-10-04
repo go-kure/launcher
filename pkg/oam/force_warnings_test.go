@@ -15,7 +15,7 @@ import (
 const (
 	forcedTail       = ": when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data"
 	annotationReason = "kustomize.toolkit.fluxcd.io/force: enabled"
-	bundleReason     = "its bundle's reconciliation policy sets force: true"
+	bundleReason     = "its bundle sets force: true"
 )
 
 func forceAnnotated(v string) map[string]string {

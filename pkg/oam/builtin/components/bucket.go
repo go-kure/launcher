@@ -50,7 +50,7 @@ func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 		"interval":           fluxSourceString("Bucket spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"timeout":            fluxSourceString("Bucket spec.timeout for fetch operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ignore":             fluxSourceString("Bucket spec.ignore: exclusion patterns in .sourceignore format."),
-		"suspend":            fluxSourceBool("Bucket spec.suspend: stop reconciling the source. Also skips the auto health check."),
+		"suspend":            fluxSourceBool("Bucket spec.suspend: stop reconciling the source."),
 	}
 }
 
@@ -154,11 +154,6 @@ func namesAmazonS3(endpoint string) bool {
 // SetFluxNamespace moves the Bucket to ns. Satisfies
 // pkg/oam.fluxNamespaceSettable.
 func (c *BucketConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
-
-// EmitsAutoHealthCheck vetoes the auto health check for `suspend: true`, where
-// the document tells source-controller not to reconcile the source. Satisfies
-// pkg/oam.autoHealthCheckEmitter.
-func (c *BucketConfig) EmitsAutoHealthCheck() bool { return !c.Spec.Suspend }
 
 // Generate emits the Bucket.
 func (c *BucketConfig) Generate(_ *stack.Application) ([]*client.Object, error) {

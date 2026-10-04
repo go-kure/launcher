@@ -59,7 +59,7 @@ import (
 // the component generates.
 //
 // Everything past the parse is the deployment component's: ApplyPolicy,
-// NonRWXClaim, ServiceAccountName, EmitsAutoHealthCheck, labels and the
+// NonRWXClaim, ServiceAccountName, labels and the
 // generated objects are the ones DeploymentConfig implements, which worker's
 // implementations matched line for line. A parse error surfaces through the
 // lowering engine, so it names the component's type and document

@@ -94,8 +94,8 @@ func ClassifyComponent(c *Component) (Tier, error) {
 // bucket). A rule-emitted (synthesized) component of one of these types deploys in
 // TierInfra, the earliest tier:
 // the consumers keep their own tier, from an annotation or a placement policy, and a source
-// in a later tier than a consumer would never be applied, since that tier waits on the
-// consumer's health check. An authored source keeps defaultTierMap's tier. A placement
+// in a later tier than a consumer would be applied only after it, since that tier's
+// bundles depend on the consumer's. An authored source keeps defaultTierMap's tier. A placement
 // policy cannot move a generated one out of TierInfra, and a dependency rule cannot make it
 // wait on another component (TransformWithPolicy).
 var generatedSourceTypes = map[string]bool{

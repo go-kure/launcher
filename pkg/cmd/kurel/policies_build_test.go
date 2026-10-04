@@ -47,19 +47,6 @@ const allBuiltinPoliciesYAML = policyAppHeader + `    - name: order
       properties:
         component: api
         tier: infra
-    - name: flux
-      type: reconciliation
-      properties:
-        interval: 5m
-        prune: true
-    - name: extra
-      type: health-checks
-      properties:
-        checks:
-          - apiVersion: batch/v1
-            kind: Job
-            name: db-migrate
-            namespace: default
 `
 
 // transformWithBuiltins runs parse -> ValidateAuthoredProperties -> Transform
@@ -108,7 +95,7 @@ func leafBundles(node *stack.Node) map[string]*stack.Bundle {
 	return out
 }
 
-// TestBuildCommand_BuiltinPolicies: a document carrying all four built-in policy
+// TestBuildCommand_BuiltinPolicies: a document carrying both built-in policy
 // types builds through `kurel build` and still emits both components' workloads.
 func TestBuildCommand_BuiltinPolicies(t *testing.T) {
 	docs, out, err := buildDocs(t, allBuiltinPoliciesYAML)
@@ -216,10 +203,10 @@ func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
 	}
 }
 
-// TestBuiltinPolicies_ShapeTheCluster checks, with all four built-in policies in
-// one document, that the reconciliation settings and the extra health check land
-// on every leaf bundle and the placement override is recorded. The dependency and
-// placement effects are proven independently above.
+// TestBuiltinPolicies_ShapeTheCluster checks, with both built-in policies in one
+// document, that the placement override is recorded and that the policies shape
+// the cluster without setting a Flux delivery field on any bundle. The dependency
+// and placement effects are proven independently above.
 func TestBuiltinPolicies_ShapeTheCluster(t *testing.T) {
 	cluster, result, err := transformWithBuiltins(t, allBuiltinPoliciesYAML)
 	if err != nil {
@@ -229,22 +216,13 @@ func TestBuiltinPolicies_ShapeTheCluster(t *testing.T) {
 		t.Errorf("TierOverrides[api] = %q, want %q", got, oam.TierInfra)
 	}
 
-	bundles := leafBundles(cluster.Node)
-	if len(bundles) == 0 {
+	if len(result.Extensions) != 0 {
+		t.Errorf("Extensions = %v, want empty: no built-in policy writes one", result.Extensions)
+	}
+	if len(leafBundles(cluster.Node)) == 0 {
 		t.Fatal("cluster has no leaf bundles")
 	}
-	extra := stack.HealthCheck{APIVersion: "batch/v1", Kind: "Job", Name: "db-migrate", Namespace: "default"}
-	for name, b := range bundles {
-		if b.Interval != "5m" {
-			t.Errorf("%s: Interval = %q, want 5m", name, b.Interval)
-		}
-		if b.Prune == nil || !*b.Prune {
-			t.Errorf("%s: Prune = %v, want true", name, b.Prune)
-		}
-		if !slices.Contains(b.HealthChecks, extra) {
-			t.Errorf("%s: HealthChecks %v lack the policy's entry", name, b.HealthChecks)
-		}
-	}
+	assertNoDeliveryFields(t, cluster)
 }
 
 // TestBuildCommand_PolicyHandlerErrorsSurface: a handler's own validation is a
@@ -278,15 +256,6 @@ func TestBuildCommand_PolicyHandlerErrorsSurface(t *testing.T) {
 `,
 			wantSub: []string{`policy "odd"`, `unknown component "cache"`},
 		},
-		{
-			name: "reconciliation bad duration",
-			policies: `    - name: flux
-      type: reconciliation
-      properties:
-        interval: often
-`,
-			wantSub: []string{`policy "flux"`, `interval "often" is not a valid duration`},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,10 +275,9 @@ func TestBuildCommand_PolicyHandlerErrorsSurface(t *testing.T) {
 // TestBuildCommand_PolicyPropertiesAreChecked: an authored built-in policy is
 // checked against its handler's PropertySchema before the transform, so a
 // misspelt key or a wrongly typed value fails `kurel build` instead of being
-// dropped by a handler that never reads it. The reconciliation cases carry a
-// valid interval beside the bad key on purpose: alone, the bad key would trip the
-// handler's own "at least one reconciliation property" error, and the build
-// would fail without this check.
+// dropped by a handler that never reads it. The placement cases carry a valid
+// component and tier beside the bad key on purpose: the handler reads both and
+// never the misspelt one, so without this check the build would succeed.
 func TestBuildCommand_PolicyPropertiesAreChecked(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -317,24 +285,26 @@ func TestBuildCommand_PolicyPropertiesAreChecked(t *testing.T) {
 		wantSub  []string
 	}{
 		{
-			name: "reconciliation misspelt key",
-			policies: `    - name: flux
-      type: reconciliation
+			name: "placement misspelt key",
+			policies: `    - name: odd
+      type: placement
       properties:
-        interval: 5m
-        prunee: true
+        component: api
+        tier: infra
+        teir: apps
 `,
-			wantSub: []string{`policy "flux" (type "reconciliation")`, `unsupported field "prunee"`},
+			wantSub: []string{`policy "odd" (type "placement")`, `unsupported field "teir"`},
 		},
 		{
-			name: "reconciliation wrongly typed value",
-			policies: `    - name: flux
-      type: reconciliation
+			name: "dependency wrongly typed value",
+			policies: `    - name: order
+      type: dependency
       properties:
-        interval: 5m
-        prune: "yes"
+        rules:
+          - component: web
+            dependsOn: api
 `,
-			wantSub: []string{`policy "flux" (type "reconciliation")`, `properties.prune: expected boolean`},
+			wantSub: []string{`policy "order" (type "dependency")`, `properties.rules[0].dependsOn: expected array`},
 		},
 		{
 			name: "placement tier outside the enum",

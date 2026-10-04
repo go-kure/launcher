@@ -12,12 +12,16 @@ import (
 )
 
 // These tests pin go-kure/launcher#720 through kurel's own transformer: every
-// force-applied PersistentVolumeClaim gets one warning, whichever source built the
-// claim (a component's `volumes` entry or a `pvc` trait) and whichever way it is
-// forced (the force-replace trait's annotation or a reconciliation policy's
-// force: true), and the output is unchanged.
+// PersistentVolumeClaim the force-replace trait annotates gets one warning,
+// whichever source built the claim (a component's `volumes` entry, a `pvc` trait,
+// a persistentvolumeclaim component or a list a manifests component generates),
+// and the output is unchanged. kurel sets no bundle's Force (go-kure/launcher#781),
+// so the annotation is the only way a claim it builds is forced; the bundle-level
+// reason is covered in pkg/oam.
 
 const forcedWarningTail = ": when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data"
+
+const forceAnnotationReason = "kustomize.toolkit.fluxcd.io/force: enabled"
 
 const forcedClaimsHeader = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -42,6 +46,10 @@ spec:
             name: shared-data
             size: 5Gi
 `
+
+// forceReplacedClaims is forcedClaimsHeader with the force-replace trait on its
+// component.
+var forceReplacedClaims = strings.Replace(forcedClaimsHeader, "      traits:\n", "      traits:\n        - type: force-replace\n", 1)
 
 // forcedVolumeWarnings transforms appYAML with kurel's builtin transformer,
 // generates it and returns the force warnings, as runBuild produces them.
@@ -73,33 +81,16 @@ func forcedVolumeWarnings(t *testing.T, appYAML string) []string {
 }
 
 func TestWarnForcedVolumes_BothClaimSources(t *testing.T) {
-	const (
-		annotation = "kustomize.toolkit.fluxcd.io/force: enabled"
-		bundle     = "its bundle's reconciliation policy sets force: true"
-	)
 	// A role kind turns a described volume claim into a synthesized `pvc` trait
 	// (go-kure/launcher#702), so it is attributed as a sub-application too.
-	volumeClaim := func(reason string) string {
-		return `PersistentVolumeClaim default/api-cache (sub-application "api-cache" of component "api") is force-applied (` + reason + `)` + forcedWarningTail
-	}
-	traitClaim := func(reason string) string {
-		return `PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (` + reason + `)` + forcedWarningTail
-	}
-	forceReplace := strings.Replace(forcedClaimsHeader, "      traits:\n", "      traits:\n        - type: force-replace\n", 1)
-	const policy = `  policies:
-    - name: flux
-      type: reconciliation
-      properties:
-        force: true
-`
+	volumeClaim := `PersistentVolumeClaim default/api-cache (sub-application "api-cache" of component "api") is force-applied (` + forceAnnotationReason + `)` + forcedWarningTail
+	traitClaim := `PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (` + forceAnnotationReason + `)` + forcedWarningTail
 	cases := []struct {
 		name, app string
 		want      []string
 	}{
 		{"no force", forcedClaimsHeader, nil},
-		{"force-replace trait", forceReplace, []string{volumeClaim(annotation), traitClaim(annotation)}},
-		{"reconciliation force", forcedClaimsHeader + policy, []string{volumeClaim(bundle), traitClaim(bundle)}},
-		{"both", forceReplace + policy, []string{volumeClaim(annotation + "; " + bundle), traitClaim(annotation + "; " + bundle)}},
+		{"force-replace trait", forceReplacedClaims, []string{volumeClaim, traitClaim}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,8 +103,7 @@ func TestWarnForcedVolumes_BothClaimSources(t *testing.T) {
 }
 
 // TestWarnForcedVolumes_ClaimComponent pins that the persistentvolumeclaim
-// component's claim is warned about like any other generated claim, by either
-// force mechanism.
+// component's claim is warned about like any other generated claim.
 func TestWarnForcedVolumes_ClaimComponent(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -128,148 +118,17 @@ spec:
         size: 20Gi
       traits:
         - type: force-replace
-  policies:
-    - name: flux
-      type: reconciliation
-      properties:
-        force: true
 `
-	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled; its bundle's reconciliation policy sets force: true)` + forcedWarningTail}
+	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (` + forceAnnotationReason + `)` + forcedWarningTail}
 	if got := forcedVolumeWarnings(t, app); !slices.Equal(got, want) {
 		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 	}
 }
 
-// TestWarnForcedVolumes_FluxCDPatches pins go-kure/launcher#728 through kurel's
-// own transformer: the fluxcd-patches trait's patches are applied before the
-// claim is read, so a patch that adds the force key warns and one that removes it
-// does not.
-func TestWarnForcedVolumes_FluxCDPatches(t *testing.T) {
-	const app = `apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: shop
-  namespace: default
-spec:
-  components:
-    - name: media
-      type: persistentvolumeclaim
-      properties:
-        size: 20Gi
-      traits:
-`
-	const (
-		addForce = `        - type: fluxcd-patches
-          properties:
-            patches:
-              - target:
-                  kind: PersistentVolumeClaim
-                patch: |
-                  - op: add
-                    path: /metadata/annotations
-                    value:
-                      kustomize.toolkit.fluxcd.io/force: enabled
-`
-		removeForce = `        - type: force-replace
-        - type: fluxcd-patches
-          properties:
-            patches:
-              - target:
-                  kind: PersistentVolumeClaim
-                  name: media
-                patch: |
-                  - op: remove
-                    path: /metadata/annotations/kustomize.toolkit.fluxcd.io~1force
-`
-	)
-	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's patches)` + forcedWarningTail}
-	if got := forcedVolumeWarnings(t, app+addForce); !slices.Equal(got, want) {
-		t.Errorf("patch adds the force key: warnings =\n%q\nwant\n%q", got, want)
-	}
-	if got := forcedVolumeWarnings(t, app+removeForce); len(got) != 0 {
-		t.Errorf("patch removes the force key: warnings = %q, want none", got)
-	}
-}
-
-// TestBuild_PatchedForceWarningLeavesOutputUntagged pins that reading a bundle's
-// patched volumes changes nothing kurel emits: no kustomize-internal annotation
-// of the patch build reaches the manifest output or any file a delivery build
-// writes.
-func TestBuild_PatchedForceWarningLeavesOutputUntagged(t *testing.T) {
-	const app = `apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: shop
-  namespace: default
-spec:
-  components:
-    - name: media
-      type: persistentvolumeclaim
-      properties:
-        size: 20Gi
-      traits:
-        - type: fluxcd-patches
-          properties:
-            patches:
-              - target:
-                  kind: PersistentVolumeClaim
-                patch: |
-                  - op: add
-                    path: /metadata/annotations
-                    value:
-                      kustomize.toolkit.fluxcd.io/force: enabled
-`
-	dir := t.TempDir()
-	appPath := writeTempFile(t, dir, "app.yaml", app)
-	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
-	build := func(args ...string) string {
-		t.Helper()
-		cmd := NewKurelCommand()
-		var stdout, stderr bytes.Buffer
-		cmd.SetOut(&stdout)
-		cmd.SetErr(&stderr)
-		cmd.SetArgs(append([]string{"build", appPath, "--profile", profile}, args...))
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("build %q: %v\nstderr: %s", args, err, stderr.String())
-		}
-		if !strings.Contains(stderr.String(), "set by its bundle's patches") {
-			t.Fatalf("build %q did not read the patched claim: stderr = %q", args, stderr.String())
-		}
-		return stdout.String()
-	}
-	const tag = "internal.config.kubernetes.io"
-	if out := build(); strings.Contains(out, tag) {
-		t.Errorf("manifest output carries %s:\n%s", tag, out)
-	}
-	outDir := filepath.Join(dir, "out")
-	build("-o", outDir, "--oci-repository", testOCIRepository)
-	files := 0
-	err := filepath.WalkDir(outDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files++
-		if bytes.Contains(data, []byte(tag)) {
-			t.Errorf("%s carries %s:\n%s", path, tag, data)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if files == 0 {
-		t.Fatal("the delivery build wrote no file")
-	}
-}
-
 // TestWarnForcedVolumes_ListMembers pins that a claim inside a list a `manifests`
 // component generates is warned about as Flux applies it: by its own annotation,
-// or by the bundle's force. The manifest parser expands the outer list itself, so
-// the claims sit in a nested one, which reaches the generated output as a list
+// not the envelope's. The manifest parser expands the outer list itself, so the
+// claims sit in a nested one, which reaches the generated output as a list
 // envelope that Kustomize and Flux expand at apply time.
 func TestWarnForcedVolumes_ListMembers(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
@@ -305,22 +164,14 @@ spec:
                     name: plain
                     namespace: default
 `
-	const policy = "  policies:\n    - name: flux\n      type: reconciliation\n      properties:\n        force: true\n"
-	claim := func(name, reason string) string {
-		return `PersistentVolumeClaim default/` + name + ` (component "raw") is force-applied (` + reason + `)` + forcedWarningTail
-	}
-	if got, want := forcedVolumeWarnings(t, app), []string{claim("annotated", "kustomize.toolkit.fluxcd.io/force: enabled")}; !slices.Equal(got, want) {
-		t.Errorf("annotated member: warnings =\n%q\nwant\n%q", got, want)
-	}
-	bundle := "its bundle's reconciliation policy sets force: true"
-	want := []string{claim("annotated", "kustomize.toolkit.fluxcd.io/force: enabled; "+bundle), claim("plain", bundle)}
-	if got := forcedVolumeWarnings(t, app+policy); !slices.Equal(got, want) {
-		t.Errorf("forced bundle: warnings =\n%q\nwant\n%q", got, want)
+	want := []string{`PersistentVolumeClaim default/annotated (component "raw") is force-applied (` + forceAnnotationReason + `)` + forcedWarningTail}
+	if got := forcedVolumeWarnings(t, app); !slices.Equal(got, want) {
+		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 	}
 }
 
 // TestBuild_ForcedClaimWarnsOnStderr pins that `kurel build` prints the warning to
-// stderr and that its manifest output does not change.
+// stderr, and only there: the manifest output carries no warning text.
 func TestBuild_ForcedClaimWarnsOnStderr(t *testing.T) {
 	dir := t.TempDir()
 	plain := filepath.Join(dir, "plain.yaml")
@@ -329,8 +180,7 @@ func TestBuild_ForcedClaimWarnsOnStderr(t *testing.T) {
 	if err := os.WriteFile(plain, []byte(forcedClaimsHeader), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	policy := "  policies:\n    - name: flux\n      type: reconciliation\n      properties:\n        force: true\n"
-	if err := os.WriteFile(forced, []byte(forcedClaimsHeader+policy), 0o644); err != nil {
+	if err := os.WriteFile(forced, []byte(forceReplacedClaims), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	build := func(appPath string) (string, string) {
@@ -345,17 +195,16 @@ func TestBuild_ForcedClaimWarnsOnStderr(t *testing.T) {
 		}
 		return stdout.String(), stderr.String()
 	}
-	plainOut, plainErr := build(plain)
-	forcedOut, forcedErr := build(forced)
-	if plainErr != "" {
+	if _, plainErr := build(plain); plainErr != "" {
 		t.Errorf("unforced build warned: %q", plainErr)
 	}
-	want := "warning: PersistentVolumeClaim default/api-cache (sub-application \"api-cache\" of component \"api\") is force-applied (its bundle's reconciliation policy sets force: true)" + forcedWarningTail + "\n" +
-		"warning: PersistentVolumeClaim default/shared-data (sub-application \"shared-data\" of component \"api\") is force-applied (its bundle's reconciliation policy sets force: true)" + forcedWarningTail + "\n"
+	forcedOut, forcedErr := build(forced)
+	want := "warning: PersistentVolumeClaim default/api-cache (sub-application \"api-cache\" of component \"api\") is force-applied (" + forceAnnotationReason + ")" + forcedWarningTail + "\n" +
+		"warning: PersistentVolumeClaim default/shared-data (sub-application \"shared-data\" of component \"api\") is force-applied (" + forceAnnotationReason + ")" + forcedWarningTail + "\n"
 	if forcedErr != want {
 		t.Errorf("stderr =\n%s\nwant\n%s", forcedErr, want)
 	}
-	if forcedOut != plainOut {
-		t.Errorf("the warning changed the manifest output:\n--- forced\n%s\n--- plain\n%s", forcedOut, plainOut)
+	if forcedOut == "" || strings.Contains(forcedOut, "is force-applied") {
+		t.Errorf("the manifest output is empty or carries the warning:\n%s", forcedOut)
 	}
 }

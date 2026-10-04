@@ -351,23 +351,6 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 	}
 }
 
-// hcVetoConfig implements ApplicationConfig + autoHealthCheckEmitter and vetoes
-// its auto health check (like a helmrelease with suspend: true).
-type hcVetoConfig struct{ fluxNSCapture }
-
-func (c *hcVetoConfig) EmitsAutoHealthCheck() bool { return false }
-
-func TestConfigMapDecorator_EmitsAutoHealthCheck_Forwards(t *testing.T) {
-	dec := traits.NewConfigMapDecorator(&hcVetoConfig{}, "c", "/etc/c")
-	e, ok := any(dec).(interface{ EmitsAutoHealthCheck() bool })
-	if !ok {
-		t.Fatal("ConfigMapDecorator does not implement EmitsAutoHealthCheck")
-	}
-	if e.EmitsAutoHealthCheck() {
-		t.Error("expected veto (false) forwarded from inner template-delivery config")
-	}
-}
-
 // TestConfigMapDecorator_MountsIntoJobPodKinds pins the two run-to-completion
 // kinds against the decorator's workload switch. Nothing in validation stops a
 // `configmap` trait with a `mountPath` from being authored on a `job` or
@@ -417,13 +400,5 @@ func TestConfigMapDecorator_MountsIntoJobPodKinds(t *testing.T) {
 				t.Errorf("configmap volume mount not added: %+v", podSpec.Containers[0].VolumeMounts)
 			}
 		})
-	}
-}
-
-func TestConfigMapDecorator_EmitsAutoHealthCheck_DefaultsTrue(t *testing.T) {
-	dec := traits.NewConfigMapDecorator(&cmStub{name: "app", namespace: "default"}, "c", "/etc/c")
-	e := any(dec).(interface{ EmitsAutoHealthCheck() bool })
-	if !e.EmitsAutoHealthCheck() {
-		t.Error("expected default true when inner does not implement autoHealthCheckEmitter")
 	}
 }

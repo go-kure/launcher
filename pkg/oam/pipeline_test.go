@@ -16,11 +16,8 @@ func TestNewPolicyResult_Defaults(t *testing.T) {
 	if r.AppDependsOn != nil {
 		t.Errorf("AppDependsOn should be nil, got %v", r.AppDependsOn)
 	}
-	if r.HealthCheckOverrides != nil {
-		t.Errorf("HealthCheckOverrides should be nil, got %v", r.HealthCheckOverrides)
-	}
-	if r.ReconciliationSettings != nil {
-		t.Errorf("ReconciliationSettings should be nil, got %v", r.ReconciliationSettings)
+	if r.Extensions == nil {
+		t.Error("Extensions should be initialised, got nil")
 	}
 	if r.ConsumedCapabilities != nil {
 		t.Errorf("ConsumedCapabilities should be nil, got %v", r.ConsumedCapabilities)

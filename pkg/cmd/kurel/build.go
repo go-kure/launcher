@@ -35,9 +35,8 @@ type buildOptions struct {
 	setValues          []string // "key=value" strings from --set
 	capabilityDefPaths []string
 	strictCapabilities bool
-	environment        string          // --environment: a name resolved to profilePath/valuesPath
-	environmentsPath   string          // --environments: the file declaring those names
-	delivery           deliveryOptions // --oci-repository, --oci-tag (delivery.go)
+	environment        string // --environment: a name resolved to profilePath/valuesPath
+	environmentsPath   string // --environments: the file declaring those names
 }
 
 func newBuildCommand() *cobra.Command {
@@ -64,7 +63,6 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 	cmd.Flags().StringArrayVar(&opts.setValues, "set", nil, "set a parameter value (key=value, repeatable)")
 	cmd.Flags().StringArrayVar(&opts.capabilityDefPaths, "capability-def", nil, "CapabilityDefinition file (repeatable)")
 	cmd.Flags().BoolVar(&opts.strictCapabilities, "strict-capabilities", false, "error instead of warn on unvalidated custom capabilities")
-	registerDeliveryFlags(cmd, opts)
 
 	cmd.Flags().StringVar(&opts.environment, "environment", "", "named environment whose profile and values replace --profile/--values")
 	cmd.Flags().StringVar(&opts.environmentsPath, "environments", "", "EnvironmentSet file declaring --environment names (default: "+environmentsFileName+" next to app.yaml)")
@@ -202,9 +200,6 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	if err := rejectLayoutAugmenters(cluster.Node); err != nil {
 		return err
 	}
-	if opts.delivery.repository != "" {
-		replayGeneration(cluster.Node)
-	}
 
 	apps, err := oam.GenerateApplications(cluster)
 	if err != nil {
@@ -218,18 +213,12 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 
 	if len(objects) == 0 {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: no resources generated")
-		// Every bundle still gets its (empty) artifact and Flux objects, so an
-		// earlier build's manifests do not survive; a no-op without delivery.
-		return writeDelivery(opts.outputDir, app.Metadata.Name, cluster, opts.delivery)
+		return nil
 	}
 
 	yamlBytes, err := kio.EncodeObjectsToYAML(objects)
 	if err != nil {
 		return errors.Wrap(err, "encoding YAML output")
-	}
-
-	if err := writeDelivery(opts.outputDir, app.Metadata.Name, cluster, opts.delivery); err != nil {
-		return err
 	}
 
 	if opts.outputDir == "" {
@@ -328,8 +317,6 @@ func builtinTraitHandlers() map[string]oam.TraitHandler {
 		"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
 		"volsync":              &traits.VolSyncHandler{},
 		"rbac":                 &traits.RBACHandler{},
-		"fluxcd-patches":       &traits.FluxCDPatchesHandler{},
-		"fluxcd-postbuild":     &traits.PostBuildHandler{},
 		"prune-protection":     &traits.PruneProtectionHandler{},
 		"force-replace":        &traits.ForceReplaceHandler{},
 		"security-context":     &traits.SecurityContextHandler{},
@@ -370,13 +357,13 @@ func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 // is deliberately absent: it orders one application after others, and a
 // single-application build has nothing to order it against, so registering it
 // would accept the policy and silently drop it. It keeps failing with "no
-// handler for policy type" instead.
+// handler for policy type" instead. So do reconciliation and health-checks, and
+// the fluxcd-patches and fluxcd-postbuild traits: they configure delivery, which
+// kurel does not do (go-kure/launcher#781), and the error says so.
 func builtinPolicyHandlers() map[string]oam.PolicyHandler {
 	return map[string]oam.PolicyHandler{
-		"dependency":     &policies.DependencyHandler{},
-		"placement":      &policies.PlacementHandler{},
-		"reconciliation": &policies.ReconciliationSettingsHandler{},
-		"health-checks":  &policies.HealthChecksHandler{},
+		"dependency": &policies.DependencyHandler{},
+		"placement":  &policies.PlacementHandler{},
 	}
 }
 

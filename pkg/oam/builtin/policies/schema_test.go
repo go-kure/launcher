@@ -14,16 +14,12 @@ import (
 // (wrong type, dropped required flag, missing nested field) fails loudly.
 func TestPolicySchemas_Surface(t *testing.T) {
 	handlers := map[string]oam.PropertySchemaProvider{
-		"dependency":     &policies.DependencyHandler{},
-		"placement":      &policies.PlacementHandler{},
-		"health-checks":  &policies.HealthChecksHandler{},
-		"reconciliation": &policies.ReconciliationSettingsHandler{},
+		"dependency": &policies.DependencyHandler{},
+		"placement":  &policies.PlacementHandler{},
 	}
 	wantKeys := map[string][]string{
-		"dependency":     {"rules"},
-		"placement":      {"component", "tier"},
-		"health-checks":  {"checks"},
-		"reconciliation": {"interval", "retryInterval", "timeout", "prune", "wait", "force", "suspend"},
+		"dependency": {"rules"},
+		"placement":  {"component", "tier"},
 	}
 	for policy, keys := range wantKeys {
 		s := handlers[policy].PropertySchema()
@@ -56,20 +52,6 @@ func TestPolicySchemas_Surface(t *testing.T) {
 		t.Errorf("dependency.rules[].dependsOn: want required array-of-string, got type=%v required=%v items=%+v", dep.Type, dep.Required, dep.Items)
 	}
 
-	// health-checks.checks[]: apiVersion/kind/name required strings, namespace optional.
-	checks := handlers["health-checks"].PropertySchema()["checks"]
-	if checks.Type != oam.PropertyTypeArray || !checks.Required || checks.Items == nil {
-		t.Fatalf("health-checks.checks: want required array with Items, got %+v", checks)
-	}
-	for _, k := range []string{"apiVersion", "kind", "name"} {
-		if p := checks.Items.Properties[k]; p.Type != oam.PropertyTypeString || !p.Required {
-			t.Errorf("health-checks.checks[].%s: want required string, got type=%v required=%v", k, p.Type, p.Required)
-		}
-	}
-	if ns := checks.Items.Properties["namespace"]; ns.Type != oam.PropertyTypeString || ns.Required {
-		t.Errorf("health-checks.checks[].namespace: want optional string, got type=%v required=%v", ns.Type, ns.Required)
-	}
-
 	// placement.tier enumerates exactly the launcher tiers and is required.
 	tier := handlers["placement"].PropertySchema()["tier"]
 	wantEnum := make([]any, 0, len(oam.TierOrder))
@@ -78,19 +60,5 @@ func TestPolicySchemas_Surface(t *testing.T) {
 	}
 	if !tier.Required || !reflect.DeepEqual(tier.Enum, wantEnum) {
 		t.Errorf("placement.tier: want required with enum %v, got required=%v enum=%v", wantEnum, tier.Required, tier.Enum)
-	}
-
-	// reconciliation: every key optional; durations are strings, the rest booleans.
-	for k, p := range handlers["reconciliation"].PropertySchema() {
-		if p.Required {
-			t.Errorf("reconciliation.%s: want optional", k)
-		}
-		want := oam.PropertyTypeBoolean
-		if k == "interval" || k == "retryInterval" || k == "timeout" {
-			want = oam.PropertyTypeString
-		}
-		if p.Type != want {
-			t.Errorf("reconciliation.%s: type %v, want %v", k, p.Type, want)
-		}
 	}
 }

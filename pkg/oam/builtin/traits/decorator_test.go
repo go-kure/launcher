@@ -338,7 +338,7 @@ func (s *augmentingSvcStub) BackendServiceName() string                   { retu
 // augmentingDecorator embedding the narrower stack.ApplicationConfig instead
 // of decoratedConfig: that mistake would make wrapIfAugmenter's wrapped
 // result implement AugmentLayout while silently losing ServicePort and
-// BackendServiceName (and Validate, SetFluxNamespace, EmitsAutoHealthCheck),
+// BackendServiceName (and Validate, SetFluxNamespace),
 // reintroducing Task 1's bug for exactly the components this task adds
 // LayoutAugmenter support for.
 func TestConfigMapDecorator_PreservesServiceForwardsWhenAugmented(t *testing.T) {
@@ -363,11 +363,11 @@ func TestConfigMapDecorator_PreservesServiceForwardsWhenAugmented(t *testing.T) 
 	if got := sn.BackendServiceName(); got != "web-svc" {
 		t.Errorf("BackendServiceName() = %q, want %q", got, "web-svc")
 	}
-	// augmentingSvcStub implements none of Validator/fluxNamespaceSettable/
-	// autoHealthCheckEmitter, so these three assert only that decoratedConfig
-	// still declares them (the type assertion succeeds) and that decoratorBase's
-	// defaults still come through — not that augmentingSvcStub itself implements
-	// them. A decoratedConfig missing any of the five would fail its assertion.
+	// augmentingSvcStub implements neither Validator nor fluxNamespaceSettable,
+	// so these two assert only that decoratedConfig still declares them (the
+	// type assertion succeeds) and that decoratorBase's defaults still come
+	// through — not that augmentingSvcStub itself implements them. A
+	// decoratedConfig missing any of the four would fail its assertion.
 	if v, ok := dec.(interface{ Validate() error }); !ok {
 		t.Fatal("wrapped config lost Validate after augmenting wrap")
 	} else if err := v.Validate(); err != nil {
@@ -377,11 +377,6 @@ func TestConfigMapDecorator_PreservesServiceForwardsWhenAugmented(t *testing.T) 
 		t.Fatal("wrapped config lost SetFluxNamespace after augmenting wrap")
 	} else {
 		s.SetFluxNamespace("ns") // must not panic for a non-settable inner
-	}
-	if e, ok := dec.(interface{ EmitsAutoHealthCheck() bool }); !ok {
-		t.Fatal("wrapped config lost EmitsAutoHealthCheck after augmenting wrap")
-	} else if !e.EmitsAutoHealthCheck() {
-		t.Error("EmitsAutoHealthCheck() = false, want true (default for a non-implementing inner)")
 	}
 }
 

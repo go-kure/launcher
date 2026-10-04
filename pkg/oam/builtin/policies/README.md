@@ -6,8 +6,8 @@ Package `policies` implements `oam.PolicyHandler` for the built-in application p
 types. A policy is an entry in an Application's `spec.policies`; it builds no resources of
 its own. Its handler validates the entry and records its effect on the shared
 `oam.PolicyResult`, and the transform applies that result to the cluster tree it builds:
-tier overrides and dependency edges decide how components are grouped into bundles, and
-health checks and reconciliation settings are set on every leaf bundle.
+tier overrides and dependency edges decide how components are grouped into bundles and
+which bundle depends on which.
 
 Handlers are registered with the transformer in `pkg/cmd/kurel` via
 `RegisterPolicy(type, handler)`, from `builtinPolicyHandlers()`. A policy type with no
@@ -22,8 +22,6 @@ handler also implements `oam.PropertySchemaProvider` (`PropertySchema()`), with 
 |--------|---------|------------|
 | `dependency` | `PolicyResult.Dependencies` | `rules[]` (required, non-empty): `component` (required), `dependsOn[]` (required, non-empty) |
 | `placement` | `PolicyResult.TierOverrides` | `component` (required), `tier` (required: `infra`, `services` or `apps`) |
-| `reconciliation` | `PolicyResult.ReconciliationSettings` | `interval`, `retryInterval`, `timeout`, `prune`, `wait`, `force`, `suspend` — at least one |
-| `health-checks` | `PolicyResult.HealthCheckOverrides` | `checks[]` (required, non-empty): `apiVersion`, `kind`, `name` (required), `namespace` |
 
 ### `dependency`
 
@@ -84,62 +82,23 @@ policies:
       tier: infra
 ```
 
-### `reconciliation`
+## Delivery policies are not built in
 
-Sets Flux Kustomization reconciliation parameters on every leaf bundle of the
-application. `interval`, `retryInterval` and `timeout` must be durations Flux's
-Kustomization CRD accepts (`5m`, `1h30m`): unsigned, in `ms`, `s`, `m` or `h`, so a value
-such as `-5m` or `500ns` that Go would parse is still an error. The check is the one the
-`oci` component uses for its `interval` (the internal
-`pkg/oam/internal/fluxduration`), applied to the emitted form as well as the authored
-one: the generated Kustomization carries each value as a `metav1.Duration`, which
-serializes as Go's `Duration.String()`, so a value below Flux's millisecond resolution is
-an error too — `0.5ms` would be emitted as `500µs`, and a positive value below a
-nanosecond as `0s` (use `0s` or at least `1ms`); `prune`, `wait`, `force` and `suspend` are booleans. A boolean left out
-leaves the bundle's own value unchanged rather than forcing `false`. A property given
-with the wrong type (`interval: 5`, `prune: "true"`) is an error rather than ignored;
-`null` reads as absent. At least one property
-must be given, and at most one `reconciliation` policy is allowed per application.
-`force: true` force-applies every object of the bundle, its PersistentVolumeClaims and
-PersistentVolumes included: one whose immutable field changes is deleted and recreated, which
-can lose its data. It stays allowed, and `Transformer.WarnForcedVolumes` (which `kurel build`
-runs) warns once per such claim or volume, as it does for the `force-replace` trait's
-annotation (go-kure/launcher#720; see the `pkg/oam` README).
+`reconciliation` and `health-checks` configured how Flux delivers an application: the
+reconciliation parameters of its Kustomizations and extra health-check entries. Launcher
+sets no Flux delivery field on the bundles it returns (go-kure/launcher#781; see
+`docs/delivery-scope.md`), so it has no handler for either type and `kurel build` fails a
+document using one:
 
-```yaml
-policies:
-  - name: flux
-    type: reconciliation
-    properties:
-      interval: 5m
-      retryInterval: 1m
-      prune: true
+```text
+no handler for policy type "reconciliation": it configures delivery, which launcher leaves to the consumer that delivers the application; a consumer that delivers through Flux registers its own handler
 ```
 
-### `health-checks`
-
-Appends explicit Flux health-check entries to every leaf bundle, after the ones the
-transform generates for the workloads it knows how to check. `apiVersion`, `kind` and
-`name` are required; `namespace` is optional and left empty when omitted or null, but a present
-`namespace` that is not a string is an error rather than read as omitted. Several
-`health-checks` policies accumulate in document order.
-
-```yaml
-policies:
-  - name: extra-checks
-    type: health-checks
-    properties:
-      checks:
-        - apiVersion: batch/v1
-          kind: Job
-          name: db-migrate
-          namespace: default
-```
-
-**Interaction with `wait`.** Flux's kustomize-controller ignores `spec.healthChecks` on a
-Kustomization whose `spec.wait` is `true`. A document that combines a `reconciliation`
-policy setting `wait: true` with a `health-checks` policy therefore builds, but the listed
-checks are never evaluated — nor are the generated ones. Use one or the other.
+A consumer that delivers through Flux registers its own handler for the type
+(`RegisterPolicy`). The handler records what it read under a key it owns in
+`PolicyResult.Extensions`, a `map[string]any` launcher neither reads nor changes, and the
+consumer reads it back from the result `TransformWithPolicy` returns and applies it to the
+delivery objects it generates.
 
 ## Validation
 
@@ -147,13 +106,12 @@ Validation happens in two places, and both name the policy.
 
 `kurel build` first checks every authored policy's properties against its handler's
 `PropertySchema` (`Transformer.ValidateAuthoredProperties`, after components and traits):
-a key the schema does not declare (`prunee: true`), a value of the wrong type
-(`prune: "true"`) or a `tier` outside its allowed values is a build error. A required
+a key the schema does not declare (`teir: infra`), a value of the wrong type
+(`component: 5`) or a `tier` outside its allowed values is a build error. A required
 property that is left out is not reported here; the handler reports it.
 
 Each handler then checks what it reads when the transform dispatches the policy: a
-required property that is missing or empty, an empty `rules`, `dependsOn` or `checks`
-list, an invalid duration,
+required property that is missing or empty, an empty `rules` or `dependsOn` list,
 an unknown tier or component, a self-dependency or a cycle is an error. A caller that drives
 `Transform` without calling `ValidateAuthoredProperties` first gets only this second
 check, in which a key the handler does not read is ignored. A wrongly typed value
@@ -161,11 +119,10 @@ the handler does read is still an error there.
 
 ## What `kurel build` shows
 
-`kurel build` prints the objects each component generates, not the Flux Kustomizations
-that would carry the bundle settings. A document with these policies builds and is
-validated, but the bundle grouping, dependencies, reconciliation settings and health
-checks they produce live on the `stack.Cluster` the transform returns, and appear only
-where a caller renders that tree into Flux resources.
+`kurel build` prints the objects each component generates, not the bundles that group
+them. A document with these policies builds and is validated, but the bundle grouping and
+dependencies they produce live on the `stack.Cluster` the transform returns, and appear
+only where a caller delivers that tree.
 
 ## `app-dependency` is not built in
 

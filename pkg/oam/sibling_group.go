@@ -60,7 +60,7 @@ func (t *Transformer) stampSiblingGroups(components []Component) error {
 
 // collapseSiblingGroups folds each sibling group's entries into one entry, placed
 // where its first member stood. The collapsed entry carries the first member's
-// component (the primary: its type picks the auto health check), the primary's
+// component (the primary), the primary's
 // tier (checkSiblingTiers settles it once placement has run), and ONE
 // stack.Application named after the group whose config is a
 // siblingGroupConfig over the members' own applications. Every name-keyed step
@@ -165,15 +165,6 @@ func (e componentEntry) traitSteps(app *Application) []traitStep {
 	return steps
 }
 
-// healthCheckConfig is the config whose object the auto health check names: the
-// primary member's for a collapsed sibling group, else the entry's own.
-func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
-	if len(e.members) > 0 {
-		return e.members[0].app.Config
-	}
-	return e.app.Config
-}
-
 // siblingGroupConfig is the one ApplicationConfig a sibling group deploys as. It
 // generates its members' objects primary objects first (Generate) and answers every
 // optional config interface the engine type-asserts on a deployed component's
@@ -182,13 +173,11 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 // trait on the member whose contracts it reads (a routing trait on the member
 // owning the Service).
 //
-//   - fluxNamespaceSettable (transform.go applyAutoHealthChecks and
-//     postProcessFluxNamespace): set on every member.
+//   - fluxNamespaceSettable (transform.go postProcessFluxNamespace): set on
+//     every member.
 //   - fluxNamespaceReader: every member's reads. moveFluxNamespaceInputs asks
 //     the member a trait ran on instead, so the union never moves one member's
 //     trait object for another member's read.
-//   - autoHealthCheckEmitter (applyAutoHealthChecks): the primary member's
-//     answer, since the health check names the primary's kind.
 //   - ComponentNamed (for consumers attributing objects to their component):
 //     the group's name, which every member shares.
 //   - servicePortProvider, serviceBackendNamer, serviceRoutingTargeter
@@ -289,14 +278,6 @@ func (g *siblingGroupConfig) FluxNamespaceReads() (configMaps, secrets []string)
 
 // ComponentName is the group's name, which every member shares (ComponentNamed).
 func (g *siblingGroupConfig) ComponentName() string { return g.members[0].Name }
-
-// EmitsAutoHealthCheck answers for the primary member, whose kind the health check names.
-func (g *siblingGroupConfig) EmitsAutoHealthCheck() bool {
-	if e, ok := g.members[0].Config.(autoHealthCheckEmitter); ok {
-		return e.EmitsAutoHealthCheck()
-	}
-	return true
-}
 
 // ServicePort is the one member's non-zero Service port, or 0.
 func (g *siblingGroupConfig) ServicePort() int32 {

@@ -2,12 +2,12 @@ package kurel
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
-	"sigs.k8s.io/yaml"
+	"github.com/go-kure/kure/pkg/stack"
 )
 
 // postgresqlMembersApp is a postgresql component emitting every member kind:
@@ -52,47 +52,15 @@ const postgresqlOrderPolicy = `  policies:
             dependsOn: [db]
 `
 
-// deliveryKustomizations runs a delivery build of app and returns the spec of
-// each Flux Kustomization it writes, by name.
-func deliveryKustomizations(t *testing.T, app string) map[string]map[string]any {
+// postgresqlBundles transforms app with kurel's builtin transformer and
+// returns the leaf bundles of its cluster, by name.
+func postgresqlBundles(t *testing.T, app string) map[string]*stack.Bundle {
 	t.Helper()
-	dir := t.TempDir()
-	appPath := writeTempFile(t, dir, "app.yaml", app)
-	outDir := filepath.Join(dir, "out")
-	if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
-		"-o", outDir, "--oci-repository", testOCIRepository, "--oci-tag", "v1.0.0"); err != nil {
-		t.Fatalf("delivery build: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(outDir, "shop.flux.yaml"))
+	cluster, _, err := transformWithBuiltins(t, app)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("transforming: %v", err)
 	}
-	ks := map[string]map[string]any{}
-	for _, raw := range strings.Split(string(data), "\n---\n") {
-		var obj map[string]any
-		if err := yaml.Unmarshal([]byte(raw), &obj); err != nil {
-			t.Fatalf("decoding %s: %v", raw, err)
-		}
-		if obj["kind"] != "Kustomization" {
-			continue
-		}
-		md, _ := obj["metadata"].(map[string]any)
-		name, _ := md["name"].(string)
-		ks[name], _ = obj["spec"].(map[string]any)
-	}
-	return ks
-}
-
-// dependsOnNames lists the Kustomizations spec depends on, in order.
-func dependsOnNames(spec map[string]any) []string {
-	deps, _ := spec["dependsOn"].([]any)
-	names := make([]string, 0, len(deps))
-	for _, d := range deps {
-		m, _ := d.(map[string]any)
-		name, _ := m["name"].(string)
-		names = append(names, name)
-	}
-	return names
+	return leafBundles(cluster.Node)
 }
 
 const postgresqlPlacementPolicy = `    - name: where
@@ -106,39 +74,21 @@ const postgresqlPlacementPolicy = `    - name: where
 // postgresql component placed all of its objects; the rule repeats it for each
 // member. Without a dependency policy the objects stay in one bundle, as they
 // were; with one, the members' bundles are in the Cluster's tier, so the tier
-// order adds no edge back to them (it made a cycle) and fluxcd-postbuild
-// reaches each of them.
+// order adds no edge back to them (it made a cycle, which the transform
+// refuses).
 func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
-	postbuild := `        - type: fluxcd-patches
-          properties:
-            patches:
-              - patch: |
-                  - op: add
-                    path: /metadata/labels/patched
-                    value: "yes"
-                target:
-                  group: postgresql.cnpg.io
-        - type: fluxcd-postbuild
-          properties:
-            substitute:
-              REGION: eu-west-1
-`
+	const traits = "        - type: prune-protection\n"
 	t.Run("without a dependency policy", func(t *testing.T) {
-		ks := deliveryKustomizations(t, postgresqlMembersApp(postbuild, "  policies:\n"+postgresqlPlacementPolicy))
-		if len(ks) != 1 || ks["shop"] == nil {
-			t.Fatalf("Kustomizations = %v, want the one bundle shop", keysOf(ks))
-		}
-		// The members share the Cluster's bundle, which carries the patch once.
-		if patches, _ := ks["shop"]["patches"].([]any); len(patches) != 1 {
-			t.Errorf("shop patches = %v, want the one authored patch", ks["shop"]["patches"])
+		bundles := postgresqlBundles(t, postgresqlMembersApp(traits, "  policies:\n"+postgresqlPlacementPolicy))
+		if got := slices.Sorted(maps.Keys(bundles)); !slices.Equal(got, []string{"shop"}) {
+			t.Fatalf("bundles = %v, want the one bundle shop", got)
 		}
 	})
 	t.Run("with a dependency policy", func(t *testing.T) {
-		ks := deliveryKustomizations(t, postgresqlMembersApp(postbuild, postgresqlOrderPolicy+postgresqlPlacementPolicy))
+		bundles := postgresqlBundles(t, postgresqlMembersApp(traits, postgresqlOrderPolicy+postgresqlPlacementPolicy))
 		for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
-			pb, _ := ks[name]["postBuild"].(map[string]any)
-			if sub, _ := pb["substitute"].(map[string]any); sub["REGION"] != "eu-west-1" {
-				t.Errorf("%s postBuild = %v, want the authored substitute (have %v)", name, ks[name]["postBuild"], keysOf(ks))
+			if bundles[name] == nil {
+				t.Errorf("no bundle %s (have %v)", name, slices.Sorted(maps.Keys(bundles)))
 			}
 		}
 	})
@@ -179,8 +129,16 @@ func TestBuild_PostgresqlDependentWaitsForEveryMember(t *testing.T) {
         component: api
         tier: services
 `
-	ks := deliveryKustomizations(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
-	got := strings.Join(dependsOnNames(ks["shop-api"]), ",")
+	bundles := postgresqlBundles(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
+	api := bundles["shop-api"]
+	if api == nil {
+		t.Fatalf("no bundle shop-api (have %v)", slices.Sorted(maps.Keys(bundles)))
+	}
+	var names []string
+	for _, dep := range api.DependsOn {
+		names = append(names, dep.Name)
+	}
+	got := strings.Join(names, ",")
 	if want := "shop-db,shop-db-pooler,shop-db-orders"; got != want {
 		t.Errorf("shop-api dependsOn = %s, want %s", got, want)
 	}
@@ -219,54 +177,6 @@ func TestBuild_PostgresqlObjectTraitsReachEveryObject(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestBuild_PostgresqlBundleTraitsReachEveryBundle: under a dependency policy
-// the Pooler and each Database get bundles of their own, so fluxcd-patches and
-// fluxcd-postbuild, which used to act on the one bundle holding all of
-// postgresql's objects, reach each of those Kustomizations. The Database named
-// like the Pooler shares the Pooler's bundle, which carries the patch once.
-func TestBuild_PostgresqlBundleTraitsReachEveryBundle(t *testing.T) {
-	traits := `        - type: fluxcd-patches
-          properties:
-            patches:
-              - patch: |
-                  - op: add
-                    path: /metadata/labels/patched
-                    value: "yes"
-                target:
-                  group: postgresql.cnpg.io
-        - type: fluxcd-postbuild
-          properties:
-            substitute:
-              REGION: eu-west-1
-`
-	ks := deliveryKustomizations(t, postgresqlMembersApp(traits, postgresqlOrderPolicy))
-	for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
-		spec, ok := ks[name]
-		if !ok {
-			t.Errorf("no Kustomization %s (have %v)", name, keysOf(ks))
-			continue
-		}
-		if patches, _ := spec["patches"].([]any); len(patches) != 1 {
-			t.Errorf("%s patches = %v, want the one authored patch", name, spec["patches"])
-		}
-		pb, _ := spec["postBuild"].(map[string]any)
-		if sub, _ := pb["substitute"].(map[string]any); sub["REGION"] != "eu-west-1" {
-			t.Errorf("%s postBuild = %v, want the authored substitute", name, spec["postBuild"])
-		}
-	}
-	if spec, ok := ks["shop-api"]; ok && (spec["patches"] != nil || spec["postBuild"] != nil) {
-		t.Errorf("shop-api got postgresql's bundle traits: %v", spec)
-	}
-}
-
-func keysOf[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }
 
 // TestBuild_PostgresqlDatabaseNamedLikeThePooler: a Database named "pooler"

@@ -21,8 +21,8 @@ the downstream runtime can validate them before invocation. This includes the pl
 handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
 `controllerType`). Some deeply nested or K8s-adjacent shapes are kept shallow/open
 (`additionalProperties`) rather than modeled field-by-field, but strictness-sensitive traits are
-**closed**: the `rbac` rule object and the `fluxcd-patches` patch item and its `target` selector
-enumerate their fields and set `additionalProperties: false` (unknown keys rejected), matching the
+**closed**: the `rbac` rule object
+enumerates its fields and sets `additionalProperties: false` (unknown keys rejected), matching the
 downstream single-owner adoption of these builtins. `prune-protection`, `topology-spread` and
 `force-replace` accept no properties of their own and so declare an empty schema (the
 engine-owned `scope`, legal on every trait, is still accepted); for `prune-protection` and
@@ -72,10 +72,16 @@ preflight reject every valid use of the trait.
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
 |--------|--------|----------------|
-| `fluxcd-patches` | Appends `Kustomization.spec.patches`; the force warning reads volumes after them (go-kure/launcher#728) | `patches[]` (`patch`, `target`) |
-| `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
 | `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Replacing a PersistentVolumeClaim or PersistentVolume can lose its data, so each one annotated gets a build warning. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
+
+`fluxcd-patches` and `fluxcd-postbuild` are not built in. They set `spec.patches` and
+`spec.postBuild` of the Flux Kustomization that delivers a bundle, and launcher sets no Flux
+delivery field on the bundles it returns (go-kure/launcher#781; see `docs/delivery-scope.md`).
+A document using one fails the transform with `no handler for trait type "fluxcd-patches": it
+configures delivery, which launcher leaves to the consumer that delivers the application; a
+consumer that delivers through Flux registers its own handler`. Such a consumer registers its
+own trait handler (`RegisterTrait`) and applies the result to the delivery objects it generates.
 
 `prune-protection` and `force-replace` annotate every object the component produces: what the
 component itself generates, including resources a layout-augmenting component adds (see
@@ -680,7 +686,7 @@ have nothing to do for an augmenter-added resource, so they implement no hook.
 
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
-`fluxNamespaceSettable`, `fluxNamespaceReader`, `autoHealthCheckEmitter`, `servicePortProvider`,
+`fluxNamespaceSettable`, `fluxNamespaceReader`, `servicePortProvider`,
 `serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer`,
 `serviceRoutingTargeter`, `podTemplateLabeler`, `identityPortMapper` and `oam.ComponentNamed` —
 so a decorated config keeps answering them. The `oam.ComponentNamed` forward keeps a trait
@@ -808,18 +814,16 @@ or slice produces when a lowering rule or a Go-API caller assigns it into a prop
 A bare `v.(map[string]any)` succeeds on it, so it used to read as an authored empty
 value where an untyped null (`key:` with no value in a document) did not. Since
 go-kure/launcher#465, the parsers of `httproute`, `ingress`, `external-secret`,
-`fluxcd-postbuild`, `fluxcd-patches`, `rbac`, `certificate`, `pvc` and `expose`, and the
+`rbac`, `certificate`, `pvc` and `expose`, and the
 shared `networkPolicy.trafficSources` parser, give a typed nil the answer an untyped one
 gets. The rule is the untyped answer, whatever it is:
 
 - **Refused, with the untyped message:** a list entry (`httproute` `parentRefs[]`,
   `rules[]`, `matches[]`, `headers[]`, `backendRefs[]`, `filters[]` and header-modifier
   entries; `ingress` `rules[]`, `paths[]`, `tls[]`; `external-secret` `data[]` and
-  `dataFrom[]`; `fluxcd-postbuild` `substituteFrom[]`; `fluxcd-patches` `patches[]`;
-  `rbac` `rules[]`; `trafficSources[]`), and a required or typed-when-present block (the `httproute`
+  `dataFrom[]`; `rbac` `rules[]`; `trafficSources[]`), and a required or typed-when-present block (the `httproute`
   filter blocks and their `backendRef`s, `ingress`/`httproute` `backendSelector`,
   `data[].remoteRef`, `certificate` `issuerRef`, `rbac` `apiGroups`/`resources`/`verbs`,
-  `fluxcd-postbuild` `substitute`/`substituteFrom`, `fluxcd-patches` `patches`/`target`,
   `networkPolicy`, `podSelector`). Before, a typed nil there became a catch-all rule, a
   `/` path, an empty TLS block, or an empty value that let a valid sibling carry the
   document.
