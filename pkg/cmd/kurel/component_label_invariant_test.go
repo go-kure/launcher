@@ -225,6 +225,8 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// no `app` label and no pods. The component name is the Namespace's name,
 	// which the API holds to a DNS-1123 label.
 	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
+	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
+		"default": map[string]any{"cpu": "500m"}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

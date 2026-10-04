@@ -299,7 +299,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"persistentvolumeclaim": &components.PersistentVolumeClaimHandler{},
 		"configmap":             &components.ConfigMapHandler{},
 
-		"namespace": &components.NamespaceHandler{},
+		"namespace":  &components.NamespaceHandler{},
+		"limitrange": &components.LimitRangeHandler{},
 	}
 }
 

@@ -90,6 +90,7 @@ reads it.
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
+| `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -185,7 +186,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
 | `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
-| `kubernetes.CreateLimitRange` | v1 LimitRange | missing | - | - | - |
+| `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
 | `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | missing | - | - | - |
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
@@ -1982,18 +1983,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `ParseConfigMapProperties(props)` and builds the ConfigMap through
     `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
     give the same ConfigMap and the same refusals on both paths.
-- **namespace** (go-kure/launcher#790) is the kind-named projection of one
-  Kubernetes core object, built on the recipe of the `cnpg-pooler`,
-  `cnpg-database` and `cnpg-objectstore` kinds: one schema key per json field
-  of the object's spec type, the whole property map decoded strictly into that
-  type under the null contract, and two spellings of one field refused.
-  `TestCoreKindSchemas_CoverSpec` holds the schema to the linked type by
-  reflection. It emits the object, named after the component, with the
-  authored spec and nothing else: no annotation, and no `app` label (a
-  component label on every generated object is go-kure/launcher#788). It runs
-  no pod and requests no storage, so `ApplyPolicy` is a no-op. Like every
-  component, it is in no tier unless a tier annotation or placement policy
-  places it.
+- **namespace**, **limitrange** (go-kure/launcher#790) are kind-named
+  projections of one Kubernetes core object each, built on the recipe of the
+  `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds: one schema key
+  per json field of the object's spec type, the whole property map decoded
+  strictly into that type under the null contract, and two spellings of one
+  field refused. `TestCoreKindSchemas_CoverSpec` holds each schema to the
+  linked type by reflection. Each emits its object, named after the component,
+  with the authored spec and nothing else: no annotation, and no `app` label
+  (a component label on every generated object is go-kure/launcher#788). None
+  runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
+  component, they are in no tier unless a tier annotation or placement policy
+  places them.
   The properties are the spec fields only. **Not covered:** the object's
   metadata, so its labels and annotations cannot be authored.
   - `namespace` publishes `finalizers`, the one field of
@@ -2005,6 +2006,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a Namespace that needs the Pod Security Admission labels
     (`pod-security.kubernetes.io/enforce` and its siblings) cannot be written
     with this component.
+  - `limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
+    and emits the LimitRange in the build namespace. `limits` is required: the
+    Go type cannot omit it, so an unauthored one (absent or `null`) would be
+    written as `limits: null` and is refused with `limits: required …`. An
+    authored `limits: []` is kept: a LimitRange that enforces nothing. Each
+    limit's `type` is required for the same reason (`limits[1].type: required
+    …`), and two limits of one type are refused by path, as the API refuses
+    them. The other value rules (which type names exist, `min` at most `max`,
+    what a `Pod` limit may not set) are left to the API server. A quantity
+    written as a number is emitted in its canonical string form (`cpu: 2`
+    becomes `cpu: "2"`). The limits constrain the pods and claims of the
+    namespace at admission; the environment policy is not applied to them.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of

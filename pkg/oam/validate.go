@@ -60,7 +60,8 @@ var validComponentTypes = map[string]bool{
 
 	// The kind components for the objects no component projected
 	// (go-kure/launcher#790).
-	"namespace": true,
+	"namespace":  true,
+	"limitrange": true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

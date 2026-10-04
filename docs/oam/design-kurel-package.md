@@ -119,6 +119,7 @@ Ported from the downstream runtime. Each type maps to a `ComponentHandler` imple
 | `persistentvolumeclaim` | Kind-named PersistentVolumeClaim (launcher-native): `size` (or the EnvironmentPolicy storage default), `storageClassName` (`""` requests no class), `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName`, which generates no claim and keeps `accessModes` so the workload can still read the claim's modes. |
 | `configmap` | Kind-named ConfigMap (launcher-native): `data` (strings only), `binaryData`, `immutable`. Distinct from the `configmap` trait. |
 | `namespace` | Kind-named Namespace (launcher-native): the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped and named after the component, which must be a DNS-1123 label. Emits identity and the authored spec; its labels are not authorable. |
+| `limitrange` | Kind-named LimitRange (launcher-native): the whole `LimitRangeSpec`, strictly decoded. `limits` and each limit's `type` are required; `limits: []` enforces nothing. Emits identity and the authored spec. |
 | `cronjob` | Scheduled task: CronJob |
 | `job` | Run-to-completion task: Job. Same JobSpec-level properties as `cronjob`'s job template, plus its own `suspend` (`JobSpec.Suspend`, not the CronJobSpec field of the same name); `selector`/`manualSelector` are refused because the job controller generates the selector. |
 | `postgresql` | PostgreSQL instance (CNPG) |
