@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // htBaseProps is the smallest valid helmtemplate property map: a chart in an
@@ -395,6 +396,137 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 	sortByKey(gen)
 	if !reflect.DeepEqual(union, gen) {
 		t.Errorf("children's union differs from Generate's output:\n  union:    %#v\n  Generate: %#v", union, gen)
+	}
+}
+
+// htHookGroupChildren transforms an Application named application whose one
+// component db is a helmtemplate on the chart served at srvURL, carrying
+// traitTypes, walks the result with kure's layout walker and returns the
+// component layout's hook-group children.
+func htHookGroupChildren(t *testing.T, srvURL, application string, traitTypes ...string) []*layout.ManifestLayout {
+	t.Helper()
+	tr := oam.NewTransformer(
+		map[string]oam.ComponentHandler{"helmtemplate": &components.HelmTemplateHandler{}},
+		map[string]oam.TraitHandler{"prune-protection": &traits.PruneProtectionHandler{}})
+	component := oam.Component{
+		Name: "db",
+		Type: "helmtemplate",
+		Properties: map[string]any{
+			"chart":   "testchart",
+			"version": "0.1.0",
+			"source":  map[string]any{"url": srvURL},
+			"values":  map[string]any{"replicas": 3},
+		},
+	}
+	for _, traitType := range traitTypes {
+		component.Traits = append(component.Traits, oam.Trait{Type: traitType, Properties: map[string]any{}})
+	}
+	cluster, err := tr.Transform(&oam.Application{
+		Metadata: oam.Metadata{Name: application},
+		Spec:     oam.ApplicationSpec{Components: []oam.Component{component}},
+	}, oam.TransformContext{Namespace: "demo"})
+	if err != nil {
+		t.Fatalf("Transform %s: %v", application, err)
+	}
+	root, err := layout.WalkCluster(cluster, layout.DefaultLayoutRules())
+	if err != nil {
+		t.Fatalf("WalkCluster %s: %v", application, err)
+	}
+	var find func(ml *layout.ManifestLayout) *layout.ManifestLayout
+	find = func(ml *layout.ManifestLayout) *layout.ManifestLayout {
+		if ml.Name == "db" {
+			return ml
+		}
+		for _, child := range ml.Children {
+			if found := find(child); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	componentLayout := find(root)
+	if componentLayout == nil {
+		t.Fatalf("application %s: the walked tree has no layout for component db", application)
+	}
+	return componentLayout.Children
+}
+
+// TestHelmTemplate_HookGroupChildNamesIncludeApplication is the acceptance
+// test of go-kure/launcher#792, through the transform and kure's layout walker:
+// two applications that each have a helmtemplate component db get different
+// hook-group child names, and a single application's children differ from the
+// ones a config no transform told its application gets only by the application
+// name that leads them — the same groups, objects and order. A trait that wraps
+// the component's config changes none of it.
+func TestHelmTemplate_HookGroupChildNamesIncludeApplication(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
+	objectNames := func(ml *layout.ManifestLayout) []string {
+		names := make([]string, len(ml.Resources))
+		for i, o := range ml.Resources {
+			names[i] = o.GetName()
+		}
+		return names
+	}
+
+	// What a config built without an application gives: the names as they were.
+	direct, err := (&components.HelmTemplateHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "db", Type: "helmtemplate", Properties: map[string]any{
+			"chart":   "testchart",
+			"version": "0.1.0",
+			"source":  map[string]any{"url": srvURL},
+			"values":  map[string]any{"replicas": 3},
+		},
+	}, "demo")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	before := &layout.ManifestLayout{Name: "db", Namespace: "team"}
+	if err := direct.(layout.LayoutAugmenter).AugmentLayout(before); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	var beforeNames []string
+	for _, child := range before.Children {
+		beforeNames = append(beforeNames, child.Name)
+	}
+	if want := []string{"db-00-pre-install", "db-01-main", "db-02-post-install"}; !slices.Equal(beforeNames, want) {
+		t.Fatalf("children without an application = %v, want %v", beforeNames, want)
+	}
+
+	seen := map[string]string{}
+	for _, application := range []string{"shop", "billing"} {
+		children := htHookGroupChildren(t, srvURL, application)
+		if len(children) != len(before.Children) {
+			t.Fatalf("application %s has %d children, want %d", application, len(children), len(before.Children))
+		}
+		for i, child := range children {
+			if want := application + "-" + beforeNames[i]; child.Name != want {
+				t.Errorf("application %s child %d is named %q, want %q", application, i, child.Name, want)
+			}
+			if other, taken := seen[child.Name]; taken {
+				t.Errorf("applications %s and %s both have a child named %q", other, application, child.Name)
+			}
+			seen[child.Name] = application
+			if got, want := objectNames(child), objectNames(before.Children[i]); !slices.Equal(got, want) {
+				t.Errorf("application %s child %q holds %v, want %v", application, child.Name, got, want)
+			}
+			var wantDeps []string
+			if i > 0 {
+				wantDeps = []string{children[i-1].Name}
+			}
+			if !slices.Equal(child.DependsOn, wantDeps) {
+				t.Errorf("application %s child %q depends on %v, want %v", application, child.Name, child.DependsOn, wantDeps)
+			}
+		}
+	}
+
+	// The trait's decorator wraps the config after it was told its application.
+	decorated := htHookGroupChildren(t, srvURL, "shop", "prune-protection")
+	var decoratedNames []string
+	for _, child := range decorated {
+		decoratedNames = append(decoratedNames, child.Name)
+	}
+	if want := []string{"shop-db-00-pre-install", "shop-db-01-main", "shop-db-02-post-install"}; !slices.Equal(decoratedNames, want) {
+		t.Errorf("children under a prune-protection trait = %v, want %v", decoratedNames, want)
 	}
 }
 

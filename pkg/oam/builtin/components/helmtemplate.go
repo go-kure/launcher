@@ -144,6 +144,11 @@ func helmTemplateValues(owned map[string]any) (map[string]any, error) {
 type HelmTemplateConfig struct {
 	// Name is the component name.
 	Name string
+	// Application is the name of the OAM application the component belongs to.
+	// The transform sets it (SetApplicationName); it leads the name of every
+	// hook-group child layout (hookGroupChildName). Empty on a config built
+	// directly, whose child names then begin with the layout's own name.
+	Application string
 	// Namespace is the application namespace, the render's .Release.Namespace;
 	// empty leaves kure's default, "default". The release name is always
 	// kure's default, "release": this terminal declares no releaseName.
@@ -216,15 +221,20 @@ func (c *HelmTemplateConfig) Generate(_ *stack.Application) ([]*client.Object, e
 	return c.objects(), nil
 }
 
+// SetApplicationName implements oam.ApplicationNameSetter: the transform hands
+// over the name of the application the component belongs to, which the
+// hook-group child layout names then begin with.
+func (c *HelmTemplateConfig) SetApplicationName(name string) { c.Application = name }
+
 // AugmentLayout repartitions the render Generate returned flat into one child
 // layout per Helm hook group, chained in execution order
-// (chartRender.partition). A chart with at most one hook group leaves ml
-// unchanged.
+// (chartRender.partition) and named after c.Application and ml. A chart with at
+// most one hook group leaves ml unchanged.
 func (c *HelmTemplateConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err
 	}
-	c.partition(ml)
+	c.partition(c.Application, ml)
 	return nil
 }
 
@@ -238,4 +248,5 @@ func (c *HelmTemplateConfig) GenerateCoversAugmentLayout() bool { return true }
 var (
 	_ layout.LayoutAugmenter         = (*HelmTemplateConfig)(nil)
 	_ oam.LayoutAugmentationCoverage = (*HelmTemplateConfig)(nil)
+	_ oam.ApplicationNameSetter      = (*HelmTemplateConfig)(nil)
 )

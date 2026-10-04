@@ -273,13 +273,13 @@ func (r *chartRender) objects() []*client.Object {
 // single-tier flattening never absorbs a layout that has children. A caller
 // that sets the layout's mode explicitly keeps it.
 //
-// Residual gap, documented not fixed: two DIFFERENT Applications with a
-// same-named component still collide (component names are unique only
-// within one Application, but every emitted Kustomization CR shares one
-// controller namespace) — a downstream consumer's identical augmenter
-// admits the same gap; inherited here, newly exposed by this repo's own
-// template-delivery support. Out of scope; see the components README.
-func (r *chartRender) partition(ml *layout.ManifestLayout) {
+// A child is named after application and ml (hookGroupChildName). Component
+// names are unique only within one application, while the Kustomization CRs a
+// consumer generates for the children of every application can share one
+// namespace, so the application name is what keeps two applications with a
+// same-named component apart (go-kure/launcher#792). An empty application — a
+// config built directly — leaves the names beginning with ml.Name.
+func (r *chartRender) partition(application string, ml *layout.ManifestLayout) {
 	if len(r.hookGroups) <= 1 {
 		return
 	}
@@ -293,7 +293,7 @@ func (r *chartRender) partition(ml *layout.ManifestLayout) {
 	parentPath := ml.FullRepoPath()
 	var prevName string
 	for i, g := range r.emitted {
-		dirName := hookGroupChildName(ml.Name, i, g)
+		dirName := hookGroupChildName(application, ml.Name, i, g)
 		child := &layout.ManifestLayout{
 			Name:          dirName,
 			Namespace:     parentPath,
@@ -547,20 +547,31 @@ func decodeChartManifests(raw []byte) ([]client.Object, error) {
 	return objs, nil
 }
 
-// hookGroupChildName computes partition's dirName for hook group
-// i: "<ml.Name>-<%02d>-<hookGroupDir(g)>". ml.Name is a validated DNS-1123
-// subdomain up to 253 characters (pkg/oam/validate.go,
+// hookGroupChildName computes partition's dirName for hook group i:
+// "<application>-<ml.Name>-<%02d>-<hookGroupDir(g)>", or
+// "<ml.Name>-<%02d>-<hookGroupDir(g)>" when application is empty (a config
+// built directly, which no transform told its application). application and
+// ml.Name are each a validated DNS-1123 subdomain up to 253 characters
+// (pkg/oam/validate.go,
 // k8s.io/apimachinery/pkg/util/validation.DNS1123SubdomainMaxLength), so the
 // composed name can exceed 253 even with hookGroupDir's own 40-character slug
 // cap — additional to that slug-only cap. Truncating the composed string from
-// the right is wrong: near a 253-char ml.Name, the fixed numeric+phase suffix
-// would be cut away entirely and every group would yield the identical
-// dirName — a deterministic collision. So the PREFIX (ml.Name) is capped
-// instead, by the one shortening rule (oam.ShortenNameWithSuffix): the digest
-// of the full ml.Name takes the place of what is cut, so two different long
-// ml.Names are vanishingly unlikely to shorten to the same name (a
+// the right is wrong: near the limit, the fixed numeric+phase suffix would be
+// cut away entirely and every group would yield the identical dirName — a
+// deterministic collision. So the PREFIX (application and ml.Name, joined) is
+// capped instead, by the one shortening rule (oam.ShortenNameWithSuffix): the
+// digest of the full prefix takes the place of what is cut, so two different
+// long prefixes are vanishingly unlikely to shorten to the same name (a
 // probabilistic guarantee, not an absolute one).
-func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
+//
+// The join is a plain "-", which both names may contain: application "a-b"
+// with component "c" and application "a" with component "b-c" compose the
+// same prefix. Two applications with a same-named component never do.
+func hookGroupChildName(application, mlName string, i int, g helm.HookGroup) string {
+	prefix := mlName
+	if application != "" {
+		prefix = application + "-" + mlName
+	}
 	suffix := fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
-	return oam.ShortenNameWithSuffix(mlName, suffix, oam.ShortenLimitSubdomain)
+	return oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitSubdomain)
 }

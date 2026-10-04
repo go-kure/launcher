@@ -50,11 +50,14 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 		{"helm values ConfigMap", "-values-0123456789", func(name string) string {
 			return helmValuesConfigMapName(name, valuesDigest)
 		}},
+		// Without an application, so that name is the whole shortened prefix as at
+		// every other site; TestHookGroupChildName_IncludesApplication covers the
+		// prefix an application leads.
 		{"hook-group child layout", "-00-pre-install", func(name string) string {
-			return hookGroupChildName(name, 0, helm.HookGroup{Phase: "pre-install"})
+			return hookGroupChildName("", name, 0, helm.HookGroup{Phase: "pre-install"})
 		}},
 		{"hook-group child layout, a three-digit index and a capped phase", "-100-" + strings.Repeat("x", 40), func(name string) string {
-			return hookGroupChildName(name, 100, helm.HookGroup{Phase: strings.Repeat("x", 80)})
+			return hookGroupChildName("", name, 100, helm.HookGroup{Phase: strings.Repeat("x", 80)})
 		}},
 		{"role component PVC claim", "-data", func(name string) string {
 			props := map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
