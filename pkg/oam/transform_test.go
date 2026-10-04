@@ -392,6 +392,13 @@ func TestTransform_SingleComponent_Flat(t *testing.T) {
 	}
 }
 
+// inTier returns c carrying the tier annotation: launcher places no component by
+// its type (go-kure/launcher#783), so a test that wants tiers declares them.
+func inTier(c Component, tier Tier) Component {
+	c.Annotations = map[string]string{TierAnnotationKey(DefaultDomain): string(tier)}
+	return c
+}
+
 func TestTransform_MultiTier_Hierarchical(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{
@@ -401,8 +408,8 @@ func TestTransform_MultiTier_Hierarchical(t *testing.T) {
 		nil,
 	)
 	app := makeApp("myapp",
-		makeComponent("web", "webservice"), // TierApps
-		makeComponent("log", "daemonset"),  // TierInfra
+		inTier(makeComponent("web", "webservice"), TierApps),
+		inTier(makeComponent("log", "daemonset"), TierInfra),
 	)
 	cluster, err := tr.Transform(app, TransformContext{})
 	if err != nil {
@@ -432,8 +439,8 @@ func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
 		nil,
 	)
 	app := makeApp("myapp",
-		makeComponent("web", "webservice"), // TierApps
-		makeComponent("log", "daemonset"),  // TierInfra
+		inTier(makeComponent("web", "webservice"), TierApps),
+		inTier(makeComponent("log", "daemonset"), TierInfra),
 	)
 	cluster, err := tr.Transform(app, TransformContext{})
 	if err != nil {
@@ -450,7 +457,8 @@ func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
 
 func TestTransform_MultiTier_TierBundlesOrdered(t *testing.T) {
 	// go-kure/launcher#575: without a dependency policy, each tier bundle must
-	// still depend on the populated tier before it, skipping an empty tier.
+	// still depend on the populated tier before it, skipping an empty tier. The
+	// tiers are declared: none comes from a component's type (go-kure/launcher#783).
 	tr := NewTransformer(
 		map[string]ComponentHandler{
 			"webservice": &pipelineComponentHandler{typ: "webservice"},
@@ -467,9 +475,9 @@ func TestTransform_MultiTier_TierBundlesOrdered(t *testing.T) {
 		{
 			name: "three tiers",
 			components: []Component{
-				makeComponent("web", "webservice"),
-				makeComponent("db", "postgresql"),
-				makeComponent("log", "daemonset"),
+				inTier(makeComponent("web", "webservice"), TierApps),
+				inTier(makeComponent("db", "postgresql"), TierServices),
+				inTier(makeComponent("log", "daemonset"), TierInfra),
 			},
 			want: map[string][]string{
 				"myapp-infra":    nil,
@@ -480,8 +488,8 @@ func TestTransform_MultiTier_TierBundlesOrdered(t *testing.T) {
 		{
 			name: "empty services tier",
 			components: []Component{
-				makeComponent("web", "webservice"),
-				makeComponent("log", "daemonset"),
+				inTier(makeComponent("web", "webservice"), TierApps),
+				inTier(makeComponent("log", "daemonset"), TierInfra),
 			},
 			want: map[string][]string{
 				"myapp-infra": nil,
@@ -517,7 +525,10 @@ func TestTransform_MultiTier_TierBundlesOrdered(t *testing.T) {
 	}
 }
 
-func TestTransform_DependencyPolicy_PerComponentBundles(t *testing.T) {
+// TestTransform_DependencyPolicy_OrderedGroups pins that a dependency rule gives
+// one application bundle with ordered groups, not one bundle per component
+// (go-kure/launcher#783).
+func TestTransform_DependencyPolicy_OrderedGroups(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{
 			"webservice": &pipelineComponentHandler{typ: "webservice"},
@@ -546,12 +557,22 @@ func TestTransform_DependencyPolicy_PerComponentBundles(t *testing.T) {
 	if !result.HasDependencies() {
 		t.Error("expected PolicyResult to have dependencies")
 	}
-	// Per-component cluster: root node has children (one per component).
-	if cluster.Node == nil {
-		t.Fatal("expected non-nil root node")
+	if cluster.Node == nil || cluster.Node.Bundle == nil {
+		t.Fatal("expected the application bundle at the root node")
 	}
-	if len(cluster.Node.Children) != 2 {
-		t.Errorf("expected 2 component nodes, got %d", len(cluster.Node.Children))
+	if len(cluster.Node.Children) != 0 {
+		t.Errorf("expected no child node, got %d", len(cluster.Node.Children))
+	}
+	root := cluster.Node.Bundle
+	if root.Name != "myapp" || len(root.Applications) != 0 || len(root.Children) != 2 {
+		t.Fatalf("root bundle %q has %d applications and %d groups, want myapp with none and 2", root.Name, len(root.Applications), len(root.Children))
+	}
+	first, second := root.Children[0], root.Children[1]
+	if first.Name != "myapp-00" || len(first.Applications) != 1 || first.Applications[0].Name != "db" || len(first.DependsOn) != 0 {
+		t.Errorf("first group = %q %v dependsOn %v, want myapp-00 holding db and depending on nothing", first.Name, first.Applications, first.DependsOn)
+	}
+	if second.Name != "myapp-01" || len(second.Applications) != 1 || second.Applications[0].Name != "web" || len(second.DependsOn) != 1 || second.DependsOn[0] != first {
+		t.Errorf("second group = %q %v dependsOn %v, want myapp-01 holding web and depending on myapp-00", second.Name, second.Applications, second.DependsOn)
 	}
 }
 
@@ -1084,8 +1105,8 @@ func (h *sharedSourceHandler) ToApplicationConfig(c *Component, _ string) (stack
 	return cfg, nil
 }
 
-// sharedSourceTransformer registers webservice (apps tier) and daemonset (infra
-// tier) components that all share one source key.
+// sharedSourceTransformer registers webservice and daemonset components that
+// all share one source key.
 func sharedSourceTransformer() (*Transformer, map[string]*dedupTrackingConfig) {
 	configs := map[string]*dedupTrackingConfig{}
 	tr := NewTransformer(map[string]ComponentHandler{
@@ -1130,7 +1151,7 @@ func TestTransform_SharedSource_OwnedByEarliestTier(t *testing.T) {
 	// The apps-tier consumer comes first in the document, but the infra tier
 	// deploys first, so the infra consumer owns the source.
 	tr, configs := sharedSourceTransformer()
-	app := makeApp("myapp", makeComponent("web", "webservice"), makeComponent("log", "daemonset"))
+	app := makeApp("myapp", inTier(makeComponent("web", "webservice"), TierApps), inTier(makeComponent("log", "daemonset"), TierInfra))
 
 	if _, err := tr.Transform(app, TransformContext{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1139,14 +1160,14 @@ func TestTransform_SharedSource_OwnedByEarliestTier(t *testing.T) {
 }
 
 func TestTransform_SharedSource_TierFromPlacement(t *testing.T) {
-	// A placement override moves the first consumer to the apps tier after
-	// classification; ownership follows the overridden tier.
+	// A placement moves the first consumer from the tier its annotation names to
+	// the apps tier; ownership follows the placement.
 	tr, configs := sharedSourceTransformer()
 	tr.RegisterPolicy("placement", &tierOverridePolicyHandler{component: "log", tier: TierApps})
 	app := makeApp("myapp",
-		makeComponent("log", "daemonset"),
-		makeComponent("web", "webservice"),
-		makeComponent("agent", "daemonset"),
+		inTier(makeComponent("log", "daemonset"), TierInfra),
+		inTier(makeComponent("web", "webservice"), TierApps),
+		inTier(makeComponent("agent", "daemonset"), TierInfra),
 	)
 	app.Spec.Policies = []ApplicationPolicy{{Name: "move", Type: "placement"}}
 
@@ -1176,69 +1197,6 @@ func (h *tierOverridePolicyHandler) CanHandle(t string) bool { return t == "plac
 func (h *tierOverridePolicyHandler) Apply(_ *ApplicationPolicy, _ []string, result *PolicyResult) error {
 	result.TierOverrides[h.component] = h.tier
 	return nil
-}
-
-func TestDeploymentOrder(t *testing.T) {
-	entry := func(name string, tier Tier) componentEntry {
-		return componentEntry{component: Component{Name: name}, tier: tier}
-	}
-	names := func(entries []componentEntry) []string {
-		out := make([]string, len(entries))
-		for i, e := range entries {
-			out[i] = e.component.Name
-		}
-		return out
-	}
-
-	tests := []struct {
-		name    string
-		entries []componentEntry
-		deps    map[string][]string
-		want    []string
-	}{
-		{
-			name:    "one tier, no dependencies keeps document order",
-			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps), entry("c", TierApps)},
-			want:    []string{"a", "b", "c"},
-		},
-		{
-			name:    "tiers order before document position",
-			entries: []componentEntry{entry("app", TierApps), entry("svc", TierServices), entry("infra", TierInfra)},
-			want:    []string{"infra", "svc", "app"},
-		},
-		{
-			name:    "explicit dependency within a tier",
-			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps), entry("c", TierApps)},
-			deps:    map[string][]string{"a": {"c"}},
-			want:    []string{"b", "c", "a"},
-		},
-		{
-			name:    "explicit dependency and tiers combine",
-			entries: []componentEntry{entry("a", TierApps), entry("db", TierServices), entry("b", TierApps)},
-			deps:    map[string][]string{"a": {"b"}},
-			want:    []string{"db", "b", "a"},
-		},
-		{
-			name:    "unknown dependency name is ignored",
-			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps)},
-			deps:    map[string][]string{"a": {"missing"}},
-			want:    []string{"a", "b"},
-		},
-		{
-			name:    "cycle falls back to document order",
-			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps)},
-			deps:    map[string][]string{"a": {"b"}, "b": {"a"}},
-			want:    []string{"a", "b"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := names(deploymentOrder(tt.entries, tt.deps))
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("deploymentOrder = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestEvaluateProfile_NonVADHandler_Passthrough(t *testing.T) {

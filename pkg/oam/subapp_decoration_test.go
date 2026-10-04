@@ -78,18 +78,19 @@ func stamps(t *testing.T, cluster *stack.Cluster) []string {
 // TestDecorateSubApplications_AnyTraitOrder is go-kure/launcher#712: a decorating
 // trait covers the sub-applications of its own component created by traits
 // authored before it and after it, once each, and no other component's, on each
-// of the three cluster shapes. On the flat shape it also pins the order: each
+// of the cluster shapes. On the flat shape it also pins the order: each
 // component's sub-applications follow it, not every component.
 func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 	shapes := []struct {
 		name       string
 		second     string
+		tiers      bool // web annotated into apps, the second component into infra
 		dependency bool
 		wantOrder  []string
 	}{
 		{name: "flat", second: "webservice", wantOrder: []string{"web=x", "before=x", "after=x", "other=", "other-settings="}},
-		{name: "hierarchical", second: "daemonset"},
-		{name: "dependency-aware", second: "webservice", dependency: true},
+		{name: "tiers", second: "daemonset", tiers: true},
+		{name: "dependency", second: "webservice", dependency: true},
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
@@ -103,6 +104,9 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 			other := Component{Name: "other", Type: shape.second, Properties: map[string]any{}, Traits: []Trait{
 				{Type: "settings", Properties: map[string]any{"name": "other-settings"}},
 			}}
+			if shape.tiers {
+				web, other = inTier(web, TierApps), inTier(other, TierInfra)
+			}
 			app := makeApp("shop", web, other)
 			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
 			if shape.dependency {
@@ -112,6 +116,9 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 			cluster, _, err := tr.TransformWithPolicy(app, TransformContext{})
 			if err != nil {
 				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if ordered := len(cluster.Node.Bundle.Children) == 2; ordered != (shape.tiers || shape.dependency) {
+				t.Fatalf("the application bundle has %d groups; the shape is not the one the case names", len(cluster.Node.Bundle.Children))
 			}
 			got := stamps(t, cluster)
 			if shape.wantOrder != nil {

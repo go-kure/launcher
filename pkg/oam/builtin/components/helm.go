@@ -404,13 +404,20 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		release["chartRef"] = ref
 	}
 
-	result.Components = append(result.Components, oam.Component{
+	helmRelease := oam.Component{
 		Name:        comp.Name,
 		Type:        "helmrelease",
 		Properties:  release,
 		Traits:      traits,
 		Annotations: comp.Annotations,
-	})
+	}
+	// The release is applied after the source this rule generated for it, its
+	// own or the one another helm component of the document already emitted. A
+	// source the author wrote is the author's to order.
+	if src.Name == "" {
+		helmRelease.OrderAfter(ref["name"].(string))
+	}
+	result.Components = append(result.Components, helmRelease)
 	return result, nil
 }
 

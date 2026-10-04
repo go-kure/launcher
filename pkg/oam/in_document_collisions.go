@@ -18,7 +18,7 @@ type GeneratedApplication struct {
 	Name      string // the stack.Application's name
 	Component string // the OAM component it belongs to (ComponentNamed), else Name
 	Objects   []*client.Object
-	// Forced reports that the application's leaf bundle sets Force, so its Flux
+	// Forced reports that the application's own bundle sets Force, so its Flux
 	// Kustomization (spec.force) force-applies every object, annotated or not.
 	// Launcher never sets a bundle's Force (go-kure/launcher#781), so this is true
 	// only for a bundle whose Force the caller set before generating.
@@ -44,11 +44,14 @@ func (a GeneratedApplication) componentOrName() string {
 
 // GenerateApplications generates every application of a transformed document
 // once and returns each one's objects with its producer, in generation order:
-// each node's bundle, then the node's children; an umbrella bundle's children in
-// order, and a leaf bundle's applications in order. A leaf bundle's labels and
-// annotations are added to its applications' objects where missing, exactly as
-// stack.Bundle.Generate adds them, so the objects are the ones Bundle.Generate
-// would return. An application's Generate error is returned unchanged.
+// each node's bundle, then the node's children; a bundle's own applications in
+// order, then its children in order. That is the order a bundle is applied in:
+// an ordered application's bundle holds its generated sources itself, ahead of
+// the groups that consume them (go-kure/launcher#783). A bundle's labels and
+// annotations are added to its own applications' objects where missing, exactly
+// as stack.Bundle.Generate adds them, so the objects are the ones
+// Bundle.Generate would return. An application's Generate error is returned
+// unchanged.
 //
 // Generating a document once and checking that inventory is the point: a
 // component may hand out objects it cached and a trait may change them in place,
@@ -83,14 +86,6 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 	if bundle == nil {
 		return nil
 	}
-	if bundle.IsUmbrella() {
-		for _, child := range bundle.Children {
-			if err := generateBundle(child, out); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 	start := len(*out)
 	forced := bundle.Force != nil && *bundle.Force
 	for _, app := range bundle.Applications {
@@ -121,6 +116,11 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 			if len(bundle.Annotations) > 0 {
 				(*p).SetAnnotations(withMissing((*p).GetAnnotations(), bundle.Annotations))
 			}
+		}
+	}
+	for _, child := range bundle.Children {
+		if err := generateBundle(child, out); err != nil {
+			return err
 		}
 	}
 	return nil

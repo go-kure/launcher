@@ -294,9 +294,9 @@ spec:
 	}
 }
 
-// TestTransform_PolicyShapedClustersCarryNoDeliveryFields covers the two cluster
-// shapes the examples do not reach: one bundle per component (a dependency
-// policy) and one bundle per tier (a placement policy).
+// TestTransform_PolicyShapedClustersCarryNoDeliveryFields covers the ordered
+// shape the examples do not reach, an application bundle with groups, from a
+// dependency policy and from placement policies.
 func TestTransform_PolicyShapedClustersCarryNoDeliveryFields(t *testing.T) {
 	for name, policy := range map[string]string{
 		"dependency": `    - name: order
@@ -311,6 +311,11 @@ func TestTransform_PolicyShapedClustersCarryNoDeliveryFields(t *testing.T) {
       properties:
         component: api
         tier: infra
+    - name: web-last
+      type: placement
+      properties:
+        component: web
+        tier: apps
 `,
 	} {
 		t.Run(name, func(t *testing.T) {

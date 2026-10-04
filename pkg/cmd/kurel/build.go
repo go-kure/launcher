@@ -437,18 +437,11 @@ func rejectLayoutAugmenters(node *stack.Node) error {
 	return nil
 }
 
-// rejectLayoutAugmentersInBundle mirrors oam.GenerateApplications' umbrella/leaf
-// traversal so every Application this build would actually generate is checked.
+// rejectLayoutAugmentersInBundle mirrors oam.GenerateApplications' traversal (a
+// bundle's own applications, then its children) so every Application this build
+// would actually generate is checked.
 func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 	if bundle == nil {
-		return nil
-	}
-	if bundle.IsUmbrella() {
-		for _, child := range bundle.Children {
-			if err := rejectLayoutAugmentersInBundle(child); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 	for _, app := range bundle.Applications {
@@ -461,6 +454,11 @@ func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 		return errors.Errorf(
 			"kurel build: component %q needs layout-level resources that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; switch the component to a mode that does not need one",
 			app.Name)
+	}
+	for _, child := range bundle.Children {
+		if err := rejectLayoutAugmentersInBundle(child); err != nil {
+			return err
+		}
 	}
 	return nil
 }

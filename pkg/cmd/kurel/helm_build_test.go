@@ -3,7 +3,6 @@ package kurel
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,29 +82,110 @@ func TestBuildCommand_HelmSharesOneSource(t *testing.T) {
 	}
 }
 
-// TestBuiltinHelm_SourceDeploysInInfra: the generated source is classified into
-// the infra tier, ahead of the releases in apps, so the cluster splits into
-// tier bundles with the source first.
-func TestBuiltinHelm_SourceDeploysInInfra(t *testing.T) {
-	cluster, _, err := transformWithBuiltins(t, helmAppHeader)
-	if err != nil {
-		t.Fatalf("Transform: %v", err)
+// assertSourcesInApplicationBundle checks the shape a generated source gives an
+// application (go-kure/launcher#783): the application bundle shop holds exactly
+// the sources as its own applications, ahead of its groups, and no group holds
+// one.
+func assertSourcesInApplicationBundle(t *testing.T, cluster *stack.Cluster, sources ...string) {
+	t.Helper()
+	root := cluster.Node.Bundle
+	if root == nil || root.Name != "shop" || len(cluster.Node.Children) != 0 {
+		t.Fatalf("root bundle = %v with %d child nodes, want the one application bundle shop", root, len(cluster.Node.Children))
 	}
-	bundles := leafBundles(cluster.Node)
-	if got := bundleHolding(bundles, helmSharedSource()); got != "shop-infra" {
-		t.Errorf("source is in bundle %q, want shop-infra (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
+	var own []string
+	for _, a := range root.Applications {
+		own = append(own, a.Name)
 	}
-	for _, rel := range []string{"api", "web"} {
-		if got := bundleHolding(bundles, rel); got != "shop-apps" {
-			t.Errorf("%s is in bundle %q, want shop-apps", rel, got)
+	if !slices.Equal(own, sources) {
+		t.Errorf("application bundle's own applications = %v, want the generated sources %v", own, sources)
+	}
+	for _, group := range root.Children {
+		for _, a := range group.Applications {
+			if slices.Contains(sources, a.Name) {
+				t.Errorf("group %s holds generated source %s", group.Name, a.Name)
+			}
 		}
 	}
 }
 
-// TestBuiltinHelm_GitAndBucketSourcesDeployInInfra: a generated gitrepository
-// and bucket are classified into the infra tier like a generated
-// helmrepository, ahead of their releases in apps.
-func TestBuiltinHelm_GitAndBucketSourcesDeployInInfra(t *testing.T) {
+// groupNames returns the application bundle's groups in order, each as
+// "<name>: <applications>", and fails when a group does not depend on exactly
+// the group before it.
+func groupNames(t *testing.T, cluster *stack.Cluster) []string {
+	t.Helper()
+	var out []string
+	var previous *stack.Bundle
+	for _, group := range cluster.Node.Bundle.Children {
+		var apps []string
+		for _, a := range group.Applications {
+			apps = append(apps, a.Name)
+		}
+		out = append(out, group.Name+": "+strings.Join(apps, " "))
+		var want []*stack.Bundle
+		if previous != nil {
+			want = []*stack.Bundle{previous}
+		}
+		if !slices.Equal(group.DependsOn, want) {
+			t.Errorf("group %s depends on %d bundle(s), want exactly the group before it", group.Name, len(group.DependsOn))
+		}
+		previous = group
+	}
+	return out
+}
+
+// TestBuiltinHelm_SourceInApplicationBundle: two helm components sharing one
+// inline source give an application bundle holding the source once, and one
+// group with both releases: the helm rule orders each release after the source,
+// and nothing orders the releases.
+func TestBuiltinHelm_SourceInApplicationBundle(t *testing.T) {
+	cluster, _, err := transformWithBuiltins(t, helmAppHeader)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	assertSourcesInApplicationBundle(t, cluster, helmSharedSource())
+	if got, want := groupNames(t, cluster), []string{"shop-00: api web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+// TestBuiltinHelm_ReferencedSourceOrdersNothing: a source the author wrote is
+// the author's to order. A helm component referencing it by name stays in one
+// flat bundle with it.
+func TestBuiltinHelm_ReferencedSourceOrdersNothing(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: charts
+      type: helmrepository
+      properties:
+        url: https://charts.example.com
+    - name: api
+      type: helm
+      properties:
+        chart: api
+        version: 1.0.0
+        source:
+          kind: HelmRepository
+          name: charts
+`
+	cluster, _, err := transformWithBuiltins(t, app)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	root := cluster.Node.Bundle
+	if root == nil || len(root.Children) != 0 || len(root.Applications) != 2 {
+		t.Fatalf("root bundle = %v, want one flat bundle holding the source and the release", root)
+	}
+}
+
+// TestBuiltinHelm_GitAndBucketSourcesInApplicationBundle: a generated
+// gitrepository and bucket sit in the application bundle like a generated
+// helmrepository, ahead of the group holding their releases.
+func TestBuiltinHelm_GitAndBucketSourcesInApplicationBundle(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -135,27 +215,21 @@ spec:
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	bundles := leafBundles(cluster.Node)
+	var sources []string
 	for _, identity := range []string{
 		`git:{"url":"https://github.com/example/charts","ref":{"branch":"main"}}`,
 		`bucket:{"provider":"","endpoint":"minio.example.com","bucketName":"charts","region":"","prefix":""}`,
 	} {
 		sum := sha256.Sum256([]byte(identity))
-		source := "shop-source-" + hex.EncodeToString(sum[:])[:10]
-		if got := bundleHolding(bundles, source); got != "shop-infra" {
-			t.Errorf("source %s (%s) is in bundle %q, want shop-infra (bundles: %v)", source, identity, got, slices.Sorted(maps.Keys(bundles)))
-		}
+		sources = append(sources, "shop-source-"+hex.EncodeToString(sum[:])[:10])
 	}
-	for _, rel := range []string{"api", "web"} {
-		if got := bundleHolding(bundles, rel); got != "shop-apps" {
-			t.Errorf("%s is in bundle %q, want shop-apps", rel, got)
-		}
+	assertSourcesInApplicationBundle(t, cluster, sources...)
+	if got, want := groupNames(t, cluster), []string{"shop-00: api web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
 	}
 }
 
-// helmDependsOn is a dependency policy ordering web after api, which makes the
-// cluster dependency-aware: one bundle per component, each also depending on
-// every bundle of the preceding populated tier.
+// helmDependsOn is a dependency policy ordering web after api.
 const helmDependsOn = `  policies:
     - name: order
       type: dependency
@@ -165,56 +239,25 @@ const helmDependsOn = `  policies:
             dependsOn: [api]
 `
 
-// assertNoConsumerPrecedesSource checks, on a dependency-aware cluster, that the
-// source's bundle depends (transitively) on no release's bundle: a source
-// would otherwise be applied only after a consumer that needs it first.
-func assertNoConsumerPrecedesSource(t *testing.T, cluster *stack.Cluster) {
-	t.Helper()
-	bundles := leafBundles(cluster.Node)
-	source := bundles["shop-"+helmSharedSource()]
-	if source == nil {
-		t.Fatalf("no bundle for the source, got %v", slices.Sorted(maps.Keys(bundles)))
-	}
-	seen := map[*stack.Bundle]bool{}
-	var walk func(b *stack.Bundle)
-	walk = func(b *stack.Bundle) {
-		for _, dep := range b.DependsOn {
-			if seen[dep] {
-				continue
-			}
-			seen[dep] = true
-			for _, rel := range []string{"api", "web"} {
-				if bundleHolding(map[string]*stack.Bundle{dep.Name: dep}, rel) != "" {
-					t.Errorf("source bundle depends on %s, which holds consumer %s", dep.Name, rel)
-				}
-			}
-			walk(dep)
-		}
-	}
-	walk(source)
-}
-
-// TestBuiltinHelm_TierAnnotationInInfraBuilds: a helm component annotated into
-// the infra tier keeps its release there, and on the dependency-aware path its
-// source is not placed after it, so the cluster builds and the source waits on
-// no consumer.
-func TestBuiltinHelm_TierAnnotationInInfraBuilds(t *testing.T) {
+// TestBuiltinHelm_TierAnnotationKeepsSourceFirst: a helm component annotated
+// into the infra tier keeps its release in that group; the shared source stays
+// in the application bundle, ahead of it.
+func TestBuiltinHelm_TierAnnotationKeepsSourceFirst(t *testing.T) {
 	app := strings.Replace(helmAppHeader, "      type: helm\n      properties:\n        chart: api",
 		"      type: helm\n      annotations:\n        "+oam.TierAnnotationKey(kurelDomain)+": infra\n      properties:\n        chart: api", 1)
 	cluster, _, err := transformWithBuiltins(t, app+helmDependsOn)
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	bundles := leafBundles(cluster.Node)
-	if bundles["shop-api"] == nil {
-		t.Fatalf("no bundle for api, got %v", slices.Sorted(maps.Keys(bundles)))
+	assertSourcesInApplicationBundle(t, cluster, helmSharedSource())
+	if got, want := groupNames(t, cluster), []string{"shop-infra: api", "shop-01: web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
 	}
-	assertNoConsumerPrecedesSource(t, cluster)
 }
 
-// TestBuiltinHelm_PlacementInInfraBuilds: the same with a placement policy,
-// which names the release only; the generated source still deploys no later.
-func TestBuiltinHelm_PlacementInInfraBuilds(t *testing.T) {
+// TestBuiltinHelm_PlacementKeepsSourceFirst: the same with a placement policy,
+// which names the release only.
+func TestBuiltinHelm_PlacementKeepsSourceFirst(t *testing.T) {
 	cluster, result, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+`    - name: api-first
       type: placement
       properties:
@@ -227,76 +270,76 @@ func TestBuiltinHelm_PlacementInInfraBuilds(t *testing.T) {
 	if len(result.TierOverrides) == 0 {
 		t.Fatalf("TierOverrides empty; the case must exercise placement")
 	}
-	assertNoConsumerPrecedesSource(t, cluster)
+	assertSourcesInApplicationBundle(t, cluster, helmSharedSource())
+	if got, want := groupNames(t, cluster), []string{"shop-infra: api", "shop-01: web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
 }
 
-// TestBuiltinHelm_PlacementCannotMoveGeneratedSource: a placement policy naming
-// the generated source may keep it in infra, but moving it to a later tier is
-// refused. Its consumer, placed in infra, would otherwise never become ready.
-func TestBuiltinHelm_PlacementCannotMoveGeneratedSource(t *testing.T) {
-	placement := func(tier string) string {
-		return `    - name: api-first
+// TestBuiltinHelm_PlacementCannotPlaceGeneratedSource: a generated source is in
+// no group, so a placement policy naming it is refused, whatever the tier.
+func TestBuiltinHelm_PlacementCannotPlaceGeneratedSource(t *testing.T) {
+	for _, tier := range []string{"infra", "apps"} {
+		_, _, err := transformWithBuiltins(t, helmAppHeader+`  policies:
+    - name: source-placed
       type: placement
       properties:
-        component: api
-        tier: infra
-    - name: source-late
-      type: placement
-      properties:
-        component: ` + helmSharedSource() + `
-        tier: ` + tier + "\n"
+        component: `+helmSharedSource()+`
+        tier: `+tier+"\n")
+		if err == nil || !strings.Contains(err.Error(), "helmrepository "+strconv.Quote(helmSharedSource())+" cannot be placed in tier "+tier) {
+			t.Errorf("tier %s: Transform error = %v, want the generated source's placement refused", tier, err)
+		}
 	}
-	_, _, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+placement("apps"))
-	if err == nil || !strings.Contains(err.Error(), "placement cannot move helmrepository "+strconv.Quote(helmSharedSource())+" to tier apps") {
-		t.Fatalf("Transform error = %v, want the generated source's placement refused", err)
-	}
-	cluster, result, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+placement("infra"))
-	if err != nil {
-		t.Fatalf("Transform with the source placed in infra: %v", err)
-	}
-	if result.TierOverrides[helmSharedSource()] != oam.TierInfra {
-		t.Fatalf("TierOverrides = %v, want the source placed in infra", result.TierOverrides)
-	}
-	assertNoConsumerPrecedesSource(t, cluster)
 }
 
 // TestBuiltinHelm_DependencyCannotDelayGeneratedSource pins the dependency
-// counterpart of the placement refusal. With the consumer placed in infra
-// beside the source, no cross-tier edge closes a cycle, so a rule making the
-// source wait on that consumer would deadlock silently rather than fail.
+// counterpart of the placement refusal: a rule making the source wait on one of
+// its consumers could not be kept, since the application bundle's own
+// applications are applied before every group.
 func TestBuiltinHelm_DependencyCannotDelayGeneratedSource(t *testing.T) {
-	apiInInfra := `    - name: api-first
-      type: placement
-      properties:
-        component: api
-        tier: infra
-`
 	sourceWaits := helmDependsOn + `          - component: ` + helmSharedSource() + `
             dependsOn: [api]
-` + apiInInfra
+`
 	_, _, err := transformWithBuiltins(t, helmAppHeader+sourceWaits)
-	if err == nil || !strings.Contains(err.Error(), "dependency cannot make helmrepository "+strconv.Quote(helmSharedSource())+" wait on api") {
+	if err == nil || !strings.Contains(err.Error(), "helmrepository "+strconv.Quote(helmSharedSource())+" cannot wait on api") {
 		t.Fatalf("Transform error = %v, want the generated source's dependency refused", err)
 	}
-	cluster, _, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+apiInInfra)
-	if err != nil {
-		t.Fatalf("Transform with only a consumer depending: %v", err)
-	}
-	assertNoConsumerPrecedesSource(t, cluster)
 }
 
-// appsSourceRule emits a helmrepository annotated into the apps tier, which a
-// custom lowering rule may do; the built-in helm rule's sources carry no
-// annotation. It declares a schema, so its output counts as synthesized.
-type appsSourceRule struct{}
+// TestBuiltinHelm_DependencyOnGeneratedSource: a component the author makes
+// wait for the generated source needs no group of its own for that; the source
+// is ahead of every group already.
+func TestBuiltinHelm_DependencyOnGeneratedSource(t *testing.T) {
+	cluster, _, err := transformWithBuiltins(t, helmAppHeader+`  policies:
+    - name: order
+      type: dependency
+      properties:
+        rules:
+          - component: web
+            dependsOn: [`+helmSharedSource()+`]
+`)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	assertSourcesInApplicationBundle(t, cluster, helmSharedSource())
+	if got, want := groupNames(t, cluster), []string{"shop-00: api web"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
 
-func (appsSourceRule) ComponentType() string { return "apps-source" }
+// unorderedSourceRule emits a helmrepository carrying a tier annotation and
+// orders nothing after it, which a custom lowering rule may do; the built-in
+// helm rule orders its release after the source it emits. It declares a
+// schema, so its output counts as synthesized.
+type unorderedSourceRule struct{}
 
-func (appsSourceRule) PropertySchema() map[string]oam.PropertySchema {
+func (unorderedSourceRule) ComponentType() string { return "apps-source" }
+
+func (unorderedSourceRule) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{}
 }
 
-func (appsSourceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+func (unorderedSourceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
 	return oam.LoweringResult{Components: []oam.Component{{
 		Name:        comp.Name + "-src",
 		Type:        "helmrepository",
@@ -305,11 +348,11 @@ func (appsSourceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext)
 	}}}, nil
 }
 
-// TestBuiltinHelm_PlacementKeepsGeneratedSourceInInfra pins that a placement the
-// refusal accepts still applies: placing an annotated generated source in infra
-// moves it there, so an infra consumer depending on it builds without a
-// cross-tier cycle.
-func TestBuiltinHelm_PlacementKeepsGeneratedSourceInInfra(t *testing.T) {
+// TestBuiltinHelm_UnorderedRuleSourceIsAComponentLikeAnyOther pins that only
+// the order a rule declares takes a source out of the groups: a source a rule
+// emits without ordering a component after it is placed and depended on like
+// any component.
+func TestBuiltinHelm_UnorderedRuleSourceIsAComponentLikeAnyOther(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -342,13 +385,20 @@ spec:
         tier: infra
 `
 	transformer := newBuiltinTransformer()
-	transformer.RegisterComponentLowering(appsSourceRule{})
+	transformer.RegisterComponentLowering(unorderedSourceRule{})
 	parsed, err := oam.ParseWithExtraTypes([]byte(app), nil, transformer.LowerableTypes())
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if _, _, err := transformer.TransformWithPolicy(parsed, oam.TransformContext{Domain: kurelDomain}); err != nil {
-		t.Fatalf("Transform with the generated source placed in infra: %v", err)
+	cluster, _, err := transformer.TransformWithPolicy(parsed, oam.TransformContext{Domain: kurelDomain})
+	if err != nil {
+		t.Fatalf("Transform with the source placed in infra: %v", err)
+	}
+	if got := len(cluster.Node.Bundle.Applications); got != 0 {
+		t.Errorf("application bundle holds %d own applications, want none", got)
+	}
+	if got, want := groupNames(t, cluster), []string{"shop-00: lib-src", "shop-01: api"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
 	}
 }
 
@@ -409,7 +459,7 @@ func TestBuiltinHelm_FluxNamespace(t *testing.T) {
 		t.Fatalf("Transform: %v", err)
 	}
 	var objs []client.Object
-	for _, b := range leafBundles(cluster.Node) {
+	for _, b := range allBundles(cluster.Node) {
 		for _, a := range b.Applications {
 			generated, err := a.Config.Generate(a)
 			if err != nil {
@@ -461,5 +511,84 @@ func TestBuiltinHelm_FluxNamespace(t *testing.T) {
 		if ref.Kind != "HelmRepository" || ref.Name != helmSharedSource() || (ref.Namespace != "" && ref.Namespace != "flux-system") {
 			t.Errorf("HelmRelease %s sourceRef = %+v, want HelmRepository %s in flux-system", name, ref, helmSharedSource())
 		}
+	}
+}
+
+// waitingRule lowers a component of type typ into a webservice "<name>-first"
+// and a component "<name>" of the built-in type as, ordered after the first.
+// The built-in rule of that type then lowers "<name>" again, into components
+// it builds from scratch. It declares a schema, so its output counts as
+// synthesized.
+type waitingRule struct {
+	typ, as string
+	props   map[string]any
+}
+
+func (r waitingRule) ComponentType() string { return r.typ }
+
+func (waitingRule) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{}
+}
+
+func (r waitingRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	second := oam.Component{Name: comp.Name, Type: r.as, Properties: r.props}
+	second.OrderAfter(comp.Name + "-first")
+	return oam.LoweringResult{Components: []oam.Component{
+		{Name: comp.Name + "-first", Type: "webservice", Properties: map[string]any{"image": "nginx:1.27"}},
+		second,
+	}}, nil
+}
+
+// TestBuiltinRules_KeepTheOrderOfTheComponentTheyLower pins that an order a
+// rule declared on a component survives the built-in rule that lowers the
+// component again: everything a webservice or a helm component becomes waits
+// as the component did. The source generated for a helm component that waits
+// is then ordered after something, so it sits in a group, not among the
+// application bundle's own applications.
+func TestBuiltinRules_KeepTheOrderOfTheComponentTheyLower(t *testing.T) {
+	const header = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: two
+      type: `
+	for _, tc := range []struct {
+		rule waitingRule
+		want []string
+	}{
+		{
+			rule: waitingRule{typ: "waiting-web", as: "webservice", props: map[string]any{"image": "nginx:1.27"}},
+			want: []string{"shop-00: two-first", "shop-01: two"},
+		},
+		{
+			rule: waitingRule{typ: "waiting-chart", as: "helm", props: map[string]any{
+				"chart":   "api",
+				"version": "1.0.0",
+				"source":  map[string]any{"url": "https://charts.example.com"},
+			}},
+			want: []string{"shop-00: two-first", "shop-01: " + helmSharedSource(), "shop-02: two"},
+		},
+	} {
+		t.Run(tc.rule.typ, func(t *testing.T) {
+			transformer := newBuiltinTransformer()
+			transformer.RegisterComponentLowering(tc.rule)
+			parsed, err := oam.ParseWithExtraTypes([]byte(header+tc.rule.typ+"\n"), nil, transformer.LowerableTypes())
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			cluster, _, err := transformer.TransformWithPolicy(parsed, oam.TransformContext{Domain: kurelDomain})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if got := len(cluster.Node.Bundle.Applications); got != 0 {
+				t.Errorf("application bundle holds %d own applications, want none", got)
+			}
+			if got := groupNames(t, cluster); !slices.Equal(got, tc.want) {
+				t.Errorf("groups = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

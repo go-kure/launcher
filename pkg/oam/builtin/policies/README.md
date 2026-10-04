@@ -6,8 +6,9 @@ Package `policies` implements `oam.PolicyHandler` for the built-in application p
 types. A policy is an entry in an Application's `spec.policies`; it builds no resources of
 its own. Its handler validates the entry and records its effect on the shared
 `oam.PolicyResult`, and the transform applies that result to the cluster tree it builds:
-tier overrides and dependency edges decide how components are grouped into bundles and
-which bundle depends on which.
+tiers and dependency edges are two of the three declarations that order an application's
+components (the third is a lowering rule's own order, see `pkg/oam`), and the order decides
+how components are grouped into bundles and which bundle depends on which.
 
 Handlers are registered with the transformer in `pkg/cmd/kurel` via
 `RegisterPolicy(type, handler)`, from `builtinPolicyHandlers()`. A policy type with no
@@ -34,16 +35,21 @@ cycle is reported as the walk that reached it, which starts from the alphabetica
 component with dependencies (`circular dependency detected: a -> b -> c -> a`), so the
 same document always gives the same message.
 
-When at least one rule is recorded, the transform builds one bundle per component and
-wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier edges
-(each bundle depends on the bundles of the tier before it). Without a `dependency`
-policy, an application spanning several tiers gets one bundle per tier instead, each
-depending on the bundle of the populated tier before it.
+A rule orders the application (go-kure/launcher#783). The application bundle then gets
+ordered child groups, the levels of the declared order: the first group holds every
+component that waits on nothing, each further group the components whose predecessors
+are all in earlier groups, and each group's bundle depends on the one before it. With
+`web` depending on `jobs`, and a `db` nothing orders, application `shop` has the groups
+`shop-00` (`db`, `jobs`) and `shop-01` (`web`). There is no bundle per component. Without
+any ordering declaration the application is one flat bundle.
+
+Dependency edges combine with the tier order of `placement`: both are edges of one
+graph. An edge against the tier order (a component placed in `infra` depending on one
+placed in `apps`) cannot hold and fails the transform, naming both declarations.
 
 When several `oci` components share one Flux source (the same OCI artifact),
-the transform emits it once, in the bundle of the sharing
-component deployed first: the one in the earliest tier, after the components it depends
-on, with document order breaking ties. That component depends on no other component
+the transform emits it once, by the sharing component that comes first in that order
+(group, then document order). That component depends on no other component
 sharing the source, so it never waits on a bundle that needs a source it has not yet
 created.
 
@@ -61,17 +67,24 @@ policies:
 
 ### `placement`
 
-Overrides the tier a component is classified into (by its type, or by the `<domain>/tier`
-annotation). The tier must be one of `infra`, `services`, `apps`, and the component must
-exist. A second `placement` policy for the same component is an error if it names a
-different tier, rather than silently overriding the first; repeating the same tier is
-accepted.
+Places a component in a tier, replacing the tier its `<domain>/tier` annotation names, if
+any. The tier must be one of `infra`, `services`, `apps`, and the component must exist. A
+second `placement` policy for the same component is an error if it names a different
+tier, rather than silently overriding the first; repeating the same tier is accepted.
 
-Placement changes both which tier bundle holds the component and when it is deployed:
-tiers deploy in order, `infra`, then `services`, then `apps`. Without a `dependency`
-policy the component joins its new tier's bundle, which depends on the bundle of the
-populated tier before it. With a `dependency` policy the component's own bundle depends
-on the bundles of the tier before its new one.
+Tiers deploy in order, `infra`, then `services`, then `apps`: every component of a
+populated tier comes after every component of the populated tier before it. A tier whose
+components make up a whole group names it, `<application>-<tier>`; the group depends on
+the group before it.
+
+**A component nothing places is in no tier** (go-kure/launcher#783): no component type
+has a default tier. It is ordered after no tier, so placing one component alone orders
+nothing and the application stays one flat bundle. To order two components, place both,
+or declare the edge with a `dependency` policy.
+
+A Flux source a lowering rule generates for its own component (the `helm` component's
+inline source) is applied with the application bundle, ahead of every group. Placing it
+in any tier is refused.
 
 ```yaml
 policies:
@@ -120,7 +133,7 @@ the handler does read is still an error there.
 ## What `kurel build` shows
 
 `kurel build` prints the objects each component generates, not the bundles that group
-them. A document with these policies builds and is validated, but the bundle grouping and
+them. A document with these policies builds and is validated, but the groups and
 dependencies they produce live on the `stack.Cluster` the transform returns, and appear
 only where a caller delivers that tree.
 

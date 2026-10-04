@@ -139,7 +139,7 @@ Property schemas section for what the check does and does not cover.
 ### Platform key domain
 
 kurel derives its platform label/annotation keys under the **`launcher.gokure.dev`**
-domain: the tier-override annotation is `launcher.gokure.dev/tier`, and synthesized
+domain: the tier annotation is `launcher.gokure.dev/tier`, and synthesized
 NetworkPolicies select pods via `launcher.gokure.dev/component`, valued at the
 component's label value (the name itself at 63 characters or fewer, a projection beyond —
 `ComponentLabelValue` in the OAM model). This is kurel's fixed

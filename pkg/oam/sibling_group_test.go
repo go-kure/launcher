@@ -157,7 +157,7 @@ func TestSiblingGroup_Refusals(t *testing.T) {
 			return out
 		}}},
 		doc:  siblingDoc(Component{Name: "web", Type: "pair"}),
-		want: `a group deploys as one unit and needs one tier`,
+		want: `member "a" is in no tier but member "b" is in tier "infra"; a group deploys as one unit and needs one tier`,
 	}, {
 		name:     "two members answering one contract",
 		handlers: []*siblingStubHandler{stubHandler("a", 80), stubHandler("b", 8080)},

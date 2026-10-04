@@ -469,14 +469,16 @@ func TestCheckInDocumentCollisions_AfterTransform(t *testing.T) {
 	}
 	shapes := []struct {
 		name string
-		// second is the second component's type: webservice keeps one tier
-		// (flat), daemonset adds the infra tier (hierarchical).
+		// second is the second component's type. tiers annotates web into the
+		// apps tier and the second component into infra, which gives a group per
+		// tier; dependency orders web after the second component.
 		second     string
+		tiers      bool
 		dependency bool
 	}{
 		{name: "flat", second: "webservice"},
-		{name: "hierarchical", second: "daemonset"},
-		{name: "dependency-aware", second: "webservice", dependency: true},
+		{name: "tiers", second: "daemonset", tiers: true},
+		{name: "dependency", second: "webservice", dependency: true},
 	}
 	producers := []struct {
 		name       string
@@ -511,9 +513,12 @@ func TestCheckInDocumentCollisions_AfterTransform(t *testing.T) {
 		for _, p := range producers {
 			t.Run(shape.name+", "+p.name, func(t *testing.T) {
 				tr := inDocumentTransformer()
-				other := p.other
+				web, other := p.web, p.other
 				other.Type = shape.second
-				app := makeApp("shop", p.web, other)
+				if shape.tiers {
+					web, other = inTier(web, TierApps), inTier(other, TierInfra)
+				}
+				app := makeApp("shop", web, other)
 				app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
 				if shape.dependency {
 					tr.RegisterPolicy("dependency", &depWritingPolicyHandler{from: "web", to: "other"})
@@ -522,6 +527,9 @@ func TestCheckInDocumentCollisions_AfterTransform(t *testing.T) {
 				cluster, _, err := tr.TransformWithPolicy(app, TransformContext{})
 				if err != nil {
 					t.Fatalf("TransformWithPolicy: %v", err)
+				}
+				if ordered := len(cluster.Node.Bundle.Children) == 2; ordered != (shape.tiers || shape.dependency) {
+					t.Fatalf("the application bundle has %d groups; the shape is not the one the case names", len(cluster.Node.Bundle.Children))
 				}
 				err = generateAndCheck(t, cluster)
 				if len(p.want) == 0 {

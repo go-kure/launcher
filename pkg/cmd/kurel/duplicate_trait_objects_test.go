@@ -36,19 +36,31 @@ func collisionCheck(t *testing.T, appYAML string) ([]oam.GeneratedApplication, e
 	return apps, oam.CheckInDocumentCollisions(apps)
 }
 
-// duplicateShapes are the three cluster shapes: one tier (flat), a daemonset in
-// the infra tier (hierarchical), and a dependency policy (dependency-aware).
+// duplicateShapes are the cluster shapes: nothing ordered (flat), groups from
+// placement policies, and groups from a dependency policy.
 var duplicateShapes = []struct {
 	name, components, policies string
 }{
 	{name: "flat"},
-	{name: "hierarchical", components: `
+	{name: "placement", components: `
     - name: agent
       type: daemonset
       properties:
         image: ghcr.io/example/agent:v1.0.0
+`, policies: `
+  policies:
+    - name: agent-first
+      type: placement
+      properties:
+        component: agent
+        tier: infra
+    - name: web-last
+      type: placement
+      properties:
+        component: web
+        tier: apps
 `},
-	{name: "dependency-aware", components: `
+	{name: "dependency", components: `
     - name: other
       type: webservice
       properties:
