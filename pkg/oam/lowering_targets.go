@@ -122,3 +122,24 @@ func emittedBy(origin *Origin) string {
 	authored.TraitType = ""
 	return fmt.Sprintf(", emitted by lowering rule %s for %s", origin.Rule, authored)
 }
+
+// traitLocation is where a "no handler" error places a trait: the component it
+// is on, and the authored component behind it. A trait a rule emitted carries
+// that itself (emittedBy). A trait a rule forwarded from its input carries no
+// rule, and the component it now sits on may be one the rule emitted under
+// another name: the component's own origin then names the rule and the authored
+// component, so the author is never left with a name the document does not hold.
+// Under the authored name the author wrote both the trait and the name, and the
+// clause is left out.
+func traitLocation(component *Component, traitOrigin *Origin) string {
+	where := fmt.Sprintf("on component %q", component.Name)
+	if by := emittedBy(traitOrigin); by != "" {
+		return where + by
+	}
+	if o := component.origin; o != nil && o.Component != component.Name {
+		if by := emittedBy(o); by != "" {
+			return where + ", itself" + strings.TrimPrefix(by, ",")
+		}
+	}
+	return where
+}
