@@ -1,7 +1,9 @@
 package oam
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"github.com/fluxcd/pkg/apis/kustomize"
@@ -500,7 +502,9 @@ func stampUnstructured(u *unstructured.Unstructured, key, value string) error {
 
 // stampUnstructuredPodTemplate is withComponentLabel on the pod template under
 // the spec at specPath of obj. A workload with no pod template, or a null one,
-// is left as it is; null metadata or labels on the template are absent ones.
+// is left as it is; null metadata or labels on the template are absent ones. A
+// label that is no string is an error, the first by name, whether or not the
+// template gets the label.
 func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, value string) error {
 	spec := obj
 	for _, field := range specPath {
@@ -522,16 +526,18 @@ func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, va
 	if err != nil {
 		return err
 	}
-	if _, exists := raw[key]; exists {
-		return nil
-	}
+	// Every label is read before the key is looked for: a template that carries
+	// the key already is held to string labels like any other.
 	podLabels := make(map[string]string, len(raw))
-	for name, v := range raw {
-		s, ok := v.(string)
+	for _, name := range slices.Sorted(maps.Keys(raw)) {
+		s, ok := raw[name].(string)
 		if !ok {
-			return errors.Errorf("label %q is a %T, not a string", name, v)
+			return errors.Errorf("label %q is a %T, not a string", name, raw[name])
 		}
 		podLabels[name] = s
+	}
+	if _, exists := podLabels[key]; exists {
+		return nil
 	}
 	// A selector that does not decode holds nothing back, as one that does not
 	// parse (withComponentLabel).

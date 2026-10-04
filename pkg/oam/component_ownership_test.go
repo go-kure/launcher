@@ -178,15 +178,30 @@ func TestStampComponentLabel_MalformedPodTemplate(t *testing.T) {
 }
 
 // TestStampComponentLabel_MalformedPodTemplateLabel: a pod template label that
-// is no string is refused too.
+// is no string is refused too, whether or not the template carries the
+// component key already, and when it is the component key's own value.
 func TestStampComponentLabel_MalformedPodTemplateLabel(t *testing.T) {
-	u := unstructuredWorkload("batch/v1", "CronJob")
-	if err := unstructured.SetNestedField(u.Object, map[string]any{"app": int64(1)}, "spec", "jobTemplate", "spec", "template", "metadata", "labels"); err != nil {
-		t.Fatal(err)
-	}
-	err := stampComponentLabel(u, ownershipKey, "web")
-	if err == nil || !strings.Contains(err.Error(), `CronJob "w"`) || !strings.Contains(err.Error(), `"app"`) {
-		t.Fatalf("error = %v, want one naming the CronJob and the label", err)
+	for name, tc := range map[string]struct {
+		labels map[string]any
+		label  string
+	}{
+		"key absent":                 {map[string]any{"app": int64(1)}, "app"},
+		"key present":                {map[string]any{ownershipKey: "web", "app": int64(1)}, "app"},
+		"the key's own value":        {map[string]any{ownershipKey: int64(1)}, ownershipKey},
+		"the first of two, by name":  {map[string]any{"a": int64(1), "b": true}, "a"},
+		"a null value is no string":  {map[string]any{"app": nil}, "app"},
+		"a nested object is refused": {map[string]any{"app": map[string]any{}}, "app"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := unstructuredWorkload("batch/v1", "CronJob")
+			if err := unstructured.SetNestedField(u.Object, tc.labels, "spec", "jobTemplate", "spec", "template", "metadata", "labels"); err != nil {
+				t.Fatal(err)
+			}
+			err := stampComponentLabel(u, ownershipKey, "web")
+			if err == nil || !strings.Contains(err.Error(), `CronJob "w"`) || !strings.Contains(err.Error(), `label "`+tc.label+`"`) {
+				t.Fatalf("error = %v, want one naming the CronJob and the label %q", err, tc.label)
+			}
+		})
 	}
 }
 
