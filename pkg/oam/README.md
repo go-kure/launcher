@@ -141,7 +141,9 @@ each a **separate** additive resource (the authored `networkpolicy` /
   **cluster-wide** (routers in different leaf bundles naming the same Service emit one merged
   policy). Two routers giving one external Service different selectors, or an external policy name
   colliding with a component's emitted inbound policy, **fails the transform** rather than emitting
-  conflicting or duplicate allows.
+  conflicting or duplicate allows. The name collision is refused once both names are resolved, so
+  a `Naming` hook that gives one of the two policies another name avoids it (see "Name roles and
+  the `Naming` hook").
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
@@ -459,6 +461,12 @@ property or the hook's answer.
 ```
 name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named by component "web" traits[0] "scaler" (role "hpa", its default) and by component "web" traits[1] "scaler" (role "hpa", its default); give one of them another name
 ```
+
+Every trait the transform applies is its own owner, whatever its place: two traits a trait
+rule lowered one authored trait to collide like two authored ones. A trait a rule gave a
+sibling group member is named with the member (`component "web" member "deployment"
+traits[0] "scaler"`), and so is one authored trait forwarded to two members. A synthesized
+policy is named by its component, or as `an external backend Service`.
 
 This knows only the names resolved this way: the roles above. An object a component
 generates, one a lowering rule names, and the object of a trait that is not in the table are
@@ -831,7 +839,10 @@ The build refuses a group:
   both members derives one name, such as `web-rbac`, from the shared name). The names
   are compared after each sub-application's `ApplyPolicy` has run, so a policy that
   renames a sub-application onto another member's is refused, and the name it moved
-  away from is free (go-kure/launcher#755).
+  away from is free (go-kure/launcher#755). A sub-application that carries the name the
+  `Naming` hook gave it is compared by its default instead, with the others the hook
+  named: the hook may give two different sub-applications one name, and the same trait
+  on both members is refused whatever the hook answers (go-kure/launcher#787).
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.

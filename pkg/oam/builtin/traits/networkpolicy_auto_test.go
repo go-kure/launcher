@@ -1132,13 +1132,65 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 // An external policy name that collides with an ACTUALLY-EMITTED component inbound policy fails the
 // transform. Component db (a Service-less deployment routing to the Service named after it through
 // servicePort, which nothing in the package owns) emits db-allow-ingress-traffic; a router routing
-// to a bare external Service named db would collide.
+// to a bare external Service named db would collide. The names are compared as the transform
+// resolved them, so a consumer's Naming hook that tells the two apart lets both through
+// (go-kure/launcher#787).
 func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
-	app := &oam.Application{
+	newApp := func() *oam.Application {
+		return externalBackendCollisionApp()
+	}
+	ctx := oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")}
+	want := `synthesized NetworkPolicy "db-allow-ingress-traffic": name collision: NetworkPolicy.networking.k8s.io "default/db-allow-ingress-traffic" is named by ` +
+		`component "db" (role "netpol-synth", its default) and by an external backend Service (role "netpol-synth", its default); give one of them another name`
+	if _, _, err := tr.TransformWithPolicy(newApp(), ctx); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want one containing %q", err, want)
+	}
+
+	var asked []string
+	ctx.Naming = func(req oam.NameRequest) (string, bool) {
+		if req.Role != oam.NameRoleNetpolSynth {
+			return "", false
+		}
+		asked = append(asked, req.Component+" "+req.Default)
+		if req.Component == "" {
+			return "external-db-policy", true
+		}
+		return "component-db-policy", true
+	}
+	cluster, _, err := tr.TransformWithPolicy(newApp(), ctx)
+	if err != nil {
+		t.Fatalf("a hook naming the two policies apart was refused: %v", err)
+	}
+	if want := []string{"db db-allow-ingress-traffic", " db-allow-ingress-traffic"}; !slices.Equal(asked, want) {
+		t.Errorf("the hook was asked for %q, want %q", asked, want)
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+	got := map[string]bool{}
+	for _, a := range apps {
+		for _, p := range a.Objects {
+			if p != nil && (*p).GetObjectKind().GroupVersionKind().Kind == "NetworkPolicy" {
+				got[(*p).GetName()] = true
+			}
+		}
+	}
+	for _, name := range []string{"component-db-policy", "external-db-policy"} {
+		if !got[name] {
+			t.Errorf("no NetworkPolicy %q among %v", name, got)
+		}
+	}
+}
+
+// externalBackendCollisionApp is a document whose component db and whose bare external Service db
+// both get a synthesized policy with the default name db-allow-ingress-traffic.
+func externalBackendCollisionApp() *oam.Application {
+	return &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
 		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
@@ -1176,10 +1228,6 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 				},
 			},
 		},
-	}
-	want := `external backend Service "db" in namespace "default" collides with a synthesized policy named "db-allow-ingress-traffic"`
-	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")}); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("error = %v, want one containing %q", err, want)
 	}
 }
 

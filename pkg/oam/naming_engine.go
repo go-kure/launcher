@@ -9,15 +9,18 @@ import (
 )
 
 // forTrait returns what the engine attaches to trait before applying it for
-// component. The trait's slot is its authored index when an authored trait
-// stands behind it, else position, its place among the traits applied with it.
-// A nil resolver attaches nothing: the trait then resolves as one built outside
-// a transform does.
-func (r *nameResolver) forTrait(component string, trait Trait, position int) *traitNaming {
+// component, on the sibling group member of type member when the component is a
+// group. The trait's slot is its authored index when an authored trait stands
+// behind it, else position, its place among the traits of the component it is
+// applied on. Each call is one trait applied: two calls never give one owner,
+// whatever their slots. A nil resolver attaches nothing: the trait then
+// resolves as one built outside a transform does.
+func (r *nameResolver) forTrait(component, member string, trait Trait, position int) *traitNaming {
 	if r == nil {
 		return nil
 	}
-	naming := &traitNaming{resolver: r, component: component, slot: position}
+	r.applied++
+	naming := &traitNaming{resolver: r, component: component, member: member, slot: position, apply: r.applied}
 	if trait.authoredIndex != nil {
 		naming.slot, naming.authored = *trait.authoredIndex, true
 	}

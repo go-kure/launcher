@@ -251,14 +251,11 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 	if firstErr != nil {
 		return firstErr
 	}
-	// Emit component policies first so the external-vs-component collision check (emitExternalBackends)
-	// sees every component name; both only queue apps.
+	// Component policies first, then the external backends'; both only queue apps.
 	if err := reg.emitComponents(labelKey); err != nil {
 		return err
 	}
-	if err := reg.emitExternalBackends(); err != nil {
-		return err
-	}
+	reg.emitExternalBackends()
 	// Every append is deferred to here, so an error at any point above leaves the cluster
 	// completely unmutated (no partially-decorated bundle observable by a direct caller).
 	reg.flush()
@@ -344,9 +341,6 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 				cfg = &backendIngressAllowPolicyConfig{ComponentName: compName, PolicyName: policyName, PodSelector: sel, Rules: retargeted}
 			}
 		}
-		// Key by namespace/name (not bare name) to preserve the go-kure/launcher#239 external-vs-component collision
-		// check and avoid future cross-namespace false positives.
-		r.emitted[ce.namespace+"/"+policyName] = struct{}{}
 		r.queue(ce.bundle, stack.NewApplication(policyName, ce.namespace, cfg))
 	}
 	return nil
@@ -415,15 +409,14 @@ type componentInboundEntry struct {
 }
 
 // npSynthesisRegistry holds cluster-wide synthesis state: read-only lookups (Service name →
-// component, component → placement), the per-component and external-backend accumulators, every
-// emitted policy's namespace/name (to detect collisions), and the deferred append queue.
+// component, component → placement), the per-component and external-backend accumulators, and the
+// deferred append queue.
 type npSynthesisRegistry struct {
 	serviceToComponent map[string]string                 // svc name → component name (cluster-wide, ambiguity-checked)
 	componentPlacement map[string]componentPlacement     // component name → its own bundle + namespace
 	routingTargets     map[string]serviceRoutingTargeter // component name → where its routed traffic lands (go-kure/launcher#411)
 	components         map[string]*componentInboundEntry
 	componentOrder     []string
-	emitted            map[string]struct{}              // namespace/name of every synthesized policy
 	externalBackends   map[string]*externalBackendEntry // key: namespace\x00service
 	externalOrder      []string
 	pending            []pendingSynthApp
@@ -435,7 +428,6 @@ func newNPSynthesisRegistry() *npSynthesisRegistry {
 		componentPlacement: map[string]componentPlacement{},
 		routingTargets:     map[string]serviceRoutingTargeter{},
 		components:         map[string]*componentInboundEntry{},
-		emitted:            map[string]struct{}{},
 		externalBackends:   map[string]*externalBackendEntry{},
 	}
 }
@@ -474,11 +466,14 @@ func (r *npSynthesisRegistry) flush() {
 }
 
 // emitExternalBackends queues one {service}-allow-ingress-traffic policy per accumulated external
-// backend, after every bundle has contributed. It fails the transform when an external policy name
-// collides with a policy already emitted this pass (a component whose Service name differs, leaving
-// a bare external Service that shares the component's name). Runs after the walk so the collision
-// check sees every component policy cluster-wide; the queued apps are appended only by flush().
-func (r *npSynthesisRegistry) emitExternalBackends() error {
+// backend, after every bundle has contributed; the queued apps are appended only by flush().
+//
+// An external policy's default name can meet a component's (a component whose Service name
+// differs, leaving a bare external Service that shares the component's name). That is not refused
+// here: the transform resolves every synthesized name afterwards (resolveSynthesizedPolicyNames),
+// where a consumer's Naming hook may tell the two apart, and refuses two that still name one
+// NetworkPolicy, naming both (go-kure/launcher#239, go-kure/launcher#787).
+func (r *npSynthesisRegistry) emitExternalBackends() {
 	sort.Strings(r.externalOrder)
 	for _, key := range r.externalOrder {
 		eb := r.externalBackends[key]
@@ -487,20 +482,12 @@ func (r *npSynthesisRegistry) emitExternalBackends() error {
 			continue
 		}
 		policyName := ingressTrafficPolicyName(eb.service)
-		nsName := eb.namespace + "/" + policyName
-		if _, dup := r.emitted[nsName]; dup {
-			return errors.Errorf(
-				"external backend Service %q in namespace %q collides with a synthesized policy named %q",
-				eb.service, eb.namespace, policyName)
-		}
-		r.emitted[nsName] = struct{}{}
 		r.queue(eb.bundle, stack.NewApplication(
 			policyName,
 			eb.namespace,
 			&backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: eb.selector, Rules: rules},
 		))
 	}
-	return nil
 }
 
 // backendRefTargetCollector is optionally implemented by routing trait configs (IngressConfig,
