@@ -96,7 +96,8 @@ engine that delivers its objects, stated without naming the engine. The `prune-p
 each of its trait sub-applications; a sibling group's one application takes each intent that
 any of its members has. Launcher writes no Flux annotation for either trait. kure's Flux
 workflow turns the intent into `kustomize.toolkit.fluxcd.io/prune: disabled` and
-`kustomize.toolkit.fluxcd.io/force: enabled` on everything the application's layout holds; the
+`kustomize.toolkit.fluxcd.io/force: enabled` on everything the application's layout holds,
+where it integrates a layout (`CreateLayoutWithResources`, `IntegrateWithLayout`); the
 [traits README](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) says
 what that covers.
 
@@ -104,10 +105,16 @@ what that covers.
 
 - Output: the objects of a component with `prune-protection` or `force-replace` no longer
   carry `kustomize.toolkit.fluxcd.io/prune` or `kustomize.toolkit.fluxcd.io/force`. A consumer
-  that delivers through kure's Flux workflow gets the same annotations from the workflow. One
-  that applies the objects another way reads `Application.Delivery`, or loses the effect.
-- The two traits no longer show in `kurel build`'s output. A consumer that applies that output
-  through a Kustomization of its own reads `Application.Delivery` or loses the effect.
+  that delivers through kure's Flux layout integration (`CreateLayoutWithResources`,
+  `IntegrateWithLayout`) gets the same annotations from it. One that applies the objects
+  another way reads `Application.Delivery`, or loses the effect.
+- kure refuses a set intent where it cannot map it, and so a document with either trait:
+  its Flux `GenerateFromCluster`, which returns none of the application's objects, fails
+  naming the application, and so does a workflow with no mapping. A caller of
+  `GenerateFromCluster` moves to `CreateLayoutWithResources`.
+- The two traits no longer show in `kurel build`'s output, which has no place for the intent.
+  A consumer that applies that output through a Kustomization of its own loses the effect;
+  to keep it, it builds through the library and reads `Application.Delivery`.
 - Under prune protection each content change of a generator-built ConfigMap leaves the old
   hash-named ConfigMap behind. That is kure's behaviour, not launcher's: its Flux workflow
   writes the prune annotation on the `configMapGenerator`s of the application's layouts, and

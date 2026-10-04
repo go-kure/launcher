@@ -33,9 +33,10 @@ func (h *PruneProtectionHandler) PropertySchema() map[string]oam.PropertySchema 
 // handed, and leaves its config and its objects as they are.
 //
 // The intent covers what the delivering workflow takes for that application's
-// objects. For kure's Flux workflow that is everything the application
-// generates, what a layout.LayoutAugmenter config adds to its layout and the
-// layouts below it (a helmtemplate component's hook groups), and the
+// objects. For kure's Flux layout integration that is everything the
+// application generates, wherever a layout.LayoutAugmenter config places it (a
+// helmtemplate component's hook groups move into child layouts), what such a
+// config adds to its layout and the layouts below it, and the
 // configMapGenerators of those layouts.
 //
 // Apply itself sets the intent only on the application it is handed. The

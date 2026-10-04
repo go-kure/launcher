@@ -264,7 +264,8 @@ delivers it, see `docs/delivery-scope.md`.
 The `prune-protection` and `force-replace` traits state a delivery intent on the
 application (`Application.Delivery`, go-kure/launcher#782), which this output has no
 place for: the two traits no longer show in it. A consumer that applies the output
-through a Kustomization of its own reads `Application.Delivery` or loses the effect.
+through a Kustomization of its own loses the effect; to keep it, it builds through the
+library and reads `Application.Delivery`.
 
 ## Global flags
 
