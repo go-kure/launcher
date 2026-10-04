@@ -31,7 +31,8 @@ import (
 
 // registeredWorkloadGVKs is every group, version and kind kure's scheme
 // registers that isWorkloadGVK calls a workload or a claim, sorted. Lists of
-// those kinds are left out: a list is not one object, and the parser refuses it.
+// those kinds are left out: a list is not one object, and the parser replaces
+// it by its items.
 func registeredWorkloadGVKs(t *testing.T) []schema.GroupVersionKind {
 	t.Helper()
 	if err := kubernetes.RegisterSchemes(); err != nil {
@@ -140,6 +141,11 @@ var keptDocuments = []struct {
 	{
 		name: "ServiceMonitor, a registered custom resource",
 		doc:  "apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: thing\nspec:\n  fieldOfALaterVersion: kept\n  selector: {}\n  endpoints:\n    - port: http\n",
+		path: []string{"spec", "fieldOfALaterVersion"},
+	},
+	{
+		name: "Lease, a kind the scheme registers since the pinned kure commit",
+		doc:  "apiVersion: coordination.k8s.io/v1\nkind: Lease\nmetadata:\n  name: thing\nspec:\n  fieldOfALaterVersion: kept\n  holderIdentity: x\n",
 		path: []string{"spec", "fieldOfALaterVersion"},
 	},
 	{
@@ -326,7 +332,10 @@ func TestDecodeManifestDocuments_ParseErrorsAreTheParsersOwn(t *testing.T) {
 		"an undeclared field before bad documents": undeclared + "---\n" + wrongType + "---\n" + noKind,
 		"invalid YAML":                             "key: [unclosed",
 		"a scalar document":                        good + "---\njust a string\n",
-		"a v1 List":                                "apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n",
+		"a list item that does not decode":         "apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n- null\n",
+		"an undeclared field in a list beside one": "apiVersion: v1\nkind: List\nitems:\n" +
+			"- apiVersion: apps/v1\n  kind: Deployment\n  metadata:\n    name: web\n  spec:\n    fieldOfALaterVersion: 1\n" +
+			"- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: a\n  data: not-a-mapping\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, want := kureio.ParseYAMLWithOptions([]byte(raw), kureio.ParseOptions{AllowUnstructured: true})

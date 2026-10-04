@@ -2913,14 +2913,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Breaking output change** (go-kure/launcher#790, with the kure version that registers
   them): `Lease`, `EndpointSlice`, `PriorityClass`, `RuntimeClass`, `APIService`, the
-  `admissionregistration.k8s.io/v1` kinds and the image-reflector kinds are emitted as their
-  Go types, no longer as rendered, so the "Limits" below apply to them; the namespaced ones
-  (`Lease`, `EndpointSlice`, `ImageRepository`, `ImagePolicy`) gain `metadata.namespace` when
-  the chart left it unset. A chart that renders a `v1` `List` or a typed list now builds, and
-  its items are held to the policy. A list of a kind the scheme does not register no longer
-  builds when a `helm.sh/hook` annotation is involved, on the list or on an item (see "Rendered
-  objects"): it built before, with a wrong output, the list's hook lost and its items emitted
-  as ordinary resources.
+  `admissionregistration.k8s.io/v1` kinds and the image-reflector kinds are read as their
+  Go types, no longer as kinds the build does not know. One that sets only fields its type
+  declares is emitted from that type; one that sets a field the type does not declare is
+  emitted as rendered, the field kept (*Undeclared fields*, below); a field of the wrong type
+  is now a build error. The namespaced ones (`Lease`, `EndpointSlice`, `ImageRepository`,
+  `ImagePolicy`) gain `metadata.namespace` when the chart left it unset. A chart that renders
+  a `v1` `List` or a typed list now builds, and each of its items is held to the policy and
+  to *Undeclared fields* as a document of its own is. A list of a kind the scheme does not
+  register no longer builds when a `helm.sh/hook` annotation is involved, on the list or on
+  an item (see "Rendered objects"): it built before, with a wrong output, the list's hook
+  lost and its items emitted as ordinary resources.
 
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
@@ -3027,6 +3030,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     from the unstructured object as it does from the Go type. One shape is refused: a
     top-level `items` array on a kind that declares none, since written out the object is a
     list to whatever applies it, and its items would be applied in its place.
+
+  A list of a registered kind (a `v1` `List`, a typed list) is replaced by its items, so the
+  rule is each item's: an item is refused or kept as a document of its own is, the error
+  naming its position (`decoding rendered manifests: item 1 of List: Deployment "demo/web":
+  undeclared field …`). A kept item of a typed list that left `apiVersion` and `kind` out is
+  written with the ones the list holds. The list's own fields are not read: the list is
+  never emitted. A document whose items cannot be matched to the objects the parser made of
+  them is refused, not passed with an item unread.
 
   A key written twice is not an undeclared field and is read as before (the last value
   stands). One case of it is refused, whatever the kind: a JSON document that writes so
@@ -3913,7 +3924,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   told there by a top-level `items` array, so a custom resource that names a field
   `items` is refused in that position too. An object of another kind inside a list of an
   unregistered kind still builds. A `v1` `List` and a typed list (`DeploymentList`) are
-  replaced by their items, each decoded and checked as a document of its own is.
+  replaced by their items, each decoded and checked as a document of its own is, for a
+  field its type does not declare too (`manifest source: parse manifests: item 0 of List:
+  Deployment "demo/web": undeclared field …`).
 
   **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
   reached the output unchecked. A document that relied on that no longer builds when its

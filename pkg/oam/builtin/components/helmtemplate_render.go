@@ -657,7 +657,9 @@ func hookGroupDir(g helm.HookGroup) string {
 // A field the vendored API type of a registered kind does not declare is not
 // dropped, as the parser alone would drop it: a workload or a claim that sets
 // one is an error naming the object and the field, and an object of any other
-// registered kind comes back unstructured, as rendered, the field kept.
+// registered kind comes back unstructured, as rendered, the field kept. An
+// item of a `v1` List or of a typed list is held to that as a document of its
+// own is.
 //
 // A list where a helm.sh/hook annotation is involved is refused before the
 // parse (refuseHookInList): the parser reads only a list's items, so the hook
