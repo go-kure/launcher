@@ -105,8 +105,9 @@ func TestShortenName_LimitBelowTheDigest(t *testing.T) {
 	}
 }
 
-// ShortenNameWithSuffix never cuts the suffix and never switches to the Helm
-// release rule, whatever is left for the name.
+// ShortenNameWithSuffix keeps a suffix whole when it leaves room for a digest
+// beside it, and never switches to the Helm release rule, whatever is left for
+// the name.
 func TestShortenNameWithSuffix(t *testing.T) {
 	long := strings.Repeat("a", 300)
 	for _, suffix := range []string{"", "-hpa", "-values-0123456789", strings.Repeat("s", 200)} {
