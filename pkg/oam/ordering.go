@@ -47,25 +47,32 @@ func (c *Component) OrderAfter(names ...string) {
 // each of names, the components that one was ordered after, so what it became
 // waits as it did (lowerDocumentBody).
 //
-// A Flux source the rule ordered another of the emitted components after is
-// left as it is. Such a source is the application's, not the component's: every
-// component that names the same source adopts it, and it is applied with the
-// application bundle, before every group (orderComponents). Made to wait on
-// what one of its consumers waits on, it could wait on another of its
-// consumers, which waits on it.
+// A generated source is left as it is: a Flux source the rule could have
+// hoisted (hoistableSource), ordered another of the emitted components after,
+// and emitted once, which is what orderComponents keeps out of the groups. Such
+// a source is the application's, not the component's: every component that
+// names the same source adopts it, and it is applied with the application
+// bundle, before every group. Made to wait on what one of its consumers waits
+// on, it could wait on another of its consumers, which waits on it. Any other
+// source the rule emits is a component like any other and inherits the order.
+//
+// It reads each component's synthesized mark, so it runs once the engine has
+// set that on the rule's output.
 func inheritOrder(emitted []Component, names []string) {
 	if len(names) == 0 {
 		return
 	}
 	prerequisite := map[string]bool{}
+	count := map[string]int{}
 	for i := range emitted {
+		count[emitted[i].Name]++
 		for _, name := range emitted[i].orderAfter {
 			prerequisite[name] = true
 		}
 	}
 	for i := range emitted {
 		c := &emitted[i]
-		if generatedSourceTypes[c.Type] && prerequisite[c.Name] {
+		if hoistableSource(c) && prerequisite[c.Name] && count[c.Name] == 1 {
 			continue
 		}
 		for _, name := range names {
@@ -84,6 +91,14 @@ var generatedSourceTypes = map[string]bool{
 	"ocirepository":  true,
 	"gitrepository":  true,
 	"bucket":         true,
+}
+
+// hoistableSource reports whether c alone qualifies as a generated source: a
+// Flux source a lowering rule emitted and ordered after nothing. Whether it is
+// one also takes a component a rule ordered after it, and it not being a
+// member of a sibling group (orderComponents, inheritOrder).
+func hoistableSource(c *Component) bool {
+	return c.synthesized && generatedSourceTypes[c.Type] && len(c.orderAfter) == 0
 }
 
 // componentOrder is the order a document's components are applied in.
@@ -193,7 +208,7 @@ func orderComponents(entries []componentEntry, deps map[string][]string) (*compo
 	source := make([]bool, len(entries))
 	for i, e := range entries {
 		c := e.component
-		if len(e.members) > 0 || !c.synthesized || !generatedSourceTypes[c.Type] || !consumed[i] || len(c.orderAfter) > 0 {
+		if len(e.members) > 0 || !hoistableSource(&c) || !consumed[i] {
 			continue
 		}
 		if e.tier != "" {

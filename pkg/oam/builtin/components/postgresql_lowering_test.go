@@ -336,6 +336,18 @@ func TestPostgresqlRule_BundleTraitOncePerBundle(t *testing.T) {
 			t.Errorf("policy %q: error = %v, want it to contain %q", tc.policy.Name, err, tc.want)
 		}
 	}
+	// So is a placement of a member in a document that orders nothing: there
+	// the members are in the Cluster's bundle, which carries the trait, and the
+	// placement could move the member out of it.
+	placedOnly := &oam.Application{Spec: oam.ApplicationSpec{
+		Components: unordered.Spec.Components,
+		Policies:   []oam.ApplicationPolicy{memberPlaced},
+	}}
+	c := comp
+	_, err := components.PostgresqlRule{}.LowerComponent(&c, oam.LoweringContext{Document: placedOnly, Namer: oam.NewNameAllocator()})
+	if want := `placement policy "pooler-last" names "db-pooler", a component generated for it, on its own`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("placement without a dependency policy: error = %v, want it to contain %q", err, want)
+	}
 	// Without a bundle trait nothing is forwarded per bundle, so a member may
 	// be ordered or placed on its own; so may another component after a member.
 	plain := comp

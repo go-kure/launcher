@@ -1381,9 +1381,6 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
-			// What the component became waits as the component did, whether or not
-			// the rule built its output from the component it was handed.
-			inheritOrder(result.Components, inheritedOrder)
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
@@ -1396,6 +1393,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
+			// What the component became waits as the component did, whether or not
+			// the rule built its output from the component it was handed.
+			inheritOrder(result.Components, inheritedOrder)
 			clearForwardingMarks(result.Components)
 			// Only a component-position rule may emit a same-name sibling group: the
 			// one invocation is the group's boundary, so a name a different
