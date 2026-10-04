@@ -367,9 +367,9 @@ generates. The case is reached only through a consumer's own lowering rule.
   may change, and the Jobs it creates afterwards carry the label. The rule is read from
   Kubernetes 1.37's Job update validation (`validatePodTemplateUpdate` in
   `pkg/apis/batch/validation`), not run against a cluster here. Its exception is a suspended
-  Job with no active pods, whose template labels may change: in 1.37 one that never started
-  or that carries the `JobSuspended` condition, in a cluster without the
-  `MutableSchedulingDirectivesForSuspendedJobs` feature only one that never started.
+  Job with no active pods, whose template labels may change: in 1.37 with its default
+  features, one that never started or that carries the `JobSuspended` condition. Which
+  suspended Jobs qualify depends on the cluster's version and feature gates.
 - `GeneratedApplication.Component` changes from the application's name to empty for a
   generated source the application bundle holds and for the external-backend policy, and
   from the application's own name to the authored component for a lowered component named
