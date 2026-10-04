@@ -442,10 +442,11 @@ func stringList(v any) []string {
 
 // synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
 // secret, for cert-manager's ingress-shim. secretName defaults to the deterministic
-// <component>-tls when the trait does not author an override.
+// <component>-tls when the trait does not author an override; that default is
+// shortened by the one rule when it is over 253 characters, an override never.
 func synthesizedIngressTLS(hosts []string, component, secretName string) []any {
 	if secretName == "" {
-		secretName = component + "-tls"
+		secretName = oam.ShortenNameWithSuffix(component, "-tls", oam.ShortenLimitSubdomain)
 	}
 	anyHosts := make([]any, len(hosts))
 	for i, h := range hosts {

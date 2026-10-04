@@ -63,6 +63,27 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 			}
 			return c.Repository
 		}},
+		{"ingress Ingress", "-ingress", func(t *testing.T, name string) string {
+			return appliedObjectName(t, &IngressHandler{}, name, scopedIngressProps(""))
+		}},
+		{"ingress Ingress with a scope", "-ingress-external", func(t *testing.T, name string) string {
+			return appliedObjectName(t, &IngressHandler{}, name, scopedIngressProps("external"))
+		}},
+		{"httproute HTTPRoute", "-httproute", func(t *testing.T, name string) string {
+			return appliedObjectName(t, &HTTPRouteHandler{}, name, scopedHTTPRouteProps(""))
+		}},
+		{"httproute HTTPRoute with a scope", "-httproute-external", func(t *testing.T, name string) string {
+			return appliedObjectName(t, &HTTPRouteHandler{}, name, scopedHTTPRouteProps("external"))
+		}},
+		{"volsync ReplicationSource", "-backup", func(t *testing.T, name string) string {
+			// The ReplicationSource is named after the source PVC, not the component.
+			return appliedObjectName(t, &VolSyncHandler{}, "web",
+				map[string]any{"sourcePVC": name, "schedule": "0 3 * * *"})
+		}},
+		{"managed TLS Secret default", "-tls", func(t *testing.T, name string) string {
+			tls := synthesizedIngressTLS([]string{"example.com"}, name, "")
+			return tls[0].(map[string]any)["secretName"].(string)
+		}},
 	}
 	shared := strings.Repeat("a", 240)
 	longA := shared + "." + strings.Repeat("b", 12) // 253 characters, a valid component name
@@ -92,6 +113,50 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 			}
 		})
 	}
+}
+
+// appliedObjectName applies a trait to a component named component and returns
+// the name of the one object the trait's sub-application generates.
+func appliedObjectName(t *testing.T, h oam.TraitHandler, component string, props map[string]any) string {
+	t.Helper()
+	bundle := &stack.Bundle{}
+	app := stack.NewApplication(component, "ns", &mockServicePortConfig{port: 80})
+	if err := h.Apply(&oam.Trait{Properties: props}, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("Apply added %d sub-applications, want 1", len(bundle.Applications))
+	}
+	objs, err := bundle.Applications[0].Generate()
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("Generate = (%d objects, %v), want one object", len(objs), err)
+	}
+	return (*objs[0]).GetName()
+}
+
+func scopedIngressProps(scope string) map[string]any {
+	props := map[string]any{
+		"ingressClassName": "nginx",
+		"rules": []any{map[string]any{
+			"host":  "example.com",
+			"paths": []any{map[string]any{"path": "/"}},
+		}},
+	}
+	if scope != "" {
+		props["scope"] = scope
+	}
+	return props
+}
+
+func scopedHTTPRouteProps(scope string) map[string]any {
+	props := map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gw"}},
+		"rules":      []any{map[string]any{}},
+	}
+	if scope != "" {
+		props["scope"] = scope
+	}
+	return props
 }
 
 // An authored repository is an override: it is used as written, never

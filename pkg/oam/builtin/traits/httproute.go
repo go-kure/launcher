@@ -34,11 +34,9 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		return err
 	}
 
-	subAppName := app.Name + "-httproute"
-	if config.Name != "" {
-		subAppName = config.Name
-	} else if config.Scope != "" {
-		subAppName = app.Name + "-httproute-" + config.Scope
+	subAppName := config.Name
+	if subAppName == "" {
+		subAppName = routingObjectName(app.Name, "httproute", config.Scope)
 	}
 	routeApp := stack.NewApplication(
 		subAppName,

@@ -877,10 +877,14 @@ longer one onto a prefix of at most 52 characters plus a 10-hex-character digest
 The object names a trait generates by default follow the same shortening rule at 253
 characters (`oam.ShortenNameWithSuffix`, go-kure/launcher#793): the `scaler` HPA and PDB
 (`<component>-hpa`, `<component>-pdb`), the `networkpolicy` trait's policy
-(`<component>-allow`) and the `volsync` default repository Secret name
+(`<component>-allow`), the `ingress` Ingress and the `httproute` HTTPRoute
+(`<component>-ingress`, `<component>-httproute`, each followed by `-<scope>` when the trait
+sets one), the managed TLS Secret default (`<component>-tls`), the `volsync`
+ReplicationSource (`<sourcePVC>-backup`) and the `volsync` default repository Secret name
 (`<component>-volsync-secret`). A name that fits is unchanged; a longer one keeps a prefix of
-the component name, a `-`, 10 hex characters of its sha256, and the suffix whole. An authored
-name, such as a `volsync` `repository`, is used as written and never shortened.
+the name before the suffix, a `-`, 10 hex characters of its sha256, and the suffix whole. An
+authored name, such as a routing trait's `name`, an `expose` `secretName` or a `volsync`
+`repository`, is used as written and never shortened.
 
 The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
 NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized

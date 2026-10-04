@@ -198,24 +198,25 @@ Launcher shortens a name only when it generated that name itself, and always by 
 returned unchanged, so no document whose names fit changes output. A longer one becomes its
 first `limit-11` characters with trailing `-`/`.` trimmed, a `-`, and the first 10 hex
 characters (`ShortenNameDigestLength`) of the sha256 of the whole name. The result is
-deterministic, and two different names share one only when their trimmed prefixes and their
-40-bit digests both coincide. `ShortenNameWithSuffix(name, suffix, limit)` is the same rule for a
+deterministic. Two different names over the limit share one only when their trimmed prefixes and
+their 40-bit digests both coincide; a name that fits is returned as written, so it can also equal
+the shortened form of a longer one. `ShortenNameWithSuffix(name, suffix, limit)` is the same rule for a
 name that ends in a fixed suffix (`-hpa`, `-values-<digest>`): the name is cut, the suffix kept
 whole.
 
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
 | 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout, the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, and the `volsync` default repository Secret name. |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout, the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name. |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
 keeps `-<suffix>`, and reserves the shortened name, so that name takes part in collision
-detection like any other. Shortening never makes an invalid name valid: the DNS-1123 check still
-runs on the result.
+detection like any other. The DNS-1123 check runs on the shortened name, which is the name
+emitted; the base is expected to be a valid name already.
 
-A name an author writes, or an override of a generated name, is never shortened: it is
-validated for its target and refused when it does not fit. Bundle names
+A name an author writes, or an override of a generated name, is never shortened: it is used as
+written, and the validation of its own property decides whether it is accepted. Bundle names
 (`<application>-<tier>`, `<application>-<component>`) do not go through the rule yet.
 
 ## Parsing
