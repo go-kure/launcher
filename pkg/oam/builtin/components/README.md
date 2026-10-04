@@ -127,8 +127,10 @@ Every object the base library can construct, and how a document reaches it
   fails when a constructor has no row, or a row has no constructor. A base-library bump that
   adds a kind therefore fails until the kind is listed here.
 - `TestKindInventory_MatchesCallSites` holds the Status column to this package and
-  `../traits`: a `kind` row's constructor is called here, a `trait` row's only there, and a
-  `missing` or `not authorable` row's by neither. A `component` row is not held to either.
+  `../traits`: a `kind` row's constructor is called here, a `trait` row's there or here (a
+  trait may build through this package, as `configmap` does), and a `missing` or
+  `not authorable` row's by neither. A `component` row is not held to either, and neither is
+  the step from `trait` to `kind`: the change that adds the kind component updates the row.
 
 Status is one of:
 
