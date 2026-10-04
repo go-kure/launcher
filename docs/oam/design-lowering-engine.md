@@ -344,8 +344,10 @@ The webservice-as-a-rule migration (`WebserviceRule`,
 that lowers one component into a same-name sibling group: a `deployment` and a
 `service`, deployed as one component (`pkg/oam` "Same-name sibling groups"). Each
 authored trait goes to the member it acts on: the routing traits to the `service`,
-the object decorators to both, and everything else, the bundle traits and an
-extension's traits included, to the `deployment`. Webservice's published property
+the object decorators to both, and everything else, to the `deployment`: that
+includes an extension's traits and the delivery traits `fluxcd-patches` and
+`fluxcd-postbuild`, which are not built in (a consumer that delivers through Flux
+registers its own handlers). Webservice's published property
 schema is pinned byte for byte against a capture of the former handler's
 (`testdata/webservice-property-schema.json`), and the handler-shaped tests are
 re-pointed through a `webserviceViaRule` adapter that runs

@@ -62,12 +62,13 @@ import (
 //   - `prune-protection` and `force-replace` to every member: they decorate
 //     every object a component generates, and each member generates its own;
 //   - every other trait to the deployment member: the workload traits read the
-//     pods, the ServiceAccount or the claims, and the bundle traits
-//     (`fluxcd-patches`, `fluxcd-postbuild`) act on the group's one
-//     Kustomization, which a trait applied to both would refuse as a duplicate
-//     sub-application. A trait type this rule does not know — one an extension
-//     registered — goes to the deployment member too, the side that holds the
-//     pods.
+//     pods, the ServiceAccount or the claims, and the delivery traits
+//     (`fluxcd-patches`, `fluxcd-postbuild`) configure how the group's one
+//     bundle is delivered. Launcher has no handler for those two: a consumer
+//     that delivers through Flux registers its own, and it then sees each
+//     trait once, on one member, instead of once per member. A trait type this
+//     rule does not know — one an extension registered — goes to the
+//     deployment member too, the side that holds the pods.
 //
 // Everything past the parse is the members' own: ApplyPolicy, NonRWXClaim,
 // and ServiceAccountName are DeploymentConfig's, and the

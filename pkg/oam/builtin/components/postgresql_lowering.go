@@ -110,10 +110,12 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 }
 
 // postgresqlObjectTraits are the authored trait types that decorate every
-// object the component generates, and postgresqlBundleTraits those that act on
-// the component's Flux Kustomization. Each applied to every object or to the
-// one bundle of a postgresql component; the rule keeps that by forwarding them
-// to the members it emits beside the Cluster.
+// object the component generates, and postgresqlBundleTraits those that
+// configure how the component's bundle is delivered (launcher has no handler
+// for them; a consumer that delivers through Flux registers its own). Each
+// applied to every object or to the one bundle of a postgresql component; the
+// rule keeps that by forwarding them to the members it emits beside the
+// Cluster.
 var (
 	postgresqlObjectTraits = map[string]bool{"prune-protection": true, "force-replace": true}
 	postgresqlBundleTraits = map[string]bool{"fluxcd-patches": true, "fluxcd-postbuild": true}
