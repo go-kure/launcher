@@ -83,8 +83,8 @@ preflight reject every valid use of the trait.
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
 |--------|--------|----------------|
-| `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
-| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Replacing a PersistentVolumeClaim or PersistentVolume can lose its data, so each one annotated gets a build warning. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
+| `prune-protection` | Sets the `PruneProtection` delivery intent on the component's applications (`stack.Application.Delivery`): their objects stay in the cluster when they are removed from the source. Writes nothing on the objects; kure's Flux workflow turns the intent into `kustomize.toolkit.fluxcd.io/prune: disabled` on each of them. | (no properties) |
+| `force-replace` | Sets the `ForceReplace` delivery intent: an object whose update fails on an immutable field (a `job`'s pod template) may be deleted and recreated. Writes nothing on the objects; kure's Flux workflow turns the intent into `kustomize.toolkit.fluxcd.io/force: enabled` on each of them. Replacing a Job re-runs it and stops any run in progress. Replacing a PersistentVolumeClaim or PersistentVolume can lose its data, so each one under the intent gets a build warning. Opt-in: without the trait launcher states no intent. | (no properties) |
 
 `fluxcd-patches` and `fluxcd-postbuild` are not built in. They set `spec.patches` and
 `spec.postBuild` of the Flux Kustomization that delivers a bundle, and launcher sets no Flux
@@ -94,23 +94,37 @@ component "<name>"): it configures delivery, which launcher leaves to the consum
 delivers the application; a consumer that delivers through Flux registers its own handler`. Such a consumer registers its
 own trait handler (`RegisterTrait`) and applies the result to the delivery objects it generates.
 
-`prune-protection` and `force-replace` annotate every object the component produces: what the
-component itself generates, including resources a layout-augmenting component adds (see
-"Decorator forwarding" below), and every sub-application its other traits append to the bundle —
-the objects of `pvc`, `configmap`, `volsync`, `certificate`, `ingress`, `httproute`, `rbac`,
-`scaler`, `networkpolicy`, `cilium-networkpolicy` and `external-secret`. Trait order does not
-matter: both implement `oam.SubApplicationDecorator`, and the engine applies them to the
-component's sub-applications in a last build step, after every trait of every component has run.
-A sibling group's sub-applications are covered once, whichever members the trait was forwarded to.
+`prune-protection` and `force-replace` cover every object the component owns, by a delivery
+intent rather than by an annotation (go-kure/launcher#782). Each sets its field of
+`stack.DeliveryIntent` on the component's application and on every sub-application its other
+traits append to the bundle — the applications of `pvc`, `configmap`, `volsync`, `certificate`,
+`ingress`, `httproute`, `rbac`, `scaler`, `networkpolicy`, `cilium-networkpolicy` and
+`external-secret`. Trait order does not matter: both implement `oam.SubApplicationDecorator`, and
+the engine applies them to the component's sub-applications in a last build step, after every
+trait of every component has run. A sibling group is delivered as one application, and that
+application takes each intent that any of its members has: a lowering rule that forwards the
+trait to one member only still covers the whole group, its sub-applications included.
 The NetworkPolicies the engine synthesizes (default-deny, inbound and egress allows) are not
-covered: they belong to no component's traits and are regenerated on every build, so Flux
-pruning them stays correct. Neither is another component's sub-application. `force-replace` sets
-its annotation after the component's own `Generate` returns, so it reaches a `job`'s Job even
-though that component clears the Job's annotations while building it. It annotates claims too —
-a component's `volumes` claims and the `pvc` sub-application's (`volsync` generates none; it
-backs up an existing claim) — and keeps doing so: a claim whose immutable field changes is then deleted and recreated, losing its data unless
-its volume is retained, so `Transformer.WarnForcedVolumes` (which `kurel build` runs) warns once
-per annotated PersistentVolume and PersistentVolumeClaim (go-kure/launcher#720; see the
+covered: they belong to no component's traits and are regenerated on every build, so pruning
+them stays correct. Neither is another component's sub-application.
+
+The traits write nothing on the objects launcher returns. The workflow that delivers an
+application reads its intent. kure's Flux workflow annotates everything the application's layout
+holds: what the application generates, what a layout-augmenting component adds outside `Generate`
+(a `helmtemplate` component's hook groups) and, as `options.annotations`, the
+`configMapGenerator`s of those layouts. Under prune protection each content change of a
+generator-built ConfigMap leaves the old hash-named ConfigMap behind: kustomize names such a
+ConfigMap with a hash of its content, so a change makes a new object, and the previous one, no
+longer in the source, is kept. That is the base library's behaviour (kure's `pkg/stack/fluxcd`
+maps the intent, in `applyDeliveryIntents`), not launcher's; no built-in component adds a
+generator. A consumer that applies launcher's objects without such a workflow reads
+`Application.Delivery` itself, or the two traits have no effect.
+
+`force-replace` covers claims too — a component's `volumes` claims and the `pvc`
+sub-application's (`volsync` generates none; it backs up an existing claim): a claim whose
+immutable field changes is then deleted and recreated, losing its data unless its volume is
+retained, so `Transformer.WarnForcedVolumes` (which `kurel build` runs) warns once per
+PersistentVolume and PersistentVolumeClaim under the intent (go-kure/launcher#720; see the
 `pkg/oam` README).
 
 ## Capability-aware traits
@@ -681,29 +695,24 @@ trait decorated it. The method is present only when the inner has it, like `Augm
 built-in component config implements `LayoutIntentAugmenter`; this keeps a registered handler's
 config, or a future built-in's, placed where it asks.
 
-A straight forward alone would also bypass every decorator's own processing for the resources
-the augmenter adds: those are created inside `AugmentLayout`, after every decorator's `Generate`
-has returned. So after the inner `AugmentLayout` returns, `augmentingDecorator` calls the outer
-decorator's unexported `postAugmentLayout` hook when it implements one. `prune-protection` and
-`force-replace` are the two decorators that do: each annotates every resource on the per-app layout
-and its child layouts with its own annotation (`kustomize.toolkit.fluxcd.io/prune: disabled`,
-`kustomize.toolkit.fluxcd.io/force: enabled`), so a resource the augmenter adds or moves into a
-child layout is covered along with the rest. kure's walker calls `AugmentLayout` only on a layout it
-seeded with that one application's `Generate` output, so the hook reaches only the application the
-decorator wraps — sibling applications in the same bundle are never on that layout. The hook runs at every level of
-a decorator chain, so trait order does not matter. The other decorators (`configmap`,
-`external-secret`, `security-context`, `topology-spread`) rewrite the workload their inner `Generate` returns and
-have nothing to do for an augmenter-added resource, so they implement no hook.
+The forward is all `augmentingDecorator` does there. A decorator's own processing never sees the
+resources the augmenter adds: those are created inside `AugmentLayout`, after every decorator's
+`Generate` has returned. No decorator needs to: `configmap`, `external-secret`,
+`security-context` and `topology-spread` rewrite the workload their inner `Generate` returns and
+have nothing to do for an augmenter-added resource. `prune-protection` and `force-replace`, which
+did annotate those resources through a post-augment hook, are no longer decorators: they set a
+delivery intent on the application, and the delivering workflow covers what the layout holds
+(go-kure/launcher#782). The hook is removed with them.
 
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `fluxNamespaceReader`, `servicePortProvider`,
 `serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer`,
 `serviceRoutingTargeter`, `podTemplateLabeler`, `identityPortMapper` and `oam.ComponentNamed` —
-so a decorated config keeps answering them. The `oam.ComponentNamed` forward keeps a trait
-sub-application decorated by `prune-protection` or `force-replace` attributed to its component
-(see "Component attribution" below). The NetworkPolicy synthesis collectors of the routing traits
-are deliberately not forwarded: synthesis runs before the engine decorates a sub-application, and
+so a decorated config keeps answering them. The `oam.ComponentNamed` forward keeps a decorated
+config attributed to its component (see "Component attribution" below). The NetworkPolicy
+synthesis collectors of the routing traits are deliberately not forwarded: they are contracts of
+trait sub-applications, which no built-in decorator wraps, and
 forwarding them would make every decorated component look like a router. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
 that authored `serviceAccountName` would stop reporting its account, and that
@@ -731,7 +740,7 @@ the method. `AugmentLayout`'s forward is conditional because kure's walker treat
 meaning, and the guard already treats "method absent" and "method returns `false`" identically —
 so a conditional forward here would only reintroduce the exact silent-loss failure mode the method
 exists to prevent, this time for any trait-decorated `delivery: template` component (e.g. one
-carrying `prune-protection`), which would otherwise be wrongly rejected by `kurel build`.
+carrying `security-context`), which would otherwise be wrongly rejected by `kurel build`.
 
 ## Trait objects under a Flux namespace
 
@@ -764,8 +773,8 @@ Every trait sub-app config exposes the OAM component it was emitted for via
 name, never the sub-app or K8s Service name. Consumers use it to stamp per-resource
 provenance (the derived `<domain>/component` label) without re-deriving the component
 from sub-app names, which several handlers author from properties rather than
-`<component>-<suffix>`. A sub-app decorated by `prune-protection` or `force-replace` keeps
-answering it through the decorator. The routing traits' existing `TargetComponentName()` (used by
+`<component>-<suffix>`. `prune-protection` and `force-replace` leave a sub-app's config as it
+is (they set a delivery intent on its application), so it answers directly. The routing traits' existing `TargetComponentName()` (used by
 auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
 NetworkPolicies target that `<domain>/component` label by default (domain from
 `TransformContext.Domain`, library default `gokure.dev`;

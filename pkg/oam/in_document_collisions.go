@@ -12,8 +12,8 @@ import (
 
 // GeneratedApplication is one application's generated output, as a caller that
 // generates a transformed document holds it: the stack.Application's name, the OAM
-// component it belongs to, every object it generated, and whether its bundle
-// force-applies them.
+// component it belongs to, every object it generated, and whether they are
+// force-applied.
 type GeneratedApplication struct {
 	Name string // the stack.Application's name
 	// Component is the authored OAM component the application belongs to
@@ -26,11 +26,19 @@ type GeneratedApplication struct {
 	// cluster) it is the config's ComponentNamed answer, else Name.
 	Component string
 	Objects   []*client.Object
-	// Forced reports that the application's own bundle sets Force, so its Flux
-	// Kustomization (spec.force) force-applies every object, annotated or not.
-	// Launcher never sets a bundle's Force (go-kure/launcher#781), so this is true
-	// only for a bundle whose Force the caller set before generating.
+	// Forced reports that every object of the application is force-applied,
+	// annotated or not, for either of two reasons. The application carries the
+	// ForceReplace delivery intent (stack.Application.Delivery), which the
+	// force-replace trait sets (go-kure/launcher#782). Or its own bundle sets
+	// Force, so its Flux Kustomization (spec.force) forces them: launcher never
+	// sets a bundle's Force (go-kure/launcher#781), so that is a bundle whose
+	// Force the caller set before generating.
 	Forced bool
+	// forceReplace and bundleForce keep Forced's two reasons apart for
+	// WarnForcedVolumes; GenerateApplications sets them. Forced decides and they
+	// only say why: they are not read when Forced is false, and a value a caller
+	// built with Forced alone names neither and is read as its bundle's force.
+	forceReplace, bundleForce bool
 }
 
 // String names the application as a collision error names its producer: a
@@ -97,7 +105,7 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		return nil
 	}
 	start := len(*out)
-	forced := bundle.Force != nil && *bundle.Force
+	bundleForce := bundle.Force != nil && *bundle.Force
 	for _, app := range bundle.Applications {
 		objs, err := app.Generate()
 		if err != nil {
@@ -112,7 +120,11 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		// Copied at once, as Bundle.Generate appends each result at once: a config
 		// that reuses its result slice must not change an earlier application's.
 		objs = append([]*client.Object(nil), objs...)
-		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs, Forced: forced})
+		forceReplace := app.Delivery.ForceReplace
+		*out = append(*out, GeneratedApplication{
+			Name: app.Name, Component: component, Objects: objs,
+			Forced: bundleForce || forceReplace, forceReplace: forceReplace, bundleForce: bundleForce,
+		})
 	}
 	// Merged after every application of the bundle has generated, as
 	// Bundle.Generate merges them: an application may change an object another

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/fluxcd"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -414,35 +415,42 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 	}
 }
 
-// htHookGroupChildren transforms an Application named application whose one
-// component db is a helmtemplate on the chart served at srvURL, carrying
-// traitTypes, walks the result with kure's layout walker and returns the
-// component layout's hook-group children.
-func htHookGroupChildren(t *testing.T, srvURL, application string, traitTypes ...string) []*layout.ManifestLayout {
+// htChartCluster transforms an Application named application whose one component
+// db is a helmtemplate on the chart served at srvURL, carrying componentTraits.
+func htChartCluster(t *testing.T, srvURL, application string, componentTraits ...oam.Trait) *stack.Cluster {
 	t.Helper()
 	tr := oam.NewTransformer(
 		map[string]oam.ComponentHandler{"helmtemplate": &components.HelmTemplateHandler{}},
-		map[string]oam.TraitHandler{"prune-protection": &traits.PruneProtectionHandler{}})
-	component := oam.Component{
-		Name: "db",
-		Type: "helmtemplate",
-		Properties: map[string]any{
-			"chart":   "testchart",
-			"version": "0.1.0",
-			"source":  map[string]any{"url": srvURL},
-			"values":  map[string]any{"replicas": 3},
-		},
-	}
-	for _, traitType := range traitTypes {
-		component.Traits = append(component.Traits, oam.Trait{Type: traitType, Properties: map[string]any{}})
-	}
+		map[string]oam.TraitHandler{
+			"prune-protection": &traits.PruneProtectionHandler{},
+			"force-replace":    &traits.ForceReplaceHandler{},
+			"security-context": &traits.SecurityContextHandler{},
+		})
 	cluster, err := tr.Transform(&oam.Application{
 		Metadata: oam.Metadata{Name: application},
-		Spec:     oam.ApplicationSpec{Components: []oam.Component{component}},
+		Spec: oam.ApplicationSpec{Components: []oam.Component{{
+			Name: "db",
+			Type: "helmtemplate",
+			Properties: map[string]any{
+				"chart":   "testchart",
+				"version": "0.1.0",
+				"source":  map[string]any{"url": srvURL},
+				"values":  map[string]any{"replicas": 3},
+			},
+			Traits: componentTraits,
+		}}},
 	}, oam.TransformContext{Namespace: "demo"})
 	if err != nil {
 		t.Fatalf("Transform %s: %v", application, err)
 	}
+	return cluster
+}
+
+// htHookGroupChildren walks the cluster htChartCluster builds with kure's layout
+// walker and returns the component layout's hook-group children.
+func htHookGroupChildren(t *testing.T, srvURL, application string, componentTraits ...oam.Trait) []*layout.ManifestLayout {
+	t.Helper()
+	cluster := htChartCluster(t, srvURL, application, componentTraits...)
 	root, err := layout.WalkCluster(cluster, layout.DefaultLayoutRules())
 	if err != nil {
 		t.Fatalf("WalkCluster %s: %v", application, err)
@@ -535,13 +543,94 @@ func TestHelmTemplate_HookGroupChildNamesIncludeApplication(t *testing.T) {
 	}
 
 	// The trait's decorator wraps the config after it was told its application.
-	decorated := htHookGroupChildren(t, srvURL, "shop", "prune-protection")
+	decorated := htHookGroupChildren(t, srvURL, "shop",
+		oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "baseline"}})
 	var decoratedNames []string
 	for _, child := range decorated {
 		decoratedNames = append(decoratedNames, child.Name)
 	}
 	if want := []string{"shop-db-00-pre-install", "shop-db-01-main", "shop-db-02-post-install"}; !slices.Equal(decoratedNames, want) {
-		t.Errorf("children under a prune-protection trait = %v, want %v", decoratedNames, want)
+		t.Errorf("children under a decorating trait = %v, want %v", decoratedNames, want)
+	}
+}
+
+// TestHelmTemplate_DeliveryIntentCoversHookGroups: prune-protection and
+// force-replace on a helmtemplate component cover every object of every hook
+// group. The traits set a delivery intent on the application
+// (go-kure/launcher#782); the base library's Flux workflow annotates what the
+// application's layout and the hook-group layouts below it hold. Without the
+// traits no object is annotated. The annotation keys and values are written
+// out literally: they are what kustomize-controller reads.
+func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
+	const pruneKey, forceKey = "kustomize.toolkit.fluxcd.io/prune", "kustomize.toolkit.fluxcd.io/force"
+	for _, tc := range []struct {
+		name   string
+		traits []oam.Trait
+		want   map[string]string
+	}{
+		{name: "no trait", want: map[string]string{}},
+		{name: "prune-protection", traits: []oam.Trait{{Type: "prune-protection"}},
+			want: map[string]string{pruneKey: "disabled"}},
+		{name: "both traits", traits: []oam.Trait{{Type: "prune-protection"}, {Type: "force-replace"}},
+			want: map[string]string{pruneKey: "disabled", forceKey: "enabled"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := htChartCluster(t, srvURL, "shop", tc.traits...)
+			var source func(b *stack.Bundle)
+			source = func(b *stack.Bundle) {
+				if b == nil {
+					return
+				}
+				if len(b.Applications) > 0 {
+					b.SourceRef = &stack.SourceRef{Kind: "OCIRepository", Name: b.Name, URL: "oci://registry.example/" + b.Name, Tag: "v1"}
+				}
+				for _, child := range b.Children {
+					source(child)
+				}
+			}
+			var nodes func(n *stack.Node)
+			nodes = func(n *stack.Node) {
+				if n == nil {
+					return
+				}
+				source(n.Bundle)
+				for _, child := range n.Children {
+					nodes(child)
+				}
+			}
+			nodes(cluster.Node)
+
+			root, err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().CreateLayoutWithResources(cluster, layout.DefaultLayoutRules())
+			if err != nil {
+				t.Fatalf("CreateLayoutWithResources: %v", err)
+			}
+			var rendered []string
+			var walk func(ml *layout.ManifestLayout)
+			walk = func(ml *layout.ManifestLayout) {
+				for _, o := range ml.Resources {
+					if _, isConfigMap := o.(*corev1.ConfigMap); !isConfigMap {
+						continue // a Flux object the workflow generated
+					}
+					rendered = append(rendered, o.GetName())
+					for _, key := range []string{pruneKey, forceKey} {
+						got, present := o.GetAnnotations()[key]
+						if wantValue, wanted := tc.want[key]; wanted != present || got != wantValue {
+							t.Errorf("ConfigMap %q in layout %q: annotation %s = %q (present %v), want %q (present %v)",
+								o.GetName(), ml.Name, key, got, present, wantValue, wanted)
+						}
+					}
+				}
+				for _, child := range ml.Children {
+					walk(child)
+				}
+			}
+			walk(root)
+			slices.Sort(rendered)
+			if want := []string{"main", "multi", "post", "pre"}; !slices.Equal(rendered, want) {
+				t.Errorf("the layout holds the chart's objects %v, want %v: the annotation check did not see every hook group", rendered, want)
+			}
+		})
 	}
 }
 

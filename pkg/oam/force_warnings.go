@@ -4,24 +4,29 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Flux kustomize-controller's force-apply annotation, as the force-replace trait
-// sets it: an object carrying it is deleted and recreated when a server-side apply
-// fails on an immutable field.
+// Flux kustomize-controller's force-apply annotation, as an author writes it on
+// an object: an object carrying it is deleted and recreated when a server-side
+// apply fails on an immutable field. Launcher writes it nowhere; kure's Flux
+// workflow sets it for an application's ForceReplace delivery intent
+// (go-kure/launcher#782).
 const (
-	fluxForceAnnotation        = "kustomize.toolkit.fluxcd.io/force"
-	fluxForceAnnotationEnabled = "enabled"
+	fluxForceAnnotation        = stack.AnnotationFluxForceKey
+	fluxForceAnnotationEnabled = stack.AnnotationFluxForceEnabled
 )
 
 // forcedVolume is one force-applied PersistentVolume or PersistentVolumeClaim, with
 // the first application that generates it and every reason it is forced.
-// annotated is set by any copy generated with the force key enabled.
+// annotated is set by any copy generated with the force key enabled, forceReplace
+// by any copy in an application with the ForceReplace delivery intent, and
+// bundleForce by any copy in an application whose bundle sets Force.
 type forcedVolume struct {
-	kind, name, producer string
-	annotated, forced    bool
+	kind, name, producer                 string
+	annotated, forceReplace, bundleForce bool
 }
 
 // forceScan collects the force-applied volumes of a document in generation order.
@@ -30,17 +35,29 @@ type forceScan struct {
 	found map[objectIdentity]*forcedVolume
 }
 
-// add records one copy of a volume: producer names what generates it, forced if
-// its bundle sets Force, annotated if it carries the force key enabled.
-func (s *forceScan) add(id objectIdentity, producer string, forced, annotated bool) {
+// add records one copy of a volume app generates, annotated if the copy carries
+// the force key enabled. Whether the application forces it is
+// GeneratedApplication.Forced alone; why is what GenerateApplications recorded
+// beside it: the ForceReplace intent, its bundle's Force. A Forced application
+// that names neither was built by a caller and is read as its bundle's force,
+// the one meaning Forced had before the intent existed.
+func (s *forceScan) add(id objectIdentity, app GeneratedApplication, annotated bool) {
 	v, seen := s.found[id]
 	if !seen {
-		v = &forcedVolume{kind: id.kind, name: qualifiedName(id.namespace, id.name), producer: producer}
+		v = &forcedVolume{kind: id.kind, name: qualifiedName(id.namespace, id.name), producer: app.String()}
 		s.found[id] = v
 		s.order = append(s.order, id)
 	}
 	v.annotated = v.annotated || annotated
-	v.forced = v.forced || forced
+	if app.Forced {
+		v.forceReplace = v.forceReplace || app.forceReplace
+		v.bundleForce = v.bundleForce || app.bundleForce || !app.forceReplace
+	}
+}
+
+// forced reports whether anything force-applies the volume.
+func (v *forcedVolume) forced() bool {
+	return v.annotated || v.forceReplace || v.bundleForce
 }
 
 // volumeIdentity returns obj's identity if it is a core PersistentVolume or
@@ -70,7 +87,7 @@ func (s *forceScan) addGenerated(apps []GeneratedApplication) {
 		for _, p := range generatedObjects(app) {
 			for _, obj := range appliedObjects(*p) {
 				if id, ok := volumeIdentity(obj); ok {
-					s.add(id, app.String(), app.Forced, forceSelected(obj))
+					s.add(id, app, forceSelected(obj))
 				}
 			}
 		}
@@ -87,15 +104,19 @@ func fluxExpanded(obj client.Object) []client.Object {
 }
 
 // WarnForcedVolumes emits one warning through the warning handler (SetWarningHandler)
-// for every PersistentVolume and PersistentVolumeClaim in apps that Flux
-// force-applies: one carrying kustomize.toolkit.fluxcd.io/force: enabled (the
-// force-replace trait sets it), or one in an application whose bundle sets Force
-// (GeneratedApplication.Forced). Flux then deletes and recreates the object when an
-// update changes an immutable field, instead of failing the apply, and a claim's
-// data can be lost with it.
+// for every PersistentVolume and PersistentVolumeClaim in apps that is
+// force-applied (GeneratedApplication.Forced, or the object's own metadata): one in
+// an application with the ForceReplace delivery intent (the force-replace trait
+// sets it on everything its component owns), one in an application whose bundle
+// sets Force, or one an author wrote kustomize.toolkit.fluxcd.io/force: enabled
+// on. The object is then deleted and recreated when an update changes an immutable
+// field, instead of the apply failing, and a claim's data can be lost with it.
 //
-// An object is annotated as Flux's force selector matches it: the force key in its
-// labels or its annotations, with the value enabled in any letter case.
+// The intent is read from the application, not from the objects: launcher writes
+// no force annotation, the workflow that delivers the application does
+// (go-kure/launcher#782). An object an author annotated is read as Flux's force
+// selector matches it: the force key in its labels or its annotations, with the
+// value enabled in any letter case.
 //
 // Objects are read as Flux applies them (appliedObjects): a list envelope stands for
 // its members, and a member is forced by its own metadata, not the envelope's. Each
@@ -118,7 +139,7 @@ func (t *Transformer) WarnForcedVolumes(apps []GeneratedApplication) {
 	scan := forceScan{found: map[objectIdentity]*forcedVolume{}}
 	scan.addGenerated(apps)
 	for _, id := range scan.order {
-		if v := scan.found[id]; v.annotated || v.forced {
+		if v := scan.found[id]; v.forced() {
 			t.warnHandler(v.warning())
 		}
 	}
@@ -184,7 +205,10 @@ func (v *forcedVolume) warning() string {
 	if v.annotated {
 		reasons = append(reasons, fluxForceAnnotation+": "+fluxForceAnnotationEnabled)
 	}
-	if v.forced {
+	if v.forceReplace {
+		reasons = append(reasons, "its application sets the force-replace delivery intent")
+	}
+	if v.bundleForce {
 		reasons = append(reasons, "its bundle sets force: true")
 	}
 	return fmt.Sprintf("%s %s (%s) is force-applied (%s): when an update changes an immutable field, "+

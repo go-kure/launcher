@@ -287,11 +287,13 @@ spec:
 	})
 }
 
-// A trait that decorates every object of its component reaches both objects of
-// an oci component with a source of its own, as it did when one handler
-// generated the two.
+// A trait that covers every object of its component reaches both objects of an
+// oci component with a source of its own, as it did when one handler generated
+// the two: every application that holds one of them takes the delivery intent
+// (go-kure/launcher#782). kurel's output, which has no place for the intent,
+// carries no Flux annotation for it.
 func TestBuild_OCIPruneProtectionReachesBothObjects(t *testing.T) {
-	docs, out := buildStdoutDocs(t, `apiVersion: launcher.gokure.dev/v1alpha1
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
   name: shop
@@ -306,19 +308,39 @@ spec:
         version: 1.4.0
       traits:
         - type: prune-protection
-`)
-	var protected []string
-	for _, d := range docs {
-		md, _ := d["metadata"].(map[string]any)
-		annotations, _ := md["annotations"].(map[string]any)
-		for k, v := range annotations {
-			if strings.HasSuffix(k, "/prune") && v == "disabled" {
-				protected = append(protected, fmt.Sprint(d["kind"]))
+`
+	cluster, _, err := transformWithBuiltins(t, app)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	var protected, unprotected []string
+	for _, b := range leafBundles(cluster.Node) {
+		for _, a := range b.Applications {
+			objs, err := a.Config.Generate(a)
+			if err != nil {
+				t.Fatalf("Generate %s: %v", a.Name, err)
+			}
+			for _, o := range objs {
+				kind := (*o).GetObjectKind().GroupVersionKind().Kind
+				if a.Delivery.PruneProtection {
+					protected = append(protected, kind)
+				} else {
+					unprotected = append(unprotected, kind+"/"+(*o).GetName())
+				}
 			}
 		}
 	}
 	slices.Sort(protected)
 	if want := []string{"Kustomization", "OCIRepository"}; !slices.Equal(protected, want) {
-		t.Errorf("prune-protected kinds = %v, want %v\noutput:\n%s", protected, want, out)
+		t.Errorf("kinds under the prune-protection intent = %v, want %v", protected, want)
 	}
+	if len(unprotected) != 0 {
+		t.Errorf("objects of an application without the intent: %v, want none", unprotected)
+	}
+
+	docs, out := buildStdoutDocs(t, app)
+	if len(docs) != 2 {
+		t.Fatalf("kurel wrote %d documents, want the OCIRepository and the Kustomization\noutput:\n%s", len(docs), out)
+	}
+	assertNoFluxObjectKeys(t, docs...)
 }

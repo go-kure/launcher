@@ -112,8 +112,9 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	return oam.LoweringResult{Components: out, Policies: policies}, nil
 }
 
-// postgresqlObjectTraits are the authored trait types that decorate every
-// object the component generates, and postgresqlBundleTraits those that
+// postgresqlObjectTraits are the authored trait types that cover every
+// object the component generates (they set a delivery intent on each
+// application that generates one), and postgresqlBundleTraits those that
 // configure how the component's bundle is delivered (launcher has no handler
 // for them; a consumer that delivers through Flux registers its own). Each
 // applied to every object or to the bundle of a postgresql component; the

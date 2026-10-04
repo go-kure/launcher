@@ -87,14 +87,45 @@ stay unset (go-kure/launcher#781). How an application is delivered (which Flux
 Kustomization applies it, how readiness is judged, how often it reconciles) belongs to the
 consumer that delivers it; see `docs/delivery-scope.md`.
 
+An application can carry a delivery intent, `stack.Application.Delivery`: what it asks of the
+engine that delivers its objects, stated without naming the engine. The `prune-protection` and
+`force-replace` traits set it (go-kure/launcher#782), on the component's application and on
+each of its trait sub-applications; a sibling group's one application takes each intent that
+any of its members has. Launcher writes no Flux annotation for either trait. kure's Flux
+workflow turns the intent into `kustomize.toolkit.fluxcd.io/prune: disabled` and
+`kustomize.toolkit.fluxcd.io/force: enabled` on everything the application's layout holds; the
+[traits README](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) says
+what that covers.
+
+**Breaking library changes** (go-kure/launcher#782):
+
+- Output: the objects of a component with `prune-protection` or `force-replace` no longer
+  carry `kustomize.toolkit.fluxcd.io/prune` or `kustomize.toolkit.fluxcd.io/force`. A consumer
+  that delivers through kure's Flux workflow gets the same annotations from the workflow. One
+  that applies the objects another way reads `Application.Delivery`, or loses the effect.
+- The two traits no longer show in `kurel build`'s output. A consumer that applies that output
+  through a Kustomization of its own reads `Application.Delivery` or loses the effect.
+- Under prune protection each content change of a generator-built ConfigMap leaves the old
+  hash-named ConfigMap behind. That is kure's behaviour, not launcher's: its Flux workflow
+  writes the prune annotation on the `configMapGenerator`s of the application's layouts, and
+  kustomize names a generated ConfigMap by its content.
+- A sibling group's application takes the intent of any member, so the trait on one member
+  covers every object of the group.
+- `GeneratedApplication.Forced` is also true for an application with the `ForceReplace`
+  intent, not only for one whose bundle sets `Force`. A forced-volume warning then gives `its
+  application sets the force-replace delivery intent` as its reason, where it named the
+  annotation.
+- The two traits no longer wrap `stack.Application.Config`, and the trait decorators' internal
+  post-augment hook is gone.
+
 Within a bundle, each component's application is followed by the sub-applications its traits
 created, in creation order, so a trait's objects are emitted with their own component's rather
 than after every component of the bundle (go-kure/launcher#712). A trait handler that moves
 an application or removes a sub-application keeps the order it left (go-kure/launcher#718); one
 that replaces, removes or renames a component's application fails the transform (go-kure/launcher#734,
 see `TraitHandler` below). A trait whose handler
-implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`) also
-decorates those sub-applications, whatever order the traits were authored in: the last step of
+implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`, which
+set a delivery intent) is also applied to those sub-applications, whatever order the traits were authored in: the last step of
 the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies
 that synthesis adds are no component's sub-applications and stay undecorated.
 
@@ -568,7 +599,7 @@ the built-ins. Extend the system by implementing:
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
-| `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
+| `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`, whose `Apply` sets the application's delivery intent and wraps nothing (go-kure/launcher#782). |
 | `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 | `ConfigWrapper` | `WrappedApplicationConfig() stack.ApplicationConfig` — a config that wraps another one and says so. The ownership wrapper is one; `UnwrapConfig(cfg)` returns the config under every such wrapper. After `Transform` every application's config answers `ComponentNamed` through the ownership wrapper: the authored component, or `""` for an application the document as a whole owns ([Component label and ownership](#component-label-and-ownership)). |
@@ -715,14 +746,17 @@ and recreates it instead of failing the apply, which can lose a claim's data. Pa
 `GenerateApplications` result, after `CheckInDocumentCollisions`, to
 `Transformer.WarnForcedVolumes`. It emits one warning through the warning handler
 (`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
-`kustomize.toolkit.fluxcd.io/force: enabled` (the `force-replace` trait sets it) or whose
-application is `GeneratedApplication.Forced` (its bundle sets `Force`; launcher never
-does, so only a bundle whose `Force` the caller set before generating,
-go-kure/launcher#781). The warning names the kind,
-`namespace/name`, the producer and every reason the object is forced, in generation order:
+`kustomize.toolkit.fluxcd.io/force: enabled` itself (an author's own, in a `manifests`
+component for one) or whose application is `GeneratedApplication.Forced`. An application is
+forced when it carries the `ForceReplace` delivery intent (the `force-replace` trait sets
+it, go-kure/launcher#782) or when its bundle sets `Force` (launcher never does, so only a
+bundle whose `Force` the caller set before generating, go-kure/launcher#781). The warning
+names the kind, `namespace/name`, the producer and every reason the object is forced — the
+annotation, the intent, the bundle, in that order:
 `PersistentVolumeClaim shop/data (component "db") is force-applied
-(kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field,
-Flux deletes and recreates it instead of failing the apply, which can lose its data`.
+(its application sets the force-replace delivery intent): when an update changes an
+immutable field, Flux deletes and recreates it instead of failing the apply, which can lose
+its data`.
 An object counts as annotated as Flux's force selector matches it: the force key as a label
 or an annotation, with `enabled` in any letter case. Objects are read as Flux applies them:
 a list envelope still in the output stands for its members — Kustomize's build expands a

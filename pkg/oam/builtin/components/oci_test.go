@@ -106,7 +106,7 @@ func TestOCIRule_ComponentType(t *testing.T) {
 // TestOCIRule_LowersToSameNamePair: a component whose source no other shares
 // lowers to an ocirepository and a fluxcd-kustomization, both named after it,
 // the source first. Each carries exactly the properties its object needs; the
-// annotations go to both, as do the two traits that decorate every object a
+// annotations go to both, as do the two traits that cover every object a
 // component generates, and every other trait goes to the fluxcd-kustomization.
 func TestOCIRule_LowersToSameNamePair(t *testing.T) {
 	protection := oam.Trait{Type: "prune-protection", Properties: map[string]any{}}

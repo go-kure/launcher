@@ -17,18 +17,18 @@ import (
 // paths, through the real `kurel build` entry point. Only the ownership fields
 // may differ — the ConfigMap's `app` label names the owning component on the
 // trait path and the ConfigMap itself on the kind path — and the owner's
-// decorators reach the trait's ConfigMap as the kind's own decorators reach
-// its ConfigMap.
+// delivery traits cover the trait's ConfigMap as the kind's own cover its
+// ConfigMap.
 
 // configMapTwinApp returns an Application holding the ConfigMap both ways: the
 // kind path as a configmap component named name, or the trait path as a
-// configmap trait of that name on a job component named "owner". decorators
+// configmap trait of that name on a job component named "owner". ownerTraits
 // are trait types added to the component that owns the ConfigMap on either
 // path.
-func configMapTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, decorators ...string) string {
+func configMapTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, ownerTraits ...string) string {
 	t.Helper()
 	var decs []any
-	for _, d := range decorators {
+	for _, d := range ownerTraits {
 		decs = append(decs, map[string]any{"type": d})
 	}
 	var comp map[string]any
@@ -81,9 +81,9 @@ func configMapDoc(t *testing.T, docs []map[string]any, name string) map[string]a
 // `app` label, which names the owner there.
 func TestConfigMapTwin_SameConfigMapBothWays(t *testing.T) {
 	cases := []struct {
-		name       string
-		props      map[string]any
-		decorators []string
+		name        string
+		props       map[string]any
+		ownerTraits []string
 	}{
 		{name: "data", props: map[string]any{"data": map[string]any{"b.yaml": "x: 1", "A_KEY": "value", "c": ""}}},
 		{name: "data and binaryData", props: map[string]any{
@@ -92,15 +92,15 @@ func TestConfigMapTwin_SameConfigMapBothWays(t *testing.T) {
 		}},
 		{name: "immutable true", props: map[string]any{"data": map[string]any{"k": "v"}, "immutable": true}},
 		{name: "immutable false", props: map[string]any{"data": map[string]any{"k": "v"}, "immutable": false}},
-		{name: "prune-protection decorator", props: map[string]any{"data": map[string]any{"k": "v"}}, decorators: []string{"prune-protection"}},
+		{name: "prune-protection on the owner", props: map[string]any{"data": map[string]any{"k": "v"}}, ownerTraits: []string{"prune-protection"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			kindDocs, kindErr, err := buildPVCDocs(t, configMapTwinApp(t, false, "settings", tc.props, tc.decorators...))
+			kindDocs, kindErr, err := buildPVCDocs(t, configMapTwinApp(t, false, "settings", tc.props, tc.ownerTraits...))
 			if err != nil {
 				t.Fatalf("kind path: %v\n%s", err, kindErr)
 			}
-			traitDocs, traitErr, err := buildPVCDocs(t, configMapTwinApp(t, true, "settings", tc.props, tc.decorators...))
+			traitDocs, traitErr, err := buildPVCDocs(t, configMapTwinApp(t, true, "settings", tc.props, tc.ownerTraits...))
 			if err != nil {
 				t.Fatalf("trait path: %v\n%s", err, traitErr)
 			}
@@ -144,14 +144,14 @@ func TestConfigMapTwin_SameConfigMapBothWays(t *testing.T) {
 					t.Errorf("trait ConfigMap %s = %#v, want the authored %#v", field, got, want)
 				}
 			}
-			for _, d := range tc.decorators {
-				if d != "prune-protection" {
-					t.Fatalf("no expected annotation recorded for decorator %q", d)
-				}
-				if v, _ := docAnnotation(traitCM, "kustomize.toolkit.fluxcd.io/prune"); v != "disabled" {
-					t.Errorf("%s on the owner did not reach the trait's ConfigMap: prune = %q, want %q", d, v, "disabled")
-				}
-			}
+			// A delivery trait writes nothing on the ConfigMap: it sets an intent
+			// on the application that holds it (go-kure/launcher#782), which on
+			// the trait path is a sub-application the engine carries the owner's
+			// intent to.
+			assertTwinDeliveryIntent(t, "settings", tc.ownerTraits,
+				configMapTwinApp(t, false, "settings", tc.props, tc.ownerTraits...),
+				configMapTwinApp(t, true, "settings", tc.props, tc.ownerTraits...))
+			assertNoFluxObjectKeys(t, kindCM, traitCM)
 		})
 	}
 }

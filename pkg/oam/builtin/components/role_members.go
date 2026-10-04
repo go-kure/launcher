@@ -11,7 +11,7 @@ import (
 )
 
 // roleObjectTraits are the authored trait types a role rule forwards to every
-// member, because they decorate every object a component generates and each
+// member, because they cover every object a component generates and each
 // member generates its own (see WebserviceRule).
 var roleObjectTraits = map[string]bool{"prune-protection": true, "force-replace": true}
 

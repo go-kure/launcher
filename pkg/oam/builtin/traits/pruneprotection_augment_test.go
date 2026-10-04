@@ -52,10 +52,6 @@ func layoutObjects(ml *layout.ManifestLayout) []client.Object {
 	return out
 }
 
-func isPruneDisabled(o client.Object) bool {
-	return o.GetAnnotations()[stack.AnnotationFluxPruneKey] == stack.AnnotationFluxPruneDisabled
-}
-
 // augmentLikeWalker drives app the way kure's layout walker does for a
 // LayoutAugmenter config: Generate, seed a per-app layout with the result,
 // then call AugmentLayout on that layout.
@@ -79,28 +75,22 @@ func augmentLikeWalker(t *testing.T, app *stack.Application) *layout.ManifestLay
 	return ml
 }
 
-func assertAllPruneDisabled(t *testing.T, ml *layout.ManifestLayout, wantNames ...string) {
+// assertAugmentedUnannotated checks that the layout holds what the stub
+// generates and what its AugmentLayout adds, and that none of it carries a
+// kustomize-controller key.
+func assertAugmentedUnannotated(t *testing.T, ml *layout.ManifestLayout) {
 	t.Helper()
+	objs := layoutObjects(ml)
 	seen := map[string]bool{}
-	for _, o := range layoutObjects(ml) {
+	for _, o := range objs {
 		seen[o.GetName()] = true
-		if !isPruneDisabled(o) {
-			t.Errorf("%s %q: missing %s=%s", o.GetObjectKind().GroupVersionKind().Kind, o.GetName(),
-				stack.AnnotationFluxPruneKey, stack.AnnotationFluxPruneDisabled)
-		}
 	}
-	for _, n := range wantNames {
+	for _, n := range []string{"generated", "augmented", "augmented-child"} {
 		if !seen[n] {
-			t.Errorf("layout does not contain %q; the assertion above would be vacuous for it", n)
+			t.Errorf("layout does not contain %q; the assertion below would be vacuous for it", n)
 		}
 	}
-}
-
-func applyPruneProtection(t *testing.T, app *stack.Application) {
-	t.Helper()
-	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
-		t.Fatalf("prune-protection Apply: %v", err)
-	}
+	assertNoFluxObjectKeys(t, objs...)
 }
 
 // applySecurityContext wraps app.Config in another decoratorBase decorator;
@@ -114,46 +104,54 @@ func applySecurityContext(t *testing.T, app *stack.Application) {
 	}
 }
 
-// TestPruneProtection_AnnotatesAugmentLayoutResources is the regression test
-// for go-kure/launcher#324: resources an inner LayoutAugmenter adds in
-// AugmentLayout — to ml.Resources or to a child layout — must carry the
-// prune-disabled annotation just like the ones Generate returns.
-func TestPruneProtection_AnnotatesAugmentLayoutResources(t *testing.T) {
-	app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-	applyPruneProtection(t, app)
-	ml := augmentLikeWalker(t, app)
-	assertAllPruneDisabled(t, ml, "generated", "augmented", "augmented-child")
-}
-
-// TestPruneProtection_AnnotatesAugmentLayoutResources_ThroughDecoratorChain
-// covers prune-protection sitting at either end of a decorator chain: the
-// annotation must reach augmenter-added resources whether prune-protection
-// wraps another decorator or is itself wrapped by one.
-func TestPruneProtection_AnnotatesAugmentLayoutResources_ThroughDecoratorChain(t *testing.T) {
-	t.Run("PruneOutermost", func(t *testing.T) {
-		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-		applySecurityContext(t, app)
+// TestDeliveryIntentTraits_LeaveAugmentLayoutResourcesAlone replaces the
+// go-kure/launcher#324 regression test. The resources an inner LayoutAugmenter
+// adds in AugmentLayout, to ml.Resources or to a child layout, used to be
+// annotated by a hook around the augmenter. Since go-kure/launcher#782 the two
+// traits state an intent on the application and install no hook: the augmenter
+// runs as the component wrote it, alone and inside a decorator chain, and the
+// workflow that delivers the application covers what it added
+// (TestDeliveryIntent_FluxWorkflowAnnotatesEverythingAComponentOwns).
+func TestDeliveryIntentTraits_LeaveAugmentLayoutResourcesAlone(t *testing.T) {
+	want := stack.DeliveryIntent{PruneProtection: true, ForceReplace: true}
+	apply := func(t *testing.T, app *stack.Application) {
+		t.Helper()
 		applyPruneProtection(t, app)
-		assertAllPruneDisabled(t, augmentLikeWalker(t, app), "generated", "augmented", "augmented-child")
-	})
-
-	t.Run("PruneInnermost", func(t *testing.T) {
-		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-		applyPruneProtection(t, app)
-		applySecurityContext(t, app)
-		assertAllPruneDisabled(t, augmentLikeWalker(t, app), "generated", "augmented", "augmented-child")
-	})
-}
-
-// TestNonPruneDecorator_DoesNotAnnotateAugmentLayoutResources pins that the
-// post-AugmentLayout annotation is prune-protection's own, not a side effect
-// of the generic augmentingDecorator forward every trait decorator shares.
-func TestNonPruneDecorator_DoesNotAnnotateAugmentLayoutResources(t *testing.T) {
-	app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-	applySecurityContext(t, app)
-	for _, o := range layoutObjects(augmentLikeWalker(t, app)) {
-		if _, ok := o.GetAnnotations()[stack.AnnotationFluxPruneKey]; ok {
-			t.Errorf("%q: unexpectedly annotated without prune-protection", o.GetName())
-		}
+		applyForceReplace(t, app)
 	}
+
+	t.Run("Alone", func(t *testing.T) {
+		cfg := &addingAugmenterStub{}
+		app := stack.NewApplication("stub", "ns", cfg)
+		apply(t, app)
+		if got, ok := app.Config.(*addingAugmenterStub); !ok || got != cfg {
+			t.Errorf("Config = %T, want the component's own augmenter, unwrapped", app.Config)
+		}
+		if app.Delivery != want {
+			t.Errorf("Delivery = %+v, want %+v", app.Delivery, want)
+		}
+		assertAugmentedUnannotated(t, augmentLikeWalker(t, app))
+	})
+	t.Run("AfterADecorator", func(t *testing.T) {
+		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
+		applySecurityContext(t, app)
+		wrapped := app.Config
+		apply(t, app)
+		if app.Config != wrapped {
+			t.Errorf("Config = %T, want the decorator the earlier trait installed, untouched", app.Config)
+		}
+		if app.Delivery != want {
+			t.Errorf("Delivery = %+v, want %+v", app.Delivery, want)
+		}
+		assertAugmentedUnannotated(t, augmentLikeWalker(t, app))
+	})
+	t.Run("BeforeADecorator", func(t *testing.T) {
+		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
+		apply(t, app)
+		applySecurityContext(t, app)
+		if app.Delivery != want {
+			t.Errorf("Delivery = %+v after a later decorator, want %+v", app.Delivery, want)
+		}
+		assertAugmentedUnannotated(t, augmentLikeWalker(t, app))
+	})
 }

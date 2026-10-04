@@ -56,7 +56,7 @@ const ociType = "oci"
 //
 // Annotations go to both members of a group, so a tier override places the
 // group as one; the fluxcd-kustomization alone carries them in the shared
-// case. `prune-protection` and `force-replace` decorate every object a
+// case. `prune-protection` and `force-replace` cover every object a
 // component generates, so both members carry them; every other authored trait
 // goes to the fluxcd-kustomization. A shared source carries neither
 // annotations nor traits.

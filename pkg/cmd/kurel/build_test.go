@@ -1048,8 +1048,10 @@ func helmIndexYAML(name, version, url string) string {
 // validation, handler, trait decoration, kurel build's LayoutAugmenter guard —
 // against a chart served locally. The chart has two hook groups, so the
 // component is a LayoutAugmenter the guard must let through (its Generate
-// covers AugmentLayout, also through the prune-protection decorator), and both
-// objects must reach the flat output in hook order.
+// covers AugmentLayout, also through a decorating trait), and both objects
+// must reach the flat output in hook order. prune-protection sets a delivery
+// intent on the application and writes nothing on the rendered objects
+// (go-kure/launcher#782).
 func TestBuildCommand_HelmtemplateComponent(t *testing.T) {
 	chartFiles := map[string]string{
 		"testchart/templates/cm.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\ndata:\n  key: value\n",
@@ -1087,6 +1089,9 @@ spec:
         source:
           url: %s
       traits:
+        - type: security-context
+          properties:
+            psaLevel: baseline
         - type: prune-protection
 `, srvURL)
 
@@ -1117,8 +1122,8 @@ spec:
 	if strings.Contains(got, "kind: HelmRelease") || strings.Contains(got, "kind: HelmRepository") {
 		t.Errorf("helmtemplate must emit neither a HelmRelease nor a source CR, got:\n%s", got)
 	}
-	if !strings.Contains(got, "kustomize.toolkit.fluxcd.io/prune") {
-		t.Errorf("expected the prune-protection annotation on the rendered objects, got:\n%s", got)
+	if strings.Contains(got, fluxObjectKeyPrefix) {
+		t.Errorf("prune-protection must write no Flux annotation on the rendered objects, got:\n%s", got)
 	}
 }
 

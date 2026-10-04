@@ -4,27 +4,12 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
-	"github.com/go-kure/kure/pkg/stack/layout"
 	batchv1 "k8s.io/api/batch/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
-
-// The wire values are written out literally rather than read from a constant:
-// they are what kustomize-controller matches (its apply ForceSelector), so a
-// test that shared the implementation's constant would stay green if the
-// constant drifted.
-const (
-	forceKey     = "kustomize.toolkit.fluxcd.io/force"
-	forceEnabled = "enabled"
-)
-
-func isForceEnabled(o client.Object) bool {
-	return o.GetAnnotations()[forceKey] == forceEnabled
-}
 
 func applyForceReplace(t *testing.T, app *stack.Application) {
 	t.Helper()
@@ -64,58 +49,59 @@ func TestForceReplaceHandler_PropertySchema_Empty(t *testing.T) {
 	}
 }
 
-func TestForceReplaceHandler_Apply_AnnotatesResources(t *testing.T) {
-	app := stack.NewApplication("migrate", "ns", &cmStub{name: "migrate", namespace: "ns"})
-	applyForceReplace(t, app)
+// TestForceReplaceHandler_Apply_SetsDeliveryIntent pins what the trait is
+// since go-kure/launcher#782: the ForceReplace delivery intent on the
+// application, and nothing else. The config is the component's own, not a
+// wrapper around it, and the objects it generates carry no Flux annotation.
+func TestForceReplaceHandler_Apply_SetsDeliveryIntent(t *testing.T) {
+	cfg := &cmStub{name: "migrate", namespace: "ns"}
+	app := stack.NewApplication("migrate", "ns", cfg)
+	bundle := newBundle()
 
-	resources, err := app.Generate()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
+	h := &traits.ForceReplaceHandler{}
+	if !h.DecoratesSubApplications() {
+		t.Error("DecoratesSubApplications() = false: the engine would not cover the component's sub-applications")
 	}
-	if len(resources) == 0 {
-		t.Fatal("Generate returned no resources")
+	if err := h.Apply(&oam.Trait{Type: "force-replace"}, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-	for _, r := range resources {
-		if !isForceEnabled(*r) {
-			t.Errorf("resource %q: annotation %q = %q, want %q",
-				(*r).GetName(), forceKey, (*r).GetAnnotations()[forceKey], forceEnabled)
-		}
+
+	if got, want := app.Delivery, (stack.DeliveryIntent{ForceReplace: true}); got != want {
+		t.Errorf("Delivery = %+v, want %+v", got, want)
 	}
+	if got, ok := app.Config.(*cmStub); !ok || got != cfg {
+		t.Errorf("Config = %T, want the component's own config, unwrapped", app.Config)
+	}
+	if len(bundle.Applications) != 0 {
+		t.Errorf("Apply added %d applications to the bundle, want none", len(bundle.Applications))
+	}
+	if bundle.Force != nil {
+		t.Errorf("Apply set the bundle's Force to %v; the trait forces its own component, not the bundle", *bundle.Force)
+	}
+	assertNoFluxObjectKeys(t, generatedObjects(t, app)...)
 }
 
 // TestForceReplaceHandler_Apply_OnlyTargetApp pins both the opt-in default
-// (a component without the trait carries no force annotation) and the narrow
-// scope (the trait on one component does not leak onto another).
+// (an application without the trait has no intent) and the narrow scope (the
+// trait on one application does not reach another).
 func TestForceReplaceHandler_Apply_OnlyTargetApp(t *testing.T) {
 	forced := stack.NewApplication("forced", "ns", &cmStub{name: "forced", namespace: "ns"})
 	plain := stack.NewApplication("plain", "ns", &cmStub{name: "plain", namespace: "ns"})
 	applyForceReplace(t, forced)
 
-	forcedResources, err := forced.Generate()
-	if err != nil {
-		t.Fatalf("forced.Generate: %v", err)
+	if !forced.Delivery.ForceReplace {
+		t.Error("the application with the trait has no ForceReplace intent")
 	}
-	plainResources, err := plain.Generate()
-	if err != nil {
-		t.Fatalf("plain.Generate: %v", err)
-	}
-	for _, r := range forcedResources {
-		if !isForceEnabled(*r) {
-			t.Errorf("forced resource %q: missing %s=%s", (*r).GetName(), forceKey, forceEnabled)
-		}
-	}
-	for _, r := range plainResources {
-		if v, ok := (*r).GetAnnotations()[forceKey]; ok {
-			t.Errorf("resource %q without the trait carries %s=%q", (*r).GetName(), forceKey, v)
-		}
+	if !plain.Delivery.IsZero() {
+		t.Errorf("the application without the trait has the intent %+v, want none", plain.Delivery)
 	}
 }
 
 // TestForceReplaceHandler_Apply_RealJob is the case go-kure/launcher#406 was
 // filed for: the job component clears the generated Job's annotations
-// wholesale (createJob's job.Annotations = nil), so the force annotation only
-// reaches the emitted Job if the decorator sets it after the inner Generate
-// returns. Every object the component emits (Job and ServiceAccount) carries it.
+// wholesale (createJob's job.Annotations = nil). The intent is stated on the
+// application, where the component's Generate cannot drop it, and the Job is
+// generated as the component wrote it.
 func TestForceReplaceHandler_Apply_RealJob(t *testing.T) {
 	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
 		Name:       "migrate",
@@ -128,103 +114,53 @@ func TestForceReplaceHandler_Apply_RealJob(t *testing.T) {
 	app := stack.NewApplication("migrate", "default", cfg)
 	applyForceReplace(t, app)
 
-	resources, err := app.Generate()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
+	if !app.Delivery.ForceReplace {
+		t.Error("the job's application has no ForceReplace intent")
 	}
+	objs := generatedObjects(t, app)
 	sawJob := false
-	for _, r := range resources {
-		if _, ok := (*r).(*batchv1.Job); ok {
+	for _, o := range objs {
+		if _, ok := o.(*batchv1.Job); ok {
 			sawJob = true
-		}
-		if !isForceEnabled(*r) {
-			t.Errorf("%T %q: missing %s=%s", *r, (*r).GetName(), forceKey, forceEnabled)
 		}
 	}
 	if !sawJob {
 		t.Fatal("job component emitted no batch/v1 Job; the test no longer exercises the case it pins")
 	}
+	assertNoFluxObjectKeys(t, objs...)
 }
 
-// TestForceReplace_PreservesOtherAnnotations stacks force-replace with
-// prune-protection in both orders: each decorator adds its own key to the
-// existing map rather than replacing it.
-func TestForceReplace_PreservesOtherAnnotations(t *testing.T) {
-	for _, order := range []string{"ForceOutermost", "ForceInnermost"} {
+// TestDeliveryIntentTraits_Stack pins that force-replace and prune-protection
+// each set their own field and keep the other's, in either order.
+func TestDeliveryIntentTraits_Stack(t *testing.T) {
+	want := stack.DeliveryIntent{PruneProtection: true, ForceReplace: true}
+	for _, order := range []string{"PruneFirst", "ForceFirst"} {
 		t.Run(order, func(t *testing.T) {
 			app := stack.NewApplication("stub", "ns", &cmStub{name: "stub", namespace: "ns"})
-			if order == "ForceOutermost" {
+			if order == "PruneFirst" {
 				applyPruneProtection(t, app)
 				applyForceReplace(t, app)
 			} else {
 				applyForceReplace(t, app)
 				applyPruneProtection(t, app)
 			}
-			resources, err := app.Generate()
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			for _, r := range resources {
-				if !isForceEnabled(*r) {
-					t.Errorf("%q: missing %s", (*r).GetName(), forceKey)
-				}
-				if !isPruneDisabled(*r) {
-					t.Errorf("%q: missing %s", (*r).GetName(), stack.AnnotationFluxPruneKey)
-				}
+			if app.Delivery != want {
+				t.Errorf("Delivery = %+v, want %+v", app.Delivery, want)
 			}
 		})
 	}
 }
 
-// TestForceReplace_AnnotatesAugmentLayoutResources mirrors prune-protection's
-// go-kure/launcher#324 regression test: resources an inner LayoutAugmenter
-// adds in AugmentLayout, to ml.Resources or to a child layout, are generated by
-// the component too and must carry the annotation, whatever the trait order.
-func TestForceReplace_AnnotatesAugmentLayoutResources(t *testing.T) {
-	assertAllForced := func(t *testing.T, ml *layout.ManifestLayout) {
-		t.Helper()
-		seen := map[string]bool{}
-		for _, o := range layoutObjects(ml) {
-			seen[o.GetName()] = true
-			if !isForceEnabled(o) {
-				t.Errorf("%q: missing %s=%s", o.GetName(), forceKey, forceEnabled)
-			}
-		}
-		for _, n := range []string{"generated", "augmented", "augmented-child"} {
-			if !seen[n] {
-				t.Errorf("layout does not contain %q; the assertion above would be vacuous for it", n)
-			}
-		}
-	}
-
-	t.Run("Alone", func(t *testing.T) {
-		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-		applyForceReplace(t, app)
-		assertAllForced(t, augmentLikeWalker(t, app))
-	})
-	t.Run("ForceOutermost", func(t *testing.T) {
-		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-		applySecurityContext(t, app)
-		applyForceReplace(t, app)
-		assertAllForced(t, augmentLikeWalker(t, app))
-	})
-	t.Run("ForceInnermost", func(t *testing.T) {
-		app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
-		applyForceReplace(t, app)
-		applySecurityContext(t, app)
-		assertAllForced(t, augmentLikeWalker(t, app))
-	})
-}
-
-// TestNonForceDecorator_DoesNotAnnotateAugmentLayoutResources pins that the
-// post-AugmentLayout annotation is force-replace's own, not a side effect of
-// the generic augmentingDecorator forward (prune-protection's hook included).
-func TestNonForceDecorator_DoesNotAnnotateAugmentLayoutResources(t *testing.T) {
-	app := stack.NewApplication("stub", "ns", &addingAugmenterStub{})
+// TestDeliveryIntentTraits_Idempotent pins that applying a trait twice, as the
+// engine does when the same trait reaches an application through two paths,
+// leaves the same intent.
+func TestDeliveryIntentTraits_Idempotent(t *testing.T) {
+	app := stack.NewApplication("stub", "ns", &cmStub{name: "stub", namespace: "ns"})
+	applyForceReplace(t, app)
+	applyForceReplace(t, app)
 	applyPruneProtection(t, app)
-	for _, o := range layoutObjects(augmentLikeWalker(t, app)) {
-		if v, ok := o.GetAnnotations()[forceKey]; ok {
-			t.Errorf("%q: carries %s=%q without force-replace", o.GetName(), forceKey, v)
-		}
+	applyPruneProtection(t, app)
+	if want := (stack.DeliveryIntent{PruneProtection: true, ForceReplace: true}); app.Delivery != want {
+		t.Errorf("Delivery = %+v, want %+v", app.Delivery, want)
 	}
 }
