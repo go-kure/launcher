@@ -79,15 +79,11 @@ func validHelmReleaseName(name string) bool {
 const helmReleaseNameRule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
 
 // templateReleaseName resolves the release name of a client-side render:
-// releaseName when set, else the release name Flux gives a HelmRelease named
-// componentName with no spec.releaseName and no spec.targetNamespace — the
-// name itself, shortened as Flux shortens it (oam.ShortenName at
-// oam.ShortenLimitHelmRelease) — so a chart renders under the same name under
-// either delivery of the helm rule. An authored name is never shortened; it,
-// and the default, must be a valid Helm release name (validHelmReleaseName). A
-// default that is not (Flux's shortening can leave a label starting with '-')
-// is refused with the remedy to set releaseName. Every error is prefixed with
-// owner, the component type.
+// releaseName when set, else the default every Helm release of the component
+// gets (defaultHelmReleaseName), so a chart renders under the same name under
+// either delivery of the helm rule. An authored name is never shortened; it
+// must be a valid Helm release name (validHelmReleaseName). Every error is
+// prefixed with owner, the component type.
 func templateReleaseName(owner, releaseName, componentName string) (string, error) {
 	if releaseName != "" {
 		if !validHelmReleaseName(releaseName) {
@@ -95,6 +91,22 @@ func templateReleaseName(owner, releaseName, componentName string) (string, erro
 		}
 		return releaseName, nil
 	}
+	return defaultHelmReleaseName(owner, componentName)
+}
+
+// defaultHelmReleaseName is the release name of a Helm release whose component
+// authors none, under either delivery (go-kure/launcher#785): the component
+// name, shortened above 53 characters as Flux helm-controller shortens a
+// release name (oam.ShortenName at oam.ShortenLimitHelmRelease). The helmrelease
+// terminal writes it to spec.releaseName and the helmtemplate terminal renders
+// under it, so a chart is released under one name whatever delivers it. It must
+// be a valid Helm release name (validHelmReleaseName); one that is not (Flux's
+// shortening can cut a dotted name just after a '.', leaving a label that
+// starts with '-') is refused with the remedy to set releaseName. So is an
+// empty component name, which only a config built directly can have: there is
+// nothing to derive a default from. The error is prefixed with owner, the
+// component type.
+func defaultHelmReleaseName(owner, componentName string) (string, error) {
 	if componentName == "" {
 		return "", errors.Errorf("%s: no release name: releaseName is unset and the component has no name to derive it from; set ReleaseName or Name", owner)
 	}

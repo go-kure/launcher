@@ -118,7 +118,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"interval":           str("HelmRelease spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"kubeConfig":         object("HelmRelease spec.kubeConfig: a kubeconfig reference for a remote cluster."),
 		"suspend":            boolean("HelmRelease spec.suspend: stop reconciling the release."),
-		"releaseName":        str("HelmRelease spec.releaseName. Flux's default applies when unset: <targetNamespace>-<name> when targetNamespace is set, else the component name."),
+		"releaseName":        str("HelmRelease spec.releaseName. When unset it is set to the component name, whatever targetNamespace is; a name over 53 characters is shortened as Flux shortens a release name (its first 40 characters, '-', and 12 hex digits of its SHA-256). An authored value is written as it is."),
 		"targetNamespace":    str("HelmRelease spec.targetNamespace. When unset and a Flux namespace is configured, it is set to the application namespace."),
 		"storageNamespace":   str("HelmRelease spec.storageNamespace: where Helm stores release state."),
 		"dependsOn":          objects("HelmRelease spec.dependsOn: releases that must be ready first.", "One dependency reference (name, namespace, readyExpr)."),
@@ -195,8 +195,8 @@ type HelmReleaseConfig struct {
 	Namespace string
 
 	// Spec is the HelmRelease spec as authored. Generate copies it and
-	// applies the interval default and the targetNamespace default under a
-	// Flux namespace to that copy.
+	// applies the interval default, the releaseName default and the
+	// targetNamespace default under a Flux namespace to that copy.
 	Spec helmv2.HelmReleaseSpec
 
 	// fluxNS overrides the HelmRelease's namespace. Set by
@@ -230,6 +230,9 @@ func (c *HelmReleaseConfig) validate() error {
 	if err := checkFluxDurations("helmrelease", &c.Spec, helmReleaseDurations); err != nil {
 		return err
 	}
+	if _, err := c.releaseName(); err != nil {
+		return err
+	}
 	if _, err := helmReleaseValuesMap(c.Spec.Values); err != nil {
 		return err
 	}
@@ -239,6 +242,22 @@ func (c *HelmReleaseConfig) validate() error {
 		}
 	}
 	return nil
+}
+
+// releaseName returns spec.releaseName as Generate writes it: the authored
+// value as it is, else the default every Helm release of the component gets
+// (defaultHelmReleaseName), which is the name delivery: template renders the
+// same component under (go-kure/launcher#785). Flux derives an unset release
+// name from the HelmRelease's name and, when one is set, its target namespace
+// ("<targetNamespace>-<name>"); writing the default makes the release name the
+// component's with and without a target namespace. A config built directly
+// with neither a Name nor a releaseName has nothing to derive a default from
+// and is refused, as the helmtemplate terminal refuses it.
+func (c *HelmReleaseConfig) releaseName() (string, error) {
+	if c.Spec.ReleaseName != "" {
+		return c.Spec.ReleaseName, nil
+	}
+	return defaultHelmReleaseName("helmrelease", c.Name)
 }
 
 // helmReleaseValuesFromKinds are the kinds Flux's ValuesReference admits (its
@@ -332,6 +351,8 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	if hr.Spec.Interval.Duration == 0 {
 		hr.Spec.Interval = metav1.Duration{Duration: helmReleaseDefaultInterval}
 	}
+	// validate has already accepted it.
+	hr.Spec.ReleaseName, _ = c.releaseName()
 	// Under a Flux namespace the HelmRelease no longer sits in the
 	// application namespace, and Flux installs a release into the
 	// HelmRelease's own namespace unless targetNamespace says otherwise. So
