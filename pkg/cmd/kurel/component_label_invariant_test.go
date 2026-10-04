@@ -221,6 +221,10 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"serviceaccount":        {props: map[string]any{}, labelled: true},
 	"persistentvolumeclaim": {props: map[string]any{"size": "1Gi"}, labelled: true},
 	"configmap":             {props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true},
+	// The go-kure/launcher#790 kinds emit identity and the authored spec, with
+	// no `app` label and no pods. The component name is the Namespace's name,
+	// which the API holds to a DNS-1123 label.
+	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

@@ -472,6 +472,9 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		// The kind components for the objects the workload kinds generated
 		// (go-kure/launcher#702).
 		"configmap", "persistentvolumeclaim", "serviceaccount",
+		// The kind components for the objects no component projected
+		// (go-kure/launcher#790).
+		"namespace",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "postgresql", "webservice", "worker"}

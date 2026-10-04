@@ -89,6 +89,7 @@ reads it.
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
+| `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -186,7 +187,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | missing | - | - | - |
 | `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | missing | - | - | - |
-| `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | missing | - | - | - |
@@ -1981,6 +1982,29 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `ParseConfigMapProperties(props)` and builds the ConfigMap through
     `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
     give the same ConfigMap and the same refusals on both paths.
+- **namespace** (go-kure/launcher#790) is the kind-named projection of one
+  Kubernetes core object, built on the recipe of the `cnpg-pooler`,
+  `cnpg-database` and `cnpg-objectstore` kinds: one schema key per json field
+  of the object's spec type, the whole property map decoded strictly into that
+  type under the null contract, and two spellings of one field refused.
+  `TestCoreKindSchemas_CoverSpec` holds the schema to the linked type by
+  reflection. It emits the object, named after the component, with the
+  authored spec and nothing else: no annotation, and no `app` label (a
+  component label on every generated object is go-kure/launcher#788). It runs
+  no pod and requests no storage, so `ApplyPolicy` is a no-op. Like every
+  component, it is in no tier unless a tier annotation or placement policy
+  places it.
+  The properties are the spec fields only. **Not covered:** the object's
+  metadata, so its labels and annotations cannot be authored.
+  - `namespace` publishes `finalizers`, the one field of
+    `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
+    no namespace, whatever namespace the application is built for. The
+    component name is the Namespace's name, which the API holds to a DNS-1123
+    label (at most 63 characters, no dot), narrower than a component name;
+    any other name is refused, naming it. Since its labels cannot be authored,
+    a Namespace that needs the Pod Security Admission labels
+    (`pod-security.kubernetes.io/enforce` and its siblings) cannot be written
+    with this component.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of

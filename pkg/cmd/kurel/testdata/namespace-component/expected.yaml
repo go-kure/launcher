@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+spec: {}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-b
+spec:
+  finalizers:
+  - kubernetes
+  - example.com/cleanup
