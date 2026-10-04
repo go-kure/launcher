@@ -114,9 +114,11 @@ var (
 )
 
 // noHandlerMessage is the "no handler" error for a policy or trait type, with a
-// hint when the type is one of delivery.
-func noHandlerMessage(position, typ string, delivery map[string]bool) string {
-	msg := fmt.Sprintf("no handler for %s type %q", position, typ)
+// hint when the type is one of delivery. where names the element: the policy, or
+// the component the trait is on, and the lowering rule that emitted it, if one
+// did (emittedBy).
+func noHandlerMessage(position, typ, where string, delivery map[string]bool) string {
+	msg := fmt.Sprintf("no handler for %s type %q (%s)", position, typ, where)
 	if delivery[typ] {
 		msg += ": it configures delivery, which launcher leaves to the consumer that delivers the application; a consumer that delivers through Flux registers its own handler"
 	}
@@ -294,19 +296,20 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 }
 
 // HandlerContractSet is the set of ContractMetadata declared by registered
-// component/trait handlers and component/trait lowering rules, keyed by type name.
-// Mirrors HandlerSchemaSet's Components/Traits split for the identical reason: a
-// component and a trait that share a type name must not collide, and a consumer
-// needs to know which registry a contract came from.
+// component/trait/policy handlers and component/trait/policy lowering rules, keyed
+// by type name. Mirrors HandlerSchemaSet's Components/Traits/Policies split for the
+// identical reason: two positions that share a type name must not collide, and a
+// consumer needs to know which registry a contract came from.
 type HandlerContractSet struct {
 	Components map[string]ContractMetadata
 	Traits     map[string]ContractMetadata
+	Policies   map[string]ContractMetadata
 }
 
-// HandlerContracts returns the ContractMetadata of every registered component and
-// trait handler, and every component/trait lowering rule, that implements
-// ContractDescriber. Entries that do not implement it are omitted. The maps are
-// always non-nil. Covers the four component/trait registries HandlerSchemas covers, for the same
+// HandlerContracts returns the ContractMetadata of every registered component,
+// trait and policy handler, and every component/trait/policy lowering rule, that
+// implements ContractDescriber. Entries that do not implement it are omitted. The maps are
+// always non-nil. Covers the six registries HandlerSchemas covers, for the same
 // reason: a type reachable only through a lowering rule (e.g. "expose", claimed via
 // RegisterTraitLowering rather than RegisterBuiltinTrait) must still publish its
 // contract metadata here — otherwise a caller discovering contracts would see a gap
@@ -316,6 +319,17 @@ func (t *Transformer) HandlerContracts() HandlerContractSet {
 	set := HandlerContractSet{
 		Components: make(map[string]ContractMetadata),
 		Traits:     make(map[string]ContractMetadata),
+		Policies:   make(map[string]ContractMetadata),
+	}
+	for name, h := range t.policyHandlers {
+		if p, ok := h.(ContractDescriber); ok {
+			set.Policies[name] = p.ContractMetadata()
+		}
+	}
+	for name, r := range t.policyLoweringRules {
+		if p, ok := r.(ContractDescriber); ok {
+			set.Policies[name] = p.ContractMetadata()
+		}
 	}
 	for name, h := range t.componentHandlers {
 		if p, ok := h.(ContractDescriber); ok {
@@ -553,6 +567,11 @@ func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.
 // returns the accumulated PolicyResult. ctx.Policy is normalized to NoopPolicy
 // if nil so that all pipeline stages always receive a non-nil Policy value.
 func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, error) {
+	// A lowering rule whose declared targets are not registered is refused here,
+	// whether or not this document uses it (Seal).
+	if err := t.Seal(); err != nil {
+		return nil, nil, err
+	}
 	if ctx.Policy == nil {
 		ctx.Policy = &NoopPolicy{}
 	}
@@ -740,7 +759,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 	for i, component := range app.Spec.Components {
 		handler := t.findComponentHandler(component.Type)
 		if handler == nil {
-			return nil, &TransformError{Message: fmt.Sprintf("no handler for component type %q", component.Type)}
+			return nil, &TransformError{Message: fmt.Sprintf("no handler for component type %q (component %q%s)", component.Type, component.Name, emittedBy(component.origin))}
 		}
 
 		// D3: an authored value for a platform-reserved property is rejected before
@@ -833,7 +852,8 @@ func (t *Transformer) applyPolicies(app *Application, entries []componentEntry) 
 	for _, p := range app.Spec.Policies {
 		handler := t.findPolicyHandler(p.Type)
 		if handler == nil {
-			return nil, &TransformError{Message: noHandlerMessage("policy", p.Type, deliveryPolicyTypes)}
+			where := fmt.Sprintf("policy %q%s", p.Name, emittedBy(p.origin))
+			return nil, &TransformError{Message: noHandlerMessage("policy", p.Type, where, deliveryPolicyTypes)}
 		}
 		if err := handler.Apply(&p, componentNames, result); err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("policy %q", p.Name), Cause: err}
@@ -1141,7 +1161,8 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
-				return nil, &TransformError{Message: noHandlerMessage("trait", trait.Type, deliveryTraitTypes)}
+				where := fmt.Sprintf("on component %q%s", entry.component.Name, emittedBy(trait.origin))
+				return nil, &TransformError{Message: noHandlerMessage("trait", trait.Type, where, deliveryTraitTypes)}
 			}
 			// A sealed trait was emitted by a lowering rule, which already merged
 			// capability rendering into it (D5) before the fixpoint settled — the

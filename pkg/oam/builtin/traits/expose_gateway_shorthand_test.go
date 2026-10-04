@@ -101,11 +101,13 @@ func TestExposeRule_Gateway_HostnamesAndRules(t *testing.T) {
 
 // gatewayShorthandTransformer builds the engine as the real pipeline assembles it
 // for this trait: the webservice lowering rule and its member kinds, the httproute
-// trait handler the lowered expose trait dispatches to, and ExposeRule itself.
+// trait handler the lowered expose trait dispatches to, and ExposeRule itself,
+// with the ingress handler that is the rule's other target.
 func gatewayShorthandTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	tr.RegisterBuiltinTraitLowering(traits.ExposeRule{})
 	return tr
 }

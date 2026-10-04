@@ -54,6 +54,7 @@ func transformServicePort(t *testing.T, traitType string, port any) ([]client.Ob
 	}, nil)
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
+	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	tr.RegisterComponentLowering(servicePortRule{traitType: traitType, traitProps: props})

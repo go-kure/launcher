@@ -46,6 +46,10 @@ func exposeGatewayApp(gatewayName string) *oam.Application {
 func TestExposeRule_GatewayName_InlineAuthoringRejected(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	tr.RegisterBuiltinTraitLowering(traits.ExposeRule{})
+	// The rule's two targets: a registry without them is refused before the
+	// document is read.
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	ctx := oam.TransformContext{
 		Namespace: "default",

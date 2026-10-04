@@ -30,6 +30,17 @@ engine-owned `scope`, legal on every trait, is still accepted); for `prune-prote
 array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
 
+Every built-in trait handler, and the `expose` rule, implements `oam.ContractDescriber`
+(go-kure/launcher#789): family is the trait type, version is `builtin.ContractVersion`
+(`v1alpha1`), and `RequiredCapabilityKeys` is the trait type for the two whose
+`CapabilityRequired` returns `true` (`certificate`, `expose`) and empty for the rest. The
+`expose` rule also implements `oam.LoweringTargetDeclarer`: it lowers into the `ingress` and
+`httproute` traits, so `Transformer.Seal`, which every transform runs first, refuses a
+registry that holds `ExposeRule` without both, with `registry incomplete: lowering rule
+trait/expose@v1alpha1 lowers into trait type "httproute", which is not registered`.
+**Breaking library change**: a consumer that registered `ExposeRule` with one of the two
+handlers only now fails at the first transform.
+
 Capability-injected fields are **not** marked `Required` in a handler's schema, because
 they are supplied by capability rendering (validated in `ValidateAndApplyDefaults`), not by
 the OAM author — e.g. `expose.controllerType` and the parent `certificate.issuerRef` are
@@ -78,9 +89,9 @@ preflight reject every valid use of the trait.
 `fluxcd-patches` and `fluxcd-postbuild` are not built in. They set `spec.patches` and
 `spec.postBuild` of the Flux Kustomization that delivers a bundle, and launcher sets no Flux
 delivery field on the bundles it returns (go-kure/launcher#781; see `docs/delivery-scope.md`).
-A document using one fails the transform with `no handler for trait type "fluxcd-patches": it
-configures delivery, which launcher leaves to the consumer that delivers the application; a
-consumer that delivers through Flux registers its own handler`. Such a consumer registers its
+A document using one fails the transform with `no handler for trait type "fluxcd-patches" (on
+component "<name>"): it configures delivery, which launcher leaves to the consumer that
+delivers the application; a consumer that delivers through Flux registers its own handler`. Such a consumer registers its
 own trait handler (`RegisterTrait`) and applies the result to the delivery objects it generates.
 
 `prune-protection` and `force-replace` annotate every object the component produces: what the

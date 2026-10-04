@@ -202,6 +202,7 @@ func topologySpreadTransformer() *oam.Transformer {
 	}, nil)
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
+	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 	return tr
 }
 

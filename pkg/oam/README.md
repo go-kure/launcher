@@ -328,7 +328,8 @@ the built-ins. Extend the system by implementing:
 | `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies (go-kure/launcher#772). Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
 | `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
-| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
+| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). Every built-in handler and lowering rule implements it. |
+| `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
@@ -342,9 +343,10 @@ no built-in handler writes one (go-kure/launcher#781). A consumer that delivers 
 uses it to carry what its own `reconciliation` or `health-checks` handler read. Launcher has
 no handler for those two policy types, nor for the `fluxcd-patches` and `fluxcd-postbuild`
 traits: a document using one fails the transform with `no handler for policy type
-"reconciliation": it configures delivery, which launcher leaves to the consumer that
-delivers the application; a consumer that delivers through Flux registers its own handler`
-(`no handler for trait type …` for the two traits).
+"reconciliation" (policy "<name>"): it configures delivery, which launcher leaves to the
+consumer that delivers the application; a consumer that delivers through Flux registers its
+own handler` (`no handler for trait type "fluxcd-patches" (on component "<name>"): …` for
+the two traits).
 
 `PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
 app's traits actually resolved against `ctx.Capabilities` during the transform — a real
@@ -1118,16 +1120,86 @@ read or enforced. Consumers otherwise: schema publication, artifact
 provenance in a downstream consumer, and deprecation tooling. Metadata rides the
 existing registration mechanism; there is no separate contract registry.
 
-`Transformer.HandlerContracts()` returns a `HandlerContractSet{ Components, Traits }`
-of every registered component/trait handler, and every component/trait lowering
-rule, that implements `ContractDescriber` — the same four component/trait
-registries `HandlerSchemas()` covers (componentHandlers, traitHandlers,
-componentLoweringRules, traitLoweringRules), for the identical reason: a type
-reachable only through a lowering rule must still publish its metadata.
+`Transformer.HandlerContracts()` returns a `HandlerContractSet{ Components, Traits,
+Policies }` of every registered component, trait and policy handler, and every
+component, trait and policy lowering rule, that implements `ContractDescriber` — the
+same six registries `HandlerSchemas()` covers (componentHandlers, traitHandlers,
+policyHandlers and the three lowering-rule registries), for the identical reason: a
+type reachable only through a lowering rule must still publish its metadata.
+**Breaking library change** (go-kure/launcher#789): `HandlerContractSet` gained the
+`Policies` field, so an unkeyed composite literal of it no longer compiles.
 
 A lowering rule that implements `ContractDescriber` also has its `Version` folded
 into the lowering-rule identity recorded on `Origin.Rule` (see Lowering above), e.g.
-`"trait/expose@v1"`.
+`"trait/expose@v1alpha1"`.
+
+Every built-in handler and lowering rule implements `ContractDescriber`
+(go-kure/launcher#789). The scheme: `Family` is the type name the built-in is
+registered under (`webservice`, `expose`, `placement`), `Version` is
+`builtin.ContractVersion` (`v1alpha1`, one value for all of them), and
+`RequiredCapabilityKeys` is the type name for a built-in whose
+`CapabilityAware.CapabilityRequired` returns `true` (`certificate`, `expose`) and
+empty otherwise. No built-in is deprecated. A built-in rule's identity therefore
+reads `component/webservice@v1alpha1`, on `Origin.Rule`, on `LoweringStep.Rule` and
+in a `LoweringError` chain, where it read `component/webservice`.
+
+### Lowering targets and `Seal`
+
+A lowering rule emits elements other handlers render, so a registry that holds the
+rule without them fails only when a document reaches the gap. A rule that
+implements `LoweringTargetDeclarer` declares, in a `LoweringTargets{ ComponentTypes,
+TraitTypes, PolicyTypes }`, every type it can emit over all of its inputs: the
+components it emits, the traits it emits or attaches to a component it emits, and
+the policies it emits. A type it only forwards from its input is not a target, and
+document kinds are not listed.
+
+`Transformer.Seal()` checks every registered rule that declares targets, of any
+kind (document, raw document, component, trait, policy): each declared type must be
+registered at its position, as a handler or as another lowering rule. The check
+cannot run at registration, because a rule and the handlers of its targets are
+registered in any order. `Transform` and `TransformWithPolicy` call `Seal` first, so
+an incomplete registry is refused whether or not the document uses the rule;
+`LowerRaws` does not, because it dispatches no handler. A caller that has finished
+registering may call `Seal` itself to learn of a gap before it has a document. The
+error names each rule and the type it is missing, sorted:
+
+```text
+registry incomplete: lowering rule component/webservice@v1alpha1 lowers into component type "service", which is not registered
+```
+
+`Seal` stores nothing and locks nothing: it reads the registry as it stands, may be
+called any number of times, and accepts on the next call a type registered after a
+refusal. A rule that does not implement `LoweringTargetDeclarer` is not checked, and
+the engine does not check that a rule emits only what it declares.
+**Breaking library change** (go-kure/launcher#789): a consumer that registers a
+built-in lowering rule without the types it lowers into now fails at `Seal` or at
+the first transform, where it failed only for a document that reached the missing
+type. The built-in rules declare:
+
+| Rule | Components | Traits | Policies |
+|------|------------|--------|----------|
+| `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap` | |
+| `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database` | | `dependency`, `placement` |
+| `expose` (trait) | | `ingress`, `httproute` | |
+
+### The "no handler" error
+
+A type with no registered handler fails the transform, and the message names where
+the element is: `no handler for component type "x" (component "web")`, `no handler
+for trait type "x" (on component "web")`, `no handler for policy type "x" (policy
+"first")`. For an element a lowering rule emitted, it also names the rule and the
+authored component it lowered:
+
+```text
+no handler for component type "service" (component "web", emitted by lowering rule component/role for component "web" (type "role") in document "app" (kind "Application"))
+```
+
+That form is reached only for a type the package knows and the registry holds no
+handler for, and only for a rule that does not declare the type as a target (`Seal`
+refuses a declared one first). A type the package does not know is refused earlier,
+when the lowered document is validated.
 
 ## Policy defaults & enforcement
 
