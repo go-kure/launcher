@@ -45,17 +45,30 @@ func requireCnpgClusterRef(name string) error {
 // maxima, and the privileged, hostProcess and capability checks. Ephemeral
 // containers are not policed here: a pod template cannot declare them, so the
 // caller refuses them outright. label prefixes each error with the template's
-// path.
+// path; an empty label is a pod spec that is itself what the errors name (the
+// pod kind's properties), so nothing is prefixed.
 func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) error {
 	if ps == nil {
 		return nil
 	}
-	cfg := PodSpecConfig{PodSpec: *ps}
-	if err := enforceHostNamespaces(cfg, p); err != nil {
+	at := func(err error) error {
+		if label == "" {
+			return err
+		}
 		return errors.Wrap(err, label)
 	}
+	under := func(field string) string {
+		if label == "" {
+			return field
+		}
+		return label + "." + field
+	}
+	cfg := PodSpecConfig{PodSpec: *ps}
+	if err := enforceHostNamespaces(cfg, p); err != nil {
+		return at(err)
+	}
 	if err := enforceHostPathVolumes(ps.Volumes, p.AllowHostPathVolumes()); err != nil {
-		return errors.Wrap(err, label)
+		return at(err)
 	}
 	// A generic ephemeral volume provisions a claim for every pod, so its
 	// storage request is capped as cnpg-cluster caps its ephemeralVolumeSource
@@ -67,7 +80,7 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 		if q, ok := v.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
 			where := fmt.Sprintf("volume %q ephemeral.volumeClaimTemplate.spec.resources.requests.storage", v.Name)
 			if err := enforceMaxResource(q.String(), p.MaxStorageSize(), where); err != nil {
-				return errors.Wrap(err, label)
+				return at(err)
 			}
 		}
 	}
@@ -77,7 +90,7 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	// podResources properties.
 	if sc := ps.SecurityContext; !p.AllowPrivileged() && sc != nil && sc.WindowsOptions != nil &&
 		sc.WindowsOptions.HostProcess != nil && *sc.WindowsOptions.HostProcess {
-		return errors.Errorf("%s.securityContext.windowsOptions.hostProcess is not allowed by environment policy", label)
+		return errors.Errorf("%s is not allowed by environment policy", under("securityContext.windowsOptions.hostProcess"))
 	}
 	if r := ps.Resources; r != nil {
 		for _, c := range []struct {
@@ -92,12 +105,12 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 			{r.Limits, corev1.ResourceMemory, p.MaxMemory(), "resources memory limit"},
 		} {
 			if err := enforceMaxResource(quantityString(c.list, c.name), c.max, c.label); err != nil {
-				return errors.Wrap(err, label)
+				return at(err)
 			}
 		}
 	}
 	check := func(kind string, i int, name, image string, res corev1.ResourceRequirements, sc *corev1.SecurityContext) error {
-		where := fmt.Sprintf("%s.%s[%d] %q", label, kind, i, name)
+		where := fmt.Sprintf("%s[%d] %q", under(kind), i, name)
 		if image != "" {
 			if err := enforceAllowedRegistries(image, p.AllowedRegistries()); err != nil {
 				return errors.Wrap(err, where)
