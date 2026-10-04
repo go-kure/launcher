@@ -270,6 +270,31 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			want: []string{`rendered Pod "inner"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
 		},
 		{
+			name: "list left inside a list of an unregistered kind",
+			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
+				"  - apiVersion: v1\n    kind: List\n    metadata:\n      name: wrapped\n    items:\n" +
+				"      - apiVersion: v1\n        kind: Pod\n        metadata:\n          name: inner\n        spec:\n" + htIndent(privileged, "          ")},
+			want: []string{`rendered List "wrapped"`, "is a list inside a list", "cannot be checked against environment policy"},
+		},
+		{
+			name:      "privileged container in a PodTemplate",
+			templates: map[string]string{"d.yaml": podIn("PodTemplate", "v1", "template.spec", privileged)},
+			want:      []string{`rendered PodTemplate "thing"`, `template.spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
+		},
+		{
+			name: "StatefulSet claim template over the storage maximum",
+			templates: map[string]string{"d.yaml": "apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: thing\nspec:\n" +
+				"  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        resources:\n          requests:\n            storage: 1Ti\n" +
+				"  template:\n    spec:\n" + htIndent(htPlainPod, "      ")},
+			want: []string{`rendered StatefulSet "thing"`, `spec.volumeClaimTemplates[0] "data" spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
+		},
+		{
+			name: "PersistentVolumeClaim over the storage maximum",
+			templates: map[string]string{"d.yaml": "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: thing\nspec:\n" +
+				"  resources:\n    requests:\n      storage: 1Ti\n"},
+			want: []string{`rendered PersistentVolumeClaim "thing"`, `spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
+		},
+		{
 			name:      "workload in an API version the build cannot read",
 			templates: map[string]string{"d.yaml": podIn("CronJob", "batch/v1beta1", "spec.jobTemplate.spec.template.spec", "restartPolicy: Never\n"+htPlainPod)},
 			want:      []string{`rendered CronJob "thing"`, `apiVersion "batch/v1beta1"`, "cannot be checked against environment policy"},
@@ -300,6 +325,7 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 				allowedRegistries:      []string{"registry.example", htServerHost(t, srvURL)},
 				forbiddenContainerCaps: []string{"NET_ADMIN"},
 				maxCPU:                 "2",
+				maxStorageSize:         "10Gi",
 			}
 			_, err := htTransform(srvURL, policy)
 			htWantViolation(t, err, append([]string{"helmtemplate: "}, tc.want...)...)

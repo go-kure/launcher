@@ -302,9 +302,11 @@ be closed at build time.
 3. **Rendered workloads** go through the existing image and pod-security enforcement.
    - `ApplyPolicy` runs before `Generate`, so it triggers the render — the one `Generate`
      and `AugmentLayout` then return. The chart is therefore fetched during the transform.
-   - The pod spec of each Pod, ReplicationController, Deployment, StatefulSet, DaemonSet,
-     ReplicaSet, Job and CronJob is checked by `enforcePodTemplatePolicy`, the variant over
-     `corev1.PodSpec` the operator-CR components already use.
+   - The pod spec of each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet,
+     DaemonSet, ReplicaSet, Job and CronJob is checked by `enforcePodTemplatePolicy`, the
+     variant over `corev1.PodSpec` the operator-CR components already use. The storage request
+     of a PersistentVolumeClaim and of a StatefulSet's claim templates is held to
+     `MaxStorageSize`, as on the authored kinds.
    - **Decided:** `ValidateImageRef` (tag or digest required, no `:latest`) applies to
      chart images, so a rendered workload is held to the same image rule as a
      launcher-built one.
@@ -312,8 +314,9 @@ be closed at build time.
      privileged container, a host namespace or a hostPath volume, as it does an authored
      workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
      `AllowHostIPC` and `AllowHostPathVolumes` allow one.
-   - **Limits:** a workload that cannot be decoded typed (an API version kure's scheme does
-     not register) is refused; a custom resource's pods, the archive host a Helm repository
+   - **Limits:** a workload or claim that cannot be decoded typed (an API version kure's
+     scheme does not register), and a list nested in an unregistered list, are refused; a
+     custom resource's pods, the archive host a Helm repository
      index names and redirects are not checked.
 
 ---

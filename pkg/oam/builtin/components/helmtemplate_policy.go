@@ -69,22 +69,36 @@ func renderedObjectRef(obj client.Object) string {
 // enforceRenderedObjectPolicy holds one rendered object to the policy an
 // authored workload is held to. An object that runs no pod passes.
 //
-// A workload — a Pod, a ReplicationController, a Deployment, StatefulSet,
-// DaemonSet or ReplicaSet, a Job or CronJob — has its pod spec checked by
-// enforcePodTemplatePolicy (host namespaces, hostPath volumes, the storage and
-// resource maxima, and per init and regular container the registry allowlist,
-// the cpu and memory maxima, and the privileged, hostProcess and capability
-// gates), and every init and regular container's image by ValidateImageRef: no
-// untagged image and no :latest. Ephemeral containers are refused as the
-// workload kinds refuse them: the API server accepts none on a created pod.
+// A workload — a Pod, a PodTemplate, a ReplicationController, a Deployment,
+// StatefulSet, DaemonSet or ReplicaSet, a Job or CronJob — has its pod spec
+// checked by enforcePodTemplatePolicy (host namespaces, hostPath volumes, the
+// storage and resource maxima, and per init and regular container the registry
+// allowlist, the cpu and memory maxima, and the privileged, hostProcess and
+// capability gates), and every init and regular container's image by
+// ValidateImageRef: no untagged image and no :latest. Ephemeral containers are
+// refused as the workload kinds refuse them: the API server accepts none on a
+// created pod. The storage a claim requests — a PersistentVolumeClaim's, and
+// each of a StatefulSet's claim templates' — is held to the storage maximum,
+// as the persistentvolumeclaim and statefulset kinds hold theirs.
 //
-// A workload kind that reached the build untyped is refused, since its pod
-// spec cannot be read: one in an API version kure's scheme does not register
-// (apps/v1beta2, batch/v1beta1), or an item of a list whose kind it does not.
+// What reached the build untyped and may hold a workload is refused, since
+// nothing in it can be read: a workload kind in an API version kure's scheme
+// does not register (apps/v1beta2, batch/v1beta1) or an item of a list whose
+// kind it does not, and a list left inside such a list, whose own items the
+// parser does not unpack.
 func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
+	if err := enforceRenderedClaims(obj, p); err != nil {
+		return err
+	}
 	path, ps := renderedPodSpec(obj)
 	if ps == nil {
-		if u, ok := obj.(*unstructured.Unstructured); ok && isWorkloadKind(u) {
+		u, ok := obj.(*unstructured.Unstructured)
+		switch {
+		case !ok:
+			return nil
+		case u.IsList():
+			return errors.New("the object is a list inside a list, so the objects in it cannot be checked against environment policy")
+		case isWorkloadKind(u):
 			return errors.Errorf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion())
 		}
 		return nil
@@ -108,6 +122,31 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	return nil
 }
 
+// enforceRenderedClaims holds the storage a rendered claim requests to the
+// policy's storage maximum: a PersistentVolumeClaim's own request, and that of
+// each claim template of a StatefulSet. Any other object passes.
+func enforceRenderedClaims(obj client.Object, p oam.Policy) error {
+	check := func(where string, spec *corev1.PersistentVolumeClaimSpec) error {
+		q, ok := spec.Resources.Requests[corev1.ResourceStorage]
+		if !ok {
+			return nil
+		}
+		return enforceMaxResource(q.String(), p.MaxStorageSize(), where+".resources.requests.storage")
+	}
+	switch o := obj.(type) {
+	case *corev1.PersistentVolumeClaim:
+		return check("spec", &o.Spec)
+	case *appsv1.StatefulSet:
+		for i := range o.Spec.VolumeClaimTemplates {
+			vct := &o.Spec.VolumeClaimTemplates[i]
+			if err := check(fmt.Sprintf("spec.volumeClaimTemplates[%d] %q spec", i, vct.Name), &vct.Spec); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // renderedPodSpec returns the pod spec a typed workload object runs and its
 // path within the object, or a nil spec for any other object.
 func renderedPodSpec(obj client.Object) (string, *corev1.PodSpec) {
@@ -115,6 +154,8 @@ func renderedPodSpec(obj client.Object) (string, *corev1.PodSpec) {
 	switch o := obj.(type) {
 	case *corev1.Pod:
 		return "spec", &o.Spec
+	case *corev1.PodTemplate:
+		return "template.spec", &o.Template.Spec
 	case *corev1.ReplicationController:
 		if o.Spec.Template == nil {
 			return "", nil
@@ -137,16 +178,16 @@ func renderedPodSpec(obj client.Object) (string, *corev1.PodSpec) {
 }
 
 // workloadGroups and workloadKinds are the API groups and kinds of the
-// workloads renderedPodSpec reads, in any version.
+// objects renderedPodSpec and enforceRenderedClaims read, in any version.
 var (
 	workloadGroups = map[string]bool{"": true, "apps": true, "batch": true, "extensions": true}
 	workloadKinds  = map[string]bool{
-		"Pod": true, "ReplicationController": true, "Deployment": true, "StatefulSet": true,
-		"DaemonSet": true, "ReplicaSet": true, "Job": true, "CronJob": true,
+		"Pod": true, "PodTemplate": true, "ReplicationController": true, "Deployment": true, "StatefulSet": true,
+		"DaemonSet": true, "ReplicaSet": true, "Job": true, "CronJob": true, "PersistentVolumeClaim": true,
 	}
 )
 
-// isWorkloadKind reports whether u is one of the workload kinds in one of the
+// isWorkloadKind reports whether u is one of the checked kinds in one of the
 // built-in workload groups, whatever its version.
 func isWorkloadKind(u *unstructured.Unstructured) bool {
 	gvk := u.GroupVersionKind()
