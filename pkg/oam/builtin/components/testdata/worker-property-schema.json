@@ -814,7 +814,7 @@
   },
   "paused": {
     "type": "boolean",
-    "description": "Whether the deployment controller stops acting on template changes. Progress is not estimated while paused, which the API's own progressDeadlineSeconds documentation states. Authoring true also suppresses the automatic readiness check this component would otherwise synthesize, since gating on a workload the document told the controller not to roll out is not a health signal. The API default is false."
+    "description": "Whether the deployment controller stops acting on template changes. Progress is not estimated while paused, which the API's own progressDeadlineSeconds documentation states. The API default is false."
   },
   "podResources": {
     "type": "object",
