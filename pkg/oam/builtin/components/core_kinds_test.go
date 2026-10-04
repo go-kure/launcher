@@ -32,6 +32,7 @@ var coreKindSchemas = []struct {
 	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}},
 	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}},
 	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}},
+	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}},
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes
@@ -119,16 +120,23 @@ func coreKindErr(h oam.ComponentHandler, typ, name string, props map[string]any)
 // scope.
 func generateCoreKind(t *testing.T, h oam.ComponentHandler, typ, name string, props map[string]any) client.Object {
 	t.Helper()
-	cfg, err := h.ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, coreKindNamespace)
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
 	one := int32(1)
 	restrictive := &stubPolicy{
 		maxReplicas: &one, maxCPU: "1m", maxMemory: "1Ki", maxStorageSize: "1Ki",
 		allowedRegistries: []string{"registry.invalid"},
 	}
-	for _, p := range []oam.Policy{restrictive, nil} {
+	return generateCoreKindUnder(t, h, typ, name, props, restrictive, nil)
+}
+
+// generateCoreKindUnder is generateCoreKind under the given policies, for a
+// kind the environment policy does constrain.
+func generateCoreKindUnder(t *testing.T, h oam.ComponentHandler, typ, name string, props map[string]any, policies ...oam.Policy) client.Object {
+	t.Helper()
+	cfg, err := h.ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, coreKindNamespace)
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	for _, p := range policies {
 		if err := cfg.(policyApplier).ApplyPolicy(p); err != nil {
 			t.Fatalf("ApplyPolicy(%v): %v", p, err)
 		}

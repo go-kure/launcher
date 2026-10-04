@@ -117,6 +117,11 @@ func (h *ResourceQuotaHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *PersistentVolumeHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("persistentvolume")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

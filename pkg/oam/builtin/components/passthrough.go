@@ -250,7 +250,7 @@ func (c *PassthroughConfig) ComponentName() string { return c.componentName }
 // an authored workload is held to (enforceRenderedObjectPolicy, the check
 // template delivery runs on the objects a chart renders): the image, pod
 // security, resource, storage and replica rules, on every kind that check
-// reads. An object that runs no pod passes, a custom resource included,
+// reads. An object of any other kind passes, a custom resource included,
 // whatever it holds: the pods its controller creates are not covered. A nil
 // policy checks nothing.
 //

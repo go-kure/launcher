@@ -443,7 +443,7 @@ type manifestConfig struct {
 // The objects are held to the policy an authored workload is held to
 // (enforceRenderedObjectPolicy, the check template delivery runs on the
 // objects a chart renders): the image, pod security, resource, storage and
-// replica rules, on every kind that check reads. An object that runs no pod
+// replica rules, on every kind that check reads. An object of any other kind
 // passes, a custom resource included, whatever it holds: the pods its
 // controller creates are not covered. An inline source is checked here, since
 // its objects are already known. A url source is fetched at generation, as it

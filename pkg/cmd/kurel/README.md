@@ -95,7 +95,7 @@ kind components `serviceaccount`, `persistentvolumeclaim` and `configmap`
 (go-kure/launcher#702) are registered the same way. Fixtures with the same names
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
-components `namespace`, `limitrange` and `resourcequota`
+components `namespace`, `limitrange`, `resourcequota` and `persistentvolume`
 (go-kure/launcher#790) are registered the same way; the `<type>-component`
 fixtures build each. The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both

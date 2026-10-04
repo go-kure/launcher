@@ -164,6 +164,40 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 	return nil
 }
 
+// enforcePersistentVolumePolicy holds a PersistentVolume's spec to the
+// environment policy. It is the one check for every path that can produce the
+// object: the persistentvolume kind, and the shared rendered-object check
+// (enforceRenderedObjectPolicy) that template delivery, passthrough and
+// manifests run. prefix is the path of the spec within what is named in the
+// refusal: empty for the kind's properties, "spec." for an object.
+//
+// A hostPath source is refused unless the policy allows hostPath volumes, as a
+// pod's hostPath volume is (enforceHostPathVolumes), and so is a local source:
+// both name a path on the node, and a pod that binds the volume through a
+// claim reads and writes that path. capacity.storage is held to the storage
+// maximum, as the storage a claim requests is.
+//
+// Not covered: a csi or flexVolume source. Each names a driver and options
+// only the driver interprets, and no field says whether a node path is exposed;
+// a pod's csi and flexVolume volumes are unchecked for the same reason
+// (item 12 of go-kure/launcher#794). The other sources of
+// corev1.PersistentVolumeSource each name a remote endpoint or disk, not a path
+// on the node.
+func enforcePersistentVolumePolicy(prefix string, spec *corev1.PersistentVolumeSpec, p oam.Policy) error {
+	if !p.AllowHostPathVolumes() {
+		if spec.HostPath != nil {
+			return errors.Errorf("%shostPath: hostPath volumes are not allowed by environment policy", prefix)
+		}
+		if spec.Local != nil {
+			return errors.Errorf("%slocal: local volumes expose a path on the node, as hostPath volumes do, and are not allowed by environment policy", prefix)
+		}
+	}
+	if q, ok := spec.Capacity[corev1.ResourceStorage]; ok {
+		return enforceMaxResource(q.String(), p.MaxStorageSize(), prefix+"capacity.storage")
+	}
+	return nil
+}
+
 // enforceExtraContainer checks one non-main container (an init container or
 // sidecar) against the same four policy gates the main container gets.
 // Errors are prefixed with the authored list position and name so the
