@@ -261,8 +261,8 @@ A name an author writes, or an override of a generated name, is used as written 
 is never shortened and never changed, and one that cannot be the name of its object fails the
 transform with the property in the error, so the cluster never has to refuse it
 (go-kure/launcher#787). The built-in traits' authored names and the rule each is checked by are
-listed in [`builtin/traits`](builtin/traits/README.md). The application bundle carries the
-Application's name as written.
+listed in the trait handlers' README (`pkg/oam/builtin/traits/README.md`). The application
+bundle carries the Application's name as written.
 
 ## Parsing
 
