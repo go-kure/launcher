@@ -106,6 +106,9 @@ func (h *PersistentVolumeClaimHandler) ContractMetadata() oam.ContractMetadata {
 func (h *ConfigMapHandler) ContractMetadata() oam.ContractMetadata { return contract("configmap") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *NamespaceHandler) ContractMetadata() oam.ContractMetadata { return contract("namespace") }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

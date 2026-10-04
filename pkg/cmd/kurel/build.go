@@ -298,6 +298,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"serviceaccount":        &components.ServiceAccountHandler{},
 		"persistentvolumeclaim": &components.PersistentVolumeClaimHandler{},
 		"configmap":             &components.ConfigMapHandler{},
+
+		"namespace": &components.NamespaceHandler{},
 	}
 }
 

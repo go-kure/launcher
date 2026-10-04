@@ -1,0 +1,16 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: team-a
+      type: namespace
+      properties: {}
+    - name: team-b
+      type: namespace
+      properties:
+        finalizers:
+          - kubernetes
+          - example.com/cleanup
