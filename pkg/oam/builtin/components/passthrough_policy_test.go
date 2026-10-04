@@ -312,13 +312,13 @@ func TestPassthrough_GoAssembledObjectIsChecked(t *testing.T) {
 // TestPassthrough_PolicyAllowsWhatItAllows: a privileged, host-path workload
 // from a registry the strict policy does not list builds under a policy that
 // allows privileged containers and hostPath volumes and sets no registry
-// allowlist, and is emitted as it was authored: unstructured, a field the
-// vendored API type does not declare included.
+// allowlist, and is emitted as it was authored: unstructured, a value the typed
+// decode would rewrite (the cpu quantity) as written.
 func TestPassthrough_PolicyAllowsWhatItAllows(t *testing.T) {
-	doc := strings.Replace(ptDeployment(
-		"volumes:\n  - name: host\n    hostPath:\n      path: /etc\n"+
-			"containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n    securityContext:\n      privileged: true\n"),
-		"spec:\n", "spec:\n  fieldOfALaterVersion: kept\n", 1)
+	doc := ptDeployment(
+		"volumes:\n  - name: host\n    hostPath:\n      path: /etc\n" +
+			"containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n    securityContext:\n      privileged: true\n" +
+			"    resources:\n      limits:\n        cpu: \"0.5\"\n")
 
 	if _, err := ptTransform(ptObject(t, doc), &stubPolicy{}); err == nil {
 		t.Fatal("control: the object builds under a policy allowing neither privileged containers nor hostPath volumes")
@@ -334,9 +334,189 @@ func TestPassthrough_PolicyAllowsWhatItAllows(t *testing.T) {
 	if !ok {
 		t.Fatalf("emitted %T, want the authored object as *unstructured.Unstructured", objs[0])
 	}
-	if got, _, _ := unstructured.NestedString(u.Object, "spec", "fieldOfALaterVersion"); got != "kept" {
-		t.Errorf("spec.fieldOfALaterVersion = %q, want it emitted as authored", got)
+	containers, _, _ := unstructured.NestedSlice(u.Object, "spec", "template", "spec", "containers")
+	if len(containers) != 1 {
+		t.Fatalf("emitted %d containers, want 1", len(containers))
 	}
+	if got, _, _ := unstructured.NestedString(containers[0].(map[string]any), "resources", "limits", "cpu"); got != "0.5" {
+		t.Errorf("cpu limit = %q, want %q: the object as authored, not as its Go type writes it (500m)", got, "0.5")
+	}
+}
+
+// TestPassthrough_UndeclaredFieldInAWorkloadIsRefused: a workload or a claim
+// that sets a field the API type this build reads it with does not declare is
+// refused when the component is built, under any policy and under none: the
+// policy check reads that type and cannot see the field. The error names the
+// component, the object and the field's path.
+func TestPassthrough_UndeclaredFieldInAWorkloadIsRefused(t *testing.T) {
+	cases := []struct {
+		name   string
+		object string
+		want   []string
+	}{
+		{
+			name:   "pod spec field of a Deployment",
+			object: ptDeployment("fieldOfALaterVersion: true\n" + htPlainPod),
+			want:   []string{`object Deployment "demo/thing"`, "undeclared field spec.template.spec.fieldOfALaterVersion", "apps/v1 Deployment"},
+		},
+		{
+			name:   "container field of a CronJob",
+			object: ptWorkload("CronJob", "batch/v1", "spec.jobTemplate.spec.template.spec", "restartPolicy: Never\n"+htPlainPod+"    fieldOfALaterVersion: x\n"),
+			want:   []string{`object CronJob "demo/thing"`, "undeclared field spec.jobTemplate.spec.template.spec.containers[0].fieldOfALaterVersion", "batch/v1 CronJob"},
+		},
+		{
+			name:   "two fields of a bare Pod",
+			object: ptWorkload("Pod", "v1", "spec", "fieldOfALaterVersion: true\n"+htPlainPod) + "another: 1\n",
+			want:   []string{`object Pod "demo/thing"`, "undeclared fields another, spec.fieldOfALaterVersion:", "does not declare them"},
+		},
+		{
+			name: "spec field of a PersistentVolumeClaim",
+			object: "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: thing\nspec:\n  fieldOfALaterVersion: x\n" +
+				"  resources:\n    requests:\n      storage: 1Gi\n",
+			want: []string{`object PersistentVolumeClaim "demo/thing"`, "undeclared field spec.fieldOfALaterVersion", "v1 PersistentVolumeClaim"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := append([]string{`passthrough component "web"`, "cannot be checked against environment policy"}, tc.want...)
+			for policyName, policy := range map[string]oam.Policy{
+				"strict policy":     ptStrictPolicy(),
+				"permissive policy": &stubPolicy{allowPrivileged: true, allowHostPathVols: true},
+			} {
+				_, err := ptTransform(ptObject(t, tc.object), policy)
+				if err == nil {
+					t.Fatalf("under the %s: transform succeeded, want the object refused", policyName)
+				}
+				for _, f := range want {
+					if !strings.Contains(err.Error(), f) {
+						t.Errorf("under the %s: error %q lacks %q", policyName, err, f)
+					}
+				}
+			}
+
+			// With no policy at all: the handler alone, which no policy reaches.
+			_, err := (&components.PassthroughHandler{}).ToApplicationConfig(&oam.Component{
+				Name: "web", Type: "passthrough", Properties: map[string]any{"object": ptObject(t, tc.object)},
+			}, "demo")
+			if err == nil {
+				t.Fatal("ToApplicationConfig succeeded with no policy applied, want the object refused")
+			}
+			for _, f := range want {
+				if !strings.Contains(err.Error(), f) {
+					t.Errorf("with no policy applied: error %q lacks %q", err, f)
+				}
+			}
+		})
+	}
+}
+
+// TestPassthrough_GenerateRefusesAnUndeclaredWorkloadField: Object is an
+// exported field, so a workload with an undeclared field can be assigned after
+// the component was built. Generate refuses it, with a policy applied or not.
+func TestPassthrough_GenerateRefusesAnUndeclaredWorkloadField(t *testing.T) {
+	for _, applyPolicy := range []bool{false, true} {
+		cfg, err := (&components.PassthroughHandler{}).ToApplicationConfig(passthroughComponent(map[string]any{
+			"object": ptObject(t, ptDeployment(htPlainPod)),
+		}), "demo")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+		if applyPolicy {
+			if err := cfg.(oam.Enforceable).ApplyPolicy(ptStrictPolicy()); err != nil {
+				t.Fatalf("ApplyPolicy on the allowed object: %v", err)
+			}
+		}
+		cfg.(*components.PassthroughConfig).Object = ptObject(t, ptDeployment("fieldOfALaterVersion: true\n"+htPlainPod))
+		_, err = cfg.Generate(nil)
+		if err == nil {
+			t.Fatalf("policy applied = %v: Generate emitted a workload with an undeclared field", applyPolicy)
+		}
+		if want := "undeclared field spec.template.spec.fieldOfALaterVersion"; !strings.Contains(err.Error(), want) {
+			t.Errorf("policy applied = %v: error %q lacks %q", applyPolicy, err, want)
+		}
+	}
+}
+
+// TestPassthrough_UndeclaredFieldOutsideAWorkloadIsEmitted: an object that is
+// neither a workload nor a claim is emitted as authored, a field its API type
+// does not declare included, whether kure's scheme registers its kind
+// (ConfigMap, HorizontalPodAutoscaler) or not. The autoscaler's replica maximum
+// is still held to the policy.
+func TestPassthrough_UndeclaredFieldOutsideAWorkloadIsEmitted(t *testing.T) {
+	const hpa = "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: thing\nspec:\n" +
+		"  fieldOfALaterVersion: kept\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  minReplicas: 1\n"
+	cases := map[string]string{
+		"ConfigMap":               "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: thing\nspec:\n  fieldOfALaterVersion: kept\n",
+		"HorizontalPodAutoscaler": hpa + "  maxReplicas: 3\n",
+		"custom resource":         "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n  fieldOfALaterVersion: kept\n",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			objs, err := ptTransform(ptObject(t, doc), ptStrictPolicy())
+			if err != nil {
+				t.Fatalf("transform: %v", err)
+			}
+			if len(objs) != 1 {
+				t.Fatalf("generated %d objects, want 1", len(objs))
+			}
+			u, ok := objs[0].(*unstructured.Unstructured)
+			if !ok {
+				t.Fatalf("emitted %T, want the authored object as *unstructured.Unstructured", objs[0])
+			}
+			if got, _, _ := unstructured.NestedString(u.Object, "spec", "fieldOfALaterVersion"); got != "kept" {
+				t.Errorf("spec.fieldOfALaterVersion = %q, want it emitted as authored", got)
+			}
+		})
+	}
+
+	_, err := ptTransform(ptObject(t, hpa+"  maxReplicas: 9\n"), ptStrictPolicy())
+	htWantViolation(t, err, `object HorizontalPodAutoscaler "demo/thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3")
+}
+
+// TestPassthrough_LargeIntegerIsEmittedAsAuthoredAndWrittenRounded: the
+// component emits a large integer as it was authored, under a policy and under
+// none: the object is the authored map, and the decode the policy check reads
+// never replaces it. The digits are lost one step later, in every component
+// alike: kure's manifest writer reads each object's numbers as floats, so an
+// integer above 2^53 is written rounded. The README states that limit; a
+// writer that keeps the digits fails here, and the README sentence goes.
+func TestPassthrough_LargeIntegerIsEmittedAsAuthoredAndWrittenRounded(t *testing.T) {
+	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n" +
+		"  at53: 9007199254740992\n  over53: 9007199254740993\n  over63: 9223372036854775808\n"
+	for name, policy := range map[string]oam.Policy{"strict policy": ptStrictPolicy(), "no policy": nil} {
+		objs, err := ptTransform(ptObject(t, doc), policy)
+		if err != nil {
+			t.Fatalf("%s: transform: %v", name, err)
+		}
+		if len(objs) != 1 {
+			t.Fatalf("%s: generated %d objects, want 1", name, len(objs))
+		}
+		spec := objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
+		for key, want := range map[string]any{"at53": 9007199254740992, "over53": 9007199254740993, "over63": uint64(9223372036854775808)} {
+			if spec[key] != want {
+				t.Errorf("%s: emitted spec.%s = %v (%T), want the authored %v (%T)", name, key, spec[key], spec[key], want, want)
+			}
+		}
+
+		out, err := kureio.EncodeObjectsToYAML(clientObjectPointers(objs))
+		if err != nil {
+			t.Fatalf("%s: encoding: %v", name, err)
+		}
+		for _, want := range []string{"at53: 9007199254740992\n", "over53: 9007199254740992\n", "over63: 9223372036854776000\n"} {
+			if !strings.Contains(string(out), want) {
+				t.Errorf("%s: written object lacks %q, the value as the writer rounds it:\n%s", name, want, out)
+			}
+		}
+	}
+}
+
+// clientObjectPointers is objs in the form kure's encoder takes.
+func clientObjectPointers(objs []client.Object) []*client.Object {
+	out := make([]*client.Object, len(objs))
+	for i := range objs {
+		out[i] = &objs[i]
+	}
+	return out
 }
 
 // TestPassthrough_NoPolicyDeniesPrivileged: with no policy passed the transform

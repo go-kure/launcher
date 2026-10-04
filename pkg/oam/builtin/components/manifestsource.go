@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -127,7 +126,10 @@ func (s *manifestSource) resolve() ([]client.Object, error) {
 		default:
 			return nil, errors.Errorf("manifest source: no source configured")
 		}
-		objs, err := kureio.ParseYAMLWithOptions(data, kureio.ParseOptions{AllowUnstructured: true})
+		// The decode template delivery gives a rendered chart: a workload or a
+		// claim that sets a field its API type does not declare is refused, and
+		// any other registered kind that does is emitted as written.
+		objs, err := decodeManifestDocuments(data)
 		if err != nil {
 			return nil, errors.Errorf("manifest source: parse manifests: %w", err)
 		}

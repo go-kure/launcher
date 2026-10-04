@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -114,7 +115,7 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 			return nil
 		case u.IsList():
 			return errors.New("the object has a top-level items list and sits inside a list of an unregistered kind, so it is read as a list whose objects cannot be checked against environment policy")
-		case isWorkloadKind(u):
+		case isWorkloadGVK(u.GroupVersionKind()):
 			return errors.Errorf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion())
 		}
 		return nil
@@ -246,6 +247,14 @@ func renderedPodSpec(obj client.Object) (string, *corev1.PodSpec) {
 // workloadGroups and workloadKinds are the API groups and kinds of the
 // objects renderedPodSpec, enforceRenderedClaims and the PersistentVolume
 // check read, in any version.
+//
+// They are also the kinds whose documents are refused when they set a field
+// the Go type does not declare (undeclared_fields.go), since this check reads
+// that type and cannot see such a field. A kind this check starts to read as
+// its Go type belongs here; TestUndeclaredFields_RefuseSetIsWhatThePolicyReads
+// holds the two together. A HorizontalPodAutoscaler is not one of them: its one
+// checked field is read from the unstructured object too, so a document with
+// an undeclared field is kept as written and still checked.
 var (
 	workloadGroups = map[string]bool{"": true, "apps": true, "batch": true, "extensions": true}
 	workloadKinds  = map[string]bool{
@@ -255,9 +264,8 @@ var (
 	}
 )
 
-// isWorkloadKind reports whether u is one of the checked kinds in one of the
+// isWorkloadGVK reports whether gvk is one of the checked kinds in one of the
 // built-in workload groups, whatever its version.
-func isWorkloadKind(u *unstructured.Unstructured) bool {
-	gvk := u.GroupVersionKind()
+func isWorkloadGVK(gvk schema.GroupVersionKind) bool {
 	return workloadGroups[gvk.Group] && workloadKinds[gvk.Kind]
 }

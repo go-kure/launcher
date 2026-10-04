@@ -93,7 +93,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		}
 	}
 
-	return &PassthroughConfig{
+	cfg := &PassthroughConfig{
 		componentName: component.Name,
 		Namespace:     namespace,
 		ClusterScoped: clusterScoped,
@@ -108,7 +108,14 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		// decode never runs this function at all. Generate re-runs the arms on the
 		// map it is about to emit; that, not the copy, is what closes those routes.
 		Object: deepCopyMap(object),
-	}, nil
+	}
+	// Build the emitted object once here, so that what emitted refuses on its
+	// own account (a workload that sets a field its API type does not declare)
+	// fails the component now and not at generation.
+	if _, err := cfg.emitted(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // validateEmittableObject holds everything that must be true of the map passthrough
@@ -294,7 +301,9 @@ func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error 
 // and kind kure's scheme registers comes back as the Go type of its kind,
 // decoded as the manifests component and template delivery decode a document
 // (kure's parser). That decode is the lenient one, so a field the vendored API
-// type does not declare is not read. Any other object comes back unstructured,
+// type does not declare is not read: emitted has already refused a workload or
+// a claim that sets one, and no other kind is read here beyond what it
+// declares. Any other object comes back unstructured,
 // with the value types a decoded document has: the authored map holds what the
 // YAML decoder or a Go caller put there (an int, a map[string]string), which
 // the unstructured readers do not take.
@@ -360,7 +369,8 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 }
 
 // emitted builds the object Generate emits: a validated copy of Object with the
-// metadata defaults stamped on. ApplyPolicy checks the same construction.
+// metadata defaults stamped on. ApplyPolicy checks the same construction, and
+// ToApplicationConfig builds it once to fail early.
 func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 	// Only a config that never went through ToApplicationConfig can be here with no
 	// object — the constructor requires a non-empty apiVersion and kind. Emitting a
@@ -389,7 +399,15 @@ func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 		}
 	}
 
-	return &unstructured.Unstructured{Object: obj}, nil
+	// A workload or a claim that sets a field its API type does not declare is
+	// refused, policy or none: the policy check reads that type, so it cannot
+	// see the field, and the manifests component and template delivery refuse
+	// the same object (undeclared_fields.go).
+	u := &unstructured.Unstructured{Object: obj}
+	if err := refuseUndeclaredWorkloadFields(u); err != nil {
+		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
+	}
+	return u, nil
 }
 
 // deepCopyMap returns a deep copy of a decoded YAML/JSON map: nested maps and

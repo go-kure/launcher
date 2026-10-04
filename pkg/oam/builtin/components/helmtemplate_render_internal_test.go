@@ -129,22 +129,42 @@ items:
 	assertDeepCopyable(t, objects)
 }
 
-// TestDecodeChartManifests_TypedDecodeIsLenientOnUnknownFields: a field the
-// API type does not declare is dropped, not refused; one whose value has the
-// wrong type is an error.
-func TestDecodeChartManifests_TypedDecodeIsLenientOnUnknownFields(t *testing.T) {
+// TestDecodeChartManifests_UndeclaredFieldIsKeptOrRefused: a field the API
+// type of a registered kind does not declare is not dropped. An object that is
+// neither a workload nor a claim comes back unstructured with the field; a
+// workload is refused, the error naming the object and the field's path. A
+// field whose value has the wrong type is an error, as it was.
+func TestDecodeChartManifests_UndeclaredFieldIsKeptOrRefused(t *testing.T) {
 	const head = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
 	objects, err := decodeChartManifests([]byte(head + "notAField: x\ndata:\n  k: v\n"))
 	if err != nil {
 		t.Fatalf("decodeChartManifests: %v", err)
 	}
-	cm, ok := objects[0].(*corev1.ConfigMap)
+	u, ok := objects[0].(*unstructured.Unstructured)
 	if !ok {
-		t.Fatalf("cm is %T, want *corev1.ConfigMap", objects[0])
+		t.Fatalf("cm is %T, want *unstructured.Unstructured: the document as rendered", objects[0])
 	}
-	if cm.Data["k"] != "v" {
-		t.Errorf("data.k = %q, want %q", cm.Data["k"], "v")
+	if u.Object["notAField"] != "x" {
+		t.Errorf("notAField = %#v, want it kept", u.Object["notAField"])
 	}
+	if got, _, _ := unstructured.NestedString(u.Object, "data", "k"); got != "v" {
+		t.Errorf("data.k = %q, want %q", got, "v")
+	}
+	assertDeepCopyable(t, objects)
+
+	objects, err = decodeChartManifests([]byte(head + "data:\n  k: v\n"))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	if _, ok := objects[0].(*corev1.ConfigMap); !ok {
+		t.Errorf("control: a ConfigMap with declared fields only is %T, want *corev1.ConfigMap", objects[0])
+	}
+
+	_, err = decodeChartManifests([]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  namespace: shop\n" +
+		"spec:\n  template:\n    spec:\n      fieldOfALaterVersion: true\n"))
+	assertErrorMentions(t, err, "decoding rendered manifests", `Deployment "shop/web"`,
+		"undeclared field spec.template.spec.fieldOfALaterVersion", "apps/v1 Deployment")
+
 	_, err = decodeChartManifests([]byte(head + "data: not-a-mapping\n"))
 	assertErrorMentions(t, err, "decoding rendered manifests")
 }
