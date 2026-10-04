@@ -35,7 +35,7 @@ source), alongside the built-in lowering rules: the trait-position ones
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
 component-position ones (`builtinComponentLoweringRules()` — `worker`,
-`webservice`, `postgresql` and `helm`, registered via `RegisterComponentLowering`).
+`webservice`, `postgresql`, `helm` and `oci`, registered via `RegisterComponentLowering`).
 `worker` lowers to a `deployment` component plus, unless `topologySpread: false`, a
 synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
 and `service` pair, deployed as one component, with the same `topology-spread`
@@ -50,7 +50,13 @@ postgresql derives after the policy; nothing besides the rule needs registering
 for it. `helm` lowers to a `helmrelease` (plus a generated
 `helmrepository`, `ocirepository`, `gitrepository` or `bucket` for an inline
 source, shared within the document)
-or, under `delivery: template`, to a `helmtemplate`. The built-in application policy
+or, under `delivery: template`, to a `helmtemplate`. `oci` lowers to an
+`ocirepository` and a `fluxcd-kustomization` (go-kure/launcher#784): a same-name
+pair deployed as one component, or, when several `oci` components in the document
+use the same artifact at the same interval, one shared `ocirepository` they all
+reference. So `builtinComponentHandlers()` must register `ocirepository` and
+`fluxcd-kustomization`, the kind-named projection of the Flux `Kustomization`,
+authorable on its own; the `oci` fixture under `testdata/` builds the pair. The built-in application policy
 handlers are registered too (`builtinPolicyHandlers()` — `dependency` and `placement`,
 registered via `RegisterPolicy`). Every registered handler and rule
 declares a `PropertySchema` for its user-facing properties, so every authored
