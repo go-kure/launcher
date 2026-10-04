@@ -93,6 +93,7 @@ reads it.
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
+| `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -195,7 +196,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
-| `kubernetes.CreatePod` | v1 Pod | missing | - | - | - |
+| `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | missing | - | - | - |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
@@ -2099,6 +2100,61 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
   through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
   component.
+- **pod** (go-kure/launcher#790) is the kind-named projection of a v1 Pod, on
+  the same recipe: one schema key per json field of `corev1.PodSpec`, the
+  property map decoded strictly into that type, two spellings of one field
+  refused, and one Pod named after the component in the build namespace, with
+  the authored spec, no label and no annotation. It is a bare Pod: no
+  controller recreates it, and it is not the workload shape of `webservice`,
+  `worker` or `deployment` — a property of those (`image`, `ports`, `env` at
+  the top level) is refused as not a PodSpec field. Nothing is added: no
+  ServiceAccount, no `automountServiceAccountToken`, no resources, no probe.
+
+  **Refused when the component is read**, with or without a policy:
+  - `ephemeralContainers`, `priority` and `overhead`, with the texts the
+    workload kinds give. A pod cannot be created with ephemeral containers,
+    and the Priority and RuntimeClass admission controllers set the other two
+    and reject a differing value; an author sets `priorityClassName` or
+    `runtimeClassName`. The three are not in the schema. An empty
+    `ephemeralContainers` or `overhead` is read as unset. Cost: on a cluster
+    that runs without those admission controllers the two fields cannot be
+    authored through this kind.
+  - An unauthored `containers`. The API's other value rules (an empty list, a
+    container without a name, …) are left to the API server.
+  - An image without a tag or digest, or tagged `:latest`, on every init and
+    regular container (`ValidateImageRef`), so a container without an image
+    too.
+  - A `timeoutSeconds`, `periodSeconds`, `successThreshold` or
+    `failureThreshold` written as `0` on a liveness, readiness or startup
+    probe of an init or regular container. The Go type omits a zero there and
+    the API server would apply its default (1, 10, 1, 3), so the authored
+    value cannot be carried. A test derives the list from the field comments
+    of the linked `k8s.io/api` types (every non-pointer `omitempty` number or
+    boolean under `PodSpec` whose comment states a non-zero default) and fails
+    when the two differ. It holds the list to the documented defaults, not to
+    the API server's defaulting code.
+
+  **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
+  Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
+  storage maximum on a generic ephemeral volume's claim, the pod-level cpu and
+  memory maxima, and for every init and regular container the registry
+  allowlist, the cpu and memory maxima and the privileged, HostProcess and
+  capability gates. It fills no policy default: a container without resources
+  stays without. The kind names a field as the property it is (`hostNetwork is
+  not allowed by environment policy`, `containers[0] "app": …`); the three
+  rendered paths name it under the object (`passthrough: object Pod "runner":
+  spec.containers[0] "app": …`).
+
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
+  admission controllers decide there. They do refuse ephemeral containers and
+  an untagged or `:latest` image.
+
+  The config implements `oam.ServiceAccountNamer`: the account is the authored
+  `serviceAccountName`, or the deprecated `serviceAccount` where that one is
+  unset, as the API server reads the two; with neither, the namespace's
+  `default` account. **Not covered:** the object's metadata, so the Pod's
+  labels and annotations cannot be authored.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of

@@ -238,6 +238,10 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"persistentvolume": {props: map[string]any{
 		"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteMany"},
 		"nfs": map[string]any{"server": "nfs.example.com", "path": "/exports/data"}}},
+	// A Pod name is a DNS-1123 subdomain too. The pod carries the authored spec
+	// and no `app` label, and it is a pod, not a selector over pods.
+	"pod": {props: map[string]any{"containers": []any{
+		map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
