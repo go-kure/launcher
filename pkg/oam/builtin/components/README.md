@@ -3643,8 +3643,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
   component is built and again by `Generate`, under any policy and with none
   (`passthrough component "web": object Deployment "demo/web": undeclared field
-  spec.template.spec.fieldOfALaterVersion: …`). An object of any other kind is emitted with
-  the field. **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
+  spec.template.spec.fieldOfALaterVersion: …`). A workload or a claim in which a value
+  that serializes itself (a Go caller's `json.RawMessage`) repeats enough keys to fill the
+  strict decode's record is refused on the same ground. An object of any other kind is
+  emitted as authored, the field with it, whatever the strict decode says of it: nothing
+  it sets is dropped, so the full-record refusal of `manifests` has no part here.
+  **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
   undeclared field was emitted unchecked before and no longer builds.
   `Generate` runs the check again on the object it is about to emit, once
   `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map

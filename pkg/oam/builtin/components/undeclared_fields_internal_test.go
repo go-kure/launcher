@@ -549,6 +549,30 @@ func TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField(t *testing.T) {
 			},
 		}
 	}
+	// The refusal is for what the policy check reads as a Go type. An object
+	// of any other kind is emitted as authored, whatever the strict decode
+	// says of it: nothing it sets is dropped.
+	t.Run("another kind is emitted as authored", func(t *testing.T) {
+		cfg := config(strictErrorLimit)
+		cfg.Object["kind"] = "ConfigMap"
+		delete(cfg.Object, "spec")
+		cfg.Object["futureField"] = true
+		if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
+			t.Fatalf("ApplyPolicy: %v", err)
+		}
+		objs, err := cfg.Generate(nil)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		u, ok := (*objs[0]).(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("generated a %T, want the authored map", *objs[0])
+		}
+		if got, found, _ := unstructured.NestedBool(u.Object, "futureField"); !found || !got {
+			t.Errorf("futureField = %v (found %v), want it emitted", got, found)
+		}
+	})
+
 	for name, tc := range map[string]struct {
 		repeats int
 		want    string
