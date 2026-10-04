@@ -566,7 +566,9 @@ func decodeChartManifests(raw []byte) ([]client.Object, error) {
 //
 // The join is a plain "-", which both names may contain: application "a-b"
 // with component "c" and application "a" with component "b-c" compose the
-// same prefix. Two applications with a same-named component never do.
+// same prefix. Two applications with a same-named component and different
+// names do not. Two applications with one name do, whatever their namespaces:
+// the prefix, like the bundle name, carries no namespace.
 func hookGroupChildName(application, mlName string, i int, g helm.HookGroup) string {
 	prefix := mlName
 	if application != "" {
