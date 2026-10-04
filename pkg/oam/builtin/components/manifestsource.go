@@ -425,32 +425,72 @@ type manifestConfig struct {
 	namespace string
 	src       *manifestSource
 	process   func(namespace string, objs []client.Object) ([]client.Object, error)
+
+	// policy is the environment policy ApplyPolicy was given, kept so that
+	// Generate holds the objects it emits to it. Nil until then.
+	policy oam.Policy
 }
 
-// ApplyPolicy stores the policy registry allowlist on the source (so the URL
-// resolver's redirect check has policy context) and rejects a disallowed
-// configured-url host up front. It reads the allowlist through the oam.Policy
-// interface (AllowedRegistries) rather than type-asserting a concrete type, so
-// any policy implementation enforces correctly.
+// ApplyPolicy holds the source and the objects it yields to the environment
+// policy. A nil policy checks nothing.
+//
+// For a url source it stores the policy registry allowlist on the source (so
+// the URL resolver's redirect check has policy context) and rejects a
+// disallowed configured-url host up front. It reads the allowlist through the
+// oam.Policy interface (AllowedRegistries) rather than type-asserting a
+// concrete type, so any policy implementation enforces correctly.
+//
+// The objects are held to the policy an authored workload is held to
+// (enforceRenderedObjectPolicy, the check template delivery runs on the
+// objects a chart renders): the image, pod security, resource, storage and
+// replica rules, on every kind that check reads. An object that runs no pod
+// passes, a custom resource included, whatever it holds: the pods its
+// controller creates are not covered. An inline source is checked here, since
+// its objects are already known. A url source is fetched at generation, as it
+// was, so its objects are checked there: the policy is kept, and Generate
+// checks whatever it emits.
 func (c *manifestConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil || c.src.url == "" {
+	if p == nil {
 		return nil
 	}
-	allowed := p.AllowedRegistries()
-	c.src.setAllowedHosts(allowed)
-	return enforceAllowedURLHosts(c.src.url, allowed)
+	c.policy = p
+	if c.src.url != "" {
+		allowed := p.AllowedRegistries()
+		c.src.setAllowedHosts(allowed)
+		return enforceAllowedURLHosts(c.src.url, allowed)
+	}
+	objs, err := c.objects()
+	if err != nil {
+		return err
+	}
+	return enforceManifestPolicy(objs, p)
+}
+
+// enforceManifestPolicy checks every object a manifest source yields against
+// p and names the object in what it refuses; each caller adds the component.
+func enforceManifestPolicy(objs []client.Object, p oam.Policy) error {
+	for _, obj := range objs {
+		if err := enforceRenderedObjectPolicy(obj, p); err != nil {
+			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
+		}
+	}
+	return nil
 }
 
 // Generate resolves the source (cached) and applies the per-type process hook.
+// Once ApplyPolicy has supplied a policy it holds the objects it is about to
+// emit to it, which is where the objects of a url source are first known. A
+// refusal here is the component's oam.ViolationError, as the transform reports
+// one from ApplyPolicy; a source that cannot be fetched or read keeps its own
+// error.
 func (c *manifestConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
-	objs, err := c.src.resolve()
+	objs, err := c.objects()
 	if err != nil {
 		return nil, err
 	}
-	if c.process != nil {
-		objs, err = c.process(c.namespace, objs)
-		if err != nil {
-			return nil, err
+	if c.policy != nil {
+		if err := enforceManifestPolicy(objs, c.policy); err != nil {
+			return nil, &oam.ViolationError{Component: c.name, Cause: err}
 		}
 	}
 	out := make([]*client.Object, len(objs))
@@ -459,6 +499,19 @@ func (c *manifestConfig) Generate(_ *stack.Application) ([]*client.Object, error
 		out[i] = &o
 	}
 	return out, nil
+}
+
+// objects resolves the source (cached) and applies the per-type process hook:
+// the objects Generate emits, and the ones ApplyPolicy checks.
+func (c *manifestConfig) objects() ([]client.Object, error) {
+	objs, err := c.src.resolve()
+	if err != nil {
+		return nil, err
+	}
+	if c.process != nil {
+		return c.process(c.namespace, objs)
+	}
+	return objs, nil
 }
 
 // validateInline runs resolve + process eagerly for inline sources so config

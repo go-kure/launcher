@@ -107,7 +107,7 @@ reads it.
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, and a workload, claim or autoscaler is held to the environment policy. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
-| `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
+| `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 
 Only the two role kinds, `webservice` and `worker`, emit a per-component
 ServiceAccount, and only when the component does not author
@@ -3491,6 +3491,56 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   declare — one a newer Kubernetes version added, say — is left out of the emitted
   object, with no error (go-kure/launcher#794, item 7, decides between refusing such a
   document, keeping the field, and leaving the loss documented).
+
+  **Policy.** Every object a `manifests` or `crd` source yields is checked against the
+  environment policy with the check template delivery (`helmtemplate`) and `passthrough`
+  use: each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet,
+  ReplicaSet, Job and CronJob is checked as an authored workload is (host namespaces,
+  hostPath volumes, the cpu/memory maxima, the registry allowlist, the privileged,
+  HostProcess and capability gates, `ValidateImageRef`, no ephemeral containers), a
+  PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
+  maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
+  replica maximum. The error names the object and the field (`manifest source: object
+  Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
+  holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
+  before.
+
+  When the check runs depends on the source. An `inline` source is checked by
+  `ApplyPolicy`, the transform's policy step, and the refusal is that step's
+  `*oam.ViolationError`. A `url` source is checked in `Generate`, on the objects it is
+  about to emit: `ApplyPolicy` checks its host against the allowed registries and does
+  not fetch, so **a caller that runs the transform and never generates does not see an
+  object refusal for a `url` source**. A refusal in `Generate` is the same
+  `*oam.ViolationError`, naming the component; a fetch or parse failure there keeps its
+  own error and is not a policy violation. `Generate` also checks an `inline` source
+  again, on what it emits.
+
+  What cannot be read is refused, not passed: a workload or claim in an API version
+  kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`); a workload or claim
+  inside a list of an unregistered kind, which the parser unpacks into untyped objects;
+  and a list left inside such a list, whose items the parser does not unpack. A list is
+  told there by a top-level `items` array, so a custom resource that names a field
+  `items` is refused in that position too. An object of another kind inside a list of an
+  unregistered kind still builds. A source that holds a `v1` `List` did not build before
+  this check and does not now (go-kure/kure#981 decides whether kure's parser flattens a
+  typed list into its items).
+
+  **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
+  reached the output unchecked. A document that relied on that no longer builds when its
+  source holds a workload with a privileged container, a host namespace, a hostPath
+  volume, an image outside the registry allowlist, an untagged or `:latest` image, or a
+  value over a maximum, or an object the check cannot read (above) — and with no policy
+  passed the first three are always refused, since `NoopPolicy` denies them. A consumer
+  allows what it wants allowed through its policy, not per component, exactly as for
+  `passthrough` (above). An untagged or `:latest` image has to be pinned in the source,
+  and a workload in an API version the build cannot read has to be authored in the one
+  it can (`batch/v1`, `apps/v1`).
+
+  Not checked: an object that runs no pod; a custom resource, the pods its controller
+  creates and the replica count it sets; a `Secret`, which no check here reads. A nil
+  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
+  to) checks nothing.
+
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme and host only
   (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
