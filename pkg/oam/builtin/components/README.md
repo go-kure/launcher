@@ -205,7 +205,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
-| `kubernetes.CreateSecret` | v1 Secret | missing | - | - | - |
+| `kubernetes.CreateSecret` | v1 Secret | trait | `secret` | hand-written parser | The trait builds through a generator of this package, so a `secret` kind can use the same path. The `helm` component's `secretValues` synthesizes the trait. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | missing | - | - | - |
