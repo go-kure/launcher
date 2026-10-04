@@ -361,10 +361,18 @@ func TestStampComponentLabel_NullPodTemplateLabelValue(t *testing.T) {
 }
 
 // TestStampComponentLabel_NullPodTemplateMetadata: YAML's explicit null is an
-// absent value. A pod template whose metadata or labels are null gets the
+// absent value, and so is a nil map, which a config built in Go can hold where
+// YAML has a null. A pod template whose metadata or labels are null gets the
 // label; a workload with no pod template, or a null one, is left as it is.
 // A PodTemplate has no spec around its pod template.
 func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
+	for nullName, nullValue := range map[string]any{"null": nil, "nil-map": map[string]any(nil)} {
+		testStampComponentLabelNullPodTemplateMetadata(t, nullName, nullValue)
+	}
+}
+
+func testStampComponentLabelNullPodTemplateMetadata(t *testing.T, nullName string, nullValue any) {
+	t.Helper()
 	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}, {"apps/v1", "ReplicaSet"}, {"v1", "ReplicationController"}, {"v1", "PodTemplate"}} {
 		spec := []string{"spec"}
 		switch kind.kind {
@@ -378,9 +386,9 @@ func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 			"labels":   append(append([]string(nil), template...), "metadata", "labels"),
 			"metadata": append(append([]string(nil), template...), "metadata"),
 		} {
-			t.Run(kind.kind+" with null "+name, func(t *testing.T) {
+			t.Run(kind.kind+" with "+nullName+" "+name, func(t *testing.T) {
 				u := unstructuredWorkload(kind.apiVersion, kind.kind)
-				if err := unstructured.SetNestedField(u.Object, nil, null...); err != nil {
+				if err := unstructured.SetNestedField(u.Object, nullValue, null...); err != nil {
 					t.Fatal(err)
 				}
 				if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
@@ -397,9 +405,9 @@ func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 			absent["spec"] = spec[:1]
 		}
 		for name, null := range absent {
-			t.Run(kind.kind+" with null "+name, func(t *testing.T) {
+			t.Run(kind.kind+" with "+nullName+" "+name, func(t *testing.T) {
 				u := unstructuredWorkload(kind.apiVersion, kind.kind)
-				if err := unstructured.SetNestedField(u.Object, nil, null...); err != nil {
+				if err := unstructured.SetNestedField(u.Object, nullValue, null...); err != nil {
 					t.Fatal(err)
 				}
 				want := u.DeepCopy()
@@ -636,11 +644,13 @@ func TestStampComponentLabel_SelectorThatAllowsTheLabel(t *testing.T) {
 }
 
 // TestStampComponentLabel_UnstructuredHelmReleaseNulls: a null spec or
-// postRenderers on an unstructured HelmRelease is an absent one.
+// postRenderers on an unstructured HelmRelease is an absent one, and so is a
+// spec that is a nil map: the post-renderer goes into a spec made for it.
 func TestStampComponentLabel_UnstructuredHelmReleaseNulls(t *testing.T) {
 	for name, spec := range map[string]any{
 		"null postRenderers": map[string]any{"postRenderers": nil},
 		"null spec":          nil,
+		"nil-map spec":       map[string]any(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			u := &unstructured.Unstructured{Object: map[string]any{

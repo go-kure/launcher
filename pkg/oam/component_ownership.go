@@ -527,8 +527,9 @@ var podTemplateKinds = []struct {
 }
 
 // objectField returns the object m holds at field. YAML's explicit null is an
-// absent value: both are reported as not found. Anything else that is no
-// object is an error.
+// absent value: both are reported as not found, and so is a nil map a config
+// built in Go may hold there, which serializes as null and cannot be written
+// into. Anything else that is no object is an error.
 func objectField(m map[string]any, field string) (map[string]any, bool, error) {
 	v, ok := m[field]
 	if !ok || v == nil {
@@ -537,6 +538,9 @@ func objectField(m map[string]any, field string) (map[string]any, bool, error) {
 	o, ok := v.(map[string]any)
 	if !ok {
 		return nil, false, errors.Errorf("%s is a %T, not an object", field, v)
+	}
+	if o == nil {
+		return nil, false, nil
 	}
 	return o, true, nil
 }

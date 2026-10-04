@@ -300,7 +300,8 @@ never fails, so its pod template always gets the label.
 
 An unstructured object's labels are read as written, on the object and on a workload's pod
 template. Null `metadata` or `labels` are absent ones, as is a null pod `template`, and a null
-label value is the empty string the cluster reads it as. A label that is not a string is
+label value is the empty string the cluster reads it as. A nil map, which a config built in
+Go can hold in such a place, reads as a null. A label that is not a string is
 refused, with the object named, whether or not the key is there already: generation fails
 rather than drop a label an author wrote.
 
