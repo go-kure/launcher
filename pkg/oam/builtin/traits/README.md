@@ -66,7 +66,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
-| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, or `helmtemplate` templates) is not inspected (see below). |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -633,13 +633,13 @@ The trait is strict in five ways, each an error at build time:
   nothing to conflict with.
 - **A typed Deployment is required.** The trait acts on the typed Deployment
   objects a component's `Generate` returns: the one `deployment`, `webservice`
-  or `worker` builds, and any `apps/v1` Deployment in a `manifests` source,
-  which is decoded into that type. A component whose output contains none
-  (`statefulset`, `daemonset`, a `manifests` source without a Deployment, …)
-  fails, rather than carrying a trait that does nothing. A Deployment passed
-  through as raw, unstructured output — a `passthrough` object, or one rendered
-  from `helmtemplate` templates — is not inspected, as for the other
-  Deployment-decorating traits, so such a component fails the same way.
+  or `worker` builds, and any `apps/v1` Deployment in a `manifests` source or
+  in the render of a `helmtemplate` chart, which is decoded into that type. A
+  component whose output contains none (`statefulset`, `daemonset`, a
+  `manifests` source or a chart without a Deployment, …) fails, rather than
+  carrying a trait that does nothing. A Deployment passed through as raw,
+  unstructured output — a `passthrough` object — is not inspected, as for the
+  other Deployment-decorating traits, so such a component fails the same way.
 - **A `matchLabels` selector is required.** A Deployment whose selector is
   missing, has no `matchLabels`, or also carries `matchExpressions` is refused,
   since the spread selector could not select exactly its pods. The check runs

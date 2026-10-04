@@ -278,31 +278,43 @@ No path writes explicit values into a Secret.
 
 | Check | Flux delivery | Template delivery |
 |---|---|---|
-| Registry allowlist | Chart source host, on the generated or authored Flux source (`helmrepository.go:110-115`). Chart images: not checked (`HelmReleaseConfig.ApplyPolicy` is a no-op). | **None.** The chart URL is fetched at build time unchecked. `HelmTemplateConfig.ApplyPolicy` is a no-op (`helmtemplate.go:177-179`). |
-| Image reference check (`ValidateImageRef`, `common.go:37-60`) | No | No |
-| Pod security (privileged, host namespaces, hostPath, capabilities; `pkg/oam/policy.go:32-37`, `enforce.go:115-260`) | No | No. A chart rendering a privileged pod is not refused. |
+| Registry allowlist | Chart source host, on the generated or authored Flux source (`helmrepository.go:110-115`). Chart images: not checked (`HelmReleaseConfig.ApplyPolicy` is a no-op). | Chart source host, before any fetch, and every image of a rendered workload (`HelmTemplateConfig.ApplyPolicy`, `helmtemplate_policy.go`). |
+| Image reference check (`ValidateImageRef`, `common.go:37-60`) | No | Yes, on every init and regular container of a rendered workload. |
+| Pod security (privileged, host namespaces, hostPath, capabilities; `pkg/oam/policy.go:32-37`, `enforce.go:115-260`) | No | Yes, on every rendered workload. A chart rendering a privileged pod is refused unless the policy allows it. |
 | Namespace | HelmRelease and source in the Flux namespace | Whatever `metadata.namespace` the chart writes; nothing stamps or checks it. |
 
-`kurel` sets no `Policy`, so `NoopPolicy` applies and the registry allowlist is empty on
-every path (`pkg/cmd/kurel/build.go:190-195`, `transform.go:551-552`). Only a library
-consumer that passes a `Policy` gets it.
+`kurel` sets no `Policy`, so `NoopPolicy` applies (`pkg/cmd/kurel/build.go:190-195`,
+`transform.go:551-552`): the registry allowlist is empty on every path, and the five
+security flags are denied. Only a library consumer that passes a `Policy` sets either.
 
-### 5.2 Target (go-kure/launcher#791)
+A chart delivered as a `HelmRelease` is rendered on the cluster, so the Flux column cannot
+be closed at build time.
 
-1. **Decode** chart output with kure's parser (`ParseYAMLWithOptions` with
-   `AllowUnstructured`) instead of `decodeKubeManifests` (`helmtemplate_render.go:542-573`),
-   so registered kinds are typed.
+### 5.2 Implemented (go-kure/launcher#791)
+
+1. **Decode:** chart output is decoded with kure's parser (`ParseYAMLWithOptions` with
+   `AllowUnstructured`), so registered kinds are typed (`decodeChartManifests`,
+   `helmtemplate_render.go`). `Generate` returns a fresh copy on each call, so a
+   workload-decorating trait acts on a chart's typed workload without changing the cached
+   render.
 2. **Chart URL allowlist:** `HelmTemplateConfig.ApplyPolicy` checks the chart URL host
-   against `AllowedRegistries`, as the source kinds do.
+   against `AllowedRegistries`, as the source kinds do, and fails before any request.
 3. **Rendered workloads** go through the existing image and pod-security enforcement.
-   - `ApplyPolicy` runs before `Generate` (`transform.go:796`), while the render is lazy.
-     The check must trigger the render, or move into `Generate`.
-   - Only the image, securityContext and volume helpers in `enforce.go` take Kubernetes
-     types. The host-namespace, host-process and resource helpers take launcher's own
-     config types, so they need a variant over `corev1.PodSpec`.
-   - **Decide in the ticket:** whether `ValidateImageRef` (tag or digest required, no
-     `:latest`) applies to chart images. Recommendation: yes, so a rendered workload is
-     held to the same image rule as a launcher-built one.
+   - `ApplyPolicy` runs before `Generate`, so it triggers the render — the one `Generate`
+     and `AugmentLayout` then return. The chart is therefore fetched during the transform.
+   - The pod spec of each Pod, ReplicationController, Deployment, StatefulSet, DaemonSet,
+     ReplicaSet, Job and CronJob is checked by `enforcePodTemplatePolicy`, the variant over
+     `corev1.PodSpec` the operator-CR components already use.
+   - **Decided:** `ValidateImageRef` (tag or digest required, no `:latest`) applies to
+     chart images, so a rendered workload is held to the same image rule as a
+     launcher-built one.
+   - **Decided:** with no policy passed, `NoopPolicy` denies a chart that renders a
+     privileged container, a host namespace or a hostPath volume, as it does an authored
+     workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
+     `AllowHostIPC` and `AllowHostPathVolumes` allow one.
+   - **Limits:** a workload that cannot be decoded typed (an API version kure's scheme does
+     not register) is refused; a custom resource's pods, the archive host a Helm repository
+     index names and redirects are not checked.
 
 ---
 

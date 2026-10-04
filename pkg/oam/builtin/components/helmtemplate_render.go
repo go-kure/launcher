@@ -1,20 +1,14 @@
 package components
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
+	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
-	"gopkg.in/yaml.v3"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -144,11 +138,19 @@ type chartRender struct {
 	// call; nil until then. Not goroutine-safe — concurrent Generate/AugmentLayout
 	// calls on the same config race on rendered/hookGroups (an identical cache in
 	// a downstream consumer's analogous handler isn't goroutine-safe either).
+	//
+	// These objects are the render as ApplyPolicy checked it and are never
+	// handed out: objects returns copies.
 	hookGroups []helm.HookGroup
 	// rendered reports whether render has already populated hookGroups, so that
-	// Generate followed by AugmentLayout (kure's layout walker's usual call
-	// order) renders the chart over the network exactly once.
+	// ApplyPolicy, Generate and AugmentLayout (the transform's and kure's layout
+	// walker's call order) render the chart over the network exactly once.
 	rendered bool
+	// emitted is the copy of hookGroups the last objects call handed out, group
+	// by group; nil until then. partition builds the child layouts from it, so
+	// they hold the very objects Generate returned, with whatever a trait
+	// decorator did to them.
+	emitted []helm.HookGroup
 }
 
 // render renders src client-side via renderFn on first call (a nil renderFn
@@ -186,16 +188,26 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	return nil
 }
 
-// objects flattens hookGroups in execution order. This is the union partition
-// later repartitions into child layouts for a layout-walking consumer —
-// Generate itself always returns the flat set, which is what keeps kurel build
-// (which never walks a layout.ManifestLayout) and every validator unaffected,
-// and is the premise GenerateCoversAugmentLayout's guard opt-out rests on.
+// objects flattens a deep copy of hookGroups in execution order, and records
+// that copy in emitted. This is the union partition later repartitions into
+// child layouts for a layout-walking consumer — Generate itself always returns
+// the flat set, which is what keeps kurel build (which never walks a
+// layout.ManifestLayout) and every validator unaffected, and is the premise
+// GenerateCoversAugmentLayout's guard opt-out rests on.
+//
+// Each call copies afresh, as the manifests component copies what it decoded:
+// the objects are typed, so a trait decorator that edits a workload in place
+// (a mounted ConfigMap, topology spread constraints) edits the copy, and a
+// second Generate starts again from the render instead of meeting the first
+// call's edits.
 func (r *chartRender) objects() []*client.Object {
+	r.emitted = make([]helm.HookGroup, len(r.hookGroups))
 	var objects []*client.Object
-	for _, g := range r.hookGroups {
-		for _, obj := range g.Resources {
-			o := obj
+	for i, g := range r.hookGroups {
+		r.emitted[i] = helm.HookGroup{Phase: g.Phase, Weight: g.Weight, Resources: make([]client.Object, len(g.Resources))}
+		for j, obj := range g.Resources {
+			o, _ := obj.DeepCopyObject().(client.Object)
+			r.emitted[i].Resources[j] = o
 			objects = append(objects, &o)
 		}
 	}
@@ -205,9 +217,10 @@ func (r *chartRender) objects() []*client.Object {
 // partition is AugmentLayout's work once the chart is rendered. With at most
 // one hook group, ml.Resources already carries the flat union Generate
 // returned and no children are needed. With multiple groups, that union is
-// partitioned: ml.Resources is cleared and rebuilt solely from r.hookGroups
-// (the same cached render Generate flattened), so this relies on ml.Resources
-// containing exactly that render's objects when AugmentLayout runs — true today
+// partitioned: ml.Resources is cleared and rebuilt solely from r.emitted (the
+// copy of the render the last Generate flattened and returned; a fresh copy
+// when Generate never ran), so this relies on ml.Resources containing exactly
+// those objects when AugmentLayout runs — true today
 // because every trait decorator in this repo (traits/decorator.go's
 // decoratorBase-embedding types) only mutates the objects its inner Generate
 // returns in place and never appends a new one; a trait's own additional
@@ -270,13 +283,16 @@ func (r *chartRender) partition(ml *layout.ManifestLayout) {
 	if len(r.hookGroups) <= 1 {
 		return
 	}
+	if r.emitted == nil {
+		r.objects()
+	}
 	ml.Resources = nil
 	if ml.ApplicationFileMode == layout.AppFileUnset {
 		ml.ApplicationFileMode = layout.AppFilePerResource
 	}
 	parentPath := ml.FullRepoPath()
 	var prevName string
-	for i, g := range r.hookGroups {
+	for i, g := range r.emitted {
 		dirName := hookGroupChildName(ml.Name, i, g)
 		child := &layout.ManifestLayout{
 			Name:          dirName,
@@ -300,6 +316,11 @@ func (r *chartRender) partition(ml *layout.ManifestLayout) {
 // splits it into Helm hook-phase-and-weight groups via kure's
 // helm.SplitByHookWeight.
 //
+// The decode is kure's parser with unstructured objects allowed
+// (decodeChartManifests): an object of a kind kure's scheme registers is its
+// Go type, which is what lets ApplyPolicy read a rendered workload's pod spec,
+// and any other object is unstructured.
+//
 // kure's SplitByHookWeight documents (pkg/stack/helm/hooks.go:35-36) that a
 // comma-separated helm.sh/hook annotation (e.g. "pre-install,pre-upgrade") is
 // treated as one opaque phase string and sorted into the alphabetical
@@ -313,7 +334,7 @@ func (r *chartRender) partition(ml *layout.ManifestLayout) {
 // objects, with their original unmodified annotations, are what land in
 // HookGroup.Resources and therefore in emitted output.
 func parseChartManifests(raw []byte) ([]helm.HookGroup, error) {
-	objs, err := decodeKubeManifests(raw)
+	objs, err := decodeChartManifests(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -361,29 +382,6 @@ var excludedHookPhases = map[string]bool{
 	"pre-rollback":  true,
 	"post-rollback": true,
 	"test":          true,
-}
-
-// hookDropsObject reports whether hook grouping drops, unwritten, an object
-// whose helm.sh/hook annotation is hook: kure's SplitByHookWeight drops one
-// whose whole annotation is an excludedHookPhases member (an exact match), and
-// normalizeHookAnnotationForGrouping has it drop one whose comma-separated
-// annotation has at least one non-empty token and nothing but excluded ones.
-func hookDropsObject(hook string) bool {
-	if !strings.Contains(hook, ",") {
-		return excludedHookPhases[hook]
-	}
-	sawToken := false
-	for _, tok := range strings.Split(hook, ",") {
-		tok = strings.TrimSpace(tok)
-		if tok == "" {
-			continue
-		}
-		if !excludedHookPhases[tok] {
-			return false
-		}
-		sawToken = true
-	}
-	return sawToken
 }
 
 // normalizeHookAnnotationForGrouping returns a client.Object suitable for
@@ -469,8 +467,9 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 // annotations map — untouched. The copy exists only to steer kure's
 // helm.SplitByHookWeight to the correct group; parseChartManifests swaps it
 // back out for the original object before returning, so the rewritten
-// annotation never reaches emitted output. The deep copy relies on obj's
-// content being JSON-typed, which decodeKubeManifests guarantees.
+// annotation never reaches emitted output. The deep copy is safe on every
+// object decodeChartManifests returns: a typed object copies itself, and an
+// unstructured one was decoded from JSON, so its content is JSON-typed.
 func cloneWithHookAnnotation(obj client.Object, ann map[string]string, newHook string) client.Object {
 	cp, _ := obj.DeepCopyObject().(client.Object)
 	newAnn := make(map[string]string, len(ann))
@@ -526,171 +525,26 @@ func hookGroupDir(g helm.HookGroup) string {
 	return slug
 }
 
-// decodeKubeManifests decodes multi-doc YAML from RenderChart into Kubernetes objects.
-// Real YAML parse errors are returned immediately.
-// A document that is not a mapping (a scalar, a sequence, or nil, as a
-// comment-only document decodes) and an empty mapping are skipped defensively
-// (kure filters NOTES.txt upstream).
-// Mapping documents without apiVersion/kind are an error (broken chart manifest).
-// Each object's content is converted in place to JSON types (toJSONTypes), so
-// the objects are safe to deep-copy. A document with a key or value that
-// cannot be emitted is an error — including a key that is not a string at
-// its own top level, for which yaml.v3 decodes the whole document to
-// map[any]any — unless hook grouping would drop it unwritten
-// (hookDropsObject): then it is skipped, since nothing it holds is emitted.
-func decodeKubeManifests(raw []byte) ([]client.Object, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	var objects []client.Object
-	for {
-		var rawDoc any
-		if err := dec.Decode(&rawDoc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, errors.Wrapf(err, "decoding rendered manifest")
-		}
-		var doc map[string]any
-		var convErr error
-		switch d := rawDoc.(type) {
-		case map[string]any:
-			if len(d) == 0 {
-				continue // defensive: skip an empty document
-			}
-			doc = d
-		case map[any]any:
-			// Never empty: yaml.v3 decodes an empty mapping to map[string]any.
-			// The document cannot be emitted, but its string-keyed entries are
-			// read as any document's are, for the checks below and the error.
-			doc = stringKeyedEntries(d)
-			_, convErr = toJSONTypes(d, "")
-		default:
-			continue // defensive: skip a scalar, a sequence or a nil document
-		}
-		if doc["apiVersion"] == nil || doc["kind"] == nil {
-			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", rawDoc)
-		}
-		u := &unstructured.Unstructured{Object: doc}
-		// Read before converting: a failed conversion stops at the first value
-		// it cannot convert and leaves the document partly converted, in map
-		// iteration order.
-		hook := hookAnnotation(doc)
-		if convErr == nil {
-			_, convErr = toJSONTypes(doc, "")
-		}
-		if convErr != nil {
-			if hookDropsObject(hook) {
-				continue
-			}
-			return nil, errors.Wrapf(convErr, "rendered %s %q", u.GetKind(), u.GetName())
-		}
-		objects = append(objects, u)
-	}
-	return objects, nil
-}
-
-// hookAnnotation returns the helm.sh/hook annotation of doc, a decoded
-// document, or "" when it has none. Unlike unstructured's GetAnnotations, it
-// reads metadata and metadata.annotations as either map[string]any or the
-// map[any]any yaml.v3 decodes a mapping with a non-string key to, so such a
-// key cannot hide the hook that decides whether the document is dropped.
-func hookAnnotation(doc map[string]any) string {
-	hook, _ := stringKeyedValue(stringKeyedValue(doc["metadata"], "annotations"), "helm.sh/hook").(string)
-	return hook
-}
-
-// stringKeyedValue returns the value under key in m, a map[string]any or a
-// map[any]any, or nil when m is neither or has no such key.
-func stringKeyedValue(m any, key string) any {
-	switch t := m.(type) {
-	case map[string]any:
-		return t[key]
-	case map[any]any:
-		return t[key]
-	default:
-		return nil
-	}
-}
-
-// stringKeyedEntries returns the entries of m, a document yaml.v3 decoded to
-// map[any]any, whose key is a string: the object's apiVersion, kind and
-// metadata, read through unstructured's accessors exactly as for a document
-// with string keys only. The values are shared with m, not copied.
-func stringKeyedEntries(m map[any]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		if s, ok := k.(string); ok {
-			out[s] = v
-		}
-	}
-	return out
-}
-
-// toJSONTypes converts v, a value yaml.v3 decoded into any, to the types an
-// unstructured.Unstructured holds: those runtime.DeepCopyJSONValue accepts,
-// which panics on anything else ("cannot deep copy int"). Unstructured's
-// DeepCopy copies through it, so every copy of an object does, including the
-// grouping copy cloneWithHookAnnotation makes. Maps and slices are converted
-// in place. Each conversion encodes to the same JSON as the value it replaces,
-// and kure writes an object from its JSON encoding, so the written manifest is
-// unchanged:
-//   - int, yaml.v3's type for an integer that fits in an int64, becomes int64;
-//   - uint64, its type for an integer above math.MaxInt64 up to
-//     math.MaxUint64, becomes a json.Number of the same digits (int64 cannot
-//     hold it);
-//   - time.Time, its type for an unquoted timestamp, becomes the RFC 3339
-//     string encoding/json writes for it (time.Time.MarshalJSON's);
-//   - float64 (also its type for an integer beyond math.MaxUint64, and for
-//     .inf and .nan, which encoding/json refuses to write, as before),
-//     string, bool and nil are kept.
+// decodeChartManifests decodes multi-doc YAML from RenderChart into Kubernetes
+// objects with kure's parser, unstructured objects allowed — the decode the
+// manifests component gives a fetched document. An object whose group, version
+// and kind kure's scheme registers is its Go type (*appsv1.Deployment,
+// *batchv1.Job); any other is *unstructured.Unstructured, and an unregistered
+// list kind is replaced by its items. An empty or comment-only document is
+// skipped (kure filters NOTES.txt upstream).
 //
-// A mapping with a key that is not a string (map[any]any) is an error naming
-// its path — "top level" for the document itself, path "" — since
-// encoding/json cannot write one either. So is a time.Time that
-// MarshalJSON refuses because RFC 3339 cannot express it (a year outside
-// [0,9999], or a UTC offset of 24 hours or more, which the time.Parse behind
-// yaml.v3's timestamps accepts), and any other type.
-func toJSONTypes(v any, path string) (any, error) {
-	switch t := v.(type) {
-	case map[string]any:
-		for k, e := range t {
-			c, err := toJSONTypes(e, path+"."+k)
-			if err != nil {
-				return nil, err
-			}
-			t[k] = c
-		}
-		return t, nil
-	case []any:
-		for i, e := range t {
-			c, err := toJSONTypes(e, fmt.Sprintf("%s[%d]", path, i))
-			if err != nil {
-				return nil, err
-			}
-			t[i] = c
-		}
-		return t, nil
-	case int:
-		return int64(t), nil
-	case uint64:
-		return json.Number(strconv.FormatUint(t, 10)), nil
-	case time.Time:
-		// The string MarshalJSON writes, quotes removed: RFC 3339 text holds no
-		// character JSON escapes. Its refusal is what kure's writer met before.
-		b, err := t.MarshalJSON()
-		if err != nil {
-			return nil, errors.Wrapf(err, "%s: a timestamp outside RFC 3339 cannot be emitted", path)
-		}
-		return string(b[1 : len(b)-1]), nil
-	case nil, bool, string, int64, float64:
-		return t, nil
-	case map[any]any:
-		if path == "" {
-			path = "top level"
-		}
-		return nil, errors.Errorf("%s: a mapping key that is not a string cannot be emitted", path)
-	default:
-		return nil, errors.Errorf("%s: a value of type %T cannot be emitted", path, v)
+// Every document that does not decode is an error, and the parser reports them
+// together: invalid YAML; a document that is not a mapping; one without
+// apiVersion or kind; a field of a registered kind whose value has the wrong
+// type; and a registered kind that is not a single object, a `v1` List
+// included. The typed decode is the lenient one: a field the vendored API type
+// does not declare is dropped, not refused.
+func decodeChartManifests(raw []byte) ([]client.Object, error) {
+	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{AllowUnstructured: true})
+	if err != nil {
+		return nil, errors.Wrap(err, "decoding rendered manifests")
 	}
+	return objs, nil
 }
 
 // hookGroupChildName computes partition's dirName for hook group

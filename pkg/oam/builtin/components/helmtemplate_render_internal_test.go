@@ -4,7 +4,6 @@ package components
 // (helmtemplate_render.go), driven through the helmtemplate terminal.
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -13,47 +12,42 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestDecodeKubeManifests_ErrorOnMalformedYAML(t *testing.T) {
-	_, err := decodeKubeManifests([]byte("key: [unclosed"))
-	if err == nil {
-		t.Fatal("expected error on malformed YAML")
-	}
+func TestDecodeChartManifests_ErrorOnMalformedYAML(t *testing.T) {
+	_, err := decodeChartManifests([]byte("key: [unclosed"))
+	assertErrorMentions(t, err, "decoding rendered manifests")
 }
 
-func TestDecodeKubeManifests_ErrorOnMappingWithoutAPIVersion(t *testing.T) {
-	_, err := decodeKubeManifests([]byte("kind: ConfigMap\nmetadata:\n  name: cm"))
-	if err == nil {
-		t.Fatal("expected error for map without apiVersion")
-	}
+func TestDecodeChartManifests_ErrorOnMappingWithoutAPIVersion(t *testing.T) {
+	_, err := decodeChartManifests([]byte("kind: ConfigMap\nmetadata:\n  name: cm"))
+	assertErrorMentions(t, err, "decoding rendered manifests")
 }
 
-// TestDecodeKubeManifests_SkipsNonMapDoc: a document that is a scalar, nil
-// (null, ~, a comment alone, nothing at all) or an empty mapping carries no
-// object and is skipped; the document after it still decodes.
-func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
+// TestDecodeChartManifests_SkipsEmptyDoc: a document that holds nothing (null,
+// ~, a comment alone, nothing at all) carries no object and is skipped; the
+// document after it still decodes.
+func TestDecodeChartManifests_SkipsEmptyDoc(t *testing.T) {
 	for _, skipped := range []string{
-		"just a string\n",
-		"42\n",
 		"null\n",
 		"~\n",
 		"# a comment alone\n",
 		"",
-		"{}\n",
 	} {
 		t.Run(fmt.Sprintf("%q", skipped), func(t *testing.T) {
-			objects, err := decodeKubeManifests([]byte(skipped + "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm"))
+			objects, err := decodeChartManifests([]byte(skipped + "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm"))
 			if err != nil {
-				t.Fatalf("decodeKubeManifests: %v", err)
+				t.Fatalf("decodeChartManifests: %v", err)
 			}
 			if names := resourceNames(objects); !slices.Equal(names, []string{"cm"}) {
 				t.Fatalf("decoded %v, want [cm] (the first document skipped)", names)
@@ -62,60 +56,127 @@ func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
 	}
 }
 
-// TestDecodeKubeManifests_TopLevelNonStringKeyIsAnError: a key that is not a
-// string at a document's own top level makes yaml.v3 decode the whole
-// document to map[any]any, not a nested mapping only. That document is an
-// error naming the object and the top level, as a nested mapping's is, not
-// skipped as a document that holds no object; with no apiVersion or kind
-// among its string keys it is the missing-apiVersion error. The same key
-// quoted is a string, and the document decodes as any other.
-func TestDecodeKubeManifests_TopLevelNonStringKeyIsAnError(t *testing.T) {
-	const head = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
-	const next = "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: next\n"
-	for _, key := range []string{"1: x", "true: y", "1.5: z", "~: n"} {
-		t.Run(key, func(t *testing.T) {
-			doc := head + key + "\n"
-			var plain any
-			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
-				t.Fatalf("yaml.v3 decode: %v", err)
-			}
-			if _, ok := plain.(map[any]any); !ok {
-				t.Fatalf("yaml.v3 decodes the document to %T, want map[any]any; the case no longer pins a top-level non-string key", plain)
-			}
-			_, err := decodeKubeManifests([]byte(doc + next))
-			assertErrorMentions(t, err, `ConfigMap "cm"`, "top level", "not a string")
+// TestDecodeChartManifests_NonObjectDocIsAnError: a document that holds
+// something other than one Kubernetes object — a scalar, a sequence, an empty
+// mapping, a `v1` List — is an error, not skipped and not emitted.
+func TestDecodeChartManifests_NonObjectDocIsAnError(t *testing.T) {
+	for _, doc := range []string{
+		"just a string\n",
+		"42\n",
+		"- a\n- b\n",
+		"{}\n",
+		"apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n",
+	} {
+		t.Run(fmt.Sprintf("%q", doc), func(t *testing.T) {
+			_, err := decodeChartManifests([]byte(doc + "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm"))
+			assertErrorMentions(t, err, "decoding rendered manifests")
 		})
 	}
-	t.Run("no apiVersion or kind", func(t *testing.T) {
-		_, err := decodeKubeManifests([]byte("1: x\ntrue: y\n" + next))
-		assertErrorMentions(t, err, "missing apiVersion or kind")
-	})
-	t.Run("quoted key", func(t *testing.T) {
-		objects, err := decodeKubeManifests([]byte(head + "\"1\": x\n\"true\": y\n"))
-		if err != nil {
-			t.Fatalf("decodeKubeManifests: %v", err)
-		}
-		if len(objects) != 1 {
-			t.Fatalf("got %d objects, want 1", len(objects))
-		}
-		u := objects[0].(*unstructured.Unstructured)
-		if u.Object["1"] != "x" || u.Object["true"] != "y" {
-			t.Errorf(`top-level "1" = %#v, "true" = %#v, want "x" and "y"`, u.Object["1"], u.Object["true"])
-		}
-	})
 }
 
-// TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged covers each Go type
-// yaml.v3 yields for a scalar a chart can render: the decoded value, at the
-// top of spec, in a list and in a nested mapping, must be one
-// runtime.DeepCopyJSONValue accepts (it panics on yaml.v3's int, uint64 and
-// time.Time), and the object must encode to the same JSON as the yaml.v3
-// decode alone — kure writes an object from its JSON encoding, so the written
-// file is unchanged. .inf and .nan stay float64, which encoding/json refuses
-// to write either way. Timestamps at the edges of RFC 3339's range become
-// the string time.Time.MarshalJSON writes; a five-digit year is no yaml.v3
-// timestamp (it parses exactly four digits) and stays a string.
-func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
+// TestDecodeChartManifests_TypedOrUnstructured: an object of a kind kure's
+// scheme registers decodes to its Go type, any other to unstructured, and the
+// items of a list of an unregistered kind replace the list.
+func TestDecodeChartManifests_TypedOrUnstructured(t *testing.T) {
+	objects, err := decodeChartManifests([]byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+---
+apiVersion: example.com/v1
+kind: Thing
+metadata:
+  name: thing
+---
+apiVersion: example.com/v1
+kind: ThingList
+items:
+- apiVersion: example.com/v1
+  kind: Thing
+  metadata:
+    name: item
+`))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	if names := resourceNames(objects); !slices.Equal(names, []string{"web", "migrate", "thing", "item"}) {
+		t.Fatalf("decoded %v, want [web migrate thing item]", names)
+	}
+	dep, ok := objects[0].(*appsv1.Deployment)
+	if !ok {
+		t.Fatalf("web is %T, want *appsv1.Deployment", objects[0])
+	}
+	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 2 {
+		t.Errorf("Deployment replicas = %v, want 2", dep.Spec.Replicas)
+	}
+	if _, ok := objects[1].(*batchv1.Job); !ok {
+		t.Errorf("migrate is %T, want *batchv1.Job", objects[1])
+	}
+	for _, o := range objects[2:] {
+		if _, ok := o.(*unstructured.Unstructured); !ok {
+			t.Errorf("%s is %T, want *unstructured.Unstructured", o.GetName(), o)
+		}
+	}
+	assertDeepCopyable(t, objects)
+}
+
+// TestDecodeChartManifests_TypedDecodeIsLenientOnUnknownFields: a field the
+// API type does not declare is dropped, not refused; one whose value has the
+// wrong type is an error.
+func TestDecodeChartManifests_TypedDecodeIsLenientOnUnknownFields(t *testing.T) {
+	const head = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
+	objects, err := decodeChartManifests([]byte(head + "notAField: x\ndata:\n  k: v\n"))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	cm, ok := objects[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("cm is %T, want *corev1.ConfigMap", objects[0])
+	}
+	if cm.Data["k"] != "v" {
+		t.Errorf("data.k = %q, want %q", cm.Data["k"], "v")
+	}
+	_, err = decodeChartManifests([]byte(head + "data: not-a-mapping\n"))
+	assertErrorMentions(t, err, "decoding rendered manifests")
+}
+
+// TestDecodeChartManifests_NonStringMappingKeyBecomesAString: the parser
+// converts a document to JSON before it decodes it, so a mapping key that is
+// not a string becomes its string form, in a typed object and in an
+// unstructured one alike.
+func TestDecodeChartManifests_NonStringMappingKeyBecomesAString(t *testing.T) {
+	objects, err := decodeChartManifests([]byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  1: one\n" +
+		"---\napiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\n1: x\ntrue: z\nspec:\n  2: two\n"))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	if got := objects[0].(*corev1.ConfigMap).Data["1"]; got != "one" {
+		t.Errorf(`ConfigMap data["1"] = %q, want "one"`, got)
+	}
+	u := objects[1].(*unstructured.Unstructured)
+	if u.Object["1"] != "x" || u.Object["true"] != "z" {
+		t.Errorf(`top-level "1" = %#v, "true" = %#v, want "x" and "z"`, u.Object["1"], u.Object["true"])
+	}
+	if got, _, _ := unstructured.NestedString(u.Object, "spec", "2"); got != "two" {
+		t.Errorf(`spec["2"] = %q, want "two"`, got)
+	}
+	assertDeepCopyable(t, objects)
+}
+
+// TestDecodeChartManifests_UnstructuredScalarsAreJSONTyped covers the scalars
+// a chart can render into an object of an unregistered kind: the decoded
+// value, at the top of spec, in a list and in a nested mapping, is the type a
+// JSON decode gives it, which runtime.DeepCopyJSONValue accepts. An unquoted
+// timestamp stays the string the chart wrote, in or out of RFC 3339's range;
+// an integer beyond int64 becomes a float64.
+func TestDecodeChartManifests_UnstructuredScalarsAreJSONTyped(t *testing.T) {
 	cases := []struct {
 		scalar string
 		want   any
@@ -125,38 +186,23 @@ func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
 		{"-1", int64(-1)},
 		{"0x1F", int64(31)},
 		{"9223372036854775807", int64(math.MaxInt64)},
-		{"9223372036854775808", json.Number("9223372036854775808")},
-		{"18446744073709551615", json.Number("18446744073709551615")},
-		{"18446744073709551616", 1.8446744073709552e19},
+		{"9223372036854775808", 9.223372036854775808e18},
 		{"1.5", 1.5},
-		{"1.0", 1.0},
-		{".inf", math.Inf(1)},
-		{".nan", math.NaN()},
-		{"2001-12-14", "2001-12-14T00:00:00Z"},
-		{"2001-12-14t21:59:43.10-05:00", "2001-12-14T21:59:43.1-05:00"},
-		{"0000-01-01T00:00:00Z", "0000-01-01T00:00:00Z"},
-		{"9999-12-31T23:59:59.999999999+23:59", "9999-12-31T23:59:59.999999999+23:59"},
-		{"10000-01-01T00:00:00Z", "10000-01-01T00:00:00Z"},
+		{"2001-12-14", "2001-12-14"},
+		{"2001-12-14t21:59:43.10-05:00", "2001-12-14t21:59:43.10-05:00"},
+		{"2001-12-14T21:59:43+24:00", "2001-12-14T21:59:43+24:00"},
 		{"!!binary aGVsbG8=", "hello"},
 		{"true", true},
 		{"null", nil},
 		{"text", "text"},
 	}
-	same := func(got, want any) bool {
-		g, gok := got.(float64)
-		w, wok := want.(float64)
-		if gok && wok && math.IsNaN(g) && math.IsNaN(w) {
-			return true
-		}
-		return reflect.DeepEqual(got, want)
-	}
 	for _, tc := range cases {
 		t.Run(tc.scalar, func(t *testing.T) {
 			doc := "apiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\nspec:\n  v: " + tc.scalar +
 				"\n  list:\n  - " + tc.scalar + "\n  nested:\n    v: " + tc.scalar + "\n"
-			objects, err := decodeKubeManifests([]byte(doc))
+			objects, err := decodeChartManifests([]byte(doc))
 			if err != nil {
-				t.Fatalf("decodeKubeManifests: %v", err)
+				t.Fatalf("decodeChartManifests: %v", err)
 			}
 			if len(objects) != 1 {
 				t.Fatalf("got %d objects, want 1", len(objects))
@@ -168,38 +214,12 @@ func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
 				"spec.list[0]":  spec["list"].([]any)[0],
 				"spec.nested.v": spec["nested"].(map[string]any)["v"],
 			} {
-				if !same(got, tc.want) {
+				if !reflect.DeepEqual(got, tc.want) {
 					t.Errorf("%s = %#v (%T), want %#v (%T)", where, got, got, tc.want, tc.want)
 				}
 			}
 			assertDeepCopyable(t, objects)
-
-			var plain map[string]any
-			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
-				t.Fatalf("yaml.v3 decode: %v", err)
-			}
-			wantJSON, wantErr := json.Marshal(plain)
-			gotJSON, gotErr := json.Marshal(u.Object)
-			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || string(gotJSON) != string(wantJSON) {
-				t.Errorf("JSON = %s (err %v), want the yaml.v3 decode's %s (err %v)", gotJSON, gotErr, wantJSON, wantErr)
-			}
 		})
-	}
-}
-
-// TestDecodeKubeManifests_NonStringMappingKeyIsAnError: yaml.v3 decodes a
-// mapping with a non-string key to map[any]any, which
-// runtime.DeepCopyJSONValue panics on and encoding/json refuses to write. It
-// is an error naming the object and the mapping, not a later panic.
-func TestDecodeKubeManifests_NonStringMappingKeyIsAnError(t *testing.T) {
-	_, err := decodeKubeManifests([]byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  1: one\n"))
-	if err == nil {
-		t.Fatal("expected an error for a mapping with a non-string key")
-	}
-	for _, want := range []string{`ConfigMap "cm"`, ".data", "not a string"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
-		}
 	}
 }
 
@@ -217,146 +237,22 @@ func assertErrorMentions(t *testing.T, err error, wants ...string) {
 	}
 }
 
-// TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError: Go's time.Parse,
-// which yaml.v3 parses an unquoted timestamp with, accepts a UTC offset hour
-// up to 24 and minute up to 60, so a rendered offset of 24 hours or more
-// decodes to a time.Time that RFC 3339 cannot express and
-// time.Time.MarshalJSON refuses. kure writes an object from its JSON
-// encoding, so such a manifest never built; the decode refuses it too,
-// naming the object and the path, instead of converting it to a string that
-// writes.
-func TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError(t *testing.T) {
-	for _, scalar := range []string{
-		"2001-12-14T21:59:43+24:00",
-		"2001-12-14T21:59:43-24:00",
-		"2001-12-14T21:59:43+23:60",
-	} {
-		t.Run(scalar, func(t *testing.T) {
-			doc := "apiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\nspec:\n  nested:\n    v: " + scalar + "\n"
-			var plain map[string]any
-			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
-				t.Fatalf("yaml.v3 decode: %v", err)
-			}
-			if _, err := json.Marshal(plain); err == nil {
-				t.Fatalf("encoding/json writes the yaml.v3 decode of %s; the case no longer pins a refused timestamp", scalar)
-			}
-			_, err := decodeKubeManifests([]byte(doc))
-			assertErrorMentions(t, err, `Thing "t"`, ".spec.nested.v", "timezone hour outside of range")
-		})
-	}
-}
-
-// TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped: hook
-// grouping drops a document whose helm.sh/hook annotation is one of kure's
-// excluded phases, or a comma-separated list of nothing else, before
-// anything is written, so the keys and values it holds were never refused: a
-// non-string mapping key, nested or at the document's own top level, or an
-// out-of-range timestamp in it is skipped with the document. Any other hook
-// value is still refused, naming where. Each row's dropped column is first
-// checked against parseChartManifests on a valid document, so the table
-// cannot drift from what grouping actually drops.
-func TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped(t *testing.T) {
-	const hooked = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hooked\n  annotations:\n    helm.sh/hook: %q\n"
+// TestDecodeChartManifests_UndecodableDocumentOfADroppedHookIsAnError: every
+// document is decoded before hook grouping drops any, so one that does not
+// decode fails the build even when its helm.sh/hook annotation would have had
+// it dropped unwritten.
+func TestDecodeChartManifests_UndecodableDocumentOfADroppedHookIsAnError(t *testing.T) {
+	const hooked = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hooked\n  annotations:\n    helm.sh/hook: test\n"
 	const mainDoc = "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: main\n"
-	unemittable := []struct{ name, body, where string }{
-		{"non-string key", "data:\n  1: one\n", ".data"},
-		{"top-level non-string key", "1: one\n", "top level"},
-		{"top-level bool key", "true: yes\n", "top level"},
-		{"out-of-range timestamp", "data:\n  at: 2001-12-14T21:59:43+24:00\n", ".data.at"},
+	groups, err := parseChartManifests([]byte(hooked + mainDoc))
+	if err != nil {
+		t.Fatalf("parseChartManifests: %v", err)
 	}
-	for _, tc := range []struct {
-		hook    string
-		dropped bool
-	}{
-		{"test", true},
-		{"pre-delete", true},
-		{"post-rollback", true},
-		{"pre-delete,post-delete", true},
-		{" test , pre-rollback ", true},
-		{"test,pre-install", false},
-		{"post-install", false},
-		{" test", false},
-		{",", false},
-		{"", false},
-	} {
-		t.Run(fmt.Sprintf("%q", tc.hook), func(t *testing.T) {
-			groups, err := parseChartManifests([]byte(fmt.Sprintf(hooked, tc.hook)))
-			if err != nil {
-				t.Fatalf("parseChartManifests: %v", err)
-			}
-			if grouped := len(groups) > 0; grouped == tc.dropped {
-				t.Fatalf("hook grouping keeps the document = %v, but the row says dropped = %v", grouped, tc.dropped)
-			}
-			for _, u := range unemittable {
-				objects, err := decodeKubeManifests([]byte(fmt.Sprintf(hooked, tc.hook) + u.body + mainDoc))
-				if !tc.dropped {
-					assertErrorMentions(t, err, `ConfigMap "hooked"`, u.where)
-					continue
-				}
-				if err != nil {
-					t.Errorf("%s: decodeKubeManifests: %v", u.name, err)
-					continue
-				}
-				if names := resourceNames(objects); !slices.Equal(names, []string{"main"}) {
-					t.Errorf("%s: decoded %v, want [main]", u.name, names)
-				}
-			}
-		})
+	if len(groups) != 1 || len(groups[0].Resources) != 1 || groups[0].Resources[0].GetName() != "main" {
+		t.Fatalf("control: a decodable test hook is dropped and main kept; got %d group(s)", len(groups))
 	}
-}
-
-// TestToJSONTypes_TimeOutsideRFC3339IsAnError: every time.Time
-// time.Time.MarshalJSON refuses — a year outside [0,9999], a UTC offset of
-// 24 hours or more — is an error naming its path, as encoding/json's refusal
-// to write it was. yaml.v3 only yields four-digit years (see
-// TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged), so the year cases
-// are Go values.
-func TestToJSONTypes_TimeOutsideRFC3339IsAnError(t *testing.T) {
-	cases := []struct {
-		name string
-		v    time.Time
-		want string
-	}{
-		{"year 10000", time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), "year outside of range"},
-		{"year -1", time.Date(-1, 12, 31, 0, 0, 0, 0, time.UTC), "year outside of range"},
-		{"offset +24:00", time.Date(2001, 12, 14, 21, 59, 43, 0, time.FixedZone("", 24*3600)), "timezone hour outside of range"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := json.Marshal(tc.v); err == nil {
-				t.Fatalf("encoding/json writes %v; the case no longer pins a refused time", tc.v)
-			}
-			_, err := toJSONTypes(map[string]any{"list": []any{tc.v}}, "")
-			assertErrorMentions(t, err, ".list[0]", tc.want)
-		})
-	}
-}
-
-// TestToJSONTypes_TimeIsItsMarshalJSONString: a time.Time
-// time.Time.MarshalJSON accepts becomes a string that encodes to exactly the
-// JSON MarshalJSON writes, so the written manifest is unchanged.
-func TestToJSONTypes_TimeIsItsMarshalJSONString(t *testing.T) {
-	for _, v := range []time.Time{
-		time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
-		time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.FixedZone("", 23*3600+59*60)),
-		time.Date(2001, 12, 14, 21, 59, 43, 100000000, time.FixedZone("", -5*3600)),
-		time.Date(2001, 12, 14, 21, 59, 43, 0, time.Local),
-	} {
-		want, err := v.MarshalJSON()
-		if err != nil {
-			t.Fatalf("MarshalJSON(%v): %v", v, err)
-		}
-		got, err := toJSONTypes(v, "")
-		if err != nil {
-			t.Fatalf("toJSONTypes(%v): %v", v, err)
-		}
-		if _, ok := got.(string); !ok {
-			t.Fatalf("toJSONTypes(%v) = %#v (%T), want a string", v, got, got)
-		}
-		if gotJSON, err := json.Marshal(got); err != nil || string(gotJSON) != string(want) {
-			t.Errorf("toJSONTypes(%v) encodes to %s (err %v), want MarshalJSON's %s", v, gotJSON, err, want)
-		}
-	}
+	_, err = parseChartManifests([]byte(hooked + "data: not-a-mapping\n" + mainDoc))
+	assertErrorMentions(t, err, "decoding rendered manifests")
 }
 
 func TestGenerate_FlattensHookGroupsInExecutionOrder(t *testing.T) {
@@ -392,11 +288,7 @@ metadata:
 	}
 	var names []string
 	for _, o := range objects {
-		u, ok := (*o).(*unstructured.Unstructured)
-		if !ok {
-			t.Fatalf("object = %T, want *unstructured.Unstructured", *o)
-		}
-		names = append(names, u.GetName())
+		names = append(names, (*o).GetName())
 	}
 	want := []string{"pre", "main", "post"}
 	for i, n := range want {
@@ -567,7 +459,7 @@ func reachableObjectNames(t *testing.T, dir string) map[string]bool {
 			if err != nil {
 				t.Fatalf("read %s: %v", p, err)
 			}
-			objs, err := decodeKubeManifests(data)
+			objs, err := decodeChartManifests(data)
 			if err != nil {
 				t.Fatalf("decode %s: %v", p, err)
 			}
@@ -602,12 +494,8 @@ func TestExcludedHookPhasesAreDropped(t *testing.T) {
 	if len(objects) != 1 {
 		t.Fatalf("expected 1 surviving object (the 5 excluded-phase objects dropped), got %d", len(objects))
 	}
-	u, ok := (*objects[0]).(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("objects[0] = %T, want *unstructured.Unstructured", *objects[0])
-	}
-	if u.GetName() != "kept" {
-		t.Errorf("surviving object name = %q, want %q", u.GetName(), "kept")
+	if got := (*objects[0]).GetName(); got != "kept" {
+		t.Errorf("surviving object name = %q, want %q", got, "kept")
 	}
 }
 
@@ -705,7 +593,7 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 }
 
 // generateNames runs Generate and returns the resulting objects' names in
-// order, failing the test on any error or non-unstructured object.
+// order, failing the test on any error.
 func generateNames(t *testing.T, cfg *HelmTemplateConfig) []string {
 	t.Helper()
 	objects, err := cfg.Generate(nil)
@@ -714,11 +602,7 @@ func generateNames(t *testing.T, cfg *HelmTemplateConfig) []string {
 	}
 	names := make([]string, len(objects))
 	for i, o := range objects {
-		u, ok := (*o).(*unstructured.Unstructured)
-		if !ok {
-			t.Fatalf("objects[%d] = %T, want *unstructured.Unstructured", i, *o)
-		}
-		names[i] = u.GetName()
+		names[i] = (*o).GetName()
 	}
 	return names
 }
@@ -849,10 +733,7 @@ metadata:
 	if len(objects) != 2 {
 		t.Fatalf("expected 2 objects, got %d", len(objects))
 	}
-	u, ok := (*objects[1]).(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("objects[1] = %T, want *unstructured.Unstructured", *objects[1])
-	}
+	u := *objects[1]
 	if u.GetName() != "multi" {
 		t.Fatalf("execution order: objects[1].Name = %q, want %q (unrecognized custom hook must sort last, unchanged)", u.GetName(), "multi")
 	}
@@ -908,11 +789,7 @@ metadata:
 	if len(cfg.hookGroups[0].Resources) != 1 {
 		t.Fatalf("hookGroups[0].Resources has %d entries, want 1", len(cfg.hookGroups[0].Resources))
 	}
-	u, ok := cfg.hookGroups[0].Resources[0].(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("hookGroups[0].Resources[0] = %T, want *unstructured.Unstructured", cfg.hookGroups[0].Resources[0])
-	}
-	if got := u.GetAnnotations()["helm.sh/hook"]; got != "test,crd-install" {
+	if got := cfg.hookGroups[0].Resources[0].GetAnnotations()["helm.sh/hook"]; got != "test,crd-install" {
 		t.Errorf("emitted object's helm.sh/hook annotation = %q, want unchanged %q", got, "test,crd-install")
 	}
 }
@@ -1004,10 +881,7 @@ metadata:
 	if len(objects) != 3 {
 		t.Fatalf("expected 3 objects, got %d", len(objects))
 	}
-	u, ok := (*objects[0]).(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("objects[0] = %T, want *unstructured.Unstructured", *objects[0])
-	}
+	u := *objects[0]
 	if u.GetName() != "multi" {
 		t.Fatalf("Generate execution order: objects[0].Name = %q, want %q (earliest-phase placement)", u.GetName(), "multi")
 	}
@@ -1032,10 +906,7 @@ metadata:
 	if len(ml.Children[0].Resources) != 1 {
 		t.Fatalf("Children[0].Resources has %d entries, want 1", len(ml.Children[0].Resources))
 	}
-	child, ok := ml.Children[0].Resources[0].(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("Children[0].Resources[0] = %T, want *unstructured.Unstructured", ml.Children[0].Resources[0])
-	}
+	child := ml.Children[0].Resources[0]
 	if child.GetName() != "multi" {
 		t.Fatalf("Children[0].Resources[0].Name = %q, want %q", child.GetName(), "multi")
 	}

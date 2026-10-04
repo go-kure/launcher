@@ -72,7 +72,7 @@ reads it.
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
@@ -2398,8 +2398,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 - **helmtemplate** — the kind-named terminal for a client-side Helm render
   (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
   role-named `helm` rule lowers to under `delivery: template`.
-  It fetches and renders the chart at build time and emits the rendered manifests. It creates
-  no source CR and no `HelmRelease`.
+  It fetches and renders the chart at build time and emits the rendered manifests, each checked
+  against the environment policy (see **Policy** below). It creates no source CR and no
+  `HelmRelease`.
 
   **Properties.** `source` is
   required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
@@ -2445,14 +2446,61 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
   as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
   loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
-  A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
-  error naming the object and the mapping — the document's own top level (named `top level`)
-  as much as a mapping nested in it — and so is an unquoted timestamp that RFC 3339 cannot
-  express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
-  path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
-  that one of the dropped hooks above carries is never written, so it is dropped with such a
-  key or value in it rather than refused — including a non-string key in its `metadata` or
-  `metadata.annotations` mapping, which does not hide the `helm.sh/hook` annotation.
+
+  **Rendered objects.** The render is decoded with kure's manifest parser
+  (`io.ParseYAMLWithOptions`, unstructured allowed), the decode the `manifests` component uses
+  (go-kure/launcher#791). An object of a kind kure's scheme registers is emitted as its Go type —
+  a Deployment as `*appsv1.Deployment`, a hook Job as `*batchv1.Job` — and any other as
+  unstructured. What follows from reading a document as the API server does:
+  - a field the registered type does not declare is dropped, and a value of the wrong type (an
+    unquoted `true` as an annotation value) is a build error;
+  - YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping key that is not
+    a string (`1:`) becomes its string form, and an unquoted timestamp stays the string the chart
+    wrote; in an unstructured object an integer beyond 64 bits becomes a float;
+  - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}`, a
+    mapping without `apiVersion` and `kind`, and a `v1` `List` are build errors — in a document
+    of a dropped hook as well, since the render is decoded before hooks are grouped;
+  - a list of a kind the scheme does not register is flattened into its items, each unstructured.
+
+  A decode failure is reported as `decoding rendered manifests: …`. `Generate` returns a fresh
+  copy of the decoded objects on every call, as `manifests` does, so a trait that decorates a
+  typed workload (`topology-spread`, `security-context`, a mounted `configmap`,
+  `external-secret`) acts on a chart's Deployment as on an authored one, and generating the
+  same result twice gives the same output.
+
+  **Policy.** `ApplyPolicy` holds the chart to the environment policy in two steps
+  (go-kure/launcher#791); the transform calls it with `NoopPolicy` when no policy is passed.
+  - *The source, before any fetch.* The host of `source.url` must match an entry of the policy's
+    allowed registries (`AllowedRegistries`) exactly, as for `oci`, `crd` and `manifests`; for an
+    `oci://` URL that is its first segment, which is what the Helm registry client pulls from. A
+    refused source fails before any request is made: only an allowed source is rendered. No
+    allowlist, or an empty one, permits every host.
+  - *Every emitted workload.* The chart is then rendered — in the transform, so a fetch or render
+    failure is reported there, as that component's policy error — and each Pod,
+    ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob in it,
+    a kept hook's included, is checked as an authored workload is: host namespaces, hostPath
+    volumes, the storage and cpu/memory maxima, and for every init and regular container the
+    registry allowlist, the privileged, HostProcess and capability gates, and `ValidateImageRef`
+    (no untagged image, no `:latest`). Ephemeral containers are refused. The error names the
+    rendered object and the field (`helmtemplate: rendered Deployment "demo/web":
+    spec.template.spec.containers[0] "app": …`).
+
+  **Behaviour change:** a chart that renders a privileged container, a host namespace or a
+  hostPath volume no longer builds unless the policy allows it — and with no policy passed
+  nothing allows it, since `NoopPolicy` denies all five. The policy accessors that allow such a
+  chart are `AllowPrivileged()`, `AllowHostNetwork()`, `AllowHostPID()`, `AllowHostIPC()` and
+  `AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without a tag, or
+  tagged `:latest`, has to be pinned through the chart's values.
+
+  Limits. A workload in an API version kure's scheme does not register (`batch/v1beta1`,
+  `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and is refused rather
+  than passed unchecked. Not checked: an object of a dropped hook (never emitted); the pods a
+  custom resource's controller creates; the host of the chart archive a Helm repository's index
+  points at, and any redirect, which kure's renderer follows. A nil policy (a direct
+  `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing. A chart
+  delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under `delivery: flux`) is rendered
+  on the cluster, so nothing it renders can be checked at build time; only the host of a source
+  component in the document is.
 
   **Hook-group layout.** For a layout-walking consumer (the `layout.LayoutAugmenter` path), more
   than one hook group makes `AugmentLayout` clear the component's flat `Resources` and replace

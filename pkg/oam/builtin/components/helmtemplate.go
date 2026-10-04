@@ -174,10 +174,6 @@ type HelmTemplateConfig struct {
 	chartRender
 }
 
-// ApplyPolicy is a no-op: rendered chart manifests have no resource-limit
-// policy.
-func (c *HelmTemplateConfig) ApplyPolicy(_ oam.Policy) error { return nil }
-
 // source checks c and returns what the render fetches. ToApplicationConfig
 // runs it on the parsed document; ensureRendered runs it again because this
 // type and its fields are exported, so a config built directly never went
