@@ -85,6 +85,49 @@ func TestExposeRule_Ingress_SecretNameNoIssuerRejected(t *testing.T) {
 	}
 }
 
+// An authored secretName names the managed TLS Secret: one that cannot be a
+// Secret's name is refused with the component and the property, not passed on
+// for cert-manager to fail on; the longest valid name is used as written
+// (go-kure/launcher#787).
+func TestExposeRule_Ingress_SecretNameMustBeAnObjectName(t *testing.T) {
+	fits := strings.Repeat("a", oam.ShortenLimitSubdomain)
+	for why, name := range map[string]string{
+		"too long":          fits + "a",
+		"upper case":        "Custom-TLS",
+		"underscore":        "custom_tls",
+		"trailing hyphen":   "custom-",
+		"path-like":         "team/custom-tls",
+		"empty DNS label":   "custom..tls",
+		"surrounding space": " custom-tls",
+	} {
+		t.Run(why, func(t *testing.T) {
+			trait := exposeIngressTrait("letsencrypt-prod", "", "a.apps.example.com")
+			trait.Properties["secretName"] = name
+			err := applyExpose(trait, newWebApp("my-app", "default"), &stack.Bundle{})
+			var ve *pkgerrors.ValidationError
+			if !stderrors.As(err, &ve) {
+				t.Fatalf("expected *ValidationError for secretName=%q, got %v", name, err)
+			}
+			if ve.Field != "secretName" || ve.Component != "my-app" {
+				t.Errorf("error names field %q of component %q, want secretName of my-app", ve.Field, ve.Component)
+			}
+			if !strings.Contains(err.Error(), "DNS-1123 subdomain") {
+				t.Errorf("error = %q, want the rule the name breaks", err.Error())
+			}
+		})
+	}
+
+	bundle := &stack.Bundle{}
+	trait := exposeIngressTrait("letsencrypt-prod", "", "a.apps.example.com")
+	trait.Properties["secretName"] = fits
+	if err := applyExpose(trait, newWebApp("my-app", "default"), bundle); err != nil {
+		t.Fatalf("Apply with a %d-character secretName: %v", len(fits), err)
+	}
+	if got := ingressFromBundle(t, bundle).Spec.TLS[0].SecretName; got != fits {
+		t.Errorf("secretName = %q, want the authored value unchanged", got)
+	}
+}
+
 // Present-but-wrong-typed / empty secretName is rejected, not silently defaulted to
 // <component>-tls (the go-kure/launcher#199 lesson: absence-defaulting + lenient parse hides a typo).
 func TestExposeRule_Ingress_SecretNameWrongType(t *testing.T) {

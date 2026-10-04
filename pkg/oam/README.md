@@ -257,9 +257,12 @@ length may be over (`SubdomainSyntaxErrors` is `IsDNS1123Subdomain` without the 
 a site that shortens and validates). The full DNS-1123 check then runs on the shortened name,
 which is the name emitted. A role component's PVC claim name is checked the same way.
 
-A name an author writes, or an override of a generated name, is never shortened: it is used as
-written, and the validation of its own property decides whether it is accepted. The
-application bundle carries the Application's name as written.
+A name an author writes, or an override of a generated name, is used as written or refused. It
+is never shortened and never changed, and one that cannot be the name of its object fails the
+transform with the property in the error, so the cluster never has to refuse it
+(go-kure/launcher#787). The built-in traits' authored names and the rule each is checked by are
+listed in [`builtin/traits`](builtin/traits/README.md). The application bundle carries the
+Application's name as written.
 
 ## Parsing
 

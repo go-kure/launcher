@@ -186,9 +186,11 @@ func scopedHTTPRouteProps(scope string) map[string]any {
 }
 
 // An authored repository is an override: it is used as written, never
-// shortened.
+// shortened. At the longest name an object can have it is still kept whole,
+// where the default for the same component would be shortened; one character
+// more is refused (TestAuthoredObjectName_UsedAsWrittenOrRefused).
 func TestVolsyncRepository_AuthoredIsNeverShortened(t *testing.T) {
-	authored := strings.Repeat("r", 300)
+	authored := strings.Repeat("r", oam.ShortenLimitSubdomain)
 	c, err := (&VolSyncHandler{}).parseProperties(
 		map[string]any{"sourcePVC": "data", "schedule": "0 3 * * *", "repository": authored},
 		stack.NewApplication("web", "ns", nil))

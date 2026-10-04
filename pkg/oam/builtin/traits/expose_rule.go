@@ -198,6 +198,13 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 					Message:   "secretName must be a non-empty string",
 				}
 			}
+			if err := checkAuthoredObjectName("secretName", "the managed TLS Secret", s); err != nil {
+				return oam.LoweringResult{}, &errors.ValidationError{
+					Field:     "secretName",
+					Component: componentName,
+					Message:   err.Error(),
+				}
+			}
 			secretName = s
 		}
 		delete(props, "secretName")

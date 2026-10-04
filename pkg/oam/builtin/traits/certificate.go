@@ -107,6 +107,9 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 	if !ok || secretName == "" {
 		return nil, errors.New("required property 'secretName' missing or not a string")
 	}
+	if err := checkAuthoredObjectName("secretName", "the Certificate and its Secret", secretName); err != nil {
+		return nil, err
+	}
 	config.SecretName = secretName
 
 	issuerRef, ok := props["issuerRef"].(map[string]any)
