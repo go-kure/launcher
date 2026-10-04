@@ -32,8 +32,8 @@ import (
 
 const ownershipKey = "launcher.gokure.dev/component"
 
-// podTemplateLabelsOf returns obj's pod template labels and whether obj is one
-// of the five workload kinds, typed or unstructured.
+// podTemplateLabelsOf returns obj's pod template labels and whether obj is of
+// a kind that has a pod template, typed or unstructured.
 func podTemplateLabelsOf(t *testing.T, obj client.Object) (map[string]string, bool) {
 	t.Helper()
 	switch o := obj.(type) {
@@ -54,10 +54,15 @@ func podTemplateLabelsOf(t *testing.T, obj client.Object) (map[string]string, bo
 			return nil, true
 		}
 		return o.Spec.Template.Labels, true
+	case *corev1.PodTemplate:
+		return o.Template.Labels, true
 	case *unstructured.Unstructured:
 		path := []string{"spec", "template", "metadata", "labels"}
-		if o.GetKind() == "CronJob" {
+		switch o.GetKind() {
+		case "CronJob":
 			path = []string{"spec", "jobTemplate", "spec", "template", "metadata", "labels"}
+		case "PodTemplate":
+			path = []string{"template", "metadata", "labels"}
 		}
 		labels, _, err := unstructured.NestedStringMap(o.Object, path...)
 		if err != nil {
@@ -68,8 +73,19 @@ func podTemplateLabelsOf(t *testing.T, obj client.Object) (map[string]string, bo
 	return nil, false
 }
 
+// unstructuredWorkload is an object of kind with an unlabelled pod template
+// where the kind holds it: under its spec, under a CronJob's job template, or
+// on a PodTemplate itself.
 func unstructuredWorkload(apiVersion, kind string) *unstructured.Unstructured {
 	template := map[string]any{"spec": map[string]any{"containers": []any{}}}
+	if kind == "PodTemplate" {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": apiVersion,
+			"kind":       kind,
+			"metadata":   map[string]any{"name": "w"},
+			"template":   template,
+		}}
+	}
 	spec := map[string]any{"template": template}
 	if kind == "CronJob" {
 		spec = map[string]any{"jobTemplate": map[string]any{"spec": map[string]any{"template": template}}}
@@ -109,8 +125,9 @@ func TestStampComponentLabel_ReplicationControllerWithoutTemplate(t *testing.T) 
 	}
 }
 
-// TestStampComponentLabel_Workloads: every workload kind, typed and
-// unstructured, gets the label on the object and on its pod template.
+// TestStampComponentLabel_Workloads: every workload kind and a PodTemplate,
+// typed and unstructured, gets the label on the object and on its pod
+// template.
 func TestStampComponentLabel_Workloads(t *testing.T) {
 	workloads := map[string]client.Object{
 		"typed Deployment":  &appsv1.Deployment{},
@@ -123,6 +140,7 @@ func TestStampComponentLabel_Workloads(t *testing.T) {
 			Selector: map[string]string{"app": "web"},
 			Template: &corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}}},
 		}},
+		"typed PodTemplate":                  &corev1.PodTemplate{},
 		"unstructured Deployment":            unstructuredWorkload("apps/v1", "Deployment"),
 		"unstructured StatefulSet":           unstructuredWorkload("apps/v1", "StatefulSet"),
 		"unstructured DaemonSet":             unstructuredWorkload("apps/v1", "DaemonSet"),
@@ -130,6 +148,7 @@ func TestStampComponentLabel_Workloads(t *testing.T) {
 		"unstructured CronJob":               unstructuredWorkload("batch/v1", "CronJob"),
 		"unstructured ReplicaSet":            unstructuredWorkload("apps/v1", "ReplicaSet"),
 		"unstructured ReplicationController": unstructuredReplicationController(),
+		"unstructured PodTemplate":           unstructuredWorkload("v1", "PodTemplate"),
 	}
 	for name, obj := range workloads {
 		t.Run(name, func(t *testing.T) {
@@ -344,11 +363,15 @@ func TestStampComponentLabel_NullPodTemplateLabelValue(t *testing.T) {
 // TestStampComponentLabel_NullPodTemplateMetadata: YAML's explicit null is an
 // absent value. A pod template whose metadata or labels are null gets the
 // label; a workload with no pod template, or a null one, is left as it is.
+// A PodTemplate has no spec around its pod template.
 func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
-	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}, {"apps/v1", "ReplicaSet"}, {"v1", "ReplicationController"}} {
+	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}, {"apps/v1", "ReplicaSet"}, {"v1", "ReplicationController"}, {"v1", "PodTemplate"}} {
 		spec := []string{"spec"}
-		if kind.kind == "CronJob" {
+		switch kind.kind {
+		case "CronJob":
 			spec = []string{"spec", "jobTemplate", "spec"}
+		case "PodTemplate":
+			spec = nil
 		}
 		template := append(append([]string(nil), spec...), "template")
 		for name, null := range map[string][]string{
@@ -369,7 +392,11 @@ func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 				}
 			})
 		}
-		for name, null := range map[string][]string{"template": template, "spec": spec[:1]} {
+		absent := map[string][]string{"template": template}
+		if len(spec) > 0 {
+			absent["spec"] = spec[:1]
+		}
+		for name, null := range absent {
 			t.Run(kind.kind+" with null "+name, func(t *testing.T) {
 				u := unstructuredWorkload(kind.apiVersion, kind.kind)
 				if err := unstructured.SetNestedField(u.Object, nil, null...); err != nil {
@@ -385,6 +412,51 @@ func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestStampComponentLabel_PodTemplate: a PodTemplate's pod template is a field
+// of the object itself. A value the template already carries stays, the
+// object's own label is added beside it, and a second call changes nothing.
+func TestStampComponentLabel_PodTemplate(t *testing.T) {
+	typed := &corev1.PodTemplate{}
+	typed.Template.Labels = map[string]string{ownershipKey: "authored"}
+	u := unstructuredWorkload("v1", "PodTemplate")
+	if err := unstructured.SetNestedStringMap(u.Object, map[string]string{ownershipKey: "authored"}, "template", "metadata", "labels"); err != nil {
+		t.Fatal(err)
+	}
+	for name, obj := range map[string]client.Object{"typed": typed, "unstructured": u} {
+		t.Run(name, func(t *testing.T) {
+			for range 2 {
+				if err := stampComponentLabel(obj, ownershipKey, "web"); err != nil {
+					t.Fatalf("stampComponentLabel: %v", err)
+				}
+			}
+			if got := obj.GetLabels()[ownershipKey]; got != "web" {
+				t.Errorf("object label = %q, want web", got)
+			}
+			labels, _ := podTemplateLabelsOf(t, obj)
+			if want := map[string]string{ownershipKey: "authored"}; !reflect.DeepEqual(labels, want) {
+				t.Errorf("pod template labels = %v, want the authored value kept: %v", labels, want)
+			}
+		})
+	}
+}
+
+// TestStampComponentLabel_PodTemplateHasNoSelector: a PodTemplate has no
+// selector, so a top-level field of that name holds no label back, as nothing
+// does on the typed kind.
+func TestStampComponentLabel_PodTemplateHasNoSelector(t *testing.T) {
+	u := unstructuredWorkload("v1", "PodTemplate")
+	u.Object["selector"] = map[string]any{
+		"matchExpressions": []any{map[string]any{"key": ownershipKey, "operator": "DoesNotExist"}},
+	}
+	if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
+		t.Fatalf("stampComponentLabel: %v", err)
+	}
+	labels, _ := podTemplateLabelsOf(t, u)
+	if want := map[string]string{ownershipKey: "web"}; !reflect.DeepEqual(labels, want) {
+		t.Errorf("pod template labels = %v, want %v", labels, want)
 	}
 }
 
@@ -602,9 +674,9 @@ func authoredPostRenderer() helmv2.PostRenderer {
 }
 
 // assertComponentPostRenderer checks pr is the component label post-renderer:
-// one patch per workload kind, each a strategic merge setting only the label on
-// the kind's pod template, and one for a bare Pod setting it on the Pod itself,
-// the value a string whatever it looks like.
+// one patch per workload kind and one for PodTemplate, each a strategic merge
+// setting only the label on the kind's pod template, and one for a bare Pod
+// setting it on the Pod itself, the value a string whatever it looks like.
 func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, value string) {
 	t.Helper()
 	if pr.Kustomize == nil || len(pr.Kustomize.Images) != 0 {
@@ -618,9 +690,10 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		{Group: "batch", Version: "v1", Kind: "CronJob"},
 		{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
 		{Version: "v1", Kind: "ReplicationController"},
+		{Version: "v1", Kind: "PodTemplate"},
 		{Version: "v1", Kind: "Pod"},
 	}
-	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1", "v1"}
+	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1", "v1", "v1"}
 	if len(pr.Kustomize.Patches) != len(wantTargets) {
 		t.Fatalf("patches = %d, want %d", len(pr.Kustomize.Patches), len(wantTargets))
 	}
@@ -637,6 +710,11 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		switch wantTargets[i].Kind {
 		case "CronJob":
 			path = []string{"spec", "jobTemplate", "spec", "template", "metadata", "labels"}
+		case "PodTemplate":
+			path = []string{"template", "metadata", "labels"}
+			if _, found := doc["spec"]; found {
+				t.Errorf("patch %d has a spec, want the PodTemplate's template only\n%s", i, p.Patch)
+			}
 		case "Pod":
 			path = []string{"metadata", "labels"}
 			if _, found := doc["spec"]; found {

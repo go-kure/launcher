@@ -272,9 +272,9 @@ NetworkPolicies select (`TransformContext.ComponentLabelKey`, else `<Domain>/com
 goes on:
 
 - every object the application generates, in `metadata.labels`;
-- the pod template of a `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet` or
-  `ReplicationController`, and the job template's pod template of a `CronJob`, typed or
-  unstructured;
+- the pod template of a `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet`,
+  `ReplicationController` or `PodTemplate`, and the job template's pod template of a
+  `CronJob`, typed or unstructured;
 - the same places in a layout the config augments (`layout.LayoutAugmenter`);
 - nothing an application without an owner generates.
 
@@ -311,11 +311,12 @@ pod template and a `HelmRelease` with its post-renderer, beside the envelope its
 
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
-a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
-`CronJob`, `ReplicaSet`, `ReplicationController`) that sets the label on the pod template,
-and one for a bare `Pod` that sets it on the Pod's own labels. Flux applies it to whatever
-the chart rendered, so here the component's value **replaces** one the chart set. The entry
-is added once, however often the document is transformed or generated.
+a strategic-merge patch per kind with a pod template (`Deployment`, `StatefulSet`,
+`DaemonSet`, `Job`, `CronJob`, `ReplicaSet`, `ReplicationController`, `PodTemplate`) that
+sets the label on the pod template, and one for a bare `Pod` that sets it on the Pod's own
+labels. Flux applies it to whatever the chart rendered, so here the component's value
+**replaces** one the chart set. The entry is added once, however often the document is
+transformed or generated.
 
 The post-renderer reaches what Helm hands it. Whether that includes a chart's hook and test
 Pods depends on the Helm version the helm-controller runs, and launcher has not verified

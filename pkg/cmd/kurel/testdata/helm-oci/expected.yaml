@@ -128,6 +128,18 @@ spec:
           version: v1
       - patch: |
           apiVersion: v1
+          kind: PodTemplate
+          metadata:
+            name: component-label
+          template:
+            metadata:
+              labels:
+                launcher.gokure.dev/component: cert-manager
+        target:
+          kind: PodTemplate
+          version: v1
+      - patch: |
+          apiVersion: v1
           kind: Pod
           metadata:
             labels:
