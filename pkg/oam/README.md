@@ -357,6 +357,17 @@ generates. The case is reached only through a consumer's own lowering rule.
 
 - Output: every owned object and pod template gains the component label, a `HelmRelease`
   gains the post-renderer, and a component's synthesized NetworkPolicies gain the label.
+- A `Job` that a cluster already holds from before this change, and that nothing recreates,
+  cannot take the label on its pod template: the cluster keeps a Job's pod template
+  immutable, so the apply, or the Helm upgrade, fails on it with the API's immutable-field
+  error. This holds for a Job a chart renders, under Flux delivery (the post-renderer) and
+  under template delivery, and for one launcher generates (the `job` component, a
+  `manifests` Job). Once: delete the Job so that it is recreated with the label, or apply
+  with force where the deployer supports it. A `CronJob` is not affected: its job template
+  may change, and the Jobs it creates afterwards carry the label. The rule is read from
+  Kubernetes 1.37's Job update validation (`validatePodTemplateUpdate` in
+  `pkg/apis/batch/validation`), not run against a cluster here; its one exception is a
+  suspended Job that never started, whose template labels may change.
 - `GeneratedApplication.Component` changes from the application's name to empty for a
   generated source the application bundle holds and for the external-backend policy, and
   from the application's own name to the authored component for a lowered component named
