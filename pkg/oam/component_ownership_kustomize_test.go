@@ -12,8 +12,8 @@ import (
 
 // chartOutput stands for what a chart renders: a Deployment whose pod template
 // already carries the component key with the chart's own value, a CronJob, a
-// ReplicaSet and a ReplicationController that do not carry it, a bare Pod, and
-// an object that runs no pod.
+// ReplicaSet, a ReplicationController and a PodTemplate that do not carry it,
+// a bare Pod, and an object that runs no pod.
 const chartOutput = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,6 +65,19 @@ spec:
     metadata:
       labels:
         app: controller
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: chart-template
+template:
+  metadata:
+    labels:
+      app: template
+  spec:
+    containers:
+    - name: main
+      image: example.com/main:1
 ---
 apiVersion: v1
 kind: Pod
@@ -127,8 +140,8 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 		name, _, _ := unstructured.NestedString(doc, "metadata", "name")
 		byName[name] = doc
 	}
-	if len(byName) != 6 {
-		t.Fatalf("kustomize returned objects %v, want the chart's six under their own names\n%s", byName, out)
+	if len(byName) != 7 {
+		t.Fatalf("kustomize returned objects %v, want the chart's seven under their own names\n%s", byName, out)
 	}
 	return byName
 }
@@ -143,6 +156,7 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 		"chart-cron":       {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
 		"chart-replicas":   {"spec", "template", "metadata", "labels"},
 		"chart-controller": {"spec", "template", "metadata", "labels"},
+		"chart-template":   {"template", "metadata", "labels"},
 		"chart-pod":        {"metadata", "labels"},
 	} {
 		labels, _, err := unstructured.NestedStringMap(byName[name], path...)
@@ -169,6 +183,15 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	containers, _, err := unstructured.NestedSlice(byName["chart-pod"], "spec", "containers")
 	if err != nil || len(containers) != 1 {
 		t.Errorf("chart-pod containers = %v (%v), want the chart's one", containers, err)
+	}
+	// The PodTemplate patch sets the label on the template and nothing else: the
+	// object's own labels stay absent and the template keeps its containers.
+	if labels, found, _ := unstructured.NestedMap(byName["chart-template"], "metadata", "labels"); found {
+		t.Errorf("chart-template got object labels %v, want its template labelled only", labels)
+	}
+	templateContainers, _, err := unstructured.NestedSlice(byName["chart-template"], "template", "spec", "containers")
+	if err != nil || len(templateContainers) != 1 {
+		t.Errorf("chart-template containers = %v (%v), want the chart's one", templateContainers, err)
 	}
 	if labels, found, _ := unstructured.NestedMap(byName["chart-settings"], "metadata", "labels"); found {
 		t.Errorf("the ConfigMap got labels %v, want it left alone", labels)

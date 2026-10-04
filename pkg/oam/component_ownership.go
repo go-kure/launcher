@@ -386,8 +386,9 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // stampComponentLabel puts key: value on obj where obj carries no value for key
 // yet, and on its pod template when obj is a workload: a Deployment,
 // StatefulSet, DaemonSet, Job, CronJob, ReplicaSet or ReplicationController,
-// typed or unstructured. A HelmRelease also gets the post-renderer that labels
-// its chart's pod templates (componentLabelPostRenderer).
+// typed or unstructured. A PodTemplate is its pod template: it gets the label
+// there too. A HelmRelease also gets the post-renderer that labels its chart's
+// pod templates (componentLabelPostRenderer).
 //
 // A value already there stays, whatever it is: a component, a trait or an
 // author set it, and with a key a workload selects on (ComponentLabelKey "app")
@@ -437,6 +438,10 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 		if o.Spec.Template != nil {
 			o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, nil, key, value)
 		}
+	case *corev1.PodTemplate:
+		// Its pod template is a field of the object itself, and it has no
+		// selector.
+		o.Template.Labels = withComponentLabel(o.Template.Labels, nil, key, value)
 	case *helmv2.HelmRelease:
 		pr, err := componentLabelPostRenderer(key, value)
 		if err != nil {
@@ -492,17 +497,21 @@ func ownLabels(labels map[string]string, key, value string) map[string]string {
 	return withMissing(maps.Clone(labels), map[string]string{key: value})
 }
 
-// podTemplateKinds are the workload kinds whose pod template takes the
-// component label, in the order the HelmRelease post-renderer patches them,
-// with the path of the spec that holds the pod template ("template") and the
-// workload's own selector ("selector") in each. The core group is "": a
-// kustomize target cannot name it, and one with no group matches the kind in
-// any group, so the ReplicationController patch would also reach a v1 kind of
-// that name in another group.
+// podTemplateKinds are the kinds whose pod template takes the component label,
+// the workload kinds and PodTemplate, in the order the HelmRelease
+// post-renderer patches them, with the path of the spec that holds the pod
+// template ("template") and the workload's own selector ("selector") in each.
+// The core group is "": a kustomize target cannot name it, and one with no
+// group matches the kind in any group, so the ReplicationController patch would
+// also reach a v1 kind of that name in another group.
 //
 // A ReplicationController's selector is a plain label map, not a label
 // selector. Read as one it either does not decode or selects every pod, so it
 // holds no label back, as a label map does not.
+//
+// A PodTemplate holds its pod template itself, with no spec around it and no
+// selector: its path is empty. It is in the core group too, so its patch has
+// the reach the ReplicationController's has.
 var podTemplateKinds = []struct {
 	group, version, kind string
 	spec                 []string
@@ -514,6 +523,7 @@ var podTemplateKinds = []struct {
 	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}},
 	{"apps", "v1", "ReplicaSet", []string{"spec"}},
 	{"", "v1", "ReplicationController", []string{"spec"}},
+	{"", "v1", "PodTemplate", nil},
 }
 
 // objectField returns the object m holds at field. YAML's explicit null is an
@@ -637,9 +647,11 @@ func stampUnstructuredPodTemplate(obj map[string]any, specPath []string, key, va
 		return nil
 	}
 	// A selector that does not decode holds nothing back, as one that does not
-	// parse (withComponentLabel).
+	// parse (withComponentLabel). A PodTemplate, the one kind with no spec
+	// around its template, has no selector: a field of that name on it is not
+	// read as one.
 	var selector *metav1.LabelSelector
-	if rawSelector, ok := spec["selector"].(map[string]any); ok {
+	if rawSelector, ok := spec["selector"].(map[string]any); ok && len(specPath) > 0 {
 		decoded := &metav1.LabelSelector{}
 		if runtime.DefaultUnstructuredConverter.FromUnstructured(rawSelector, decoded) == nil {
 			selector = decoded
@@ -691,11 +703,11 @@ func stampUnstructuredHelmRelease(u *unstructured.Unstructured, key, value strin
 const componentLabelPostRendererName = "component-label"
 
 // componentLabelPostRenderer builds the Flux post-renderer that puts key: value
-// on the pod template of every workload a chart renders, and on a bare Pod. A
-// Flux post-renderer offers kustomize patches and images only, so it is one
-// strategic merge patch per workload kind (podTemplateKinds) and one for Pod,
-// each targeting the kind in its own API group; a chart that renders none of a
-// kind is left alone by that patch.
+// on the pod template of every workload and PodTemplate a chart renders, and on
+// a bare Pod. A Flux post-renderer offers kustomize patches and images only, so
+// it is one strategic merge patch per kind with a pod template
+// (podTemplateKinds) and one for Pod, each targeting the kind in its own API
+// group; a chart that renders none of a kind is left alone by that patch.
 //
 // It reaches what Helm hands a post-renderer. Whether that includes a chart's
 // hook and test Pods depends on the Helm the helm-controller runs, and is not
@@ -716,7 +728,8 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 		targets = append(targets, target{k.group, k.version, k.kind, append(append([]string(nil), k.spec...), "template", "metadata", "labels")})
 	}
 	// A bare Pod has no pod template: its own labels are its pod's. Its target
-	// names no group either, as the ReplicationController's (podTemplateKinds).
+	// names no group either, as the ReplicationController's and the
+	// PodTemplate's (podTemplateKinds).
 	targets = append(targets, target{"", "v1", "Pod", []string{"metadata", "labels"}})
 
 	patches := make([]kustomize.Patch, 0, len(targets))
