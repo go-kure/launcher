@@ -2115,10 +2115,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     workload kinds give. A pod cannot be created with ephemeral containers,
     and the Priority and RuntimeClass admission controllers set the other two
     and reject a differing value; an author sets `priorityClassName` or
-    `runtimeClassName`. The three are not in the schema. An empty
-    `ephemeralContainers` or `overhead` is read as unset. Cost: on a cluster
-    that runs without those admission controllers the two fields cannot be
-    authored through this kind.
+    `runtimeClassName`. The three are not in the schema, so a caller that
+    validates the properties against it first, as `kurel build` does, refuses
+    each as an unsupported field whatever its value, an empty one included. A
+    caller that converts the component without that validation gets the texts
+    above, and there an empty `ephemeralContainers` or `overhead` is read as
+    unset. Cost: on a cluster that runs without those admission controllers
+    the two fields cannot be authored through this kind.
   - An unauthored `containers`. The API's other value rules (an empty list, a
     container without a name, …) are left to the API server.
   - An image without a tag or digest, or tagged `:latest`, on every init and
