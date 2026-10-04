@@ -134,23 +134,6 @@ type ContractDescriber interface {
 	ContractMetadata() ContractMetadata
 }
 
-// SourceDeduplicatable is an optional interface for ApplicationConfig types
-// that generate source CRDs (e.g. HelmRepository). The runtime uses it to
-// suppress duplicate source generation when multiple components share the
-// same source key (URL for HelmRepository, URL+version for OCIRepository).
-// The component deployed first (earliest tier, then dependency order, then
-// document order) emits the source; every other one references it.
-//
-// No builtin config implements it since go-kure/launcher#784: the oci rule
-// shares its source the way the helm rule does, as a generated component
-// (NameAllocator.NameOrAdopt). The engine still honours an implementer;
-// go-kure/launcher#783 removes the interface.
-type SourceDeduplicatable interface {
-	GetSourceKey() string
-	GetSourceRefName() string
-	SuppressSourceGeneration(refName string)
-}
-
 // ComponentNamed is an optional interface for trait/component sub-app
 // ApplicationConfig types that expose the OAM component they were emitted for.
 // Consumers use it to attribute each emitted resource to its owning component

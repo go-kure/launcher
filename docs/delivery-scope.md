@@ -168,21 +168,22 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 
 Decided in the ticket:
 
-- **Tier of the component's own source.** A component alone on its artifact lowers to a
-  same-name sibling group. Its `ocirepository` member takes its type's tier instead of the
-  `infra` tier of a generated source (`isGeneratedSource`, `classify.go`), so the group
-  stays in one tier and a tier annotation, `placement` or `dependency` naming the component
-  moves both objects. Temporary: go-kure/launcher#783 deletes that function with the tier
-  model.
+- **The component's own source stays with it.** A component alone on its artifact lowers
+  to a same-name sibling group. Its `ocirepository` member is not a generated source (§2.2
+  item 4): the rule orders nothing after it and it is a group member, so the pair is one
+  unit, and a tier annotation, `placement` or `dependency` naming the component moves both
+  objects. With nothing declared the pair orders nothing.
 - **A shared source belongs to the application.** When two or more `oci` components of a
   document have the same source, it is emitted once as a generated source named
   `<document>-source-<digest>`, `helm`'s scheme, and no longer under the name of the
-  component deployed first. The identity is the url, the version and the effective
-  interval: components whose intervals differ keep a source each, so no component's
-  interval is replaced by another's. An `oci` and a `helm` component on one artifact do not
-  share.
-- **`SourceDeduplicatable`** (`pkg/oam/handler.go`) has no builtin implementer left. The
-  interface and the engine's call stay until go-kure/launcher#783 removes them.
+  component deployed first. The rule orders each Kustomization after it (§2.2 item 2), so
+  it sits in the application bundle itself, ahead of the ordered groups. The identity is
+  the url, the version and the effective interval: components whose intervals differ keep
+  a source each, so no component's interval is replaced by another's. An `oci` and a `helm`
+  component on one artifact do not share.
+- **`SourceDeduplicatable` is removed**, with the engine pass that read it
+  (`deduplicateSourceRefs`): no builtin implemented it any more, and a rule that shares a
+  source emits it as a component (`NameAllocator.NameOrAdopt`, `Component.OrderAfter`).
 - `targetNamespace` is never defaulted on `fluxcd-kustomization`, for the reason `oci`
   never defaulted it (§7).
 - The name of an authored Kustomization against a delivery Kustomization a consumer

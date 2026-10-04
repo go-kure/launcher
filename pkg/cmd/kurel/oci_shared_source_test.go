@@ -9,16 +9,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
+
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // Two oci components on one artifact (go-kure/launcher#784). When their
 // effective intervals are equal they share one OCIRepository, which belongs to
 // the document rather than to the component that comes first: it is named
-// <document>-source-<digest> and deploys in the infra tier, ahead of both
+// <document>-source-<digest>, each Kustomization is ordered after it, and the
+// application bundle itself holds it, ahead of the group with both
 // Kustomizations. When the intervals differ each component keeps a source of its
 // own, named after it and polling at its own interval, so neither component's
-// interval is replaced by the other's.
+// interval is replaced by the other's, and nothing is ordered.
 
 // ociSharedApp is a document with two oci components on one artifact, each with
 // the given interval line ("" for unset).
@@ -106,17 +109,58 @@ func TestBuild_OCISameArtifact_EqualIntervalsShareOneSource(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Transform: %v", err)
 			}
-			bundles := leafBundles(cluster.Node)
-			if got := bundleHolding(bundles, shared); got != "shop-infra" {
-				t.Errorf("shared source is in bundle %q, want shop-infra (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
-			}
-			for _, comp := range []string{"base", "addons"} {
-				if got := bundleHolding(bundles, comp); got != "shop-apps" {
-					t.Errorf("%s is in bundle %q, want shop-apps", comp, got)
-				}
+			// The rule orders each Kustomization after the shared source, so the
+			// source is a generated one: the application bundle holds it, ahead
+			// of the one group with both Kustomizations, which nothing orders.
+			assertSourcesInApplicationBundle(t, cluster, shared)
+			if got, want := groupNames(t, cluster), []string{"shop-00: base addons"}; !slices.Equal(got, want) {
+				t.Errorf("groups = %v, want %v", got, want)
 			}
 		})
 	}
+}
+
+// A placement of a consumer leaves the shared source where it is: with the
+// application bundle, ahead of every group, so the consumer placed first and
+// the one placed last both follow it.
+func TestBuild_OCISharedSourceStaysAheadOfPlacedConsumers(t *testing.T) {
+	app := ociSharedApp("", "") + `  policies:
+    - name: base-first
+      type: placement
+      properties:
+        component: base
+        tier: infra
+    - name: addons-last
+      type: placement
+      properties:
+        component: addons
+        tier: apps
+`
+	cluster, _, err := transformWithBuiltins(t, app)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	assertSourcesInApplicationBundle(t, cluster, ociSharedSourceName("1h0m0s"))
+	if got, want := groupNames(t, cluster), []string{"shop-infra: base", "shop-apps: addons"}; !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+// ociObjectsOf returns the objects the applications of bundle generate, each as
+// "<kind>/<name>", in order.
+func ociObjectsOf(t *testing.T, bundle *stack.Bundle) []string {
+	t.Helper()
+	var out []string
+	for _, a := range bundle.Applications {
+		objs, err := a.Config.Generate(a)
+		if err != nil {
+			t.Fatalf("Generate %s: %v", a.Name, err)
+		}
+		for _, o := range objs {
+			out = append(out, (*o).GetObjectKind().GroupVersionKind().Kind+"/"+(*o).GetName())
+		}
+	}
+	return out
 }
 
 func TestBuild_OCISameArtifact_DifferentIntervalsKeepTwoSources(t *testing.T) {
@@ -131,29 +175,30 @@ func TestBuild_OCISameArtifact_DifferentIntervalsKeepTwoSources(t *testing.T) {
 		t.Errorf("source references = %v, want %v", refs, want)
 	}
 
-	// Each component's two objects deploy as one unit, in its type's tier. Both
-	// components are in the apps tier and neither source is a generated one, so
-	// the document stays one bundle, named after it: a source in the infra tier
-	// would split it into shop-infra and shop-apps.
+	// Each component's two objects deploy as one unit, and neither source is a
+	// generated one: nothing is ordered, so the application is one flat bundle
+	// holding one application per component. A hoisted source would instead
+	// give the bundle a child group.
 	cluster, _, err := transformWithBuiltins(t, app)
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	bundles := leafBundles(cluster.Node)
-	if got := slices.Sorted(maps.Keys(bundles)); !slices.Equal(got, []string{"shop"}) {
-		t.Fatalf("bundles = %v, want the one bundle shop", got)
+	root := cluster.Node.Bundle
+	if root == nil || root.Name != "shop" || len(root.Children) != 0 || len(cluster.Node.Children) != 0 {
+		t.Fatalf("root bundle = %v, want the one flat bundle shop", root)
 	}
-	for _, comp := range []string{"base", "addons"} {
-		if got := bundleHolding(bundles, comp); got != "shop" {
-			t.Errorf("%s is in bundle %q, want shop", comp, got)
-		}
+	wantObjects := []string{"OCIRepository/base", "Kustomization/base", "OCIRepository/addons", "Kustomization/addons"}
+	if got := ociObjectsOf(t, root); !slices.Equal(got, wantObjects) {
+		t.Errorf("bundle shop holds %v, want %v", got, wantObjects)
 	}
 }
 
 // A component alone on its artifact deploys its source and its Kustomization as
-// one unit, so a tier annotation or a placement policy naming the component
-// moves both, and a dependency rule may order the component after another.
-func TestBuild_OCIOwnSourceFollowsItsComponentsTier(t *testing.T) {
+// one unit: the source is a member of the component's same-name group, not a
+// generated source, so the application bundle does not take it. A tier
+// annotation or a placement policy naming the component moves both objects, and
+// a dependency rule orders both after another component.
+func TestBuild_OCIOwnSourceStaysWithItsComponent(t *testing.T) {
 	const header = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -163,6 +208,8 @@ spec:
   components:
     - name: api
       type: webservice
+      annotations:
+        ` + kurelDomain + `/tier: apps
       properties:
         image: nginx:1.27
     - name: manifests
@@ -195,28 +242,18 @@ spec:
 			if tc.wantOverride && result.TierOverrides["manifests"] != oam.TierInfra {
 				t.Fatalf("TierOverrides = %v, want manifests placed in infra", result.TierOverrides)
 			}
-			bundles := leafBundles(cluster.Node)
-			if got := bundleHolding(bundles, "manifests"); got != "shop-infra" {
-				t.Fatalf("manifests is in bundle %q, want shop-infra (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
+			assertSourcesInApplicationBundle(t, cluster)
+			if got, want := groupNames(t, cluster), []string{"shop-infra: manifests", "shop-apps: api"}; !slices.Equal(got, want) {
+				t.Fatalf("groups = %v, want %v", got, want)
 			}
-			var kinds []string
-			for _, a := range bundles["shop-infra"].Applications {
-				objs, err := a.Config.Generate(a)
-				if err != nil {
-					t.Fatalf("Generate %s: %v", a.Name, err)
-				}
-				for _, o := range objs {
-					kinds = append(kinds, (*o).GetObjectKind().GroupVersionKind().Kind+"/"+(*o).GetName())
-				}
-			}
-			if want := []string{"OCIRepository/manifests", "Kustomization/manifests"}; !slices.Equal(kinds, want) {
-				t.Errorf("shop-infra holds %v, want %v", kinds, want)
+			if got, want := ociObjectsOf(t, cluster.Node.Bundle.Children[0]), []string{"OCIRepository/manifests", "Kustomization/manifests"}; !slices.Equal(got, want) {
+				t.Errorf("shop-infra holds %v, want %v", got, want)
 			}
 		})
 	}
 
 	t.Run("dependency rule", func(t *testing.T) {
-		cluster, _, err := transformWithBuiltins(t, header+props+`  policies:
+		cluster, _, err := transformWithBuiltins(t, strings.Replace(header, "      annotations:\n        "+kurelDomain+"/tier: apps\n", "", 1)+props+`  policies:
     - name: order
       type: dependency
       properties:
@@ -227,17 +264,25 @@ spec:
 		if err != nil {
 			t.Fatalf("Transform: %v", err)
 		}
-		bundles := leafBundles(cluster.Node)
-		manifests := bundles["shop-manifests"]
-		if manifests == nil {
-			t.Fatalf("no bundle for manifests, got %v", slices.Sorted(maps.Keys(bundles)))
+		assertSourcesInApplicationBundle(t, cluster)
+		if got, want := groupNames(t, cluster), []string{"shop-00: api", "shop-01: manifests"}; !slices.Equal(got, want) {
+			t.Fatalf("groups = %v, want %v", got, want)
 		}
-		var deps []string
-		for _, d := range manifests.DependsOn {
-			deps = append(deps, d.Name)
+		if got, want := ociObjectsOf(t, cluster.Node.Bundle.Children[1]), []string{"OCIRepository/manifests", "Kustomization/manifests"}; !slices.Equal(got, want) {
+			t.Errorf("shop-01 holds %v, want %v", got, want)
 		}
-		if !slices.Contains(deps, "shop-api") {
-			t.Errorf("shop-manifests depends on %v, want shop-api among them", deps)
+	})
+
+	// Nothing declared: the pair orders nothing by itself, so the application
+	// stays one flat bundle with the source in it.
+	t.Run("nothing declared", func(t *testing.T) {
+		cluster, _, err := transformWithBuiltins(t, strings.Replace(header, "      annotations:\n        "+kurelDomain+"/tier: apps\n", "", 1)+props)
+		if err != nil {
+			t.Fatalf("Transform: %v", err)
+		}
+		root := cluster.Node.Bundle
+		if root == nil || len(root.Children) != 0 || len(root.Applications) != 2 {
+			t.Fatalf("root bundle = %v, want one flat bundle holding api and manifests", root)
 		}
 	})
 }

@@ -198,8 +198,8 @@ func (e componentEntry) traitSteps(app *Application) []traitStep {
 //     whether a routing target selects another member's pods on ports mapped
 //     to themselves, and then keeps the component label as the pod selector.
 //
-// Not forwarded, on purpose: Enforceable and SourceDeduplicatable run per member
-// in createApplications, before the group exists; trafficSourceCollector and
+// Not forwarded, on purpose: Enforceable runs per member in
+// createApplications, before the group exists; trafficSourceCollector and
 // backendRefTargetCollector are trait sub-application contracts, never a
 // component's; stack.Validator runs inside each member's own Generate. A member
 // that is a kure layout augmenter is refused (checkSiblingGroups): its layout is

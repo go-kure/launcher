@@ -637,10 +637,10 @@ func TestOrdering_AuthoredSource_IsAComponentLikeAnyOther(t *testing.T) {
 	assertFlat(t, cluster, []string{"web", "repo"})
 }
 
-// --- shared source of a SourceDeduplicatable config ---
+// --- the order entries are built in ---
 
-// TestOrdering_Sequence: the order a shared source's owner is chosen in follows
-// the groups, then the document.
+// TestOrdering_Sequence: the order the application's entries are built in
+// follows the groups, then the document.
 func TestOrdering_Sequence(t *testing.T) {
 	entry := func(name string, tier Tier) componentEntry {
 		return componentEntry{component: Component{Name: name}, tier: tier}

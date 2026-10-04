@@ -41,7 +41,8 @@ declarations order components:
   no tier and takes no part in that order, so one populated tier alone orders nothing.
 - **A `dependency` policy rule.**
 - **A lowering rule's order between the components it emits** (`Component.OrderAfter`).
-  The `helm` rule orders its release after the source it generates.
+  The `helm` rule orders its release after the source it generates, and the `oci` rule
+  each Kustomization after the source several `oci` components share.
 
 An application is always one bundle, named after the Application. With nothing declared
 it is flat: the one bundle holds every component. Otherwise the components are split into
@@ -79,10 +80,6 @@ bundles.** Launcher expresses "sources before groups" only through that shape an
 enforce it. kure's layout walker writes a bundle's applications, then its children. A
 caller that walks the tree itself must visit the own applications of a bundle that has
 children; `GenerateApplications` does.
-
-A Flux source shared by several components through `SourceDeduplicatable` is emitted once,
-by the sharing component that comes first in that order (group, then document order), so
-its owner never waits on another consumer.
 
 Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
 `Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
@@ -485,7 +482,6 @@ the built-ins. Extend the system by implementing:
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). Every built-in handler and lowering rule implements it. |
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
-| `SourceDeduplicatable` | Collapse duplicate sources emitted by several component configs. No builtin implements it since go-kure/launcher#784 (`oci` shares its source through its lowering rule, as `helm` does); go-kure/launcher#783 removes it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`. |
@@ -913,8 +909,15 @@ the component: it is the application's, shared by every component that names the
 source, and stays among the application bundle's own applications. Any other source the
 rule emits is a component like any other and takes the order. `OrderAfter` is one of
 the three ordering declarations described under "Pipeline".
-The built-in user is the `helm` rule, which orders the release after the source it
-generates or adopts.
+The built-in users are the `helm` rule, which orders the release after the source it
+generates or adopts, and the `oci` rule, which does the same for each Kustomization of a
+source several `oci` components share (go-kure/launcher#784). A component alone on its
+artifact orders nothing: its source is a member of its same-name sibling group.
+
+A source that several components share is always a component a rule emits once and the
+others adopt. The engine has no other sharing mechanism: the `SourceDeduplicatable`
+interface and the pass that let the first config of a shared source key emit it were
+removed with go-kure/launcher#784.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the

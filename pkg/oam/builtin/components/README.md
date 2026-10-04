@@ -3156,9 +3156,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     10-hex digest of the source identity, through
     `NameAllocator.NameOrAdopt`, which shortens a name over 253 characters by
     the one rule), and each component lowers to its Kustomization alone,
-    referencing it. Like a source `helm` generates, it deploys in the `infra`
-    tier, carries no trait and no annotation of any consumer, may be placed
-    only in `infra` and may not be made to wait on a component.
+    referencing it and ordered after it (`Component.OrderAfter`). Like a
+    source `helm` generates, it is then a generated source: `pkg/oam` applies
+    it with the application bundle, ahead of every group, wherever its
+    consumers are placed. It carries no trait and no annotation of any
+    consumer, and may not be placed in a tier or made to wait on a component.
   - *The source identity* is the `url`, the `version` and the effective
     `interval`. Unset, `0s`, `60m` and `1h` are one interval. Components
     whose intervals differ do not share: each keeps a source of its own,
@@ -3169,8 +3171,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Output changes.** For a document in which several `oci` components
   reconcile one artifact, the OCIRepository is renamed from the name of the
-  component deployed first to `<document>-source-<digest>`. It deploys in the
-  `infra` tier instead of that component's, and no longer carries that
+  component deployed first to `<document>-source-<digest>`. It is applied
+  with the application bundle, ahead of every group, instead of with that
+  component, so the application has an ordered group even when the document
+  declares no order. It no longer carries that
   component's `prune-protection` or `force-replace` decoration. The rename also happens when a second consumer
   is added to a document that had one, and is undone when it is removed.
   Components that shared one source while their intervals differed now emit
