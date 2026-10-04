@@ -404,7 +404,7 @@ No path writes explicit values into a Secret.
 | Image reference check (`ValidateImageRef`, `common.go`) | No | Yes, on every init and regular container of a rendered workload. |
 | Pod security (privileged, host namespaces, hostPath, capabilities; the `Policy` flags, `pkg/oam/policy.go`, read by `enforcePodTemplatePolicy`, `cnpg_common.go`) | No | Yes, on every rendered workload (`enforceRenderedObjectPolicy`, `helmtemplate_policy.go`). A chart rendering a privileged pod is refused unless the policy allows it. |
 | PersistentVolume (a `hostPath` or `local` source, `capacity.storage`) | No | Yes, since the `persistentvolume` kind (go-kure/launcher#790): a rendered PersistentVolume is held to what the kind holds its own to (`enforcePersistentVolumePolicy`, `enforce.go`). |
-| Namespace | HelmRelease and source in the Flux namespace | **Shipped (go-kure/launcher#794, item 4):** a namespaced object the chart rendered without `metadata.namespace` is given the application namespace, where a Helm install would create it (`stampRenderedNamespaces`, `helmtemplate_render.go`). A namespace the chart wrote is kept, and it is not checked. A cluster-scoped object is left as rendered. So is an object whose scope is unknown (a kind kure does not register, with no CustomResourceDefinition for it among the rendered objects; a chart's `crds/` directory is not rendered): it stays without a namespace. |
+| Namespace | HelmRelease and source in the Flux namespace | **Shipped (go-kure/launcher#794, item 4):** a namespaced object the chart rendered without `metadata.namespace` is given the application namespace, where a Helm install would create it (`stampRenderedNamespaces`, `helmtemplate_render.go`). A namespace the chart wrote is kept, and it is not checked. A cluster-scoped object is left as rendered. So is an object whose scope is unknown (a kind kure does not register, with no CustomResourceDefinition for it among the rendered objects; a chart's `crds/` directory is not rendered): it stays without a namespace, unless the `helmtemplate` component's `scopeOverrides` states the kind's scope (§7, item 11). |
 
 `kurel` sets no `Policy` (`runBuild`, `pkg/cmd/kurel/build.go`), so `NoopPolicy` applies
 (`Transformer.TransformWithPolicy`, `pkg/oam/transform.go`): the registry allowlist is
@@ -600,8 +600,17 @@ and the disposition of every item. The four this document started from:
   The component label of go-kure/launcher#788 (§3.4) is stamped on the pod template of
   every workload kind without it, and is not among the labels it returns.
 - **Namespace on template output (item 4): shipped** (§5.1). An object of unknown scope
-  is left as rendered; a `scopeOverrides` property on `helm` and `helmtemplate`, as
-  `manifests` has, is the follow-up (item 11, not decided).
+  is left as rendered.
+- **Scope overrides on template delivery (item 11): shipped for `helmtemplate`.** The
+  component takes the `scopeOverrides` property `manifests` has, read by the same parser
+  and resolved by one function both call (`resolveObjectScope`,
+  `pkg/oam/builtin/components/manifests.go`); a test holds the two to the same answer. A
+  kind stated `Namespaced` gets the application namespace on an object without one; a kind
+  stated `Cluster` is left as rendered, also with a namespace the chart wrote, which
+  `manifests` refuses. Refused: a malformed entry, and an entry that contradicts a
+  CustomResourceDefinition the chart renders. Not covered: the `helm` rule does not take
+  the property and refuses it as an unknown key. Not breaking for a document that does
+  not use it.
 
 Item 5 was decided as "document" and needed no text: tiers are declared, never
 derived, since go-kure/launcher#783 (§2.2).
@@ -631,5 +640,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), `scopeOverrides` on `helmtemplate` (item 11); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |

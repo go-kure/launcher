@@ -29,19 +29,30 @@ func (h *ManifestsHandler) CanHandle(componentType string) bool { return compone
 // not contradict (stampManifestNamespaces).
 func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"inline": {Type: oam.PropertyTypeString, Description: "Raw multi-document manifest YAML emitted inline (mutually exclusive with url)."},
-		"url":    {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
-		"scopeOverrides": {
-			Type:        oam.PropertyTypeArray,
-			Description: "Explicit scope entries, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD in this same source is an error).",
-			Items: &oam.PropertySchema{
-				Type:        oam.PropertyTypeObject,
-				Description: "A single scope override for one apiVersion/kind.",
-				Properties: map[string]oam.PropertySchema{
-					"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the kind whose scope is being overridden."},
-					"kind":       {Type: oam.PropertyTypeString, Required: true, Description: "Kind whose scope is being overridden."},
-					"scope":      {Type: oam.PropertyTypeString, Required: true, Enum: []any{"Cluster", "Namespaced"}, Description: "Whether the kind is cluster-scoped or namespaced."},
-				},
+		"inline":          {Type: oam.PropertyTypeString, Description: "Raw multi-document manifest YAML emitted inline (mutually exclusive with url)."},
+		"url":             {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
+		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD in this same source is an error)."),
+	}
+}
+
+// scopeOverridesKey is the property that states a kind's scope, on the
+// manifests and helmtemplate components.
+const scopeOverridesKey = "scopeOverrides"
+
+// scopeOverridesSchema is the schema of the scopeOverrides property, the one
+// shape parseScopeOverrides reads, under the description each component gives
+// it.
+func scopeOverridesSchema(description string) oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeArray,
+		Description: description,
+		Items: &oam.PropertySchema{
+			Type:        oam.PropertyTypeObject,
+			Description: "A single scope override for one apiVersion/kind.",
+			Properties: map[string]oam.PropertySchema{
+				"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the kind whose scope is being overridden."},
+				"kind":       {Type: oam.PropertyTypeString, Required: true, Description: "Kind whose scope is being overridden."},
+				"scope":      {Type: oam.PropertyTypeString, Required: true, Enum: []any{"Cluster", "Namespaced"}, Description: "Whether the kind is cluster-scoped or namespaced."},
 			},
 		},
 	}
@@ -66,25 +77,26 @@ func (h *ManifestsHandler) ToApplicationConfig(component *oam.Component, namespa
 // parseScopeOverrides extracts the optional `scopeOverrides` property and returns
 // the parsed overrides plus the remaining properties. It splits the property out
 // so the shared parseManifestSource (which rejects unknown keys, and is also used
-// by the crd component) never sees it. Each entry is {apiVersion, kind, scope}
+// by the crd component) never sees it, nor the helmtemplate component's strict
+// decode. Each entry is {apiVersion, kind, scope}
 // where scope is "Cluster" or "Namespaced"; an override takes effect for any
 // kind except one whose scope the Kubernetes API itself governs (see
-// isAPIGovernedScope) and one a CRD in the same source defines, which it must
-// agree with rather than override (see stampManifestNamespaces).
+// isAPIGovernedScope) and one a CRD among the same objects defines, which it
+// must agree with rather than override (see resolveObjectScope).
 func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]manifest.ScopeResult, map[string]any, error) {
-	if _, present := props["scopeOverrides"]; !present {
+	if _, present := props[scopeOverridesKey]; !present {
 		return nil, props, nil
 	}
 	srcProps := make(map[string]any, len(props))
 	for k, v := range props {
-		if k == "scopeOverrides" {
+		if k == scopeOverridesKey {
 			continue
 		}
 		srcProps[k] = v
 	}
 	// An explicit null, typed or untyped, reads as omission; the key is still
 	// removed so parseManifestSource does not refuse it as unknown.
-	raw, ok := authoredValue(props, "scopeOverrides")
+	raw, ok := authoredValue(props, scopeOverridesKey)
 	if !ok {
 		return nil, srcProps, nil
 	}
@@ -167,10 +179,8 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 		}
 		for _, o := range objs {
 			gvk := o.GetObjectKind().GroupVersionKind()
-			scope, overridden := overrides[gvk]
-			if !overridden || isAPIGovernedScope(o) {
-				scope = manifest.Scope(o, crdScopes)
-			} else if declared, defined := crdScopes[gvk.GroupKind()]; defined && crdDeclaredScope(declared) != scope {
+			scope, declared, conflict := resolveObjectScope(o, overrides, crdScopes)
+			if conflict {
 				return nil, errors.Errorf("object %s %q: scopeOverrides says %s but the CustomResourceDefinition for %s in this source declares %s; the bundled CRD defines the scope the cluster will serve, so drop the override or correct the CRD", gvk.Kind, o.GetName(), scopeName(scope), gvk.GroupKind().String(), declared)
 			}
 			switch scope {
@@ -190,6 +200,31 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 		}
 		return objs, nil
 	}
+}
+
+// resolveObjectScope returns o's scope under overrides, among objects whose
+// CustomResourceDefinitions declare crdScopes. It is the one resolution the
+// manifests component and template delivery both act on
+// (stampManifestNamespaces, stampRenderedNamespaces), so a scopeOverrides
+// entry means the same on either; what each does with the answer differs and
+// is its own.
+//
+// With no override for o's apiVersion and kind, or with one on a kind whose
+// scope the Kubernetes API itself governs (isAPIGovernedScope), the scope is
+// kure's (manifest.Scope): its table, then a CRD in crdScopes, else unknown.
+// Otherwise it is the override's. An override that disagrees with the CRD
+// crdScopes holds for the kind is a conflict: the override's scope is returned
+// with the scope the CRD declares, for the caller to refuse with both named.
+func resolveObjectScope(o client.Object, overrides map[schema.GroupVersionKind]manifest.ScopeResult, crdScopes map[schema.GroupKind]apiextv1.ResourceScope) (scope manifest.ScopeResult, declared apiextv1.ResourceScope, conflict bool) {
+	gvk := o.GetObjectKind().GroupVersionKind()
+	scope, overridden := overrides[gvk]
+	if !overridden || isAPIGovernedScope(o) {
+		return manifest.Scope(o, crdScopes), "", false
+	}
+	if declared, defined := crdScopes[gvk.GroupKind()]; defined && crdDeclaredScope(declared) != scope {
+		return scope, declared, true
+	}
+	return scope, "", false
 }
 
 // crdDeclaredScope maps a CRD's declared spec.scope onto the ScopeResult an

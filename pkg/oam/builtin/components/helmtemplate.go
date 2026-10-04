@@ -3,9 +3,11 @@ package components
 import (
 	"encoding/json"
 
+	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -38,9 +40,10 @@ func (h *HelmTemplateHandler) CanHandle(componentType string) bool {
 }
 
 // PropertySchema declares exactly the keys helmTemplateProperties decodes plus
-// values, so authored-property validation and the handler's strict decode
-// admit the same set: source (url, kind), chart, version, releaseName and
-// values. A test ties this schema to the struct.
+// values and scopeOverrides, so authored-property validation and the handler's
+// strict decode admit the same set: source (url, kind), chart, version,
+// releaseName, values and scopeOverrides. A test ties this schema to the
+// struct.
 func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
@@ -52,15 +55,17 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 				"kind": {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "OCIRepository"}, Description: "Source kind. Inferred from the URL scheme when unset (oci:// is OCIRepository, anything else HelmRepository); when set, it must agree with the scheme."},
 			},
 		},
-		"chart":       {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
-		"version":     {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
-		"releaseName": {Type: oam.PropertyTypeString, Description: "The render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, as a Helm release name is. Defaults to the release name Flux gives a HelmRelease named after the component: the component name, a name over 53 characters shortened as Flux shortens it (its first 40 characters, '-', and 12 hex digits of its SHA-256)."},
-		"values":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		"chart":           {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
+		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
+		"releaseName":     {Type: oam.PropertyTypeString, Description: "The render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, as a Helm release name is. Defaults to the release name Flux gives a HelmRelease named after the component: the component name, a name over 53 characters shortened as Flux shortens it (its first 40 characters, '-', and 12 hex digits of its SHA-256)."},
+		"values":          {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
 	}
 }
 
 // helmTemplateProperties is the property surface the strict decode checks,
-// values excepted. Any key it does not declare, at any depth, is refused — in
+// values and scopeOverrides excepted, which are split off before it (see
+// ToApplicationConfig). Any key it does not declare, at any depth, is refused — in
 // particular targetNamespace (this terminal renders into the application
 // namespace), every property only a Flux-reconciled release reads (interval,
 // driftDetection, install, upgrade, valuesFrom, valuesMode), the helm rule's
@@ -79,15 +84,21 @@ type helmTemplateSource struct {
 	Kind string `json:"kind"`
 }
 
-// ToApplicationConfig decodes the component's properties strictly, with values
-// split off first, and checks the inline source: source.url required, the kind
-// inferred from or checked against the URL scheme, chart required for a
-// HelmRepository, version required for an OCIRepository, values an object that
-// encodes as JSON, and the release name, authored or defaulted from the
-// component name as Flux defaults a HelmRelease's, a valid Helm release name
-// (templateReleaseName).
+// ToApplicationConfig decodes the component's properties strictly, with
+// scopeOverrides and values split off first, and checks the inline source:
+// source.url required, the kind inferred from or checked against the URL
+// scheme, chart required for a HelmRepository, version required for an
+// OCIRepository, values an object that encodes as JSON, and the release name,
+// authored or defaulted from the component name as Flux defaults a
+// HelmRelease's, a valid Helm release name (templateReleaseName).
+// scopeOverrides is read as the manifests component reads its own
+// (parseScopeOverrides), with the same refusals of a malformed entry.
 func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](component.Properties, helmTemplateValuesKey)
+	overrides, rest, err := parseScopeOverrides(component.Properties)
+	if err != nil {
+		return nil, errors.Errorf("%s: %w", helmTemplateType, err)
+	}
+	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](rest, helmTemplateValuesKey)
 	if err != nil {
 		return nil, errors.Errorf("%s: properties do not decode: %w", helmTemplateType, err)
 	}
@@ -108,6 +119,8 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 		ReleaseName: props.ReleaseName,
 		Values:      values,
 		renderChart: helm.RenderChart,
+
+		ScopeOverrides: overrides,
 	}
 	src, err := cfg.source()
 	if err != nil {
@@ -181,6 +194,13 @@ type HelmTemplateConfig struct {
 	// Values is the Helm values tree handed to the render as-is. It must be
 	// representable as JSON.
 	Values map[string]any
+	// ScopeOverrides states the scope of a kind the chart renders, by
+	// apiVersion and kind: manifest.ScopeNamespaced or manifest.ScopeCluster,
+	// any other value is refused. The namespace stamp reads it
+	// (stampRenderedNamespaces): it outranks kure's own table, not a kind the
+	// Kubernetes API scopes, and must agree with a CustomResourceDefinition the
+	// chart renders for the kind.
+	ScopeOverrides map[schema.GroupVersionKind]manifest.ScopeResult
 
 	// renderChart renders the chart. ToApplicationConfig sets helm.RenderChart,
 	// which a nil value also means; tests inject a stub.
@@ -213,7 +233,12 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 	if err != nil {
 		return chartSource{}, err
 	}
-	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace, ReleaseName: releaseName}, nil
+	for gvk, scope := range c.ScopeOverrides {
+		if scope != manifest.ScopeNamespaced && scope != manifest.ScopeCluster {
+			return chartSource{}, errors.Errorf("%s: the scope override for %s %s is neither Namespaced nor Cluster", helmTemplateType, gvk.GroupVersion().String(), gvk.Kind)
+		}
+	}
+	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace, ReleaseName: releaseName, ScopeOverrides: c.ScopeOverrides}, nil
 }
 
 // ensureRendered checks c and renders its chart, once: Generate and

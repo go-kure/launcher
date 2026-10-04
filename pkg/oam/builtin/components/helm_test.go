@@ -564,6 +564,10 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"template valuesMode configMap", template(map[string]any{"valuesMode": "configMap"}), "helm: delivery: template does not support valuesMode: configMap"},
 		{"template OCI without version", map[string]any{"delivery": "template", "source": oci}, "helm: delivery: template with an OCIRepository source requires version to be set"},
 		{"template OCI with chart", map[string]any{"delivery": "template", "chart": "a", "version": "1.0.0", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},
+		// scopeOverrides is the helmtemplate component's (go-kure/launcher#794):
+		// the rule does not take it, under either delivery.
+		{"template scopeOverrides", template(map[string]any{"scopeOverrides": []any{map[string]any{"apiVersion": "example.io/v1", "kind": "Gadget", "scope": "Namespaced"}}}), `helm: properties do not decode: json: unknown field "scopeOverrides"`},
+		{"flux scopeOverrides", map[string]any{"chart": "a", "source": repo, "scopeOverrides": []any{map[string]any{"apiVersion": "example.io/v1", "kind": "Gadget", "scope": "Namespaced"}}}, `helm: properties do not decode: json: unknown field "scopeOverrides"`},
 	}
 	for _, key := range []string{"interval", "targetNamespace", "driftDetection", "install", "upgrade", "valuesFrom"} {
 		cases = append(cases, struct {

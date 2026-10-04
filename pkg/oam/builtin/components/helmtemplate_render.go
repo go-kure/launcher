@@ -42,17 +42,20 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // whose Kind inlineChartSourceKind has already resolved and checked against
 // URL's scheme, the chart name within a HelmRepository, the chart version, the
 // values tree handed to the render as-is, the namespace the render uses as
-// .Release.Namespace (empty leaves kure's default, "default"), and the release
+// .Release.Namespace (empty leaves kure's default, "default"), the release
 // name it uses as .Release.Name, which templateReleaseName has already resolved
-// and checked (empty leaves kure's default, "release").
+// and checked (empty leaves kure's default, "release"), and the scope the
+// document states for a rendered kind, which the namespace stamp reads
+// (stampRenderedNamespaces).
 type chartSource struct {
-	URL         string
-	Kind        string // "HelmRepository" or "OCIRepository"
-	Chart       string
-	Version     string
-	Values      map[string]any
-	Namespace   string
-	ReleaseName string
+	URL            string
+	Kind           string // "HelmRepository" or "OCIRepository"
+	Chart          string
+	Version        string
+	Values         map[string]any
+	Namespace      string
+	ReleaseName    string
+	ScopeOverrides map[schema.GroupVersionKind]manifest.ScopeResult
 }
 
 // renderOptions turns the release name and the namespace into kure render
@@ -236,7 +239,9 @@ type chartRender struct {
 // each caller decides. A namespaced object the chart rendered without
 // metadata.namespace is then given src.Namespace (stampRenderedNamespaces), so
 // the cached groups — what ApplyPolicy checks and what objects and partition
-// hand out — already carry it.
+// hand out — already carry it. A scope override the rendered objects contradict
+// is refused there, as `<componentType> "<name>": object <kind> "<name>": …`,
+// and nothing is cached.
 func (r *chartRender) render(renderFn renderChartFunc, componentType, name string, src chartSource) error {
 	if r.rendered {
 		return nil
@@ -252,7 +257,9 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	if err != nil {
 		return err
 	}
-	stampRenderedNamespaces(src.Namespace, groups)
+	if err := stampRenderedNamespaces(src.Namespace, src.ScopeOverrides, groups); err != nil {
+		return errors.Wrapf(err, "%s %q", componentType, name)
+	}
 	r.hookGroups = groups
 	r.rendered = true
 	return nil
@@ -261,26 +268,34 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 // stampRenderedNamespaces sets namespace on every emitted object that is
 // namespaced and carries no metadata.namespace, which is where a Helm install
 // into that namespace would create it. It resolves each object's scope as the
-// manifests component does (manifest.Scope): kure's scope table, plus the
+// manifests component does (resolveObjectScope): the scope overrides states
+// for the object's apiVersion and kind, else kure's scope table, plus the
 // scope a CustomResourceDefinition among the emitted objects declares for the
 // kind it defines. A chart's crds/ directory is not rendered, so a CRD shipped
 // there defines no scope here.
 //
-// Unlike the manifests component, it refuses nothing, since a chart is not
-// authored by the application:
+// Unlike the manifests component, it refuses nothing about what the chart
+// wrote, since a chart is not authored by the application:
 //
 //   - a namespace the chart wrote is kept, on a cluster-scoped object too, as
-//     Helm keeps it;
+//     Helm keeps it, and also when an override calls the kind cluster-scoped
+//     (the manifests component refuses that object);
 //   - an object whose scope is unknown — a kind kure does not register, custom
-//     or built-in, with no CRD for it among the emitted objects — is left as
-//     rendered, namespace-less: stamping it would be a guess, and a
-//     cluster-scoped object must not carry a namespace;
+//     or built-in, with no CRD for it among the emitted objects and no
+//     override — is left as rendered, namespace-less: stamping it would be a
+//     guess, and a cluster-scoped object must not carry a namespace;
 //   - a cluster-scoped object is left as rendered.
 //
-// An empty namespace (a config built directly, with none) stamps nothing.
-func stampRenderedNamespaces(namespace string, groups []helm.HookGroup) {
-	if namespace == "" {
-		return
+// The one thing it refuses is the document's own statement: an override that
+// disagrees with the CustomResourceDefinition among the emitted objects for
+// the same kind, which no cluster can honour. The error names the object's
+// kind and name and both scopes, and nothing else of the object.
+//
+// An empty namespace (a config built directly, with none) stamps nothing; a
+// contradicted override is refused all the same.
+func stampRenderedNamespaces(namespace string, overrides map[schema.GroupVersionKind]manifest.ScopeResult, groups []helm.HookGroup) error {
+	if namespace == "" && len(overrides) == 0 {
+		return nil
 	}
 	crdScopes := map[schema.GroupKind]apiextv1.ResourceScope{}
 	for _, g := range groups {
@@ -292,11 +307,17 @@ func stampRenderedNamespaces(namespace string, groups []helm.HookGroup) {
 	}
 	for _, g := range groups {
 		for _, o := range g.Resources {
-			if o.GetNamespace() == "" && manifest.Scope(o, crdScopes) == manifest.ScopeNamespaced {
+			scope, declared, conflict := resolveObjectScope(o, overrides, crdScopes)
+			if conflict {
+				gvk := o.GetObjectKind().GroupVersionKind()
+				return errors.Errorf("object %s %q: scopeOverrides says %s but the CustomResourceDefinition for %s the chart renders declares %s; that CRD defines the scope the cluster will serve, so drop the override", gvk.Kind, o.GetName(), scopeName(scope), gvk.GroupKind().String(), declared)
+			}
+			if namespace != "" && o.GetNamespace() == "" && scope == manifest.ScopeNamespaced {
 				o.SetNamespace(namespace)
 			}
 		}
 	}
+	return nil
 }
 
 // objects flattens a deep copy of hookGroups in execution order, and records
