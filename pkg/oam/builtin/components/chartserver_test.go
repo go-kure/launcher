@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -78,6 +79,15 @@ func buildMinimalChartTar(t *testing.T, name, version string, extraFiles map[str
 // base URL. Closed via t.Cleanup.
 func startMinimalHelmChartServer(t *testing.T, name, version string, templateFiles map[string]string) string {
 	t.Helper()
+	srvURL, _ := startCountingHelmChartServer(t, name, version, templateFiles)
+	return srvURL
+}
+
+// startCountingHelmChartServer is startMinimalHelmChartServer that also
+// returns the number of requests the server has received, whatever their path.
+func startCountingHelmChartServer(t *testing.T, name, version string, templateFiles map[string]string) (string, *atomic.Int64) {
+	t.Helper()
+	requests := new(atomic.Int64)
 	chartFiles := make(map[string]string, len(templateFiles))
 	for path, content := range templateFiles {
 		chartFiles[name+"/templates/"+path] = content
@@ -91,6 +101,7 @@ func startMinimalHelmChartServer(t *testing.T, name, version string, templateFil
 	// NewServer returns would be read/written across goroutines with no
 	// synchronization between them.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		switch r.URL.Path {
 		case "/index.yaml":
 			fmt.Fprintf(w, "apiVersion: v1\nentries:\n  %s:\n  - name: %s\n    version: %s\n    urls:\n      - http://%s/%s\ngenerated: \"2024-01-01T00:00:00Z\"\n",
@@ -102,5 +113,5 @@ func startMinimalHelmChartServer(t *testing.T, name, version string, templateFil
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv.URL
+	return srv.URL, requests
 }

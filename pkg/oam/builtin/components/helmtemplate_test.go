@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -366,14 +366,14 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 		t.Errorf("execution order = %v, want %v (the test hook dropped)", names, want)
 	}
 	for _, o := range termObjs {
-		u, ok := o.(*unstructured.Unstructured)
+		cm, ok := o.(*corev1.ConfigMap)
 		if !ok {
-			t.Fatalf("%s: %T, want *unstructured.Unstructured", o.GetName(), o)
+			t.Fatalf("%s: %T, want *corev1.ConfigMap", o.GetName(), o)
 		}
-		if u.GetName() != "main" {
+		if cm.GetName() != "main" {
 			continue
 		}
-		if got, _, _ := unstructured.NestedString(u.Object, "data", "replicas"); got != "three" {
+		if got := cm.Data["replicas"]; got != "three" {
 			t.Errorf("main data.replicas = %q, want %q (values.replicas reached the chart as the int it was authored as)", got, "three")
 		}
 	}

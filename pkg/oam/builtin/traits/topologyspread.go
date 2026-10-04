@@ -19,9 +19,10 @@ import (
 // The trait applies launcher's default topology-spread opinion — the one the
 // webservice and worker kinds apply from their `topologySpread` property,
 // components.BuildTopologySpreadConstraints — to every typed Deployment the
-// component generates (built by a launcher kind or decoded from a manifests
-// source; a Deployment passed through as raw, unstructured output is not
-// inspected). It makes that opinion available on a kind that carries
+// component generates (built by a launcher kind, decoded from a manifests
+// source or rendered from a helmtemplate chart; a Deployment passed through as
+// raw, unstructured output is not inspected). It makes that opinion available
+// on a kind that carries
 // none of its own (`deployment`), so a document or a lowering rule can ask for
 // it explicitly. The trait takes no properties of its own; the engine-owned
 // ones every trait accepts (`scope`) are let through.
@@ -92,8 +93,8 @@ type topologySpreadConfig struct {
 
 // Generate delegates to the inner config, then applies the constraints to each
 // generated typed *appsv1.Deployment — one a launcher kind builds, or one a
-// manifests source decodes. A Deployment emitted as unstructured output
-// (passthrough, helmtemplate renders) is not inspected, like every other
+// manifests source or a helmtemplate chart render decodes. A Deployment emitted
+// as unstructured output (passthrough) is not inspected, like every other
 // Deployment-decorating trait. A component with no typed Deployment is an
 // error: the trait would otherwise be accepted and do nothing.
 func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Object, error) {
@@ -116,7 +117,7 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 		}
 	}
 	if !found {
-		return nil, errors.Errorf("topology-spread: component %q generates no Deployment the trait can act on; it needs a Deployment built by a launcher kind or decoded from a manifests source, and a Deployment passed through as raw, unstructured output (passthrough, helmtemplate renders) is not inspected", app.Name)
+		return nil, errors.Errorf("topology-spread: component %q generates no Deployment the trait can act on; it needs a Deployment built by a launcher kind, decoded from a manifests source or rendered from a helmtemplate chart, and a Deployment passed through as raw, unstructured output (passthrough) is not inspected", app.Name)
 	}
 	return objects, nil
 }
