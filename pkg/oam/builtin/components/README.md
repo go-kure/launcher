@@ -691,7 +691,10 @@ itself escapes interior hyphens in each half (`escapeForPVCQualification`)
 before concatenating, since plain `<appName>-<localName>` string
 concatenation is not collision-free when either half itself contains a
 hyphen — component `a-b` with volume `data`, and component `a` with volume
-`b-data`, would otherwise both qualify to `a-b-data`; `hostPath.path`
+`b-data`, would otherwise both qualify to `a-b-data`; a qualified name over
+253 characters is shortened by the one rule (`oam.ShortenNameWithSuffix`,
+go-kure/launcher#793), the escaped component cut and the escaped volume kept
+whole; `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;

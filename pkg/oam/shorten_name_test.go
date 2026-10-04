@@ -128,6 +128,35 @@ func TestShortenNameWithSuffix(t *testing.T) {
 	}
 }
 
+// A suffix that leaves no room for a full digest beside it cannot be kept
+// whole: the whole name+suffix is shortened by the general rule, so the
+// result still fits, is valid, and tells two names apart by a full digest.
+func TestShortenNameWithSuffix_SuffixLeavesNoRoom(t *testing.T) {
+	for _, n := range []int{235, 244, 253, 300} { // 9 characters left, none, less than none
+		suffix := "-ingress-" + strings.Repeat("s", n)
+		got, other := ShortenNameWithSuffix("web", suffix, ShortenLimitSubdomain), ShortenNameWithSuffix("api", suffix, ShortenLimitSubdomain)
+		if want := wantShortened("web"+suffix, "", ShortenLimitSubdomain); got != want {
+			t.Errorf("suffix of %d characters: got %q, want %q", len(suffix), got, want)
+		}
+		if len(got) > ShortenLimitSubdomain {
+			t.Errorf("suffix of %d characters: length %d, over 253", len(suffix), len(got))
+		}
+		if errs := validation.IsDNS1123Subdomain(got); len(errs) > 0 {
+			t.Errorf("suffix of %d characters: IsDNS1123Subdomain = %v", len(suffix), errs)
+		}
+		if got == other {
+			t.Errorf("suffix of %d characters: two names both gave %q", len(suffix), got)
+		}
+	}
+	// Exactly a digest's room left: the suffix is kept, the name is its digest.
+	suffix := "-" + strings.Repeat("s", ShortenLimitSubdomain-ShortenNameDigestLength-1)
+	long := strings.Repeat("a", 20)
+	sum := sha256.Sum256([]byte(long))
+	if got, want := ShortenNameWithSuffix(long, suffix, ShortenLimitSubdomain), hex.EncodeToString(sum[:])[:10]+suffix; got != want {
+		t.Errorf("a digest's room left: got %q, want %q", got, want)
+	}
+}
+
 // TestShortenName_GeneratingSites is the acceptance test of
 // go-kure/launcher#793 for this package: every site that generates a name
 // shows the one rule, is deterministic, and keeps two names apart that share

@@ -115,6 +115,32 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 	}
 }
 
+// A scope is authored and can be so long that <component>-<kind>-<scope> has
+// no room for a shortened component beside it. The whole name is shortened
+// then, so the object name still fits, is valid, and differs per component.
+func TestRoutingObjectName_OversizedScope(t *testing.T) {
+	scope := strings.Repeat("s", 245)
+	handlers := map[string]struct {
+		h     oam.TraitHandler
+		props map[string]any
+	}{
+		"ingress":   {&IngressHandler{}, scopedIngressProps(scope)},
+		"httproute": {&HTTPRouteHandler{}, scopedHTTPRouteProps(scope)},
+	}
+	for kind, tc := range handlers {
+		got := appliedObjectName(t, tc.h, "web", tc.props)
+		if want := wantShortened("web-"+kind+"-"+scope, "", oam.ShortenLimitSubdomain); got != want {
+			t.Errorf("%s: got %q, want %q", kind, got, want)
+		}
+		if errs := validation.IsDNS1123Subdomain(got); len(errs) > 0 {
+			t.Errorf("%s: IsDNS1123Subdomain(%q) = %v, want no errors", kind, got, errs)
+		}
+		if other := appliedObjectName(t, tc.h, "api", tc.props); other == got {
+			t.Errorf("%s: two components both gave %q", kind, got)
+		}
+	}
+}
+
 // appliedObjectName applies a trait to a component named component and returns
 // the name of the one object the trait's sub-application generates.
 func appliedObjectName(t *testing.T, h oam.TraitHandler, component string, props map[string]any) string {
