@@ -313,15 +313,6 @@ rule emits is read the same way, with one exception: a Flux source the rule orde
 component after is applied with the application bundle, so a tier on it, from an
 annotation or a `placement` policy, is refused.
 
-The `oci` rule (go-kure/launcher#784) emits a source in two ways. The `ocirepository`
-several `oci` components share is a generated source like the `helm` rule's, with the tier
-and the two refusals above. The `ocirepository` of a component alone on its artifact is a
-member of that component's same-name sibling group, beside the `fluxcd-kustomization` that
-reads it: it is the component's own source, so it takes its type's tier (`TierApps`) like
-any other member, and a tier annotation, a `placement` policy or a `dependency` rule naming
-the component acts on the group as one. In the `infra` tier a group would span two tiers
-and be refused.
-
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
