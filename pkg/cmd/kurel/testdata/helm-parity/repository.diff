@@ -14,7 +14,7 @@
 +    launcher.gokure.dev/component: metrics
    name: metrics
    namespace: default
-@@ -19,7 +21,82 @@
+@@ -19,7 +21,109 @@
        sourceRef:
          kind: HelmRepository
 -        name: metrics
@@ -95,6 +95,33 @@
 +        target:
 +          group: batch
 +          kind: CronJob
++          version: v1
++      - patch: |
++          apiVersion: apps/v1
++          kind: ReplicaSet
++          metadata:
++            name: component-label
++          spec:
++            template:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: metrics
++        target:
++          group: apps
++          kind: ReplicaSet
++          version: v1
++      - patch: |
++          apiVersion: v1
++          kind: ReplicationController
++          metadata:
++            name: component-label
++          spec:
++            template:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: metrics
++        target:
++          kind: ReplicationController
 +          version: v1
    targetNamespace: monitoring
  

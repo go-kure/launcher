@@ -47,6 +47,13 @@ func podTemplateLabelsOf(t *testing.T, obj client.Object) (map[string]string, bo
 		return o.Spec.Template.Labels, true
 	case *batchv1.CronJob:
 		return o.Spec.JobTemplate.Spec.Template.Labels, true
+	case *appsv1.ReplicaSet:
+		return o.Spec.Template.Labels, true
+	case *corev1.ReplicationController:
+		if o.Spec.Template == nil {
+			return nil, true
+		}
+		return o.Spec.Template.Labels, true
 	case *unstructured.Unstructured:
 		path := []string{"spec", "template", "metadata", "labels"}
 		if o.GetKind() == "CronJob" {
@@ -75,20 +82,54 @@ func unstructuredWorkload(apiVersion, kind string) *unstructured.Unstructured {
 	}}
 }
 
+// unstructuredReplicationController has the selector of its kind: a plain label
+// map, here with a key a label selector has as a field of its own. It holds no
+// label back.
+func unstructuredReplicationController() *unstructured.Unstructured {
+	u := unstructuredWorkload("v1", "ReplicationController")
+	selector := map[string]any{"app": "web", "matchLabels": "kept"}
+	_ = unstructured.SetNestedMap(u.Object, selector, "spec", "selector")
+	_ = unstructured.SetNestedMap(u.Object, selector, "spec", "template", "metadata", "labels")
+	return u
+}
+
+// TestStampComponentLabel_ReplicationControllerWithoutTemplate: a typed
+// ReplicationController with no pod template is labelled and otherwise left as
+// it is.
+func TestStampComponentLabel_ReplicationControllerWithoutTemplate(t *testing.T) {
+	rc := &corev1.ReplicationController{}
+	if err := stampComponentLabel(rc, ownershipKey, "web"); err != nil {
+		t.Fatalf("stampComponentLabel: %v", err)
+	}
+	if got := rc.Labels[ownershipKey]; got != "web" {
+		t.Errorf("object label = %q, want web", got)
+	}
+	if rc.Spec.Template != nil {
+		t.Errorf("pod template = %+v, want none", rc.Spec.Template)
+	}
+}
+
 // TestStampComponentLabel_Workloads: every workload kind, typed and
 // unstructured, gets the label on the object and on its pod template.
 func TestStampComponentLabel_Workloads(t *testing.T) {
 	workloads := map[string]client.Object{
-		"typed Deployment":         &appsv1.Deployment{},
-		"typed StatefulSet":        &appsv1.StatefulSet{},
-		"typed DaemonSet":          &appsv1.DaemonSet{},
-		"typed Job":                &batchv1.Job{},
-		"typed CronJob":            &batchv1.CronJob{},
-		"unstructured Deployment":  unstructuredWorkload("apps/v1", "Deployment"),
-		"unstructured StatefulSet": unstructuredWorkload("apps/v1", "StatefulSet"),
-		"unstructured DaemonSet":   unstructuredWorkload("apps/v1", "DaemonSet"),
-		"unstructured Job":         unstructuredWorkload("batch/v1", "Job"),
-		"unstructured CronJob":     unstructuredWorkload("batch/v1", "CronJob"),
+		"typed Deployment":  &appsv1.Deployment{},
+		"typed StatefulSet": &appsv1.StatefulSet{},
+		"typed DaemonSet":   &appsv1.DaemonSet{},
+		"typed Job":         &batchv1.Job{},
+		"typed CronJob":     &batchv1.CronJob{},
+		"typed ReplicaSet":  &appsv1.ReplicaSet{},
+		"typed ReplicationController": &corev1.ReplicationController{Spec: corev1.ReplicationControllerSpec{
+			Selector: map[string]string{"app": "web"},
+			Template: &corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}}},
+		}},
+		"unstructured Deployment":            unstructuredWorkload("apps/v1", "Deployment"),
+		"unstructured StatefulSet":           unstructuredWorkload("apps/v1", "StatefulSet"),
+		"unstructured DaemonSet":             unstructuredWorkload("apps/v1", "DaemonSet"),
+		"unstructured Job":                   unstructuredWorkload("batch/v1", "Job"),
+		"unstructured CronJob":               unstructuredWorkload("batch/v1", "CronJob"),
+		"unstructured ReplicaSet":            unstructuredWorkload("apps/v1", "ReplicaSet"),
+		"unstructured ReplicationController": unstructuredReplicationController(),
 	}
 	for name, obj := range workloads {
 		t.Run(name, func(t *testing.T) {
@@ -304,7 +345,7 @@ func TestStampComponentLabel_NullPodTemplateLabelValue(t *testing.T) {
 // absent value. A pod template whose metadata or labels are null gets the
 // label; a workload with no pod template, or a null one, is left as it is.
 func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
-	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}} {
+	for _, kind := range []struct{ apiVersion, kind string }{{"apps/v1", "Deployment"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"}, {"apps/v1", "ReplicaSet"}, {"v1", "ReplicationController"}} {
 		spec := []string{"spec"}
 		if kind.kind == "CronJob" {
 			spec = []string{"spec", "jobTemplate", "spec"}
@@ -372,6 +413,8 @@ func TestStampComponentLabel_SelectorThatRulesTheLabelOut(t *testing.T) {
 	job.Spec.Selector, job.Spec.Template.Labels = excludingSelector(), podLabels()
 	cron := &batchv1.CronJob{}
 	cron.Spec.JobTemplate.Spec.Selector, cron.Spec.JobTemplate.Spec.Template.Labels = excludingSelector(), podLabels()
+	rs := &appsv1.ReplicaSet{}
+	rs.Spec.Selector, rs.Spec.Template.Labels = excludingSelector(), podLabels()
 
 	rawSelector, err := runtime.DefaultUnstructuredConverter.ToUnstructured(excludingSelector())
 	if err != nil {
@@ -394,8 +437,10 @@ func TestStampComponentLabel_SelectorThatRulesTheLabelOut(t *testing.T) {
 		"typed DaemonSet":         ds,
 		"typed Job":               job,
 		"typed CronJob":           cron,
+		"typed ReplicaSet":        rs,
 		"unstructured Deployment": unstructuredWith("apps/v1", "Deployment", "spec"),
 		"unstructured CronJob":    unstructuredWith("batch/v1", "CronJob", "spec", "jobTemplate", "spec"),
+		"unstructured ReplicaSet": unstructuredWith("apps/v1", "ReplicaSet", "spec"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := stampComponentLabel(obj, ownershipKey, "web"); err != nil {
@@ -489,7 +534,10 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		{Group: "apps", Version: "v1", Kind: "DaemonSet"},
 		{Group: "batch", Version: "v1", Kind: "Job"},
 		{Group: "batch", Version: "v1", Kind: "CronJob"},
+		{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
+		{Version: "v1", Kind: "ReplicationController"},
 	}
+	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1"}
 	if len(pr.Kustomize.Patches) != len(wantTargets) {
 		t.Fatalf("patches = %d, want %d", len(pr.Kustomize.Patches), len(wantTargets))
 	}
@@ -515,6 +563,9 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		}
 		if doc["kind"] != wantTargets[i].Kind {
 			t.Errorf("patch %d kind = %v, want %s", i, doc["kind"], wantTargets[i].Kind)
+		}
+		if doc["apiVersion"] != wantAPIVersions[i] {
+			t.Errorf("patch %d apiVersion = %v, want %s", i, doc["apiVersion"], wantAPIVersions[i])
 		}
 	}
 }

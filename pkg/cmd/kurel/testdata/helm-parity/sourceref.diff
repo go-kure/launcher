@@ -7,7 +7,7 @@
 +    launcher.gokure.dev/component: prometheus
    name: prometheus
    namespace: default
-@@ -14,3 +16,78 @@
+@@ -14,3 +16,105 @@
        version: 69.3.2
    interval: 1h0m0s
 +  postRenderers:
@@ -84,5 +84,32 @@
 +        target:
 +          group: batch
 +          kind: CronJob
++          version: v1
++      - patch: |
++          apiVersion: apps/v1
++          kind: ReplicaSet
++          metadata:
++            name: component-label
++          spec:
++            template:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: prometheus
++        target:
++          group: apps
++          kind: ReplicaSet
++          version: v1
++      - patch: |
++          apiVersion: v1
++          kind: ReplicationController
++          metadata:
++            name: component-label
++          spec:
++            template:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: prometheus
++        target:
++          kind: ReplicationController
 +          version: v1
  

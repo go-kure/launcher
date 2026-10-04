@@ -99,3 +99,30 @@ spec:
           group: batch
           kind: CronJob
           version: v1
+      - patch: |
+          apiVersion: apps/v1
+          kind: ReplicaSet
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: cert-manager
+        target:
+          group: apps
+          kind: ReplicaSet
+          version: v1
+      - patch: |
+          apiVersion: v1
+          kind: ReplicationController
+          metadata:
+            name: component-label
+          spec:
+            template:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: cert-manager
+        target:
+          kind: ReplicationController
+          version: v1

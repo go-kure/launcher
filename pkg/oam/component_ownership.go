@@ -11,10 +11,12 @@ import (
 	"github.com/go-kure/kure/pkg/stack/layout"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -383,9 +385,9 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 
 // stampComponentLabel puts key: value on obj where obj carries no value for key
 // yet, and on its pod template when obj is a workload: a Deployment,
-// StatefulSet, DaemonSet, Job or CronJob, typed or unstructured. A HelmRelease
-// also gets the post-renderer that labels its chart's pod templates
-// (componentLabelPostRenderer).
+// StatefulSet, DaemonSet, Job, CronJob, ReplicaSet or ReplicationController,
+// typed or unstructured. A HelmRelease also gets the post-renderer that labels
+// its chart's pod templates (componentLabelPostRenderer).
 //
 // A value already there stays, whatever it is: a component, a trait or an
 // author set it, and with a key a workload selects on (ComponentLabelKey "app")
@@ -427,6 +429,14 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 	case *batchv1.CronJob:
 		job := &o.Spec.JobTemplate.Spec
 		job.Template.Labels = withComponentLabel(job.Template.Labels, job.Selector, key, value)
+	case *appsv1.ReplicaSet:
+		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
+	case *corev1.ReplicationController:
+		// Its selector is a plain label map, which a further label on the pods
+		// never fails; its pod template is optional.
+		if o.Spec.Template != nil {
+			o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, nil, key, value)
+		}
 	case *helmv2.HelmRelease:
 		pr, err := componentLabelPostRenderer(key, value)
 		if err != nil {
@@ -473,7 +483,14 @@ func withComponentLabel(podLabels map[string]string, selector *metav1.LabelSelec
 // podTemplateKinds are the workload kinds whose pod template takes the
 // component label, in the order the HelmRelease post-renderer patches them,
 // with the path of the spec that holds the pod template ("template") and the
-// workload's own selector ("selector") in each.
+// workload's own selector ("selector") in each. The core group is "": a
+// kustomize target cannot name it, and one with no group matches the kind in
+// any group, so the ReplicationController patch would also reach a v1 kind of
+// that name in another group.
+//
+// A ReplicationController's selector is a plain label map, not a label
+// selector. Read as one it either does not decode or selects every pod, so it
+// holds no label back, as a label map does not.
 var podTemplateKinds = []struct {
 	group, version, kind string
 	spec                 []string
@@ -483,6 +500,8 @@ var podTemplateKinds = []struct {
 	{"apps", "v1", "DaemonSet", []string{"spec"}},
 	{"batch", "v1", "Job", []string{"spec"}},
 	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}},
+	{"apps", "v1", "ReplicaSet", []string{"spec"}},
+	{"", "v1", "ReplicationController", []string{"spec"}},
 }
 
 // objectField returns the object m holds at field. YAML's explicit null is an
@@ -674,7 +693,7 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 	patches := make([]kustomize.Patch, 0, len(podTemplateKinds))
 	for _, k := range podTemplateKinds {
 		doc := map[string]any{
-			"apiVersion": k.group + "/" + k.version,
+			"apiVersion": schema.GroupVersion{Group: k.group, Version: k.version}.String(),
 			"kind":       k.kind,
 			"metadata":   map[string]any{"name": componentLabelPostRendererName},
 		}
