@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -211,6 +213,18 @@ func TestManifests_ObjectViolations(t *testing.T) {
 			want:   []string{`object CronJob "demo/thing"`, `apiVersion "batch/v1beta1"`, "cannot be checked against environment policy"},
 		},
 		{
+			name: "host network Pod inside a v1 List",
+			inline: "apiVersion: v1\nkind: List\nitems:\n" +
+				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: thing\n    spec:\n      hostNetwork: true\n" + htIndent(htPlainPod, "      "),
+			want: []string{`object Pod "demo/thing"`, "hostNetwork is not allowed"},
+		},
+		{
+			name: "host network Deployment inside a typed list",
+			inline: "apiVersion: apps/v1\nkind: DeploymentList\nitems:\n" +
+				"  - metadata:\n      name: thing\n    spec:\n      template:\n        spec:\n          hostNetwork: true\n" + htIndent(htPlainPod, "          "),
+			want: []string{`object Deployment "demo/thing"`, "hostNetwork is not allowed"},
+		},
+		{
 			name: "Pod inside a list of an unregistered kind",
 			inline: "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
 				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: thing\n      namespace: demo\n    spec:\n" + htIndent(htPlainPod, "      "),
@@ -306,13 +320,35 @@ func TestManifests_ObjectsThatRunNoPodPass(t *testing.T) {
 	}
 }
 
-// TestManifests_TypedListDoesNotParse: a source holding a v1 List is refused by
-// the parser, as it was before the policy check, and not as a policy violation.
-func TestManifests_TypedListDoesNotParse(t *testing.T) {
+// TestManifests_RegisteredListYieldsItsItems: a source holding a v1 List or a
+// typed list builds to the list's items, each typed and given the application
+// namespace as a document of its own is.
+func TestManifests_RegisteredListYieldsItsItems(t *testing.T) {
+	objs, err := mfTransform("manifests", mfInline("apiVersion: v1\nkind: List\nitems:\n"+
+		"  - apiVersion: v1\n    kind: ConfigMap\n    metadata:\n      name: settings\n"+
+		"---\napiVersion: apps/v1\nkind: DeploymentList\nitems:\n"+
+		"  - metadata:\n      name: web\n    spec:\n      template:\n        spec:\n"+htIndent(htPlainPod, "          ")), ptStrictPolicy())
+	if err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+	if len(objs) != 2 {
+		t.Fatalf("generated %d objects, want the ConfigMap and the Deployment", len(objs))
+	}
+	if cm, ok := objs[0].(*corev1.ConfigMap); !ok || cm.Name != "settings" || cm.Namespace != "demo" {
+		t.Errorf("first object is %T %s/%s, want *corev1.ConfigMap demo/settings", objs[0], objs[0].GetNamespace(), objs[0].GetName())
+	}
+	if dep, ok := objs[1].(*appsv1.Deployment); !ok || dep.Name != "web" || dep.Namespace != "demo" {
+		t.Errorf("second object is %T %s/%s, want *appsv1.Deployment demo/web", objs[1], objs[1].GetNamespace(), objs[1].GetName())
+	}
+}
+
+// TestManifests_UndecodableListItemIsNotAViolation: a list item that does not
+// decode is the parser's error, not a policy violation.
+func TestManifests_UndecodableListItemIsNotAViolation(t *testing.T) {
 	_, err := mfTransform("manifests", mfInline("apiVersion: v1\nkind: List\nitems:\n"+
-		"  - apiVersion: v1\n    kind: ConfigMap\n    metadata:\n      name: thing\n      namespace: demo\n"), ptStrictPolicy())
+		"  - apiVersion: v1\n    kind: ConfigMap\n    metadata:\n      name: thing\n      namespace: demo\n    data: not-a-mapping\n"), ptStrictPolicy())
 	if err == nil {
-		t.Fatal("a source holding a v1 List built")
+		t.Fatal("a source holding a list item that does not decode built")
 	}
 	var v *oam.ViolationError
 	if errors.As(err, &v) {

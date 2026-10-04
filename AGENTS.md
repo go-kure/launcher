@@ -333,6 +333,12 @@ direct dep (a missing entry is still caught by the CI guard, just as a red PR).
 kure bump → cut a kure release → bump launcher's `go-kure/kure` require to it and take the
 shared-dep bump together (yields no lead → guard passes).
 
+**A commit pin is not a release pin.** Between kure releases, `go.mod` may require a commit of
+kure's `main` as a pseudo-version, so launcher work can build on what kure has merged. A
+launcher release is never cut on one: kure is released first and `go.mod` requires that tag
+before launcher's release runs. This is a rule to keep, not a check: the release script does
+not refuse a pseudo-version yet.
+
 ### Reverse Mapping: Code to Docs
 
 This table is generated from `site/docs-map.yaml`. Do not edit it by hand — edit the
