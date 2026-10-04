@@ -264,6 +264,18 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			want:      []string{`rendered ReplicaSet "demo/thing"`, "securityContext.privileged is not allowed"},
 		},
 		{
+			name: "privileged container in a Pod inside a v1 List",
+			templates: map[string]string{"d.yaml": "apiVersion: v1\nkind: List\nitems:\n" +
+				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(privileged, "      ")},
+			want: []string{`rendered Pod "demo/inner"`, `spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
+		},
+		{
+			name: "privileged container in a Deployment inside a typed list",
+			templates: map[string]string{"d.yaml": "apiVersion: apps/v1\nkind: DeploymentList\nitems:\n" +
+				"  - metadata:\n      name: inner\n    spec:\n      template:\n        spec:\n" + htIndent(privileged, "          ")},
+			want: []string{`rendered Deployment "demo/inner"`, "securityContext.privileged is not allowed"},
+		},
+		{
 			name: "Pod inside a list of an unregistered kind",
 			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
 				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(htPlainPod, "      ")},

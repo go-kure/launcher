@@ -83,7 +83,8 @@ func nsWant(t *testing.T, where string, objs []client.Object, want map[string]st
 
 // TestHelmTemplate_StampsNamespaceOnNamespacedRenderedObjects: a namespaced
 // rendered object without metadata.namespace gets the application namespace —
-// a typed one, an untyped one in an API version kure's scheme does not
+// a typed one (a Lease, an EndpointSlice and an ImageRepository among them), an
+// untyped one in an API version kure's scheme does not
 // register, a hook's, and a custom resource whose CRD the same render emits —
 // while a namespace the chart wrote, a cluster-scoped object (with or without
 // a namespace) and an object of unknown scope stay as rendered. Nothing is
@@ -95,6 +96,10 @@ func TestHelmTemplate_StampsNamespaceOnNamespacedRenderedObjects(t *testing.T) {
 		nsDoc("v1", "ConfigMap", "authored", "other", ""),
 		nsDoc("batch/v1", "Job", "migrate", "", "pre-install"),
 		nsDoc("autoscaling/v1", "HorizontalPodAutoscaler", "untyped", "", ""),
+		nsDoc("coordination.k8s.io/v1", "Lease", "lock", "", ""),
+		nsDoc("discovery.k8s.io/v1", "EndpointSlice", "slice", "", ""),
+		nsDoc("image.toolkit.fluxcd.io/v1", "ImageRepository", "repo", "", ""),
+		nsDoc("scheduling.k8s.io/v1", "PriorityClass", "high", "", ""),
 		nsDoc("v1", "Namespace", "extra", "", ""),
 		nsDoc("rbac.authorization.k8s.io/v1", "ClusterRole", "stray", "kept", ""),
 		nsFixtureCRD("Widget", "widgets", "Namespaced", ""),
@@ -109,6 +114,10 @@ func TestHelmTemplate_StampsNamespaceOnNamespacedRenderedObjects(t *testing.T) {
 		"ConfigMap/authored":              "other",
 		"Job/migrate":                     "team",
 		"HorizontalPodAutoscaler/untyped": "team",
+		"Lease/lock":                      "team",
+		"EndpointSlice/slice":             "team",
+		"ImageRepository/repo":            "team",
+		"PriorityClass/high":              "",
 		"Namespace/extra":                 "",
 		"ClusterRole/stray":               "kept",
 		"Widget/w":                        "team",

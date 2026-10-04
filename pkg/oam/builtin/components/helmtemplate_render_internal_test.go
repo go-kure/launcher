@@ -59,15 +59,17 @@ func TestDecodeChartManifests_SkipsEmptyDoc(t *testing.T) {
 }
 
 // TestDecodeChartManifests_NonObjectDocIsAnError: a document that holds
-// something other than one Kubernetes object — a scalar, a sequence, an empty
-// mapping, a `v1` List — is an error, not skipped and not emitted.
+// something other than Kubernetes objects — a scalar, a sequence, an empty
+// mapping, a list with an item that does not decode — is an error, not skipped
+// and not emitted.
 func TestDecodeChartManifests_NonObjectDocIsAnError(t *testing.T) {
 	for _, doc := range []string{
 		"just a string\n",
 		"42\n",
 		"- a\n- b\n",
 		"{}\n",
-		"apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n",
+		"apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n- null\n",
+		"apiVersion: apps/v1\nkind: DeploymentList\nitems:\n- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: inner\n",
 	} {
 		t.Run(fmt.Sprintf("%q", doc), func(t *testing.T) {
 			_, err := decodeChartManifests([]byte(doc + "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm"))
@@ -124,6 +126,68 @@ items:
 	for _, o := range objects[2:] {
 		if _, ok := o.(*unstructured.Unstructured); !ok {
 			t.Errorf("%s is %T, want *unstructured.Unstructured", o.GetName(), o)
+		}
+	}
+	assertDeepCopyable(t, objects)
+}
+
+// TestDecodeChartManifests_FlattensRegisteredLists: a `v1` List and a typed
+// list are replaced by their items, in the list's order. An item of a `v1`
+// List is decoded as a document of its own: typed when its kind is registered,
+// unstructured when not, and flattened in turn when it is itself a list. An
+// item of a typed list that leaves apiVersion and kind out is the kind the
+// list holds.
+func TestDecodeChartManifests_FlattensRegisteredLists(t *testing.T) {
+	objects, err := decodeChartManifests([]byte(`apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: settings
+- apiVersion: example.com/v1
+  kind: Thing
+  metadata:
+    name: thing
+- apiVersion: v1
+  kind: List
+  items:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: migrate
+---
+apiVersion: apps/v1
+kind: DeploymentList
+items:
+- metadata:
+    name: web
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: api
+`))
+	if err != nil {
+		t.Fatalf("decodeChartManifests: %v", err)
+	}
+	if names := resourceNames(objects); !slices.Equal(names, []string{"settings", "thing", "migrate", "web", "api"}) {
+		t.Fatalf("decoded %v, want [settings thing migrate web api]", names)
+	}
+	if _, ok := objects[0].(*corev1.ConfigMap); !ok {
+		t.Errorf("settings is %T, want *corev1.ConfigMap", objects[0])
+	}
+	if _, ok := objects[1].(*unstructured.Unstructured); !ok {
+		t.Errorf("thing is %T, want *unstructured.Unstructured", objects[1])
+	}
+	if _, ok := objects[2].(*batchv1.Job); !ok {
+		t.Errorf("migrate is %T, want *batchv1.Job", objects[2])
+	}
+	for _, o := range objects[3:] {
+		if _, ok := o.(*appsv1.Deployment); !ok {
+			t.Errorf("%s is %T, want *appsv1.Deployment", o.GetName(), o)
+		}
+		if kind := o.GetObjectKind().GroupVersionKind().Kind; kind != "Deployment" {
+			t.Errorf("%s has kind %q, want Deployment", o.GetName(), kind)
 		}
 	}
 	assertDeepCopyable(t, objects)

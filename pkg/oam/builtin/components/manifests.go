@@ -229,18 +229,20 @@ func isAPIGovernedScope(o client.Object) bool {
 	if registered {
 		return k.ScopeSource == kubernetes.ScopeSourceBuiltin
 	}
-	// Kure fixes the scope of a few cluster-scoped API built-ins it registers no
-	// builders for — PriorityClass, APIService and the two webhook
-	// configurations. manifest.Scope's own documentation puts them under the
+	// Kure can fix the scope of a cluster-scoped API built-in it does not
+	// register. manifest.Scope's own documentation puts such a kind under the
 	// same rule this function implements ("The Kubernetes API defines those
-	// scopes and no manifest can redefine them"), but they are absent from the
-	// generated table, so KindForAnyVersion does not report them and the check
+	// scopes and no manifest can redefine them"), but it is absent from the
+	// generated table, so KindForAnyVersion does not report it and the check
 	// above alone would let a scopeOverrides entry stamp a namespace onto one.
 	// Kure keeps that set unexported, so ask manifest.Scope itself with no CRD
 	// context: for an unregistered non-CRD object every other arm of Scope needs
 	// either registration or a crdScopes entry, so ScopeCluster can only have
 	// come from that residual set. Probing instead of copying the list keeps
 	// kure the single answer — the set only shrinks, and a kind that gains a
-	// builder moves to the registered branch above on its own.
+	// builder moves to the registered branch above on its own. The set is
+	// empty at the kure version in go.mod (PriorityClass, APIService and the
+	// two webhook configurations, once in it, are registered), so the probe
+	// answers false for every kind today.
 	return manifest.Scope(o, nil) == manifest.ScopeCluster
 }

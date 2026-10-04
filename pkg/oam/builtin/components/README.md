@@ -162,6 +162,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 
 | Constructor | Kind | Status | Type | Decode | Notes |
 |---|---|---|---|---|---|
+| `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
 | `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | missing | - | - | - |
@@ -176,6 +177,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
+| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | missing | - | - | - |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | missing | - | - | - |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
@@ -188,8 +190,12 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
 | `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
+| `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
 | `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | missing | - | - | - |
+| `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
@@ -198,6 +204,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreatePod` | v1 Pod | missing | - | - | - |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | missing | - | - | - |
+| `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | missing | - | - | - |
@@ -205,6 +212,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateSecret` | v1 Secret | missing | - | - | - |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
@@ -214,6 +222,9 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
 | `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | missing | - | - | - |
 | `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | missing | - | - | - |
+| `kubernetes.CreateValidatingAdmissionPolicy` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
 | `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | missing | - | - | - |
 | `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | trait | `certificate` | hand-written parser | - |
@@ -265,6 +276,8 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `fluxcd.CreateHelmChart` | source.toolkit.fluxcd.io/v1 HelmChart | kind | `helmchart` | strict decode of `HelmChartSpec` | - |
 | `fluxcd.CreateHelmRelease` | helm.toolkit.fluxcd.io/v2 HelmRelease | kind | `helmrelease` | strict decode of `HelmReleaseSpec` | `helm` lowers onto it. |
 | `fluxcd.CreateHelmRepository` | source.toolkit.fluxcd.io/v1 HelmRepository | kind | `helmrepository` | strict decode of `HelmRepositorySpec` | - |
+| `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | missing | - | - | - |
+| `fluxcd.CreateImageRepository` | image.toolkit.fluxcd.io/v1 ImageRepository | missing | - | - | - |
 | `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | missing | - | - | - |
 | `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | component | `oci` | hand-written parser | `oci` emits it beside its OCIRepository; a kind component is the subject of go-kure/launcher#784. |
 | `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` emits one too. |
@@ -2750,14 +2763,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   application namespace, where a Helm install into that namespace would create it
   (go-kure/launcher#794, item 4). Each object's scope is resolved as the `manifests` component
   resolves it (kure's `manifest.Scope`): kure's scope table — the kinds kure registers, in any
-  API version, and a few cluster-scoped built-ins it does not — plus the scope a
+  API version — plus the scope a
   `CustomResourceDefinition` among the emitted objects declares for the kind it defines. Unlike
   `manifests`, the render refuses nothing here, since the application does not author a chart:
   - a namespace the chart wrote is kept, on a cluster-scoped object too, as Helm keeps it;
   - a cluster-scoped object without one stays without;
   - an object of unknown scope without one is left as rendered, with no namespace and no error:
-    a kind kure does not register — a custom resource, or a built-in such as `Lease` or
-    `EndpointSlice` at the pinned kure version — with no CRD for it among the emitted objects.
+    a kind kure does not register — a custom resource, or a built-in of an API group kure's
+    scheme does not hold — with no CRD for it among the emitted objects. `Lease`,
+    `EndpointSlice` and the image-reflector kinds (`ImageRepository`, `ImagePolicy`) are
+    registered, so one without a namespace is given the application namespace.
     Whoever applies the output decides where it lands (Flux's `targetNamespace`, a client's
     default namespace). A chart's `crds/` directory is not rendered, and a CRD under a dropped
     hook is not emitted, so neither gives a kind a scope; there is no `scopeOverrides` on this
@@ -2770,6 +2785,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Breaking output change** (go-kure/launcher#794): such objects gain `metadata.namespace` in
   the output. Before, a chart that left it unset rendered namespace-less objects, which landed
   wherever the applying client defaulted them.
+
+  **Breaking output change** (go-kure/launcher#790, with the kure version that registers
+  them): `Lease`, `EndpointSlice`, `PriorityClass`, `RuntimeClass`, `APIService`, the
+  `admissionregistration.k8s.io/v1` kinds and the image-reflector kinds are emitted as their
+  Go types, no longer as rendered, so the "Limits" below apply to them; the namespaced ones
+  (`Lease`, `EndpointSlice`, `ImageRepository`, `ImagePolicy`) gain `metadata.namespace` when
+  the chart left it unset. A chart that renders a `v1` `List` or a typed list now builds, and
+  its items are held to the policy.
 
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
@@ -2792,10 +2815,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping key that is not
     a string (`1:`) becomes its string form, and an unquoted timestamp stays the string the chart
     wrote; in an unstructured object an integer beyond 64 bits becomes a float;
-  - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}`, a
-    mapping without `apiVersion` and `kind`, and a `v1` `List` are build errors — in a document
+  - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}` and a
+    mapping without `apiVersion` and `kind` are build errors — in a document
     of a dropped hook as well, since the render is decoded before hooks are grouped;
-  - a list of a kind the scheme does not register is flattened into its items, each unstructured.
+  - a list document is replaced by its items, in the list's order. Each item of a `v1` `List`
+    is decoded as a document of its own (typed when its kind is registered, a list among them
+    flattened in turn, to the depth kure's parser bounds), and each item of a typed list (`DeploymentList`) as
+    the kind the list holds; an item that does not decode is a build error naming its
+    position. A list of a kind the scheme does not register is flattened one level, each item
+    unstructured.
 
   A decode failure is reported as `decoding rendered manifests: …`. `Generate` returns a fresh
   copy of the decoded objects on every call, as `manifests` does, so a trait that decorates a
@@ -2841,8 +2869,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   chart wrote it: a field that type does not declare — one a newer Kubernetes version added,
   say — is left out of the output, with no error. Before go-kure/launcher#791 the object was
   emitted as rendered. go-kure/launcher#794 (item 7) decides between refusing such a document,
-  keeping the field, and leaving the loss documented. A chart that emits a `v1` `List` does not
-  build: at the pinned kure version the parser does not flatten a typed list into its items.
+  keeping the field, and leaving the loss documented. The items of a `v1` `List` or of a typed
+  list are checked as documents of their own are.
   A workload, claim or PersistentVolume in an API version kure's scheme
   does not register
   (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
@@ -3627,9 +3655,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
   `manifests.go`: a `CustomResourceDefinition` document; any kind whose kure
   scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
-  upstream types; and the handful of cluster-scoped API built-ins kure registers
-  no builder for, which are therefore absent from that table — `PriorityClass`,
-  `APIService` and the two webhook configurations. Those last are detected by
+  upstream types, `PriorityClass`, `APIService` and the two webhook
+  configurations among them; and any cluster-scoped API built-in kure fixes the
+  scope of without registering it, a set that is empty at the kure version in
+  `go.mod`. Such a kind is detected by
   asking `manifest.Scope` itself with no CRD context, not by copying kure's
   list, so kure stays the single answer); a manifest cannot redefine those. A kind with no override and
   no other scope source still fails closed when it carries no
@@ -3675,9 +3704,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and a list left inside such a list, whose items the parser does not unpack. A list is
   told there by a top-level `items` array, so a custom resource that names a field
   `items` is refused in that position too. An object of another kind inside a list of an
-  unregistered kind still builds. A source that holds a `v1` `List` did not build before
-  this check and does not now (at the pinned kure version the parser does not flatten a
-  typed list into its items).
+  unregistered kind still builds. A `v1` `List` and a typed list (`DeploymentList`) are
+  replaced by their items, each decoded and checked as a document of its own is.
 
   **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
   reached the output unchecked. A document that relied on that no longer builds when its

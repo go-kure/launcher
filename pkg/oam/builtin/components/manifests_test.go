@@ -48,6 +48,40 @@ func TestManifestsHandler_ClusterScopedUntouched(t *testing.T) {
 	}
 }
 
+// TestManifestsHandler_ScopeOfEveryRegisteredAPIGroup: a kind of the
+// coordination, discovery, scheduling, node, admission registration, API
+// registration and image-reflector groups has a scope kure's table answers
+// for, so a namespace-less source builds: the namespaced ones are stamped, the
+// cluster-scoped ones are not.
+func TestManifestsHandler_ScopeOfEveryRegisteredAPIGroup(t *testing.T) {
+	doc := func(apiVersion, kind string) string {
+		return "apiVersion: " + apiVersion + "\nkind: " + kind + "\nmetadata:\n  name: thing\n"
+	}
+	cases := []struct{ apiVersion, kind, want string }{
+		{"coordination.k8s.io/v1", "Lease", "Lease:app-ns"},
+		{"discovery.k8s.io/v1", "EndpointSlice", "EndpointSlice:app-ns"},
+		{"image.toolkit.fluxcd.io/v1", "ImageRepository", "ImageRepository:app-ns"},
+		{"image.toolkit.fluxcd.io/v1", "ImagePolicy", "ImagePolicy:app-ns"},
+		{"scheduling.k8s.io/v1", "PriorityClass", "PriorityClass:"},
+		{"node.k8s.io/v1", "RuntimeClass", "RuntimeClass:"},
+		{"apiregistration.k8s.io/v1", "APIService", "APIService:"},
+		{"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration", "ValidatingWebhookConfiguration:"},
+		{"admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration", "MutatingWebhookConfiguration:"},
+		{"admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicy:"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			got, err := generateManifests(t, "app-ns", doc(tc.apiVersion, tc.kind))
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if len(got) != 1 || got[0] != tc.want {
+				t.Errorf("got %v, want [%s]", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestManifestsHandler_CustomResourceScopeFromSameSourceCRD(t *testing.T) {
 	inline := crdYAML + "---\napiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: w1\n"
 	got, err := generateManifests(t, "app-ns", inline)
@@ -202,14 +236,15 @@ func TestManifestsHandler_ScopeOverride_IgnoredForKnownScope(t *testing.T) {
 	}
 }
 
-// PriorityClass is cluster-scoped by the Kubernetes API, but kure registers no
-// builder for it, so it is absent from the generated table and
-// KindForAnyVersion does not report it. A Namespaced override must still be
-// ignored: its scope is API-governed exactly like a registered built-in's.
+// PriorityClass is cluster-scoped by the Kubernetes API, and kure's generated
+// table records it so (ScopeSourceBuiltin). A Namespaced override must be
+// ignored: the scope is API-governed.
 // TestManifestsHandler_ScopeOverride_Namespaced above is the discriminating
-// half — the same override on an unregistered kind that is NOT in kure's
-// residual cluster-scoped set does stamp the namespace.
-func TestManifestsHandler_ScopeOverride_IgnoredForUnregisteredClusterBuiltin(t *testing.T) {
+// half — the same override on a kind kure does not register does stamp the
+// namespace. No kind exercises isAPIGovernedScope's probe for a cluster-scoped
+// built-in kure fixes the scope of without registering it: kure's set of those
+// is empty.
+func TestManifestsHandler_ScopeOverride_IgnoredForClusterBuiltin(t *testing.T) {
 	overrides := []any{map[string]any{"apiVersion": "scheduling.k8s.io/v1", "kind": "PriorityClass", "scope": "Namespaced"}}
 	got, err := generateManifestsWithOverrides(t, "app-ns",
 		"apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata:\n  name: high\nvalue: 1000\n", overrides)
@@ -265,9 +300,9 @@ func TestManifestsHandler_ScopeOverride_ClusterWithAuthoredNamespaceRejected(t *
 // from a source-code marker on the vendored type rather than the Kubernetes
 // API itself (kure's generated table records it as
 // `ScopeSource: "marker"`, not `"builtin"`) — a "registered, non-API-governed"
-// kind. Neither ClusterWidget (never registered) nor PriorityClass below
-// (unregistered but in isAPIGovernedScope's residual cluster-scoped probe)
-// exercises this branch: kure's own registered, marker-sourced table entry.
+// kind. Neither ClusterWidget (never registered) nor PriorityClass above
+// (registered, with a scope the Kubernetes API governs) exercises this branch:
+// kure's own registered, marker-sourced table entry.
 const clusterIssuerYAML = "apiVersion: cert-manager.io/v1\nkind: ClusterIssuer\nmetadata:\n  name: ci\n"
 
 func TestManifestsHandler_RegisteredMarkerScopedKind_UntouchedWithoutOverride(t *testing.T) {
