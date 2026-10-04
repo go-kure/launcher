@@ -211,7 +211,10 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 //
 // With no override for o's apiVersion and kind, or with one on a kind whose
 // scope the Kubernetes API itself governs (isAPIGovernedScope), the scope is
-// kure's (manifest.Scope): its table, then a CRD in crdScopes, else unknown.
+// kure's (manifest.Scope): Cluster for a CustomResourceDefinition itself, a
+// built-in kind's from kure's table, else the scope a CRD in crdScopes
+// declares for the kind, else the table's for any other kind kure registers,
+// else unknown.
 // Otherwise it is the override's. An override that disagrees with the CRD
 // crdScopes holds for the kind is a conflict: the override's scope is returned
 // with the scope the CRD declares, for the caller to refuse with both named.
