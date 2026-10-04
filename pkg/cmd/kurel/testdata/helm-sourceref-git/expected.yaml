@@ -142,6 +142,7 @@ spec:
           group: ^$
           kind: Pod
           version: v1
+  releaseName: podinfo
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -286,3 +287,4 @@ spec:
           group: ^$
           kind: Pod
           version: v1
+  releaseName: exporter

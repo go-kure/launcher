@@ -143,6 +143,7 @@ spec:
           group: ^$
           kind: Pod
           version: v1
+  releaseName: podinfo
   valuesFrom:
   - kind: ConfigMap
     name: podinfo-values-3f4f090c42

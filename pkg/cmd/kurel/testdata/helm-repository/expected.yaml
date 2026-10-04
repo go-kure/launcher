@@ -150,4 +150,5 @@ spec:
           group: ^$
           kind: Pod
           version: v1
+  releaseName: metrics
   targetNamespace: monitoring

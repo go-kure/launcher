@@ -7,7 +7,7 @@
 +    launcher.gokure.dev/component: prometheus
    name: prometheus
    namespace: default
-@@ -14,3 +16,130 @@
+@@ -14,3 +16,131 @@
        version: 69.3.2
    interval: 1h0m0s
 +  postRenderers:
@@ -137,4 +137,5 @@
 +          group: ^$
 +          kind: Pod
 +          version: v1
++  releaseName: prometheus
  

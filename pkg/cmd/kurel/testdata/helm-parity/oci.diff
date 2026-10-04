@@ -14,7 +14,7 @@
 +    launcher.gokure.dev/component: cert-manager
    name: cert-manager
    namespace: default
-@@ -21,5 +23,132 @@
+@@ -21,5 +23,133 @@
    chartRef:
      kind: OCIRepository
 -    name: cert-manager
@@ -147,4 +147,5 @@
 +          group: ^$
 +          kind: Pod
 +          version: v1
++  releaseName: cert-manager
  
