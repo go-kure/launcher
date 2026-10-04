@@ -2710,8 +2710,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   ObjectStore; the objects are the same), and a Database named `pooler`
   comes right after the Pooler, ahead of the other Databases. Under a
   `dependency` policy the Pooler and the Databases are deployed from
-  one bundle they share, after the Cluster's (was one bundle for all
-  of postgresql's objects). A generated `<name>-pooler` or
+  one bundle they share, after the Cluster's, unless the document orders
+  or places a generated member on its own (was one bundle for all of
+  postgresql's objects). A generated `<name>-pooler` or
   `<name>-<db>` that is already the name of another component in the
   document is refused, naming both. A database name repeated in
   `databases` is refused, naming both entries: each entry is one Database
