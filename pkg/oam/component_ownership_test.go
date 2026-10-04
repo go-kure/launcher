@@ -20,6 +20,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1432,6 +1433,49 @@ func TestTransform_ComponentOwnership(t *testing.T) {
 		"legacy-allow-ingress-traffic":    "", // an external backend's policy
 	} {
 		assertOwner(t, apps, name, ownershipKey, component)
+	}
+}
+
+// renamedRule lowers a "renamed" component into a webservice named
+// "<name>-renamed" that carries the authored traits: a part a rule emits under
+// another name than its component's.
+type renamedRule struct{}
+
+func (renamedRule) ComponentType() string { return "renamed" }
+
+func (renamedRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name + "-renamed", Type: "webservice", Traits: comp.Traits}}}, nil
+}
+
+// TestTransform_PolicySelectsTheAuthoredComponent: a synthesized inbound or
+// egress policy selects the value the label pass stamps, the authored
+// component's, also for an entry a rule emitted under another name. The policy
+// keeps the entry's name; its selector is the label the entry's objects carry.
+func TestTransform_PolicySelectsTheAuthoredComponent(t *testing.T) {
+	tr := ownershipTransformer()
+	tr.RegisterComponentLowering(renamedRule{})
+	app := makeApp("shop", Component{Name: "api", Type: "renamed", Traits: []Trait{{Type: "routed", Properties: map[string]any{}}}})
+	ctx := TransformContext{
+		Domain: "launcher.gokure.dev",
+		EgressPeers: map[string][]netpol.EgressPeer{"api-renamed": {{
+			Namespace:   "data",
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+			Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+		}}},
+	}
+	apps := generatedByName(t, tr, app, ctx)
+
+	assertOwner(t, apps, "api-renamed", ownershipKey, "api")
+	stamped := (*apps["api-renamed"].Objects[0]).GetLabels()[ownershipKey]
+	for _, name := range []string{"api-renamed-allow-ingress-traffic", "api-renamed-allow-egress-traffic"} {
+		assertOwner(t, apps, name, ownershipKey, "api")
+		np, ok := (*apps[name].Objects[0]).(*networkingv1.NetworkPolicy)
+		if !ok {
+			t.Fatalf("%s generated a %T, want a NetworkPolicy", name, *apps[name].Objects[0])
+		}
+		if want := map[string]string{ownershipKey: stamped}; !reflect.DeepEqual(np.Spec.PodSelector.MatchLabels, want) {
+			t.Errorf("%s selects %v, want the label the entry's objects carry: %v", name, np.Spec.PodSelector.MatchLabels, want)
+		}
 	}
 }
 
