@@ -87,7 +87,7 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 		RetainDaily:       7,
 		RetainWeekly:      4,
 		RetainMonthly:     3,
-		Repository:        app.Name + "-volsync-secret",
+		Repository:        oam.ShortenNameWithSuffix(app.Name, "-volsync-secret", oam.ShortenLimitSubdomain),
 	}
 
 	if repo, ok := props["repository"].(string); ok && repo != "" {

@@ -77,8 +77,9 @@ func componentServiceName(app *stack.Application) (string, bool) {
 
 // componentAllowPolicyConfig is the ApplicationConfig for an auto-generated
 // NetworkPolicy that allows ingress from routing controller traffic sources to
-// the component's pods. The resource name is {component}-allow-ingress-traffic,
-// distinct from the name emitted by the explicit networkpolicy trait.
+// the component's pods. The resource name is {component}-allow-ingress-traffic
+// (ingressTrafficPolicyName), distinct from the name emitted by the explicit
+// networkpolicy trait.
 type componentAllowPolicyConfig struct {
 	ComponentName string
 	Rules         []trafficRule // one per collector with non-empty ports; deduplicated
@@ -104,7 +105,7 @@ func (c *componentAllowPolicyConfig) podSelectorKey() string {
 func (c *componentAllowPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
 
 func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-ingress-traffic", app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(ingressTrafficPolicyName(c.ComponentName), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
 	// The value is the component's label value, not its raw name: a name over 63
@@ -298,7 +299,7 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 		if len(rules) == 0 {
 			continue
 		}
-		policyName := compName + "-allow-ingress-traffic"
+		policyName := ingressTrafficPolicyName(compName)
 		var cfg stack.ApplicationConfig = &componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey}
 		if rt, ok := r.routingTargets[compName]; ok {
 			sel, retargeted, err := retargetTrafficRules(compName, rt, rules)
@@ -456,7 +457,7 @@ func (r *npSynthesisRegistry) emitExternalBackends() error {
 		if len(rules) == 0 {
 			continue
 		}
-		policyName := eb.service + "-allow-ingress-traffic"
+		policyName := ingressTrafficPolicyName(eb.service)
 		nsName := eb.namespace + "/" + policyName
 		if _, dup := r.emitted[nsName]; dup {
 			return errors.Errorf(
@@ -689,7 +690,7 @@ func (c *componentEgressPolicyConfig) podSelectorKey() string {
 func (c *componentEgressPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
 
 func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-egress-traffic", app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(egressTrafficPolicyName(c.ComponentName), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
 	// The component's label value, as on the inbound side (go-kure/launcher#572).
@@ -792,7 +793,7 @@ func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[st
 				continue
 			}
 			autoApps = append(autoApps, stack.NewApplication(
-				app.Name+"-allow-egress-traffic",
+				egressTrafficPolicyName(app.Name),
 				app.Namespace,
 				&componentEgressPolicyConfig{ComponentName: app.Name, Peers: peers, PodSelectorKey: labelKey},
 			))
@@ -953,9 +954,29 @@ type componentEndpointIngressPolicyConfig struct {
 // endpoint name. Mirrors the podSelectorKey() default-fallback pattern of the other families.
 func (c *componentEndpointIngressPolicyConfig) policyName() string {
 	if c.PolicyName == "" {
-		return c.ComponentName + "-allow-endpoint-ingress"
+		return ShortenNameWithSuffix(c.ComponentName, endpointIngressPolicySuffix, ShortenLimitSubdomain)
 	}
 	return c.PolicyName
+}
+
+// The fixed suffixes of the synthesized NetworkPolicy names. Each name is the
+// owner's name plus its suffix, shortened by the one rule when it would exceed
+// an object name's 253 characters: the owner's name is cut, the suffix kept.
+const (
+	ingressTrafficPolicySuffix  = "-allow-ingress-traffic"
+	egressTrafficPolicySuffix   = "-allow-egress-traffic"
+	endpointIngressPolicySuffix = "-allow-endpoint-ingress"
+)
+
+// ingressTrafficPolicyName names the inbound policy synthesized for owner, a
+// component or an external backend Service.
+func ingressTrafficPolicyName(owner string) string {
+	return ShortenNameWithSuffix(owner, ingressTrafficPolicySuffix, ShortenLimitSubdomain)
+}
+
+// egressTrafficPolicyName names the outbound policy synthesized for a component.
+func egressTrafficPolicyName(component string) string {
+	return ShortenNameWithSuffix(component, egressTrafficPolicySuffix, ShortenLimitSubdomain)
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields
@@ -1138,12 +1159,12 @@ func endpointKey(e netpol.Endpoint) string {
 // of the endpoint so the names are distinct and — because the hash is derived from the endpoint's
 // own selector+ports, not its position — stable across unrelated endpoint additions.
 func endpointIngressPolicyName(comp string, e netpol.Endpoint, multi bool) string {
-	base := comp + "-allow-endpoint-ingress"
-	if !multi {
-		return base
+	suffix := endpointIngressPolicySuffix
+	if multi {
+		sum := sha256.Sum256([]byte(endpointKey(e)))
+		suffix += "-" + hex.EncodeToString(sum[:])[:8]
 	}
-	sum := sha256.Sum256([]byte(endpointKey(e)))
-	return base + "-" + hex.EncodeToString(sum[:])[:8]
+	return ShortenNameWithSuffix(comp, suffix, ShortenLimitSubdomain)
 }
 
 // sourcesKey returns a canonical dedup/ordering key for a source set — per-source keys sorted

@@ -2167,9 +2167,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     with sorted keys and numbers kept exact (JSON is YAML, which is how Flux reads a
     values reference); those exact bytes are both stored and hashed into the name:
     `<component>-values-<first 10 hex digits of their sha256>`. A name that would
-    exceed 253 bytes keeps a truncated prefix plus a short digest of the full
-    component name, so it is always a legal DNS-1123 subdomain and always carries the
-    values hash. Identical values hash alike whatever their key order, and any change
+    exceed 253 bytes is shortened by the one shortening rule
+    (`oam.ShortenNameWithSuffix`, go-kure/launcher#793): the component name is cut to a
+    prefix plus the first 10 hex digits of the sha256 of the full component name (8
+    before go-kure/launcher#793, so such a name changes once), and the suffix is kept, so
+    it is always a legal DNS-1123 subdomain and always carries the values hash. Identical values hash alike whatever their key order, and any change
     to them renames the ConfigMap and so changes the HelmRelease's spec, which is what
     makes Flux upgrade the release on a values-only edit. Empty or absent `values`
     add no trait and no entry; `values` that are not a JSON object, a non-finite
@@ -2473,8 +2475,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
-  behavioural benefit. Known limitation: the child directory name's DNS-1123 truncation (a
-  `sha256`-prefixed truncation, the scheme `helm` uses for its values ConfigMap name) makes
+  behavioural benefit. Known limitation: the child directory name's shortening to 253
+  characters (the one shortening rule, `oam.ShortenNameWithSuffix`, which `helm` uses for its
+  values ConfigMap name: a prefix of the component name plus 10 hex digits of its sha256, 8
+  before go-kure/launcher#793) makes
   same-name collisions vanishingly unlikely *within* one Application, but two different
   Applications with a same-named component still collide — component names are unique only
   within one Application, while emitted Kustomization CRs for hook-group children share one

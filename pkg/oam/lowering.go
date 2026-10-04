@@ -466,7 +466,10 @@ func (n *NameAllocator) EmitOrAdopt(name, identity string, origin Origin) (adopt
 }
 
 // Name builds "<base>-<suffix>", validates it as a DNS-1123 subdomain, reserves it
-// against origin, and returns it.
+// against origin, and returns it. A name over 253 characters is shortened, not
+// refused: base is cut by the one shortening rule (ShortenNameWithSuffix at
+// ShortenLimitSubdomain) and "-<suffix>" is kept whole. The shortened name is the
+// one reserved, so it takes part in collision detection like any other.
 func (n *NameAllocator) Name(base, suffix string, origin Origin) (string, error) {
 	name, err := generatedName(base, suffix)
 	if err != nil {
@@ -478,8 +481,9 @@ func (n *NameAllocator) Name(base, suffix string, origin Origin) (string, error)
 	return name, nil
 }
 
-// NameOrAdopt is Name for EmitOrAdopt: it builds and validates "<base>-<suffix>",
-// then claims it for identity. adopted reports that the element already exists.
+// NameOrAdopt is Name for EmitOrAdopt: it builds, shortens when needed and validates
+// "<base>-<suffix>", then claims it for identity. adopted reports that the element
+// already exists.
 func (n *NameAllocator) NameOrAdopt(base, suffix, identity string, origin Origin) (name string, adopted bool, err error) {
 	name, err = generatedName(base, suffix)
 	if err != nil {
@@ -493,7 +497,7 @@ func (n *NameAllocator) NameOrAdopt(base, suffix, identity string, origin Origin
 }
 
 func generatedName(base, suffix string) (string, error) {
-	name := base + "-" + suffix
+	name := ShortenNameWithSuffix(base, "-"+suffix, ShortenLimitSubdomain)
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return "", errors.Errorf("lowering: generated name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
 	}

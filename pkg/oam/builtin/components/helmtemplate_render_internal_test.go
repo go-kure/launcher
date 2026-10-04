@@ -654,16 +654,16 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 		{Phase: strings.Repeat("x", 80)}, // slugs+truncates to 40 x's via hookGroupDir
 	}
 
-	// mlNameA's truncation boundary (prefixLen=229 for group 0's suffix
-	// "-00-pre-install", len 15: maxPrefix=253-15=238, prefixLen=238-8-1=229)
-	// lands right after a literal '.': mlNameA[:229] ends in ".", exercising
-	// the TrimRight(name, "-.") cleanup mirrored from boundedResourceName.
-	mlNameA := strings.Repeat("a", 228) + "." + strings.Repeat("b", 24)
+	// mlNameA's truncation boundary (prefixLen=227 for group 0's suffix
+	// "-00-pre-install", len 15: maxPrefix=253-15=238, prefixLen=238-10-1=227)
+	// lands right after a literal '.': mlNameA[:227] ends in ".", exercising
+	// the trailing-separator trim of the shortening rule (oam.ShortenName).
+	mlNameA := strings.Repeat("a", 226) + "." + strings.Repeat("b", 26)
 	if len(mlNameA) != 253 {
 		t.Fatalf("test setup: len(mlNameA) = %d, want 253", len(mlNameA))
 	}
-	if mlNameA[228] != '.' {
-		t.Fatalf("test setup: mlNameA[228] = %q, want '.'", mlNameA[228])
+	if mlNameA[226] != '.' {
+		t.Fatalf("test setup: mlNameA[226] = %q, want '.'", mlNameA[226])
 	}
 
 	namesA := make([]string, len(groups))
@@ -686,9 +686,9 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 
 	// A second near-253-char ml.Name sharing mlNameA's truncated prefix must
 	// still yield a distinct dirName set — the sha256 prefix, not just the
-	// group index, is what prevents cross-name collision (mirrors
-	// TestBoundedResourceName_TruncationPreservesUniqueness).
-	mlNameB := strings.Repeat("a", 228) + "." + strings.Repeat("c", 24)
+	// group index, is what prevents cross-name collision (as
+	// TestShortenName_GeneratingSites shows for every site).
+	mlNameB := strings.Repeat("a", 226) + "." + strings.Repeat("c", 26)
 	if len(mlNameB) != 253 {
 		t.Fatalf("test setup: len(mlNameB) = %d, want 253", len(mlNameB))
 	}

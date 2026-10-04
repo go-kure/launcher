@@ -153,8 +153,8 @@ Selectors under an operator's own label and naming contract — the `postgresql`
 component-identity labels.
 It is a projection rather than a refusal because the label is an identifier, not the object's
 name: several component types (`manifests`, `oci`,
-`crd`, `passthrough`) and their traits accept a name over 63 characters. Object names are never
-projected.
+`crd`, `passthrough`) and their traits accept a name over 63 characters. It is the 63-character
+case of the one shortening rule, [Names and overrides](#names-and-overrides).
 Because a projected value is itself a valid component name, validation rejects an Application
 in which two components share a `ComponentLabelValue` — a component named exactly like another
 component's projection, or two long names whose prefix and digest both coincide — since their
@@ -190,6 +190,33 @@ source, egress peer, backend or endpoint selector it came from. The inputs are r
 trait configuration, reused by every rule and every policy built from them, so a label a
 consumer stamps onto one generated policy would otherwise reach all of them
 (go-kure/launcher#396).
+
+## Names and overrides
+
+Launcher shortens a name only when it generated that name itself, and always by one rule,
+`ShortenName(name, limit)` (go-kure/launcher#793). A name of at most `limit` characters is
+returned unchanged, so no document whose names fit changes output. A longer one becomes its
+first `limit-11` characters with trailing `-`/`.` trimmed, a `-`, and the first 10 hex
+characters (`ShortenNameDigestLength`) of the sha256 of the whole name. The result is
+deterministic, and two different names share one only when their trimmed prefixes and their
+40-bit digests both coincide. `ShortenNameWithSuffix(name, suffix, limit)` is the same rule for a
+name that ends in a fixed suffix (`-hpa`, `-values-<digest>`): the name is cut, the suffix kept
+whole.
+
+| Limit | Constant | Generated names |
+|-------|----------|-----------------|
+| 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout, the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, and the `volsync` default repository Secret name. |
+| 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
+
+The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
+keeps `-<suffix>`, and reserves the shortened name, so that name takes part in collision
+detection like any other. Shortening never makes an invalid name valid: the DNS-1123 check still
+runs on the result.
+
+A name an author writes, or an override of a generated name, is never shortened: it is
+validated for its target and refused when it does not fit. Bundle names
+(`<application>-<tier>`, `<application>-<component>`) do not go through the rule yet.
 
 ## Parsing
 
@@ -455,7 +482,8 @@ source, say) use the emit-or-adopt pair instead:
   determined by `identity`, a string the rule builds from every input that shapes that
   element.
 - `NameOrAdopt(base, suffix, identity, origin)` is the same claim through `Name`'s
-  `<base>-<suffix>` construction and DNS-1123 check.
+  `<base>-<suffix>` construction, shortening ([Names and overrides](#names-and-overrides)) and
+  DNS-1123 check.
 
 The first claim returns `adopted=false`, and the rule emits the element. A later claim with
 the same identity, from any element of the same authored document and in any round, returns

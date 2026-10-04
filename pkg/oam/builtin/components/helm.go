@@ -511,12 +511,16 @@ type helmValuesFromSpec struct {
 }
 
 // helmValuesConfigMapName names the values ConfigMap of component name whose
-// serialized values have the hex digest valuesDigest: boundedResourceName
-// with the suffix "-values-<first 10 digest digits>". The suffix survives
-// truncation, so the name always carries the values hash and is always a legal
-// DNS-1123 subdomain within 253 bytes.
+// serialized values have the hex digest valuesDigest: name with the suffix
+// "-values-<first 10 digest digits>", shortened by the one shortening rule
+// (oam.ShortenNameWithSuffix) when it would exceed 253 characters. Only name is
+// cut, and the digest of the whole name takes the place of what is cut: a plain
+// truncation would give two components whose long names share a prefix the
+// same ConfigMap, one clobbering the other's values. The suffix survives, so
+// the name always carries the values hash and is always a legal DNS-1123
+// subdomain.
 func helmValuesConfigMapName(name, valuesDigest string) string {
-	return boundedResourceName(name, "-values-"+valuesDigest[:helmValuesHashLen])
+	return oam.ShortenNameWithSuffix(name, "-values-"+valuesDigest[:helmValuesHashLen], oam.ShortenLimitSubdomain)
 }
 
 // plainSourceURL reports whether raw is exactly an http:// or https:// URL made

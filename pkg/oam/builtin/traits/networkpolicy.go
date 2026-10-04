@@ -893,7 +893,7 @@ type npPort struct {
 
 // Generate creates a Kubernetes NetworkPolicy resource.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(c.componentName+"-allow", app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(oam.ShortenNameWithSuffix(c.componentName, "-allow", oam.ShortenLimitSubdomain), app.Namespace)
 	np.Labels = componentLabels(c.componentName)
 	np.Annotations = nil
 	np.Spec.PodSelector = metav1.LabelSelector{
