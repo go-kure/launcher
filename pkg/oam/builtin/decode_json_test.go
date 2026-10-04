@@ -190,6 +190,87 @@ func TestUnknownJSONFieldPath(t *testing.T) {
 	}
 }
 
+type (
+	SelLeaf struct {
+		Name string `json:"name"`
+	}
+	SelUntagged struct{ Value SelLeaf }
+	SelTagged   struct {
+		Free map[string]any `json:"Value"`
+	}
+	// selDominated: two fields keyed "Value" at one depth; the tagged one wins.
+	selDominated struct {
+		SelUntagged
+		SelTagged
+	}
+	// selFoldFirst: no field is keyed "Alpha"; the decoder folds the key onto
+	// the first field in declaration order, the free-form map.
+	selFoldFirst struct {
+		Open   map[string]any `json:"alpha"`
+		Closed SelLeaf        `json:"ALPHA"`
+	}
+	// selFoldClosed is selFoldFirst with the closed struct declared first.
+	selFoldClosed struct {
+		Closed SelLeaf        `json:"alpha"`
+		Open   map[string]any `json:"ALPHA"`
+	}
+	SelDeep struct {
+		Open map[string]any `json:"beta"`
+	}
+	// selFoldDepth: the promoted field comes first in declaration order, so a
+	// folded key lands on it although the other field is shallower.
+	selFoldDepth struct {
+		SelDeep
+		Closed SelLeaf `json:"BETA"`
+	}
+	// selArray: the decoder drops the elements past a fixed array's length.
+	selArray struct {
+		Items [1]SelLeaf `json:"items"`
+	}
+)
+
+// unknownPathAgrees checks UnknownJSONFieldPath[T] against want, and that it
+// finds a key exactly when the strict decode refuses one as unknown.
+func unknownPathAgrees[T any](t *testing.T, src map[string]any, want string) {
+	t.Helper()
+	got := builtin.UnknownJSONFieldPath[T](src)
+	if got != want {
+		t.Errorf("UnknownJSONFieldPath = %q, want %q", got, want)
+	}
+	_, _, err := builtin.DecodeStrictJSON[T](src)
+	if unknown := err != nil && strings.Contains(err.Error(), "unknown field"); unknown != (got != "") {
+		t.Errorf("decoder error %v, path %q: they must agree on whether a key is unknown", err, got)
+	}
+}
+
+// TestUnknownJSONFieldPath_FollowsFieldSelection: the walk descends into the
+// field encoding/json fills from a key, not into another field that merely
+// matches it: one a tagged field dominates, or one a case-folded key does not
+// reach because a field declared earlier folds to the same key. It reads no
+// element the decoder discards.
+func TestUnknownJSONFieldPath_FollowsFieldSelection(t *testing.T) {
+	extra := map[string]any{"extra": true}
+	t.Run("a dominated field is not walked", func(t *testing.T) {
+		unknownPathAgrees[selDominated](t, map[string]any{"Value": extra}, "")
+	})
+	t.Run("a folded key lands on the first field declared", func(t *testing.T) {
+		unknownPathAgrees[selFoldFirst](t, map[string]any{"Alpha": extra}, "")
+		unknownPathAgrees[selFoldClosed](t, map[string]any{"Alpha": extra}, "Alpha.extra")
+	})
+	t.Run("an exact key wins over a folded one", func(t *testing.T) {
+		unknownPathAgrees[selFoldFirst](t, map[string]any{"ALPHA": extra}, "ALPHA.extra")
+		unknownPathAgrees[selFoldClosed](t, map[string]any{"ALPHA": extra}, "")
+	})
+	t.Run("declaration order, not depth, decides a folded key", func(t *testing.T) {
+		unknownPathAgrees[selFoldDepth](t, map[string]any{"Beta": extra}, "")
+		unknownPathAgrees[selFoldDepth](t, map[string]any{"BETA": extra}, "BETA.extra")
+	})
+	t.Run("an element past a fixed array's length is not read", func(t *testing.T) {
+		unknownPathAgrees[selArray](t, map[string]any{"items": []any{map[string]any{"name": "ok"}, extra}}, "")
+		unknownPathAgrees[selArray](t, map[string]any{"items": []any{extra}}, "items[0].extra")
+	})
+}
+
 // TestUnknownJSONFieldPath_AgreesWithDecoder: on a Flux spec type, a path is
 // found exactly when the strict decode reports an unknown field, and its last
 // key is the one the decoder names.
