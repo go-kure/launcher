@@ -44,8 +44,10 @@ const (
 // no prefix, or limit leaves no room for one, the result is the digest alone,
 // cut to limit.
 //
-// The result is deterministic, and two different names share one only when
-// their trimmed prefixes and their 40-bit digests both coincide.
+// The result is deterministic. Two different names over limit share one only
+// when their trimmed prefixes and their 40-bit digests both coincide; a name
+// that fits is returned as written, so it can also equal the shortened form of
+// a longer one.
 //
 // One exception: at ShortenLimitHelmRelease the result is what Flux
 // helm-controller computes for a HelmRelease's release name — the first 40
@@ -54,8 +56,7 @@ const (
 // it. helm-controller keeps that function internal, so it is reproduced here.
 //
 // Only a name launcher generates by default goes through ShortenName. A name
-// an author or a consumer supplies is validated for its target and refused
-// when it is too long, never shortened.
+// an author or a consumer supplies is used as written, never shortened.
 func ShortenName(name string, limit int) string {
 	if limit == ShortenLimitHelmRelease {
 		if len(name) <= limit {

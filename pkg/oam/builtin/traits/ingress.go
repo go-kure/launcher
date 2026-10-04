@@ -178,6 +178,18 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// routingObjectName is the default name of the object a routing trait generates
+// for a component, which is also its sub-application's name:
+// <component>-<kind>, or <component>-<kind>-<scope> when the trait sets a scope.
+// A name over 253 characters is shortened by the one rule, the suffix kept whole.
+func routingObjectName(component, kind, scope string) string {
+	suffix := "-" + kind
+	if scope != "" {
+		suffix += "-" + scope
+	}
+	return oam.ShortenNameWithSuffix(component, suffix, oam.ShortenLimitSubdomain)
+}
+
 // Apply creates an Ingress resource for the component's service.
 // If the optional 'name' property is set, that value is used as the sub-application
 // name, enabling multiple ingress traits on the same component without collision.
@@ -187,11 +199,9 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	subAppName := app.Name + "-ingress"
-	if config.Name != "" {
-		subAppName = config.Name
-	} else if config.Scope != "" {
-		subAppName = app.Name + "-ingress-" + config.Scope
+	subAppName := config.Name
+	if subAppName == "" {
+		subAppName = routingObjectName(app.Name, "ingress", config.Scope)
 	}
 	ingressApp := stack.NewApplication(subAppName, app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, ingressApp)
