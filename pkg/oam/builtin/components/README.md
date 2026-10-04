@@ -2476,13 +2476,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     refused source fails before any request is made: only an allowed source is rendered. No
     allowlist, or an empty one, permits every host.
   - *Every emitted workload.* The chart is then rendered — in the transform, so a fetch or render
-    failure is reported there, as that component's policy error — and each Pod,
+    failure is reported there, as that component's policy error — and each Pod, PodTemplate,
     ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob in it,
     a kept hook's included, is checked as an authored workload is: host namespaces, hostPath
-    volumes, the storage and cpu/memory maxima, and for every init and regular container the
-    registry allowlist, the privileged, HostProcess and capability gates, and `ValidateImageRef`
-    (no untagged image, no `:latest`). Ephemeral containers are refused. The error names the
-    rendered object and the field (`helmtemplate: rendered Deployment "demo/web":
+    volumes, the cpu/memory maxima, the storage maximum on a generic ephemeral volume's claim,
+    and for every init and regular container the registry allowlist, the privileged, HostProcess
+    and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral
+    containers are refused. The storage a PersistentVolumeClaim, or a StatefulSet's claim
+    template, requests is held to the storage maximum (`MaxStorageSize`), as the
+    `persistentvolumeclaim` and `statefulset` kinds hold theirs. The error names the rendered
+    object and the field (`helmtemplate: rendered Deployment "demo/web":
     spec.template.spec.containers[0] "app": …`).
 
   **Behaviour change:** a chart that renders a privileged container, a host namespace or a
@@ -2492,9 +2495,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without a tag, or
   tagged `:latest`, has to be pinned through the chart's values.
 
-  Limits. A workload in an API version kure's scheme does not register (`batch/v1beta1`,
-  `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and is refused rather
-  than passed unchecked. Not checked: an object of a dropped hook (never emitted); the pods a
+  Limits. A workload or claim in an API version kure's scheme does not register
+  (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
+  is refused rather than passed unchecked; so is a list left inside such a list, whose items the
+  parser does not unpack. Not checked: an object of a dropped hook (never emitted); the pods a
   custom resource's controller creates; the host of the chart archive a Helm repository's index
   points at, and any redirect, which kure's renderer follows. A nil policy (a direct
   `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing. A chart
