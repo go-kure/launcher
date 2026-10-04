@@ -1145,7 +1145,7 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 	}
 	ctx := oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")}
 	want := `synthesized NetworkPolicy "db-allow-ingress-traffic": name collision: NetworkPolicy.networking.k8s.io "default/db-allow-ingress-traffic" is named by ` +
-		`component "db" (role "netpol-synth", its default) and by an external backend Service (role "netpol-synth", its default); give one of them another name`
+		`component "db" (role "netpol-synth", its default) and by external backend Service "db" (role "netpol-synth", its default); give one of them another name`
 	if _, _, err := tr.TransformWithPolicy(newApp(), ctx); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %v, want one containing %q", err, want)
 	}

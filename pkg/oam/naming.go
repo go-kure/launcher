@@ -104,9 +104,12 @@ type NameRequest struct {
 	// "Kind.group" ("HorizontalPodAutoscaler.autoscaling"). It is empty for a
 	// name that is no object (a bundle, a group, a sub-application).
 	Kind string
-	// Default is launcher's own name, already shortened to fit. It is what tells
-	// apart several names of one component and role: the two bundles of two
-	// groups, each object of the rbac trait.
+	// Default is launcher's own name, as launcher would use it: already shortened
+	// to fit where launcher shortens a name (a group's bundle, a generated
+	// object), and as long as it is where it does not (a trait's sub-application:
+	// the component name plus a suffix). It is what tells apart several names of
+	// one component and role: the two bundles of two groups, each object of the
+	// rbac trait.
 	Default string
 }
 
@@ -125,7 +128,9 @@ type NameSpec struct {
 	// property holding the empty string is an authored name, and is refused.
 	Property string
 	Authored string
-	// Default is launcher's name, already shortened to fit. It is used as it is.
+	// Default is launcher's name. It is used as it is: resolving a name never
+	// shortens it, so a default that must fit a limit is shortened by its handler
+	// before it asks.
 	Default string
 }
 
@@ -156,29 +161,50 @@ type nameOwner struct {
 	// apply numbers the trait the engine applied (nameResolver.forTrait), zero for
 	// a name no trait resolves. The slot does not tell two traits apart: a trait
 	// rule's outputs keep their input's slot, and a trait forwarded to two
-	// members of a sibling group is applied on each.
+	// members of a sibling group is applied on each. nth counts, from one, the
+	// applied traits of one component, member, slot and type: the outputs a
+	// trait rule lowered one trait to.
 	apply int
+	nth   int
+	// service is the external backend Service a NetworkPolicy was synthesized
+	// for, which no component owns; empty for every other name.
+	service string
 	// def is the default: what tells apart two names of one component and role.
 	def string
 }
 
-// describe says who resolved the name and where it came from. A trait a rule
-// gave a sibling group member is described with the member, whose traits its
-// slot counts; a trait forwarded from an authored one is described by its
-// authored slot alone, unless withMember asks for the member as well.
-func (o nameOwner) describe(source nameSource, property string, withMember bool) string {
+// How much describe says about a trait. A trait a rule gave a sibling group
+// member is always described with the member, whose traits its slot counts.
+const (
+	// describeSlot describes a trait forwarded from an authored one by its
+	// authored slot alone.
+	describeSlot = iota
+	// describeMember adds the member it was applied on: one authored trait
+	// forwarded to two members.
+	describeMember
+	// describeOutput adds which output of its lowering it is: one trait a trait
+	// rule lowered to two of one type.
+	describeOutput
+)
+
+// describe says who resolved the name and where it came from, in as much
+// detail as asked (describeSlot, describeMember, describeOutput).
+func (o nameOwner) describe(source nameSource, property string, detail int) string {
 	var who string
 	switch {
-	case o.component == "" && o.role == NameRoleNetpolSynth:
-		who = "an external backend Service"
+	case o.service != "":
+		who = fmt.Sprintf("external backend Service %q", o.service)
 	case o.component == "":
 		who = "the application"
 	case o.trait == "":
 		who = fmt.Sprintf("component %q", o.component)
-	case o.member != "" && (withMember || !o.authored):
+	case o.member != "" && (detail >= describeMember || !o.authored):
 		who = fmt.Sprintf("component %q member %q traits[%d] %q", o.component, o.member, o.slot, o.trait)
 	default:
 		who = fmt.Sprintf("component %q traits[%d] %q", o.component, o.slot, o.trait)
+	}
+	if o.trait != "" && detail >= describeOutput {
+		who += fmt.Sprintf(", output %d of its lowering", o.nth)
 	}
 	switch source {
 	case nameFromAuthor:
@@ -223,10 +249,13 @@ func (n *NameAllocator) claimName(key nameClaimKey, claim resolvedNameClaim) err
 		if prior.owner == claim.owner {
 			return nil
 		}
-		first, second := prior.owner.describe(prior.source, prior.property, false), claim.owner.describe(claim.source, claim.property, false)
-		if first == second {
-			// One authored trait forwarded to two members of a sibling group.
-			first, second = prior.owner.describe(prior.source, prior.property, true), claim.owner.describe(claim.source, claim.property, true)
+		// The two are told apart in the fewest words that do.
+		var first, second string
+		for detail := describeSlot; detail <= describeOutput; detail++ {
+			first, second = prior.owner.describe(prior.source, prior.property, detail), claim.owner.describe(claim.source, claim.property, detail)
+			if first != second {
+				break
+			}
 		}
 		return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
 	}
@@ -244,8 +273,18 @@ type nameResolver struct {
 	hook        func(NameRequest) (string, bool)
 	application string
 	claims      *NameAllocator
-	// applied counts the traits forTrait was asked about.
+	// applied counts the traits forTrait was asked about, and outputs those of
+	// them that share one component, member, slot and type.
 	applied int
+	outputs map[traitPlace]int
+}
+
+// traitPlace is where an applied trait stands, as a collision error describes
+// it. Two traits of one place are the outputs a trait rule lowered one trait to.
+type traitPlace struct {
+	component, member, trait string
+	slot                     int
+	authored                 bool
 }
 
 // traitNaming is what the engine attaches to a trait before it applies it: the
@@ -257,6 +296,7 @@ type traitNaming struct {
 	slot      int
 	authored  bool
 	apply     int
+	nth       int
 	// hookSubApps holds, for each sub-application name the hook gave this trait,
 	// the defaults it replaced, in the order they were resolved.
 	hookSubApps map[string][]string
@@ -264,7 +304,9 @@ type traitNaming struct {
 
 // takeHookSubApp returns the default the hook replaced with name, a
 // sub-application name this trait resolved, and whether there is one. Each
-// resolution is returned once.
+// resolution is returned once, the earliest first: a trait that the hook gave
+// one name for two sub-applications is taken to create them in the order it
+// resolved them.
 func (n *traitNaming) takeHookSubApp(name string) (string, bool) {
 	if n == nil || len(n.hookSubApps[name]) == 0 {
 		return "", false
@@ -292,7 +334,8 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 		return (*nameResolver)(nil).resolve(owner, spec)
 	}
 	owner.component, owner.member = t.naming.component, t.naming.member
-	owner.slot, owner.authored, owner.apply = t.naming.slot, t.naming.authored, t.naming.apply
+	owner.slot, owner.authored = t.naming.slot, t.naming.authored
+	owner.apply, owner.nth = t.naming.apply, t.naming.nth
 	name, err := t.naming.resolver.resolve(owner, spec)
 	if err == nil && spec.Role == NameRoleSubApplication && name != spec.Default {
 		if t.naming.hookSubApps == nil {

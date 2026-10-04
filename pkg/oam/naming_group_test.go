@@ -84,12 +84,13 @@ func TestResolveName_EveryAppliedTraitIsItsOwnOwner(t *testing.T) {
 				`component "web" member "b" traits[0] "named" (role "hpa", its default); give one of them another name`,
 		},
 		{
-			// Both keep the authored slot of the trait they replace, on one member.
+			// Both keep the authored slot of the trait they replace, on one member:
+			// only which output each is tells them apart.
 			name: "two traits a trait rule lowered one forwarded trait to",
 			tr:   namingGroupTransformer(nil, nil),
 			doc:  Component{Name: "web", Type: "pair", Traits: []Trait{{Type: "two", Properties: map[string]any{}}}},
-			want: collision + `component "web" member "a" traits[0] "named" (role "hpa", its default) and by ` +
-				`component "web" member "a" traits[0] "named" (role "hpa", its default); give one of them another name`,
+			want: collision + `component "web" member "a" traits[0] "named", output 1 of its lowering (role "hpa", its default) and by ` +
+				`component "web" member "a" traits[0] "named", output 2 of its lowering (role "hpa", its default); give one of them another name`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +105,8 @@ func TestResolveName_EveryAppliedTraitIsItsOwnOwner(t *testing.T) {
 // A sub-application's name is not unique, in a sibling group as outside one:
 // the Naming hook may give two different sub-applications of two members one
 // name. The same trait on two members is still refused, whatever the hook
-// answers, since it is asked the same question for both (go-kure/launcher#787).
+// answers, since it is asked the same question for both. A name the hook gave
+// that meets one it did not give is refused by name (go-kure/launcher#787).
 func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 	shared := func(req NameRequest) (string, bool) {
 		return "shared", req.Role == NameRoleSubApplication
@@ -131,16 +133,103 @@ func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 			t.Fatalf("err = %v\nwant one containing %q", err, want)
 		}
 	})
-	t.Run("a name the hook gave is not compared with one it did not give", func(t *testing.T) {
-		// Member a's sub-application is named by the hook, member b's by its own
-		// trait, which resolves nothing.
-		tr := namingGroupTransformer([]Trait{named("", "web-config")}, []Trait{{Type: "sub", Properties: map[string]any{}}})
-		tr.RegisterTrait("sub", subAppTrait{})
-		hook := func(req NameRequest) (string, bool) {
-			return "web-sub", req.Role == NameRoleSubApplication
+	// Only two names the hook gave are compared by their defaults. A name it gave
+	// that meets one it did not give is refused by name, as before the hook.
+	onlyConfig := func(name string) func(NameRequest) (string, bool) {
+		return func(req NameRequest) (string, bool) {
+			return name, req.Role == NameRoleSubApplication && req.Default == "web-config"
 		}
-		if _, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: hook}); err != nil {
-			t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		onB  Trait
+		hook func(NameRequest) (string, bool)
+	}{
+		{
+			// Member b's trait resolves nothing and names its sub-application itself.
+			name: "a name the hook gave meets one a trait gave",
+			onB:  Trait{Type: "sub", Properties: map[string]any{}},
+			hook: onlyConfig("web-sub"),
+		},
+		{
+			name: "a name the hook gave meets one a policy renamed onto it",
+			onB:  Trait{Type: "renamesub", Properties: map[string]any{"name": "web-other", "to": "web-sub"}},
+			hook: onlyConfig("web-sub"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := namingGroupTransformer([]Trait{named("", "web-config")}, []Trait{tc.onB})
+			tr.RegisterTrait("sub", subAppTrait{})
+			tr.RegisterTrait("renamesub", renamingSubTrait{})
+			_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: tc.hook})
+			want := `sibling group "web": traits on members "a" and "b" both create sub-application "web-sub" (the Naming hook's name for "web-config" on member "a"); carry the trait on one member, or return another name from the hook`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, want)
+			}
+		})
+	}
+	t.Run("a policy renaming one of a trait's two sub-applications leaves the other its default", func(t *testing.T) {
+		// Member a's trait is given "shared" for both its sub-applications, and a
+		// policy renames the first. The second is still the hook's name for
+		// "web-y", which member b's trait creates too.
+		tr := namingGroupTransformer(
+			[]Trait{{Type: "twosub", Properties: map[string]any{"first": "web-x", "second": "web-y"}}},
+			[]Trait{named("", "web-y")})
+		tr.RegisterTrait("twosub", twoSubTrait{})
+		_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
+		want := `sibling group "web": traits on members "a" and "b" both create sub-application "web-y" (named "shared" by the Naming hook); carry the trait on one member`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %q", err, want)
 		}
 	})
+}
+
+// twoSubTrait resolves the sub-application names in properties "first" and
+// "second" and appends both, in that order. The first's ApplyPolicy renames it
+// to "moved".
+type twoSubTrait struct{}
+
+func (twoSubTrait) CanHandle(t string) bool { return t == "twosub" }
+func (twoSubTrait) Apply(trait *Trait, app *stack.Application, b *stack.Bundle) error {
+	var names [2]string
+	for i, property := range []string{"first", "second"} {
+		name, err := trait.ResolveName(NameSpec{Role: NameRoleSubApplication, Default: trait.Properties[property].(string)})
+		if err != nil {
+			return err
+		}
+		names[i] = name
+	}
+	moved := stack.NewApplication(names[0], app.Namespace, nil)
+	moved.SetConfig(&renamingSubStub{own: moved, to: "moved"})
+	b.Applications = append(b.Applications, moved, stack.NewApplication(names[1], app.Namespace, &siblingStub{}))
+	return nil
+}
+
+// decoratingNamedTrait resolves one object name on every Apply: on its
+// component's application, and again on each sub-application it decorates.
+type decoratingNamedTrait struct{ applied *int }
+
+func (decoratingNamedTrait) CanHandle(t string) bool        { return t == "decor" }
+func (decoratingNamedTrait) DecoratesSubApplications() bool { return true }
+func (d decoratingNamedTrait) Apply(trait *Trait, _ *stack.Application, _ *stack.Bundle) error {
+	*d.applied++
+	_, err := trait.ResolveName(hpaSpec("web-hpa"))
+	return err
+}
+
+// A decorating trait the engine applies again on a sub-application resolves its
+// name for the same owner: it does not collide with itself.
+func TestResolveName_DecoratingTraitAppliedAgainIsOneOwner(t *testing.T) {
+	applied := 0
+	tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0)},
+		map[string]TraitHandler{"named": namedTrait{}, "decor": decoratingNamedTrait{&applied}})
+	doc := siblingDoc(Component{Name: "web", Type: "a", Properties: map[string]any{}, Traits: []Trait{
+		{Type: "decor", Properties: map[string]any{}}, named("", "web-sub"),
+	}})
+	if _, _, err := tr.TransformWithPolicy(doc, TransformContext{Namespace: "default"}); err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if applied != 2 {
+		t.Fatalf("the decorating trait was applied %d times, want 2: on its component and on the sub-application", applied)
+	}
 }

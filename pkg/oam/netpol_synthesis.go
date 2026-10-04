@@ -190,9 +190,13 @@ type backendIngressAllowPolicyConfig struct {
 	// component whose routed traffic lands on its selector's pods. Empty for an
 	// external backend, which belongs to no component (markComponentOwnership).
 	ComponentName string
-	PolicyName    string
-	PodSelector   *metav1.LabelSelector // authored backend selector (matchLabels-only)
-	Rules         []trafficRule
+	// Service is the external backend Service the policy was synthesized for;
+	// empty for a component's. It tells apart two external policies whose
+	// shortened default names meet (go-kure/launcher#787).
+	Service     string
+	PolicyName  string
+	PodSelector *metav1.LabelSelector // authored backend selector (matchLabels-only)
+	Rules       []trafficRule
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields.
@@ -485,7 +489,7 @@ func (r *npSynthesisRegistry) emitExternalBackends() {
 		r.queue(eb.bundle, stack.NewApplication(
 			policyName,
 			eb.namespace,
-			&backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: eb.selector, Rules: rules},
+			&backendIngressAllowPolicyConfig{Service: eb.service, PolicyName: policyName, PodSelector: eb.selector, Rules: rules},
 		))
 	}
 }

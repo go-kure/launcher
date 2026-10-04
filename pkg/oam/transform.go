@@ -1154,34 +1154,49 @@ type groupSubApp struct {
 // ApplyPolicy of every sub-application created so far, since a policy may rename
 // its own sub-application or an earlier one (go-kure/launcher#755).
 //
-// A sub-application still under the name the Naming hook gave it is compared by
-// its default instead, and only with others the hook named: the hook is asked
-// the same question for the same trait on two members, so their defaults meet
-// whatever it answers, while two different sub-applications it gave one name
-// are accepted as they are outside a group (go-kure/launcher#787).
+// Two sub-applications that are both still under the name the Naming hook gave
+// them are compared by their defaults instead: the hook is asked the same
+// question for the same trait on two members, so their defaults meet whatever it
+// answers, while two different sub-applications it gave one name are accepted as
+// they are outside a group. Every other pair is compared by name as before: one
+// the hook named against one it did not name, or against one a policy renamed
+// since (go-kure/launcher#787).
 func checkGroupSubApplications(group string, subApps []groupSubApp) error {
-	type subAppKey struct {
-		byHook bool
-		name   string
-	}
-	seen := make(map[subAppKey]string, len(subApps))
-	for _, s := range subApps {
-		key := subAppKey{name: s.app.Name}
-		if s.hookName != "" && s.app.Name == s.hookName {
-			key = subAppKey{byHook: true, name: s.def}
-		}
-		if member, dup := seen[key]; dup && member != s.member {
-			named := ""
-			if key.byHook {
-				named = fmt.Sprintf(" (named %q by the Naming hook)", s.hookName)
+	for i, s := range subApps {
+		for _, prior := range subApps[:i] {
+			if prior.member == s.member {
+				continue
 			}
-			return &TransformError{Message: fmt.Sprintf(
-				"sibling group %q: traits on members %q and %q both create sub-application %q%s; carry the trait on one member",
-				group, member, s.member, key.name, named)}
+			switch {
+			case prior.hookNamed() && s.hookNamed():
+				if prior.def == s.def {
+					return &TransformError{Message: fmt.Sprintf(
+						"sibling group %q: traits on members %q and %q both create sub-application %q (named %q by the Naming hook); carry the trait on one member",
+						group, prior.member, s.member, s.def, s.hookName)}
+				}
+			case prior.app.Name == s.app.Name:
+				hooked := prior
+				if s.hookNamed() {
+					hooked = s
+				}
+				if !hooked.hookNamed() {
+					return &TransformError{Message: fmt.Sprintf(
+						"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
+						group, prior.member, s.member, s.app.Name)}
+				}
+				return &TransformError{Message: fmt.Sprintf(
+					"sibling group %q: traits on members %q and %q both create sub-application %q (the Naming hook's name for %q on member %q); carry the trait on one member, or return another name from the hook",
+					group, prior.member, s.member, s.app.Name, hooked.def, hooked.member)}
+			}
 		}
-		seen[key] = s.member
 	}
 	return nil
+}
+
+// hookNamed reports whether the sub-application still carries the name the
+// Naming hook gave it: no policy renamed it since.
+func (s groupSubApp) hookNamed() bool {
+	return s.hookName != "" && s.app.Name == s.hookName
 }
 
 // applyEntryTraits applies the traits of one entry — each member's own, on that
@@ -1317,6 +1332,18 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			}
 
 			added := addedApplications(prev, bundle.Applications)
+			// Which of them the Naming hook named is read now, under the names the
+			// trait gave them: a policy may rename one below.
+			var created []groupSubApp
+			if len(e.members) > 0 {
+				for _, newApp := range added {
+					s := groupSubApp{app: newApp, member: entry.component.Type}
+					if def, hooked := resolved.naming.takeHookSubApp(newApp.Name); hooked {
+						s.hookName, s.def = newApp.Name, def
+					}
+					created = append(created, s)
+				}
+			}
 			for _, newApp := range added {
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
@@ -1330,13 +1357,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				}
 			}
 			if len(e.members) > 0 {
-				for _, newApp := range added {
-					s := groupSubApp{app: newApp, member: entry.component.Type}
-					if def, hooked := resolved.naming.takeHookSubApp(newApp.Name); hooked {
-						s.hookName, s.def = newApp.Name, def
-					}
-					groupSubApps = append(groupSubApps, s)
-				}
+				groupSubApps = append(groupSubApps, created...)
 				if err := checkGroupSubApplications(entry.component.Name, groupSubApps); err != nil {
 					return nil, err
 				}

@@ -434,8 +434,11 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
 (empty for the bundle, a group and an external backend's policy), the role, the object's kind
-as `Kind` or `Kind.group` (empty for a role that names no object) and the default, already
-shortened. The default is what tells apart several names of one component and role. Returning
+as `Kind` or `Kind.group` (empty for a role that names no object) and the default as launcher
+would use it: already shortened where launcher shortens a name (a group's bundle, the `hpa`,
+`pdb`, `networkpolicy` and `netpol-synth` objects), and as long as it is where it does not: a
+trait's sub-application default (`<component>-scaler` is 260 characters for a 253-character
+component name). The default is what tells apart several names of one component and role. Returning
 `false` keeps the default. Answers are not cached: a hook must give the same answer to the
 same request. A component's own application, whose name is the component's, and an
 application a component adds itself (the `helm` values ConfigMap's) are not roles, and the
@@ -460,10 +463,13 @@ name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named b
 ```
 
 Every trait the transform applies is its own owner, whatever its place: two traits a trait
-rule lowered one authored trait to collide like two authored ones. A trait a rule gave a
-sibling group member is named with the member (`component "web" member "deployment"
-traits[0] "scaler"`), and so is one authored trait forwarded to two members. A synthesized
-policy is named by its component, or as `an external backend Service`.
+rule lowered one authored trait to collide like two authored ones. The error tells the two
+apart in the fewest words that do. A trait a rule gave a sibling group member is named with
+the member (`component "web" member "deployment" traits[0] "scaler"`), and so is one authored
+trait forwarded to two members; two traits a trait rule lowered one trait to are named
+`…, output 1 of its lowering` and `…, output 2 of its lowering`. A synthesized policy is named
+by its component, or by its Service (`external backend Service "db"`): two external Services
+whose shortened default policy names meet are refused too.
 
 This knows only the names resolved this way: the roles above. An object a component
 generates, one a lowering rule names, and the object of a trait that is not in the table are
@@ -835,10 +841,12 @@ The build refuses a group:
   both members derives one name, such as `web-rbac`, from the shared name). The names
   are compared after each sub-application's `ApplyPolicy` has run, so a policy that
   renames a sub-application onto another member's is refused, and the name it moved
-  away from is free (go-kure/launcher#755). A sub-application that carries the name the
-  `Naming` hook gave it is compared by its default instead, with the others the hook
-  named: the hook may give two different sub-applications one name, and the same trait
-  on both members is refused whatever the hook answers (go-kure/launcher#787).
+  away from is free (go-kure/launcher#755). Two sub-applications that both still carry
+  the name the `Naming` hook gave them are compared by their defaults instead: the hook
+  may give two different sub-applications one name, and the same trait on both members
+  is refused whatever the hook answers. A name the hook gave that meets, on another
+  member, one it did not give (a trait's own, or one a policy renamed onto it) is
+  refused by name (go-kure/launcher#787).
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.
