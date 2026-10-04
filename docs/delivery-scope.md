@@ -281,7 +281,8 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per kind with a pod template
     (Deployment, StatefulSet, DaemonSet, Job, CronJob, ReplicaSet, ReplicationController,
-    PodTemplate) and one for a bare Pod. It replaces a value the chart set and touches no
+    PodTemplate) and one for a bare Pod, each for the kind in its own API group only. It
+    replaces a value the chart set and touches no
     selector: with a `ComponentLabelKey` the chart's own selectors use, that parts a
     selector from the chart's pods where it does not accept the component's value. The key
     to use is one no chart sets, such as the default. Whether a chart's hook and test Pods

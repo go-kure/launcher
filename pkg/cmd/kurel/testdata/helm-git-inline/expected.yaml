@@ -125,6 +125,7 @@ spec:
                 labels:
                   launcher.gokure.dev/component: podinfo
         target:
+          group: ^$
           kind: ReplicationController
           version: v1
       - patch: |
@@ -137,6 +138,7 @@ spec:
               labels:
                 launcher.gokure.dev/component: podinfo
         target:
+          group: ^$
           kind: PodTemplate
           version: v1
       - patch: |
@@ -147,6 +149,7 @@ spec:
               launcher.gokure.dev/component: podinfo
             name: component-label
         target:
+          group: ^$
           kind: Pod
           version: v1
 ---
@@ -266,6 +269,7 @@ spec:
                 labels:
                   launcher.gokure.dev/component: exporter
         target:
+          group: ^$
           kind: ReplicationController
           version: v1
       - patch: |
@@ -278,6 +282,7 @@ spec:
               labels:
                 launcher.gokure.dev/component: exporter
         target:
+          group: ^$
           kind: PodTemplate
           version: v1
       - patch: |
@@ -288,5 +293,6 @@ spec:
               launcher.gokure.dev/component: exporter
             name: component-label
         target:
+          group: ^$
           kind: Pod
           version: v1

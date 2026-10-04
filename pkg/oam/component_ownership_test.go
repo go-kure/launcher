@@ -699,9 +699,9 @@ func assertComponentPostRenderer(t *testing.T, pr helmv2.PostRenderer, key, valu
 		{Group: "batch", Version: "v1", Kind: "Job"},
 		{Group: "batch", Version: "v1", Kind: "CronJob"},
 		{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
-		{Version: "v1", Kind: "ReplicationController"},
-		{Version: "v1", Kind: "PodTemplate"},
-		{Version: "v1", Kind: "Pod"},
+		{Group: "^$", Version: "v1", Kind: "ReplicationController"},
+		{Group: "^$", Version: "v1", Kind: "PodTemplate"},
+		{Group: "^$", Version: "v1", Kind: "Pod"},
 	}
 	wantAPIVersions := []string{"apps/v1", "apps/v1", "apps/v1", "batch/v1", "batch/v1", "apps/v1", "v1", "v1", "v1"}
 	if len(pr.Kustomize.Patches) != len(wantTargets) {

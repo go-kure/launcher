@@ -13,7 +13,9 @@ import (
 // chartOutput stands for what a chart renders: a Deployment whose pod template
 // already carries the component key with the chart's own value, a CronJob, a
 // ReplicaSet, a ReplicationController and a PodTemplate that do not carry it,
-// a bare Pod, and an object that runs no pod.
+// a bare Pod, an object that runs no pod, and three custom resources of
+// another API group whose kinds are named like the core group's
+// ReplicationController, PodTemplate and Pod.
 const chartOutput = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -96,6 +98,27 @@ metadata:
   name: chart-settings
 data:
   k: v
+---
+apiVersion: example.com/v1
+kind: ReplicationController
+metadata:
+  name: custom-controller
+spec:
+  size: small
+---
+apiVersion: example.com/v1
+kind: PodTemplate
+metadata:
+  name: custom-template
+spec:
+  size: small
+---
+apiVersion: example.com/v1
+kind: Pod
+metadata:
+  name: custom-pod
+spec:
+  size: small
 `
 
 // applyComponentLabelPostRenderer applies the post-renderer's patches for
@@ -140,8 +163,8 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 		name, _, _ := unstructured.NestedString(doc, "metadata", "name")
 		byName[name] = doc
 	}
-	if len(byName) != 7 {
-		t.Fatalf("kustomize returned objects %v, want the chart's seven under their own names\n%s", byName, out)
+	if len(byName) != 10 {
+		t.Fatalf("kustomize returned objects %v, want the chart's ten under their own names\n%s", byName, out)
 	}
 	return byName
 }
@@ -198,6 +221,34 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	}
 	if _, found, _ := unstructured.NestedMap(byName["chart-settings"], "spec"); found {
 		t.Errorf("the ConfigMap got a spec: %v", byName["chart-settings"])
+	}
+}
+
+// TestComponentLabelPostRenderer_CoreGroupOnly: a patch for a kind of the core
+// API group reaches that group only. Kustomize does not test the group of a
+// target that names none, so a custom resource of another group whose kind is
+// named ReplicationController, PodTemplate or Pod would get a pod template or
+// labels its own schema may not know.
+func TestComponentLabelPostRenderer_CoreGroupOnly(t *testing.T) {
+	byName := applyComponentLabelPostRenderer(t, ownershipKey, "web")
+	for _, name := range []string{"custom-controller", "custom-template", "custom-pod"} {
+		obj := byName[name]
+		if obj == nil {
+			t.Fatalf("%s is missing from the result", name)
+		}
+		if labels, found, _ := unstructured.NestedMap(obj, "metadata", "labels"); found {
+			t.Errorf("%s got labels %v, want it left alone", name, labels)
+		}
+		if template, found := obj["template"]; found {
+			t.Errorf("%s got a template %v, want it left alone", name, template)
+		}
+		spec, _, err := unstructured.NestedMap(obj, "spec")
+		if err != nil {
+			t.Fatalf("%s spec: %v", name, err)
+		}
+		if len(spec) != 1 || spec["size"] != "small" {
+			t.Errorf("%s spec = %v, want only the size the chart wrote", name, spec)
+		}
 	}
 }
 

@@ -706,12 +706,17 @@ func stampUnstructuredHelmRelease(u *unstructured.Unstructured, key, value strin
 // target, not this name, decides which objects it merges into.
 const componentLabelPostRendererName = "component-label"
 
+// coreGroupPattern is the group of a patch target for a kind of the core API
+// group: the pattern that matches the empty group name and no other.
+const coreGroupPattern = "^$"
+
 // componentLabelPostRenderer builds the Flux post-renderer that puts key: value
 // on the pod template of every workload and PodTemplate a chart renders, and on
 // a bare Pod. A Flux post-renderer offers kustomize patches and images only, so
 // it is one strategic merge patch per kind with a pod template
 // (podTemplateKinds) and one for Pod, each targeting the kind in its own API
-// group; a chart that renders none of a kind is left alone by that patch.
+// group and no other; a chart that renders none of a kind is left alone by
+// that patch.
 //
 // It reaches what Helm hands a post-renderer. Whether that includes a chart's
 // hook and test Pods depends on the Helm the helm-controller runs, and is not
@@ -731,9 +736,9 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 	for _, k := range podTemplateKinds {
 		targets = append(targets, target{k.group, k.version, k.kind, append(append([]string(nil), k.spec...), "template", "metadata", "labels")})
 	}
-	// A bare Pod has no pod template: its own labels are its pod's. Its target
-	// names no group either, as the ReplicationController's and the
-	// PodTemplate's (podTemplateKinds).
+	// A bare Pod has no pod template: its own labels are its pod's. It is of the
+	// core API group, as the ReplicationController and the PodTemplate are
+	// (podTemplateKinds).
 	targets = append(targets, target{"", "v1", "Pod", []string{"metadata", "labels"}})
 
 	patches := make([]kustomize.Patch, 0, len(targets))
@@ -752,9 +757,17 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 		if err != nil {
 			return helmv2.PostRenderer{}, errors.Errorf("component label: post-renderer patch for %s: %w", k.kind, err)
 		}
+		// A target's group, version and kind are patterns, and kustomize does
+		// not test a group the target leaves empty: a target for the core group
+		// would reach a custom resource of any group whose kind has the same
+		// name. The pattern for the empty group keeps it to the core group.
+		group := k.group
+		if group == "" {
+			group = coreGroupPattern
+		}
 		patches = append(patches, kustomize.Patch{
 			Patch:  string(raw),
-			Target: &kustomize.Selector{Group: k.group, Version: k.version, Kind: k.kind},
+			Target: &kustomize.Selector{Group: group, Version: k.version, Kind: k.kind},
 		})
 	}
 	return helmv2.PostRenderer{Kustomize: &helmv2.Kustomize{Patches: patches}}, nil
