@@ -60,7 +60,8 @@ components cannot be ordered: "web" is after "db" (placement: tier apps is after
 A Flux source (`helmrepository`, `ocirepository`, `gitrepository`, `bucket`) that a
 lowering rule generates and orders a component after is in no group. It is one of the
 application bundle's own applications, beside the child groups, so a source several
-components share belongs to the application and exists once. It cannot be placed in a tier
+components share belongs to the application and exists once. It waits on nothing, not even
+on what the component it was generated for waits on. It cannot be placed in a tier
 or made to wait on a component: the transform refuses both. A source the author wrote, or
 one a rule emits without ordering anything after it, is a component like any other.
 
@@ -737,11 +738,12 @@ part of the component value, survives copies, is not serialized, and cannot be
 authored: an author orders components with a `dependency` policy. It survives further
 lowering too: when a component rule lowers a component that carries an order, the
 engine gives that order to every component the rule emits for it, whatever the rule
-built them from, so everything the component becomes waits as it did. A source
-generated for such a component is then ordered after something and sits in a group,
-not among the application bundle's own applications. It is one of the three ordering
-declarations described under "Pipeline". The built-in user is the `helm` rule, which
-orders the release after the source it generates or adopts.
+built them from, so what the component becomes waits as it did. A source generated
+for such a component does not wait with it: it is the application's, shared by every
+component that names the same source, and stays among the application bundle's own
+applications. It is one of the three ordering declarations described under "Pipeline".
+The built-in user is the `helm` rule, which orders the release after the source it
+generates or adopts.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the

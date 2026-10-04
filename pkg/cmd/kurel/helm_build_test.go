@@ -541,10 +541,10 @@ func (r waitingRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) 
 
 // TestBuiltinRules_KeepTheOrderOfTheComponentTheyLower pins that an order a
 // rule declared on a component survives the built-in rule that lowers the
-// component again: everything a webservice or a helm component becomes waits
-// as the component did. The source generated for a helm component that waits
-// is then ordered after something, so it sits in a group, not among the
-// application bundle's own applications.
+// component again: what a webservice or a helm component becomes waits as the
+// component did. The source generated for a helm component that waits does not
+// wait with it: it is the application's, and stays among the application
+// bundle's own applications.
 func TestBuiltinRules_KeepTheOrderOfTheComponentTheyLower(t *testing.T) {
 	const header = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -557,6 +557,7 @@ spec:
       type: `
 	for _, tc := range []struct {
 		rule waitingRule
+		own  []string
 		want []string
 	}{
 		{
@@ -569,7 +570,8 @@ spec:
 				"version": "1.0.0",
 				"source":  map[string]any{"url": "https://charts.example.com"},
 			}},
-			want: []string{"shop-00: two-first", "shop-01: " + helmSharedSource(), "shop-02: two"},
+			own:  []string{helmSharedSource()},
+			want: []string{"shop-00: two-first", "shop-01: two"},
 		},
 	} {
 		t.Run(tc.rule.typ, func(t *testing.T) {
@@ -583,9 +585,7 @@ spec:
 			if err != nil {
 				t.Fatalf("Transform: %v", err)
 			}
-			if got := len(cluster.Node.Bundle.Applications); got != 0 {
-				t.Errorf("application bundle holds %d own applications, want none", got)
-			}
+			assertSourcesInApplicationBundle(t, cluster, tc.own...)
 			if got := groupNames(t, cluster); !slices.Equal(got, tc.want) {
 				t.Errorf("groups = %v, want %v", got, tc.want)
 			}

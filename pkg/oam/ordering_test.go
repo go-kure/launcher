@@ -71,6 +71,26 @@ func (r orderedPairRule) LowerComponent(comp *Component, _ LoweringContext) (Low
 	return LoweringResult{Components: []Component{{Name: comp.Name + "-first", Type: "webservice"}, second}}, nil
 }
 
+// chartsRule lowers a component into two "chart" components, "<name>-a" ordered
+// after "<name>-b", which chartRule lowers into releases sharing one source. It
+// emits the later one first when laterFirst is set.
+type chartsRule struct {
+	typ        string
+	laterFirst bool
+}
+
+func (r chartsRule) ComponentType() string                   { return r.typ }
+func (chartsRule) PropertySchema() map[string]PropertySchema { return map[string]PropertySchema{} }
+func (r chartsRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	later := Component{Name: comp.Name + "-a", Type: "chart"}
+	later.OrderAfter(comp.Name + "-b")
+	earlier := Component{Name: comp.Name + "-b", Type: "chart"}
+	if r.laterFirst {
+		return LoweringResult{Components: []Component{later, earlier}}, nil
+	}
+	return LoweringResult{Components: []Component{earlier, later}}, nil
+}
+
 // relayRule lowers a "relay" component into "<name>" and "<name>-extra", both
 // built from scratch: it copies nothing from the component it was handed, as
 // the built-in rules do not.
@@ -134,6 +154,8 @@ func orderingTransformer(deps map[string][]string, tiers map[string]Tier) (*Tran
 	tr.RegisterComponentLowering(orderedPairRule{typ: "relayed-pair", second: "relay"})
 	tr.RegisterComponentLowering(orderedPairRule{typ: "chart-pair", second: "chart"})
 	tr.RegisterComponentLowering(relayRule{})
+	tr.RegisterComponentLowering(chartsRule{typ: "charts-later-first", laterFirst: true})
+	tr.RegisterComponentLowering(chartsRule{typ: "charts-earlier-first"})
 	tr.RegisterComponentLowering(danglingRule{})
 	tr.RegisterPolicy("dependency", &depsPolicyHandler{deps: deps})
 	tr.RegisterPolicy("placement", &tiersPolicyHandler{tiers: tiers})
@@ -428,22 +450,40 @@ func TestOrdering_RuleOrder_SurvivesFurtherLowering(t *testing.T) {
 	})
 }
 
-// TestOrdering_RuleOrder_GeneratedSourceOfAWaitingComponentWaits: a component
-// that waits and is lowered into a release and the source generated for it
-// makes both wait. The source is then ordered after something, so it is a
-// component of a group like any other, not one of the application bundle's own
-// applications.
-func TestOrdering_RuleOrder_GeneratedSourceOfAWaitingComponentWaits(t *testing.T) {
+// TestOrdering_RuleOrder_GeneratedSourceDoesNotWait: a component that waits and
+// is lowered into a release and the source generated for it makes the release
+// wait, not the source. The source is the application's: it stays one of the
+// application bundle's own applications.
+func TestOrdering_RuleOrder_GeneratedSourceDoesNotWait(t *testing.T) {
 	tr, _ := orderingTransformer(nil, nil)
 	cluster, err := tr.Transform(orderingApp(makeComponent("two", "chart-pair")), TransformContext{})
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	assertOrdered(t, cluster, nil, []group{
+	assertOrdered(t, cluster, []string{"myapp-source"}, []group{
 		{name: "myapp-00", applications: []string{"two-first"}},
-		{name: "myapp-01", applications: []string{"myapp-source"}, dependsOn: []string{"myapp-00"}},
-		{name: "myapp-02", applications: []string{"two"}, dependsOn: []string{"myapp-01"}},
+		{name: "myapp-01", applications: []string{"two"}, dependsOn: []string{"myapp-00"}},
 	})
+}
+
+// TestOrdering_RuleOrder_SharedSourceOfOrderedConsumers: two consumers of one
+// generated source, one ordered after the other by the rule that emitted them,
+// in either emission order. The source waits on neither, so no consumer waits
+// on a source that waits on it.
+func TestOrdering_RuleOrder_SharedSourceOfOrderedConsumers(t *testing.T) {
+	for _, typ := range []string{"charts-later-first", "charts-earlier-first"} {
+		t.Run(typ, func(t *testing.T) {
+			tr, _ := orderingTransformer(nil, nil)
+			cluster, err := tr.Transform(orderingApp(makeComponent("x", typ)), TransformContext{})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			assertOrdered(t, cluster, []string{"myapp-source"}, []group{
+				{name: "myapp-00", applications: []string{"x-b"}},
+				{name: "myapp-01", applications: []string{"x-a"}, dependsOn: []string{"myapp-00"}},
+			})
+		})
+	}
 }
 
 // TestOrdering_RuleOrder_UnknownComponent_Refused: a rule cannot order its

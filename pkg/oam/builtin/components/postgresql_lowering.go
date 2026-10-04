@@ -105,6 +105,11 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 
 	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents)
 	split := slices.ContainsFunc(policies, func(p oam.ApplicationPolicy) bool { return p.Type == "dependency" })
+	if split {
+		if err := postgresqlMembersShareBundle(lctx.Document, comp, dependents); err != nil {
+			return oam.LoweringResult{}, err
+		}
+	}
 	forwardMemberTraits(out, comp.Traits, split)
 	return oam.LoweringResult{Components: out, Policies: policies}, nil
 }
@@ -128,10 +133,11 @@ var (
 // emitted a dependency policy, so the members are ordered after the Cluster
 // and land in a later group's bundle than its own) and only to the first
 // member that is not a sibling of the Cluster: every member waits for the
-// Cluster and for nothing else, so they share one group, and a bundle trait
-// carried by two of them would configure that one bundle twice. Without split
-// nothing separates the members from the Cluster, whose bundle already
-// carries them.
+// Cluster and for nothing else, and is placed where it is
+// (postgresqlMembersShareBundle refuses a document that says otherwise), so
+// they share one group, and a bundle trait carried by two of them would
+// configure that one bundle twice. Without split nothing separates the
+// members from the Cluster, whose bundle already carries them.
 //
 // Each is a by-value copy of the authored element with the same properties
 // map, which the engine recognises as forwarded rather than built by the rule
@@ -149,6 +155,47 @@ func forwardMemberTraits(out []oam.Component, authored []oam.Trait, split bool) 
 			}
 		}
 	}
+}
+
+// postgresqlMembersShareBundle refuses a document that authors a bundle trait
+// on the postgresql component and, in a dependency rule or a placement of its
+// own, names one of the members (the components the rule emits beside the
+// Cluster) as the component to order or place. That member could then be
+// applied in another group than the rest, where the one forwarded copy of the
+// trait (forwardMemberTraits) does not reach, and its objects would silently
+// lose what the trait configures. The rule cannot know the groups: they are
+// computed after lowering has settled.
+//
+// Only the document's own policies are read, at the time the component is
+// lowered. A policy that makes another component wait for a member separates
+// nothing and is left alone.
+func postgresqlMembersShareBundle(doc *oam.Application, comp *oam.Component, members []string) error {
+	i := slices.IndexFunc(comp.Traits, func(t oam.Trait) bool { return postgresqlBundleTraits[t.Type] })
+	if i < 0 || doc == nil {
+		return nil
+	}
+	for _, p := range doc.Spec.Policies {
+		var named []string
+		switch p.Type {
+		case "placement":
+			component, _ := p.Properties["component"].(string)
+			named = append(named, component)
+		case "dependency":
+			rules, _ := p.Properties["rules"].([]any)
+			for _, r := range rules {
+				rule, _ := r.(map[string]any)
+				component, _ := rule["component"].(string)
+				named = append(named, component)
+			}
+		}
+		for _, name := range named {
+			if slices.Contains(members, name) {
+				return errors.Errorf("trait %q configures the bundle of every object this component generates, but %s policy %q names %q, a component generated for it, on its own: that component could be applied in a bundle the trait does not reach; name %q in the policy instead, or remove the trait",
+					comp.Traits[i].Type, p.Type, p.Name, name, comp.Name)
+			}
+		}
+	}
+	return nil
 }
 
 // postgresqlChildName allocates the name of a component the rule emits beside
