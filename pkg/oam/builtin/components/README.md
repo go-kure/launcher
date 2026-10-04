@@ -2010,8 +2010,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   spellings of one field refused. `TestCoreKindSchemas_CoverSpec` holds each
   schema to the linked type by reflection. Each emits its object, named after
   the component,
-  with the authored spec and nothing else: no annotation, and no `app` label
-  (a component label on every generated object is go-kure/launcher#788). None
+  with the authored spec and nothing else: the handler adds no annotation and
+  no label, not an `app` label either. The transform then sets the component
+  label on the object, as on every object a component owns
+  (go-kure/launcher#788). None
   runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
   component, they are in no tier unless a tier annotation or placement policy
   places them.
@@ -2051,7 +2053,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `resourcequota` above: one schema key per json field of
   `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
   type, two spellings of one field refused, and one object named after the
-  component, with the authored spec, no label and no annotation. The spec
+  component, with the authored spec; the handler adds no label and no
+  annotation, and the transform sets the component label. The spec
   embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
   `hostPath`, …) is a top-level property, as it is a top-level field of the
   object's spec. A PersistentVolume is cluster-scoped: the object carries no

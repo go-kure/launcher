@@ -1,12 +1,16 @@
 apiVersion: v1
 kind: Namespace
 metadata:
+  labels:
+    launcher.gokure.dev/component: team-a
   name: team-a
 spec: {}
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
+  labels:
+    launcher.gokure.dev/component: team-b
   name: team-b
 spec:
   finalizers:
