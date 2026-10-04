@@ -899,8 +899,10 @@ An authored name is used as written or refused: it is never shortened and never 
 one that cannot be the name of its object fails the transform with the property in the error
 (go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects is
 named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
-with an alphanumeric). An authored empty string is refused too: it is not a way to ask for the
-default, which a property left out (or null) gets.
+with an alphanumeric). An authored empty string is refused too. For an optional override
+(`name` on a routing trait, `targetSecretName`, `repository`) it is not a way to ask for the
+default: leaving the property out, or null, gets that. The `expose` `secretName` is optional
+too and gets its default when left out. The other names are required.
 
 | Trait | Property | What it names |
 |-------|----------|---------------|
