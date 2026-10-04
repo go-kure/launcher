@@ -291,6 +291,22 @@ func TestHelmTemplateConfig_ApplyPolicy_ExplicitSecrets(t *testing.T) {
 	if err := cfg.ApplyPolicy(forbidding); err != nil {
 		t.Errorf("a config without secretValues was refused: %v", err)
 	}
+
+	// A Secret the chart renders is not the document's: it is not refused,
+	// where the passthrough and manifests components refuse one they carry.
+	cfg = secretTemplateFixture(t, nil, nil, func(string, string, map[string]any, ...helm.RenderOption) ([]byte, error) {
+		return []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: generated\nstringData:\n  token: abc\n"), nil
+	})
+	if err := cfg.ApplyPolicy(forbidding); err != nil {
+		t.Errorf("a chart that renders a Secret was refused: %v", err)
+	}
+	rendered := 0
+	for _, g := range cfg.hookGroups {
+		rendered += len(g.Resources)
+	}
+	if rendered != 1 {
+		t.Errorf("the check saw %d rendered objects, want the Secret", rendered)
+	}
 }
 
 // TestSharedValuePath pins the walk both deliveries share: two objects at a key

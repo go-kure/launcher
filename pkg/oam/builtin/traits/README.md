@@ -791,7 +791,8 @@ component: `secret "creds": the environment policy forbids explicit secrets; ref
 created out of band instead`. **The default is to allow**: a policy that does not implement the
 interface, `NoopPolicy` included, permits the trait. A consumer that must forbid Secrets in
 documents has to implement it. The `helm` component's `secretValues` and the `helmtemplate`
-kind's are held to the same answer.
+kind's are held to the same answer, and so is a core Secret the `passthrough` or `manifests`
+component carries.
 
 `components.ParseSecretProperties` and `components.GenerateSecret` are the parse and generate
 pair, placed in the components package so a `secret` kind can be built on the same code, as the

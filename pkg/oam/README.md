@@ -1399,8 +1399,9 @@ component and the sub-application (go-kure/launcher#752).
 interface a `Policy` may also implement, so adding one breaks no implementation.
 `ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`, go-kure/launcher#786) says whether a
 document may carry secret values itself: the `secret` trait, the `helm` component's
-`secretValues` and the `helmtemplate` kind's. `ExplicitSecretsAllowed(policy)` is how a handler
-asks. **A policy that does not implement it allows them**, as does no policy at all: this is
+`secretValues` and the `helmtemplate` kind's, and a core Secret the `passthrough` or
+`manifests` component carries (go-kure/launcher#794). `ExplicitSecretsAllowed(policy)` is how
+a handler asks. **A policy that does not implement it allows them**, as does no policy at all: this is
 the permissive side, so a consumer that must keep secrets out of documents has to implement the
 interface and answer `false`. A refusal is a `ViolationError` naming the component.
 

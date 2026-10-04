@@ -109,7 +109,7 @@ reads it.
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, and a workload, claim or autoscaler is held to the environment policy. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 
@@ -2796,7 +2796,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `helm` component states;
   - a policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses the component
     in `ApplyPolicy`, before any fetch
-    (`helmtemplate: secretValues is set and the environment policy forbids explicit secrets; …`);
+    (`helmtemplate: secretValues is set and the environment policy forbids explicit secrets; …`).
+    **Not covered:** a Secret the chart itself renders. It is emitted under such a policy, where
+    the `passthrough` and `manifests` components refuse a Secret they carry: its content comes
+    from the chart and its values, and most charts render one;
   - a render or decode failure is not reported as Helm reports it, since a template error can
     quote a value (`fail`, `required`, a YAML parse error showing the line). The chart is
     rendered a second time with `values` alone. If that fails too, its error is the one
@@ -3724,6 +3727,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the field (`passthrough: object Deployment "demo/web":
   spec.template.spec.containers[0] "app": …`).
 
+  A core Secret is refused under a policy that forbids explicit secrets
+  (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README), as the `secret` trait is
+  (go-kure/launcher#794, item 2): `passthrough: object Secret "demo/creds": the object is a
+  Secret, and the environment policy forbids explicit secrets; …`. The check does not read
+  what the Secret holds, so one with no entry is refused too, and the message quotes nothing
+  of the object. A policy that does not implement the interface, and no policy, allow it.
+  **Breaking** only under a policy that answers `false`: a `passthrough` Secret built under
+  it before.
+
   The object is authored as a map and the check reads Go types, so an object whose group,
   version and kind kure's scheme registers is decoded as that kind **for the check only**.
   What is emitted stays the authored map, so a field the Go type does not declare is
@@ -3825,6 +3837,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
   holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
   before.
+
+  A core Secret a `manifests` source yields, `inline` or fetched, is refused under a policy
+  that forbids explicit secrets (`oam.ExplicitSecretPolicy`), as the `secret` trait and a
+  `passthrough` Secret are (go-kure/launcher#794, item 10): `manifest source: object Secret
+  "demo/creds": the object is a Secret, and the environment policy forbids explicit
+  secrets; …`. The check does not read what the Secret holds, and the message quotes
+  nothing of it. **Breaking** only under a policy that answers `false`. **Not covered:** a
+  Secret a chart renders under template delivery (`helmtemplate`, `helm` with
+  `delivery: template`), whose content comes from the chart and its values; the document's
+  own sensitive values are refused there where they are set (`secretValues`).
 
   When the check runs depends on the source. An `inline` source is checked by
   `ApplyPolicy`, the transform's policy step, and the refusal is that step's

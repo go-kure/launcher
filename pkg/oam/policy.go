@@ -56,8 +56,9 @@ type Policy interface {
 // ExplicitSecretPolicy is an optional interface of a Policy: whether a document
 // may carry secret material itself, which then lands in the build output as a
 // Secret (base64-encoded, not encrypted) or in a chart rendered at build time.
-// The built-in sources of such material are the secret trait and the
-// secretValues of a helm or helmtemplate component (go-kure/launcher#786).
+// The built-in sources of such material are the secret trait, the secretValues
+// of a helm or helmtemplate component (go-kure/launcher#786), and a core Secret
+// the passthrough or manifests component carries (go-kure/launcher#794).
 //
 // A Policy that does not implement it allows explicit secrets, and so does
 // NoopPolicy: the interface exists so that adding the constraint changes
