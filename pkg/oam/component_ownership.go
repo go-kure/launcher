@@ -392,11 +392,27 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // an overwrite of the pod template's would part the selector from the template.
 // For the same reason a pod template stays as written when the workload's own
 // selector rules the label out (withComponentLabel).
+//
+// An unstructured list envelope stands for its members when Flux applies it
+// (appliedObjects), so each member is labelled as an object handed out on its
+// own is, beside the envelope.
 func stampComponentLabel(obj client.Object, key, value string) error {
 	// An unstructured object's labels are read as written, not through its
 	// accessor (stampUnstructured).
 	if u, ok := obj.(*unstructured.Unstructured); ok {
-		return stampUnstructured(u, key, value)
+		if err := stampUnstructured(u, key, value); err != nil {
+			return err
+		}
+		for _, applied := range appliedObjects(u) {
+			member, ok := applied.(*unstructured.Unstructured)
+			if !ok || member == u {
+				continue
+			}
+			if err := stampUnstructured(member, key, value); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	obj.SetLabels(withMissing(obj.GetLabels(), map[string]string{key: value}))
 	switch o := obj.(type) {

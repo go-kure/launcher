@@ -590,6 +590,75 @@ func TestStampComponentLabel_UnstructuredHelmRelease(t *testing.T) {
 	assertComponentPostRenderer(t, hr.Spec.PostRenderers[1], ownershipKey, "web")
 }
 
+// TestStampComponentLabel_ListMembers: a list envelope stands for its members
+// when Flux applies it (appliedObjects), so each member gets the label as an
+// object handed out on its own does: a workload on its pod template too, a
+// HelmRelease with its post-renderer, and the member of a list inside a list.
+// A member that is no object stays as written.
+func TestStampComponentLabel_ListMembers(t *testing.T) {
+	for name, kind := range map[string]string{
+		"a List":                        "List",
+		"an envelope only Flux expands": "Widget",
+	} {
+		t.Run(name, func(t *testing.T) {
+			deployment := unstructuredWorkload("apps/v1", "Deployment")
+			configMap := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "c", "labels": map[string]any{"app": "web"}}}
+			release := map[string]any{"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "metadata": map[string]any{"name": "r"}}
+			list := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       kind,
+				"items":      []any{deployment.Object, configMap, "no object", release},
+			}}
+			for range 2 {
+				if err := stampComponentLabel(list, ownershipKey, "web"); err != nil {
+					t.Fatalf("stampComponentLabel: %v", err)
+				}
+			}
+			if got := deployment.GetLabels()[ownershipKey]; got != "web" {
+				t.Errorf("Deployment label = %q, want web", got)
+			}
+			if labels, _ := podTemplateLabelsOf(t, deployment); labels[ownershipKey] != "web" {
+				t.Errorf("Deployment pod template labels = %v, want the component's", labels)
+			}
+			wantLabels := map[string]any{"app": "web", ownershipKey: "web"}
+			if got := configMap["metadata"].(map[string]any)["labels"]; !reflect.DeepEqual(got, any(wantLabels)) {
+				t.Errorf("ConfigMap labels = %v, want %v", got, wantLabels)
+			}
+			if got := list.Object["items"].([]any)[2]; got != "no object" {
+				t.Errorf("member that is no object = %v, want it as written", got)
+			}
+			postRenderers, _, err := unstructured.NestedSlice(release, "spec", "postRenderers")
+			if err != nil || len(postRenderers) != 1 {
+				t.Errorf("HelmRelease postRenderers = %v (%v), want the label's alone", postRenderers, err)
+			}
+		})
+	}
+
+	t.Run("a list inside a List", func(t *testing.T) {
+		inner := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "n"}}
+		list := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "List",
+			"items":      []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMapList", "items": []any{inner}}},
+		}}
+		if err := stampComponentLabel(list, ownershipKey, "web"); err != nil {
+			t.Fatalf("stampComponentLabel: %v", err)
+		}
+		if got, _, _ := unstructured.NestedString(inner, "metadata", "labels", ownershipKey); got != "web" {
+			t.Errorf("inner member label = %q, want web", got)
+		}
+	})
+
+	t.Run("a member with a malformed label", func(t *testing.T) {
+		member := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "c", "labels": map[string]any{"n": int64(1)}}}
+		list := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{member}}}
+		err := stampComponentLabel(list, ownershipKey, "web")
+		if err == nil || !strings.Contains(err.Error(), `ConfigMap "c"`) || !strings.Contains(err.Error(), `label "n"`) {
+			t.Fatalf("error = %v, want one naming the ConfigMap and its label", err)
+		}
+	})
+}
+
 // ownershipObjectsConfig hands out the objects it holds.
 type ownershipObjectsConfig struct{ objects []client.Object }
 

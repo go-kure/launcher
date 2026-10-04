@@ -297,6 +297,11 @@ label value is the empty string the cluster reads it as. A label that is not a s
 refused, with the object named, whether or not the key is there already: generation fails
 rather than drop a label an author wrote.
 
+An unstructured list envelope stands for its members when Flux applies it (as the force
+warning reads one: Kustomize's build inlines a `List`, Flux's reader expands what is left, one
+level). Each such member is labelled as an object handed out on its own is, a workload on its
+pod template and a `HelmRelease` with its post-renderer, beside the envelope itself.
+
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
 a strategic-merge patch per workload kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`,
