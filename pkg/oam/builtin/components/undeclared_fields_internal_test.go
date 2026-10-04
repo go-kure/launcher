@@ -6,6 +6,7 @@ package components
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -556,7 +557,19 @@ func TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField(t *testing.T) {
 		cfg := config(strictErrorLimit)
 		cfg.Object["kind"] = "ConfigMap"
 		delete(cfg.Object, "spec")
-		cfg.Object["futureField"] = true
+		// A map is serialized with its keys sorted, so the field has to sort
+		// after metadata for the repeats to fill the record before it.
+		cfg.Object["zzFutureField"] = true
+		serialized, err := json.Marshal(cfg.Object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := undeclaredFields(serialized); !errors.Is(err, errStrictRecordFull) {
+			t.Fatalf("the fixture gave %v, want a full record: it does not test the case", err)
+		}
+		if _, err := decodeManifestDocuments(serialized); !errors.Is(err, errStrictRecordFull) {
+			t.Fatalf("the same document through the manifests decode gave %v, want it refused", err)
+		}
 		if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
 			t.Fatalf("ApplyPolicy: %v", err)
 		}
@@ -568,8 +581,8 @@ func TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField(t *testing.T) {
 		if !ok {
 			t.Fatalf("generated a %T, want the authored map", *objs[0])
 		}
-		if got, found, _ := unstructured.NestedBool(u.Object, "futureField"); !found || !got {
-			t.Errorf("futureField = %v (found %v), want it emitted", got, found)
+		if got, found, _ := unstructured.NestedBool(u.Object, "zzFutureField"); !found || !got {
+			t.Errorf("zzFutureField = %v (found %v), want it emitted", got, found)
 		}
 	})
 
