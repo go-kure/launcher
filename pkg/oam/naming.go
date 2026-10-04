@@ -2,6 +2,7 @@ package oam
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -310,23 +311,50 @@ type traitNaming struct {
 	authored  bool
 	apply     int
 	nth       int
-	// hookSubApps holds, for each sub-application name the hook gave this trait,
-	// the defaults it replaced, in the order they were resolved.
-	hookSubApps map[string][]string
+	// subApps holds, by name, every sub-application name this trait resolved
+	// since the engine last took them.
+	subApps map[string][]subAppName
 }
 
-// takeHookSubApp returns the default the hook replaced with name, a
-// sub-application name this trait resolved, and whether there is one. Each
-// resolution is returned once, the earliest first: a trait that the hook gave
-// one name for two sub-applications is taken to create them in the order it
-// resolved them.
-func (n *traitNaming) takeHookSubApp(name string) (string, bool) {
-	if n == nil || len(n.hookSubApps[name]) == 0 {
-		return "", false
+// subAppName is one sub-application name a trait resolved: where it came from
+// and the default it stands for.
+type subAppName struct {
+	source nameSource
+	def    string
+}
+
+// takeSubAppNames returns, by name, the sub-application names this trait
+// resolved since the last call, and forgets them.
+func (n *traitNaming) takeSubAppNames() map[string][]subAppName {
+	if n == nil {
+		return nil
 	}
-	def := n.hookSubApps[name][0]
-	n.hookSubApps[name] = n.hookSubApps[name][1:]
-	return def, true
+	names := n.subApps
+	n.subApps = nil
+	return names
+}
+
+// hookDefaults returns the defaults the Naming hook replaced with one name,
+// given every resolution of that name by one trait and how many
+// sub-applications of that name the trait created. It returns nil unless the
+// hook named them all: a name is resolved to a string, so the engine cannot
+// tell which of a trait's equal-named sub-applications is which, and says of
+// each only what holds for all. One the trait did not resolve, or resolved from
+// its default or an authored property, makes none of them the hook's.
+func hookDefaults(resolved []subAppName, created int) []string {
+	if created > len(resolved) {
+		return nil
+	}
+	var defs []string
+	for _, r := range resolved {
+		if r.source != nameFromHook {
+			return nil
+		}
+		if !slices.Contains(defs, r.def) {
+			defs = append(defs, r.def)
+		}
+	}
+	return defs
 }
 
 // ResolveName returns the name to use for spec, in this order: the author's
@@ -350,13 +378,13 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 	owner.slot, owner.authored = t.naming.slot, t.naming.authored
 	owner.apply, owner.nth = t.naming.apply, t.naming.nth
 	name, source, err := t.naming.resolver.resolveFrom(owner, spec)
-	// A name the hook gave is recorded as the hook's even when it is the default:
-	// what the sibling-group check asks is who named it.
-	if err == nil && spec.Role == NameRoleSubApplication && source == nameFromHook {
-		if t.naming.hookSubApps == nil {
-			t.naming.hookSubApps = make(map[string][]string)
+	// Recorded with its source: a name the hook gave is the hook's even when it is
+	// the default, since what the sibling-group check asks is who named it.
+	if err == nil && spec.Role == NameRoleSubApplication {
+		if t.naming.subApps == nil {
+			t.naming.subApps = make(map[string][]subAppName)
 		}
-		t.naming.hookSubApps[name] = append(t.naming.hookSubApps[name], spec.Default)
+		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default})
 	}
 	return name, err
 }
