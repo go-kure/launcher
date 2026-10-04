@@ -110,9 +110,13 @@ them stays correct. Neither is another component's sub-application.
 
 The traits write nothing on the objects launcher returns. The workflow that delivers an
 application reads its intent. kure's Flux workflow annotates everything the application's layout
-holds: what the application generates, what a layout-augmenting component adds outside `Generate`
-(a `helmtemplate` component's hook groups) and, as `options.annotations`, the
-`configMapGenerator`s of those layouts. Under prune protection each content change of a
+holds, where it integrates a layout (`CreateLayoutWithResources`, `IntegrateWithLayout`): what
+the application generates, wherever a layout augmenter places it (a `helmtemplate` component's
+hook groups, which its `Generate` returns and its augmenter moves into child layouts), what an
+augmenter adds outside `Generate` and, as `options.annotations`, the `configMapGenerator`s of
+those layouts. kure refuses a set intent where it cannot map it: its Flux
+`GenerateFromCluster`, which returns none of the application's objects, and a workflow with no
+mapping. Under prune protection each content change of a
 generator-built ConfigMap leaves the old hash-named ConfigMap behind: kustomize names such a
 ConfigMap with a hash of its content, so a change makes a new object, and the previous one, no
 longer in the source, is kept. That is the base library's behaviour (kure's `pkg/stack/fluxcd`
