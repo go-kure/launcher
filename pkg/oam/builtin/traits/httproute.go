@@ -147,7 +147,9 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	}
 
 	// Optional: name (for multiple httproute traits on the same component)
-	if name, ok := props["name"].(string); ok && name != "" {
+	// An authored name is used as written or refused, the empty string too: it
+	// is not a way to ask for the default (go-kure/launcher#787).
+	if name, ok := props["name"].(string); ok {
 		if err := checkAuthoredObjectName("name", "the HTTPRoute", name); err != nil {
 			return nil, err
 		}

@@ -190,7 +190,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 	}
 
 	config.TargetSecretName = secretName
-	if tsn, ok := props["targetSecretName"].(string); ok && tsn != "" {
+	if tsn, ok := props["targetSecretName"].(string); ok {
 		if err := checkAuthoredObjectName("targetSecretName", "the produced Secret", tsn); err != nil {
 			return nil, err
 		}

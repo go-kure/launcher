@@ -899,11 +899,13 @@ An authored name is used as written or refused: it is never shortened and never 
 one that cannot be the name of its object fails the transform with the property in the error
 (go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects is
 named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
-with an alphanumeric):
+with an alphanumeric). An authored empty string is refused too: it is not a way to ask for the
+default, which a property left out (or null) gets.
 
 | Trait | Property | What it names |
 |-------|----------|---------------|
 | `ingress`, `httproute` | `name` | The Ingress or HTTPRoute. |
+| `expose` | `name` | The Ingress or HTTPRoute the trait lowers to; checked by that trait. |
 | `expose` | `secretName` | The managed TLS Secret (a `ValidationError` on the component). |
 | `certificate` | `secretName` | The Certificate and the Secret it writes. |
 | `external-secret` | `secretName`, `targetSecretName` | The ExternalSecret, and the Secret it produces. |
@@ -912,7 +914,8 @@ with an alphanumeric):
 | `pvc` | `name` | The PersistentVolumeClaim. |
 | `volsync` | `repository`, `sourcePVC` | The repository Secret, and the claim to back up (which also starts the ReplicationSource name). |
 
-A routing trait's `scope` is a part of a generated name, not a name: its length is never
+A routing trait's `scope` (on `ingress`, `httproute`, and `expose`, which hands its own on) is
+a part of a generated name, not a name: its length is never
 refused, because the name it ends is shortened, but a character an object name cannot hold is,
 checked on the name as built so the digest cannot hide it. Beside an authored `name` the scope
 is in no name and is not checked. A property that only refers to an
