@@ -184,6 +184,31 @@ func TestSecretHandler_Apply_MissingName(t *testing.T) {
 	}
 }
 
+// TestSecretHandler_Apply_Name: the name is the Secret's metadata.name, so it
+// must be a DNS-1123 subdomain; a legal one of the longest length is accepted.
+func TestSecretHandler_Apply_Name(t *testing.T) {
+	apply := func(name string) error {
+		bundle := newBundle()
+		return (&traits.SecretHandler{}).Apply(&oam.Trait{Type: "secret", Properties: map[string]any{
+			"name": name, "stringData": map[string]any{"password": secretSentinel}}}, newApp("api", "shop"), bundle)
+	}
+	for _, name := range []string{"BAD_NAME", "-creds", "creds.", "a/b", strings.Repeat("a", 254)} {
+		err := apply(name)
+		if err == nil || !strings.Contains(err.Error(), "is not a valid DNS-1123 subdomain") {
+			t.Errorf("name %q: err = %v, want the name refused", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), secretSentinel) {
+			t.Errorf("name %q: the refusal carries the value: %v", name, err)
+		}
+	}
+	for _, name := range []string{"creds", "app.creds-1", strings.Repeat("a", 253)} {
+		if err := apply(name); err != nil {
+			t.Errorf("name %q: %v", name, err)
+		}
+	}
+}
+
 // TestSecretConfig_ApplyPolicy: a policy that forbids explicit secrets refuses
 // the trait, naming the Secret and no value; one that does not implement the
 // optional interface, and no policy at all, allow it.

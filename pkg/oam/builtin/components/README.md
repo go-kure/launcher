@@ -2238,7 +2238,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `helm: auth.password is set in both values and secretValues; a path may be
       set in only one of them`. Two objects at the same key are compared key by
       key; anything else at a key both trees set (a scalar, a list, a null) is a
-      shared path. Without the refusal the winner would depend on the values mode,
+      shared path. An empty key is a key like any other and is written `""` in
+      the message. Without the refusal the winner would depend on the values mode,
       since Flux applies inline `spec.values` after every `valuesFrom` entry.
     - *Policy.* A policy that forbids explicit secrets
       (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README) refuses a component
@@ -2257,7 +2258,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Encrypting it is the consumer's business (SOPS or the like, on the written
     manifests). The Secret's name, and the HelmRelease naming it, carry 40 bits of
     a digest of the tree, so whoever reads either can test a guess of the whole
-    tree against it. To keep a value out of the document and the output altogether,
+    tree against it. Under `delivery: template` one Helm warning can print a value
+    to the build's log (a subchart `global` entry conflicting with the parent's;
+    see **helmtemplate**). To keep a value out of the document and the output altogether,
     create the Secret out of band (an `external-secret` trait, a sealed or
     externally managed Secret) and name it in `valuesFrom`, or use the chart's own
     existing-secret values.
@@ -2510,7 +2513,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     with placeholder values in `values`. The second render repeats the fetch;
   - *not covered:* the policy checks on rendered objects (see **Policy**) quote what they
     refuse, an image reference for one. A chart that builds such a field from a sensitive value
-    has it quoted in that violation.
+    has it quoted in that violation;
+  - *not covered:* one Helm warning. When the chart has a subchart and `secretValues` gives
+    that subchart a `global` entry (`<subchart>.global.…`) whose shape conflicts with the
+    parent's `global` at a key, a table on one side and a plain value on the other, Helm
+    ignores the entry and prints a warning to the process's standard log that quotes it:
+    `warning: destination for … is a table. Ignoring non-table value (…)`. The render succeeds
+    and launcher cannot intercept the line, so the value is in the build's log. To avoid it,
+    keep sensitive values out of a subchart's `global`, or give both sides the same shape.
+    go-kure/launcher#794 (item 9) tracks having the renderer capture Helm's logging. A test
+    pins that the error and the output stay clean in that case.
 
   **Decoding.** `values` and `secretValues` are split off, and the rest of the property map is decoded with
   `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by

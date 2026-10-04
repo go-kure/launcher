@@ -1,7 +1,10 @@
 package traits
 
 import (
+	"strings"
+
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -36,7 +39,7 @@ func (h *SecretHandler) CanHandle(traitType string) bool {
 // PropertySchema declares the secret trait's user-facing properties.
 func (h *SecretHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the Secret resource to create."},
+		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the Secret to create (a DNS-1123 subdomain)."},
 		"stringData": {
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
@@ -70,6 +73,9 @@ func (h *SecretHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	name, ok := props["name"].(string)
 	if !ok || name == "" {
 		return errors.New("required property 'name' missing or not a string")
+	}
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return errors.Errorf("secret trait: name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
 	}
 
 	secret, err := components.ParseSecretProperties(props)
