@@ -284,6 +284,11 @@ func TestRegisteredListDocument_IsTheParsersDetection(t *testing.T) {
 // document that is no registered list decoded to several objects with a typed
 // one among them, some object's fields would go unread. Each is refused.
 func TestKeepDocumentFields_RefusesAReadingThatIsNotTheParsers(t *testing.T) {
+	// The objects here are made by hand, so no parse has registered the scheme
+	// the list detection reads.
+	if err := kubernetes.RegisterSchemes(); err != nil {
+		t.Fatalf("RegisterSchemes: %v", err)
+	}
 	pods := []client.Object{&corev1.Pod{}, &corev1.Pod{}}
 	one := []byte(`{"apiVersion": "v1", "kind": "PodList", "items": [{"metadata": {"name": "a"}}]}`)
 	_, err := keepDocumentFields(one, pods)
