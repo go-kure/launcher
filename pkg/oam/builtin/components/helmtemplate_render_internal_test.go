@@ -533,13 +533,17 @@ func TestDecodeChartManifests_HookInAListBelowTheNestingBound(t *testing.T) {
 
 // TestDecodeChartManifests_HookOnASingleObjectIsNotRefused: the refusal is for
 // lists. An object that is not one keeps its helm.sh/hook annotation and
-// decodes, a registered kind that states an items field of its own included:
-// the parser does not replace it by anything.
+// decodes. A registered kind that states an items array of its own is no list
+// to the parser, which does not replace it by anything, so the hook refusal is
+// not its error: it is refused as any object written with an items array its
+// type does not declare is.
 func TestDecodeChartManifests_HookOnASingleObjectIsNotRefused(t *testing.T) {
-	const hook = "  annotations:\n    helm.sh/hook: pre-install\n"
+	const (
+		hook = "  annotations:\n    helm.sh/hook: pre-install\n"
+		cm   = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n" + hook
+	)
 	objects, err := decodeChartManifests([]byte(
-		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n" + hook + "items:\n- metadata:\n    annotations:\n      helm.sh/hook: test\n" +
-			"---\napiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: thing\n" + hook))
+		cm + "---\napiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: thing\n" + hook))
 	if err != nil {
 		t.Fatalf("decodeChartManifests: %v", err)
 	}
@@ -550,6 +554,12 @@ func TestDecodeChartManifests_HookOnASingleObjectIsNotRefused(t *testing.T) {
 		if got := o.GetAnnotations()["helm.sh/hook"]; got != "pre-install" {
 			t.Errorf("%s: helm.sh/hook = %q, want pre-install", o.GetName(), got)
 		}
+	}
+
+	_, err = decodeChartManifests([]byte(cm + "items:\n- metadata:\n    annotations:\n      helm.sh/hook: test\n"))
+	assertErrorMentions(t, err, `ConfigMap "cm"`, "declares no `items` field")
+	if err != nil && strings.Contains(err.Error(), "carries a helm.sh/hook annotation") {
+		t.Errorf("a single object that states items was refused as a hook list: %v", err)
 	}
 }
 

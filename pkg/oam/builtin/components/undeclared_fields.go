@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 
 	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/kubernetes"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -36,6 +38,9 @@ import (
 //     unstructured object, so the field is kept. Nothing reads such an object
 //     as its Go type: the policy check passes it, and scope, namespace and
 //     metadata are read through interfaces an unstructured object satisfies.
+//
+// The parser replaces a list of a registered kind by its items, so what is
+// refused or kept is each item, not the list (keepListItemFields).
 //
 // The strict decode is the one over kure's own scheme, so it reports exactly
 // what kure's lenient decode drops, with one known limit: a type that
@@ -78,11 +83,19 @@ var strictDecoder = sync.OnceValues(func() (runtime.Decoder, error) {
 // keys twice that the decoder's record of strict errors is full and names no
 // undeclared field: whether it sets one cannot be told.
 func undeclaredFields(doc []byte) ([]string, error) {
+	return undeclaredFieldsAs(doc, nil)
+}
+
+// undeclaredFieldsAs is undeclaredFields for a document that may leave its
+// apiVersion and kind out: an item of a typed list, which is of the kind the
+// list holds. itemKind is that kind, and nil for a document that states its
+// own.
+func undeclaredFieldsAs(doc []byte, itemKind *schema.GroupVersionKind) ([]string, error) {
 	decoder, err := strictDecoder()
 	if err != nil {
 		return nil, err
 	}
-	_, _, err = decoder.Decode(doc, nil, nil)
+	_, _, err = decoder.Decode(doc, itemKind, nil)
 	if err == nil || runtime.IsNotRegisteredError(err) {
 		return nil, nil
 	}
@@ -132,20 +145,25 @@ func undeclaredFieldsError(gvk schema.GroupVersionKind, paths []string) error {
 // errors (strictErrorLimit of them) before it names an undeclared field: the
 // decode cannot say whether the document sets one.
 //
+// A list of a registered kind (a `v1` List, a typed list such as
+// DeploymentList) is replaced by its items, and the rule above is each item's:
+// an item is refused or kept as a document of its own would be, the error
+// naming its position in the list (keepListItemFields). The list's own fields
+// are not read: the list is never emitted.
+//
 // Every document that does not decode is an error, and the parser reports them
 // together, as it always did: that error is kure's own, unchanged, and it is
 // returned before any undeclared field is looked at.
 func decodeManifestDocuments(raw []byte) ([]client.Object, error) {
-	opts := kureio.ParseOptions{AllowUnstructured: true}
 	docs, err := splitManifestDocuments(raw)
 	decoded := make([][]client.Object, len(docs))
 	for i := 0; err == nil && i < len(docs); i++ {
-		decoded[i], err = kureio.ParseYAMLWithOptions(docs[i], opts)
+		decoded[i], err = kureio.ParseYAMLWithOptions(docs[i], manifestParseOptions)
 	}
 	if err != nil {
 		// The parser reports every bad document of the input in one error; a
 		// document alone would give only its own.
-		if _, whole := kureio.ParseYAMLWithOptions(raw, opts); whole != nil {
+		if _, whole := kureio.ParseYAMLWithOptions(raw, manifestParseOptions); whole != nil {
 			return nil, whole
 		}
 		return nil, err
@@ -153,11 +171,157 @@ func decodeManifestDocuments(raw []byte) ([]client.Object, error) {
 
 	var out []client.Object
 	for i, doc := range docs {
-		objs, err := keepUndeclaredFields(doc, decoded[i])
+		objs, err := keepDocumentFields(doc, decoded[i])
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, objs...)
+	}
+	return out, nil
+}
+
+// manifestParseOptions is how decodeManifestDocuments runs kure's parser: an
+// object of a kind the scheme does not register is unstructured, not an error.
+var manifestParseOptions = kureio.ParseOptions{AllowUnstructured: true}
+
+// keepDocumentFields returns objs, what kure's parser made of doc, with the
+// undeclared fields of doc settled: by keepUndeclaredFields for a document of
+// a single kind or a list of a kind the scheme does not register, by
+// keepListItemFields for a list of a registered kind.
+func keepDocumentFields(doc []byte, objs []client.Object) ([]client.Object, error) {
+	list, isList := registeredListDocument(doc)
+	if isList {
+		return keepListItemFields(list, objs)
+	}
+	// What is no registered list is one object, or the untyped items of a list
+	// of an unregistered kind. Several objects with a typed one among them are
+	// the items of a list registeredListDocument did not recognise.
+	if len(objs) > 1 {
+		for _, obj := range objs {
+			if _, untyped := obj.(*unstructured.Unstructured); !untyped {
+				return nil, errors.Errorf("%s: a document that is no list of a registered kind decoded to %d objects, so the fields of each cannot be checked; this is a defect of this build, not of the document", renderedObjectRef(obj), len(objs))
+			}
+		}
+	}
+	return keepUndeclaredFields(doc, objs, nil)
+}
+
+// listDocument is a list document of a registered kind, as kure's parser reads
+// it: its kind, the items it states, undecoded, and whether it is the generic
+// `v1` List, whose items are documents of any kind.
+type listDocument struct {
+	kind    string
+	items   []json.RawMessage
+	generic bool
+}
+
+// registeredListDocument reports whether doc is a list document of a kind
+// kure's scheme registers, which kure's parser replaces by its items, and
+// returns how that parser reads it.
+//
+// It is the parser's own detection (kure pkg/io, registeredList and
+// listItemKind), which that package does not export, step for step: apiVersion,
+// kind and items read under exactly those keys, the last statement of each, and
+// the generic list told by the type of its items, not by its name.
+// TestRegisteredListDocument_IsTheParsersDetection holds it to the parser. A
+// document this does not hold for a list while the parser does would have its
+// items pass unread; keepDocumentFields refuses the one case of that it can
+// see, a document that decodes to several objects with a typed one among them.
+func registeredListDocument(doc []byte) (listDocument, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(doc, &fields); err != nil {
+		return listDocument{}, false
+	}
+	apiVersion, okVersion := statedString(fields, "apiVersion")
+	kind, okKind := statedString(fields, "kind")
+	if !okVersion || !okKind || kind == "" {
+		return listDocument{}, false
+	}
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return listDocument{}, false
+	}
+	list, err := kubernetes.Scheme.New(gv.WithKind(kind))
+	if err != nil {
+		return listDocument{}, false
+	}
+	if _, isObject := list.(client.Object); isObject || !meta.IsListType(list) {
+		return listDocument{}, false
+	}
+	out := listDocument{kind: kind}
+	if itemsPtr, err := meta.GetItemsPtr(list); err == nil {
+		out.generic = reflect.TypeOf(itemsPtr).Elem().Elem() == reflect.TypeOf(runtime.RawExtension{})
+	}
+	if stated := fields["items"]; len(stated) > 0 {
+		// Items that are not an array are the parser's error, reported before
+		// this is reached.
+		_ = json.Unmarshal(stated, &out.items)
+	}
+	return out, true
+}
+
+// statedString returns the string fields states under key, "" when the key is
+// absent or null, and false when its value is not a string.
+func statedString(fields map[string]json.RawMessage, key string) (string, bool) {
+	value, stated := fields[key]
+	if !stated {
+		return "", true
+	}
+	var s string
+	if err := json.Unmarshal(value, &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// keepListItemFields is keepUndeclaredFields for each item of list, a list
+// document of a registered kind; objs is what kure's parser made of that
+// document, its items in the list's order.
+//
+// An item of a typed list is one object, of the kind the list holds, which the
+// item may leave out: it is read as that kind. An item of the generic List is a
+// document of its own, so the parser is run on it again and the result settled
+// as a document's is, a list among the items in turn. The parser bounds how
+// deep registered lists nest, and it has accepted the whole document, so the
+// descent ends.
+//
+// The items must account for exactly the objects the parser returned. When they
+// do not, this reading of the list is not the parser's, some object would go
+// unread, and the document is refused.
+func keepListItemFields(list listDocument, objs []client.Object) ([]client.Object, error) {
+	mismatch := func(read int) error {
+		return errors.Errorf("the items of %s were read as %d objects and decoded to %d, so the fields of each cannot be checked; this is a defect of this build, not of the document", list.kind, read, len(objs))
+	}
+	out := make([]client.Object, 0, len(objs))
+	if !list.generic {
+		if len(list.items) != len(objs) {
+			return nil, mismatch(len(list.items))
+		}
+		for i, item := range list.items {
+			itemKind := objs[i].GetObjectKind().GroupVersionKind()
+			kept, err := keepUndeclaredFields(item, objs[i:i+1], &itemKind)
+			if err != nil {
+				return nil, errors.Wrapf(err, "item %d of %s", i, list.kind)
+			}
+			out = append(out, kept...)
+		}
+		return out, nil
+	}
+	read := 0
+	for i, item := range list.items {
+		itemObjs, err := kureio.ParseYAMLWithOptions(item, manifestParseOptions)
+		if err != nil {
+			return nil, errors.Wrapf(err, "item %d of %s", i, list.kind)
+		}
+		read += len(itemObjs)
+		kept, err := keepDocumentFields(item, itemObjs)
+		if err != nil {
+			return nil, errors.Wrapf(err, "item %d of %s", i, list.kind)
+		}
+		out = append(out, kept...)
+	}
+	if read != len(objs) {
+		return nil, mismatch(read)
 	}
 	return out, nil
 }
@@ -184,9 +348,11 @@ func splitManifestDocuments(raw []byte) ([][]byte, error) {
 // keepUndeclaredFields returns objs, what kure's parser made of doc, or what
 // stands in for it when doc sets fields its Go type does not declare: an error
 // for a workload or a claim, the document as an unstructured object for any
-// other kind.
-func keepUndeclaredFields(doc []byte, objs []client.Object) ([]client.Object, error) {
-	paths, err := undeclaredFields(doc)
+// other kind. itemKind is the kind of an item of a typed list, which doc may
+// leave out, and nil for a document that states its own: the unstructured
+// object that stands in for such an item is given it.
+func keepUndeclaredFields(doc []byte, objs []client.Object, itemKind *schema.GroupVersionKind) ([]client.Object, error) {
+	paths, err := undeclaredFieldsAs(doc, itemKind)
 	if err != nil {
 		if len(objs) == 1 {
 			return nil, errors.Wrap(err, renderedObjectRef(objs[0]))
@@ -211,6 +377,9 @@ func keepUndeclaredFields(doc []byte, objs []client.Object) ([]client.Object, er
 		return nil, errors.Wrapf(err, "%s: reading the document as written", renderedObjectRef(obj))
 	}
 	u := &unstructured.Unstructured{Object: object}
+	if itemKind != nil {
+		u.SetGroupVersionKind(*itemKind)
+	}
 	if u.IsList() {
 		return nil, errors.Errorf("%s: the %s %s type declares no `items` field, and written out with one the object is a list whose items would be applied in its place; remove the field", renderedObjectRef(obj), gvk.GroupVersion(), gvk.Kind)
 	}
