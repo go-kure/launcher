@@ -1,11 +1,12 @@
 # Launcher delivery scope: ordering, naming, Helm values and template security
 
-*Date: 2026-10-04 | Status: Draft design, tickets filed*
+*Date: 2026-10-04 | Status: Design, tickets filed; §8 says which have shipped*
 
 This document records the target scope of the launcher library and `kurel` after a
 cross-library scope review of kure, launcher and a downstream cluster engine that consumes
-both. For each area it states launcher's current behaviour, with `file:line` references,
-and the target behaviour of the ticket that changes it.
+both. For each area it states launcher's current behaviour, naming the symbol and the file
+that hold it, and the target behaviour of the ticket that changes it. A reference to code
+that a shipped ticket removed keeps the `file:line` it had before that change.
 
 It supersedes §11 "Launcher Layout" of the [design document](design.md), which
 go-kure/launcher#781 deleted with the `kurel` layer it described.
@@ -13,11 +14,12 @@ go-kure/launcher#781 deleted with the `kurel` layer it described.
 **Tickets.** Each target names the go-kure/launcher issue that implements it; §8 lists them
 all. Each issue links back to this document.
 
-**Basis.** "Current" means `main` at v0.2.0-beta.1. Paths are relative to the repository
-root. Kure paths refer to kure v0.2.0-beta.15. Everything here is pre-release: output,
-names and the library contract may change, and live-cluster upgrade effects are not a
-constraint. A section or row marked **Shipped** states what the code does since its ticket
-merged, in place of the target it replaced.
+**Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
+Paths are relative to the repository root. Kure paths refer to kure v0.2.0-beta.15, the
+version `go.mod` pins. Everything here is pre-release: output, names and the library
+contract may change, and live-cluster upgrade effects are not a constraint. A section or
+row marked **Shipped** states what the code does since its ticket merged, in place of the
+target it replaced; one marked **Target** is not in the code.
 
 ---
 
@@ -75,7 +77,7 @@ target.
 | `PolicyResult.HealthCheckOverrides`, `PolicyResult.ReconciliationSettings` | `pkg/oam/pipeline.go:20-21,59-67` | **Shipped (go-kure/launcher#781):** removed (breaking for a consumer that aliased them). `PolicyResult.Extensions` carries what a consumer's own policy handlers record; launcher neither reads nor changes it. |
 | `GeneratedApplication.Patches` and the bundle-patch replay in the force warnings | `pkg/oam/in_document_collisions.go:24-27`, `force_warnings.go:121`, `force_attribution.go:62` | **Shipped (go-kure/launcher#781):** removed with `bundle_patches.go`. `GeneratedApplication.Forced` lost its source (the reconciliation policy's `force`): it is true only for a bundle whose `Force` the caller set before generating (`generateBundle`, `pkg/oam/in_document_collisions.go`), until go-kure/launcher#782 re-sources it. |
 | `kurel build --oci-repository`, `--oci-tag`: a bundle-level Flux delivery layer | `pkg/cmd/kurel/delivery.go`; `pkg/cmd/kurel/README.md:159-160` and its "Flux delivery output" section; design §11 "Launcher Layout" | **Shipped (go-kure/launcher#781):** removed in the same change. `kurel build` writes plain YAML only and both flags are unknown. An engine-neutral artifact option may follow when `kurel` work resumes. |
-| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | `pkg/oam/builtin/traits/forcereplace.go:17`, `pruneprotection.go:14,112` | **Target (go-kure/launcher#782, open):** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
+| `force-replace`, `prune-protection` write Flux annotations (`kustomize.toolkit.fluxcd.io/force`, `.../prune`) on every object of the application | Still there: `ForceReplaceHandler` (`pkg/oam/builtin/traits/forcereplace.go`), `PruneProtectionHandler` (`pruneprotection.go`) | **Target (go-kure/launcher#782, open):** both traits stay, and set an engine-neutral delivery-intent field on the kure `Application` instead (kure adds the field; its Flux workflow maps it to the annotation). The PV force warning (`Transformer.WarnForcedVolumes`) reads the intent. |
 
 What stays: `placement`, `dependency`, the tier annotation (author-declared ordering
 intent), `postProcessFluxNamespace` (`pkg/oam/transform.go`), which places authored Flux
@@ -148,19 +150,21 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 ### 2.3 Target (go-kure/launcher#784): `oci` lowers to kind components
 
 - New kind component `fluxcd-kustomization`: one Flux Kustomization, with strict decode of
-  the upstream `KustomizationSpec` (the pattern of `helmrelease`,
-  `pkg/oam/builtin/components/helmrelease.go:167-168`). The type name follows the naming
+  the upstream `KustomizationSpec` (the pattern of `helmrelease`:
+  `HelmReleaseHandler.ToApplicationConfig`,
+  `pkg/oam/builtin/components/helmrelease.go`). The type name follows the naming
   decision in [go-kure/launcher#352](https://github.com/go-kure/launcher/issues/352).
 - `oci` becomes an upper-level component that lowers into `ocirepository` plus
   `fluxcd-kustomization`. The `OCIHandler` kind goes.
 - `oci` today misses most of the Kustomization spec (`patches`, `postBuild`, `force`,
   `dependsOn`, `timeout`, `serviceAccountName` and more). The new kind closes that gap.
-- Keep the explicit-registry rule for a non-empty allowlist (`oci.go:258-279`) on the
-  `ocirepository` path.
+- Keep the explicit-registry rule for a non-empty allowlist (`OCIConfig.ApplyPolicy`,
+  `oci.go`, through `ociNamesRegistry`) on the `ocirepository` path.
 - `SourceDeduplicatable` (`pkg/oam/handler.go`) has one implementer today, `OCIConfig`
-  (`oci.go:287`). After go-kure/launcher#784 it has none: remove it, or document why it stays.
+  (`OCIConfig.GetSourceKey`, `oci.go`). After go-kure/launcher#784 it has none: remove it,
+  or document why it stays.
 - **Decide in the ticket:** the name of a source shared by two `oci` components. Today the
-  first component's name is kept (`deduplicateSourceRefs`, `transform.go:1412-1429`), while
+  first component's name is kept (`deduplicateSourceRefs`, `pkg/oam/transform.go`), while
   `helm` names a generated source `<document>-source-<digest>`.
 - The name of an authored Kustomization against a delivery Kustomization a consumer
   generates is a kure check, not launcher's.
@@ -173,55 +177,92 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 
 - **Consumer knobs:** `ClusterID`, `Namespace`, `FluxNamespace`, `Domain`,
   `ComponentLabelKey`. No hook for any object, application, bundle or source name.
-  `LoweringContext.Namer` is a concrete `*NameAllocator` built inside the engine
-  (`pkg/oam/lowering.go:276-284`).
-- **No author override** exists for: the `postgresql` pooler name (`<cluster>-pooler`),
+  `LoweringContext.Namer` is a concrete `*NameAllocator` the engine builds itself
+  (`NewNameAllocator`, `pkg/oam/lowering.go`).
+- **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
+  (`hpaName`, `pdbName`), the `rbac` objects (`name`) and the `networkpolicy` trait's
+  policy (`name`). Still none for: the `postgresql` pooler name (`<cluster>-pooler`),
   generated Helm source names (`<document>-source-<digest>`), the values ConfigMap name
-  (`helm.go:518-520`),
-  bundle names, `scaler` HPA/PDB (`<c>-hpa`, `<c>-pdb`), `rbac` object names (`<c>`), the
-  `networkpolicy` trait object (`<c>-allow`), synthesized NetworkPolicies
-  (`<c>-allow-ingress-traffic` and others), Helm hook-group child layouts, and the template
-  release name.
+  (`helmValuesConfigMapName`, `pkg/oam/builtin/components/helm.go`), bundle and ordered-group
+  names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others), Helm
+  hook-group child layouts, and the template release name.
 - **Object name = component name** for every kind component. A Service named like its
   StatefulSet is only reachable through `passthrough` or `manifests`: two kind components
-  `app` are refused as a duplicate component name (`pkg/oam/validate.go:247`).
-- **Shortening is per site:** `ComponentLabelValue` (52 + 10 hex), the values ConfigMap and
-  hook-group children (253, 8 hex), and the Namer, which never shortens and fails on an
-  over-length name (`lowering.go:495-501`). CNPG and Service names are validated, never
-  shortened.
-- **Collisions:** `CheckInDocumentCollisions` refuses a (group, kind, namespace, name)
-  generated by two different generated applications of one document. A repeat inside a
-  single generated application is not detected (`in_document_collisions.go:182-184`).
-  Hook-group child names are not unique across two applications with a same-named
-  component (documented in `helmtemplate_render.go:264-268`).
+  `app` are refused as a duplicate component name (`validateComponent`,
+  `pkg/oam/validate.go`).
+- **Shortening** is one rule for every name launcher generates (§3.3). CNPG and Service
+  names, which are the component's name, are validated, never shortened.
+- **Collisions:** `CheckInDocumentCollisions` (`pkg/oam/in_document_collisions.go`) refuses
+  a (group, kind, namespace, name) generated by two different generated applications of
+  one document. An object one generated application emits twice is not reported there.
 
-### 3.2 Target (go-kure/launcher#787): name overrides
+### 3.2 Partly shipped (go-kure/launcher#787, open): name overrides
 
-- **Author:** an override property for every generated name that has none (the list above),
-  plus an object name separate from the component name. The latter allows a Service named
-  like its StatefulSet as kind components (rule 4 permits different kinds to share a name).
-- **Consumer:** an optional naming hook on `TransformContext`, keyed by owning component and
-  role, falling back to the default.
-  - The `Namer` (`lowering.go:383-501`) consults it for lowering-rule names.
-  - Most names above are **not** built by the Namer: trait objects (`scaler`, `rbac`,
+- **Shipped: an authored name is used as written or refused.** It is never shortened and
+  never changed. One that cannot name its object fails the transform with the property in
+  the error (`checkAuthoredObjectName`, `pkg/oam/builtin/traits/authored_name.go`): the
+  DNS-1123 subdomain rule, and an authored empty string is refused too. A `scope`, which
+  is one part of a generated name, is checked for its characters only
+  (`checkAuthoredNamePart`). The rule covers the names the traits already took (`name` on
+  `ingress`, `httproute`, `configmap` and `cilium-networkpolicy`, the Secret names of
+  `certificate`, `expose` and `external-secret`, the `volsync` names) and the new ones.
+- **Shipped: four new author overrides** (the traits README, "Conventions"):
+  - `scaler` `hpaName` and `pdbName` (`ScalerHandler`, `traits/scaler.go`). `pdbName`
+    without `enablePDB: true` is refused: it would name no object.
+  - `rbac` `name` (`RBACHandler`, `traits/rbac.go`) names the Role, RoleBinding,
+    ClusterRole and ClusterRoleBinding and both `roleRef.name`. The binding's subject
+    stays the component's ServiceAccount, and the `app` label stays the component's. It is
+    held to the subdomain rule, which is stricter than the cluster's own rule for the RBAC
+    kinds: a name with a colon, which a cluster accepts, is refused.
+  - `networkpolicy` `name` (`NetworkPolicyHandler`, `traits/networkpolicy.go`).
+- **Shipped limit:** an authored name is not checked against other objects at the
+  transform. Two objects of one kind, namespace and name are reported by
+  `CheckInDocumentCollisions` over `GenerateApplications`, as for a default name.
+- **Target, author:** an override for each remaining name of §3.1, plus an object name
+  separate from the component name. The latter allows a Service named like its StatefulSet
+  as kind components (rule 4 permits different kinds to share a name).
+- **Target, consumer:** an optional naming hook on `TransformContext`, keyed by owning
+  component and role, falling back to the default.
+  - The `Namer` (`NameAllocator.Name` and `NameOrAdopt`, `pkg/oam/lowering.go`) consults
+    it for lowering-rule names.
+  - Most generated names are **not** built by the Namer: trait objects (`scaler`, `rbac`,
     `networkpolicy`), synthesized NetworkPolicies, the values ConfigMap, hook-group
     children and bundle names. The hook must reach each of these sites. The ticket lists
     the roles.
-  - An override, from an author property or from the hook, is never shortened. It is
-    validated for its target and refused when invalid or too long, and collision-checked
-    as a default name is. Only launcher's own defaults go through the shortening helper
-    (§3.3).
+  - An override from the hook is held to the shipped rule for an authored name: never
+    shortened, validated for its target, refused when invalid or too long. Only
+    launcher's own defaults go through the shortening rule (§3.3).
 
-### 3.3 Target (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
+### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
-- **go-kure/launcher#792:** hook-group child layout names include the application, so they are unique across
-  applications (`hookGroupChildName`, `helmtemplate_render.go:711`, called at `:281`).
-- **go-kure/launcher#793:** one shortening helper, prefix plus hash, with a documented limit passed by the
-  caller (63, 253, or 53 for a Helm release name). Every name launcher generates by default
-  uses it; an override never does (§3.2). The Namer shortens instead of failing. One
-  documented exception: at limit 53 for a Helm release
-  name, the helper reproduces Flux's shortening algorithm, so a template-rendered release
-  is named as Flux would name it.
+- **go-kure/launcher#793, one shortening rule:** `ShortenName(name, limit)` and
+  `ShortenNameWithSuffix(name, suffix, limit)` (`pkg/oam/shorten_name.go`;
+  `pkg/oam/README.md` "Names and overrides"). A name that fits is returned unchanged. A
+  longer one keeps a prefix, a `-` and the first 10 hex characters of the sha256 of the
+  whole name; a fixed suffix is kept whole. The caller passes the limit:
+  - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`.
+  - `ShortenLimitSubdomain` (253): every object name launcher generates by default, the
+    hook-group child layouts and the ordered-group bundles.
+  - `ShortenLimitHelmRelease` (53): the one exception to the rule. The result is what Flux
+    computes for a HelmRelease, so a release launcher renders itself is named as Flux
+    would name it. Nothing passes this limit yet: go-kure/launcher#785 is its first caller
+    (§4.2).
+
+  The Namer shortens instead of refusing an over-length `<base>-<suffix>` (`generatedName`,
+  `pkg/oam/lowering.go`). The characters are checked on the name as built, before it is
+  shortened, and the shortened name is reserved, so it takes part in collision detection.
+  An authored name never goes through the rule (§3.2).
+- **go-kure/launcher#792, hook-group child names:** a child layout is named
+  `<application>-<component>-<NN>-<phase>` (`hookGroupChildName`,
+  `pkg/oam/builtin/components/helmtemplate_render.go`), so two applications with a
+  same-named component no longer produce the same child names. The transform tells the
+  component its application through `ApplicationNameSetter` (`pkg/oam/handler.go`;
+  `HelmTemplateConfig.SetApplicationName`). A config built directly, with no application,
+  keeps `<component>-<NN>-<phase>`.
+  - The join is a plain `-`: application `a-b` with component `c`, and application `a`
+    with component `b-c`, compose the same prefix.
+  - The name carries no namespace, as a bundle name carries none: two applications with
+    one name in two namespaces produce the same child names.
 
 ### 3.4 Shipped (go-kure/launcher#788): component label and provenance
 
@@ -262,9 +303,9 @@ What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transf
 
 | Path | Release name | Values |
 |---|---|---|
-| `helm` or `helmrelease`, Flux delivery, no Flux namespace | No `spec.releaseName`. Flux defaults it to the HelmRelease name, `<component>`. | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`pkg/oam/builtin/components/helm.go:418-430`); `helmrelease` refuses the key (`helmrelease.go:147-149`). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
-| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`helmrelease.go:358-359`). Flux then computes `<appns>-<component>`. | As above. The `helm` values ConfigMap follows the HelmRelease into the Flux namespace. |
-| `helm` with `delivery: template`, or `helmtemplate` | kure's fixed default `release` as `.Release.Name`; the chart's templates decide the object names. `releaseName` is refused (`helm.go:42`). | Inline values, rendered into the output. `valuesFrom` is refused: a build cannot read a cluster object. |
+| `helm` or `helmrelease`, Flux delivery, no Flux namespace | No `spec.releaseName`. Flux defaults it to the HelmRelease name, `<component>`. | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`helmValuesConfigMap`, `pkg/oam/builtin/components/helm.go`); `helmrelease` refuses the key (`helmReleaseValuesModeHint`, `helmrelease.go`). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
+| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`HelmReleaseConfig.Generate`, `helmrelease.go`). Flux then computes `<appns>-<component>`. | As above. The `helm` values ConfigMap follows the HelmRelease into the Flux namespace. |
+| `helm` with `delivery: template`, or `helmtemplate` | kure's fixed default `release` as `.Release.Name`, and the application namespace as `.Release.Namespace` (`chartSource`, `helmtemplate_render.go`); the chart's templates decide the object names. `releaseName` is refused (`helmFluxOnlyKeys`, `helm.go`; the strict decode of `helmTemplateProperties`, `helmtemplate.go`). | Inline values, rendered into the output. `valuesFrom` is refused: a build cannot read a cluster object. |
 
 No path writes explicit values into a Secret.
 
@@ -274,9 +315,10 @@ No path writes explicit values into a Secret.
   `spec.releaseName` on every HelmRelease, and the template render's release name, as in
   [go-kure/launcher#778](https://github.com/go-kure/launcher/pull/778).
 - The `helmrelease` kind sets the default, so a directly authored `helmrelease` gets it
-  too, as the kind already defaults `targetNamespace` (`helmrelease.go:358-359`).
-- Shortened with the shortening helper of go-kure/launcher#793 at 53 characters, which
-  reproduces Flux's own algorithm for that limit (§3.3).
+  too, as the kind already defaults `targetNamespace` (`HelmReleaseConfig.Generate`).
+- Shortened with the shipped rule of go-kure/launcher#793 at `ShortenLimitHelmRelease`
+  (53 characters), which reproduces Flux's own algorithm for that limit (§3.3). This
+  ticket is the limit's first caller.
 - The author's `releaseName` overrides it under both deliveries. The consumer override
   comes from go-kure/launcher#787.
 
@@ -310,14 +352,16 @@ No path writes explicit values into a Secret.
 
 | Check | Flux delivery | Template delivery |
 |---|---|---|
-| Registry allowlist | Chart source host, on the generated or authored Flux source (`helmrepository.go:110-115`). Chart images: not checked (`HelmReleaseConfig.ApplyPolicy` is a no-op). | Chart source host, before any fetch, and every image of a rendered workload (`HelmTemplateConfig.ApplyPolicy`, `helmtemplate_policy.go`). |
-| Image reference check (`ValidateImageRef`, `common.go:37-60`) | No | Yes, on every init and regular container of a rendered workload. |
-| Pod security (privileged, host namespaces, hostPath, capabilities; `pkg/oam/policy.go:32-37`, `enforce.go:115-260`) | No | Yes, on every rendered workload. A chart rendering a privileged pod is refused unless the policy allows it. |
-| Namespace | HelmRelease and source in the Flux namespace | Whatever `metadata.namespace` the chart writes; nothing stamps or checks it. |
+| Registry allowlist | Chart source host, on the generated or authored Flux source (`HelmRepositoryConfig.ApplyPolicy`, `pkg/oam/builtin/components/helmrepository.go`, and the other source kinds). Chart images: not checked (`HelmReleaseConfig.ApplyPolicy` is a no-op). | Chart source host, before any fetch, and every image of a rendered workload (`HelmTemplateConfig.ApplyPolicy`, `helmtemplate_policy.go`). |
+| Image reference check (`ValidateImageRef`, `common.go`) | No | Yes, on every init and regular container of a rendered workload. |
+| Pod security (privileged, host namespaces, hostPath, capabilities; the `Policy` flags, `pkg/oam/policy.go`, read by `enforcePodTemplatePolicy`, `cnpg_common.go`) | No | Yes, on every rendered workload (`enforceRenderedObjectPolicy`, `helmtemplate_policy.go`). A chart rendering a privileged pod is refused unless the policy allows it. |
+| PersistentVolume (a `hostPath` or `local` source, `capacity.storage`) | No | Yes, since the `persistentvolume` kind (go-kure/launcher#790): a rendered PersistentVolume is held to what the kind holds its own to (`enforcePersistentVolumePolicy`, `enforce.go`). |
+| Namespace | HelmRelease and source in the Flux namespace | **Shipped (go-kure/launcher#794, item 4):** a namespaced object the chart rendered without `metadata.namespace` is given the application namespace, where a Helm install would create it (`stampRenderedNamespaces`, `helmtemplate_render.go`). A namespace the chart wrote is kept, and it is not checked. A cluster-scoped object is left as rendered. So is an object whose scope is unknown (a kind kure does not register, with no CustomResourceDefinition for it among the rendered objects; a chart's `crds/` directory is not rendered): it stays without a namespace. |
 
-`kurel` sets no `Policy`, so `NoopPolicy` applies (`pkg/cmd/kurel/build.go:190-195`,
-`transform.go:551-552`): the registry allowlist is empty on every path, and the five
-security flags are denied. Only a library consumer that passes a `Policy` sets either.
+`kurel` sets no `Policy` (`runBuild`, `pkg/cmd/kurel/build.go`), so `NoopPolicy` applies
+(`Transformer.TransformWithPolicy`, `pkg/oam/transform.go`): the registry allowlist is
+empty on every path, and the five security flags are denied. Only a library consumer that
+passes a `Policy` sets either.
 
 A chart delivered as a `HelmRelease` is rendered on the cluster, so the Flux column cannot
 be closed at build time.
@@ -341,7 +385,9 @@ be closed at build time.
      `MaxStorageSize`, as on the authored kinds. The replica count of a Deployment,
      StatefulSet, ReplicaSet or ReplicationController and the `maxReplicas` of a
      HorizontalPodAutoscaler are held to `MaxReplicas`, as on the authored kinds and the
-     `scaler` trait.
+     `scaler` trait. A PersistentVolume's `hostPath` or `local` source needs
+     `AllowHostPathVolumes`, and its `capacity.storage` is held to `MaxStorageSize`, as on
+     the `persistentvolume` kind (go-kure/launcher#790).
    - **Decided:** `ValidateImageRef` (tag or digest required, no `:latest`) applies to
      chart images, so a rendered workload is held to the same image rule as a
      launcher-built one.
@@ -349,9 +395,9 @@ be closed at build time.
      privileged container, a host namespace or a hostPath volume, as it does an authored
      workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
      `AllowHostIPC` and `AllowHostPathVolumes` allow one.
-   - **Limits:** a workload or claim that cannot be decoded typed (an API version kure's
-     scheme does not register), and a list nested in an unregistered list (any object with a
-     top-level `items` array there), are refused; a
+   - **Limits:** a workload, claim or PersistentVolume that cannot be decoded typed (an API
+     version kure's scheme does not register), and a list nested in an unregistered list
+     (any object with a top-level `items` array there), are refused; a
      custom resource's pods, the archive host a Helm repository
      index names and redirects are not checked (the last two: go-kure/launcher#794, item 6).
      The typed decode is lenient: a field the vendored API type does not declare is left out
@@ -362,60 +408,146 @@ be closed at build time.
 
 ## 6. Contract metadata and kind coverage (go-kure/launcher#789, go-kure/launcher#790)
 
-### 6.1 Target (go-kure/launcher#789): contract metadata
+### 6.1 Shipped (go-kure/launcher#789): contract metadata
 
-- **Today:** no builtin implements `ContractDescriber` (`pkg/oam/handler.go:100-131`), so
-  `HandlerContracts()` returns empty maps. A missing co-registration is found only when a
-  lowered component is dispatched, and the message (`transform.go:751`, `:1227`) names the
-  type, not the authored component or the rule.
-- **Target:**
-  - every builtin implements `ContractDescriber`;
-  - `HandlerContractSet` has only `Components` and `Traits` today
-    (`transform.go:296-299`); policies need a third map;
-  - lowering rules declare their target kinds (new optional `LoweringTargets()`);
-  - a rule whose targets are not registered is refused, naming the rule and the kind.
-- `kurel` registers component lowering rules before trait handlers
-  (`pkg/cmd/kurel/build.go:385-420`), and `webservice` emits the `topology-spread` trait. A
-  check at registration time would refuse that valid order. The check runs once the
-  registry is complete: at the first `Transform`, or at an explicit seal.
+- **Before:** no builtin implemented `ContractDescriber`, so `HandlerContracts()` returned
+  empty maps. A missing co-registration was found only when a lowered component was
+  dispatched, and the message named the type, not the authored component or the rule.
+- **Now** (`pkg/oam/README.md` "Contract metadata"):
+  - Every built-in handler and lowering rule implements `ContractDescriber`
+    (`pkg/oam/handler.go`; one `contract.go` in each of the components, traits and
+    policies packages). `Family` is the type name, `Version` is `builtin.ContractVersion`
+    (`v1alpha1`, `pkg/oam/builtin/contract.go`).
+  - `HandlerContractSet` (`pkg/oam/transform.go`) has a third map, `Policies`. Breaking
+    for a consumer that wrote an unkeyed literal of it.
+  - A built-in rule's identity carries the version: `component/webservice@v1alpha1` on
+    `Origin.Rule`, on `LoweringStep.Rule` and in a `LoweringError` chain, where it read
+    `component/webservice`.
+  - A lowering rule declares the types it lowers into (`LoweringTargetDeclarer`,
+    `LoweringTargets`, `pkg/oam/lowering_targets.go`), and every built-in rule does.
+  - `Transformer.Seal` refuses a registry where a declared type is registered neither as
+    a handler nor as a rule, naming the rule and the type: `registry incomplete: lowering
+    rule component/webservice@v1alpha1 lowers into component type "service", which is not
+    registered`. Breaking for a consumer that registers a built-in rule without the types
+    it lowers into.
+  - The "no handler" error names where the element is, and for an element a rule emitted
+    the rule and the authored component it lowered (`emittedBy`, `traitLocation`,
+    `pkg/oam/lowering_targets.go`).
+- **When the check runs.** A rule and the handlers of its targets are registered in any
+  order, so the check cannot run at registration. `Transform` and `TransformWithPolicy`
+  call `Seal` first, whether or not the document uses the rule; `LowerRaws` does not. A
+  caller that has finished registering may call `Seal` itself. It stores and locks
+  nothing.
+- **Limits:** the engine enforces no field of the metadata but a rule's `Version` (in the
+  identity) and `Deprecated` (one warning per authored element). A rule that declares no
+  targets is not checked, and the engine does not check that a rule emits only what it
+  declares.
 
-### 6.2 Target (go-kure/launcher#790): full spec and the full set of kinds
+### 6.2 Partly shipped (go-kure/launcher#790, open): full spec and the full set of kinds
 
+- **Shipped: the kind inventory.** `pkg/oam/builtin/components/README.md` "Kind
+  inventory" has one row per constructor the base library generates, with a status
+  (`kind`, `component`, `trait`, `missing`, `not authorable`), the component or trait type
+  and, for a kind judged not authorable, the reason. Two tests hold it to the code
+  (`TestKindInventory_CoversEveryConstructor`, `TestKindInventory_MatchesCallSites`,
+  `kind_inventory_internal_test.go`): a base-library bump that adds a kind fails until the
+  table has its row.
+- **Shipped: four core kinds,** `namespace`, `limitrange`, `resourcequota` and
+  `persistentvolume` (`namespace.go`, `limitrange.go`, `resourcequota.go`,
+  `persistentvolume.go` in `pkg/oam/builtin/components`).
+  - Each has one schema key per json field of the object's spec type, and the property
+    map is decoded strictly into that type (`decodeKindSpec`, `kind_decode.go`), as the
+    CloudNativePG kinds are. A test holds each schema to the type by reflection
+    (`TestCoreKindSchemas_CoverSpec`).
+  - Each emits one object named after the component, with the authored spec. Its
+    metadata is not authorable, so a Namespace that needs the Pod Security Admission
+    labels cannot be written with `namespace`. The only label is the component label of
+    go-kure/launcher#788 (§3.4).
+  - `namespace` and `persistentvolume` are cluster-scoped. A `namespace` component's name
+    must be a DNS-1123 label.
+  - `persistentvolume` is held to environment policy on every path that produces one
+    (the kind, template delivery, `passthrough`, `manifests`): a `hostPath` or `local`
+    source needs `AllowHostPathVolumes`, and `capacity.storage` is held to
+    `MaxStorageSize` (`enforcePersistentVolumePolicy`, `enforce.go`). A `csi` or
+    `flexVolume` source is not checked (go-kure/launcher#794, item 12, not decided).
+    Breaking for a chart, a `passthrough` component or a `manifests` source that holds
+    such a PersistentVolume. The other three kinds have nothing to enforce.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: `tolerations`, `topologySpreadConstraints`;
   - `daemonset`: `affinity`, `topologySpreadConstraints`;
   - `job`, `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`;
   - all workloads: `imagePullPolicy` and further container and pod fields;
-  - `service`: `ExternalName` (refused today, `service.go:48-55,75-79`), traffic policies,
-    load-balancer fields;
+  - `service`: `ExternalName` (refused today: not in `serviceTypes`,
+    `pkg/oam/builtin/components/service.go`), traffic policies, load-balancer fields;
   - `persistentvolumeclaim`: `dataSource`, `dataSourceRef`, `selector`, `volumeName`.
 
   `selector` is refused today with an explicit reason on `deployment`, `statefulset`,
   `daemonset` and `job`, and `template` on `deployment` and `job`
-  (`deployment_spec.go:52-53`, `statefulset_spec.go:59`, `daemonset_spec.go:48`,
-  `job.go:44-46`); each kind's sub-task decides whether that refusal stays, with its
-  reason documented. Each kind gets a sub-task in the ticket.
-- **Missing kinds:** Secret, Namespace, ServiceMonitor, PersistentVolume, Pod, LimitRange,
-  ResourceQuota, and the kinds reachable only as traits today (Ingress, HTTPRoute,
-  Certificate, ExternalSecret, HPA, PDB, NetworkPolicy, CiliumNetworkPolicy, Role and
-  RoleBinding, ReplicationSource). The inventory is derived from kure's generated
-  `Create<Kind>` set and the supported CRD kinds. A kind judged not authorable is listed
-  with its reason. A kind kure lacks is added to kure first.
+  (`deploymentSpecRejectedKeys`, `statefulSetSpecRejectedKeys`,
+  `daemonSetSpecRejectedKeys`, `jobSpecRejectedKeys`, in `deployment_spec.go`,
+  `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
+  whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
+  ticket.
+- **Missing kinds:** the inventory's `missing` rows (Secret, Pod, ServiceMonitor,
+  StorageClass, Gateway among them), and its `trait` rows, the
+  kinds reachable only as traits today (Ingress, HTTPRoute, Certificate, ExternalSecret,
+  HPA, PDB, NetworkPolicy, CiliumNetworkPolicy, Role and RoleBinding, ReplicationSource).
+  The ticket adds them group by group. A kind kure lacks is added to kure first.
 
 ---
 
 ## 7. Asymmetries (go-kure/launcher#794)
 
-Fix or document each:
+Each item is to be fixed, or documented with its reason. The issue holds the full list
+and the disposition of every item. The four this document started from:
 
-- `oci` sets no `targetNamespace` default; `helmrelease` does under a Flux namespace
-  (`oci.go:44`).
-- No `ApplyPolicy` on `service`, `serviceaccount`, `configmap`, `passthrough`. (`crd` has
-  one through `manifestConfig`, `crd.go:34`, `manifestsource.go:435-442`.)
-- Pod-template labels (`PodTemplateLabels`) only on `deployment`, not on `statefulset`,
-  `daemonset`, `cronjob`, `job`.
-- Template output keeps whatever namespace the chart writes; launcher neither stamps nor
-  checks it (§5.1).
+- **`targetNamespace` default (item 1): documented, no change.** `oci` sets no default;
+  `helmrelease` defaults it to the application namespace under a Flux namespace
+  (`HelmReleaseConfig.Generate`). The difference is deliberate: a Kustomization's
+  `targetNamespace` overrides the namespace of every namespaced object in the artifact,
+  where the HelmRelease default only says where the release installs. The `oci` property's
+  description says so (`OCIHandler.PropertySchema`, `pkg/oam/builtin/components/oci.go`).
+  The `fluxcd-kustomization` kind of go-kure/launcher#784 follows `oci`.
+- **Environment policy on unbuilt objects (items 2 and 10): shipped for `passthrough` and
+  `manifests`.** Both are held to the check template delivery runs on a rendered object
+  (`enforceRenderedObjectPolicy`, `helmtemplate_policy.go`): the image, pod security,
+  resource, storage and replica rules, on every kind that check reads.
+  - `passthrough` (`PassthroughConfig.ApplyPolicy`, `passthrough.go`): an object of a
+    kind kure's scheme registers is decoded as that kind for the check alone
+    (`policyObject`); what is emitted stays the authored object. One that cannot be read
+    is refused: a registered kind that does not decode, and a workload kind, a claim or a
+    PersistentVolume in an API version the scheme does not register.
+  - `manifests` and `crd` (`manifestConfig.ApplyPolicy`, `enforceManifestPolicy`,
+    `manifestsource.go`): the objects of an `inline` source are checked at the policy
+    step, those of a `url` source at generation, where they are first known. The `url`
+    host is still checked first.
+  - Both check again what `Generate` emits and report a refusal there as the component's
+    `oam.ViolationError`.
+  - A PersistentVolume is among the kinds the check reads since the `persistentvolume`
+    kind (§6.2), on both.
+  - Not covered: an object of a kind the check does not read passes, a custom resource
+    included, so the pods its controller creates are not checked. With no policy passed
+    to the handler, nothing is checked.
+  - Breaking for a document that relied on either bypass.
+  - **Documented, no change:** `service`, `serviceaccount` and `configmap` have no
+    `ApplyPolicy`, deliberately. None of their properties maps to an environment-policy
+    method, so there is nothing to enforce; the policy makes no statement about a
+    Service's `type` (`pkg/oam/builtin/components/README.md`, the `service` and
+    `serviceaccount` entries).
+- **Pod-template labels (item 3): documented, no change.** `PodTemplateLabels` is
+  implemented by `DeploymentConfig` only (`deployment.go`), not by `statefulset`,
+  `daemonset`, `cronjob` or `job`. Its one reader is the sibling-group check
+  (`podTemplateLabeler`, `pkg/oam/sibling_group.go`), and `deployment` is the only pod kind
+  a lowering rule emits into a group. A rule that emits another pod kind into a group must
+  add the method to that kind's config (`pkg/oam/README.md` "Same-name sibling groups").
+  The component label of go-kure/launcher#788 (§3.4) is stamped on the pod template of
+  every workload kind without it, and is not among the labels it returns.
+- **Namespace on template output (item 4): shipped** (§5.1). An object of unknown scope
+  is left as rendered; a `scopeOverrides` property on `helm` and `helmtemplate`, as
+  `manifests` has, is the follow-up (item 11, not decided).
+
+Item 5 was decided as "document" and needed no text: tiers are declared, never
+derived, since go-kure/launcher#783 (§2.2).
 
 `kurel`'s global `-f/--output-file`, which `build` ignores, is filed separately as
 go-kure/launcher#795 and deferred with the rest of the `kurel` CLI work.
@@ -424,20 +556,23 @@ go-kure/launcher#795 and deferred with the rest of the `kurel` CLI work.
 
 ## 8. Ticket index
 
-| Issue | Ticket | Section | Needs |
-|---|---|---|---|
-| [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781) | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | — |
-| [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
-| [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
-| [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | — |
-| [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | go-kure/launcher#793 |
-| [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | go-kure/launcher#790 (Secret kind) |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
-| [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | — |
-| [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
-| [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | — |
-| [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | go-kure/launcher#793, go-kure/launcher#787 |
-| [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
-| [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | — |
+State is what the code holds: **shipped** (the ticket's whole target), **partly** (the
+section says which part), or **open** (nothing of it).
+
+| Issue | Ticket | Section | State | Needs |
+|---|---|---|---|---|
+| [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781) | Remove Flux delivery fields from library output, and `kurel`'s delivery mode | §1.3 | Shipped | — |
+| [go-kure/launcher#782](https://github.com/go-kure/launcher/issues/782) | Delivery intent instead of Flux annotations | §1.3 | Open | [go-kure/kure#974](https://github.com/go-kure/kure/issues/974) (delivery intent), go-kure/launcher#781 |
+| [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | Shipped | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
+| [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Open | — |
+| [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Open | go-kure/launcher#793 |
+| [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
+| [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota` and `persistentvolume` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
+| [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
+| [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace; items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |

@@ -18,8 +18,12 @@ property set, fills in launcher's own choices (an image tag from `version`, a
 component does not name is out of reach, and each new one is a code change.
 
 The alternative, `passthrough`, reaches every field but gives up everything a
-component provides: no schema, no environment policy, no endpoints for network
-policy synthesis.
+component provides for a custom resource: no schema, no environment policy, no
+endpoints for network policy synthesis. Since go-kure/launcher#794 `passthrough`
+holds the object it emits to the environment policy, but only on the kinds that
+check reads (workloads, claims, autoscalers and PersistentVolumes). A custom
+resource is none of them, so it passes whatever it holds, and the pods its operator
+creates from it are not checked.
 
 ## Decision
 
