@@ -164,6 +164,49 @@ func TestResolveName_HookRequest(t *testing.T) {
 	}
 }
 
+// A document lowering rule may rename the document. The hook is asked about the
+// document the names are resolved for: the renamed one, which the defaults are
+// built from (go-kure/launcher#787).
+func TestNaming_ApplicationIsTheLoweredDocument(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0)},
+		map[string]TraitHandler{"named": namedTrait{}})
+	tr.RegisterDocumentLowering(testDocRule{kind: "Renamer"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Renamer",
+		Metadata:   Metadata{Name: "authored"},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name: "web", Type: "a", Properties: map[string]any{},
+			Traits: []Trait{named("web-hpa", "web-sub")},
+		}}},
+	}
+	var asked []NameRequest
+	_, _, err := tr.TransformWithPolicy(app, TransformContext{Naming: func(req NameRequest) (string, bool) {
+		asked = append(asked, req)
+		return "", false
+	}})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+
+	var roles []NameRole
+	for _, req := range asked {
+		roles = append(roles, req.Role)
+		if req.Application != "authored-lowered" {
+			t.Errorf("role %q: Application = %q, want the lowered document's name %q", req.Role, req.Application, "authored-lowered")
+		}
+		if req.Role == NameRoleBundle && req.Default != "authored-lowered" {
+			t.Errorf("the bundle's default is %q, want the lowered document's name %q", req.Default, "authored-lowered")
+		}
+	}
+	for _, role := range []NameRole{NameRoleBundle, NameRoleHPA, NameRoleSubApplication} {
+		if !slices.Contains(roles, role) {
+			t.Errorf("the hook was not asked for role %q; it was asked for %v", role, roles)
+		}
+	}
+}
+
 // An override is used as written or refused, never shortened; the error names
 // the role and where the name came from.
 func TestResolveName_RefusesAnInvalidOverride(t *testing.T) {

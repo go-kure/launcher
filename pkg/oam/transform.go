@@ -603,7 +603,6 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}
-	ctx.names = &nameResolver{hook: ctx.Naming, application: app.Metadata.Name, claims: NewNameAllocator()}
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -670,6 +669,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 			app.Metadata.Name, len(docs))
 	}
 	app = docs[0]
+	// Created after lowering: a document rule may rename the document, and
+	// NameRequest.Application is the name the defaults are built from. No name is
+	// resolved before this point.
+	ctx.names = &nameResolver{hook: ctx.Naming, application: app.Metadata.Name, claims: NewNameAllocator()}
 
 	namespace := ctx.Namespace
 	if namespace == "" {
