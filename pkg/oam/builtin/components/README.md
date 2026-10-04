@@ -91,6 +91,7 @@ reads it.
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
+| `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -200,7 +201,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | missing | - | - | - |
 | `kubernetes.CreateReplicationController` | v1 ReplicationController | missing | - | - | - |
-| `kubernetes.CreateResourceQuota` | v1 ResourceQuota | missing | - | - | - |
+| `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateSecret` | v1 Secret | missing | - | - | - |
@@ -1983,13 +1984,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `ParseConfigMapProperties(props)` and builds the ConfigMap through
     `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
     give the same ConfigMap and the same refusals on both paths.
-- **namespace**, **limitrange** (go-kure/launcher#790) are kind-named
-  projections of one Kubernetes core object each, built on the recipe of the
-  `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds: one schema key
-  per json field of the object's spec type, the whole property map decoded
-  strictly into that type under the null contract, and two spellings of one
-  field refused. `TestCoreKindSchemas_CoverSpec` holds each schema to the
-  linked type by reflection. Each emits its object, named after the component,
+- **namespace**, **limitrange**, **resourcequota** (go-kure/launcher#790) are
+  kind-named projections of one Kubernetes core object each, built on the
+  recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
+  one schema key per json field of the object's spec type, the whole property
+  map decoded strictly into that type under the null contract, and two
+  spellings of one field refused. `TestCoreKindSchemas_CoverSpec` holds each
+  schema to the linked type by reflection. Each emits its object, named after
+  the component,
   with the authored spec and nothing else: no annotation, and no `app` label
   (a component label on every generated object is go-kure/launcher#788). None
   runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
@@ -2018,6 +2020,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     written as a number is emitted in its canonical string form (`cpu: 2`
     becomes `cpu: "2"`). The limits constrain the pods and claims of the
     namespace at admission; the environment policy is not applied to them.
+  - `resourcequota` publishes `hard`, `scopes` and `scopeSelector`, the
+    fields of `corev1.ResourceQuotaSpec`, and emits the ResourceQuota in the
+    build namespace. The API requires none of them, so a component with no
+    properties is a quota that limits nothing. Which resource names, scopes
+    and selector operators exist is left to the API server. A quantity written
+    as a number is emitted in its canonical string form
+    (`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
+    namespace may hold in total; the environment policy is not applied to it.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
