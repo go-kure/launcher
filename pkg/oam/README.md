@@ -50,8 +50,14 @@ component that comes after no other, each further group the components whose pre
 are all in earlier groups. Each group is a child bundle of the application bundle and
 depends on the group before it. A group that is exactly the components of one tier is
 named `<application>-<tier>`; any other is `<application>-<NN>`, its two-digit position
-counted from `00`. Declarations that cannot all hold (a dependency against the tier order,
-a cycle) fail the transform, naming each step and where it was declared:
+counted from `00`. A group name is held to 253 characters, the limit of a name that names no
+delivery engine ([Names and overrides](#names-and-overrides)). A stricter limit of the object
+an engine makes from a bundle is that engine's workflow to check where it builds the object:
+a Flux Kustomization's name is also written as a label value, at most 63 characters. A
+consumer that names its Kustomizations itself is not bound by the bundle's name.
+
+Declarations that cannot all hold (a dependency against the tier order, a cycle) fail the
+transform, naming each step and where it was declared:
 
 ```text
 components cannot be ordered: "web" is after "db" (placement: tier apps is after tier infra), "db" is after "web" (dependency policy)
