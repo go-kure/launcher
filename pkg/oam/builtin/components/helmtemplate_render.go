@@ -10,6 +10,7 @@ import (
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,28 +36,73 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // chartSource is what one client-side render fetches: an inline chart source
 // whose Kind inlineChartSourceKind has already resolved and checked against
 // URL's scheme, the chart name within a HelmRepository, the chart version, the
-// values tree handed to the render as-is, and the namespace the render uses as
-// .Release.Namespace (empty leaves kure's default, "default"). .Release.Name is
-// always kure's default, "release".
+// values tree handed to the render as-is, the namespace the render uses as
+// .Release.Namespace (empty leaves kure's default, "default"), and the release
+// name it uses as .Release.Name, which templateReleaseName has already resolved
+// and checked (empty leaves kure's default, "release").
 type chartSource struct {
-	URL       string
-	Kind      string // "HelmRepository" or "OCIRepository"
-	Chart     string
-	Version   string
-	Values    map[string]any
-	Namespace string
+	URL         string
+	Kind        string // "HelmRepository" or "OCIRepository"
+	Chart       string
+	Version     string
+	Values      map[string]any
+	Namespace   string
+	ReleaseName string
 }
 
-// renderOptions turns the namespace into a kure render option when set. It
-// only sets .Release.Namespace: kure stamps no metadata.namespace, so a chart
-// that omits it still renders namespace-less objects. chartRender.render
-// stamps those afterwards (stampRenderedNamespaces).
+// renderOptions turns the release name and the namespace into kure render
+// options, each when set. The namespace only sets .Release.Namespace: kure
+// stamps no metadata.namespace, so a chart that omits it still renders
+// namespace-less objects. chartRender.render stamps those afterwards
+// (stampRenderedNamespaces).
 func (s chartSource) renderOptions() []helm.RenderOption {
 	var opts []helm.RenderOption
+	if s.ReleaseName != "" {
+		opts = append(opts, helm.WithReleaseName(s.ReleaseName))
+	}
 	if s.Namespace != "" {
 		opts = append(opts, helm.WithNamespace(s.Namespace))
 	}
 	return opts
+}
+
+// validHelmReleaseName reports whether name is a release name Helm accepts,
+// by Helm's own rule (chartutil.ValidateReleaseName): a DNS-1123 subdomain of
+// at most 53 characters. kure's render checks nothing, so a name Helm would
+// refuse to install under would otherwise render.
+func validHelmReleaseName(name string) bool {
+	return chartutil.ValidateReleaseName(name) == nil
+}
+
+// helmReleaseNameRule completes a refused release name's message, in place of
+// Helm's, which quotes its regular expression.
+const helmReleaseNameRule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
+
+// templateReleaseName resolves the release name of a client-side render:
+// releaseName when set, else the release name Flux gives a HelmRelease named
+// componentName with no spec.releaseName and no spec.targetNamespace — the
+// name itself, shortened as Flux shortens it (oam.ShortenName at
+// oam.ShortenLimitHelmRelease) — so a chart renders under the same name under
+// either delivery of the helm rule. An authored name is never shortened; it,
+// and the default, must be a valid Helm release name (validHelmReleaseName). A
+// default that is not (Flux's shortening can leave a label starting with '-')
+// is refused with the remedy to set releaseName. Every error is prefixed with
+// owner, the component type.
+func templateReleaseName(owner, releaseName, componentName string) (string, error) {
+	if releaseName != "" {
+		if !validHelmReleaseName(releaseName) {
+			return "", errors.Errorf("%s: releaseName %q %s", owner, releaseName, helmReleaseNameRule)
+		}
+		return releaseName, nil
+	}
+	if componentName == "" {
+		return "", errors.Errorf("%s: no release name: releaseName is unset and the component has no name to derive it from; set ReleaseName or Name", owner)
+	}
+	name := oam.ShortenName(componentName, oam.ShortenLimitHelmRelease)
+	if !validHelmReleaseName(name) {
+		return "", errors.Errorf("%s: the default release name %q, derived from the component name %q as Flux derives a HelmRelease's, %s; set releaseName", owner, name, componentName, helmReleaseNameRule)
+	}
+	return name, nil
 }
 
 // chartURL is the location handed to the renderer: a HelmRepository's base URL

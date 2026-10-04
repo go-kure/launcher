@@ -1176,8 +1176,9 @@ spec:
 }
 
 // TestBuildCommand_HelmtemplateUndeclaredPropertyRejected: a release-identity
-// property helmtemplate does not declare is a build error naming it, before any
-// chart is fetched — authored-property validation runs first.
+// property helmtemplate does not declare (targetNamespace) is a build error
+// naming it, before any chart is fetched — authored-property validation runs
+// first.
 func TestBuildCommand_HelmtemplateUndeclaredPropertyRejected(t *testing.T) {
 	appYAML := `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -1190,7 +1191,7 @@ spec:
       type: helmtemplate
       properties:
         chart: testchart
-        releaseName: testapp
+        targetNamespace: elsewhere
         source:
           url: https://charts.example.com
 `
@@ -1205,11 +1206,109 @@ spec:
 	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("expected build to reject releaseName on a helmtemplate component, got success, output:\n%s", out.String())
+		t.Fatalf("expected build to reject targetNamespace on a helmtemplate component, got success, output:\n%s", out.String())
 	}
-	if !strings.Contains(err.Error(), `unsupported field "releaseName"`) {
+	if !strings.Contains(err.Error(), `unsupported field "targetNamespace"`) {
 		t.Errorf("error should name the refused field, got: %v", err)
 	}
+}
+
+// TestBuildCommand_TemplateRenderedReleaseName builds one chart, served
+// locally, twice into one namespace: as a helmtemplate and as a helm component
+// with delivery: template. The chart names its object after the release name.
+// With no releaseName each renders under its component name, as its
+// HelmRelease would be released under delivery: flux, so the two get distinct
+// objects; an authored releaseName — on either type — replaces that name; the
+// same releaseName on both makes their objects collide, which the build
+// refuses.
+func TestBuildCommand_TemplateRenderedReleaseName(t *testing.T) {
+	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", map[string]string{
+		"testchart/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-cm\n  namespace: {{ .Release.Namespace }}\ndata:\n  k: v\n",
+	})
+	// The chart URL is derived from the request (r.Host): the handler runs on
+	// the server's goroutines, so it must not read a variable assigned after
+	// NewServer returns.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("testchart", "0.1.0", "http://"+r.Host+"/testchart-0.1.0.tgz"))
+		case "/testchart-0.1.0.tgz":
+			_, _ = w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	build := func(t *testing.T, templateExtra, helmExtra string) (string, error) {
+		t.Helper()
+		appYAML := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: shop
+spec:
+  components:
+    - name: first
+      type: helmtemplate
+      properties:
+        chart: testchart
+        version: "0.1.0"%s
+        source:
+          url: %s
+    - name: second
+      type: helm
+      properties:
+        delivery: template
+        chart: testchart
+        version: "0.1.0"%s
+        source:
+          url: %s
+`, templateExtra, srv.URL, helmExtra, srv.URL)
+		dir := t.TempDir()
+		appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+		profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+		cmd := NewKurelCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+		err := cmd.Execute()
+		return out.String(), err
+	}
+	const releaseName = "\n        releaseName: other"
+
+	for name, tc := range map[string]struct {
+		templateExtra, helmExtra string
+		want                     []string
+	}{
+		"no releaseName: each under its component name":  {"", "", []string{"name: first-cm", "name: second-cm"}},
+		"releaseName on the helmtemplate":                {releaseName, "", []string{"name: other-cm", "name: second-cm"}},
+		"releaseName on the helm with template delivery": {"", releaseName, []string{"name: first-cm", "name: other-cm"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := build(t, tc.templateExtra, tc.helmExtra)
+			if err != nil {
+				t.Fatalf("build failed: %v\noutput:\n%s", err, out)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("output does not contain %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+	t.Run("same releaseName on both: collision refused", func(t *testing.T) {
+		out, err := build(t, releaseName, releaseName)
+		if err == nil {
+			t.Fatalf("build succeeded; want a generated-object collision, output:\n%s", out)
+		}
+		for _, want := range []string{"generated-object collision", "other-cm"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error does not contain %q: %v", want, err)
+			}
+		}
+	})
 }
 
 // topologySpreadAppYAML is a deployment component carrying the topology-spread
