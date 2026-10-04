@@ -2,8 +2,10 @@ package components
 
 import (
 	"fmt"
+	"math"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -79,7 +81,9 @@ func renderedObjectRef(obj client.Object) string {
 // refused as the workload kinds refuse them: the API server accepts none on a
 // created pod. The storage a claim requests — a PersistentVolumeClaim's, and
 // each of a StatefulSet's claim templates' — is held to the storage maximum,
-// as the persistentvolumeclaim and statefulset kinds hold theirs.
+// as the persistentvolumeclaim and statefulset kinds hold theirs, and the
+// replica count a controller or a HorizontalPodAutoscaler asks for to the
+// replica maximum (enforceRenderedReplicas).
 //
 // What reached the build untyped and may hold a workload is refused, since
 // nothing in it can be read: a workload kind in an API version kure's scheme
@@ -90,6 +94,9 @@ func renderedObjectRef(obj client.Object) string {
 // refused there too; rendered on its own the parser already reads it as a list.
 func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	if err := enforceRenderedClaims(obj, p); err != nil {
+		return err
+	}
+	if err := enforceRenderedReplicas(obj, p); err != nil {
 		return err
 	}
 	path, ps := renderedPodSpec(obj)
@@ -145,6 +152,56 @@ func enforceRenderedClaims(obj client.Object, p oam.Policy) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// enforceRenderedReplicas holds the replica count a rendered object asks for
+// to the policy's replica maximum, as the deployment and statefulset kinds and
+// the scaler trait hold theirs: spec.replicas of a Deployment, StatefulSet,
+// ReplicaSet or ReplicationController — one when unset, the API server's
+// default — and spec.maxReplicas of a HorizontalPodAutoscaler. That field sits
+// at the same path in every version of the kind, so one kure's scheme does not
+// register (autoscaling/v1) is read as it arrived; a value there that is not
+// an integer is refused, since it cannot be compared. Any other object passes,
+// and so does every object under a policy with no maximum.
+func enforceRenderedReplicas(obj client.Object, p oam.Policy) error {
+	limit := p.MaxReplicas()
+	if limit == nil {
+		return nil
+	}
+	check := func(field string, n int32) error {
+		if err := enforceMaxReplicas(n, limit); err != nil {
+			return errors.Wrap(err, field)
+		}
+		return nil
+	}
+	replicas := func(r *int32) error {
+		if r == nil {
+			return check("spec.replicas", 1)
+		}
+		return check("spec.replicas", *r)
+	}
+	switch o := obj.(type) {
+	case *appsv1.Deployment:
+		return replicas(o.Spec.Replicas)
+	case *appsv1.StatefulSet:
+		return replicas(o.Spec.Replicas)
+	case *appsv1.ReplicaSet:
+		return replicas(o.Spec.Replicas)
+	case *corev1.ReplicationController:
+		return replicas(o.Spec.Replicas)
+	case *autoscalingv2.HorizontalPodAutoscaler:
+		return check("spec.maxReplicas", o.Spec.MaxReplicas)
+	case *unstructured.Unstructured:
+		if gvk := o.GroupVersionKind(); gvk.Group != "autoscaling" || gvk.Kind != "HorizontalPodAutoscaler" {
+			return nil
+		}
+		n, found, err := unstructured.NestedInt64(o.Object, "spec", "maxReplicas")
+		if err != nil || !found || n > math.MaxInt32 || n < math.MinInt32 {
+			return errors.New("spec.maxReplicas is not an integer this build can read, so the object cannot be checked against environment policy")
+		}
+		return check("spec.maxReplicas", int32(n))
 	}
 	return nil
 }

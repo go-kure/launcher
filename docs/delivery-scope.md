@@ -306,7 +306,10 @@ be closed at build time.
      DaemonSet, ReplicaSet, Job and CronJob is checked by `enforcePodTemplatePolicy`, the
      variant over `corev1.PodSpec` the operator-CR components already use. The storage request
      of a PersistentVolumeClaim and of a StatefulSet's claim templates is held to
-     `MaxStorageSize`, as on the authored kinds.
+     `MaxStorageSize`, as on the authored kinds. The replica count of a Deployment,
+     StatefulSet, ReplicaSet or ReplicationController and the `maxReplicas` of a
+     HorizontalPodAutoscaler are held to `MaxReplicas`, as on the authored kinds and the
+     `scaler` trait.
    - **Decided:** `ValidateImageRef` (tag or digest required, no `:latest`) applies to
      chart images, so a rendered workload is held to the same image rule as a
      launcher-built one.
@@ -318,7 +321,10 @@ be closed at build time.
      scheme does not register), and a list nested in an unregistered list (any object with a
      top-level `items` array there), are refused; a
      custom resource's pods, the archive host a Helm repository
-     index names and redirects are not checked.
+     index names and redirects are not checked (the last two: go-kure/launcher#794, item 6).
+     The typed decode is lenient: a field the vendored API type does not declare is left out
+     of the output with no error, where the object was emitted as rendered before
+     (go-kure/launcher#794, item 7).
 
 ---
 
