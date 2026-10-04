@@ -335,7 +335,9 @@ Two differences are deliberate and pinned. A worker refused by its own parse now
 carries the lowering engine's prefix (`component "w" (type "worker") in document …`)
 instead of the former `component "w":`, with the cause text unchanged. A
 trait-lowering error on a worker's trait carries one more chain line naming the
-`component/worker` step. The former handler's check that the `affinity` shorthand
+`component/worker` step (`component/worker@v1alpha1` since go-kure/launcher#789,
+which added the contract version to every built-in rule's identity). The former
+handler's check that the `affinity` shorthand
 evaluates to label selectors the API server accepts runs in the rule, before the
 raw `affinity` is forwarded, with the same text.
 
