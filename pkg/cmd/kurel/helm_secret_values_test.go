@@ -70,6 +70,14 @@ func generateSecretApp(fluxNS string, policy oam.Policy, comp oam.Component) ([]
 	return oam.GenerateApplications(cluster)
 }
 
+// componentLabels are the labels of an object the named component owns: the
+// `app` label its handler or trait writes and the component label the
+// transform adds.
+func componentLabels(name string) map[string]string {
+	v := oam.ComponentLabelValue(name)
+	return map[string]string{"app": v, kurelComponentLabel: v}
+}
+
 // objectYAML is obj as it is written into a manifest file.
 func objectYAML(t *testing.T, obj client.Object) string {
 	t.Helper()
@@ -176,7 +184,7 @@ func TestHelmSecretValues_Emitted(t *testing.T) {
 				if written := objectYAML(t, secret); strings.Contains(written, secretSentinel) {
 					t.Errorf("the written Secret carries the value outside base64")
 				}
-				if want := map[string]string{"app": oam.ComponentLabelValue("podinfo")}; !maps.Equal(secret.Labels, want) {
+				if want := componentLabels("podinfo"); !maps.Equal(secret.Labels, want) {
 					t.Errorf("Secret labels %v, want %v", secret.Labels, want)
 				}
 
@@ -311,7 +319,7 @@ func TestHelmSecretValues_AuthoredSecretTrait(t *testing.T) {
 	if string(secret.Data["password"]) != secretSentinel || string(secret.Data["username"]) != "admin" {
 		t.Error("the Secret does not hold the authored entries")
 	}
-	if want := map[string]string{"app": oam.ComponentLabelValue("settings")}; !maps.Equal(secret.Labels, want) {
+	if want := componentLabels("settings"); !maps.Equal(secret.Labels, want) {
 		t.Errorf("Secret labels %v, want %v", secret.Labels, want)
 	}
 }
