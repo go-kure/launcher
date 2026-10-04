@@ -147,5 +147,21 @@ spec:
 		if got := job.Annotations["helm.sh/hook"]; got != "pre-install" {
 			t.Errorf("hook Job annotation = %q, want it kept as rendered", got)
 		}
+		// The chart sets no component label, so launcher adds the owning
+		// component's on each rendered object and on each pod template
+		// (go-kure/launcher#788).
+		for where, labels := range map[string]map[string]string{
+			"the Deployment":                dep.Labels,
+			"the Deployment's pod template": dep.Spec.Template.Labels,
+			"the hook Job":                  job.Labels,
+			"the hook Job's pod template":   job.Spec.Template.Labels,
+		} {
+			if got := labels[kurelComponentLabel]; got != "web" {
+				t.Errorf("%s has %s = %q, want %q", where, kurelComponentLabel, got, "web")
+			}
+		}
+		if got := dep.Spec.Template.Labels["app"]; got != "web" {
+			t.Errorf("Deployment pod template app label = %q, want the chart's kept", got)
+		}
 	})
 }

@@ -18,7 +18,9 @@ const DefaultDomain = "gokure.dev"
 // the library default key (== TierAnnotationKey(DefaultDomain)).
 const TierAnnotation = "gokure.dev/tier"
 
-// ComponentLabel is the default pod-selector key synthesized NetworkPolicies target.
+// ComponentLabel is the default key of the component label: launcher sets it on
+// what a component owns (go-kure/launcher#788), and synthesized NetworkPolicies
+// select pods by it.
 //
 // Deprecated: use ComponentLabelKeyForDomain(domain). The library default key
 // (== ComponentLabelKeyForDomain(DefaultDomain)).

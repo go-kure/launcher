@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: db
+    launcher.gokure.dev/component: db
   name: db
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: db
+        launcher.gokure.dev/component: db
     spec:
       automountServiceAccountToken: false
       containers:
@@ -32,6 +34,7 @@ kind: Service
 metadata:
   labels:
     app: db-peers
+    launcher.gokure.dev/component: db-peers
   name: db-peers
   namespace: default
 spec:
@@ -50,6 +53,7 @@ kind: Service
 metadata:
   labels:
     app: db-discovery
+    launcher.gokure.dev/component: db-discovery
   name: db-discovery
   namespace: default
 spec:

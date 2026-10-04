@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       automountServiceAccountToken: false
       containers:

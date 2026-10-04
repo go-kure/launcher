@@ -1,6 +1,8 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo-charts
   name: podinfo-charts
   namespace: sources
 spec:
@@ -10,6 +12,8 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo-oci-charts
   name: podinfo-oci-charts
   namespace: sources
 spec:
@@ -20,6 +24,8 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo-manifests
   name: podinfo-manifests
   namespace: sources
 spec:
@@ -31,6 +37,8 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo-repo
   name: podinfo-repo
   namespace: sources
 spec:
@@ -45,6 +53,8 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: Bucket
 metadata:
+  labels:
+    launcher.gokure.dev/component: artifacts
   name: artifacts
   namespace: sources
 spec:
@@ -59,6 +69,8 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmChart
 metadata:
+  labels:
+    launcher.gokure.dev/component: podinfo-chart
   name: podinfo-chart
   namespace: sources
 spec:

@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - envFrom:
@@ -39,6 +41,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -57,6 +60,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 ---
@@ -65,6 +69,7 @@ kind: ExternalSecret
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api-credentials
   namespace: default
 spec:

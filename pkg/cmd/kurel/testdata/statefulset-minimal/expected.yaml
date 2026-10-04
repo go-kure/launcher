@@ -3,6 +3,7 @@ kind: StatefulSet
 metadata:
   labels:
     app: db
+    launcher.gokure.dev/component: db
   name: db
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: db
+        launcher.gokure.dev/component: db
     spec:
       automountServiceAccountToken: false
       containers:
@@ -50,6 +52,7 @@ kind: Service
 metadata:
   labels:
     app: db-headless
+    launcher.gokure.dev/component: db-headless
   name: db-headless
   namespace: default
 spec:

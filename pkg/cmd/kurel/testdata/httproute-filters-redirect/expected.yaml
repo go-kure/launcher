@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: shlink
+    launcher.gokure.dev/component: shlink
   name: shlink
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: shlink
+        launcher.gokure.dev/component: shlink
     spec:
       containers:
       - image: shlinkio/shlink:4.3
@@ -36,6 +38,7 @@ kind: Service
 metadata:
   labels:
     app: shlink
+    launcher.gokure.dev/component: shlink
   name: shlink
   namespace: default
 spec:
@@ -54,6 +57,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: shlink
+    launcher.gokure.dev/component: shlink
   name: shlink
   namespace: default
 ---
@@ -62,6 +66,7 @@ kind: HTTPRoute
 metadata:
   labels:
     app: shlink
+    launcher.gokure.dev/component: shlink
   name: shlink-httproute
   namespace: default
 spec:

@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: secureapi
+    launcher.gokure.dev/component: secureapi
   name: secureapi
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: secureapi
+        launcher.gokure.dev/component: secureapi
     spec:
       containers:
       - image: myorg/secureapi:v2.0.0
@@ -36,6 +38,7 @@ kind: Service
 metadata:
   labels:
     app: secureapi
+    launcher.gokure.dev/component: secureapi
   name: secureapi
   namespace: default
 spec:
@@ -54,6 +57,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: secureapi
+    launcher.gokure.dev/component: secureapi
   name: secureapi
   namespace: default
 ---
@@ -62,6 +66,7 @@ kind: HTTPRoute
 metadata:
   labels:
     app: secureapi
+    launcher.gokure.dev/component: secureapi
   name: secureapi-httproute
   namespace: default
 spec:

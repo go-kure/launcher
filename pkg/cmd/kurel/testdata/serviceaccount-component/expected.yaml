@@ -3,6 +3,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: runner
+    launcher.gokure.dev/component: runner
   name: runner
   namespace: default
 ---
@@ -14,5 +15,6 @@ kind: ServiceAccount
 metadata:
   labels:
     app: builder
+    launcher.gokure.dev/component: builder
   name: builder
   namespace: default

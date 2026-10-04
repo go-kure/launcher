@@ -204,23 +204,29 @@ objects in the Flux namespace, and the Flux kinds as authorable components.
   name, the helper reproduces Flux's shortening algorithm, so a template-rendered release
   is named as Flux would name it.
 
-### 3.4 Target (go-kure/launcher#788): component label and provenance
+### 3.4 Shipped (go-kure/launcher#788): component label and provenance
 
-- **Today:** launcher never stamps `<domain>/component`. It is only a NetworkPolicy
-  selector key (`ComponentLabelKey`, else the domain's key, `transform.go:711-714`), so a
-  synthesized NetworkPolicy can select a label present nowhere in the output.
-  Chart-rendered pods carry chart labels only.
-  `GeneratedApplication.Component` maps trait sub-applications and sibling groups to their
-  component; the pooler, database, generated sources and synthesized NetworkPolicies
-  report themselves (`in_document_collisions.go:17-19`).
-- **Target:** launcher stamps `<ComponentLabelKey>: ComponentLabelValue(c)` on every object
-  and pod template a component owns.
-  - Chart output under Flux delivery: through a post-renderer on the HelmRelease. Flux
-    post-renderers carry kustomize patches, so pod-template labels need one patch per
-    workload kind.
-  - Chart output under template delivery: labels added to the rendered objects.
-  - `GeneratedApplication.Component` is filled for the pooler, database and NetworkPolicies.
-  - A shared generated source is owned by the application: it carries no component label.
+- **Before:** launcher never stamped `<domain>/component`. It was only a NetworkPolicy
+  selector key (`ComponentLabelKey`, else the domain's key), so a synthesized NetworkPolicy
+  could select a label present nowhere in the output. Chart-rendered pods carried chart
+  labels only. `GeneratedApplication.Component` mapped trait sub-applications and sibling
+  groups to their component; the pooler, database, generated sources and synthesized
+  NetworkPolicies reported themselves.
+- **Now:** the transform's last step records the owner of every application, and launcher
+  stamps `<ComponentLabelKey>: ComponentLabelValue(c)` on every object and pod template a
+  component owns, where the key is absent (`pkg/oam/component_ownership.go`,
+  `pkg/oam/README.md` "Component label and ownership").
+  - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
+    the authored ones, with a strategic-merge patch per workload kind (Deployment,
+    StatefulSet, DaemonSet, Job, CronJob). It replaces a value the chart set.
+  - Chart output under template delivery: labels added to the rendered objects, where the
+    key is absent.
+  - `GeneratedApplication.Component` is the authored component for the pooler, a database,
+    an object store and a component's synthesized NetworkPolicies.
+  - A shared generated source is owned by the application: it carries no component label
+    and reports an empty component. So does the external-backend NetworkPolicy.
+  - Not covered: pods an operator creates from a custom resource, and an owner label a
+    consumer needs to be authoritative (it enforces that in its own pass).
 
 ---
 

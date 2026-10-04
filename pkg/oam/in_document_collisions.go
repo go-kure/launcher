@@ -15,8 +15,16 @@ import (
 // component it belongs to, every object it generated, and whether its bundle
 // force-applies them.
 type GeneratedApplication struct {
-	Name      string // the stack.Application's name
-	Component string // the OAM component it belongs to (ComponentNamed), else Name
+	Name string // the stack.Application's name
+	// Component is the authored OAM component the application belongs to
+	// (go-kure/launcher#788): the component itself, one a lowering rule emitted
+	// for it under any name, a sub-application one of its traits added, a
+	// NetworkPolicy synthesized for it. It is empty for an application the
+	// document as a whole owns: a generated source the application bundle holds,
+	// and an external backend Service's synthesized NetworkPolicy. For an
+	// application the transform did not build (one a caller added to the
+	// cluster) it is the config's ComponentNamed answer, else Name.
+	Component string
 	Objects   []*client.Object
 	// Forced reports that the application's own bundle sets Force, so its Flux
 	// Kustomization (spec.force) force-applies every object, annotated or not.
@@ -26,8 +34,10 @@ type GeneratedApplication struct {
 }
 
 // String names the application as a collision error names its producer: a
-// component's own application (or a sibling group, which deploys as one) by its
-// component, any other — a trait's sub-application — by its name and component.
+// component's own application (or a sibling group, which deploys as one) and
+// an application the document as a whole owns by its name, any other — a
+// trait's sub-application, a lowered component named differently, a synthesized
+// NetworkPolicy — by its name and component.
 func (a GeneratedApplication) String() string {
 	if a.componentOrName() == a.Name {
 		return fmt.Sprintf("component %q", a.Name)
@@ -94,7 +104,9 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 			return err
 		}
 		component := app.Name
-		if named, ok := app.Config.(ComponentNamed); ok && named.ComponentName() != "" {
+		if owned, ok := app.Config.(componentOwner); ok {
+			component = owned.owningComponent()
+		} else if named, ok := app.Config.(ComponentNamed); ok && named.ComponentName() != "" {
 			component = named.ComponentName()
 		}
 		// Copied at once, as Bundle.Generate appends each result at once: a config

@@ -3,6 +3,7 @@ kind: StatefulSet
 metadata:
   labels:
     app: db
+    launcher.gokure.dev/component: db
   name: db
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: db
+        launcher.gokure.dev/component: db
     spec:
       automountServiceAccountToken: false
       containers:
@@ -44,6 +46,8 @@ spec:
 apiVersion: volsync.backube/v1alpha1
 kind: ReplicationSource
 metadata:
+  labels:
+    launcher.gokure.dev/component: db
   name: data-backup
   namespace: default
 spec:

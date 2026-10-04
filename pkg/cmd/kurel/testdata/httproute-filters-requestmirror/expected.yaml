@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: production
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - image: myregistry/api:v1.0.0
@@ -36,6 +38,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: production
 spec:
@@ -54,6 +57,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: production
 ---
@@ -62,6 +66,7 @@ kind: HTTPRoute
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api-httproute
   namespace: production
 spec:

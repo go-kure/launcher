@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: backend
+    launcher.gokure.dev/component: backend
   name: backend
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: backend
+        launcher.gokure.dev/component: backend
     spec:
       affinity:
         nodeAffinity:

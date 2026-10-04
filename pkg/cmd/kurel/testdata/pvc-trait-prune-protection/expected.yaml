@@ -5,6 +5,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -17,6 +18,7 @@ spec:
     metadata:
       labels:
         app: api
+        launcher.gokure.dev/component: api
     spec:
       containers:
       - image: ghcr.io/example/api:v1.0.0
@@ -40,6 +42,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -60,6 +63,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 ---
@@ -70,6 +74,7 @@ metadata:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: shared-data
   namespace: default
 spec:

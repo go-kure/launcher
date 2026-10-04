@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: api-server
+    launcher.gokure.dev/component: api-server
   name: api-server
   namespace: default
 spec:
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app: api-server
+        launcher.gokure.dev/component: api-server
     spec:
       automountServiceAccountToken: false
       containers:
@@ -32,6 +34,7 @@ kind: Service
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
@@ -53,6 +56,7 @@ kind: Ingress
 metadata:
   labels:
     app: api
+    launcher.gokure.dev/component: api
   name: api-ingress
   namespace: default
 spec:

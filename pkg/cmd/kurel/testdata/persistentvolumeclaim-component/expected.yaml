@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   labels:
     app: media
+    launcher.gokure.dev/component: media
   name: media
   namespace: default
 spec:
@@ -18,6 +19,7 @@ kind: PersistentVolumeClaim
 metadata:
   labels:
     app: raw
+    launcher.gokure.dev/component: raw
   name: raw
   namespace: default
 spec:

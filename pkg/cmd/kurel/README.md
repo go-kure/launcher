@@ -145,7 +145,11 @@ kurel derives its platform label/annotation keys under the **`launcher.gokure.de
 domain: the tier annotation is `launcher.gokure.dev/tier`, and synthesized
 NetworkPolicies select pods via `launcher.gokure.dev/component`, valued at the
 component's label value (the name itself at 63 characters or fewer, a projection beyond —
-`ComponentLabelValue` in the OAM model). This is kurel's fixed
+`ComponentLabelValue` in the OAM model). Every object a component owns and each of its
+pod templates carries that label in the build output, and a `HelmRelease` carries a
+post-renderer that sets it on the chart's pod templates, so a synthesized policy selects
+its component's pods as emitted (go-kure/launcher#788); a generated source shared by the
+application carries none. This is kurel's fixed
 choice over the launcher library default (`gokure.dev`); other embedders set their own
 domain through `TransformContext.Domain`. See the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation

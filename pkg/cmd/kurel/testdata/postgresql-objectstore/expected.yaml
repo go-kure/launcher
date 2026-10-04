@@ -1,6 +1,8 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
   name: postgres
   namespace: default
 spec:
@@ -25,6 +27,8 @@ spec:
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
   name: postgres
   namespace: default
 spec:

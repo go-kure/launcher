@@ -114,13 +114,23 @@ func TestConfigMapTwin_SameConfigMapBothWays(t *testing.T) {
 			if got := labelOf(traitCM, "app"); got != "owner" {
 				t.Errorf("trait ConfigMap app label = %q, want the owner %q", got, "owner")
 			}
-			delete(kindCM["metadata"].(map[string]any)["labels"].(map[string]any), "app")
-			delete(traitCM["metadata"].(map[string]any)["labels"].(map[string]any), "app")
+			// The component label names the same owner (go-kure/launcher#788).
+			if got := labelOf(kindCM, kurelComponentLabel); got != "settings" {
+				t.Errorf("kind ConfigMap component label = %q, want %q", got, "settings")
+			}
+			if got := labelOf(traitCM, kurelComponentLabel); got != "owner" {
+				t.Errorf("trait ConfigMap component label = %q, want the owner %q", got, "owner")
+			}
+			for _, cm := range []map[string]any{kindCM, traitCM} {
+				labels := cm["metadata"].(map[string]any)["labels"].(map[string]any)
+				delete(labels, "app")
+				delete(labels, kurelComponentLabel)
+			}
 
 			if !reflect.DeepEqual(kindCM, traitCM) {
 				k, _ := yaml.Marshal(kindCM)
 				tr, _ := yaml.Marshal(traitCM)
-				t.Errorf("ConfigMaps differ beyond the app label\nkind:\n%s\ntrait:\n%s", k, tr)
+				t.Errorf("ConfigMaps differ beyond the owner's labels\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
 			// Each authored field must reach the ConfigMap with its authored
 			// value. Both paths share one generator, so their equality alone
