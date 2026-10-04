@@ -65,7 +65,7 @@ preflight reject every valid use of the trait.
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`, `name` (optional). The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. The objects are named after the component unless `name` is authored: the one `name` names the Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding, and is the `roleRef.name` of both bindings (go-kure/launcher#787; see Conventions). It names neither the subject nor the `app` label, which stay the component's. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
-| `secret` | Secret | A Secret the document carries (go-kure/launcher#786). `name` (required), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
+| `secret` | Secret | A Secret the document carries (go-kure/launcher#786). `name` (required, a DNS-1123 subdomain), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
 ### Storage
@@ -770,6 +770,8 @@ see above), and the component's pruning and replacement traits.
 - `stringData` values are strings and `data` values base64; both are emitted under `data`, which
   is how the API stores them, so a manifest diff shows no plain text. A key in both is refused:
   the API server would let `stringData` win silently.
+- `name` is the Secret's `metadata.name` and must be a DNS-1123 subdomain; anything else is
+  refused when the trait is applied.
 - Keys must be valid Secret keys (the ConfigMap key rule), and the decoded values may total at
   most 1,048,576 bytes, the API server's Secret limit.
 - `type` is the Secret type, emitted as written (unset is `Opaque` on the cluster); the trait

@@ -305,22 +305,36 @@ func TestSharedValuePath(t *testing.T) {
 		return m
 	}
 	cases := []struct {
-		name string
-		a, b map[string]any
-		want string
+		name   string
+		a, b   map[string]any
+		want   string
+		shared bool
 	}{
-		{"nil trees", nil, nil, ""},
-		{"disjoint", obj("a", 1), obj("b", 2), ""},
-		{"disjoint under one object", obj("o", obj("a", 1)), obj("o", obj("b", 2)), ""},
-		{"scalar", obj("a", 1), obj("a", 2), "a"},
-		{"nested", obj("o", obj("p", obj("q", 1))), obj("o", obj("p", obj("q", 2))), "o.p.q"},
-		{"null against object", obj("o", nil), obj("o", obj("a", 1)), "o"},
-		{"empty objects", obj("o", obj()), obj("o", obj()), ""},
-		{"sorted", obj("z", 1, "b", 1), obj("z", 2, "b", 2), "b"},
+		{"nil trees", nil, nil, "", false},
+		{"disjoint", obj("a", 1), obj("b", 2), "", false},
+		{"disjoint under one object", obj("o", obj("a", 1)), obj("o", obj("b", 2)), "", false},
+		{"scalar", obj("a", 1), obj("a", 2), "a", true},
+		{"nested", obj("o", obj("p", obj("q", 1))), obj("o", obj("p", obj("q", 2))), "o.p.q", true},
+		{"null against object", obj("o", nil), obj("o", obj("a", 1)), "o", true},
+		{"empty objects", obj("o", obj()), obj("o", obj()), "", false},
+		{"sorted", obj("z", 1, "b", 1), obj("z", 2, "b", 2), "b", true},
+		// An empty key is a key: it sorts first, is a shared path, and does not
+		// end the walk when the two sides only share an object under it.
+		{"empty key", obj("", 1, "z", 1), obj("", 2, "z", 2), `""`, true},
+		{"nested empty key", obj("o", obj("", 1)), obj("o", obj("", 2)), `o.""`, true},
+		{"empty key over a later one", obj("", obj("a", 1), "z", 1), obj("", obj("b", 2), "z", 2), "z", true},
 	}
 	for _, tc := range cases {
-		if got := sharedValuePath(tc.a, tc.b); got != tc.want {
-			t.Errorf("%s: sharedValuePath = %q, want %q", tc.name, got, tc.want)
+		if got, shared := sharedValuePath(tc.a, tc.b); got != tc.want || shared != tc.shared {
+			t.Errorf("%s: sharedValuePath = %q, %v, want %q, %v", tc.name, got, shared, tc.want, tc.shared)
 		}
+	}
+	// The refusal reads the flag, not the path.
+	for _, owner := range []string{helmType, helmTemplateType} {
+		err := refuseSharedValuePath(owner, obj("", "plain"), obj("", sensitiveValue))
+		if err == nil || !strings.Contains(err.Error(), owner+`: "" is set in both values and secretValues`) {
+			t.Errorf("%s: err = %v, want the shared empty key refused", owner, err)
+		}
+		assertWithholdsSensitive(t, err)
 	}
 }

@@ -1,11 +1,13 @@
 package kurel
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -440,14 +442,15 @@ spec:
 }
 
 // secretChartRepo serves a one-chart Helm repository local to t and returns
-// its URL. The chart's templates are files, keyed by name under templates/.
+// its URL. files are the chart's files beside its Chart.yaml, keyed by their
+// path in the chart (templates/cm.yaml, charts/child/Chart.yaml).
 func secretChartRepo(t *testing.T, files map[string]string) string {
 	t.Helper()
-	templates := map[string]string{}
+	archived := map[string]string{}
 	for name, content := range files {
-		templates["secretchart/templates/"+name] = content
+		archived["secretchart/"+name] = content
 	}
-	chart := buildMinimalChartTar(t, "secretchart", "0.1.0", templates)
+	chart := buildMinimalChartTar(t, "secretchart", "0.1.0", archived)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index.yaml":
@@ -485,8 +488,8 @@ func templateSecretComponent(url string, plain bool) oam.Component {
 // its own, so the ConfigMap the chart renders from plain values carries none.
 func TestHelmSecretValues_TemplateDelivery(t *testing.T) {
 	url := secretChartRepo(t, map[string]string{
-		"cm.yaml":     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  user: {{ .Values.auth.user }}\n  replicas: {{ .Values.replicaCount | quote }}\n",
-		"secret.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: login\nstringData:\n  password: {{ .Values.auth.password }}\n",
+		"templates/cm.yaml":     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  user: {{ .Values.auth.user }}\n  replicas: {{ .Values.replicaCount | quote }}\n",
+		"templates/secret.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: login\nstringData:\n  password: {{ .Values.auth.password }}\n",
 	})
 	apps, err := generateSecretApp("", nil, templateSecretComponent(url, false))
 	if err != nil {
@@ -531,7 +534,7 @@ func slicesOfKeys(m map[string]client.Object) []string {
 // is in secretValues.
 func TestHelmSecretValues_TemplateRenderFailureWithholdsTheValue(t *testing.T) {
 	url := secretChartRepo(t, map[string]string{
-		"cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n" +
+		"templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n" +
 			"{{- if .Values.auth.password }}\n{{ fail (printf \"rejected password %s\" .Values.auth.password) }}\n{{- end }}\n",
 	})
 
@@ -546,5 +549,80 @@ func TestHelmSecretValues_TemplateRenderFailureWithholdsTheValue(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
+	}
+}
+
+// TestHelmSecretValues_SubchartGlobalConflict pins the one documented way a
+// value of secretValues leaves a template render other than through what the
+// chart renders (go-kure/launcher#794, item 9). When secretValues give a
+// subchart a `global` entry whose shape conflicts with the parent's `global`,
+// Helm ignores the entry and prints a warning quoting it to the process's
+// standard log, which the renderer does not capture.
+//
+// What launcher controls stays clean: the build succeeds, so no error carries
+// the value, and no generated object does. The leak is exactly that one log
+// line; when the renderer stops emitting it, this test fails on the last check
+// and the limit comes out of the README.
+func TestHelmSecretValues_SubchartGlobalConflict(t *testing.T) {
+	url := secretChartRepo(t, map[string]string{
+		"templates/cm.yaml":              "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: parent\ndata:\n  password: {{ .Values.global.auth.password | toJson | quote }}\n",
+		"charts/child/Chart.yaml":        "apiVersion: v2\nname: child\nversion: 0.1.0\n",
+		"charts/child/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: child\ndata:\n  password: {{ .Values.global.auth.password | toJson | quote }}\n",
+	})
+	comp := helmSecretComponent(secretSentinel, func(p map[string]any) {
+		p["delivery"] = "template"
+		p["chart"] = "secretchart"
+		p["version"] = "0.1.0"
+		p["source"] = map[string]any{"url": url}
+		delete(p, "valuesFrom")
+		p["values"] = map[string]any{"global": map[string]any{"auth": map[string]any{"password": map[string]any{"placeholder": true}}}}
+		p["secretValues"] = map[string]any{"child": map[string]any{"global": map[string]any{"auth": map[string]any{"password": secretSentinel}}}}
+	})
+
+	var logged bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	apps, err := generateSecretApp("", nil, comp)
+	if err != nil {
+		if strings.Contains(err.Error(), secretSentinel) {
+			t.Fatal("the build failed with an error carrying the sensitive value")
+		}
+		t.Fatalf("transform: %v", err)
+	}
+	rendered := map[string]string{}
+	for _, a := range apps {
+		if strings.Contains(a.String(), secretSentinel) {
+			t.Errorf("GeneratedApplication %s names the sensitive value", a)
+		}
+		for _, o := range a.Objects {
+			if written := objectYAML(t, *o); strings.Contains(written, secretSentinel) {
+				t.Errorf("%T carries the sensitive value:\n%s", *o, written)
+			}
+			if cm, ok := (*o).(*corev1.ConfigMap); ok {
+				rendered[cm.Name] = cm.Data["password"]
+			}
+		}
+	}
+	// Helm kept the parent's table for both charts and dropped the subchart's
+	// conflicting scalar.
+	if want := map[string]string{"parent": `{"placeholder":true}`, "child": `{"placeholder":true}`}; !maps.Equal(rendered, want) {
+		t.Errorf("rendered passwords = %v, want %v", rendered, want)
+	}
+
+	// The limit itself: one Helm warning, quoting the value.
+	lines := 0
+	for _, line := range strings.Split(logged.String(), "\n") {
+		if !strings.Contains(line, secretSentinel) {
+			continue
+		}
+		lines++
+		if !strings.Contains(line, "is a table. Ignoring non-table value") {
+			t.Errorf("a log line other than Helm's coalesce warning carries the value: %s", strings.ReplaceAll(line, secretSentinel, "<value>"))
+		}
+	}
+	if lines != 1 {
+		t.Errorf("%d log lines carry the value, want exactly Helm's one coalesce warning; if the renderer no longer prints it, drop the limit from the components README", lines)
 	}
 }

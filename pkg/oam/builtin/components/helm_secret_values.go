@@ -117,33 +117,38 @@ func jsonObject(v any) (map[string]any, error) {
 // what the other side set. Only a map[string]any is read as an object.
 //
 // The first shared path in sorted key order is named, by its keys joined with
-// dots and never by a value. owner is the component type that prefixes the
-// message.
+// dots and never by a value; an empty key is written "". owner is the component
+// type that prefixes the message.
 func refuseSharedValuePath(owner string, values, secretValues map[string]any) error {
-	if path := sharedValuePath(values, secretValues); path != "" {
+	if path, shared := sharedValuePath(values, secretValues); shared {
 		return errors.Errorf("%s: %s is set in both values and %s; a path may be set in only one of them", owner, path, helmSecretValuesKey)
 	}
 	return nil
 }
 
 // sharedValuePath returns the first path, in sorted key order, that a and b
-// both set (see refuseSharedValuePath), or "" when there is none.
-func sharedValuePath(a, b map[string]any) string {
+// both set (see refuseSharedValuePath), and whether there is one. The path
+// alone cannot say so: a shared empty key is a path too.
+func sharedValuePath(a, b map[string]any) (string, bool) {
 	for _, k := range slices.Sorted(maps.Keys(b)) {
 		av, ok := a[k]
 		if !ok {
 			continue
 		}
+		name := k
+		if name == "" {
+			name = `""`
+		}
 		am, aok := av.(map[string]any)
 		bm, bok := b[k].(map[string]any)
 		if !aok || !bok {
-			return k
+			return name, true
 		}
-		if sub := sharedValuePath(am, bm); sub != "" {
-			return k + "." + sub
+		if sub, shared := sharedValuePath(am, bm); shared {
+			return name + "." + sub, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // mergeSecretValues returns values with secretValues merged over it: the tree a
