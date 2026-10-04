@@ -54,11 +54,11 @@ var cnpgObjectStoreDefaultedZeroFields = map[string]string{
 // requires, must be authored and non-empty: the Go type would otherwise encode
 // it as an empty string.
 func (h *CnpgObjectStoreHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	spec, props, err := decodeCnpgSpec[barmanv1.ObjectStoreSpec](component.Properties, "barmancloud.cnpg.io/v1 ObjectStoreSpec")
+	spec, props, err := decodeKindSpec[barmanv1.ObjectStoreSpec](component.Properties, "barmancloud.cnpg.io/v1 ObjectStoreSpec")
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedCnpgValues(props, spec, cnpgObjectStoreDefaultedZeroFields); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgObjectStoreDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
 	cfg := &CnpgObjectStoreConfig{Name: component.Name, Namespace: namespace, Spec: *spec}

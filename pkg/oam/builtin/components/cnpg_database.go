@@ -101,7 +101,7 @@ var cnpgDatabaseAlwaysEncodedDefaults = map[string]string{
 // cnpgDatabaseAlwaysEncodedDefaults. The Go type cannot tell it from an
 // unauthored one, so Generate would write the CRD default over it, while the
 // CRD's enum refuses it as written. authored is the stripped property tree
-// decodeCnpgSpec returns; keys match case-insensitively, as the decode's do.
+// decodeKindSpec returns; keys match case-insensitively, as the decode's do.
 func refuseEmptyAlwaysEncodedDefaults(authored map[string]any) error {
 	for _, path := range slices.Sorted(maps.Keys(cnpgDatabaseAlwaysEncodedDefaults)) {
 		list, field, ok := strings.Cut(path, "[].")
@@ -160,11 +160,11 @@ var cnpgReservedDatabaseNames = map[string]bool{"postgres": true, "template0": t
 // non-empty: cluster.name, name and owner, which the Go type would otherwise
 // encode as empty strings.
 func (h *CnpgDatabaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	spec, props, err := decodeCnpgSpec[cnpgv1.DatabaseSpec](component.Properties, "postgresql.cnpg.io/v1 DatabaseSpec")
+	spec, props, err := decodeKindSpec[cnpgv1.DatabaseSpec](component.Properties, "postgresql.cnpg.io/v1 DatabaseSpec")
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedCnpgValues(props, spec, cnpgDatabaseDefaultedZeroFields); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgDatabaseDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
 	if err := refuseEmptyAlwaysEncodedDefaults(props); err != nil {
