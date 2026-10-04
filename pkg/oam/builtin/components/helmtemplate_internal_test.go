@@ -98,10 +98,11 @@ metadata:
 // TestHelmTemplateHandler_SchemaMatchesProperties ties the published schema to
 // what the strict decode accepts: every JSON key of helmTemplateProperties, at
 // every depth, with the property type its Go field encodes as, plus the values
-// key split off before the decode — no more and no fewer. It also pins which
-// nodes are required, the two the handler itself refuses when missing.
+// and scopeOverrides keys split off before the decode — no more and no fewer.
+// It also pins which nodes are required, the two the handler itself refuses
+// when missing.
 func TestHelmTemplateHandler_SchemaMatchesProperties(t *testing.T) {
-	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject}
+	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject, scopeOverridesKey: oam.PropertyTypeArray}
 	var walk func(prefix string, st reflect.Type)
 	walk = func(prefix string, st reflect.Type) {
 		for f := range st.Fields() {

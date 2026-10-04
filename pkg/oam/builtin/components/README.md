@@ -99,7 +99,7 @@ reads it.
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
@@ -2848,7 +2848,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   used. `version`
   is required for an `OCIRepository`. `values` is an open object, the Helm values tree, and must
   be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
-  checks are shared with the `helm` rule's inline source rather than copied.
+  checks are shared with the `helm` rule's inline source rather than copied. `scopeOverrides`
+  states the scope of a kind the chart renders (see **Scope overrides** below).
 
   **Release name.** `releaseName` is the render's `.Release.Name`. Unset, it is the default the
   `helmrelease` terminal writes to `spec.releaseName` (go-kure/launcher#785): the component
@@ -2869,7 +2870,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   go-kure/launcher#776 every render used kure's default `release`; the project is pre-GA, so the
   changed object names of an existing template-rendered chart carry no compatibility shim.
 
-  **Decoding.** `values` is split off, and the rest of the property map is decoded with
+  **Decoding.** `values` and `scopeOverrides` are split off, and the rest of the property map is decoded with
   `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
   name, as is a wrongly typed value. `values` itself reaches the render exactly as authored, with
   its YAML-decoded value types, rather than the strict decoder's `json.Number` re-reading, which
@@ -2889,25 +2890,57 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Namespace.** A namespaced rendered object that carries no `metadata.namespace` is given the
   application namespace, where a Helm install into that namespace would create it
   (go-kure/launcher#794, item 4). Each object's scope is resolved as the `manifests` component
-  resolves it (kure's `manifest.Scope`): kure's scope table — the kinds kure registers, in any
-  API version — plus the scope a
-  `CustomResourceDefinition` among the emitted objects declares for the kind it defines. Unlike
-  `manifests`, the render refuses nothing here, since the application does not author a chart:
+  resolves it, by the one function both call (`resolveObjectScope`, `manifests.go`): a
+  `scopeOverrides` entry for the object's kind, else kure's scope table (`manifest.Scope`) — the
+  kinds kure registers, in any API version — plus the scope a `CustomResourceDefinition` among
+  the emitted objects declares for the kind it defines. Unlike `manifests`, the render refuses
+  nothing about what the chart wrote, since the application does not author a chart:
   - a namespace the chart wrote is kept, on a cluster-scoped object too, as Helm keeps it;
   - a cluster-scoped object without one stays without;
   - an object of unknown scope without one is left as rendered, with no namespace and no error:
     a kind kure does not register — a custom resource, or a built-in of an API group kure's
-    scheme does not hold — with no CRD for it among the emitted objects. `Lease`,
-    `EndpointSlice` and the image-reflector kinds (`ImageRepository`, `ImagePolicy`) are
-    registered, so one without a namespace is given the application namespace.
-    Whoever applies the output decides where it lands (Flux's `targetNamespace`, a client's
-    default namespace). A chart's `crds/` directory is not rendered, and a CRD under a dropped
-    hook is not emitted, so neither gives a kind a scope; there is no `scopeOverrides` on this
-    component (go-kure/launcher#794, item 11).
+    scheme does not hold — with no CRD for it among the emitted objects and no `scopeOverrides`
+    entry. `Lease`, `EndpointSlice` and the image-reflector kinds (`ImageRepository`,
+    `ImagePolicy`) are registered, so one without a namespace is given the application
+    namespace. Whoever applies the output decides where it lands (Flux's `targetNamespace`, a
+    client's default namespace). A chart's `crds/` directory is not rendered, and a CRD under a
+    dropped hook is not emitted, so neither gives a kind a scope.
 
   The policy check runs on the stamped objects, so a violation names an object with the
   namespace it is emitted in. A `HelmTemplateConfig` built directly with an empty `Namespace`
   has none to give and stamps nothing.
+
+  **Scope overrides** (go-kure/launcher#794, item 11). `scopeOverrides` states the scope of a
+  kind the chart renders, for a kind of unknown scope above: a list of `{apiVersion, kind,
+  scope}`, `scope` being `Cluster` or `Namespaced`, matched on the exact `apiVersion` and
+  `kind`. It is the property `manifests` has, read by the same parser (`parseScopeOverrides`)
+  and resolved by the same function, so an entry means the same on both: it outranks kure's
+  own table, is ignored for a kind the Kubernetes API itself scopes, and must agree with a
+  `CustomResourceDefinition` among the emitted objects (see **crd / manifests**). A test holds
+  the two components to the same answer for the same objects and overrides.
+  - `Namespaced`: an object of the kind without `metadata.namespace` is given the application
+    namespace, as a kind kure knows to be namespaced is.
+  - `Cluster`: an object of the kind is left as rendered. That includes one the chart wrote a
+    namespace on, which `manifests` refuses: template delivery refuses nothing about what a
+    chart wrote.
+  - An entry for a kind the chart does not render does nothing. `null` reads as omission.
+
+  *Refused*, two cases only. A malformed entry, at decode and before any render, with the
+  `manifests` messages under this component's prefix (`helmtemplate: scopeOverrides[0]: scope
+  "cluster" is invalid; must be "Cluster" or "Namespaced"`). And an entry that contradicts a
+  `CustomResourceDefinition` the chart renders for the kind, when the chart is rendered
+  (`helmtemplate "<component>": object Widget "w": scopeOverrides says Cluster but the
+  CustomResourceDefinition for Widget.fixtures.example.com the chart renders declares
+  Namespaced; …`): that CRD defines the scope the cluster will serve, so no cluster can honour
+  the entry. The message names the object's kind and name and the two scopes, nothing else of
+  the object. A `HelmTemplateConfig` built directly holds the overrides in `ScopeOverrides`,
+  where a value other than the two scopes is refused before the render.
+
+  *Not covered:* the `helm` rule does not take the property under either delivery and refuses
+  it as an unknown key, so a chart delivered through `helm` with `delivery: template` cannot
+  state a scope; author a `helmtemplate` for it. No policy or placement check on template
+  output reads an object's scope, so the overrides change the namespace stamp and nothing else.
+  Not breaking: a document that does not use the property renders as before.
 
   **Breaking output change** (go-kure/launcher#794): such objects gain `metadata.namespace` in
   the output. Before, a chart that left it unset rendered namespace-less objects, which landed
@@ -3965,7 +3998,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   bundled in the same source: that CRD is the definition being applied, so it
   must agree with the override rather than be overridden by it — a disagreement
   is rejected (`manifests.go`'s `stampManifestNamespaces`, an error naming both
-  the override's and the CRD's declared scope); an agreeing override still
+  the override's and the CRD's declared scope; the resolution itself is
+  `resolveObjectScope`, which the `helmtemplate` component's `scopeOverrides`
+  goes through too); an agreeing override still
   applies, and a kind with no same-source CRD falls back to the non-API-governed
   case above. It is also ignored
   for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
