@@ -477,8 +477,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"configmap", "persistentvolumeclaim", "serviceaccount",
 		// The kind components for the objects no component projected
 		// (go-kure/launcher#790).
-		"limitrange", "namespace", "persistentvolume", "pod", "replicaset", "replicationcontroller",
-		"resourcequota",
+		"limitrange", "namespace", "persistentvolume", "pod", "podtemplate", "replicaset",
+		"replicationcontroller", "resourcequota",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

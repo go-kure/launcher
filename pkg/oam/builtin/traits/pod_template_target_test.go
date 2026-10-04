@@ -187,6 +187,75 @@ func TestPodTemplateKinds_ExternalSecretInjects(t *testing.T) {
 	}
 }
 
+// podTemplateComponent is the podtemplate kind: its object holds a pod
+// template too, but it is stored, not run, so it is not in podTemplateKinds.
+var podTemplateComponent = podTemplateKind{
+	typ:     "podtemplate",
+	handler: &components.PodTemplateHandler{},
+	props:   map[string]any{"template": podTemplateProps()},
+	template: func(obj client.Object) *corev1.PodTemplateSpec {
+		if pt, ok := obj.(*corev1.PodTemplate); ok {
+			return &pt.Template
+		}
+		return nil
+	},
+}
+
+// TestPodTemplateComponent_SecurityContextWritesNothing: the security-context
+// trait writes to the pod spec of the workloads it knows, and a PodTemplate is
+// not one of them. It applies without error and leaves the template as
+// authored: the trait skips a kind it does not know, which
+// go-kure/launcher#794 (item 14) tracks.
+func TestPodTemplateComponent_SecurityContextWritesNothing(t *testing.T) {
+	k := podTemplateComponent
+	app := newPodTemplateApp(t, k, "batch")
+	if err := (&traits.SecurityContextHandler{}).Apply(
+		&oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "restricted"}},
+		app, newBundle()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	spec := generatedPodTemplate(t, k, app).Spec
+	if spec.SecurityContext != nil || spec.Containers[0].SecurityContext != nil || spec.InitContainers[0].SecurityContext != nil {
+		t.Errorf("the template gained a securityContext: pod %+v, app %+v, init %+v",
+			spec.SecurityContext, spec.Containers[0].SecurityContext, spec.InitContainers[0].SecurityContext)
+	}
+}
+
+// TestPodTemplateComponent_IsNoMountTarget: a podtemplate component is not one
+// of the workloads a configmap mount or an external-secret injection changes.
+// Both are refused, naming the kinds they do apply to.
+func TestPodTemplateComponent_IsNoMountTarget(t *testing.T) {
+	k := podTemplateComponent
+	const want = "requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod component"
+	for name, apply := range map[string]func(app *stack.Application) error{
+		"configmap mountPath": func(app *stack.Application) error {
+			return (&traits.ConfigMapHandler{}).Apply(&oam.Trait{Type: "configmap", Properties: map[string]any{
+				"name": "cfg", "mountPath": "/etc/cfg", "data": map[string]any{"k": "v"},
+			}}, app, newBundle())
+		},
+		"external-secret envFrom": func(app *stack.Application) error {
+			return (&traits.ExternalSecretHandler{}).Apply(&oam.Trait{Type: "external-secret", Properties: map[string]any{
+				"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+				"data": []any{map[string]any{"secretKey": "DB_PASSWORD"}},
+			}}, app, newBundle())
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app := newPodTemplateApp(t, k, "batch")
+			if tmpl := generatedPodTemplate(t, k, app); len(tmpl.Spec.Containers) != 1 {
+				t.Fatalf("control: the undecorated template has %d containers, want 1", len(tmpl.Spec.Containers))
+			}
+			if err := apply(app); err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			_, err := app.Config.Generate(app)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Generate err = %v, want one mentioning %q", err, want)
+			}
+		})
+	}
+}
+
 // TestPodTemplateKinds_NetworkPolicySelectsThePods: the NetworkPolicy the
 // networkpolicy trait builds for a component of each kind selects the pods its
 // template describes, under a name long enough to be projected into the label

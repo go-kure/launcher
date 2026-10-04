@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  labels:
+    launcher.gokure.dev/component: minimal
+  name: minimal
+  namespace: default
+template:
+  metadata:
+    labels:
+      launcher.gokure.dev/component: minimal
+  spec:
+    containers:
+    - image: ghcr.io/example/app:v1.0.0
+      name: app
+      resources: {}
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  labels:
+    launcher.gokure.dev/component: batch
+  name: batch
+  namespace: default
+template:
+  metadata:
+    annotations:
+      example.com/scrape: "true"
+    labels:
+      launcher.gokure.dev/component: batch
+      tier: batch
+  spec:
+    activeDeadlineSeconds: 600
+    automountServiceAccountToken: false
+    containers:
+    - image: ghcr.io/example/batch:v2.1.0
+      name: batch
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      volumeMounts:
+      - mountPath: /scratch
+        name: scratch
+    initContainers:
+    - args:
+      - --for
+      - db
+      image: ghcr.io/example/wait:v0.3.1
+      name: wait
+      resources: {}
+    nodeSelector:
+      kubernetes.io/os: linux
+    restartPolicy: Never
+    securityContext:
+      fsGroup: 2000
+      runAsNonRoot: true
+    serviceAccountName: batch
+    terminationGracePeriodSeconds: 0
+    volumes:
+    - emptyDir: {}
+      name: scratch

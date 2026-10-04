@@ -532,8 +532,8 @@ name authorable — the name must also be added here. A type registered on one s
 is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
 The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
-`pod`, `replicaset` and `replicationcontroller` (go-kure/launcher#790) are on this
-list.
+`pod`, `replicaset`, `replicationcontroller` and `podtemplate` (go-kure/launcher#790)
+are on this list.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type

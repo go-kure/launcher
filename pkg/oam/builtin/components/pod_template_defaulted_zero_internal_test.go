@@ -11,6 +11,31 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// TestPodTemplateProperties_MatchUpstream: what a podtemplate component
+// decodes its properties into is the `template` field of corev1.PodTemplate,
+// under the same json name and of the same type, and nothing else. So a
+// dependency bump that renames or retypes the field fails here;
+// TestCoreKindSchemas_CoverSpec catches one that adds a field.
+func TestPodTemplateProperties_MatchUpstream(t *testing.T) {
+	upstream, ok := reflect.TypeFor[corev1.PodTemplate]().FieldByName("Template")
+	if !ok {
+		t.Fatal("corev1.PodTemplate has no Template field")
+	}
+	typ := reflect.TypeFor[podTemplateProperties]()
+	if typ.NumField() != 1 {
+		t.Fatalf("podTemplateProperties has %d fields, want the one template", typ.NumField())
+	}
+	own := typ.Field(0)
+	if own.Type != upstream.Type {
+		t.Errorf("podTemplateProperties.%s is a %s, corev1.PodTemplate.Template a %s", own.Name, own.Type, upstream.Type)
+	}
+	ownName, _, _ := strings.Cut(own.Tag.Get("json"), ",")
+	upstreamName, _, _ := strings.Cut(upstream.Tag.Get("json"), ",")
+	if ownName != upstreamName || ownName == "" {
+		t.Errorf("json name = %q, corev1.PodTemplate's is %q", ownName, upstreamName)
+	}
+}
+
 // TestPodTemplateKindsDefaultedZeros_MatchFieldDocs is
 // TestPodSpecDefaultedZeros_MatchFieldDocs for the kinds that hold a pod
 // template: over the whole type each one decodes, the fields on which an
@@ -26,6 +51,7 @@ func TestPodTemplateKindsDefaultedZeros_MatchFieldDocs(t *testing.T) {
 	for _, typ := range []reflect.Type{
 		reflect.TypeFor[appsv1.ReplicaSetSpec](),
 		reflect.TypeFor[corev1.ReplicationControllerSpec](),
+		reflect.TypeFor[podTemplateProperties](),
 	} {
 		t.Run(typ.String(), func(t *testing.T) {
 			docs := omitemptyScalarDocs(t, typ)
