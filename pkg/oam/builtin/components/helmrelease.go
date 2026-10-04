@@ -2,8 +2,6 @@ package components
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"regexp"
@@ -361,33 +359,4 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 
 	obj := client.Object(hr)
 	return []*client.Object{&obj}, nil
-}
-
-// boundedResourceName appends suffix to name and keeps the result a legal
-// DNS-1123 subdomain name (at most 253 bytes) for any valid component name
-// (validate.go admits DNS-1123 subdomains of up to 253 bytes). A name that
-// fits is name+suffix; one that does not keeps a truncated prefix of name, a
-// short digest of the full name, and suffix intact. suffix must itself be
-// DNS-1123-legal, start with "-" and end in an alphanumeric, and be short
-// enough to leave room for the digest.
-func boundedResourceName(name, suffix string) string {
-	maxPrefix := 253 - len(suffix)
-	if len(name) <= maxPrefix {
-		return name + suffix
-	}
-	// A plain truncation to maxPrefix characters would map any two distinct
-	// valid component names (up to 253 chars — validate.go's DNS-1123
-	// subdomain max) that share the same first maxPrefix characters to the
-	// identical ConfigMap name. Full-name uniqueness (validate.go's
-	// duplicate-component-name check) does not protect against this — it
-	// compares full names, not truncated prefixes — so two such components
-	// in one Application would silently share (and one clobber) the other's
-	// values ConfigMap. Reserve room for a short content hash of the full
-	// name so a truncated name stays unique to the name it came from.
-	const hashLen = 8
-	sum := sha256.Sum256([]byte(name))
-	hash := hex.EncodeToString(sum[:])[:hashLen]
-	prefixLen := maxPrefix - hashLen - 1 // -1 for the "-" joining prefix and hash
-	prefix := strings.TrimRight(name[:prefixLen], "-.")
-	return prefix + "-" + hash + suffix
 }

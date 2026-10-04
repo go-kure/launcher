@@ -2,8 +2,6 @@ package components
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // This file is the one implementation of client-side Helm chart rendering and
@@ -703,22 +702,11 @@ func toJSONTypes(v any, path string) (any, error) {
 // the right is wrong: near a 253-char ml.Name, the fixed numeric+phase suffix
 // would be cut away entirely and every group would yield the identical
 // dirName — a deterministic collision. So the PREFIX (ml.Name) is capped
-// instead, following the same truncation approach as helmrelease.go's
-// boundedResourceName: reserve room for a short sha256 hash of the
-// full ml.Name so two different long ml.Names are vanishingly unlikely to
-// truncate to the same prefix (the same probabilistic guarantee as that
-// approach, not an absolute one).
+// instead, by the one shortening rule (oam.ShortenNameWithSuffix): the digest
+// of the full ml.Name takes the place of what is cut, so two different long
+// ml.Names are vanishingly unlikely to shorten to the same name (a
+// probabilistic guarantee, not an absolute one).
 func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
 	suffix := fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
-	const maxLen = 253
-	if len(mlName)+len(suffix) <= maxLen {
-		return mlName + suffix
-	}
-	maxPrefix := maxLen - len(suffix)
-	const hashLen = 8
-	sum := sha256.Sum256([]byte(mlName))
-	hash := hex.EncodeToString(sum[:])[:hashLen]
-	prefixLen := max(maxPrefix-hashLen-1, 0) // -1 for the "-" joining prefix and hash
-	prefix := strings.TrimRight(mlName[:prefixLen], "-.")
-	return prefix + "-" + hash + suffix
+	return oam.ShortenNameWithSuffix(mlName, suffix, oam.ShortenLimitSubdomain)
 }

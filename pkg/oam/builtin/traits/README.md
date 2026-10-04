@@ -868,7 +868,15 @@ matches them. A component name may be up to 253 characters and a label value at 
 63; the function returns a name of 63 characters or fewer unchanged and projects a
 longer one onto a prefix of at most 52 characters plus a 10-hex-character digest
 (go-kure/launcher#572). A trait on a component whose type accepts a longer name (a
-`passthrough`, for one) reaches the projection; object names are never projected.
+`passthrough`, for one) reaches the projection.
+
+The object names a trait generates by default follow the same shortening rule at 253
+characters (`oam.ShortenNameWithSuffix`, go-kure/launcher#793): the `scaler` HPA and PDB
+(`<component>-hpa`, `<component>-pdb`), the `networkpolicy` trait's policy
+(`<component>-allow`) and the `volsync` default repository Secret name
+(`<component>-volsync-secret`). A name that fits is unchanged; a longer one keeps a prefix of
+the component name, a `-`, 10 hex characters of its sha256, and the suffix whole. An authored
+name, such as a `volsync` `repository`, is used as written and never shortened.
 
 The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
 NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized

@@ -214,7 +214,7 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 }
 
 func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string) *autoscalingv2.HorizontalPodAutoscaler {
-	hpa := kubernetes.CreateHorizontalPodAutoscaler(c.componentName+"-hpa", app.Namespace)
+	hpa := kubernetes.CreateHorizontalPodAutoscaler(oam.ShortenNameWithSuffix(c.componentName, "-hpa", oam.ShortenLimitSubdomain), app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
 	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.componentName)
@@ -229,7 +229,7 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 }
 
 func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string) *policyv1.PodDisruptionBudget {
-	pdb := kubernetes.CreatePodDisruptionBudget(c.componentName+"-pdb", app.Namespace)
+	pdb := kubernetes.CreatePodDisruptionBudget(oam.ShortenNameWithSuffix(c.componentName, "-pdb", oam.ShortenLimitSubdomain), app.Namespace)
 	pdb.Labels = labels
 	pdb.Annotations = nil
 	kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))

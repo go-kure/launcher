@@ -1,18 +1,13 @@
 package oam
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"strings"
-
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ComponentLabelDigestLength is the number of lowercase hex characters of the
 // SHA-256 digest that ComponentLabelValue appends to a shortened component name:
-// 10 characters, 40 bits.
-const ComponentLabelDigestLength = 10
+// ShortenNameDigestLength, 10 characters, 40 bits.
+const ComponentLabelDigestLength = ShortenNameDigestLength
 
 // ComponentLabelValue returns the label value that identifies the component
 // named name: the value of the `app` label the built-in handlers generate, of
@@ -23,7 +18,8 @@ const ComponentLabelDigestLength = 10
 // validate.go), but a label value is at most 63 characters
 // (validation.LabelValueMaxLength). A name of 63 characters or fewer is always
 // a valid label value and is returned unchanged, so no document whose names
-// fit changes output. A longer name is projected onto a readable prefix of
+// fit changes output. A longer name is shortened by the rule every generated
+// name follows, ShortenName at ShortenLimitLabel: a readable prefix of
 // itself, a "-", and the first ComponentLabelDigestLength hex characters of the
 // SHA-256 digest of the whole name: at most 63 characters, beginning with the
 // name's own first character and ending in a hex digit, so always a valid
@@ -55,17 +51,7 @@ const ComponentLabelDigestLength = 10
 // name must be a valid component name (a DNS-1123 subdomain); the result is
 // unspecified otherwise.
 func ComponentLabelValue(name string) string {
-	if len(name) <= validation.LabelValueMaxLength {
-		return name
-	}
-	sum := sha256.Sum256([]byte(name))
-	digest := hex.EncodeToString(sum[:])[:ComponentLabelDigestLength]
-	prefixLen := validation.LabelValueMaxLength - ComponentLabelDigestLength - 1 // -1 for the joining "-"
-	prefix := strings.TrimRight(name[:prefixLen], "-.")
-	if prefix == "" {
-		return digest
-	}
-	return prefix + "-" + digest
+	return ShortenName(name, ShortenLimitLabel)
 }
 
 // validateComponentLabelValues rejects an Application in which two components
