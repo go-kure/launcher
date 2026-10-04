@@ -292,7 +292,8 @@ there. Such a workload then carries no component label on its pods, and a synthe
 does not select them. The workload object itself still carries the label.
 
 In an unstructured workload, a null `template`, `metadata` or `labels` is an absent one. A
-pod template label that is not a string is refused, with the workload named.
+pod template label that is not a string is refused, with the workload named, whether or not
+the template carries the key already.
 
 **Chart output.** A chart Flux installs is rendered in the cluster, where launcher cannot
 label it. Its `HelmRelease` gets one kustomize post-renderer, after any authored ones, with
@@ -303,8 +304,10 @@ once, however often the document is transformed or generated.
 
 The patch sets the pod template's label and touches no selector, and launcher does not look
 into a chart. With a `ComponentLabelKey` that a Flux-installed chart's own selectors use
-(`app`, `app.kubernetes.io/name`), the post-renderer parts the chart's selectors from its
-pods and the cluster refuses the workload. Use a key no chart sets, such as the default.
+(`app`, `app.kubernetes.io/name`), the post-renderer replaces the value those selectors
+expect. Wherever the chart's value is not the component's, that parts the chart's selectors
+from its pods and the cluster refuses the workload. Use a key no chart sets, such as the
+default.
 
 A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which

@@ -46,11 +46,15 @@ type TransformContext struct {
 	// as the selector is, so the selector matches the component's pods with no caller
 	// labelling anything (go-kure/launcher#788). On the objects launcher generates the
 	// label is added only where the key is absent: set to a key the objects already carry
-	// (e.g. "app"), the values they carry stay. A HelmRelease's post-renderer overwrites
-	// instead: with a ComponentLabelKey that a Flux-installed chart's own selectors use
-	// ("app", "app.kubernetes.io/name"), the post-renderer parts the chart's selectors
-	// from its pods and the cluster refuses the workload. Use a key no chart sets, such as
-	// the default.
+	// (e.g. "app"), the values they carry stay. A workload whose own selector rules the
+	// label out (DoesNotExist on the key, NotIn with the component's value) keeps its pod
+	// template as written: its pods carry no component label, and a synthesized policy
+	// does not select them. A HelmRelease's post-renderer overwrites instead: with a
+	// ComponentLabelKey that a Flux-installed chart's own selectors use ("app",
+	// "app.kubernetes.io/name"), the post-renderer replaces the value those selectors
+	// expect, which parts the chart's selectors from its pods wherever the chart's value
+	// is not the component's, and the cluster refuses the workload. Use a key no chart
+	// sets, such as the default.
 	ComponentLabelKey string
 	// Domain is the label/annotation domain for derived platform keys (<domain>/tier,
 	// <domain>/component). Empty => DefaultDomain ("gokure.dev"). Non-authorable platform
