@@ -72,10 +72,19 @@ func ShortenName(name string, limit int) string {
 // ShortenName's general rule to what suffix leaves of limit, and suffix is
 // kept whole, so what the suffix says (a role such as "-hpa", a content
 // digest) survives. The Helm release exception never applies here, whatever
-// suffix leaves. suffix must be shorter than limit by at least
-// ShortenNameDigestLength characters.
+// suffix leaves.
+//
+// A suffix that leaves fewer than ShortenNameDigestLength characters of limit
+// cannot be kept whole beside a full digest. The whole name+suffix is then
+// shortened by the general rule, so the result still fits limit and still
+// tells two names apart; only a suffix with a part of unbounded length, such
+// as an authored scope, can be that long.
 func ShortenNameWithSuffix(name, suffix string, limit int) string {
-	return shortenName(name, limit-len(suffix)) + suffix
+	room := limit - len(suffix)
+	if len(name) > room && room < ShortenNameDigestLength {
+		return shortenName(name+suffix, limit)
+	}
+	return shortenName(name, room) + suffix
 }
 
 func shortenName(name string, limit int) string {

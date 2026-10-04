@@ -27,6 +27,13 @@ func wantShortened(name, suffix string, limit int) string {
 	return prefix + "-" + hex.EncodeToString(sum[:])[:10] + suffix
 }
 
+func errString(err error) string {
+	if err == nil {
+		return "no error, but not one trait"
+	}
+	return err.Error()
+}
+
 // TestShortenName_GeneratingSites is the acceptance test of
 // go-kure/launcher#793 for the built-in components: each site that generates a
 // name shows the one rule, is deterministic, stays a valid object name, and
@@ -48,6 +55,18 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 		}},
 		{"hook-group child layout, a three-digit index and a capped phase", "-100-" + strings.Repeat("x", 40), func(name string) string {
 			return hookGroupChildName(name, 100, helm.HookGroup{Phase: strings.Repeat("x", 80)})
+		}},
+		{"role component PVC claim", "-data", func(name string) string {
+			props := map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
+			traits, err := roleClaims(&oam.Component{Name: name}, props, oam.LoweringContext{})
+			if err != nil || len(traits) != 1 {
+				return "roleClaims failed: " + errString(err)
+			}
+			claim := traits[0].Properties["name"].(string)
+			if ref := props["volumes"].([]any)[0].(map[string]any)["claimName"]; ref != claim {
+				return "the volume references another claim than the one generated"
+			}
+			return claim
 		}},
 	}
 	shared := strings.Repeat("a", 240)

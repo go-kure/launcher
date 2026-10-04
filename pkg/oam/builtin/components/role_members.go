@@ -82,7 +82,10 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 			continue
 		}
 		volName, _ := m["name"].(string)
-		claim := escapeForPVCQualification(comp.Name) + "-" + escapeForPVCQualification(volName)
+		// A claim name over 253 characters is shortened by the one rule: the
+		// escaped component is cut, the escaped volume kept whole.
+		claim := oam.ShortenNameWithSuffix(escapeForPVCQualification(comp.Name),
+			"-"+escapeForPVCQualification(volName), oam.ShortenLimitSubdomain)
 		// Kubernetes PersistentVolumeClaim names must be DNS-1123 subdomains.
 		if errs := validation.IsDNS1123Subdomain(claim); len(errs) > 0 {
 			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claim, strings.Join(errs, "; "))
