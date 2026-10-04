@@ -91,11 +91,14 @@ func isOwned(owned []string, key string) bool {
 // to name where the key sits.
 //
 // It returns "" when it finds no such key. It walks src along T's fields and
-// asks encoding/json itself whether each struct accepts each key, so it cannot
-// call a key unknown that the decoder accepts. It does not look inside a value
-// whose type decodes itself (UnmarshalJSON, UnmarshalText), where the decoder
-// does not check keys either. Keys are visited in sorted order at each level,
-// the order DecodeStrictJSON's marshalled input has.
+// asks encoding/json itself whether each struct accepts each key, and descends
+// only into the field the decoder fills from a key (jsonFieldType), so it does
+// not call a key unknown that the decoder accepts. Where it cannot show which
+// field that is, it does not descend. It does not look inside a value whose
+// type decodes itself (UnmarshalJSON, UnmarshalText), where the decoder does
+// not check keys either, nor at the elements past a fixed array's length,
+// which the decoder drops. Keys are visited in sorted order at each level, the
+// order DecodeStrictJSON's marshalled input has.
 func UnknownJSONFieldPath[T any](src map[string]any, owned ...string) string {
 	rest := make(map[string]any, len(src))
 	for k, v := range src {
@@ -174,6 +177,10 @@ func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
 		if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
 			return ""
 		}
+		if t.Kind() == reflect.Array && len(v) > t.Len() {
+			// The decoder drops the elements a fixed array has no room for.
+			v = v[:t.Len()]
+		}
 		for i, item := range v {
 			if sub := unknownJSONFieldPath(t.Elem(), item); sub != "" {
 				return join("["+strconv.Itoa(i)+"]", sub)
@@ -184,25 +191,61 @@ func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
 }
 
 // jsonFieldType returns the type of the field of t that encoding/json fills
-// from key: the field keyed exactly so, else one equal ignoring case, the
-// shallowest when several match.
+// from key, selecting it the way the decoder does: the field keyed exactly
+// so, else the first in declaration order whose key equals it ignoring case.
+// Only a field encoding/json keeps counts. Of several fields with one key it
+// keeps the dominant one (the shallowest, a tagged one before an untagged one)
+// or none, and which is asked of encoding/json itself (encodesField). It
+// reports false when that cannot be shown, so the caller walks no field the
+// decoder may not fill.
 func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type, bool) {
-	var best *jsonField
-	exact := false
-	for i := range fields {
-		f := &fields[i]
-		if !strings.EqualFold(f.key, key) {
-			continue
+	// kept is the one field keyed k that encoding/json keeps. ok is false when
+	// several fields are keyed k and none can be shown to be kept.
+	kept := func(k string) (f jsonField, ok bool) {
+		var same []jsonField
+		for _, o := range fields {
+			if o.key == k {
+				same = append(same, o)
+			}
 		}
-		isExact := f.key == key
-		if best == nil || (isExact && !exact) || (isExact == exact && len(f.index) < len(best.index)) {
-			best, exact = f, isExact
+		if len(same) == 1 {
+			return same[0], true
+		}
+		for _, o := range same {
+			if encodesField(t, o.index) {
+				return o, true
+			}
+		}
+		return jsonField{}, false
+	}
+
+	var folded []string
+	for _, f := range fields {
+		if f.key == key {
+			exact, ok := kept(key)
+			if !ok {
+				return nil, false
+			}
+			return t.FieldByIndex(exact.index).Type, true
+		}
+		if strings.EqualFold(f.key, key) && !slices.Contains(folded, f.key) {
+			folded = append(folded, f.key)
 		}
 	}
-	if best == nil {
+	var first *jsonField
+	for _, k := range folded {
+		f, ok := kept(k)
+		if !ok {
+			return nil, false
+		}
+		if first == nil || slices.Compare(f.index, first.index) < 0 {
+			first = &f
+		}
+	}
+	if first == nil {
 		return nil, false
 	}
-	return t.FieldByIndex(best.index).Type, true
+	return t.FieldByIndex(first.index).Type, true
 }
 
 // UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
