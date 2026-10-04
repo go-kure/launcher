@@ -243,9 +243,6 @@ func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, err
 			if split == len(out) {
 				split = j + 1
 			}
-			if p == nil || isNullValue(*p) {
-				continue
-			}
 			obj := *p
 			gvk := obj.GetObjectKind().GroupVersionKind()
 			if gvk.Kind == "" {
