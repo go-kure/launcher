@@ -69,7 +69,9 @@ func (h *CRDHandler) ContractMetadata() oam.ContractMetadata { return contract("
 func (h *ManifestsHandler) ContractMetadata() oam.ContractMetadata { return contract("manifests") }
 
 // ContractMetadata implements oam.ContractDescriber.
-func (h *OCIHandler) ContractMetadata() oam.ContractMetadata { return contract("oci") }
+func (h *FluxcdKustomizationHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(fluxcdKustomizationType)
+}
 
 // ContractMetadata implements oam.ContractDescriber.
 func (h *HelmRepositoryHandler) ContractMetadata() oam.ContractMetadata {
@@ -166,6 +168,17 @@ func (HelmRule) LoweringTargets() oam.LoweringTargets {
 			"helmrepository", "ocirepository", "gitrepository", "bucket",
 		},
 		TraitTypes: []string{"configmap"},
+	}
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (OCIRule) ContractMetadata() oam.ContractMetadata { return contract(ociType) }
+
+// LoweringTargets implements oam.LoweringTargetDeclarer: the source of the
+// artifact ("ocirepository") and the Kustomization that reconciles it.
+func (OCIRule) LoweringTargets() oam.LoweringTargets {
+	return oam.LoweringTargets{
+		ComponentTypes: []string{"ocirepository", fluxcdKustomizationType},
 	}
 }
 
