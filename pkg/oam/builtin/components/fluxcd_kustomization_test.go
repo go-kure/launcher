@@ -287,6 +287,7 @@ func TestFluxcdKustomizationHandler_Refuses(t *testing.T) {
 		{"unknown key in postBuild", map[string]any{"sourceRef": kzSourceRef(), "postBuild": map[string]any{"substitutes": map[string]any{}}}, `unknown field "postBuild.substitutes"`},
 		{"unknown key in a patch target", map[string]any{"sourceRef": kzSourceRef(), "patches": []any{map[string]any{"patch": "x", "target": map[string]any{"kinds": "Deployment"}}}}, `unknown field "patches[0].target.kinds"`},
 		{"unknown key in a later dependsOn item", map[string]any{"sourceRef": kzSourceRef(), "dependsOn": []any{map[string]any{"name": "infra"}, map[string]any{"name": "db", "kind": "Kustomization"}}}, `unknown field "dependsOn[1].kind"`},
+		{"unknown key that contains a dot", map[string]any{"sourceRef": map[string]any{"kind": "OCIRepository", "name": "m", "metadata.name": "x"}}, `unknown field "sourceRef.metadata.name"`},
 		{"unknown key spelled in another case", map[string]any{"SourceRef": map[string]any{"Kind": "OCIRepository", "name": "m", "Tag": "v1"}}, `unknown field "SourceRef.Tag"`},
 		{"the decode names the spec type", map[string]any{"sourceRef": kzSourceRef(), "x": 1}, "fluxcd-kustomization: properties do not decode as a KustomizationSpec"},
 		{"no sourceRef", map[string]any{}, "fluxcd-kustomization: sourceRef.kind is required: one of OCIRepository, GitRepository, Bucket, ExternalArtifact"},

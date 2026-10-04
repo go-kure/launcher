@@ -105,6 +105,24 @@ func (h *FluxcdKustomizationHandler) PropertySchema() map[string]oam.PropertySch
 	}
 }
 
+// namesUnknownKeyAt reports whether the strict decode's error names, as its
+// unknown field, the key path ends in. encoding/json quotes the key alone, and
+// a key may itself contain dots ("metadata.name"), so the key is whatever
+// follows one of path's dots, or the whole of path.
+func namesUnknownKeyAt(err error, path string) bool {
+	msg := err.Error()
+	for key := path; ; {
+		if strings.Contains(msg, "unknown field "+strconv.Quote(key)) {
+			return true
+		}
+		dot := strings.Index(key, ".")
+		if dot < 0 {
+			return false
+		}
+		key = key[dot+1:]
+	}
+}
+
 // ToApplicationConfig decodes the component's properties strictly into a
 // kustv1.KustomizationSpec. Any key KustomizationSpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: sourceRef names a
@@ -116,11 +134,8 @@ func (h *FluxcdKustomizationHandler) ToApplicationConfig(component *oam.Componen
 		// encoding/json names an unknown key without its path, and
 		// KustomizationSpec declares the same key in several places (kind, name,
 		// namespace), so the path is added.
-		if path := builtin.UnknownJSONFieldPath[kustv1.KustomizationSpec](component.Properties); path != "" {
-			leaf := path[strings.LastIndex(path, ".")+1:]
-			if strings.Contains(err.Error(), "unknown field "+strconv.Quote(leaf)) {
-				return nil, errors.Errorf("%s: properties do not decode as a KustomizationSpec: unknown field %q", fluxcdKustomizationType, path)
-			}
+		if path := builtin.UnknownJSONFieldPath[kustv1.KustomizationSpec](component.Properties); path != "" && namesUnknownKeyAt(err, path) {
+			return nil, errors.Errorf("%s: properties do not decode as a KustomizationSpec: unknown field %q", fluxcdKustomizationType, path)
 		}
 		return nil, errors.Errorf("%s: properties do not decode as a KustomizationSpec: %w", fluxcdKustomizationType, err)
 	}
