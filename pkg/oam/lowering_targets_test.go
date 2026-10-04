@@ -43,21 +43,41 @@ func (r versionedTargetComponentRule) ContractMetadata() ContractMetadata {
 }
 
 // undeclaredComponentRule is targetComponentRule without the declaration: the
-// shape of every rule written before LoweringTargets existed.
+// shape of every rule written before LoweringTargets existed. With forward it
+// also forwards the authored traits unchanged.
 type undeclaredComponentRule struct {
-	typ    string
-	emit   string
-	traits []string
+	typ     string
+	emit    string
+	traits  []string
+	forward bool
 }
 
 func (r undeclaredComponentRule) ComponentType() string { return r.typ }
 
 func (r undeclaredComponentRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
 	c := Component{Name: comp.Name, Type: r.emit, Properties: map[string]any{}}
+	if r.forward {
+		c.Traits = comp.Traits
+	}
 	for _, trait := range r.traits {
 		c.Traits = append(c.Traits, Trait{Type: trait, Properties: map[string]any{}})
 	}
 	return LoweringResult{Components: []Component{c}}, nil
+}
+
+// renamingForwardRule lowers a component of type typ into one of type emit under
+// another name, forwarding the authored traits unchanged.
+type renamingForwardRule struct {
+	typ  string
+	emit string
+}
+
+func (r renamingForwardRule) ComponentType() string { return r.typ }
+
+func (r renamingForwardRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name: comp.Name + "-rendered", Type: r.emit, Properties: map[string]any{}, Traits: comp.Traits,
+	}}}, nil
 }
 
 // targetTraitRule lowers a trait of type typ into a trait of type emit.
@@ -314,6 +334,31 @@ func TestTransform_MissingTraitHandlerNamesTheComponentAndTheRule(t *testing.T) 
 		_, err := tr.Transform(terminalApp(Component{Name: "web", Type: "role", Properties: map[string]any{}}), TransformContext{})
 		const want = `no handler for trait type "topology-spread" (on component "web", emitted by lowering rule component/role ` +
 			`for component "web" (type "role") in document "app" (kind "Application"))`
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v\nwant  %s", err, want)
+		}
+	})
+	// A forwarded trait carries no rule of its own, and the component it sits on
+	// may be one the rule emitted under another name: the error still names the
+	// authored component, through the emitted component's origin.
+	t.Run("forwarded onto a component a rule renamed", func(t *testing.T) {
+		tr := NewTransformer(handlers, nil)
+		tr.RegisterComponentLowering(renamingForwardRule{typ: "role", emit: "kind-a"})
+		_, err := tr.Transform(terminalApp(Component{Name: "web", Type: "role", Properties: map[string]any{},
+			Traits: []Trait{{Type: "configmap", Properties: map[string]any{}}}}), TransformContext{})
+		const want = `no handler for trait type "configmap" (on component "web-rendered", itself emitted by lowering rule component/role ` +
+			`for component "web" (type "role") in document "app" (kind "Application"))`
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v\nwant  %s", err, want)
+		}
+	})
+	// Under the authored name the author wrote the trait and the name: no clause.
+	t.Run("forwarded onto a component of the authored name", func(t *testing.T) {
+		tr := NewTransformer(handlers, nil)
+		tr.RegisterComponentLowering(undeclaredComponentRule{typ: "role", emit: "kind-a", forward: true})
+		_, err := tr.Transform(terminalApp(Component{Name: "web", Type: "role", Properties: map[string]any{},
+			Traits: []Trait{{Type: "configmap", Properties: map[string]any{}}}}), TransformContext{})
+		const want = `no handler for trait type "configmap" (on component "web")`
 		if err == nil || err.Error() != want {
 			t.Errorf("err = %v\nwant  %s", err, want)
 		}

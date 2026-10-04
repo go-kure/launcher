@@ -1161,7 +1161,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
-				where := fmt.Sprintf("on component %q%s", entry.component.Name, emittedBy(trait.origin))
+				where := traitLocation(&entry.component, trait.origin)
 				return nil, &TransformError{Message: noHandlerMessage("trait", trait.Type, where, deliveryTraitTypes)}
 			}
 			// A sealed trait was emitted by a lowering rule, which already merged

@@ -1196,7 +1196,13 @@ authored component it lowered:
 no handler for component type "service" (component "web", emitted by lowering rule component/role for component "web" (type "role") in document "app" (kind "Application"))
 ```
 
-That form is reached only for a type the package knows and the registry holds no
+A trait the author wrote, forwarded by a rule onto a component the rule emitted under
+another name, names that component and, through it, the rule and the authored
+component: `no handler for trait type "x" (on component "web-rendered", itself emitted
+by lowering rule component/role for component "web" (type "role") in document "app"
+(kind "Application"))`. Under the authored name the clause is left out.
+
+The emitted form is reached only for a type the package knows and the registry holds no
 handler for, and only for a rule that does not declare the type as a target (`Seal`
 refuses a declared one first). A type the package does not know is refused earlier,
 when the lowered document is validated.
