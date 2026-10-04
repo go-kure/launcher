@@ -2535,9 +2535,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       with `secretValues`, under either delivery, with a violation naming the
       component. A policy that does not implement that optional interface allows
       it.
-    - *No message repeats a value.* A refusal names `secretValues`, a path by its
-      keys, or the type of a wrong value, and never wraps an encoding or decoding
-      error, which could quote one.
+    - *No refusal of the property repeats a value.* It names `secretValues`, a
+      path by its keys, or the type of a wrong value, and never wraps an encoding
+      or decoding error, which could quote one. Under `delivery: template` an
+      error about an object the chart rendered is another matter (see
+      **helmtemplate**, "not covered").
 
     **Security note.** `secretValues` keeps sensitive values out of the
     HelmRelease and the values ConfigMap. It does not encrypt them. The generated
@@ -2808,9 +2810,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     only `rendering chart with secretValues failed, and without them it renders; the cause is
     withheld because it can repeat a sensitive value`. To debug such a chart, render it
     with placeholder values in `values`. The second render repeats the fetch;
-  - *not covered:* the policy checks on rendered objects (see **Policy**) quote what they
-    refuse, an image reference for one. A chart that builds such a field from a sensitive value
-    has it quoted in that violation;
+  - *not covered:* an error about a rendered object. Every check that runs on what the chart
+    rendered names the object it refuses, by kind and name: the policy checks (see **Policy**),
+    which also quote the field they refuse, an image reference for one; the refusal of a field
+    the kind's type does not declare; and the transform's component label, which refuses a
+    label that is not a string. A chart that builds an object's name, or such a field, from a
+    sensitive value has it quoted in that error;
   - *not covered:* one Helm warning. When the chart has a subchart and `secretValues` gives
     that subchart a `global` entry (`<subchart>.global.…`) whose shape conflicts with the
     parent's `global` at a key, a table on one side and a plain value on the other, Helm
