@@ -834,9 +834,9 @@ parseable-but-undispatchable, and in both cases a handler-level test suite stays
 The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`,
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
-`ingress` and `httproute` (go-kure/launcher#790) are on this list. `ingress` and
-`httproute` are also trait types: the two lists are separate, and a component of such a
-type is the authored object, not the trait.
+`ingress`, `httproute` and `networkpolicy` (go-kure/launcher#790) are on this list.
+`ingress`, `httproute` and `networkpolicy` are also trait types: the two lists are
+separate, and a component of such a type is the authored object, not the trait.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type

@@ -65,6 +65,7 @@ var coreKindSchemas = []struct {
 	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
 	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
+	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole

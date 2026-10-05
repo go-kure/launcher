@@ -296,6 +296,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"parentRefs": []any{map[string]any{"name": "gateway"}},
 		"rules": []any{map[string]any{"backendRefs": []any{
 			map[string]any{"name": "web", "port": 80}}}}}},
+	// A NetworkPolicy name is a DNS-1123 subdomain too. Its podSelector is the
+	// author's and picks pods another component owns, so the output holds no pod
+	// template to compare it with, as with a Service fronting another component.
+	"networkpolicy": {props: map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
+		"policyTypes": []any{"Ingress"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

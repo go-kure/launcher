@@ -172,6 +172,11 @@ func (h *IngressHandler) ContractMetadata() oam.ContractMetadata { return contra
 func (h *HTTPRouteHandler) ContractMetadata() oam.ContractMetadata { return contract("httproute") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *NetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("networkpolicy")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
