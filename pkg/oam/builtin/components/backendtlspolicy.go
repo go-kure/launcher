@@ -44,7 +44,7 @@ func (h *BackendTLSPolicyHandler) PropertySchema() map[string]oam.PropertySchema
 		},
 		"validation": {
 			Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true,
-			Description: "Required. " + spec + "validation: how the Gateway validates the certificate a backend presents: `hostname`, required, the name it sends as SNI and matches the certificate against; one of `caCertificateRefs` (`group`, `kind` and `name` of each, all three required) and `wellKnownCACertificates` (System); and `subjectAltNames` (`type`, required, with `hostname` or `uri`)." + gatewayDecoded + "BackendTLSPolicyValidation in its API reference.",
+			Description: "Required. " + spec + "validation: how the Gateway validates the certificate a backend presents: `hostname`, required, the name it sends as SNI and, where no `subjectAltNames` is given, matches the certificate against; one of `caCertificateRefs` (`group`, `kind` and `name` of each, all three required) and `wellKnownCACertificates` (System); and `subjectAltNames` (`type`, required, with `hostname` or `uri`)." + gatewayDecoded + "BackendTLSPolicyValidation in its API reference.",
 		},
 		"options": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
@@ -68,7 +68,7 @@ var backendTLSPolicyKind = &policyFreeKind[gatewayv1.BackendTLSPolicySpec]{
 	required: requiredFields(
 		map[string]string{
 			"validation":                        "how the Gateway validates the certificate a backend presents",
-			"validation.hostname":               "the name the Gateway sends as SNI and matches the backend's certificate against",
+			"validation.hostname":               "the name the Gateway sends as SNI and, where no subjectAltNames is given, matches the backend's certificate against",
 			"validation.subjectAltNames[].type": "the type of the subject alternative name: Hostname or URI",
 		},
 		gatewayReferenceRequired("the backend the policy applies to", "targetRefs[]"),
