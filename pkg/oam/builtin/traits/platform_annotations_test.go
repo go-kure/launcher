@@ -153,10 +153,79 @@ func TestExposeRule_WritesPlatformAnnotations(t *testing.T) {
 	}
 }
 
+// exposeCarrierRule is a ComponentLoweringRule without a schema that emits a
+// webservice with an expose trait nested on it. The engine seals that trait
+// without marking it synthesized, since nothing checked the rule's input, so
+// the ingress trait the expose rule then emits is not synthesized either: its
+// platform-reserved keys pass only where a rule recorded them as rendered.
+type exposeCarrierRule struct{}
+
+func (exposeCarrierRule) ComponentType() string { return "expose-carrier" }
+
+func (exposeCarrierRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	expose := oam.Trait{Type: "expose", Properties: map[string]any{
+		"ingressClassName": "nginx",
+		"hostnames":        []any{"shop.example.com"},
+		"sslRedirect":      true,
+	}}
+	for key, value := range map[string]string{"controllerType": "ingress", "certManagerClusterIssuer": "letsencrypt-prod"} {
+		if err := expose.RenderReserved(key, value); err != nil {
+			return oam.LoweringResult{}, err
+		}
+	}
+	return oam.LoweringResult{Components: []oam.Component{{
+		Name:       comp.Name,
+		Type:       "webservice",
+		Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+		Traits:     []oam.Trait{expose},
+	}}}, nil
+}
+
+// TestExposeRule_PlatformAnnotationsOnAnUnsynthesizedTrait: the expose rule
+// records the annotations it writes as rendered, so the ingress trait takes
+// them also where the engine does not mark the rule's output synthesized. Here
+// the expose trait comes from a rule whose input nothing checked.
+func TestExposeRule_PlatformAnnotationsOnAnUnsynthesizedTrait(t *testing.T) {
+	tr := platformAnnotationsTransformer()
+	tr.RegisterComponentLowering(exposeCarrierRule{})
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{Components: []oam.Component{{
+			Name: "web", Type: "expose-carrier", Properties: map[string]any{},
+		}}},
+	}
+	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "default", ReservedMetadataKeys: reservedIngressPrefixes})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		t.Fatalf("GenerateApplications: %v", err)
+	}
+	var ing *networkingv1.Ingress
+	for _, a := range apps {
+		for _, p := range a.Objects {
+			if found, ok := (*p).(*networkingv1.Ingress); ok {
+				ing = found
+			}
+		}
+	}
+	if ing == nil {
+		t.Fatal("no Ingress generated")
+	}
+	for key, want := range map[string]string{kClusterIssuer: "letsencrypt-prod", kSSLRedirect: "true"} {
+		if got := ing.Annotations[key]; got != want {
+			t.Errorf("annotation %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 // TestExposeRule_PlatformAnnotationsPassReservedKeys: with both prefixes the
 // rule writes under reserved, an expose trait still builds and its Ingress
-// carries all six annotations, sealed or not, also beside an authored annotation
-// that says the same. A hand-written annotation under a reserved prefix is
+// carries all six annotations, also beside an authored annotation that says
+// the same. A hand-written annotation under a reserved prefix is
 // refused, naming the component, the Ingress, the key and the prefix.
 func TestExposeRule_PlatformAnnotationsPassReservedKeys(t *testing.T) {
 	ctx := oam.TransformContext{Namespace: "default", Capabilities: exposeCapability(), ReservedMetadataKeys: reservedIngressPrefixes}
