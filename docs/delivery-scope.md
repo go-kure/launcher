@@ -705,9 +705,10 @@ be closed at build time.
     `policyFreeKind`: no environment policy applies. A ServiceCIDR needs at least one of
     `cidrs`; a PodDisruptionBudget has no required field. That `minAvailable` and
     `maxUnavailable` exclude each other is left to the API server.
-  - `horizontalpodautoscaler` (namespaced) requires `scaleTargetRef` and a `maxReplicas`
-    of at least 1, and `maxReplicas` is held to `MaxReplicas`, as a rendered
-    HorizontalPodAutoscaler is. No policy default is filled.
+  - `horizontalpodautoscaler` (namespaced) requires `scaleTargetRef` and `maxReplicas`
+    (an authored `0` counts as unauthored; a negative one is left to the API server),
+    and `maxReplicas` is held to `MaxReplicas`, as a rendered HorizontalPodAutoscaler
+    is. No policy default is filled.
   - The selector of a budget and the target of an autoscaler are the author's: launcher
     points neither at a component and checks neither against the document. **The
     `scaler` trait's guard on a workload whose claim is not ReadWriteMany does not see a

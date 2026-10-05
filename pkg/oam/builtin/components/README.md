@@ -2946,9 +2946,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **Beside the `scaler` trait.** `scaler` with `enablePDB: true` derives a
     budget for its own workload, selector included, and refuses one that
     would block every eviction. This kind is the authored object and applies
-    none of that: it is for a budget the trait does not express (a
-    percentage, `maxUnavailable`, an eviction policy, pods launcher does not
-    own).
+    none of that: it is for a budget the trait does not express (the trait
+    always writes `minAvailable: 50%`; here the count or percentage is the
+    author's, as are `maxUnavailable`, an eviction policy and pods launcher
+    does not own).
   - **Policy.** No field of the spec is one an `oam.Policy` method speaks to,
     so `ApplyPolicy` enforces nothing and fills nothing.
   - **Not covered.** The object's metadata, so its labels and annotations
@@ -2970,12 +2971,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
   - **Required** are the two top-level fields the API server refuses an
     autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
-    a `maxReplicas` of at least 1 (`maxReplicas: required …`; an authored
-    `0` is refused the same way, since the type cannot tell it from an unset
-    one). The config is exported, so `Generate` repeats both. Every other
-    value rule is left to the API server: the `kind` and `name` inside
-    `scaleTargetRef`, `minReplicas` against `maxReplicas`, which metric
-    source goes with which `type`.
+    `maxReplicas` (`maxReplicas: required …`; an authored `0` is refused
+    the same way, since the type cannot tell it from an unset one). The
+    config is exported, so `Generate` repeats both. Every other value rule
+    is left to the API server: a negative `maxReplicas`, the `kind` and
+    `name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
+    which metric source goes with which `type`.
   - **Policy.** `maxReplicas` is held to the environment policy's replica
     maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
     HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
