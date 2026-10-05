@@ -201,6 +201,12 @@ type nameOwner struct {
 	// document or policy position; empty for every other name. LowerRaws lowers
 	// several with one allocator, so the name tells two of them apart.
 	document string
+	// lowered is set for a name a lowering rule resolved
+	// (LoweringContext.ResolveName), and for no other. It keeps such an owner
+	// from being equal to the owner of a name resolved after lowering for the
+	// same component, role and default: the rule's object and the later one are
+	// two objects.
+	lowered bool
 	// def is the default: what tells apart two names of one component and role.
 	def string
 }
@@ -216,7 +222,8 @@ const (
 	describeMember
 	// describeOrigin says of a trait that was not forwarded from an authored one
 	// that its slot counts the traits after lowering: a trait a rule added, at
-	// the place an authored one holds in the document.
+	// the place an authored one holds in the document. It also says of a name a
+	// lowering rule resolved that one did.
 	describeOrigin
 	// describeOutput adds which output of its lowering it is: one trait a trait
 	// rule lowered to two of one type.
@@ -244,6 +251,9 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 	}
 	if o.trait != "" && !o.authored && detail >= describeOrigin {
 		who += " after lowering"
+	}
+	if o.lowered && detail >= describeOrigin {
+		who += " in a lowering rule"
 	}
 	if o.trait != "" && detail >= describeOutput {
 		who += fmt.Sprintf(", output %d of its lowering", o.nth)

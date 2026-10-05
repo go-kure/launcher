@@ -468,7 +468,10 @@ hook, which has no default to be asked about, is not asked.
 
 A rule resolves a name once and keeps it. Each call names one object, so a second call that
 resolves the same kind and name is refused with both named, whichever rule made it: two trait
-rules of one component, or the first rule asked again. Under `LowerRaws`, which lowers several
+rules of one component, or the first rule asked again. A name resolved after lowering for the
+same object is refused as well, also where its component, role and default are the rule's own
+(a rule naming the NetworkPolicy the transform synthesizes for its component): the rule's
+object and the later one are two. Under `LowerRaws`, which lowers several
 documents with one allocator, two documents may resolve one kind and name only where their
 `metadata.namespace` differs.
 
@@ -477,7 +480,10 @@ documents with one allocator, two documents may resolve one kind and name only w
 `poolerName` or the default. A consumer that sets `Naming` calls
 `ComponentEndpointsNamed(application, comp, naming)` instead, which asks `naming` the same
 `NameRequest` the transform asks for that name, so one pure hook gives the selector the name
-the Pooler gets; an answer the transform would refuse is refused there with the same message.
+the Pooler gets; an answer that is no valid name for its role is refused there with the
+transform's message. It is given one component, so what the transform refuses for a reason
+only the document shows (a name that is already a component of the document, or that another
+object of it has) is not seen there.
 `application` is the document's name as the transform puts it in that request: its
 `metadata.name`, or the name it has after lowering where a document rule renames it.
 

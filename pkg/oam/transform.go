@@ -546,7 +546,10 @@ func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, er
 // TransformContext.Naming: an endpoint whose selector carries a generated name carries
 // the name the transform gives the object, the author's, else the one naming returns,
 // else the default. naming is asked the NameRequest the transform asks for that name,
-// and an answer the transform refuses is refused here with the same message.
+// and an answer that is no valid name for its role is refused here with the transform's
+// message. What the transform refuses for a reason only the document shows is not seen
+// here, which is given one component: a name that is already a component of the
+// document, or that another object of it has.
 //
 // application is the name of the document comp is authored in, as the transform puts
 // it in that request (NameRequest.Application): the document's metadata.name, or,

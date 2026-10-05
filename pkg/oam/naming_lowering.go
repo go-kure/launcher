@@ -40,7 +40,9 @@ type loweredName struct {
 // rule made it and also when it is the first one made again, so a rule
 // resolves a name once and keeps it. The transform then holds every one of
 // them against the names it resolves after lowering, by kind, namespace and
-// name. The name is not reserved as a component name. A rule that emits a
+// name: a later one that names the same object is refused, also where its
+// component, role and default are this call's. The name is not reserved as a
+// component name. A rule that emits a
 // component under it reserves it with Namer.Reserve, once per component name:
 // two components of one name that one rule emits on purpose are a sibling
 // group.
@@ -77,7 +79,9 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 			application = l.Document.Metadata.Name
 		}
 	}
-	owner := nameOwner{role: spec.Role, def: def}
+	// lowered: never the owner of a name resolved after lowering, whatever else
+	// the two share.
+	owner := nameOwner{role: spec.Role, def: def, lowered: true}
 	switch {
 	case l.Component == nil:
 		owner.document = application
