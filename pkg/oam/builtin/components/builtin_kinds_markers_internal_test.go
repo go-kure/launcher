@@ -2,6 +2,7 @@ package components
 
 import (
 	"maps"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -116,19 +117,27 @@ func classifyKindFields(typ reflect.Type, skip []string, src apiSource) fieldCla
 // is in no linked module, and is not derived here.
 func TestBuiltinMarkerKinds_RequiredMatchMarkers(t *testing.T) {
 	src := markerAPISource(t)
-	// Vacuity guards: the markers are read, in both forms.
-	field := func(typ reflect.Type, name string) kindField {
-		f, ok := typ.FieldByName(name)
-		if !ok {
-			t.Fatalf("%s has no field %s", typ, name)
-		}
-		return kindField{owner: typ, field: f}
+	// Vacuity guards: the markers are read, in both forms. They are held on the
+	// markers themselves, since src falls back on the json tag where a field
+	// carries no marker, and the tag says the same of these two fields.
+	raw := packageFieldMarkers(t, filepath.Join(linkedModuleDir(t, "k8s.io/api"), "discovery", "v1"))
+	if m := raw["EndpointSlice.AddressType"]; !m.required || m.optional {
+		t.Fatalf("EndpointSlice.AddressType is read as %+v, want it marked required; the source is not being read", m)
 	}
-	if f := field(reflect.TypeFor[discoveryv1.EndpointSlice](), "AddressType"); !src.known(f) || !src.required(f) {
-		t.Fatalf("EndpointSlice.AddressType is read as described %v and required %v, want it marked required; the source is not being read", src.known(f), src.required(f))
+	if m := raw["Endpoint.Hostname"]; m.required || !m.optional {
+		t.Fatalf("Endpoint.Hostname is read as %+v, want it marked optional; the source is not being read", m)
 	}
-	if f := field(reflect.TypeFor[discoveryv1.Endpoint](), "Hostname"); !src.known(f) || src.required(f) {
-		t.Fatalf("Endpoint.Hostname is read as described %v and required %v, want it marked optional; the source is not being read", src.known(f), src.required(f))
+	// And src applies an optional marker: the tag of EndpointSlice.Endpoints
+	// does not omit the field, so only its +optional marker makes it not
+	// required. No field these kinds hold is marked +required under a tag that
+	// omits it, so no guard shows src applying a required marker.
+	typ := reflect.TypeFor[discoveryv1.EndpointSlice]()
+	endpoints, ok := typ.FieldByName("Endpoints")
+	if !ok {
+		t.Fatalf("%s has no field Endpoints", typ)
+	}
+	if f := (kindField{owner: typ, field: endpoints}); !src.known(f) || src.required(f) {
+		t.Fatalf("EndpointSlice.Endpoints is read as described %v and required %v, want it described and not required; markerAPISource does not apply the markers", src.known(f), src.required(f))
 	}
 	for _, kind := range builtinMarkerKinds {
 		t.Run(kind.component, func(t *testing.T) {
