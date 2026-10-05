@@ -120,6 +120,64 @@ func TestObjectName_LeavesTheAuthoredPropertiesAlone(t *testing.T) {
 	}
 }
 
+// fillingKind is a kind component's handler that also fills capability
+// defaults: it records whether the properties it was handed to fill still held
+// `objectName`, and returns a copy with a key of its own.
+type fillingKind struct {
+	*kindStubHandler
+	called, sawProperty bool
+}
+
+func (f *fillingKind) FillCapabilityDefaults(props map[string]any, _ LoweringContext) (map[string]any, error) {
+	f.called = true
+	_, f.sawProperty = props[ObjectNameProperty]
+	filled := map[string]any{"size": "filled"}
+	for k, v := range props {
+		filled[k] = v
+	}
+	return filled, nil
+}
+
+// The engine takes `objectName` out before any of the handler's code runs on
+// the properties: a handler that fills capability defaults is not handed it
+// either, and the name still reaches ToApplicationConfig with what was filled.
+func TestObjectName_TakenOutBeforeTheCapabilityFiller(t *testing.T) {
+	h := &fillingKind{kindStubHandler: kindStub("widget", widgetKind, ObjectScopeNamespaced)}
+	seen := map[string]any{}
+	tr := NewTransformer(map[string]ComponentHandler{"widget": schemaSeeing{fillingKind: h, seen: seen}}, nil)
+	if _, _, err := tr.TransformWithPolicy(siblingDoc(widget("web", map[string]any{"objectName": "authored"})), TransformContext{}); err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+	if !h.called {
+		t.Fatal("the capability filler was not called")
+	}
+	if h.sawProperty {
+		t.Error("the capability filler was handed the objectName property; the engine takes it out first")
+	}
+	if got := h.names["web"]; got != "authored" {
+		t.Errorf("the handler was handed object name %q, want the authored one", got)
+	}
+	if h.property["web"] {
+		t.Error("the handler was handed the objectName property")
+	}
+	if seen["size"] != "filled" {
+		t.Errorf("the handler was handed size %v, want what the filler returned", seen["size"])
+	}
+}
+
+// schemaSeeing records the properties ToApplicationConfig receives.
+type schemaSeeing struct {
+	*fillingKind
+	seen map[string]any
+}
+
+func (s schemaSeeing) ToApplicationConfig(c *Component, ns string) (stack.ApplicationConfig, error) {
+	for k, v := range c.Properties {
+		s.seen[k] = v
+	}
+	return s.fillingKind.ToApplicationConfig(c, ns)
+}
+
 func TestObjectName_Refusals(t *testing.T) {
 	tests := []struct {
 		name    string
