@@ -203,6 +203,25 @@ func TestHelmTemplateConfig_DirectConfigSharedPath(t *testing.T) {
 	}
 	_, err := cfg.Generate(nil)
 	assertWithholdsSensitive(t, err, "helmtemplate: token is set in both values and secretValues")
+
+	// A nil map in values is the null a HelmRelease would read, so a secret
+	// object at its key is a shared path here as it is under delivery: flux,
+	// and nothing is rendered with it.
+	rendered := 0
+	cfg = &HelmTemplateConfig{
+		Name: "myapp", SourceURL: "https://charts.example.com", Chart: "myapp",
+		Values:       map[string]any{"auth": map[string]any(nil)},
+		SecretValues: map[string]any{"auth": map[string]any{"password": sensitiveValue}},
+		renderChart: func(_, _ string, _ map[string]any, _ ...helm.RenderOption) ([]byte, error) {
+			rendered++
+			return nil, nil
+		},
+	}
+	_, err = cfg.Generate(nil)
+	assertWithholdsSensitive(t, err, "helmtemplate: auth is set in both values and secretValues")
+	if rendered != 0 {
+		t.Errorf("the chart was rendered %d times before the refusal", rendered)
+	}
 }
 
 // TestHelmTemplateConfig_DirectConfigNestedGlobal: a config built without the
@@ -384,6 +403,11 @@ func TestSharedValuePath(t *testing.T) {
 		{"scalar", obj("a", 1), obj("a", 2), "a", true},
 		{"nested", obj("o", obj("p", obj("q", 1))), obj("o", obj("p", obj("q", 2))), "o.p.q", true},
 		{"null against object", obj("o", nil), obj("o", obj("a", 1)), "o", true},
+		// A nil map is a null, not an object with no keys: the merge would
+		// replace it with the other side's object, or drop it.
+		{"nil map against object", obj("o", map[string]any(nil)), obj("o", obj("a", 1)), "o", true},
+		{"object against nil map", obj("o", obj("a", 1)), obj("o", map[string]any(nil)), "o", true},
+		{"nested nil map", obj("o", obj("p", map[string]any(nil))), obj("o", obj("p", obj("a", 1))), "o.p", true},
 		{"empty objects", obj("o", obj()), obj("o", obj()), "", false},
 		{"sorted", obj("z", 1, "b", 1), obj("z", 2, "b", 2), "b", true},
 		// An empty key is a key: it sorts first, is a shared path, and does not

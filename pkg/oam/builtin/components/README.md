@@ -2752,8 +2752,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       delivery and either values mode:
       `helm: auth.password is set in both values and secretValues; a path may be
       set in only one of them`. Two objects at the same key are compared key by
-      key; anything else at a key both trees set (a scalar, a list, a null) is a
-      shared path. An empty key is a key like any other and is written `""` in
+      key; anything else at a key both trees set (a scalar, a list, a null, and
+      a nil map a Go caller passes, which is a null) is a shared path. An empty
+      key is a key like any other and is written `""` in
       the message. Without the refusal the winner would depend on the values mode,
       since Flux applies inline `spec.values` after every `valuesFrom` entry.
     - *A key named `global` below the top level of `secretValues` is refused*,
