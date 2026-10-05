@@ -465,6 +465,96 @@ generates. The case is reached only through a consumer's own lowering rule.
 - `stack.Application.Config` is the ownership wrapper after `Transform`: a type assertion on
   a concrete config type goes through `UnwrapConfig`.
 
+## Reserved metadata keys
+
+A consumer that keeps label and annotation keys to itself names them in
+`TransformContext.ReservedMetadataKeys` (go-kure/launcher#790). One rule holds every
+application the transform returns to the list, whatever wrote the key: a kind component, a
+`passthrough` or `manifests` object, a chart rendered at build time, a trait's `annotations`,
+a `postgresql` or `cnpg-cluster` component's `inheritedMetadata`.
+
+**The list.** Each entry is one of:
+
+- a key: a Kubernetes qualified name (`example.org/tenant`, `team`), which reserves that key;
+- a prefix followed by `/`: a DNS-1123 subdomain (`platform.example/`), which reserves every
+  key under that prefix. It does not reserve the prefix's own name as a key, or a key under
+  another domain that ends alike (`sub.platform.example/zone`).
+
+`Transform` refuses any other entry, naming it by index
+(`invalid TransformContext.ReservedMetadataKeys[1] "not a key": ...`). A repeated entry, or a
+key a prefix entry already covers, is accepted. An empty list reserves nothing, and the
+transform and its output are then as without the field.
+
+**Where it is refused.** At generation, not in `Transform`: the check sits in the ownership
+wrapper ([Component label and ownership](#component-label-and-ownership)), so it reads each
+object as its config generated it, in `GenerateApplications` (or `Generate` on an
+application) and in a layout the config augments (`layout.LayoutAugmenter`). The error wraps
+`ErrReservedMetadataKey` and names the component, the object, the key and the entry that
+reserves it:
+
+```text
+component "web": Ingress "web-ingress": annotation "platform.example/zone" may not be set: the prefix "platform.example/" is reserved (TransformContext.ReservedMetadataKeys): oam: metadata key is reserved
+```
+
+An application the document as a whole owns (a generated source several components share)
+is checked too, and the refusal names `the document` in place of a component.
+
+**What is read.** On every object, and on each member of an unstructured list envelope as
+Flux applies it (a `List`, or an envelope with `items`):
+
+- the object's own `metadata.labels` and `metadata.annotations`;
+- the pod template's labels and annotations, on a `Deployment`, `StatefulSet`, `DaemonSet`,
+  `Job`, `ReplicaSet`, `ReplicationController` or `PodTemplate`, and the job template's pod
+  template on a `CronJob`, each in its own API group: they become the metadata of the pods;
+- `spec.inheritedMetadata` of a `postgresql.cnpg.io` `Cluster`, which the operator copies
+  onto every object it creates for the cluster.
+
+A key is read whatever its value: a value the API server would refuse, or a null, does not
+hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the
+object named, and is not read as holding no key.
+
+**What launcher writes itself is exempt.**
+
+- The `app` label and the component label key
+  (`TransformContext.ComponentLabelKey`, else `<Domain>/component`), as label keys, wherever
+  the check reads labels. The built-in components and traits write the first on what they
+  generate, and a consumer may well configure the second under a prefix it reserves. Both
+  stay checked as annotation keys, and another key under the same prefix stays reserved.
+- The component label the wrapper stamps, and a bundle's labels and annotations, are added
+  after the check and never read.
+- The annotations the platform sets on an Ingress: the ones the `expose` rule writes from a
+  capability value or one of its typed properties (`cert-manager.io/cluster-issuer`,
+  `nginx.ingress.kubernetes.io/ssl-redirect`, `force-ssl-redirect`, `auth-url`,
+  `auth-signin`, `auth-response-headers`), and the ones a rendering of the `ingress`
+  capability supplies. They reach the `ingress` trait in its platform-reserved
+  `platformAnnotations` property, apart from the authored `annotations`, and pass as that key
+  **and value**, on the Ingress's own annotations only. An authored annotation of such a key
+  must hold the same value (it then says what the platform says, and passes); another value
+  is refused by the trait, naming the annotation and where the platform's value comes from.
+  Any other annotation under a reserved prefix is an authored one and is refused, so a
+  consumer can reserve `nginx.ingress.kubernetes.io/` and keep `expose` working.
+
+**What the check does not cover.**
+
+- A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
+  cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
+- Metadata an object hands on to others in a field of its own: `spec.commonMetadata` of a
+  Flux `Kustomization` or `HelmRelease`, a StatefulSet's `volumeClaimTemplates`, a CronJob's
+  `jobTemplate` metadata (its pod template is read).
+- What a controller or an admission webhook adds in the cluster.
+- An application a caller adds to the cluster itself after `Transform`: it has no ownership
+  wrapper.
+
+**Library changes** (go-kure/launcher#790): a new exported field,
+`TransformContext.ReservedMetadataKeys`, the sentinel `ErrReservedMetadataKey`, and the
+method `PlatformAnnotations()` on the `ingress` trait's config (`traits.IngressConfig`).
+The check reads that method through an unexported contract of this package, which a config
+of another package can only meet with an exported method. A consumer's own config that
+writes annotations from the platform's input, apart from authored ones, may implement the
+same method. **Breaking for documents:** an `expose` trait whose authored annotation
+contradicts a value the trait writes is now refused where the trait's value used to win
+silently (`pkg/oam/builtin/traits/README.md`, "Capability-aware traits").
+
 ## Names and overrides
 
 Launcher shortens a name only when it generated that name itself, and always by one rule,

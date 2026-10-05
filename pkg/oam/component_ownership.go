@@ -47,9 +47,11 @@ type componentOwner interface {
 // cluster. It is the outermost config of every application from then on: over
 // the component's own config, over a trait decorator, over a sibling group.
 //
-// Generate labels the wrapped config's objects with the owning component, where
-// they carry no value for the key yet (stampComponentLabel). An application the
-// document as a whole owns (component "") is generated unchanged.
+// Generate first holds the wrapped config's objects to the consumer's reserved
+// metadata keys (checkReserved), then labels them with the owning component,
+// where they carry no value for the key yet (stampComponentLabel). An
+// application the document as a whole owns (component "") is checked and
+// otherwise generated unchanged.
 //
 // It forwards every optional contract code reads on an application's config
 // after the transform, each as a trait decorator forwards it: by value, so a
@@ -61,6 +63,9 @@ type ownedConfig struct {
 	inner     stack.ApplicationConfig
 	component string
 	labelKey  string
+	// reserved is the consumer's reserved metadata keys, nil when it reserves
+	// none (reserved_metadata.go).
+	reserved *reservedMetadataKeys
 }
 
 // wrapOwnedConfig wraps inner for the component that owns its application; an
@@ -68,7 +73,13 @@ type ownedConfig struct {
 // LayoutAugmenter and LayoutIntentAugmenter by presence, and presence decides
 // the application's placement, so the wrapper has each only when inner has it.
 func wrapOwnedConfig(inner stack.ApplicationConfig, component, labelKey string) stack.ApplicationConfig {
-	owned := &ownedConfig{inner: inner, component: component, labelKey: labelKey}
+	return wrapOwnedConfigReserving(inner, component, labelKey, nil)
+}
+
+// wrapOwnedConfigReserving is wrapOwnedConfig with the consumer's reserved
+// metadata keys, which the wrapper holds the application's objects to.
+func wrapOwnedConfigReserving(inner stack.ApplicationConfig, component, labelKey string, reserved *reservedMetadataKeys) stack.ApplicationConfig {
+	owned := &ownedConfig{inner: inner, component: component, labelKey: labelKey, reserved: reserved}
 	augmenter, ok := inner.(layout.LayoutAugmenter)
 	if !ok {
 		return owned
@@ -116,11 +127,11 @@ func UnwrapConfig(cfg stack.ApplicationConfig) stack.ApplicationConfig {
 	}
 }
 
-// Generate returns the wrapped config's objects, labelled with the owning
-// component.
+// Generate returns the wrapped config's objects, held to the reserved metadata
+// keys and labelled with the owning component.
 func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	objs, err := o.inner.Generate(app)
-	if err != nil || o.component == "" {
+	if err != nil || (o.component == "" && o.reserved == nil) {
 		return objs, err
 	}
 	for _, p := range objs {
@@ -134,18 +145,27 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 	return objs, nil
 }
 
+// stamp holds obj to the reserved metadata keys as the wrapped config left it,
+// then labels it with the owning component. The check comes first, so it never
+// reads the label the wrapper itself writes.
 func (o *ownedConfig) stamp(obj client.Object) error {
 	if isNullValue(obj) {
+		return nil
+	}
+	if err := o.checkReserved(obj); err != nil {
+		return err
+	}
+	if o.component == "" {
 		return nil
 	}
 	return stampComponentLabel(obj, o.labelKey, ComponentLabelValue(o.component))
 }
 
-// stampLayout labels every resource on l and on its child layouts. kure's
-// walker hands an augmenter a layout holding only its own application's
+// stampLayout checks and labels every resource on l and on its child layouts.
+// kure's walker hands an augmenter a layout holding only its own application's
 // objects, so everything reachable from l belongs to the component.
 func (o *ownedConfig) stampLayout(l *layout.ManifestLayout) error {
-	if l == nil || o.component == "" {
+	if l == nil || (o.component == "" && o.reserved == nil) {
 		return nil
 	}
 	for _, r := range l.Resources {
@@ -266,8 +286,9 @@ type augmentingOwnedConfig struct {
 	augmenter layout.LayoutAugmenter
 }
 
-// AugmentLayout runs the wrapped augmenter, then labels the layout: what the
-// augmenter adds or moves into child layouts never passed through Generate.
+// AugmentLayout runs the wrapped augmenter, then checks and labels the layout:
+// what the augmenter adds or moves into child layouts never passed through
+// Generate.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
 	if err := a.augmenter.AugmentLayout(l); err != nil {
 		return err
@@ -314,7 +335,7 @@ var (
 // (componentOrder.sources), whichever component's rule emitted it and however
 // many components read it, with the applications that source's traits added,
 // and the NetworkPolicy synthesized for an external backend Service.
-func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string) {
+func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys) {
 	if cluster == nil {
 		return
 	}
@@ -353,7 +374,7 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 				// document's.
 				component = byEntryName[synthesizedPolicyComponent(app.Config)]
 			}
-			app.Config = wrapOwnedConfig(app.Config, component, labelKey)
+			app.Config = wrapOwnedConfigReserving(app.Config, component, labelKey, reserved)
 		}
 	})
 }

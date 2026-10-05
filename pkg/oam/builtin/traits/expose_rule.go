@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -21,7 +22,7 @@ import (
 // engine's fixpoint to dispatch on the next round.
 //
 // The package-level helpers ExposeHandler.Apply used (ruleHosts, hostnameList,
-// setClusterIssuerAnnotation, expandHostnamesToIngressRules,
+// exposeAnnotations (once setClusterIssuerAnnotation), expandHostnamesToIngressRules,
 // setSSLRedirectAnnotations, boolProp, setAuthAnnotations, stringList,
 // synthesizedIngressTLS, below) moved here from expose.go when ExposeHandler was
 // deleted — this file is now their only caller. The five pre-existing
@@ -168,6 +169,17 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 	delete(props, "certManagerClusterIssuer")
 	delete(props, "allowedHostnameWildcard")
 
+	// The annotations the rule writes itself reach the ingress trait apart from
+	// the authored ones, as its platformAnnotations: only what the rule writes
+	// may arrive under that key, on either rendering.
+	if _, authored := props[platformAnnotationsProperty]; authored {
+		return oam.LoweringResult{}, &errors.ValidationError{
+			Field:     platformAnnotationsProperty,
+			Component: componentName,
+			Message:   platformAnnotationsProperty + " is not a property of the expose trait: the trait writes it on the ingress trait itself",
+		}
+	}
+
 	switch controllerType {
 	case "ingress":
 		// hostnames shorthand: when hostnames is set and rules is not, synthesize
@@ -209,8 +221,10 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 		}
 		delete(props, "secretName")
 		delete(props, "tls")
+		authoredAnnotations, _ := props["annotations"].(map[string]any)
+		platform := &exposeAnnotations{component: componentName, authored: authoredAnnotations}
 		if issuer != "" {
-			if err := setClusterIssuerAnnotation(props, issuer, componentName); err != nil {
+			if err := platform.set(clusterIssuerAnnotation, issuer, "the certManagerClusterIssuer capability value"); err != nil {
 				return oam.LoweringResult{}, err
 			}
 			// TLS covers the effective routing hosts only. When both `rules` and
@@ -228,15 +242,27 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 				Message:   "secretName requires platform-managed TLS (no cert-manager cluster-issuer capability)",
 			}
 		}
-		// ssl-redirect / force-ssl-redirect: typed property (capability default or
-		// inline override) wins over a same-key raw annotation.
-		setSSLRedirectAnnotations(props)
-		// external-auth: when the trait authors allowedGroups, inject the nginx
-		// auth-* annotations from the capability rendering.
-		if err := setAuthAnnotations(props, componentName); err != nil {
+		// ssl-redirect / force-ssl-redirect: written from the typed property
+		// (capability default or inline override). A raw annotation of the same key
+		// with another value is refused.
+		if err := setSSLRedirectAnnotations(props, platform); err != nil {
 			return oam.LoweringResult{}, err
 		}
-		return oam.LoweringResult{Traits: []oam.Trait{{Type: "ingress", Properties: props}}}, nil
+		// external-auth: when the trait authors allowedGroups, inject the nginx
+		// auth-* annotations from the capability rendering.
+		if err := setAuthAnnotations(props, platform); err != nil {
+			return oam.LoweringResult{}, err
+		}
+		emitted := oam.Trait{Type: "ingress", Properties: props}
+		if len(platform.written) > 0 {
+			// Recorded as rendered, so the ingress trait's D3 check accepts the
+			// reserved key whether or not the engine marks this rule's output
+			// synthesized.
+			if err := emitted.RenderReserved(platformAnnotationsProperty, platform.written); err != nil {
+				return oam.LoweringResult{}, errors.Wrap(err, "expose trait")
+			}
+		}
+		return oam.LoweringResult{Traits: []oam.Trait{emitted}}, nil
 	case "gateway":
 		// These properties are nginx-ingress-specific; reject them inline on the
 		// gateway path (the rendering guard only covers the capability-supplied form).
@@ -306,25 +332,44 @@ func hostnameList(props map[string]any) []string {
 	return hosts
 }
 
-// setClusterIssuerAnnotation adds the platform cert-manager cluster-issuer
-// annotation. The platform value is authoritative: a conflicting user-supplied
-// value is rejected as a ValidationError.
-func setClusterIssuerAnnotation(props map[string]any, issuer, component string) error {
-	anns, _ := props["annotations"].(map[string]any)
-	if anns == nil {
-		anns = map[string]any{}
-	}
-	if existing, ok := anns[clusterIssuerAnnotation].(string); ok && existing != issuer {
-		return &errors.ValidationError{
-			Field:     "annotations." + clusterIssuerAnnotation,
-			Value:     existing,
-			Component: component,
-			Message: "annotation " + clusterIssuerAnnotation +
-				" is platform-managed by the expose trait and cannot be overridden",
+// exposeAnnotations collects the annotations the expose rule writes on the
+// Ingress itself: the cert-manager cluster-issuer, the nginx ssl-redirect pair
+// and the nginx external-auth three, each from the platform's capability
+// rendering or from a typed property of the trait. They reach the emitted
+// ingress trait as its platformAnnotations, apart from the authored annotations,
+// so the check of the consumer's reserved metadata keys tells them from what an
+// author wrote (go-kure/launcher#790).
+type exposeAnnotations struct {
+	component string
+	// authored is the trait's own annotations property. It is read, never
+	// written: the map is the authored trait's.
+	authored map[string]any
+	// written holds what the rule writes, nil while it has written nothing.
+	written map[string]any
+}
+
+// set records key: value as an annotation the rule writes; source names what it
+// writes it from. The rule's value is authoritative: an authored annotation of
+// the same key holding another value is refused, naming both, and never
+// overridden silently. One holding the same value says the same thing and
+// stays.
+func (a *exposeAnnotations) set(key, value, source string) error {
+	if existing, ok := a.authored[key]; ok && !oam.IsNullValue(existing) {
+		// Compared as the ingress trait reads an authored value.
+		if got := fmt.Sprintf("%v", existing); got != value {
+			return &errors.ValidationError{
+				Field:     "annotations." + key,
+				Value:     got,
+				Component: a.component,
+				Message: fmt.Sprintf("annotation %s is platform-managed by the expose trait and cannot be overridden: "+
+					"the trait writes %q from %s; remove the annotation", key, value, source),
+			}
 		}
 	}
-	anns[clusterIssuerAnnotation] = issuer
-	props["annotations"] = anns
+	if a.written == nil {
+		a.written = map[string]any{}
+	}
+	a.written[key] = value
 	return nil
 }
 
@@ -345,34 +390,24 @@ func expandHostnamesToIngressRules(hostnames []string) []any {
 // setSSLRedirectAnnotations writes the nginx ssl-redirect / force-ssl-redirect
 // annotations from the typed sslRedirect / forceSslRedirect properties, which carry
 // the capability-rendered platform default (override-able inline). The typed value
-// is authoritative: it is written last and wins over a same-key raw annotation. When
-// the property is absent, an existing raw annotation is left untouched. The property
-// keys are consumed here so they never reach IngressHandler.
-func setSSLRedirectAnnotations(props map[string]any) {
-	var anns map[string]any
-	set := func(key string, val bool) {
-		if anns == nil {
-			// A typed-nil map asserts with ok=true; writing into it would panic, and
-			// a null reads as absence here as it does untyped (go-kure/launcher#465).
-			if existing, ok := props["annotations"].(map[string]any); ok && existing != nil {
-				anns = existing
-			} else {
-				anns = map[string]any{}
-			}
-		}
-		anns[key] = strconv.FormatBool(val)
-	}
+// is authoritative: a raw annotation of the same key with another value is refused
+// (exposeAnnotations.set). When the property is absent, an existing raw annotation
+// is left untouched. The property keys are consumed here so they never reach
+// IngressHandler.
+func setSSLRedirectAnnotations(props map[string]any, platform *exposeAnnotations) error {
 	if v, ok := boolProp(props, "sslRedirect"); ok {
-		set(sslRedirectAnnotation, v)
+		if err := platform.set(sslRedirectAnnotation, strconv.FormatBool(v), "the sslRedirect property (its own, else the capability's default)"); err != nil {
+			return err
+		}
 	}
 	if v, ok := boolProp(props, "forceSslRedirect"); ok {
-		set(forceSSLRedirectAnnotation, v)
-	}
-	if anns != nil {
-		props["annotations"] = anns
+		if err := platform.set(forceSSLRedirectAnnotation, strconv.FormatBool(v), "the forceSslRedirect property (its own, else the capability's default)"); err != nil {
+			return err
+		}
 	}
 	delete(props, "sslRedirect")
 	delete(props, "forceSslRedirect")
+	return nil
 }
 
 // boolProp reads a boolean property; ok is false when absent or not a bool.
@@ -385,9 +420,12 @@ func boolProp(props map[string]any, key string) (val, ok bool) {
 // auth-response-headers) when the expose trait authors allowedGroups. The auth-url base,
 // signin default, and response-headers come from the capability rendering (authURL and
 // authResponseHeaders are platform-reserved; authSigninURL is override-able inline);
-// allowedGroups is authored, order preserved. The typed values win over same-key raw
-// annotations. All auth-* keys are consumed here so they never reach IngressHandler.
-func setAuthAnnotations(props map[string]any, component string) error {
+// allowedGroups is authored, order preserved. The typed values are authoritative: a
+// raw annotation of the same key with another value is refused
+// (exposeAnnotations.set). All auth-* keys are consumed here so they never reach
+// IngressHandler.
+func setAuthAnnotations(props map[string]any, platform *exposeAnnotations) error {
+	component := platform.component
 	rawGroups, hasGroups := props["allowedGroups"]
 	authURL, _ := props["authURL"].(string)
 	signin, _ := props["authSigninURL"].(string)
@@ -416,18 +454,20 @@ func setAuthAnnotations(props map[string]any, component string) error {
 		}
 	}
 
-	anns, _ := props["annotations"].(map[string]any)
-	if anns == nil {
-		anns = map[string]any{}
+	if err := platform.set(authURLAnnotation, authURL+"?allowed_groups="+strings.Join(groups, ","),
+		"its allowedGroups property and the authURL capability value"); err != nil {
+		return err
 	}
-	anns[authURLAnnotation] = authURL + "?allowed_groups=" + strings.Join(groups, ",")
 	if signin != "" {
-		anns[authSigninAnnotation] = signin
+		if err := platform.set(authSigninAnnotation, signin, "the authSigninURL property (its own, else the capability's default)"); err != nil {
+			return err
+		}
 	}
 	if respHeaders != "" {
-		anns[authResponseHeadersAnnotation] = respHeaders
+		if err := platform.set(authResponseHeadersAnnotation, respHeaders, "the authResponseHeaders capability value"); err != nil {
+			return err
+		}
 	}
-	props["annotations"] = anns
 	return nil
 }
 

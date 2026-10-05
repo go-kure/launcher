@@ -588,6 +588,28 @@ be closed at build time.
 
 ### 6.2 Partly shipped (go-kure/launcher#790, open): full spec and the full set of kinds
 
+- **Shipped: reserved metadata keys.** A consumer names the label and annotation keys it
+  keeps to itself in `TransformContext.ReservedMetadataKeys` (exact keys, or a prefix ending
+  in `/`), and one rule refuses such a key on every object that reaches the output, whatever
+  component type or trait carries it (`pkg/oam/README.md` "Reserved metadata keys";
+  `reserved_metadata.go`).
+  - It is one check in one place, the ownership wrapper of go-kure/launcher#788 (§3.4),
+    so it reads what each config generated: `passthrough`, `manifests`, template delivery,
+    the `annotations` of `ingress`, `httproute` and `expose`, and `inheritedMetadata` of a
+    CloudNativePG Cluster. A test runs each of these carriers
+    (`TestReservedMetadataKeys_EveryCarrier`).
+  - Read: an object's own labels and annotations, the pod template's on the kinds that have
+    one, and a Cluster's `spec.inheritedMetadata`. Exempt: the `app` label and the component
+    label key, and the annotations the platform sets on an Ingress, which the `expose` rule
+    now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
+  - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
+    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own), and what a
+    controller adds.
+  - Breaking for a document: an `expose` trait's authored annotation that contradicts a
+    value the trait writes is refused where the trait's value used to win silently.
+  - It lands before the kind components take `labels` and `annotations`, so authored
+    metadata on a kind never exists without it. That part is still open: until then a kind
+    component's metadata stays not authorable, as the kinds below say.
 - **Shipped: the kind inventory.** `pkg/oam/builtin/components/README.md` "Kind
   inventory" has one row per constructor the base library generates, with a status
   (`kind`, `component`, `trait`, `missing`, `not authorable`), the component or trait type

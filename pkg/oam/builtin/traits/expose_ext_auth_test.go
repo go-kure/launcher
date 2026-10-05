@@ -2,6 +2,7 @@ package traits_test
 
 import (
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -72,18 +73,26 @@ func TestExposeRule_Ingress_ExtAuth_SigninOverride(t *testing.T) {
 	}
 }
 
-func TestExposeRule_Ingress_ExtAuth_TypedBeatsAnnotation(t *testing.T) {
+// An authored annotation of a key the trait writes, holding another value, is
+// refused: the typed value is not overridden, and not silently either.
+func TestExposeRule_Ingress_ExtAuth_AuthoredAnnotationRefused(t *testing.T) {
 	bundle := &stack.Bundle{}
 	props := withCapAuth(map[string]any{
 		"allowedGroups": []any{"ginsys-admins"},
 		"annotations":   map[string]any{kAuthURL: "http://evil.example/auth?allowed_groups=everyone"},
 	})
-	if err := applyExpose(exposeIngress(props), newWebApp("web", "default"), bundle); err != nil {
-		t.Fatalf("Apply: %v", err)
+	err := applyExpose(exposeIngress(props), newWebApp("web", "default"), bundle)
+	var ve *pkgerrors.ValidationError
+	if !stderrors.As(err, &ve) {
+		t.Fatalf("want *ValidationError for the authored auth-url, got %v", err)
 	}
-	ing := ingressFromBundle(t, bundle)
-	if got := ing.Annotations[kAuthURL]; got != "http://oauth2-proxy.oauth2-proxy.svc.cluster.local:4180/oauth2/auth?allowed_groups=ginsys-admins" {
-		t.Errorf("typed auth-url must beat authored annotation, got %q", got)
+	if ve.Field != "annotations."+kAuthURL || ve.Component != "web" {
+		t.Errorf("refusal names field %q of component %q, want annotations.%s of web", ve.Field, ve.Component, kAuthURL)
+	}
+	for _, want := range []string{"allowedGroups", "authURL", "ginsys-admins"} {
+		if !strings.Contains(ve.Message, want) {
+			t.Errorf("refusal %q does not name %q", ve.Message, want)
+		}
 	}
 }
 
