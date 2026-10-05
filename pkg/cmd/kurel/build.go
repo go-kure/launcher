@@ -324,6 +324,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"horizontalpodautoscaler": &components.HorizontalPodAutoscalerHandler{},
 		"poddisruptionbudget":     &components.PodDisruptionBudgetHandler{},
 		"servicecidr":             &components.ServiceCIDRHandler{},
+
+		"secret": &components.SecretHandler{},
 	}
 }
 

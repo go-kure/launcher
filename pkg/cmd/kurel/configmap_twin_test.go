@@ -27,6 +27,13 @@ import (
 // path.
 func configMapTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, ownerTraits ...string) string {
 	t.Helper()
+	return kindTraitTwinApp(t, "configmap", viaTrait, name, props, ownerTraits...)
+}
+
+// kindTraitTwinApp is configMapTwinApp for any type that is both a kind
+// component and a trait taking the kind's properties beside `name`.
+func kindTraitTwinApp(t *testing.T, typ string, viaTrait bool, name string, props map[string]any, ownerTraits ...string) string {
+	t.Helper()
 	var decs []any
 	for _, d := range ownerTraits {
 		decs = append(decs, map[string]any{"type": d})
@@ -41,10 +48,10 @@ func configMapTwinApp(t *testing.T, viaTrait bool, name string, props map[string
 			"name":       "owner",
 			"type":       "job",
 			"properties": map[string]any{"image": "ghcr.io/example/job:v1.0.0"},
-			"traits":     append([]any{map[string]any{"type": "configmap", "properties": traitProps}}, decs...),
+			"traits":     append([]any{map[string]any{"type": typ, "properties": traitProps}}, decs...),
 		}
 	} else {
-		comp = map[string]any{"name": name, "type": "configmap", "properties": props}
+		comp = map[string]any{"name": name, "type": typ, "properties": props}
 		if len(decs) > 0 {
 			comp["traits"] = decs
 		}

@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -36,26 +37,12 @@ func (h *SecretHandler) CanHandle(traitType string) bool {
 	return traitType == secretTraitType
 }
 
-// PropertySchema declares the secret trait's user-facing properties.
+// PropertySchema declares the secret trait's user-facing properties: the
+// secret kind's, which the trait reads through the kind's parser, and `name`.
 func (h *SecretHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
-		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the Secret to create (a DNS-1123 subdomain)."},
-		"stringData": {
-			Type:                 oam.PropertyTypeObject,
-			AdditionalProperties: true,
-			Description:          "Entries as key to plain string value. Keys may contain alphanumerics, '-', '_' and '.'. Emitted base64-encoded under data, not encrypted.",
-		},
-		"data": {
-			Type:                 oam.PropertyTypeObject,
-			AdditionalProperties: true,
-			Description:          "Entries as key to base64-encoded value. A key may not also appear in stringData.",
-		},
-		"type": {Type: oam.PropertyTypeString, Description: "Secret type, e.g. kubernetes.io/tls. Unset means Opaque. The keys a type requires are left to the API server."},
-		"immutable": {
-			Type:        oam.PropertyTypeBoolean,
-			Description: "When true, the API server refuses any later change to the entries; the Secret must be replaced instead.",
-		},
-	}
+	schema := maps.Clone((&components.SecretHandler{}).PropertySchema())
+	schema["name"] = oam.PropertySchema{Type: oam.PropertyTypeString, Required: true, Description: "Name of the Secret to create (a DNS-1123 subdomain)."}
+	return schema
 }
 
 // ValidateAndApplyDefaults rejects any rendering key for this no-rendering trait.

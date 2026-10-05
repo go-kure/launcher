@@ -141,6 +141,7 @@ reads it.
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
+| `secret` | Secret | Kind-named Secret: `stringData`, `data`, `type`, `immutable`. Every entry is emitted under `data`, base64-encoded and not encrypted. Refused under an environment policy that forbids explicit secrets. A workload reads it through a `secret` volume, `envFrom` or a `secretKeyRef` — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
@@ -285,7 +286,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. No environment policy applies. |
-| `kubernetes.CreateSecret` | v1 Secret | trait | `secret` | hand-written parser | The trait builds through a generator of this package, so a `secret` kind can use the same path. The `helm` component's `secretValues` synthesizes the trait. |
+| `kubernetes.CreateSecret` | v1 Secret | kind | `secret` | hand-written parser | The `secret` trait builds through the same path. The `helm` component's `secretValues` synthesizes the trait. Refused under a policy that forbids explicit secrets, on either path. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. At least one of `cidrs` must be written. No environment policy applies. |
@@ -2282,6 +2283,56 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `ParseConfigMapProperties(props)` and builds the ConfigMap through
     `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
     give the same ConfigMap and the same refusals on both paths.
+- **secret** (go-kure/launcher#790) is the kind-named projection of a v1
+  Secret, on the recipe of `configmap` above: it emits the Secret, named after
+  the component (or its `objectName`) and carrying the component's `app`
+  label, and nothing else, so a workload's `secret` volume, `envFrom` or
+  `secretKeyRef` names it by that name.
+  - It publishes `stringData` (plain string values: a number, a boolean or a
+    nested object is refused, not stringified), `data` (base64; a key may not
+    also appear in `stringData`, where the API server would let `stringData`
+    win silently), `type` and `immutable`. An unauthored `type` and
+    `immutable` stay unset (the API server stores `Opaque` for an unset
+    type), and the keys a type requires are left to the API server.
+  - Every entry is emitted under `data`, base64-encoded as the API serializes
+    it, and never under `stringData`: the object written is the object the
+    API server stores. **base64 is an encoding, not encryption**, so the
+    build output is as sensitive as the document, and so is every place that
+    output is committed or pushed to. Prefer a Secret created out of band (an
+    `external-secret` trait, a sealed or externally managed Secret) for
+    anything that must not be in the output.
+  - The decoded values together may hold at most 1,048,576 bytes, the limit
+    the API server enforces (the exported `CheckSecretSize(data)`); a key the
+    API server refuses is refused by the exported `ValidateSecretKey(field,
+    key)`. Keys are checked in sorted order. **No refusal carries a value**:
+    an entry is named by its key, a wrong value by its type, and a base64
+    error by its key alone.
+  - *Policy.* Unlike `configmap`, the kind has an `ApplyPolicy`: a policy
+    that forbids explicit secrets (`oam.ExplicitSecretPolicy`, see the
+    `pkg/oam` README) refuses the component with a violation naming it,
+    `secret: the environment policy forbids explicit secrets; reference a
+    Secret created out of band instead`, as it refuses the `secret` trait, a
+    `helm` component's `secretValues` and a Secret a `passthrough` or
+    `manifests` component carries. A policy that does not implement that
+    interface, and no policy, allow it.
+  - It is a different type from the `secret` trait, which attaches a Secret
+    to another component. The trait is this kind's twin: it reads the same
+    four properties through the exported `ParseSecretProperties(props)` and
+    builds the Secret through `GenerateSecret(config, name, namespace,
+    labels)`, and its schema is the kind's plus `name`, so the same
+    properties give the same Secret and the same refusals on both paths. Only
+    the ownership fields differ: the Secret's name, its labels, its namespace
+    and the bundle it is placed in.
+  - *Names.* The kind's Secret is claimed under role `object`. A `secret`
+    component and a `secret` trait naming one Secret are refused; the trait
+    itself claims no name. It names its own Secret under no role, so the two
+    meet among the generated objects (`generated-object collision: Secret
+    "shop/shared" is generated by both component "shared" and sub-application
+    "shared" of component "web"; …`), as a `configmap` component and trait
+    do. The Secret a `helm` component generates for
+    `secretValues` is claimed under role `values-secret`, as the same kind,
+    so a `secret` component under that name is refused as a name collision
+    with both named.
 - **namespace**, **limitrange**, **resourcequota** (go-kure/launcher#790) are
   kind-named projections of one Kubernetes core object each, built on the
   recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
@@ -5625,7 +5676,7 @@ See "Component label and ownership" in the
 Every kind component takes `objectName`, which names its one object in place of the component
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `configmap`, `secret`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four

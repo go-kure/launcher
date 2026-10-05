@@ -267,6 +267,16 @@ func (h *ConfigMapHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope)
 	return coreKind("ConfigMap"), oam.ObjectScopeNamespaced
 }
 
+// ComponentObject declares the secret kind's Secret. The `secret` trait names
+// its own Secret under no role and claims nothing, so a trait's Secret of the
+// same name is refused among the generated objects
+// (oam.CheckInDocumentCollisions); the Secret a `helm` component generates for
+// secretValues is claimed under role "values-secret" as this kind, so a secret
+// component under that name is refused as a name collision.
+func (h *SecretHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return coreKind("Secret"), oam.ObjectScopeNamespaced
+}
+
 // ComponentObject declares the persistentvolumeclaim kind's
 // PersistentVolumeClaim.
 func (h *PersistentVolumeClaimHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {

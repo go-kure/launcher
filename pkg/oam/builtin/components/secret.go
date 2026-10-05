@@ -7,18 +7,114 @@ import (
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
+	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
+// SecretHandler handles OAM secret components: the kind-named projection of
+// corev1.Secret (go-kure/launcher#790).
+//
+// It emits the Secret and nothing else. The component name is the Secret's
+// name, so a workload's `secret` volume, `envFrom` or `secretKeyRef` names it.
+// It is a different type from the `secret` trait, which attaches a Secret to
+// another component: component and trait types live in separate registries
+// (pkg/oam transform.go). The trait is this kind's twin and builds its Secret
+// through ParseSecretProperties and GenerateSecret.
+//
+// The Secret is written into the build output with its values base64-encoded,
+// not encrypted, so the output is as sensitive as the document. An environment
+// policy may forbid the component (oam.ExplicitSecretPolicy), as it may the
+// trait. No error this kind raises carries a value.
+type SecretHandler struct{}
+
+// secretType is the secret component type.
+const secretType = "secret"
+
+// CanHandle returns true for the secret component type.
+func (h *SecretHandler) CanHandle(componentType string) bool {
+	return componentType == secretType
+}
+
+// PropertySchema declares the secret component's user-facing properties.
+func (h *SecretHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"stringData": {
+			Type:                 oam.PropertyTypeObject,
+			AdditionalProperties: true,
+			Description:          "Entries as key to plain string value. Keys may contain alphanumerics, '-', '_' and '.'. Emitted base64-encoded under data, not encrypted.",
+		},
+		"data": {
+			Type:                 oam.PropertyTypeObject,
+			AdditionalProperties: true,
+			Description:          "Entries as key to base64-encoded value. A key may not also appear in stringData.",
+		},
+		"type": {Type: oam.PropertyTypeString, Description: "Secret type, e.g. kubernetes.io/tls. Unset means Opaque. The keys a type requires are left to the API server."},
+		"immutable": {
+			Type:        oam.PropertyTypeBoolean,
+			Description: "When true, the API server refuses any later change to the entries; the Secret must be replaced instead.",
+		},
+	}
+}
+
+// ToApplicationConfig converts an OAM secret component to a
+// SecretComponentConfig.
+func (h *SecretHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	secret, err := ParseSecretProperties(component.Properties)
+	if err != nil {
+		return nil, err
+	}
+	return &SecretComponentConfig{
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
+		Secret:     secret,
+	}, nil
+}
+
+// SecretComponentConfig implements stack.ApplicationConfig for secret
+// components.
+type SecretComponentConfig struct {
+	Name string
+	// ObjectName names the Secret (oam.Component.ObjectName); its labels keep
+	// Name. Empty for the application's name.
+	ObjectName string
+	Namespace  string
+	// Secret carries the entries, type and immutable as ParseSecretProperties
+	// parses them.
+	Secret SecretConfig
+}
+
+// ApplyPolicy refuses the Secret under a policy that forbids explicit secrets
+// (oam.ExplicitSecretPolicy), as the secret trait is refused. A policy that
+// does not implement that interface allows it, and so does none. The transform
+// reports the refusal as a violation naming the component.
+func (c *SecretComponentConfig) ApplyPolicy(policy oam.Policy) error {
+	if !oam.ExplicitSecretsAllowed(policy) {
+		return errors.Errorf("%s: the environment policy forbids explicit secrets; reference a Secret created out of band instead", secretType)
+	}
+	return nil
+}
+
+// Generate creates the Secret.
+func (c *SecretComponentConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	return GenerateSecret(c.Secret, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+}
+
+var _ oam.Enforceable = (*SecretComponentConfig)(nil)
+
 // The two functions below are the one Secret path: parse and generate
-// (go-kure/launcher#786). The secret trait runs them, and a kind-named secret
-// component wraps the same two, as the configmap kind and trait share
-// ParseConfigMapProperties and GenerateConfigMap. No message they raise carries
-// a value: an entry is named by its key, a wrong value by its type.
+// (go-kure/launcher#786). The secret kind and the secret trait both run them,
+// as the configmap kind and trait share ParseConfigMapProperties and
+// GenerateConfigMap, so the two build the same Secret from the same properties
+// and differ only in what ownership means: the Secret's name, its labels, its
+// namespace and the bundle it is placed in, all passed to GenerateSecret. No
+// message they raise carries a value: an entry is named by its key, a wrong
+// value by its type.
 
 // SecretConfig is a Secret's content as authored: its entries, its type and
 // immutable. Name and namespace are the caller's (GenerateSecret).

@@ -9,7 +9,7 @@ import (
 
 // A kind handler driven directly, outside a transform, is given a component the
 // engine resolved no object name for: the object keeps the component name. The
-// engine reads `objectName` and removes it before the handler runs; these three
+// engine reads `objectName` and removes it before the handler runs; these four
 // handlers, handed the property all the same, pass over it, and their own
 // schema, which the engine adds the property to, does not declare it. A handler
 // that decodes its properties strictly refuses it instead; the walk over every
@@ -27,6 +27,7 @@ func TestKindHandler_DrivenDirectly(t *testing.T) {
 			}
 		}},
 		"serviceaccount": {&components.ServiceAccountHandler{}, func() map[string]any { return map[string]any{} }},
+		"secret":         {&components.SecretHandler{}, func() map[string]any { return map[string]any{} }},
 	} {
 		t.Run(typ, func(t *testing.T) {
 			if _, declares := tc.handler.(oam.ComponentObjectProvider); !declares {

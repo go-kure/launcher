@@ -317,6 +317,9 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"horizontalpodautoscaler": {props: map[string]any{
 		"scaleTargetRef": map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "web"},
 		"maxReplicas":    3}},
+	// A Secret name is a DNS-1123 subdomain, and the kind labels its Secret as
+	// the configmap kind labels its ConfigMap.
+	"secret": {props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
