@@ -138,6 +138,34 @@ func (h *ReplicationControllerHandler) ContractMetadata() oam.ContractMetadata {
 func (h *PodTemplateHandler) ContractMetadata() oam.ContractMetadata { return contract("podtemplate") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *StorageClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("storageclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *VolumeAttributesClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("volumeattributesclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *PriorityClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("priorityclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *RuntimeClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("runtimeclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *IngressClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("ingressclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CSIDriverHandler) ContractMetadata() oam.ContractMetadata { return contract("csidriver") }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

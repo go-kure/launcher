@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: critical
+      type: priorityclass
+      properties:
+        value: 1000000
+        globalDefault: false
+        description: Workloads that must not be preempted.
+        preemptionPolicy: Never
+    - name: batch
+      type: priorityclass
+      properties:
+        value: -100
+    - name: unvalued
+      type: priorityclass
+      properties:
+        description: A class that authors no value carries 0.

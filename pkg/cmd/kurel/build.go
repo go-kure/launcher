@@ -308,6 +308,12 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"replicaset":            &components.ReplicaSetHandler{},
 		"replicationcontroller": &components.ReplicationControllerHandler{},
 		"podtemplate":           &components.PodTemplateHandler{},
+		"storageclass":          &components.StorageClassHandler{},
+		"volumeattributesclass": &components.VolumeAttributesClassHandler{},
+		"priorityclass":         &components.PriorityClassHandler{},
+		"runtimeclass":          &components.RuntimeClassHandler{},
+		"ingressclass":          &components.IngressClassHandler{},
+		"csidriver":             &components.CSIDriverHandler{},
 	}
 }
 

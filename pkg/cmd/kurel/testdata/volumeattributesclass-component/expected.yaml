@@ -1,0 +1,20 @@
+apiVersion: storage.k8s.io/v1
+driverName: ebs.csi.aws.com
+kind: VolumeAttributesClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: fast-io
+  name: fast-io
+parameters:
+  iops: "6000"
+  throughput: "250"
+---
+apiVersion: storage.k8s.io/v1
+driverName: ebs.csi.aws.com
+kind: VolumeAttributesClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: slow-io
+  name: slow-io
+parameters:
+  iops: "1000"

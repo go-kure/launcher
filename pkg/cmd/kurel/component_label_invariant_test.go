@@ -277,6 +277,15 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 			"spec": map[string]any{"containers": []any{
 				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
 		storedTemplates: 1},
+	// The six cluster-scoped kinds below emit identity and the authored fields,
+	// with no `app` label and no pods. They leave the name rules of their
+	// object to the API server, so each accepts the 200-character name.
+	"storageclass":          {props: map[string]any{"provisioner": "csi.example.com"}},
+	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
+	"priorityclass":         {props: map[string]any{"value": 1000}},
+	"runtimeclass":          {props: map[string]any{"handler": "runc"}},
+	"ingressclass":          {props: map[string]any{"controller": "example.com/ingress-controller"}},
+	"csidriver":             {props: map[string]any{"attachRequired": false}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

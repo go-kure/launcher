@@ -113,7 +113,11 @@ fixtures build each. The `pod` kind emits the authored spec and the `app`
 label, the `replicaset` and `replicationcontroller` kinds the authored spec
 with the `app` label on the pod template, and the `podtemplate` kind the
 authored template with no `app` label; none of them is one of the five pod
-kinds named below. The
+kinds named below. The cluster-scoped kind components `storageclass`,
+`volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass` and
+`csidriver` (go-kure/launcher#790) are registered the same way, with a
+`<type>-component` fixture each; each emits one object named after the
+component, with no namespace. The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
 and the synthesized `pvc` traits. The five pod kinds generate no ServiceAccount

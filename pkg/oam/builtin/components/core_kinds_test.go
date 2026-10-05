@@ -10,6 +10,10 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -50,6 +54,24 @@ var coreKindSchemas = []struct {
 		"apiVersion": "launcher emits a v1 PodTemplate; the object's type is not authored",
 		"metadata":   "launcher sets the object's name and namespace, as on every kind component; the pods' metadata is template.metadata",
 	}},
+	// The four classes below have no spec type either: each projects the
+	// object, less its identity.
+	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
+	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
+	{"priorityclass", reflect.TypeFor[schedulingv1.PriorityClass](), &components.PriorityClassHandler{}, objectIdentityExcluded("a scheduling.k8s.io/v1 PriorityClass")},
+	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},
+	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
+	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
+}
+
+// objectIdentityExcluded is the excluded set of a kind that projects a whole
+// cluster-scoped object, emitted as the given kind: its identity is launcher's.
+func objectIdentityExcluded(emits string) map[string]string {
+	return map[string]string{
+		"kind":       "launcher emits " + emits + "; the object's type is not authored",
+		"apiVersion": "launcher emits " + emits + "; the object's type is not authored",
+		"metadata":   "launcher sets the object's name, as on every kind component",
+	}
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes

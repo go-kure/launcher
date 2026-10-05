@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: external
+  name: external
+spec:
+  controller: k8s.io/ingress-nginx
+  parameters:
+    apiGroup: k8s.example.com
+    kind: IngressParameters
+    name: external
+    namespace: ingress
+    scope: Namespace
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: internal
+  name: internal
+spec:
+  controller: k8s.io/ingress-nginx

@@ -616,6 +616,23 @@ be closed at build time.
   - `podtemplate` projects a PodTemplate's one field, `template`. A PodTemplate is
     stored, not run: no `app` label, no ServiceAccount reported, and not a trait target
     (§7, item 14).
+- **Shipped: six cluster-scoped kinds no environment policy applies to,**
+  `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`,
+  `ingressclass` and `csidriver` (one file each, named after the type, in
+  `pkg/oam/builtin/components`).
+  - One shared helper builds them (`policyFreeKind`, `kind_policy_free.go`): the strict
+    decode, a config with nothing to enforce, and a `Generate` that returns the
+    base-library constructor's object with a copy of what was decoded. A kind built on it
+    is a type, an optional required-field check and a constructor.
+  - `ingressclass` and `csidriver` project their spec type. The four classes have no
+    spec type: the properties are the object's fields beside its identity, and `kind`,
+    `apiVersion` and `metadata` are refused by name.
+  - A top-level field the API documents as required must be authored (`provisioner`,
+    `handler`, `driverName`, and at least one of a VolumeAttributesClass's `parameters`).
+    A PriorityClass `value` is not one: unauthored, it is emitted as `0`. Other value
+    rules are left to the API server.
+  - Metadata is not authorable, as on every kind component, so a default StorageClass or
+    IngressClass (an annotation) cannot be written with these kinds.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
@@ -789,7 +806,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller` and `podtemplate` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass` and `csidriver` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
