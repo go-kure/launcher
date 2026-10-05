@@ -290,7 +290,12 @@ One exception on the inbound side: a component whose config reports a routing ta
 `{comp}-allow-ingress-traffic` policy on the Service's `selector` pods instead of the component
 label, with each routed Service port translated to its `targetPort`. A routed port that is not
 one of the Service's TCP ports is dropped (the rules are TCP), and a route left with no port
-synthesizes no policy. A sibling group whose `service` member fronts its own sibling's pods on
+synthesizes no policy. A `service` of type `ExternalName` selects no pods: it reports a routing
+target without labels and no port for any routed port, so a route to it synthesizes no policy
+either, alone or as a member of a sibling group (go-kure/launcher#790). That label-less
+selector is a marker for "owns its Service name and selects no pods" and is never written into
+an object, where it would select every pod of the namespace; a config that reported it together
+with a port fails the build. A sibling group whose `service` member fronts its own sibling's pods on
 unmapped ports keeps the component label, with the ports still translated and filtered the same
 way (see Same-name sibling groups below).
 

@@ -346,7 +346,9 @@ func (g *siblingGroupConfig) NonRWXClaim() string {
 	return ""
 }
 
-// ServiceRoutingTarget is the one member's routing target, or a nil selector.
+// ServiceRoutingTarget is the one member's routing target, or a nil selector. A
+// member's selector without labels (an ExternalName Service, see
+// serviceRoutingTargeter) is forwarded as it is, with no ports.
 func (g *siblingGroupConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
 	for _, m := range g.members {
 		if rt, ok := m.Config.(serviceRoutingTargeter); ok {

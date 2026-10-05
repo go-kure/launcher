@@ -173,7 +173,7 @@ func TestServiceHandler_Rejects(t *testing.T) {
 		{"targetPort wrong type", port(map[string]any{"port": 80, "targetPort": true}), "ports[0].targetPort: must be an integer or a port name"},
 		{"protocol invalid", port(map[string]any{"port": 80, "protocol": "HTTP"}), "ports[0].protocol: must be one of TCP, UDP, SCTP"},
 		{"name invalid", port(map[string]any{"port": 80, "name": "HTTP"}), "ports[0].name: invalid port name"},
-		{"unknown key", port(map[string]any{"port": 80, "nodePort": 30080}), `ports[0]: unrecognized key "nodePort"`},
+		{"unknown key", port(map[string]any{"port": 80, "hostPort": 30080}), `ports[0]: unrecognized key "hostPort"`},
 		{"unnamed port among several", map[string]any{"ports": []any{
 			map[string]any{"name": "http", "port": 80},
 			map[string]any{"port": 443},
@@ -188,7 +188,7 @@ func TestServiceHandler_Rejects(t *testing.T) {
 		}}, "ports[1]: duplicate port 80/TCP"},
 		{"selector empty", map[string]any{"selector": map[string]any{}, "ports": []any{map[string]any{"port": 80}}}, "selector: must name at least one label"},
 		{"selector non-string value", map[string]any{"selector": map[string]any{"app": 1}, "ports": []any{map[string]any{"port": 80}}}, "selector.app: must be a string"},
-		{"type invalid", map[string]any{"type": "ExternalName", "ports": []any{map[string]any{"port": 80}}}, "type: must be one of ClusterIP, NodePort, LoadBalancer"},
+		{"type invalid", map[string]any{"type": "Headless", "ports": []any{map[string]any{"port": 80}}}, `type: must be one of ClusterIP, NodePort, LoadBalancer, ExternalName, got "Headless"`},
 		// go-kure/launcher#690: only None, and only on a ClusterIP Service. A set-but-empty
 		// value is refused, not read as absent.
 		{"clusterIP empty", map[string]any{"clusterIP": "", "ports": []any{map[string]any{"port": 80}}}, `clusterIP: must be "None", got ""`},
@@ -436,7 +436,7 @@ func TestServiceHandler_PropertySchema(t *testing.T) {
 	item := ports.Items.Properties
 	// A missing entry reads as the zero PropertySchema (Type "", not Required), so each key's
 	// presence is asserted before its fields.
-	for _, key := range []string{"name", "port", "targetPort", "protocol"} {
+	for _, key := range []string{"name", "port", "targetPort", "protocol", "nodePort", "appProtocol"} {
 		if _, ok := item[key]; !ok {
 			t.Errorf("ports[] schema has no %q property", key)
 		}

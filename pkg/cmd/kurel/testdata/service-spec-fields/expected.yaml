@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: web
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: web
+        launcher.gokure.dev/component: web
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - image: ghcr.io/example/web:v1.0
+        name: web
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: web-lb
+    launcher.gokure.dev/component: web-lb
+  name: web-lb
+  namespace: default
+spec:
+  allocateLoadBalancerNodePorts: true
+  externalTrafficPolicy: Local
+  healthCheckNodePort: 30081
+  internalTrafficPolicy: Local
+  ipFamilies:
+  - IPv4
+  - IPv6
+  ipFamilyPolicy: PreferDualStack
+  loadBalancerClass: example.com/internal
+  loadBalancerSourceRanges:
+  - 10.0.0.0/8
+  ports:
+  - appProtocol: kubernetes.io/h2c
+    name: http
+    nodePort: 30080
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  publishNotReadyAddresses: true
+  selector:
+    app: web
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 600
+  trafficDistribution: PreferClose
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db
+    launcher.gokure.dev/component: db
+  name: db
+  namespace: default
+spec:
+  externalName: db.example.com
+  type: ExternalName

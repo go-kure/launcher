@@ -56,6 +56,14 @@ type servicePortProvider interface {
 // servicePorts are the routed Service ports (a number or a port name); the returned target ports
 // are the ones a TCP allow should open, with any unmatched or non-TCP Service port dropped. A nil
 // selector means "not a routing targeter" (a trait decorator wrapping any other config).
+//
+// A non-nil selector without labels means "owns its Service name and selects no pods" — an
+// ExternalName Service (go-kure/launcher#790). It comes with no port for any routed port, so
+// every rule routed to the component is dropped and no policy is written for it
+// (retargetTrafficRules), as for a port-less headless Service (go-kure/launcher#690). It is a
+// marker and is never written into an object: in an object a selector without labels selects
+// every pod of the namespace. A config that returned it with a port fails the synthesis
+// (validateMatchLabelsSelector).
 type serviceRoutingTargeter interface {
 	ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString)
 }
