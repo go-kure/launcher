@@ -76,7 +76,16 @@ func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 	// is compared; whatever else `cluster` holds is the decode's to refuse.
 	// The two keys are matched as the decode matches them, in any case
 	// (foldedFieldMaps), so `Cluster: {Name: …}` is read as it is built.
-	for _, cluster := range foldedFieldMaps(component.Properties, "cluster") {
+	//
+	// The properties are read as the build's first step reads them, as their
+	// JSON serialization (jsonProperties), so a direct caller's typed value (a
+	// map[string]string, a struct) is compared too, and a tree that step
+	// refuses is refused here with its error.
+	props, _, err := jsonProperties(component.Properties)
+	if err != nil {
+		return nil, err
+	}
+	for _, cluster := range foldedFieldMaps(props, "cluster") {
 		for _, key := range foldedFieldKeys(cluster, "name") {
 			clusterName, ok := cluster[key].(string)
 			if !ok {

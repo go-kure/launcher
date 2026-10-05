@@ -295,7 +295,14 @@ func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing
 	otherCase := &oam.Component{Name: "main", Type: "cnpg-pooler", Properties: map[string]any{
 		"Cluster": map[string]any{"Name": "main"}, "pgbouncer": map[string]any{},
 	}}
-	for spelling, comp := range map[string]*oam.Component{"as the API spells it": same, "in another case": otherCase} {
+	// A direct caller's typed values are read as their JSON serialization by
+	// the build, and by the endpoint.
+	for spelling, comp := range map[string]*oam.Component{
+		"as the API spells it": same,
+		"in another case":      otherCase,
+		"a typed map":          pooler(map[string]string{"name": "main"}),
+		"a struct":             pooler(cnpgv1.LocalObjectReference{Name: "main"}),
+	} {
 		_, buildErr := h.ToApplicationConfig(comp, "data")
 		_, endpointsErr := h.Endpoints(comp)
 		for reader, err := range map[string]error{"ToApplicationConfig": buildErr, "Endpoints": endpointsErr} {
@@ -303,6 +310,15 @@ func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing
 				t.Errorf("%s, %s: err = %v\nwant %q", spelling, reader, err, want)
 			}
 		}
+	}
+
+	// Properties encoding/json cannot serialize are refused by the build's
+	// first step, and by the endpoint with the same error.
+	unserializable := pooler(make(chan int))
+	_, buildErr := h.ToApplicationConfig(unserializable, "data")
+	_, endpointsErr := h.Endpoints(unserializable)
+	if buildErr == nil || endpointsErr == nil || buildErr.Error() != endpointsErr.Error() {
+		t.Errorf("unserializable properties: ToApplicationConfig err = %v, Endpoints err = %v; want one refusal from both", buildErr, endpointsErr)
 	}
 
 	for name, cluster := range map[string]any{
