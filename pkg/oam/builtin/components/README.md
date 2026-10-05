@@ -222,7 +222,7 @@ Status is one of:
   kind component.
 - `trait`: a trait emits it and no component does; Type is the trait `type`.
 - `missing`: authorable, with no component yet. go-kure/launcher#790 adds these group by group.
-- `held`: authorable, with no component until a named question is decided; Notes gives the
+- `held`: authorable, with no component until something named is in place; Notes gives the
   reason. A component for it would not do what the kind is authored for.
 - `not authorable`: no component is planned; Notes gives the reason.
 
@@ -249,7 +249,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
-| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, and a kind component's metadata is not authorable. Held until go-kure/launcher#790's open point on object metadata is decided. |
+| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, and a kind component's metadata is not authorable. Held until kind components take authored labels, which go-kure/launcher#790 has decided and which is not in the tree yet. |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
