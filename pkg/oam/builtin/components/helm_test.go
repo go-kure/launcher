@@ -312,13 +312,15 @@ func TestHelmRule_SharesOneSourcePerIdentity(t *testing.T) {
 
 // TestHelmRule_SourceNameIsPerDocument: the document name is part of a
 // generated source's name, so two documents sharing a URL get different names
-// and never collide, even through one allocator.
+// and never collide, even through one allocator. The two components differ in
+// name: an allocator holds one document's names, and the HelmRelease of each
+// component is claimed in it under the component's name.
 func TestHelmRule_SourceNameIsPerDocument(t *testing.T) {
 	lctx := helmLowering("shop")
 	props := map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com"}}
 	shop := componentByType(t, lowerHelm(t, lctx, "a", props), "helmrepository").Name
 	lctx.Origin.Document = "blog"
-	blog := componentByType(t, lowerHelm(t, lctx, "a", props), "helmrepository").Name
+	blog := componentByType(t, lowerHelm(t, lctx, "b", props), "helmrepository").Name
 	if shop == blog {
 		t.Errorf("two documents share the source name %s", shop)
 	}

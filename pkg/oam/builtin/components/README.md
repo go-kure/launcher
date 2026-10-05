@@ -4484,7 +4484,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
   `values`, `valuesMode` (`inline` |
   `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive part of the
-  values tree, see below), `valuesSecretName`,
+  values tree, see below), `valuesSecretName`, `helmReleaseName` (the name of
+  the HelmRelease object, see below),
   `scopeOverrides` and `hookGroupNamePrefix` (each under `delivery: template` only, see below),
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
@@ -4564,6 +4565,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     "shared" is named by component "a" (role "values-configmap", set by
     valuesConfigMapName) and by component "b" (…); give one of them another
     name`).
+  - **`helmReleaseName`** (go-kure/launcher#787) names the HelmRelease object,
+    in the same order: the author's property, else the consumer's `Naming` hook
+    (role `helm-release`, asked with the component), else the component name,
+    so a document that does not set it and a hook that declines give the same
+    output as before. A name that is not the default is used as written: a
+    DNS-1123 subdomain of at most 253 characters, refused otherwise and never
+    shortened. **`helmReleaseName` is the name of the HelmRelease object in the
+    cluster (`metadata.name`); `releaseName` is the name Helm gives the release
+    (`spec.releaseName`, the chart's `.Release.Name`).** Renaming the object
+    moves nothing else: `spec.releaseName` stays the authored `releaseName` or
+    the component name, so the installed release is not reinstalled under
+    another name, the values ConfigMap and Secret keep their names, and the
+    `helmrelease` member keeps the component's name, with its group, its
+    placement and its traits. Nothing launcher writes names the HelmRelease, so
+    no reference moves. The name is claimed where the HelmRelease lands, the
+    default included: an authored `helmrelease` component whose `objectName` is
+    the same name is refused in the transform with both named (`name collision:
+    HelmRelease.helm.toolkit.fluxcd.io "default/chart" is named by component
+    "chart" (role "helm-release", its default) and by component "rel" (role
+    "object", set by properties.objectName); give one of them another name`).
+    Under `delivery: template` the property is refused, since no HelmRelease is
+    generated, and the hook is not asked.
   - **`secretValues`** (go-kure/launcher#786) is a second values tree, for the
     values that must not sit in the HelmRelease or in a ConfigMap. It is an object
     like `values`; absent, `null` or empty it changes nothing. The `helmrelease`
@@ -4737,9 +4760,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
-    - `source.name` beside an inline source, `valuesConfigMapName` and
-      `valuesSecretName` (go-kure/launcher#787): the render generates no source,
-      no values ConfigMap and no values Secret, so each would name nothing;
+    - `source.name` beside an inline source, `valuesConfigMapName`,
+      `valuesSecretName` and `helmReleaseName` (go-kure/launcher#787): the render
+      generates no source, no values ConfigMap, no values Secret and no
+      HelmRelease, so each would name nothing;
     - an inline GitRepository or Bucket source, since the render fetches only
       from a Helm or OCI repository;
     - an OCI source without `version`;

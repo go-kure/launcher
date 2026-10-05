@@ -51,7 +51,8 @@ const (
 	// `configmap`. Default: the component name. It is not asked for a member a
 	// component or trait lowering rule emitted: the rule names its members, and
 	// one it lets the author or the hook name is asked for under the rule's own
-	// role (NameRoleOCIKustomization, NameRoleOCISource). A component of a
+	// role (NameRoleHelmRelease, NameRoleOCIKustomization, NameRoleOCISource). A
+	// component of a
 	// document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
 	// NameRoleHelmSource is a Flux source a lowering rule generates for the
@@ -68,6 +69,12 @@ const (
 	// NameRoleValuesSecret is the Secret the helm rule generates for
 	// secretValues. Default: "<component>-secret-values-<values hash>".
 	NameRoleValuesSecret NameRole = "values-secret"
+	// NameRoleHelmRelease is the HelmRelease a helm component generates under
+	// delivery: flux. Default: the component name. The hook is asked with the
+	// component. It names the object alone: the Helm release name
+	// (spec.releaseName) and the names of the values ConfigMap and Secret keep
+	// following the component name.
+	NameRoleHelmRelease NameRole = "helm-release"
 	// NameRoleOCIKustomization is the Flux Kustomization an oci component
 	// generates, whether the component keeps its source or shares one. Default:
 	// the component name. The hook is asked with the component.
@@ -140,6 +147,7 @@ var nameRoles = []struct {
 	{NameRoleHelmSource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesConfigMap, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesSecret, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleHelmRelease, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleOCIKustomization, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleOCISource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
