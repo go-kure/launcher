@@ -2487,7 +2487,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a valid CronJob name, which must be at most 52 characters: it has 53`. A
   component named with 53 to 63 characters built before this rule and is
   refused now (go-kure/launcher#787); a longer one was already refused by the
-  container-name rule.
+  container-name rule. With an Indexed job template the name must also leave
+  room for the index in each pod's hostname, a limit that applies when the
+  controller creates the Job, not when the CronJob is admitted; the build does
+  not check it.
   Known limitation: the plain 5-field `schedule` form accepts any 5
   whitespace-separated tokens with no per-field semantic check (e.g.
   `99 99 99 99 99` builds successfully here and is only rejected later, by
@@ -2515,6 +2518,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   characters was already refused at generation, by the container-name rule; it
   is now refused when the component is read, by this one
   (go-kure/launcher#787).
+
+  On a job with `completionMode: Indexed` and `completions` above 0 the name is
+  held to one more rule of the API server's (`validateNameAllowsCompletions`):
+  the pod of each index takes the hostname `<name>-<index>`, so
+  `<name>-<completions-1>` must be a DNS-1123 label, at most 63 characters and
+  without a dot. It is held at the same two places, and refused as `job
+  "<name>": the component name is the Job's name, and with completionMode
+  Indexed and completions 11 the pod of the last index takes the hostname
+  "<name>-10", which must be a DNS-1123 label: …`. An Indexed job whose name
+  leaves no room for its last index built before this rule and is refused now.
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
   job template, projected here onto `spec` directly. Every one is
@@ -4742,8 +4755,8 @@ handler's config carries it as `ObjectName`, empty when it is the component's na
 `Generate` names the object with it. Everything else the handler writes keeps the component
 name: the `app` label and selectors, the pod template's labels, the main container's name.
 A handler's own check of the name (a Service's DNS-1035 label, a CloudNativePG Cluster's
-length, a CronJob's 52 characters, a Job's 63) runs on the object name, since that is what
-the object carries.
+length, a CronJob's 52 characters, a Job's 63 and the room an Indexed job's last index
+needs) runs on the object name, since that is what the object carries.
 
 What a config tells a trait or the transform about its object follows the object name: a
 `service` component's `BackendServiceName`, a `serviceaccount` component's

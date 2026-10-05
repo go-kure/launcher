@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	batchv1 "k8s.io/api/batch/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -62,6 +63,48 @@ func TestBatchKinds_ComponentNameLength(t *testing.T) {
 				t.Fatalf("a %d-character name: err = %v\nwant one containing %q", tc.limit+1, err, want)
 			}
 		})
+	}
+}
+
+// TestJob_NameAllowsCompletions: the pods of an Indexed job take the hostname
+// "<job>-<index>", so the Job's name must leave room for the last index and
+// hold no dot. The rule is held on the name the Job takes when the component is
+// read and again at Generate, and on an Indexed job only.
+func TestJob_NameAllowsCompletions(t *testing.T) {
+	h := &components.JobHandler{}
+	name := strings.Repeat("a", 61)
+	indexed := func(completions int) map[string]any {
+		return map[string]any{"image": "busybox:1", "completionMode": "Indexed", "completions": completions}
+	}
+	convert := func(props map[string]any) error {
+		_, err := h.ToApplicationConfig(&oam.Component{Name: name, Type: "job", Properties: props}, "default")
+		return err
+	}
+
+	// "<61 characters>-9" is 63 characters, "<61 characters>-10" is 64.
+	if err := convert(indexed(10)); err != nil {
+		t.Fatalf("completions 10: err = %v, want it accepted", err)
+	}
+	if err := convert(map[string]any{"image": "busybox:1", "completions": 11}); err != nil {
+		t.Fatalf("completions 11 on a job that is not Indexed: err = %v, want it accepted", err)
+	}
+	want := `job "` + name + `": the component name is the Job's name, and with completionMode Indexed and completions 11 ` +
+		`the pod of the last index takes the hostname "` + name + `-10", which must be a DNS-1123 label: `
+	if err := convert(indexed(11)); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("completions 11: err = %v\nwant one containing %q", err, want)
+	}
+
+	mode, completions := batchv1.IndexedCompletion, int32(2)
+	spec := components.JobSpecConfig{CompletionMode: &mode, Completions: &completions}
+	cfg := &components.JobConfig{Name: "migrate", ObjectName: "migrate.v2", Image: "busybox:1", JobSpec: spec}
+	want = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "object"): "migrate.v2" is not a valid name for this Job: ` +
+		`with completionMode Indexed and completions 2 the pod of the last index takes the hostname "migrate.v2-1", which must be a DNS-1123 label: `
+	if _, err := cfg.Generate(stack.NewApplication("migrate", "default", cfg)); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Generate with a dotted ObjectName: err = %v\nwant one containing %q", err, want)
+	}
+	cfg.ObjectName = "migrate-v2"
+	if _, err := cfg.Generate(stack.NewApplication("migrate", "default", cfg)); err != nil {
+		t.Fatalf("Generate with an undotted ObjectName: err = %v, want it accepted", err)
 	}
 }
 

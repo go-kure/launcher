@@ -555,6 +555,8 @@ spec:
 			`"` + over52 + `" is not a valid CronJob name, which must be at most 52 characters`},
 		{"job", "migrate", "job", "        image: busybox:1\n", over63,
 			`"` + over63 + `" is not a valid Job name, which must be at most 63 characters`},
+		{"indexed job", "migrate", "job", "        image: busybox:1\n        completionMode: Indexed\n        completions: 2\n", "migrate.v2",
+			`"migrate.v2" is not a valid name for this Job: with completionMode Indexed and completions 2`},
 	} {
 		t.Run(tc.name+" authored", func(t *testing.T) {
 			authored := app(tc.component, tc.typ, tc.props+"        "+oam.ObjectNameProperty+": "+tc.bad+"\n")
