@@ -123,18 +123,29 @@ names it: `Bundle.KustomizationName` on the bundle launcher returned, or the `Na
 for the `bundle` and `group` roles
 ([Name roles and the `Naming` hook](#name-roles-and-the-naming-hook)).
 
-**Known limit.** Under `FluxIntegratedPerLayout` placement kure also makes a Kustomization
-for each application layout and each hook-group layout. Its default name is
-`<unit name>-<layout name>`, the unit name being the bundle's Kustomization name:
-`<bundle>-<component>` for a component layout, and
-`<bundle>-<application>-<component>-NN-<phase>` for a `helmtemplate` hook-group child, so
-the application name leads it twice when the bundle is named after the application
-(`shop-shop-db-01-main`). kure refuses a name over 63 characters and shortens nothing.
-`ManifestLayout.KustomizationName` overrides the default, but launcher does not set it on a
-hook-group child yet and has no name role for it: go-kure/launcher#787 adds one. Until then
-a consumer that walks the tree itself sets the field on the walked layout before the
-integration; the next group's `spec.dependsOn` follows the name. Launcher holds the child's
-layout name to 253 characters, not 63, and does not shorten it to 63.
+Under `FluxIntegratedPerLayout` placement kure also makes a Kustomization for each
+application layout and each hook-group layout. Its default name is
+`<unit name>-<layout name>`, the unit name being the bundle's Kustomization name, and kure
+refuses a name over 63 characters and shortens nothing. Launcher leaves that default on a
+component layout, `<bundle>-<component>`, and never overwrites a `KustomizationName` a caller
+set there. On each `helmtemplate` hook-group child launcher sets
+`ManifestLayout.KustomizationName` itself (go-kure/launcher#787): the child's own name,
+`<application>-<component>-NN-<phase>`, shortened to 63 characters by the one shortening
+rule with the `-NN-<phase>` suffix kept whole
+([Names and overrides](#names-and-overrides)). The bundle's name no longer leads it, so the
+application name is not in it twice. The child's layout name, its directory, stays held to
+253 characters, so past 63 the Kustomization's name and the directory's differ. The next
+group's `spec.dependsOn` follows the Kustomization's name: the child's `DependsOn` lists the
+sibling's layout name, and kure writes that sibling's Kustomization name. The prefix
+`<application>-<component>` is the `hook-group` name role
+([Name roles and the `Naming` hook](#name-roles-and-the-naming-hook)): an author or the hook
+sets another, which is never shortened. A consumer that walks the tree itself can still set
+the field on a walked child before the integration.
+
+**Breaking output change** (go-kure/launcher#787): under `FluxIntegratedPerLayout` placement
+the Kustomization of a hook-group child loses the leading `<unit name>-`
+(`shop-shop-db-01-main` becomes `shop-db-01-main`), and one over 63 characters, which kure
+refused, is now shortened and builds. Directory names do not change.
 
 Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
 `Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
@@ -591,8 +602,8 @@ the whole `name+suffix` is then shortened by the rule.
 
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
-| 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt`, and the default of `LoweringContext.ResolveName` and `ResolveSharedName` (the `postgresql` pooler and databases, the `helm` values ConfigMap and values Secret, a generated Flux source), a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
+| 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`, and the default name of the Flux Kustomization of a `helmtemplate` hook-group child (`ManifestLayout.KustomizationName`: `<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole). |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt`, and the default of `LoweringContext.ResolveName` and `ResolveSharedName` (the `postgresql` pooler and databases, the `helm` values ConfigMap and values Secret, a generated Flux source), the layout name, and so the directory, of a `helmtemplate` hook-group child (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole; its Kustomization's default name is the 63 row's), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
@@ -633,6 +644,19 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component generates for itself alone, which carries the component's name. | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
 | `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
 | `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
+| `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, after every name is resolved. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
+
+The `hook-group` prefix is resolved in the transform, where two components of one document
+that resolve to the same prefix are refused: their groups would share names. The names are
+built after the render. With the default prefix the layout name is shortened to 253
+characters and the Kustomization's name to 63, each with its `-<NN>-<phase>` suffix whole, so
+the two differ for a long default. A prefix the author or the hook set is used as written in
+both, and is never shortened: a prefix that is no DNS-1123 subdomain is refused in the
+transform, and a child name over 63 characters built from it is refused by `AugmentLayout`,
+in an error that carries the component, the role and the full name. A consumer that calls
+only `Generate` writes no hook-group layout and never sees that refusal. On a `helm`
+component under `delivery: flux` the property is refused: a HelmRelease installs the chart,
+no hook-group layout exists, and the prefix would name nothing.
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
@@ -642,7 +666,8 @@ as `Kind` or `Kind.group` (empty for a role that names no object) and the defaul
 would use it: already shortened where launcher shortens a name (a group's bundle, the `hpa`,
 `pdb`, `networkpolicy` and `netpol-synth` objects), and as long as it is where it does not: a
 trait's sub-application default (`<component>-scaler` is 260 characters for a 253-character
-component name). The default is what tells apart several names of one component and role. Returning
+component name) and the `hook-group` prefix, which is shortened only inside the names built
+from it. The default is what tells apart several names of one component and role. Returning
 `false` keeps the default. Answers are not cached, and one name is asked for more than once
 (in the transform, and again by `ComponentEndpointsNamed`, below): the hook must be a pure
 function of its request, the same answer for the same `NameRequest` whenever it is asked. A
@@ -990,6 +1015,7 @@ the built-ins. Extend the system by implementing:
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
+| `HookGroupNamePrefixSetter` | `AuthoredHookGroupNamePrefix() (prefix string, authored bool)` and `SetHookGroupNamePrefix(prefix string)` — on a component config whose `AugmentLayout` partitions it into hook-group layouts. The transform resolves the `hook-group` name role for it once, right after `ApplicationNameSetter`: the prefix the config reports as authored (the `hookGroupNamePrefix` property, `HookGroupNamePrefixProperty`), else the `Naming` hook's answer, else the default `<application>-<component>`, and it calls `SetHookGroupNamePrefix` only with an authored or hook-given prefix, so a config left alone keeps its default names. A config built directly, outside a transform, sets its own. Implemented by `helmtemplate` (`HelmTemplateConfig.HookGroupNamePrefix`; go-kure/launcher#787). |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`, whose `Apply` sets the application's delivery intent and wraps nothing (go-kure/launcher#782). |
 | `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |

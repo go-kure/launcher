@@ -641,12 +641,12 @@ func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 	}
 }
 
-// TestHelmTemplate_HookGroupKustomizationNames: under per-layout placement the
-// base library gives each hook-group child a Flux Kustomization named after the
-// bundle's Kustomization and the child, so the application name leads it twice
-// for an application that is its own bundle. A consumer that walks the tree
-// itself can name one: KustomizationName set on the walked child before the
-// integration is the name of that child's Kustomization, and the next group's
+// TestHelmTemplate_HookGroupKustomizationNames: each hook-group child carries
+// the name of its Flux Kustomization, so under per-layout placement the base
+// library names the Kustomization after the child and not after the bundle's
+// Kustomization and the child. A consumer that walks the tree itself can still
+// name one: KustomizationName set on the walked child before the integration
+// is the name of that child's Kustomization, and the next group's
 // spec.dependsOn follows it, though the child's DependsOn still lists the
 // layout name.
 func TestHelmTemplate_HookGroupKustomizationNames(t *testing.T) {
@@ -655,18 +655,18 @@ func TestHelmTemplate_HookGroupKustomizationNames(t *testing.T) {
 	rules.FluxPlacement = layout.FluxIntegratedPerLayout
 	for _, tc := range []struct {
 		name     string
-		override string // KustomizationName set on the main group's layout
+		override string // KustomizationName set on the main group's layout; "" leaves the one it carries
 		want     map[string][]string
 	}{
 		{name: "defaults", want: map[string][]string{
-			"shop-shop-db-00-pre-install":  nil,
-			"shop-shop-db-01-main":         {"shop-shop-db-00-pre-install"},
-			"shop-shop-db-02-post-install": {"shop-shop-db-01-main"},
+			"shop-db-00-pre-install":  nil,
+			"shop-db-01-main":         {"shop-db-00-pre-install"},
+			"shop-db-02-post-install": {"shop-db-01-main"},
 		}},
 		{name: "a consumer names the main group", override: "db-main", want: map[string][]string{
-			"shop-shop-db-00-pre-install":  nil,
-			"db-main":                      {"shop-shop-db-00-pre-install"},
-			"shop-shop-db-02-post-install": {"db-main"},
+			"shop-db-00-pre-install":  nil,
+			"db-main":                 {"shop-db-00-pre-install"},
+			"shop-db-02-post-install": {"db-main"},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -694,7 +694,12 @@ func TestHelmTemplate_HookGroupKustomizationNames(t *testing.T) {
 			if main.Name != "shop-db-01-main" {
 				t.Fatalf("the second hook-group child is %q, want shop-db-01-main", main.Name)
 			}
-			main.KustomizationName = tc.override
+			if main.KustomizationName != "shop-db-01-main" {
+				t.Fatalf("the main child carries KustomizationName %q, want shop-db-01-main", main.KustomizationName)
+			}
+			if tc.override != "" {
+				main.KustomizationName = tc.override
+			}
 
 			if err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().IntegrateWithLayout(root, cluster, rules); err != nil {
 				t.Fatalf("IntegrateWithLayout: %v", err)

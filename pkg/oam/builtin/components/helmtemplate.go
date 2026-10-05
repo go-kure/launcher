@@ -65,9 +65,14 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
 			Description: "Sensitive part of the Helm values tree, merged over values for the client-side render and written nowhere else by this component; whatever the chart renders from it is in the output in clear form. A path set in both values and secretValues is refused, and so is a key named global below the top level. Must be representable as JSON. An environment policy may forbid it.",
 		},
-		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
+		scopeOverridesKey:               scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
+		oam.HookGroupNamePrefixProperty: {Type: oam.PropertyTypeString, Description: hookGroupNamePrefixDescription},
 	}
 }
+
+// hookGroupNamePrefixDescription describes hookGroupNamePrefix for the
+// helmtemplate component, and for a helm component under delivery: template.
+const hookGroupNamePrefixDescription = "Prefix of the names of the component's hook-group layouts, in place of <application>-<component>: each layout, its directory and the Flux Kustomization generated for it under per-layout placement, is named <prefix>-<NN>-<phase>. A DNS-1123 subdomain, used as written and never shortened: a layout name over 63 characters built from it is refused. It must differ from the prefix of every other component of the document."
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values, secretValues and scopeOverrides excepted, which are split off before
@@ -81,6 +86,9 @@ type helmTemplateProperties struct {
 	Chart       string              `json:"chart"`
 	Version     string              `json:"version"`
 	ReleaseName string              `json:"releaseName"`
+	// The authored prefix of the hook-group layout names; nil when absent or
+	// null. A present empty string is an authored prefix, and refused.
+	HookGroupNamePrefix *string `json:"hookGroupNamePrefix"`
 }
 
 // helmTemplateSource is the inline chart source: a URL, and optionally the
@@ -142,6 +150,12 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	// Record the resolved kind and release name.
 	cfg.SourceKind = src.Kind
 	cfg.ReleaseName = src.ReleaseName
+	// As authored: the transform checks it when it resolves the prefix
+	// (oam.HookGroupNamePrefixSetter), and AugmentLayout checks every name built
+	// from it.
+	if props.HookGroupNamePrefix != nil {
+		cfg.HookGroupNamePrefix, cfg.prefixAuthored = *props.HookGroupNamePrefix, true
+	}
 	return cfg, nil
 }
 
@@ -182,10 +196,20 @@ type HelmTemplateConfig struct {
 	// Name is the component name.
 	Name string
 	// Application is the name of the OAM application the component belongs to.
-	// The transform sets it (SetApplicationName); it leads the name of every
-	// hook-group child layout (hookGroupChildName). Empty on a config built
-	// directly, whose child names then begin with the layout's own name.
+	// The transform sets it (SetApplicationName); it leads the default name of
+	// every hook-group child layout (hookGroupChildName). Empty on a config built
+	// directly, whose default child names then begin with the layout's own name.
 	Application string
+	// HookGroupNamePrefix is the prefix of the hook-group child layout names in
+	// place of the default "<Application>-<layout name>": the author's
+	// hookGroupNamePrefix, the answer of the consumer's Naming hook for role
+	// "hook-group" (SetHookGroupNamePrefix), or what the builder of a direct
+	// config set. Each child is then named "<prefix>-<NN>-<phase>", directory and
+	// Flux Kustomization alike. It is never shortened: AugmentLayout refuses a
+	// child name built from it that is no DNS-1123 subdomain of at most 63
+	// characters. Empty means the default, whose Kustomization name is shortened
+	// to 63 characters.
+	HookGroupNamePrefix string
 	// Namespace is the application namespace: the render's .Release.Namespace,
 	// and the namespace given to a namespaced rendered object that carries none
 	// (stampRenderedNamespaces). Empty leaves .Release.Namespace at kure's
@@ -230,6 +254,10 @@ type HelmTemplateConfig struct {
 	// Kubernetes API scopes, and must agree with a CustomResourceDefinition the
 	// chart renders for the kind.
 	ScopeOverrides map[schema.GroupVersionKind]manifest.ScopeResult
+
+	// prefixAuthored says the author wrote hookGroupNamePrefix, also where what
+	// the author wrote is the empty string, which the transform refuses.
+	prefixAuthored bool
 
 	// renderChart renders the chart. ToApplicationConfig sets helm.RenderChart,
 	// which a nil value also means; tests inject a stub.
@@ -305,16 +333,29 @@ func (c *HelmTemplateConfig) Generate(_ *stack.Application) ([]*client.Object, e
 // hook-group child layout names then begin with.
 func (c *HelmTemplateConfig) SetApplicationName(name string) { c.Application = name }
 
+// AuthoredHookGroupNamePrefix implements oam.HookGroupNamePrefixSetter: the
+// prefix the author wrote in hookGroupNamePrefix. A config built directly with
+// HookGroupNamePrefix set answers as if its builder were the author, so a
+// transform it is handed to checks and claims that prefix and asks no hook.
+func (c *HelmTemplateConfig) AuthoredHookGroupNamePrefix() (string, bool) {
+	return c.HookGroupNamePrefix, c.prefixAuthored || c.HookGroupNamePrefix != ""
+}
+
+// SetHookGroupNamePrefix implements oam.HookGroupNamePrefixSetter: the
+// transform hands over the prefix it resolved when that is not the default.
+func (c *HelmTemplateConfig) SetHookGroupNamePrefix(prefix string) { c.HookGroupNamePrefix = prefix }
+
 // AugmentLayout repartitions the render Generate returned flat into one child
 // layout per Helm hook group, chained in execution order
-// (chartRender.partition) and named after c.Application and ml. A chart with at
-// most one hook group leaves ml unchanged.
+// (chartRender.partition) and named after c.HookGroupNamePrefix, or by default
+// after c.Application and ml. A chart with at most one hook group leaves ml
+// unchanged. A child name built from c.HookGroupNamePrefix that cannot be a
+// Flux Kustomization's is refused, and ml is then left as it was.
 func (c *HelmTemplateConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err
 	}
-	c.partition(c.Application, ml)
-	return nil
+	return c.partition(hookGroupNaming{component: c.Name, application: c.Application, prefix: c.HookGroupNamePrefix}, ml)
 }
 
 // GenerateCoversAugmentLayout implements oam.LayoutAugmentationCoverage and is
@@ -328,4 +369,5 @@ var (
 	_ layout.LayoutAugmenter         = (*HelmTemplateConfig)(nil)
 	_ oam.LayoutAugmentationCoverage = (*HelmTemplateConfig)(nil)
 	_ oam.ApplicationNameSetter      = (*HelmTemplateConfig)(nil)
+	_ oam.HookGroupNamePrefixSetter  = (*HelmTemplateConfig)(nil)
 )

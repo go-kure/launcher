@@ -66,6 +66,13 @@ const (
 	// NameRoleValuesSecret is the Secret the helm rule generates for
 	// secretValues. Default: "<component>-secret-values-<values hash>".
 	NameRoleValuesSecret NameRole = "values-secret"
+	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
+	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and the
+	// Flux Kustomization the base library generates for it under per-layout
+	// placement. Default: "<application>-<component>". It is the one role whose
+	// answer is a prefix and not a name: how many groups a chart has is known only
+	// once it is rendered, after every name is resolved.
+	NameRoleHookGroup NameRole = "hook-group"
 )
 
 // nameSyntax is the rule a name that is not the default is held to.
@@ -92,6 +99,11 @@ const (
 	// are accepted when their objects differ (a configmap trait and a pvc trait
 	// both named "dup").
 	nameClassSubApplication
+	// nameClassHookGroupPrefix is the prefix of a component's hook-group layout
+	// names: claimed by the prefix across the document, so two components never
+	// share one. It is held against no bundle name: a prefix alone is no layout's
+	// name.
+	nameClassHookGroupPrefix
 )
 
 // nameRoles is the closed set, in the order NameRoles returns it.
@@ -114,6 +126,7 @@ var nameRoles = []struct {
 	{NameRoleHelmSource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesConfigMap, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesSecret, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
@@ -155,14 +168,16 @@ type NameRequest struct {
 	Role NameRole
 	// Kind is the named object's kind as a collision error prints it, "Kind" or
 	// "Kind.group" ("HorizontalPodAutoscaler.autoscaling"). It is empty for a
-	// name that is no object (a bundle, a group, a sub-application).
+	// name that is no object (a bundle, a group, a sub-application, a hook-group
+	// prefix).
 	Kind string
 	// Default is launcher's own name, as launcher would use it: already shortened
 	// to fit where launcher shortens a name (a group's bundle, a generated
 	// object), and as long as it is where it does not (a trait's sub-application:
-	// the component name plus a suffix). It is what tells apart several names of
-	// one component and role: the two bundles of two groups, each object of the
-	// rbac trait.
+	// the component name plus a suffix; a hook-group prefix, which launcher
+	// shortens only inside each name it leads). It is what tells apart several
+	// names of one component and role: the two bundles of two groups, each object
+	// of the rbac trait.
 	Default string
 }
 
@@ -322,15 +337,19 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 
 // nameClaimKey is what makes two resolved names the same name: for an object
 // its group, kind, namespace and name, as CheckInDocumentCollisions keys one;
-// for a bundle its name alone.
+// for a bundle its name alone, and for a hook-group prefix the prefix alone.
 type nameClaimKey struct {
 	class nameClass
 	objectIdentity
 }
 
 func (k nameClaimKey) String() string {
-	if k.class == nameClassBundle {
+	switch k.class {
+	case nameClassBundle:
 		return fmt.Sprintf("bundle %q", k.name)
+	case nameClassHookGroupPrefix:
+		return fmt.Sprintf("hook-group name prefix %q", k.name)
+	case nameClassObject, nameClassSubApplication:
 	}
 	return k.objectIdentity.String()
 }
