@@ -151,6 +151,24 @@ func TestObjectName_Refusals(t *testing.T) {
 	}
 }
 
+// An endpoint query resolves a kind component's object name only where the type
+// declares endpoints. For one that declares none the answer is (nil, nil): the
+// hook is not asked, and an `objectName` the transform would refuse is not read.
+func TestObjectName_EndpointsOfATypeWithoutAny(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{"widget": kindStub("widget", widgetKind, ObjectScopeNamespaced)}, nil)
+	for _, props := range []map[string]any{nil, {"objectName": "Not_Valid"}} {
+		comp := widget("web", props)
+		var asked []NameRequest
+		eps, err := tr.ComponentEndpointsNamed("app", &comp, objectHook(map[string]string{"web": "hooked"}, &asked))
+		if eps != nil || err != nil {
+			t.Errorf("properties %v: ComponentEndpointsNamed = %v, %v; want nil, nil for a type that declares no endpoints", props, eps, err)
+		}
+		if len(asked) != 0 {
+			t.Errorf("properties %v: the hook was asked %+v for a type that declares no endpoints", props, asked)
+		}
+	}
+}
+
 // A member a component lowering rule emitted is named by its rule: the hook is
 // not asked for its object, and `objectName` on it is refused, in words that
 // name the rule kinds that emit a member.

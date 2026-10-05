@@ -295,11 +295,11 @@ func validateComponentServiceName(name string) error {
 }
 
 // serviceNameField names where a service component's Service name came from,
-// for validateServiceName: the component name, or `objectName` when the Service
-// is named apart from it.
+// for validateServiceName: the component name, or, when the Service is named
+// apart from it, `objectName` or the Naming hook (objectNameField).
 func serviceNameField(serviceName, componentName string) string {
 	if serviceName != componentName {
-		return oam.ObjectNameProperty
+		return objectNameField
 	}
 	return "name"
 }

@@ -524,6 +524,49 @@ func TestNamingHook_PostgresqlRefusals(t *testing.T) {
 	}
 }
 
+// TestNamingHook_KindNameRuleNamesBothSources: a kind that holds its object's
+// name to a rule of its own (a Service, a Namespace) is handed the resolved name
+// only, so its refusal names both places that name can come from. A hook's
+// answer is not reported as the author's `objectName`.
+func TestNamingHook_KindNameRuleNamesBothSources(t *testing.T) {
+	const source = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "object"): `
+	app := func(name, typ, props string) string {
+		return fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: %s
+      type: %s
+      properties:
+%s`, name, typ, props)
+	}
+	const servicePorts = "        selector:\n          app: api\n        ports:\n          - port: 80\n"
+	for _, tc := range []struct {
+		name, component, typ, props, bad, want string
+	}{
+		{"service", "api", "service", servicePorts, "1api", `"1api" is not a valid Service name`},
+		{"namespace", "tenant", "namespace", "        finalizers: []\n", "tenant.a", `"tenant.a" is not a valid Namespace name`},
+	} {
+		t.Run(tc.name+" authored", func(t *testing.T) {
+			authored := app(tc.component, tc.typ, tc.props+"        "+oam.ObjectNameProperty+": "+tc.bad+"\n")
+			err := transformErr(t, authored, namingContext(nil))
+			if err == nil || !strings.Contains(err.Error(), source+tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, source+tc.want)
+			}
+		})
+		t.Run(tc.name+" from the hook", func(t *testing.T) {
+			hook := renameBy(map[string]string{"object " + tc.component: tc.bad})
+			err := transformErr(t, app(tc.component, tc.typ, tc.props), namingContext(hook))
+			if err == nil || !strings.Contains(err.Error(), source+tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, source+tc.want)
+			}
+		})
+	}
+}
+
 func TestNamingHook_DecliningHookChangesNothing(t *testing.T) {
 	cluster, apps := namingTransform(t, namingApp("", ""), namingContext(nil))
 	without := generatedNames(cluster, apps)
