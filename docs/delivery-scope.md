@@ -209,6 +209,8 @@ Decided in the ticket:
   Secret (`valuesConfigMapName`, `valuesSecretName`), the HelmRelease of a `helm`
   component (`helmReleaseName`), the Kustomization of an `oci`
   component and the source it keeps to itself (`kustomizationName`, `source.objectName`),
+  the Deployment, the Service and the ServiceAccount of a `webservice` or `worker`
+  component (`deploymentObjectName`, `serviceObjectName`, `serviceAccountObjectName`),
   and the prefix of a `helmtemplate`
   component's hook-group child layouts (`hookGroupNamePrefix`). Still
   none for:
@@ -255,15 +257,16 @@ Decided in the ticket:
     `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, the object
     of an authored kind component, the generated source, the values ConfigMap and
     Secret and the HelmRelease of a `helm` component, the Kustomization and the kept source of an `oci`
-    component, and the prefix of a `helmtemplate` component's
+    component, the Deployment, the Service and the ServiceAccount of a `webservice` or
+    `worker` component, and the prefix of a `helmtemplate` component's
     hook-group layouts. A trait
     handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
     `LoweringContext.ResolveName`, or with `LoweringContext.ResolveMemberName` for the
     object of a kind component it emits under its component's name
     (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
-    a DNS-1123 subdomain (a DNS-1035 label for the Pooler), refused when invalid or too
-    long. Only launcher's own defaults go through the shortening rule (§3.3).
+    a DNS-1123 subdomain (a DNS-1035 label for the Pooler and for the Service of a
+    `webservice`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
   - A lowering rule's request carries the name of the document the rule is lowering,
     which a later document rule may still change. The hook is asked only inside
     `Transform`: `LowerRaws` and a rule driven directly keep the defaults.
@@ -328,6 +331,26 @@ Decided in the ticket:
     interval, unless the object is watched.
   - These objects land in the Flux namespace when one is set, and their names are claimed
     there (`NameSpec.FluxScoped`).
+- **Shipped: the objects of a `webservice` and a `worker`** (`WebserviceRule` and
+  `WorkerRule`, `pkg/oam/builtin/components/role_members.go`; the components README,
+  **webservice / worker**). `deploymentObjectName`, `serviceObjectName` (`webservice` only)
+  and `serviceAccountObjectName` name the Deployment, the Service and the ServiceAccount,
+  under roles `workload-deployment`, `workload-service` and `workload-serviceaccount`,
+  asked with the component; the default of each is the component name, so a document that
+  sets none builds as before.
+  - Each names its object alone and is claimed (`LoweringContext.ResolveMemberName`). The
+    members keep the component's name, and with it the labels, the selectors and the names
+    the traits derive.
+  - The references launcher writes follow: the `scaler` trait's `scaleTargetRef` the
+    Deployment; a routing trait's own backend and the Service a route resolves to the
+    Service; the pods' `serviceAccountName` and the `rbac` subject the ServiceAccount.
+  - **A renamed Service has another DNS name in the cluster, and launcher builds no such
+    address: every address written with the component name is the author's to change.**
+  - `serviceAccountObjectName` is refused beside `serviceAccountName`, which names an
+    existing account: the component then generates none, and the hook is not asked.
+  - A sibling group accepts a member that runs no pods and names the account its one
+    pod-running member runs as: the same answer, not a second one
+    (`checkSiblingGroups`, `pkg/oam/sibling_group.go`).
 - **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
   hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
@@ -1267,7 +1290,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`) | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`). Open: the Cluster and the ObjectStore of a `postgresql` component | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

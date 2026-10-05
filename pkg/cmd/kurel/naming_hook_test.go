@@ -179,11 +179,15 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// objects and then its sub-application, the synthesized policy last. agent
 	// is the one authored kind component: the
 	// members the webservice, postgresql and helm rules emit are named by their
-	// rule, and the hook is not asked for them. The helm rule's generated source
-	// is the document's, so its request carries no component. The helm rule asks
-	// for its HelmRelease and the oci rule for the two objects it names after its
-	// component, each under its own role.
+	// rule, and the hook is not asked for them under the object role. The helm
+	// rule's generated source is the document's, so its request carries no
+	// component. The webservice rule asks for its Deployment, its Service and its
+	// ServiceAccount, the helm rule for its HelmRelease and the oci rule for the
+	// two objects it names after its component, each under its own role.
 	want := []oam.NameRequest{
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},

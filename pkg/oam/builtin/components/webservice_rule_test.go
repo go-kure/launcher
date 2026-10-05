@@ -28,7 +28,8 @@ func TestWebserviceRule_ComponentType(t *testing.T) {
 // publishes for "webservice". A deliberate change to a schema webservice shares
 // updates the capture with it: go-kure/launcher#790 added the shared container
 // fields (schemaContainerFields) to the main container, to an init container
-// and to a sidecar.
+// and to a sidecar; go-kure/launcher#787 added deploymentObjectName,
+// serviceObjectName and serviceAccountObjectName (schemaRoleObjectNames).
 func TestWebserviceRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/webservice-property-schema.json")
 	if err != nil {
