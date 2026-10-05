@@ -6218,7 +6218,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1035 label of
   at most 63 characters (CloudNativePG names the pooler's Service after it);
   the default derives from the component name: set poolerName to name the
-  Pooler otherwise`).
+  Pooler otherwise`). A Pooler cannot carry its Cluster's name, and with the
+  Cluster named apart the two can meet (a `clusterObjectName` of `db-pooler`
+  on component `db`): it is refused where the Pooler is built, and where
+  endpoints are collected in the same words (`cluster.name "db-pooler": a
+  pooler cannot have the same name as its cluster`).
   **CloudNativePG derives the Cluster's Services (`<cluster>-rw`,
   `<cluster>-ro`, `<cluster>-r`) and Secrets (`<cluster>-app` and the others)
   from the Cluster's name, and the default backup path moves with it: the

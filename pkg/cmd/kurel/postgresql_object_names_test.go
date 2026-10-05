@@ -321,6 +321,33 @@ func TestPostgresqlObjectNames_Refusals(t *testing.T) {
 			want:     `clusterObjectName (or the Naming hook's answer for role "postgresql-cluster"): postgresql Cluster name "` + tooLong + `": must be a DNS-1035 label of at most 50 characters`,
 			endpoint: true,
 		},
+		// A Pooler that carries its Cluster's name is refused by the build, and
+		// where endpoints are collected in the same words, whichever of the two
+		// names was moved onto the other and whoever moved it.
+		{
+			name:     "an authored Cluster name that is the Pooler's default",
+			props:    "        clusterObjectName: db-pooler\n",
+			want:     `cluster.name "db-pooler": a pooler cannot have the same name as its cluster`,
+			endpoint: true,
+		},
+		{
+			name:     "a Cluster answer that is the Pooler's default",
+			names:    map[string]string{"postgresql-cluster db": "db-pooler"},
+			want:     `cluster.name "db-pooler": a pooler cannot have the same name as its cluster`,
+			endpoint: true,
+		},
+		{
+			name:     "an authored poolerName that is the authored Cluster name",
+			props:    "        clusterObjectName: pg\n        poolerName: pg\n",
+			want:     `cluster.name "pg": a pooler cannot have the same name as its cluster`,
+			endpoint: true,
+		},
+		{
+			name:     "a Pooler answer that is the Cluster's answer",
+			names:    map[string]string{"postgresql-cluster db": "pg", "pooler db-pooler": "pg"},
+			want:     `cluster.name "pg": a pooler cannot have the same name as its cluster`,
+			endpoint: true,
+		},
 		{
 			name:  "an ObjectStore answer that is no subdomain",
 			names: map[string]string{"postgresql-objectstore db": "Backups_1"},
