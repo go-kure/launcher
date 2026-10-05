@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -30,13 +31,17 @@ import (
 // The kind components of go-kure/launcher#790 to which no dimension of the
 // environment policy applies, built on one shared helper (policyFreeKind): the
 // cluster-scoped classes, the CSIDriver, the ServiceCIDR, the
-// PodDisruptionBudget and the four kinds of the Prometheus operator's API.
+// PodDisruptionBudget and the four kinds of the Prometheus operator's API. The
+// three kinds of cert-manager's API are held here too: the policy reaches one
+// part of each (held), and everything else of them is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
 // otherwise. namespaced says the object lands in the build namespace; the
-// others are cluster-scoped. minimal is the least a component may author, full
-// a value of every top-level field.
+// others are cluster-scoped. held says the environment policy reaches the
+// kind: its fixtures then stay inside ptStrictPolicy, and what the policy
+// refuses of it has its own tests. minimal is the least a component may
+// author, full a value of every top-level field.
 type policyFreeKind struct {
 	component   string
 	handler     oam.ComponentHandler
@@ -44,8 +49,21 @@ type policyFreeKind struct {
 	typ         reflect.Type
 	wholeObject bool
 	namespaced  bool
+	held        bool
 	minimal     map[string]any
 	full        map[string]any
+}
+
+// generate builds the kind's object from props, named name. A kind the policy
+// does not reach is built under a policy that allows next to nothing and under
+// none (generateCoreKind); a held one under ptStrictPolicy with explicit
+// secrets forbidden, and under none.
+func (k policyFreeKind) generate(t *testing.T, name string, props map[string]any) client.Object {
+	t.Helper()
+	if k.held {
+		return generateCoreKindUnder(t, k.handler, k.component, name, props, esPolicy{stubPolicy: ptStrictPolicy()}, nil)
+	}
+	return generateCoreKind(t, k.handler, k.component, name, props)
 }
 
 // namespace is the namespace the kind's object carries when it is built for
@@ -316,6 +334,29 @@ var policyFreeKinds = []policyFreeKind{
 			map[string]any{"name": "empty"},
 		}},
 	},
+	{
+		component: "issuer", handler: &components.IssuerHandler{},
+		gvk: certv1.SchemeGroupVersion.WithKind("Issuer"),
+		typ: reflect.TypeFor[certv1.IssuerSpec](), namespaced: true, held: true,
+		// The API's schema requires no issuer type; cert-manager's webhook wants
+		// one, and the kind leaves that to it.
+		minimal: map[string]any{},
+		full:    issuerFull(),
+	},
+	{
+		component: "clusterissuer", handler: &components.ClusterIssuerHandler{},
+		gvk: certv1.SchemeGroupVersion.WithKind("ClusterIssuer"),
+		typ: reflect.TypeFor[certv1.IssuerSpec](), held: true,
+		minimal: map[string]any{},
+		full:    issuerFull(),
+	},
+	{
+		component: "certificate", handler: &components.CertificateHandler{},
+		gvk: certv1.SchemeGroupVersion.WithKind("Certificate"),
+		typ: reflect.TypeFor[certv1.CertificateSpec](), namespaced: true, held: true,
+		minimal: certificateMinimal(),
+		full:    certificateFull(),
+	},
 }
 
 // monitoringOAuth2 is an OAuth2 block of the Prometheus operator's API with
@@ -475,7 +516,7 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 					t.Fatalf("marshal the properties: %v", err)
 				}
 
-				obj := generateCoreKind(t, kind.handler, kind.component, "fast", props)
+				obj := kind.generate(t, "fast", props)
 				if got := obj.GetObjectKind().GroupVersionKind(); got != kind.gvk {
 					t.Errorf("GVK = %s, want %s", got, kind.gvk)
 				}
@@ -565,6 +606,21 @@ func authoredProperties(t *testing.T, props map[string]any) (map[string]struct{}
 // hold: the walk must find each when an object is compared with itself, or it
 // would pass without having looked there.
 func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
+	// An Issuer and a ClusterIssuer hold one spec type.
+	issuerReaches := []string{
+		".Spec.IssuerConfig.ACME", ".Spec.IssuerConfig.ACME.CABundle", ".Spec.IssuerConfig.ACME.ExternalAccountBinding",
+		".Spec.IssuerConfig.ACME.Solvers", ".Spec.IssuerConfig.ACME.Solvers[0].Selector.MatchLabels",
+		".Spec.IssuerConfig.ACME.Solvers[0].HTTP01.Ingress.PodTemplate",
+		".Spec.IssuerConfig.ACME.Solvers[0].HTTP01.Ingress.PodTemplate.ACMEChallengeSolverHTTP01IngressPodObjectMeta.Labels",
+		".Spec.IssuerConfig.ACME.Solvers[0].HTTP01.Ingress.PodTemplate.Spec.Resources.Limits",
+		".Spec.IssuerConfig.ACME.Solvers[0].HTTP01.Ingress.PodTemplate.Spec.SecurityContext.RunAsUser",
+		".Spec.IssuerConfig.ACME.Solvers[1].HTTP01.GatewayHTTPRoute.ParentRefs",
+		".Spec.IssuerConfig.ACME.Solvers[2].WaitInsteadOfSelfCheck",
+		".Spec.IssuerConfig.ACME.Solvers[3].DNS01.Webhook.Config.Raw",
+		".Spec.IssuerConfig.CA.CRLDistributionPoints", ".Spec.IssuerConfig.Vault.CABundleSecretRef",
+		".Spec.IssuerConfig.Vault.Auth.Kubernetes.ServiceAccountRef.TokenAudiences",
+		".Spec.IssuerConfig.SelfSigned", ".Spec.IssuerConfig.Venafi.TPP.CABundleSecretRef",
+	}
 	reaches := map[string][]string{
 		"storageclass":          {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
 		"volumeattributesclass": {".Parameters"},
@@ -599,6 +655,16 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		"prometheusrule": {
 			".Spec.Groups", ".Spec.Groups[0].Labels", ".Spec.Groups[0].Interval", ".Spec.Groups[0].Limit",
 			".Spec.Groups[0].Rules", ".Spec.Groups[0].Rules[1].For", ".Spec.Groups[0].Rules[1].Annotations",
+		},
+		"issuer":        issuerReaches,
+		"clusterissuer": issuerReaches,
+		"certificate": {
+			".Spec.Subject", ".Spec.Subject.Organizations", ".Spec.Duration", ".Spec.RenewBeforePercentage",
+			".Spec.Renewal", ".Spec.Renewal.Windows", ".Spec.Renewal.Windows[0].WindowDuration", ".Spec.DNSNames",
+			".Spec.OtherNames", ".Spec.SecretTemplate.Labels", ".Spec.Keystores", ".Spec.Keystores.JKS",
+			".Spec.Keystores.JKS.Alias", ".Spec.Keystores.PKCS12", ".Spec.Usages", ".Spec.PrivateKey",
+			".Spec.EncodeUsagesInRequest", ".Spec.RevisionHistoryLimit", ".Spec.AdditionalOutputFormats",
+			".Spec.NameConstraints", ".Spec.NameConstraints.Permitted.DNSDomains",
 		},
 	}
 	type copyCase struct {
@@ -745,15 +811,49 @@ func TestPolicyFreeKinds_ObjectIdentityIsNotAuthorable(t *testing.T) {
 
 // TestPolicyFreeKinds_Refusals: the properties are the fields of the type and
 // nothing else, at any depth, and a field the API requires must be authored:
-// a top-level one, and on the Prometheus operator's kinds a nested one the
-// type would write unauthored.
+// a top-level one, and on the Prometheus operator's and cert-manager's kinds
+// a nested one the type would write unauthored.
 func TestPolicyFreeKinds_Refusals(t *testing.T) {
 	const notA = "properties do not decode into a "
-	cases := map[string][]struct {
+	type refusal struct {
 		name  string
 		props map[string]any
 		want  string
-	}{
+	}
+	// An Issuer and a ClusterIssuer hold one spec type. None of its fields is
+	// required at the top level: of an issuer type that is authored the API
+	// requires some, and of what is authored below those.
+	vault := func(auth map[string]any) map[string]any {
+		return map[string]any{"vault": map[string]any{"server": "https://vault.example.com", "path": "pki/sign/web", "auth": auth}}
+	}
+	issuerCases := []refusal{
+		{"acme without a server", map[string]any{"acme": map[string]any{"privateKeySecretRef": map[string]any{"name": "acme-account"}}}, "acme.server: required"},
+		{"acme without an account key", map[string]any{"acme": map[string]any{"server": "https://acme.example.com/directory"}}, "acme.privateKeySecretRef: required"},
+		{"account key without a name", map[string]any{"acme": acmeWith("privateKeySecretRef", map[string]any{"key": "tls.key"})}, "acme.privateKeySecretRef.name: required"},
+		{"account binding without a key ID", map[string]any{"acme": acmeWith("externalAccountBinding", map[string]any{"keySecretRef": secretKey("acme-eab", "hmac")})}, "acme.externalAccountBinding.keyID: required"},
+		{"an empty ca", map[string]any{"ca": map[string]any{}}, "ca.secretName: required"},
+		{"vault without auth", map[string]any{"vault": map[string]any{"server": "https://vault.example.com", "path": "pki/sign/web"}}, "vault.auth: required"},
+		{"vault without a path", map[string]any{"vault": map[string]any{"server": "https://vault.example.com", "auth": map[string]any{}}}, "vault.path: required"},
+		{"optional reference without a name", vault(map[string]any{"tokenSecretRef": map[string]any{"key": "token"}}), "vault.auth.tokenSecretRef.name: required"},
+		{"app role without its secret", vault(map[string]any{"appRole": map[string]any{"path": "approle", "roleId": "issuer"}}), "vault.auth.appRole.secretRef: required"},
+		{"service account reference without a name", vault(map[string]any{"kubernetes": map[string]any{"role": "issuer", "serviceAccountRef": map[string]any{"audiences": []any{"vault"}}}}), "vault.auth.kubernetes.serviceAccountRef.name: required"},
+		{"venafi without a zone", map[string]any{"venafi": map[string]any{"tpp": map[string]any{"url": "https://tpp.example.com/vedsdk", "credentialsRef": map[string]any{"name": "tpp"}}}}, "venafi.zone: required"},
+		{"a later solver's provider", acmeIssuer(
+			map[string]any{"http01": map[string]any{"ingress": map[string]any{}}},
+			map[string]any{"dns01": map[string]any{"digitalocean": map[string]any{}}},
+		), "acme.solvers[1].dns01.digitalocean.tokenSecretRef: required"},
+		{"webhook solver without a name", acmeIssuer(map[string]any{"dns01": map[string]any{"webhook": map[string]any{"groupName": "acme.example.com"}}}), "acme.solvers[0].dns01.webhook.solverName: required"},
+		{"unknown key", map[string]any{"selfSigned": map[string]any{}, "letsEncrypt": map[string]any{}}, notA + "cert-manager.io/v1 IssuerSpec"},
+		{"the object's spec", map[string]any{"spec": map[string]any{"selfSigned": map[string]any{}}}, notA},
+		{"issuer type sub-key", map[string]any{"selfSigned": map[string]any{"crlDistributionPoint": "http://crl.example.com"}}, notA},
+		{"issuer type a string", map[string]any{"selfSigned": "true"}, notA},
+		{"bundle not base64", map[string]any{"acme": acmeWith("caBundle", "-----BEGIN CERTIFICATE-----")}, notA},
+		{"bad quantity", acmeIssuer(http01Solver("ingress", map[string]any{"limits": map[string]any{"cpu": "lots"}})), notA},
+		{"solver sub-key", acmeIssuer(map[string]any{"http01": map[string]any{"ingress": map[string]any{"image": "registry.example/solver:1"}}}), notA},
+		{"null solver", map[string]any{"acme": acmeWith("solvers", []any{nil})}, "acme.solvers[0]"},
+		{"two spellings", map[string]any{"selfSigned": map[string]any{}, "SelfSigned": map[string]any{}}, "sets the same field as"},
+	}
+	cases := map[string][]refusal{
 		"storageclass": {
 			{"no properties", nil, "provisioner: required"},
 			{"null provisioner", map[string]any{"provisioner": nil}, "provisioner: required"},
@@ -901,6 +1001,27 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null group", map[string]any{"groups": []any{map[string]any{"name": "a"}, nil}}, "groups[1]"},
 			{"two spellings", map[string]any{"groups": []any{}, "Groups": []any{}}, "sets the same field as"},
 		},
+		"issuer":        issuerCases,
+		"clusterissuer": issuerCases,
+		"certificate": {
+			{"no properties", nil, "issuerRef: required"},
+			{"no issuer", map[string]any{"secretName": "web-tls"}, "issuerRef: required"},
+			{"null issuer", map[string]any{"secretName": "web-tls", "issuerRef": nil}, "issuerRef: required"},
+			{"issuer without a name", map[string]any{"secretName": "web-tls", "issuerRef": map[string]any{"kind": "ClusterIssuer"}}, "issuerRef.name: required"},
+			{"no secret name", map[string]any{"issuerRef": map[string]any{"name": "ca"}}, "secretName: required"},
+			{"output format without a type", certificateWith("additionalOutputFormats", []any{map[string]any{"type": "DER"}, map[string]any{}}), "additionalOutputFormats[1].type: required"},
+			{"keystore without create", certificateWith("keystores", map[string]any{"jks": map[string]any{"passwordSecretRef": map[string]any{"name": "keystore"}}}), "keystores.jks.create: required"},
+			{"keystore reference without a name", certificateWith("keystores", map[string]any{"pkcs12": map[string]any{"create": true, "passwordSecretRef": map[string]any{"key": "password"}}}), "keystores.pkcs12.passwordSecretRef.name: required"},
+			{"unknown key", certificateWith("issuer", "ca"), notA + "cert-manager.io/v1 CertificateSpec"},
+			{"the object's spec", map[string]any{"spec": certificateMinimal()}, notA},
+			{"private key sub-key", certificateWith("privateKey", map[string]any{"bits": 2048}), notA},
+			{"dnsNames a string", certificateWith("dnsNames", "shop.example.com"), notA},
+			{"duration a number", certificateWith("duration", 90), notA},
+			{"duration not one", certificateWith("duration", "ninety days"), notA},
+			{"revision limit a string", certificateWith("revisionHistoryLimit", "3"), notA},
+			{"null dns name", certificateWith("dnsNames", []any{"shop.example.com", nil}), "dnsNames[1]"},
+			{"two spellings", certificateWith("SecretName", "other-tls"), "sets the same field as"},
+		},
 	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
@@ -922,12 +1043,12 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 // written as a number takes its canonical form, and lists keep their order.
 func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	full := map[string]map[string]any{}
-	handlers := map[string]oam.ComponentHandler{}
+	kinds := map[string]policyFreeKind{}
 	for _, kind := range policyFreeKinds {
-		full[kind.component], handlers[kind.component] = kind.full, kind.handler
+		full[kind.component], kinds[kind.component] = kind.full, kind
 	}
 	build := func(component string, props map[string]any) any {
-		return generateCoreKind(t, handlers[component], component, "fast", props)
+		return kinds[component].generate(t, "fast", props)
 	}
 
 	sc := build("storageclass", full["storageclass"]).(*storagev1.StorageClass)

@@ -1,0 +1,55 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    launcher.gokure.dev/component: letsencrypt
+  name: letsencrypt
+  namespace: default
+spec:
+  acme:
+    email: ops@example.com
+    privateKeySecretRef:
+      name: letsencrypt-account
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+    - http01:
+        ingress:
+          ingressClassName: nginx
+          podTemplate:
+            metadata: {}
+            spec:
+              nodeSelector:
+                kubernetes.io/os: linux
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+      selector:
+        dnsZones:
+        - example.com
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            key: token
+            name: cloudflare
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    launcher.gokure.dev/component: internal-ca
+  name: internal-ca
+  namespace: default
+spec:
+  ca:
+    secretName: ca-key-pair
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    launcher.gokure.dev/component: selfsigned
+  name: selfsigned
+  namespace: default
+spec:
+  selfSigned: {}

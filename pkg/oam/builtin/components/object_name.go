@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
@@ -182,6 +183,10 @@ func cnpgKind(kind string) schema.GroupKind {
 
 func monitoringKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: monitoringv1.SchemeGroupVersion.Group, Kind: kind}
+}
+
+func certManagerKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: certv1.SchemeGroupVersion.Group, Kind: kind}
 }
 
 func fluxSourceKind(kind string) schema.GroupKind {
@@ -386,6 +391,22 @@ func (h *PrometheusProbeHandler) ComponentObject() (schema.GroupKind, oam.Object
 // ComponentObject declares the prometheusrule kind's PrometheusRule.
 func (h *PrometheusRuleHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return monitoringKind(monitoringv1.PrometheusRuleKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the issuer kind's Issuer.
+func (h *IssuerHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return certManagerKind(certv1.IssuerKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the clusterissuer kind's ClusterIssuer, which is
+// cluster-scoped.
+func (h *ClusterIssuerHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return certManagerKind(certv1.ClusterIssuerKind), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the certificate kind's Certificate.
+func (h *CertificateHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return certManagerKind(certv1.CertificateKind), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

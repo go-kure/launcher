@@ -781,6 +781,40 @@ be closed at build time.
     that could hold one (`params`, `endpointParams`, a proxy URL) is written as authored.
   - Metadata is not authorable, as on every kind component, so the labels a Prometheus
     selects monitors and rules by cannot be written (see the open point below).
+- **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
+  `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
+  with what they share in `certmanager_common.go`), each the strict projection of its
+  spec type, declaring its object and taking `objectName`. An Issuer and a Certificate
+  are namespaced, a ClusterIssuer cluster-scoped. `certificate` is also a trait type;
+  the two are separate lists, and the trait is unchanged.
+  - **No capability is required and nothing gates them,** a ClusterIssuer included: on
+    a cluster without cert-manager's CRDs the component builds and the object is refused
+    at apply.
+  - **The environment policy reaches two fields, so these are not built on
+    `policyFreeKind` alone.** `policyHeldKind` (`kind_policy_held.go`) is that helper,
+    unchanged, with an `ApplyPolicy` that asks one function of the kind. An issuer's ACME
+    HTTP01 solver pod template sizes a pod cert-manager starts: its cpu and memory are
+    held to the policy's maxima, and nothing else of it is (it names no image and no
+    security context of a container). A Certificate's keystore password written into the
+    object is refused under a policy that forbids explicit secrets. No default is filled
+    and no `Policy` method is added.
+  - Required fields follow the rule of the Prometheus operator's kinds: a field the API
+    requires that the Go type writes whether or not it was authored must be authored. A
+    test holds each list to the CRDs the linked module ships (61 paths for an issuer, 8
+    for a certificate). An issuer has none at the top level; a required field under a
+    parent the author left out is not asked for.
+  - **cert-manager's validating webhook refuses more than the CRDs do, and launcher
+    repeats none of it:** an issuer of no type or of two, a keystore with both or neither
+    of its password fields, a certificate that names no subject. Such a component builds
+    and is refused at apply. The one rule the CRDs write as an expression (a `venafi`
+    issuer names exactly one platform) is not repeated either.
+  - **No host these objects name is held to the allowed registries** (an ACME directory,
+    a Vault server, a certificate platform, a DNS server, a CRL or OCSP endpoint): none
+    is an artifact source. **No field of an issuer is checked for a literal secret:** a
+    credential is a reference to a Secret, and the free JSON of a webhook solver's
+    `config` is written as authored.
+  - A duration is carried in Go's spelling (`2160h` as `2160h0m0s`). Metadata is not
+    authorable, as on every kind component.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, and a kind component's metadata is not authorable,
   so the kind could not do what it is authored for. Its inventory row is `held`, with
@@ -840,7 +874,7 @@ be closed at build time.
   ticket.
 - **Missing kinds:** the inventory's `missing` rows (Pod, Gateway among
   them), and its `trait` rows, the
-  kinds reachable only as traits today (Certificate, ExternalSecret, Role and RoleBinding,
+  kinds reachable only as traits today (ExternalSecret, Role and RoleBinding,
   ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
 
@@ -1001,7 +1035,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer` and `certificate` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

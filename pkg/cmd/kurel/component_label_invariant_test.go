@@ -336,6 +336,14 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"prometheusrule": {props: map[string]any{"groups": []any{map[string]any{
 		"name":  "availability",
 		"rules": []any{map[string]any{"alert": "TargetDown", "expr": "up == 0"}}}}}},
+	// The three cert-manager kinds emit identity and the authored fields too,
+	// with no `app` label and no pods: an Issuer and a Certificate namespaced, a
+	// ClusterIssuer cluster-scoped. None checks a name rule of its own.
+	"issuer":        {props: map[string]any{"selfSigned": map[string]any{}}},
+	"clusterissuer": {props: map[string]any{"ca": map[string]any{"secretName": "ca-key-pair"}}},
+	"certificate": {props: map[string]any{
+		"secretName": "web-tls", "dnsNames": []any{"web.example.com"},
+		"issuerRef": map[string]any{"name": "selfsigned", "kind": "ClusterIssuer"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

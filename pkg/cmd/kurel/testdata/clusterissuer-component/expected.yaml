@@ -1,0 +1,27 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  labels:
+    launcher.gokure.dev/component: vault
+  name: vault
+spec:
+  vault:
+    auth:
+      kubernetes:
+        mountPath: /v1/auth/kubernetes
+        role: issuer
+        secretRef:
+          name: ""
+        serviceAccountRef:
+          name: vault-issuer
+    path: pki_int/sign/example-dot-com
+    server: https://vault.example.com:8200
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  labels:
+    launcher.gokure.dev/component: bootstrap
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}

@@ -136,8 +136,8 @@ func embeddedTypeName(expr ast.Expr) string {
 	return ""
 }
 
-// monitoringField is one field the encoding of a spec type reaches.
-type monitoringField struct {
+// kindField is one field the encoding of a kind's spec type reaches.
+type kindField struct {
 	// owner is the struct that declares the field.
 	owner reflect.Type
 	field reflect.StructField
@@ -152,7 +152,7 @@ type monitoringField struct {
 
 // markers returns the field's markers, and whether its source was read: only
 // the monitoring package's is.
-func (f monitoringField) markers(all map[string]fieldMarkers) (fieldMarkers, bool) {
+func (f kindField) markers(all map[string]fieldMarkers) (fieldMarkers, bool) {
 	if f.owner.PkgPath() != reflect.TypeFor[monitoringv1.ServiceMonitorSpec]().PkgPath() {
 		return fieldMarkers{}, false
 	}
@@ -161,7 +161,7 @@ func (f monitoringField) markers(all map[string]fieldMarkers) (fieldMarkers, boo
 }
 
 // jsonOptions returns the options of the field's json tag.
-func (f monitoringField) jsonOptions() []string {
+func (f kindField) jsonOptions() []string {
 	_, opts, _ := strings.Cut(f.field.Tag.Get("json"), ",")
 	return strings.Split(opts, ",")
 }
@@ -169,7 +169,7 @@ func (f monitoringField) jsonOptions() []string {
 // writtenUnauthored says the type encodes the field when nothing was decoded
 // into it: a struct that is no pointer, whatever omitempty says, or any field
 // without omitempty.
-func (f monitoringField) writtenUnauthored() bool {
+func (f kindField) writtenUnauthored() bool {
 	opts := f.jsonOptions()
 	if slices.Contains(opts, "omitzero") {
 		return false
@@ -179,7 +179,7 @@ func (f monitoringField) writtenUnauthored() bool {
 
 // omitemptyScalar says the field is a number or a boolean that is no pointer
 // and is omitted when zero.
-func (f monitoringField) omitemptyScalar() bool {
+func (f kindField) omitemptyScalar() bool {
 	switch f.field.Type.Kind() {
 	case reflect.Bool,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -191,11 +191,21 @@ func (f monitoringField) omitemptyScalar() bool {
 	}
 }
 
-// walkMonitoringFields visits every field the encoding of typ reaches, as
+// walkMonitoringFields is walkKindFields for a type of the Prometheus
+// operator's API: a field is required where its source marks it so.
+func walkMonitoringFields(typ reflect.Type, all map[string]fieldMarkers, visit func(kindField)) {
+	walkKindFields(typ, func(f kindField) bool {
+		m, _ := f.markers(all)
+		return m.required
+	}, visit)
+}
+
+// walkKindFields visits every field the encoding of typ reaches, as
 // encoding/json reads it: exported fields by json name, embedded structs
 // promoted, pointers, lists and maps descended, types with their own JSON or
-// text encoding not. A type is walked once per branch.
-func walkMonitoringFields(typ reflect.Type, all map[string]fieldMarkers, visit func(monitoringField)) {
+// text encoding not. A type is walked once per branch. required says whether
+// the API requires a field, which decides what is forced below it.
+func walkKindFields(typ reflect.Type, required func(kindField) bool, visit func(kindField)) {
 	marshaler := reflect.TypeFor[json.Marshaler]()
 	textMarshaler := reflect.TypeFor[encoding.TextMarshaler]()
 	var walk func(typ reflect.Type, path string, forced bool, branch []reflect.Type)
@@ -225,7 +235,7 @@ func walkMonitoringFields(typ reflect.Type, all map[string]fieldMarkers, visit f
 			if name == "" {
 				name = f.Name
 			}
-			field := monitoringField{owner: typ, field: f, path: name, forced: forced}
+			field := kindField{owner: typ, field: f, path: name, forced: forced}
 			if path != "" {
 				field.path = path + "." + name
 			}
@@ -236,8 +246,7 @@ func walkMonitoringFields(typ reflect.Type, all map[string]fieldMarkers, visit f
 			// list or a map, a value exists only where one was authored.
 			child, childPath, childForced := f.Type, field.path, false
 			if child.Kind() == reflect.Struct {
-				m, _ := field.markers(all)
-				childForced = forced || !m.required
+				childForced = forced || !required(field)
 			}
 		descend:
 			for {
@@ -281,7 +290,7 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 	}
 	walked := map[string]bool{}
 	for _, kind := range monitoringKinds {
-		walkMonitoringFields(kind.typ, all, func(f monitoringField) {
+		walkMonitoringFields(kind.typ, all, func(f kindField) {
 			if !f.omitemptyScalar() {
 				return
 			}
@@ -327,7 +336,7 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 		t.Run(kind.component, func(t *testing.T) {
 			listed, validated := map[string]bool{}, map[string]bool{}
 			fields := 0
-			walkMonitoringFields(kind.typ, all, func(f monitoringField) {
+			walkMonitoringFields(kind.typ, all, func(f kindField) {
 				m, read := f.markers(all)
 				if f.owner.PkgPath() != kind.typ.PkgPath() {
 					return

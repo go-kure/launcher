@@ -138,6 +138,12 @@ The kind components of the Prometheus operator's API, `servicemonitor`,
 are registered the same way, with a `<type>-component` fixture each: a
 ServiceMonitor, a PodMonitor, a Probe and a PrometheusRule in the build
 namespace. No capability is required of the cluster profile to build them.
+The kind components of cert-manager's API, `issuer`, `clusterissuer` and
+`certificate` (go-kure/launcher#790), are registered the same way, with a
+`<type>-component` fixture each: an Issuer and a Certificate in the build
+namespace, and a ClusterIssuer with no namespace. No capability is required
+of the cluster profile to build them either; the `certificate` trait, which
+shares the kind's name, still requires its own.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

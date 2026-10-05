@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -19,6 +20,7 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -89,6 +91,11 @@ var coreKindSchemas = []struct {
 	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, nil},
 	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
 	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
+	// And the kinds of cert-manager's API. An Issuer and a ClusterIssuer share
+	// one spec type.
+	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
+	{"clusterissuer", reflect.TypeFor[certv1.IssuerSpec](), &components.ClusterIssuerHandler{}, nil},
+	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no
@@ -144,6 +151,17 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 	}
 	if len(prop.Types) != 0 {
 		t.Errorf("schema key %q declares the union %v, but the field is %s, which decodes from one type", key, prop.Types, typ)
+		return
+	}
+	// A duration is a struct that decodes from a string ("2160h") and from
+	// nothing else.
+	if typ == reflect.TypeFor[metav1.Duration]() {
+		if prop.Type != oam.PropertyTypeString {
+			t.Errorf("schema key %q declares type %q, but the field is a duration, which decodes from a string", key, prop.Type)
+		}
+		if prop.Description == "" {
+			t.Errorf("schema key %q has no description", key)
+		}
 		return
 	}
 	if want := schemaTypeForGo(typ); prop.Type != want {

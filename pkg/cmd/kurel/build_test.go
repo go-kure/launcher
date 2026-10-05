@@ -485,6 +485,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"horizontalpodautoscaler", "poddisruptionbudget", "servicecidr",
 		"secret",
 		"podmonitor", "prometheus-probe", "prometheusrule", "servicemonitor",
+		"certificate", "clusterissuer", "issuer",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

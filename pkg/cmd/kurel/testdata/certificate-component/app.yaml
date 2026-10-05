@@ -1,0 +1,39 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: shop-tls
+      type: certificate
+      properties:
+        secretName: shop-tls
+        commonName: shop.example.com
+        dnsNames:
+          - shop.example.com
+          - www.shop.example.com
+        duration: 2160h
+        renewBefore: 360h
+        issuerRef:
+          name: letsencrypt
+          kind: ClusterIssuer
+        privateKey:
+          algorithm: ECDSA
+          size: 256
+          rotationPolicy: Always
+        usages:
+          - server auth
+        encodeUsagesInRequest: false
+        keystores:
+          pkcs12:
+            create: true
+            passwordSecretRef:
+              name: keystore
+              key: password
+    - name: internal
+      type: certificate
+      properties:
+        secretName: internal-tls
+        issuerRef:
+          name: internal-ca

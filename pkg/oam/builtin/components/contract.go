@@ -218,6 +218,21 @@ func (h *PrometheusRuleHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *IssuerHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("issuer")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ClusterIssuerHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("clusterissuer")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CertificateHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("certificate")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

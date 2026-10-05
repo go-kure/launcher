@@ -167,6 +167,9 @@ reads it.
 | `podmonitor` | PodMonitor | Kind-named Prometheus operator PodMonitor: the whole `PodMonitorSpec`, strictly decoded; `selector` is required. The selector is the author's. No environment policy applies and no capability is required — see below. |
 | `prometheus-probe` | Probe | Kind-named Prometheus operator Probe: the whole `ProbeSpec`, strictly decoded; `prober.url` is required. The prober and the targets are the author's. No environment policy applies and no capability is required — see below. |
 | `prometheusrule` | PrometheusRule | Kind-named Prometheus operator PrometheusRule: the whole `PrometheusRuleSpec` (`groups`), strictly decoded; a group's `name` and a rule's `expr` are required. No environment policy applies and no capability is required — see below. |
+| `issuer` | Issuer | Kind-named cert-manager Issuer: the whole `IssuerSpec` (`acme`, `ca`, `vault`, `selfSigned`, `venafi`), strictly decoded; no top-level field is required. The cpu and memory of an ACME HTTP01 solver's pod template are held to the environment policy's maxima. No capability is required — see below. |
+| `clusterissuer` | ClusterIssuer | Kind-named cert-manager ClusterIssuer: the same `IssuerSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
+| `certificate` | Certificate | Kind-named cert-manager Certificate: the whole `CertificateSpec`, strictly decoded; `secretName` and `issuerRef` with its `name` are required. A keystore password written into the object is refused under an environment policy that forbids explicit secrets. The issuer is the author's, and no capability is required. Shares its name with the `certificate` trait — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -304,11 +307,11 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
 | `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
-| `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | trait | `certificate` | hand-written parser | - |
+| `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | kind | `certificate` | strict decode of `CertificateSpec` | `secretName` and `issuerRef` with its `name` must be written. A keystore password in the object is refused under a policy that forbids explicit secrets. No capability is required. The `certificate` trait builds a Certificate for a workload through the same constructor, from a hand-written parser. |
 | `certmanager.CreateCertificateRequest` | cert-manager.io/v1 CertificateRequest | not authorable | - | - | A one-shot request cert-manager creates for a Certificate. |
 | `certmanager.CreateChallenge` | acme.cert-manager.io/v1 Challenge | not authorable | - | - | Created by cert-manager's ACME issuer. |
-| `certmanager.CreateClusterIssuer` | cert-manager.io/v1 ClusterIssuer (cluster-scoped) | missing | - | - | - |
-| `certmanager.CreateIssuer` | cert-manager.io/v1 Issuer | missing | - | - | - |
+| `certmanager.CreateClusterIssuer` | cert-manager.io/v1 ClusterIssuer (cluster-scoped) | kind | `clusterissuer` | strict decode of `IssuerSpec` | No top-level field must be written; of an issuer type that is authored, the fields the API requires that the type would write empty. The cpu and memory of an ACME HTTP01 solver's pod template are held to the policy's maxima. No capability is required. |
+| `certmanager.CreateIssuer` | cert-manager.io/v1 Issuer | kind | `issuer` | strict decode of `IssuerSpec` | As `clusterissuer`, in the build namespace. |
 | `certmanager.CreateOrder` | acme.cert-manager.io/v1 Order | not authorable | - | - | Created by cert-manager's ACME issuer. |
 | `cilium.CreateCiliumBGPAdvertisement` | cilium.io/v2 CiliumBGPAdvertisement (cluster-scoped) | missing | - | - | - |
 | `cilium.CreateCiliumBGPClusterConfig` | cilium.io/v2 CiliumBGPClusterConfig (cluster-scoped) | missing | - | - | - |
@@ -2660,7 +2663,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
   policy applies; `servicecidr`, `poddisruptionbudget` and the four kinds of
-  the Prometheus operator's API, below, are built on it too. A kind is a value
+  the Prometheus operator's API, below, are built on it too. The three kinds
+  of cert-manager's API, below, are built on `policyHeldKind`
+  (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
+  asks one function of the kind whether the policy refuses the decoded value.
+  It refuses or passes; it fills no default. A kind is a value
   of it naming the upstream type, an optional check of required fields, an
   optional list of required fields the type writes whether or not they were
   authored, and the base-library constructor; the
@@ -3213,6 +3220,174 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Service, a pod, an Ingress, a named port, a Secret key), and whether a
   Prometheus of the cluster selects the object. The object's status is the
   operator's and is not written.
+- **issuer**, **clusterissuer**, **certificate** (go-kure/launcher#790) are
+  the kind-named projections of three objects of cert-manager's
+  `cert-manager.io/v1` API: an Issuer, a ClusterIssuer and a Certificate. Each
+  is built on `policyHeldKind` (`policyFreeKind` with a policy check, see
+  above) and emits that one object, named after the component unless
+  `objectName` names it; the handler adds no label, no annotation and no
+  default. An `issuer` and a `certificate` are emitted in the build namespace
+  and declare their object as namespaced. A `clusterissuer` is emitted with no
+  namespace and declares its object as cluster-scoped, so its name is claimed
+  in no namespace. An Issuer and a ClusterIssuer share one spec type
+  (`IssuerSpec`), and what is said of an issuer below holds for both kinds.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `cert-manager.io/v1`: where cert-manager's
+  CRDs are not installed the component builds, and the object is refused at
+  apply. Whoever may author a component may author these, a ClusterIssuer
+  included. The open point "No capability gate on component types" on
+  go-kure/launcher#790 carries it. The `certificate` trait still requires its
+  capability; the kind of the same name does not read it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (a solver, a DNS provider's settings, a keystore).
+  - `issuer` and `clusterissuer` (`IssuerSpec`): the five issuer types, `acme`,
+    `ca`, `vault`, `selfSigned` and `venafi`. An issuer type authored empty is
+    in the object as written (`selfSigned: {}` is a complete self-signed
+    issuer); one left out is not.
+  - `certificate` (`CertificateSpec`): `secretName`, `issuerRef`, the subject
+    (`commonName`, `subject`, `literalSubject`), the subject alternative names
+    (`dnsNames`, `ipAddresses`, `uris`, `emailAddresses`, `otherNames`), the
+    lifetime (`duration`, `renewBefore`, `renewBeforePercentage`, `renewal`),
+    the key and its use (`privateKey`, `signatureAlgorithm`, `usages`,
+    `encodeUsagesInRequest`, `isCA`, `nameConstraints`), and what is written
+    to the Secret (`secretTemplate`, `keystores`, `additionalOutputFormats`),
+    with `revisionHistoryLimit`.
+  - **A duration is carried in Go's spelling.** `duration`, `renewBefore` and
+    the other durations of these types are authored as a Go duration string
+    and nothing else, and the object carries the same duration as Go writes
+    it: `2160h` is emitted as `2160h0m0s`.
+  - An authored `false` or `0` is kept where the API tells it from an unset
+    field (`encodeUsagesInRequest: false`, a keystore's `create: false`, a
+    solver pod's `runAsUser: 0`), and left out where the type omits a zero
+    that means the same (`isCA: false`). `TestCertManagerKinds_NoDefaultedZeros`
+    holds the types to having no number or boolean that is omitted when zero
+    and that the CRD defaults to something else. A default cert-manager
+    applies when it reads the object (a key size, a rotation policy) reads
+    the same type, in which an authored `0` and none are one value.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, so that the object would not show the omission: the
+  rule every kind follows (see the Prometheus operator's kinds above). Each
+  must be authored (`secretName: required (…)`,
+  `acme.solvers[1].dns01.webhook.groupName: required (…)`); an authored empty
+  value is a value, and the API server's to refuse.
+  - A `certificate`: `secretName`, and `issuerRef` with its `name`. No default
+    issuer is filled. Of what is authored below them: an additional output
+    format's `type`, and a keystore's `create`.
+  - An issuer has no required top-level field. Of an issuer type that is
+    authored: `acme.server` and `acme.privateKeySecretRef`; `ca.secretName`;
+    `vault.server`, `vault.path` and `vault.auth`, and the role or path of
+    the authentication method that is authored; `venafi.zone`, and the URL,
+    credentials or token of the platform that is authored; a DNS01 provider's
+    own required settings (an ACME-DNS `host`, an RFC 2136 `nameserver`, a
+    webhook solver's `groupName` and `solverName`).
+  - Of a reference to a Secret or a ServiceAccount that is authored, on either
+    kind: its `name`. Unauthored, the type would write `name: ""`.
+  - A required field under a parent the author left out is not asked for: the
+    list follows what was authored.
+
+  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (61 paths for an
+  issuer, 8 for a certificate) to the CRDs the linked module ships, which are
+  the ones cert-manager's chart installs: every field of cert-manager's own
+  types that a CRD requires and the type writes unauthored is listed, and
+  nothing else is. A dependency bump that adds, drops or moves one fails
+  there. **Not refused:**
+  - a required field the type omits when it is not authored: the object shows
+    the omission, and the API server refuses it;
+  - a required field of a Kubernetes or Gateway API type these specs embed
+    (the terms of a solver pod's affinity, the name of a parent reference).
+    An omitted one is emitted empty;
+  - every other value rule of the CRDs (enumerations, lengths, minima, and
+    the one rule the CRDs write as an expression: that a `venafi` issuer
+    names exactly one of `tpp`, `cloud` and `ngts`);
+  - **the rules of cert-manager's validating webhook,** which refuses more
+    than the CRDs do: an issuer that configures no issuer type, or more than
+    one; a keystore with both or neither of `password` and
+    `passwordSecretRef`; a certificate that names no subject and no
+    alternative name; `subject` or `commonName` beside `literalSubject`.
+    Launcher repeats none of them, so an `issuer` with no property builds,
+    and is refused at apply where the webhook runs.
+
+  **What the type writes unauthored.** An empty reference, `{name: ""}`,
+  where the type holds one by value and the API does not require it: a
+  keystore's `passwordSecretRef` (so a keystore that authors `password`
+  carries both fields), `vault.auth.kubernetes.secretRef`, an RFC 2136
+  solver's `tsigSecretSecretRef` and a Route 53 solver's
+  `secretAccessKeySecretRef`. An HTTP01 solver's `podTemplate` carries
+  `metadata: {}` and `spec: {}`, and its `ingressTemplate` `metadata: {}`.
+  The CRDs accept each, and the same test holds every such field to its
+  schema: none is refused empty.
+
+  **Policy.**
+  - **An issuer's ACME HTTP01 solver pod is held to the cpu and memory
+    maxima.** cert-manager starts a pod to answer an HTTP01 challenge, and a
+    solver's `podTemplate.spec.resources` sizes it. Its limits and requests
+    are held to the environment policy's cpu and memory maxima, as a
+    container's are, on both ways a solver answers (`http01.ingress`,
+    `http01.gatewayHTTPRoute`) and on every solver: `component "web":
+    acme.solvers[0].http01.ingress.podTemplate.spec.resources: cpu limit "4"
+    exceeds enforced maximum "2"`. Nothing else is held and no default is
+    filled: the policy's default requests and limits are a workload's. A
+    request above its limit is not refused, since cert-manager lays the
+    authored block over its controller's own defaults key by key, and the
+    pair that reaches the pod is not the authored one. A solver pod template
+    has no other field the `pod` kind's refusals speak to: it names no image
+    (the solver's image is a flag of the cert-manager controller), no
+    container security context, no volume and no host namespace.
+  - **A certificate's keystore password in the object is refused under a
+    policy that forbids explicit secrets.** `keystores.jks.password` and
+    `keystores.pkcs12.password` hold the password itself, and the object is
+    in the build's output: `component "web": keystores.jks.password: holds
+    the keystore password in the object, and the environment policy forbids
+    explicit secrets; name the key of a Secret created out of band in
+    keystores.jks.passwordSecretRef instead`. The message quotes nothing of
+    the value, and an empty password is refused as any other is. A policy
+    that allows explicit secrets, one that does not answer the question and
+    no policy build it. No other field of a Certificate holds a secret.
+  - **No field of an issuer holds a literal secret by design, and none is
+    checked.** A credential is a reference to a Secret: an ACME account key,
+    a DNS provider's token, a Vault token or App Role secret, a platform's
+    API credentials. Free JSON that could hold one is written to the object
+    as authored, under a policy that forbids explicit secrets too: a webhook
+    solver's `config`.
+  - **Hosts are not checked.** A host these objects name is one cert-manager
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: `acme.server`, `vault.server`, a `venafi` platform's `url`
+    and token endpoint, an RFC 2136 `nameserver`, an ACME-DNS `host`, an
+    Akamai `serviceConsumerDomain`, and the CRL distribution points, OCSP
+    servers and issuing certificate URLs an issuer writes into what it
+    signs.
+  - A nil policy checks nothing.
+
+  **The issuer of a certificate is the author's.** `issuerRef` names an
+  issuer by `name`, `kind` and `group`; launcher points it at no component
+  and does not look for the issuer in the document. To have an `issuer` or
+  `clusterissuer` component sign a `certificate` component, name its object:
+  the component name, or its `objectName`. cert-manager reads an `issuerRef`
+  without a `kind` as an Issuer of the Certificate's namespace. The Secret
+  `secretName` names is cert-manager's to create, and the component emits
+  none; a Secret an issuer refers to is read in the Issuer's namespace, and
+  for a ClusterIssuer in the namespace cert-manager is configured with.
+
+  **Beside the `certificate` trait.** The trait derives a Certificate for the
+  workload it is attached to, from a few properties and the issuer the
+  cluster's `certificate` capability names, and names it after its
+  `secretName`. This kind is the authored object, for what the trait does not
+  express: the whole spec, an issuer the author chooses, a Certificate that
+  belongs to no workload. A component type and a trait type are two lists, so
+  the one name is not ambiguous in a document. The two objects are one kind:
+  a trait's and a component's given one name in one namespace are refused
+  (`generated-object collision: Certificate.cert-manager.io
+  "default/app-tls" is generated by both …`).
+
+  **Not covered.** The object's metadata, so its labels and annotations
+  cannot be authored. Whether what is referred to exists (an issuer, a
+  Secret and its key, a ServiceAccount, an ingress class, a Gateway), and
+  whether cert-manager can reach what an issuer names. The object's status is
+  cert-manager's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5847,7 +6022,8 @@ name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `sta
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four
 kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometheus-probe`,
-`prometheusrule`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
+`prometheusrule`), the three kinds of cert-manager's API (`issuer`, `clusterissuer`,
+`certificate`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`

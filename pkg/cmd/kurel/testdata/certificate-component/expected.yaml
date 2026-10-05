@@ -1,0 +1,43 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    launcher.gokure.dev/component: shop-tls
+  name: shop-tls
+  namespace: default
+spec:
+  commonName: shop.example.com
+  dnsNames:
+  - shop.example.com
+  - www.shop.example.com
+  duration: 2160h0m0s
+  encodeUsagesInRequest: false
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+  keystores:
+    pkcs12:
+      create: true
+      passwordSecretRef:
+        key: password
+        name: keystore
+  privateKey:
+    algorithm: ECDSA
+    rotationPolicy: Always
+    size: 256
+  renewBefore: 360h0m0s
+  secretName: shop-tls
+  usages:
+  - server auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    launcher.gokure.dev/component: internal
+  name: internal
+  namespace: default
+spec:
+  issuerRef:
+    name: internal-ca
+  secretName: internal-tls
