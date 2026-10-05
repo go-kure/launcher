@@ -286,6 +286,10 @@ type PVCConfig struct {
 	// and AccessModes states the referenced claim's modes so the non-RWX
 	// constraints still see it (go-kure/launcher#702).
 	ClaimName string
+	// Spec carries the claim-spec fields only a standalone claim authors (the
+	// persistentvolumeclaim kind and the pvc trait, through
+	// ParseClaimProperties); a workload's pvc volume leaves it zero.
+	Spec ClaimSpecFields
 }
 
 // ParsedVolumes holds the results of parsing volume definitions from OAM
@@ -5013,6 +5017,7 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	if pvc.StorageClass != "" || pvc.StorageClassExplicitEmpty {
 		kubernetes.SetPVCStorageClassName(claim, pvc.StorageClass)
 	}
+	pvc.Spec.apply(&claim.Spec)
 	return claim, nil
 }
 

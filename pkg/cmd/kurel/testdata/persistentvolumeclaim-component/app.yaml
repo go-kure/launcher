@@ -18,3 +18,27 @@ spec:
         size: 1Gi
         storageClassName: ""
         volumeMode: Block
+    - name: archive
+      type: persistentvolumeclaim
+      properties:
+        size: 5Gi
+        storageClassName: ""
+        selector:
+          matchLabels:
+            tier: archive
+          matchExpressions:
+            - key: zone
+              operator: In
+              values:
+                - a
+                - b
+        volumeName: pv-archive-0
+    - name: restored
+      type: persistentvolumeclaim
+      properties:
+        size: 5Gi
+        dataSourceRef:
+          apiGroup: snapshot.storage.k8s.io
+          kind: VolumeSnapshot
+          name: nightly
+        volumeAttributesClassName: gold

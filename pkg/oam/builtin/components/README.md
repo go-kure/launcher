@@ -88,7 +88,7 @@ reads it.
 | `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
-| `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
+| `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
@@ -2106,6 +2106,33 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `claimName` (see "Referencing an existing claim" below). A claim name
     another component also generates (for example a `pvc` trait of the same
     name) is refused as a generated-object collision.
+
+    Four more claim-spec fields are read (go-kure/launcher#790), by the kind
+    and by the `pvc` trait alike (`claim_spec.go`). Each is written only when
+    authored, so a document that authors none builds the claim it built
+    before. A workload's `pvc` volume does not take them.
+
+    | Property | Rule |
+    |----------|------|
+    | `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
+    | `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under "StatefulSet-level and claim-template properties"). |
+    | `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
+    | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
+
+    **No policy check on `volumeName`.** It is accepted with no capability
+    gate and no EnvironmentPolicy method (go-kure/launcher#790, open point "No
+    capability gate on component types"). A claim that names a volume binds to
+    that PersistentVolume and to no other, with no dynamic provisioning, so
+    **whoever may author a claim may ask for any PersistentVolume of the
+    cluster by name**. The cluster still decides: the volume must be unbound
+    or reserved for this claim, and must satisfy the claim's size, access
+    modes, class, attributes class and volume mode (the PersistentVolume
+    controller's `checkVolumeSatisfyClaim`). The storage default and maximum
+    still apply to the claim's `size`.
+
+    `dataSource` is refused: it is the superseded spelling of `dataSourceRef`,
+    which the API server mirrors into it. The long `resources` spelling of
+    `size` is not read on a standalone claim.
   - `configmap` publishes `data` (string values only: a number or a boolean
     is refused rather than stringified), `binaryData` (base64; a key may not
     also appear in `data`) and `immutable`. The `data` values and the decoded

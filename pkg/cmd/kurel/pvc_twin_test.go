@@ -126,6 +126,18 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 		{name: "null access modes", props: map[string]any{"size": "1Gi", "accessModes": nil}},
 		{name: "block volume mode", props: map[string]any{"size": "1Gi", "volumeMode": "Block"}},
 		{name: "null volume mode", props: map[string]any{"size": "1Gi", "volumeMode": nil}},
+		{name: "selector", props: map[string]any{"size": "1Gi", "selector": map[string]any{
+			"matchLabels":      map[string]any{"tier": "archive"},
+			"matchExpressions": []any{map[string]any{"key": "zone", "operator": "In", "values": []any{"a", "b"}}},
+		}}},
+		{name: "data source ref", props: map[string]any{"size": "1Gi", "dataSourceRef": map[string]any{
+			"apiGroup": "snapshot.storage.k8s.io", "kind": "VolumeSnapshot", "name": "nightly",
+		}}},
+		{name: "volume name", props: map[string]any{"size": "1Gi", "storageClassName": "", "volumeName": "pv-archive-0"}},
+		{name: "volume attributes class", props: map[string]any{"size": "1Gi", "volumeAttributesClassName": "gold"}},
+		{name: "null claim spec fields", props: map[string]any{
+			"size": "1Gi", "selector": nil, "dataSourceRef": nil, "volumeName": nil, "volumeAttributesClassName": nil,
+		}},
 		{name: "force-replace on the owner", props: map[string]any{"size": "1Gi"}, ownerTraits: []string{"force-replace"}},
 		{name: "prune-protection on the owner", props: map[string]any{"size": "1Gi"}, ownerTraits: []string{"prune-protection"}},
 	}
@@ -420,9 +432,10 @@ func labelOf(obj map[string]any, key string) string {
 
 // TestPVCTwin_SameRefusalsBothWays requires both paths to refuse the same
 // malformed properties with the same message. A wrongly typed or out-of-enum
-// value is refused by the shared property schema before either parser runs;
-// the rest by the kind's parser, which the trait now reads every claim field
-// through.
+// value, an undeclared key (`dataSource` among them) and a nested object
+// missing a required key are refused by the shared property schema before
+// either parser runs; the rest by the kind's parser, which the trait now reads
+// every claim field through.
 func TestPVCTwin_SameRefusalsBothWays(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -440,6 +453,12 @@ func TestPVCTwin_SameRefusalsBothWays(t *testing.T) {
 		{name: "read write once pod combined", props: map[string]any{"size": "1Gi", "accessModes": []any{"ReadWriteOncePod", "ReadOnlyMany"}}, want: "cannot be combined with other access modes"},
 		{name: "empty volume mode", props: map[string]any{"size": "1Gi", "volumeMode": ""}, want: "properties.volumeMode: value  not in allowed set"},
 		{name: "unknown volume mode", props: map[string]any{"size": "1Gi", "volumeMode": "Raw"}, want: "properties.volumeMode: value Raw not in allowed set"},
+		{name: "data source", props: map[string]any{"size": "1Gi", "dataSource": map[string]any{"kind": "PersistentVolumeClaim", "name": "golden"}}, want: `properties: unsupported field "dataSource"`},
+		{name: "empty selector", props: map[string]any{"size": "1Gi", "selector": map[string]any{}}, want: "selector: empty selector"},
+		{name: "invalid volume name", props: map[string]any{"size": "1Gi", "volumeName": "PV_Archive"}, want: `volumeName: invalid name "PV_Archive"`},
+		{name: "non-string volume name", props: map[string]any{"size": "1Gi", "volumeName": 7}, want: "properties.volumeName: expected string"},
+		{name: "data source ref without a name", props: map[string]any{"size": "1Gi", "dataSourceRef": map[string]any{"kind": "PersistentVolumeClaim"}}, want: `properties.dataSourceRef: "name" is required`},
+		{name: "invalid volume attributes class", props: map[string]any{"size": "1Gi", "volumeAttributesClassName": "Gold_Class"}, want: `volumeAttributesClassName: invalid name "Gold_Class"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
