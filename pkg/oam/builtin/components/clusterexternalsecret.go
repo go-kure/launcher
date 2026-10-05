@@ -35,18 +35,22 @@ func (h *ClusterExternalSecretHandler) PropertySchema() map[string]oam.PropertyS
 }
 
 // clusterExternalSecretKind is the clusterexternalsecret kind: see
-// policyFreeKind. validate refuses the one authored value the object cannot
-// carry (refuseDataGeneratorRef); the API's other rules are left to the API
-// server.
-var clusterExternalSecretKind = &policyFreeKind[esv1.ClusterExternalSecretSpec]{
-	upstream: "external-secrets.io/v1 ClusterExternalSecretSpec",
-	required: clusterExternalSecretRequired,
-	validate: validateClusterExternalSecret,
-	build: func(name, _ string, spec *esv1.ClusterExternalSecretSpec) client.Object {
-		secret := externalsecrets.CreateClusterExternalSecret(name)
-		spec.DeepCopyInto(&secret.Spec)
-		return secret
+// policyHeldKind. validate refuses the one authored value the object cannot
+// carry (refuseDataGeneratorRef); enforce, a target.manifest of a kind the
+// environment policy checks, in the spec of the ExternalSecrets it creates
+// (enforceTargetManifest). The API's other rules are left to the API server.
+var clusterExternalSecretKind = &policyHeldKind[esv1.ClusterExternalSecretSpec]{
+	policyFreeKind: policyFreeKind[esv1.ClusterExternalSecretSpec]{
+		upstream: "external-secrets.io/v1 ClusterExternalSecretSpec",
+		required: clusterExternalSecretRequired,
+		validate: validateClusterExternalSecret,
+		build: func(name, _ string, spec *esv1.ClusterExternalSecretSpec) client.Object {
+			secret := externalsecrets.CreateClusterExternalSecret(name)
+			spec.DeepCopyInto(&secret.Spec)
+			return secret
+		},
 	},
+	enforce: enforceClusterExternalSecretPolicy,
 }
 
 // ToApplicationConfig decodes an OAM clusterexternalsecret component into its

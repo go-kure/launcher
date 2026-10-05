@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -21,8 +22,11 @@ import (
 // object, beside the reference to a Secret that holds it. Under an environment
 // policy that forbids explicit secrets those values are refused
 // (enforceSecretStorePolicy). The two external-secret kinds are
-// policyFreeKinds: an ExternalSecret names what is read and where it is
-// written, and holds no credential field.
+// policyHeldKinds too, for one field: an ExternalSecret names what is read and
+// where it is written, and holds no credential field, but it can have the
+// operator write an object of another kind instead of a Secret
+// (target.manifest), and a kind the environment policy checks is refused there
+// (enforceTargetManifest).
 //
 // What launcher cannot tell from a secret is not checked on any of the four: a
 // header or the body of a webhook provider's request, a header of a Vault
@@ -285,7 +289,7 @@ func externalSecretSchema() map[string]oam.PropertySchema {
 		},
 		"target": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
-			Description: spec + "target: the Secret the operator writes: name (unset, the ExternalSecret's), creationPolicy (unset, the API fills Owner), deletionPolicy (unset, Retain), immutable, template (the blueprint of the Secret) and manifest (apiVersion and kind of another resource written instead of a Secret). The template's text is not checked for a secret written into it." + decoded + "ExternalSecretTarget in its API reference.",
+			Description: spec + "target: the Secret the operator writes: name (unset, the ExternalSecret's), creationPolicy (unset, the API fills Owner), deletionPolicy (unset, Retain), immutable, template (the blueprint of the Secret) and manifest (apiVersion and kind of another resource written instead of a Secret; a kind the environment policy checks, a workload among them, is refused, since what the operator would write is not known at build). The template's text is not checked for a secret written into it." + decoded + "ExternalSecretTarget in its API reference.",
 		},
 		"refreshPolicy": {
 			Type:        oam.PropertyTypeString,
@@ -404,6 +408,53 @@ func refuseDataGeneratorRef(spec *esv1.ExternalSecretSpec, at string) error {
 	return nil
 }
 
+// enforceExternalSecretPolicy holds an ExternalSecret's spec to the
+// environment policy: see enforceTargetManifest.
+func enforceExternalSecretPolicy(spec *esv1.ExternalSecretSpec, p oam.Policy) error {
+	return enforceTargetManifest(spec, "", p)
+}
+
+// enforceClusterExternalSecretPolicy is enforceExternalSecretPolicy for the
+// spec of the ExternalSecrets a ClusterExternalSecret creates.
+func enforceClusterExternalSecretPolicy(spec *esv1.ClusterExternalSecretSpec, p oam.Policy) error {
+	return enforceTargetManifest(&spec.ExternalSecretSpec, "externalSecretSpec.", p)
+}
+
+// enforceTargetManifest holds the object an ExternalSecret has the operator
+// write instead of a Secret (target.manifest, which names its apiVersion and
+// kind) to what the same policy gives an object of that kind on the
+// passthrough component, and no more.
+//
+// What passthrough would have to read cannot be read here: the object's
+// content is template text the operator renders in the cluster
+// (target.template, a templateFrom entry and its target path). So a kind the
+// rendered-object check reads anything from (policyReadsKind: a workload, a
+// claim, a PersistentVolume, a HorizontalPodAutoscaler, in any version) is
+// refused, whatever the policy's own limits are. A core Secret is asked of
+// enforceExplicitSecretObject, the call passthrough makes: refused under a
+// policy that forbids explicit secrets, and passed under any other. An object
+// of any other kind passes, as it does on passthrough: a ConfigMap, a custom
+// resource.
+//
+// Whether the operator writes such an object at all is the cluster's: its
+// generic-target setting and the access it was given. at prefixes the path.
+func enforceTargetManifest(spec *esv1.ExternalSecretSpec, at string, p oam.Policy) error {
+	manifest := spec.Target.Manifest
+	if manifest == nil {
+		return nil
+	}
+	written := &unstructured.Unstructured{}
+	written.SetAPIVersion(manifest.APIVersion)
+	written.SetKind(manifest.Kind)
+	if err := enforceExplicitSecretObject(written, p); err != nil {
+		return errors.Wrapf(err, "%starget.manifest", at)
+	}
+	if policyReadsKind(written.GroupVersionKind()) {
+		return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, fmt.Sprintf("%starget.manifest: the operator would write a %s, a kind the environment policy checks, and what the object would hold is not known at build, so it cannot be checked against environment policy", at, manifest.Kind))
+	}
+	return nil
+}
+
 // clusterExternalSecretSchema returns the properties of the
 // clusterexternalsecret kind: the top-level fields of
 // esv1.ClusterExternalSecretSpec.
@@ -412,7 +463,7 @@ func clusterExternalSecretSchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"externalSecretSpec": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
-			Description: spec + "externalSecretSpec: the spec of the ExternalSecret created in each selected namespace: the fields of the externalsecret kind (secretStoreRef, target, refreshPolicy, refreshInterval, syncWindows, data, dataFrom), with what that kind requires. Required. Decoded strictly into the operator's API type: see ExternalSecretSpec in its API reference.",
+			Description: spec + "externalSecretSpec: the spec of the ExternalSecret created in each selected namespace: the fields of the externalsecret kind (secretStoreRef, target, refreshPolicy, refreshInterval, syncWindows, data, dataFrom), with what that kind requires and what it refuses of a target.manifest. Required. Decoded strictly into the operator's API type: see ExternalSecretSpec in its API reference.",
 		},
 		"externalSecretName": {
 			Type:        oam.PropertyTypeString,
