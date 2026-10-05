@@ -15,8 +15,9 @@ import (
 // This file holds the strict decode the kind components share whose properties
 // are the top-level fields of an upstream spec type: the cnpg-pooler,
 // cnpg-database and cnpg-objectstore kinds (cnpg_common.go) and the kinds of
-// go-kure/launcher#790. cnpg-cluster predates it and keeps its own copies;
-// folding them together is a separate change.
+// go-kure/launcher#790. cnpg-cluster decodes its properties itself, since it
+// also reads which of them were authored, and is held to the same comparison
+// (refuseUncarriedSpecValues).
 
 // decodeKindSpec decodes a kind component's properties strictly into the
 // upstream spec type T, under the package's null contract, exactly as
@@ -57,11 +58,14 @@ type defaultedZeroFields struct {
 	fields map[string]string
 }
 
-// refuseUncarriedSpecValues is refuseUncarriedValues for any spec type: it
-// refuses an authored 0 or false that spec's encoding omits on a field of
-// defaulted, where the defaulter would apply its non-zero default instead, and
-// two spellings of one field in the same object, of which encoding/json keeps
-// only one.
+// refuseUncarriedSpecValues refuses an authored value that the typed spec
+// decodes but the emitted object would not carry with its meaning: a 0 or
+// false that spec's encoding omits on a field of defaulted, where the
+// defaulter would apply its non-zero default instead, and two spellings of one
+// field in the same object, of which encoding/json keeps only one. The spec is
+// encoded as Generate's object will be and the authored tree (jsonProperties'
+// output) is walked against it, so a value is refused only when it is actually
+// missing from the encoding.
 func refuseUncarriedSpecValues(authored map[string]any, spec any, defaulted defaultedZeroFields) error {
 	data, err := json.Marshal(spec)
 	if err != nil {
@@ -76,8 +80,16 @@ func refuseUncarriedSpecValues(authored map[string]any, spec any, defaulted defa
 	return compareCarriedIn(authored, encoded, "", "", defaulted)
 }
 
-// compareCarriedIn is compareCarried with the defaulted-zero list passed in
-// rather than read from cnpgClusterDefaultedZeroFields; the walk is the same.
+// compareCarriedIn walks authored against encoded, descending only where both
+// sides are objects or both are arrays (arrays align by index). path is the
+// authored spelling with indices, for the error; field is the same position in
+// the encoding's json names with [] for an index, the form defaulted.fields is
+// keyed by. A leaf present in encoded in any spelling or type (a Quantity
+// written as a number, say) is carried. A leaf absent from encoded is refused
+// when it is a numeric zero or false on a field of defaulted; elsewhere
+// omitting the zero leaves the same value, and an authored empty string is not
+// refused at all (cnpg-cluster's storage.size "" is a value that kind
+// supports, authoredStorageRequest).
 func compareCarriedIn(authored, encoded any, path, field string, defaulted defaultedZeroFields) error {
 	switch a := authored.(type) {
 	case map[string]any:
@@ -91,6 +103,10 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 			}
 			return base + "." + k
 		}
+		// claimed maps an encoded key to the authored path that matched it.
+		// unmatched holds the authored keys with nothing in encoded: only a
+		// struct field can be omitted, so two of them that fold together are
+		// two spellings of one field, whichever value the decoder kept.
 		claimed := make(map[string]string, len(a))
 		var unmatched []string
 		for _, k := range slices.Sorted(maps.Keys(a)) {
@@ -167,7 +183,9 @@ func foldedDuplicateIn(authored any, path string) error {
 }
 
 // lookupFolded returns the value of m's key that matches field
-// case-insensitively, as defaultedZeroField does for the Cluster's list.
+// case-insensitively: the parent segments of field are json names from the
+// encoding, but its leaf is the authored key, with nothing in the encoding to
+// take its json name from, and encoding/json folds field names.
 func lookupFolded(m map[string]string, field string) (string, bool) {
 	for _, known := range slices.Sorted(maps.Keys(m)) {
 		if strings.EqualFold(known, field) {
