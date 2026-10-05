@@ -993,7 +993,10 @@ group applies its members' traits in authored order, not member by member: the
 rule's own traits first, in member order, then the traits it forwarded, by the
 slot each held among the authored traits (a forwarded trait a trait rule lowers
 later keeps that slot). Trait sub-applications are therefore ordered as for one
-component carrying the same traits.
+component carrying the same traits. A rule whose members can land in different
+groups owes more for a trait that configures a bundle rather than objects: one
+copy per bundle, or a refusal where it cannot tell the groups
+(`pkg/oam/builtin/components/README.md`, "Traits a lowering rule forwards").
 
 The build refuses a group:
 - whose members' tier annotations disagree (one of them carrying none included),

@@ -499,7 +499,8 @@ be closed at build time.
      version kure's scheme does not register), and a list nested in an unregistered list
      (any object with a top-level `items` array there), are refused; a
      custom resource's pods, the archive host a Helm repository
-     index names and redirects are not checked (the last two: go-kure/launcher#794, item 6).
+     index names and redirects are not checked (the last two: a decided limit,
+     go-kure/launcher#794, item 6, §7).
      A field the vendored API type does not declare is no longer dropped: on a workload, a
      claim or a PersistentVolume it is refused; any other registered kind is emitted as
      rendered, as an unstructured object, with the field kept. One such field is refused on
@@ -575,7 +576,8 @@ be closed at build time.
     (the kind, template delivery, `passthrough`, `manifests`): a `hostPath` or `local`
     source needs `AllowHostPathVolumes`, and `capacity.storage` is held to
     `MaxStorageSize` (`enforcePersistentVolumePolicy`, `enforce.go`). A `csi` or
-    `flexVolume` source is not checked (go-kure/launcher#794, item 12, not decided).
+    `flexVolume` source is not checked (a decided limit, go-kure/launcher#794, item 12,
+    §7).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
 - **Shipped: the pod kinds** `pod`, `replicaset`, `replicationcontroller` and
@@ -638,8 +640,8 @@ be closed at build time.
 
 ## 7. Asymmetries (go-kure/launcher#794)
 
-Each item is to be fixed, or documented with its reason. The issue holds the full list
-and the disposition of every item. The four this document started from:
+Each item is fixed, or documented with its reason; none is open. The issue holds the full
+list and the disposition of every item:
 
 - **`targetNamespace` default (item 1): documented, no change.** `oci` sets no default;
   `helmrelease` defaults it to the application namespace under a Flux namespace
@@ -742,6 +744,30 @@ and the disposition of every item. The four this document started from:
   true` on a built-in namespaced kind and `false` on a built-in cluster-scoped kind
   stop building; an inline namespace on a cluster-scoped kind the table knows is
   refused without the property too.
+- **The chart archive host on template delivery (item 6): documented as a limit, no
+  change.** The registry allowlist is checked on the chart's source URL before anything
+  is fetched (`HelmTemplateConfig.ApplyPolicy`,
+  `pkg/oam/builtin/components/helmtemplate_policy.go`). The archive a Helm repository's
+  index names, and any redirect, are followed by kure's chart renderer to whatever host
+  they point at. Holding every request to the allowlist needs a hook in that renderer,
+  which offers none; that is a change to kure, not to launcher.
+- **Undeclared fields in a decoded document (item 7): shipped** (§5.2).
+- **A bundle trait on a component that lowers into several groups (item 8): the refusal
+  is kept, and the rule is documented.** A trait that configures how a bundle is
+  delivered (`fluxcd-patches`, `fluxcd-postbuild`) is forwarded to one member per bundle.
+  The groups are computed after lowering has settled, so a rule forwards such a trait
+  only where it can tell them, and refuses a document that could separate its members:
+  `postgresql` refuses one that authors such a trait and orders or places a generated
+  member on its own (`postgresqlMembersShareBundle`,
+  `pkg/oam/builtin/components/postgresql_lowering.go`). Applying a forwarded trait once
+  per resulting bundle would need an engine feature and is not built. The rule for every
+  lowering rule, with the message, is in `pkg/oam/builtin/components/README.md`, "Traits
+  a lowering rule forwards".
+- **Driver-defined volumes (item 12): documented as a limit, no change.** A `csi` or
+  `flexVolume` volume names a driver and options only the driver interprets, so no field
+  says whether a node path is exposed; both pass the hostPath gate, on a pod and on a
+  PersistentVolume. The environment policy makes no statement about them: one would be a
+  new part of the policy every consumer implements, and no use case asked for it.
 
 Item 5 was decided as "document" and needed no text: tiers are declared, never
 derived, since go-kure/launcher#783 (§2.2).
@@ -771,5 +797,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` and on `helm` under `delivery: template` (item 11), the scope of a `passthrough` object (item 13), the refusal of a pod-spec trait on a component without a workload (item 14); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
