@@ -736,6 +736,8 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `workload-deployment` | The Deployment a `webservice` or `worker` component generates. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name. | The component's name. | `deploymentObjectName` | unless `deploymentObjectName` is set |
 | `workload-service` | The Service a `webservice` component generates; a DNS-1035 label. Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
 | `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
+| `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
+| `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `objectStore`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `objectStoreObjectName` | unless `objectStoreObjectName` is set; not without `objectStore`, since the component then generates none |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
@@ -794,7 +796,7 @@ document rule may still change. Most names are made after lowering, and carry th
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
 lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
 `helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`, `workload-service`,
-`workload-serviceaccount`)
+`workload-serviceaccount`, `postgresql-cluster`, `postgresql-objectstore`)
 carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
@@ -875,10 +877,12 @@ refused.
 
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
-`poolerName` or the default. A consumer that sets `Naming` calls
+`poolerName` or the default; its cluster endpoint selects pods by the Cluster's name, and
+there it is the authored `clusterObjectName` or the component name. A consumer that sets
+`Naming` calls
 `ComponentEndpointsNamed(application, comp, naming)` instead, which asks `naming` the same
 `NameRequest` the transform asks for that name, so one pure hook gives the selector the name
-the Pooler gets; an answer that is no valid name for its role is refused there with the
+the Pooler or the Cluster gets; an answer that is no valid name for its role is refused there with the
 transform's message. It is given one component, so what the transform refuses for a reason
 only the document shows (a name that is already a component of the document, or that another
 object of it has) is not seen there.
@@ -887,7 +891,9 @@ object of it has) is not seen there.
 
 A name that is not the default (the author's or the hook's) must be a DNS-1123 subdomain of
 at most 253 characters, and is used as given or refused, never shortened. The `pooler` role is
-narrower: a DNS-1035 label, which the Pooler's name must be since its Service carries it. For
+narrower: a DNS-1035 label, which the Pooler's name must be since its Service carries it. So
+is `postgresql-cluster`, whose Services carry the Cluster's name with a suffix: a DNS-1035
+label of at most 50 characters, a rule its default, the component name, is held to as well. For
 an object that is the rule of its kind. For `bundle`, `group` and `sub-application` it is
 launcher's own rule, on these grounds: a bundle's and a group's name is written as the name
 of a Flux Kustomization, all three become a directory segment in a written tree, and their
@@ -926,8 +932,7 @@ name collision: Database.postgresql.cnpg.io "db-orders" is named by component "d
 ```
 
 This knows only the names resolved this way: the roles above. An object of a component that
-is not a kind component, one a lowering rule names without a role (the Cluster and the
-ObjectStore a `postgresql` component is lowered to), and the object of a trait that is not in the table (an
+is not a kind component, one a lowering rule names without a role, and the object of a trait that is not in the table (an
 authored `configmap` trait's ConfigMap, an authored `secret` trait's Secret) are not in it, so
 `CheckInDocumentCollisions` (below) is still what compares every generated object: a
 `configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
@@ -941,9 +946,10 @@ The Secret a `helm` component generates for `secretValues` is in the table (role
 `values-secret`), so a `secret` component under that name is a name collision instead. So are
 the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component
 (roles `workload-deployment`, `workload-service`, `workload-serviceaccount`): a `service`
-component under the name of a `webservice` component's Service is a name collision. The
-remaining lowering-rule names, those of a `postgresql` component's Cluster and ObjectStore,
-join the table in a later change of go-kure/launcher#787.
+component under the name of a `webservice` component's Service is a name collision. So are
+the Cluster and the ObjectStore of a `postgresql` component (roles `postgresql-cluster`,
+`postgresql-objectstore`): a `cnpg-cluster` component under the name of a `postgresql`
+component's Cluster is a name collision.
 
 A sub-application's name is resolved and validated but not kept apart: it is not unique. A
 `configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
@@ -1027,7 +1033,8 @@ a rule that wants a member's name choosable resolves it itself at lowering time,
 own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`),
 `LoweringContext.ResolveMemberName` for the object of a member it emits under the
 component's name (`helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`,
-`workload-service`, `workload-serviceaccount`). What a document rule or a raw document rule returns is
+`workload-service`, `workload-serviceaccount`, `postgresql-cluster`,
+`postgresql-objectstore`). What a document rule or a raw document rule returns is
 authored input, the components it built as much as the ones it forwarded: the property and
 the request apply there, so a document rule that wants to fix a kind component's object name
 writes `objectName` itself.
@@ -1071,6 +1078,31 @@ component name, as for `objectName`.
 address. Launcher builds no such address: every address written with the component name (an
 `env` value, a URL in another component's properties, a backend another component's route
 names) is the author's to change.**
+
+A `postgresql` component's Cluster and ObjectStore are named on their own too
+(`clusterObjectName`, `objectStoreObjectName`, or the hook's answer for `postgresql-cluster`,
+`postgresql-objectstore`), and what launcher writes to them follows:
+
+- the Pooler's `cluster.name` and each Database's `cluster.name` name the Cluster by the
+  name it took;
+- the pod selector of the component's cluster endpoint (`cnpg.io/cluster`) is the Cluster's
+  name, which `ComponentEndpoints` reads with the authored name and
+  `ComponentEndpointsNamed` with the hook's as well;
+- the Cluster's backup plugin names the ObjectStore by the name it took
+  (`barmanObjectName`).
+
+The default names of the Pooler and the Databases (`<component>-pooler`,
+`<component>-<database name>`) keep deriving from the component name, whatever the Cluster
+is named. A component name the Pooler's default cannot be built from is refused with
+`poolerName` named as what settles it. The two properties end in `ObjectName`, as
+`objectName` does on a kind component; `poolerName`, the older property, keeps its name.
+
+**CloudNativePG derives the Cluster's Services (`<cluster>-rw`, `<cluster>-ro`,
+`<cluster>-r`) and Secrets (`<cluster>-app` and the others) from the Cluster's name, and the
+default backup path moves with it: the server name a backup is stored under is the Cluster's
+name unless it is set. Renaming an existing Cluster creates a new one: the old one is pruned
+with its data unless it is protected. Every address or Secret reference written with the old
+name is the author's to change.**
 
 What the author writes stays as written, so a reference to a renamed component is written with
 its object name: a HelmRelease's `chartRef.name` or `sourceRef.name` naming a renamed

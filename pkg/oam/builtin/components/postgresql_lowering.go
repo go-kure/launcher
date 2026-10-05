@@ -21,9 +21,32 @@ import (
 // LowerComponent validates comp as a postgresql component and emits the CNPG
 // kind components that build the same objects (see PostgresqlRule).
 func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	c, err := r.Parse(comp)
+	// The Cluster is named first (`clusterObjectName`, else the naming hook, else the
+	// component), and the name checked as the Cluster's, before anything else is
+	// read: where the component name was refused first, the Cluster's is.
+	cluster, err := postgresqlClusterMember(lctx, comp)
 	if err != nil {
 		return oam.LoweringResult{}, err
+	}
+	c, err := r.parse(comp)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
+
+	// The ObjectStore is a member of the Cluster's same-name sibling group: it
+	// is emitted under the component's own name, and its object named like the
+	// component unless `objectStoreObjectName` or the naming hook says otherwise. It
+	// is named before the Cluster's spec is built, which names the store.
+	var store *oam.Component
+	if c.ObjectStore != nil {
+		store = &oam.Component{Name: comp.Name, Type: "cnpg-objectstore", Annotations: maps.Clone(comp.Annotations)}
+		if err := nameRoleMember(comp, lctx, store, &CnpgObjectStoreHandler{}, oam.NameRolePostgresqlObjectStore, postgresqlObjectStoreNameProperty, "ObjectStore"); err != nil {
+			return oam.LoweringResult{}, err
+		}
+		c.ObjectStore.ObjectName = store.ObjectName()
+		if store.Properties, err = specProperties(c.objectStoreSpec()); err != nil {
+			return oam.LoweringResult{}, err
+		}
 	}
 
 	spec, err := c.clusterSpec()
@@ -41,32 +64,21 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		delete(clusterProps, "instances")
 	}
 
-	out := []oam.Component{{
-		Name:        comp.Name,
-		Type:        "cnpg-cluster",
-		Properties:  clusterProps,
-		Traits:      slices.Clone(comp.Traits),
-		Annotations: maps.Clone(comp.Annotations),
-	}}
+	cluster.Properties = clusterProps
+	cluster.Traits = slices.Clone(comp.Traits)
+	cluster.Annotations = maps.Clone(comp.Annotations)
+	out := []oam.Component{cluster}
 	// The policy-dependent values are set by a post-policy step: after the
 	// policy decided the instance count and storage, and before any authored
 	// trait sees the Cluster, as postgresql's Generate did.
 	out[0].AfterPolicy(applyPostgresqlDefaults)
 
-	// The ObjectStore is named like the Cluster, so it is emitted under the
-	// component's own name: a member of the Cluster's same-name sibling group.
-	if c.ObjectStore != nil {
-		props, err := specProperties(c.objectStoreSpec())
-		if err != nil {
-			return oam.LoweringResult{}, err
-		}
-		out = append(out, oam.Component{
-			Name:        comp.Name,
-			Type:        "cnpg-objectstore",
-			Properties:  props,
-			Annotations: maps.Clone(comp.Annotations),
-		})
+	if store != nil {
+		out = append(out, *store)
 	}
+	// What the Pooler and the Databases refer to is the Cluster's object, by
+	// its name. Their own default names keep the component's.
+	clusterName := cluster.ObjectName()
 
 	var dependents []string
 	poolerName := ""
@@ -78,7 +90,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		if err := postgresqlReserveMember(lctx, name, "pooler"); err != nil {
 			return oam.LoweringResult{}, err
 		}
-		props, err := specProperties(c.poolerSpec(comp.Name))
+		props, err := specProperties(c.poolerSpec(clusterName))
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
@@ -107,7 +119,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 			}
 			dependents = append(dependents, name)
 		}
-		props, err := specProperties(c.databaseSpec(comp.Name, db))
+		props, err := specProperties(c.databaseSpec(clusterName, db))
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
@@ -576,12 +588,17 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 	}
 
 	// An objectStore component archives WAL through the barman-cloud plugin, pointed
-	// at the ObjectStore the rule emits under the same name. The plugin reads the
+	// at the ObjectStore the rule emits, by the name resolved for it (the
+	// component's unless LowerComponent resolved another). The plugin reads the
 	// store from barmanObjectName and the server name from serverName (defaulting
 	// to the Cluster name); the ObjectStore CRD forbids a serverName of its own.
 	if c.ObjectStore != nil {
 		isWALArchiver := true
-		params := map[string]string{"barmanObjectName": c.Name}
+		storeName := c.ObjectStore.ObjectName
+		if storeName == "" {
+			storeName = c.Name
+		}
+		params := map[string]string{"barmanObjectName": storeName}
 		if c.ObjectStore.ServerName != "" {
 			params["serverName"] = c.ObjectStore.ServerName
 		}

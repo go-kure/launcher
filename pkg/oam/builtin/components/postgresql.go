@@ -75,20 +75,57 @@ type PostgresqlRule struct{}
 // instead of a dispatchable component handler.
 func (PostgresqlRule) ComponentType() string { return "postgresql" }
 
+// The properties a postgresql component names its Cluster and its ObjectStore
+// with (go-kure/launcher#787), in place of the component name. They end in
+// ObjectName, as a database's `objectName` and the workload types' properties
+// do: each names the object alone, and `objectStoreName` was once a plugin
+// parameter of the Cluster.
+const (
+	postgresqlClusterNameProperty     = "clusterObjectName"
+	postgresqlObjectStoreNameProperty = "objectStoreObjectName"
+)
+
 // validatePostgresqlClusterName applies cnpg-cluster's Cluster-name rule
-// (validateCnpgClusterName) to a postgresql component, whose name becomes the
-// Cluster name and its cnpg.io/cluster selector value, and names this kind in
-// the error.
-func validatePostgresqlClusterName(name string) error {
-	if validateCnpgClusterName(name) != nil {
-		return errors.Errorf("postgresql name %q: must be a DNS-1035 label of at most %d characters (CloudNativePG rejects longer or dotted cluster names)", name, cnpgClusterNameMaxLength)
+// (validateCnpgClusterName) to the name of the Cluster a postgresql component
+// generates, which is also its cnpg.io/cluster selector value, and names this
+// kind in the error. component is the component's name: the Cluster's own
+// unless `clusterObjectName` or the naming hook names it otherwise. The rule is
+// handed the resolved name only, so the refusal of a name that is not the
+// component's names both places it can come from, as a kind component's does.
+func validatePostgresqlClusterName(component, name string) error {
+	if validateCnpgClusterName(name) == nil {
+		return nil
 	}
-	return nil
+	what := "postgresql name"
+	if name != component {
+		what = postgresqlClusterNameProperty + ` (or the Naming hook's answer for role "` + string(oam.NameRolePostgresqlCluster) + `"): postgresql Cluster name`
+	}
+	return errors.Errorf("%s %q: must be a DNS-1035 label of at most %d characters (CloudNativePG rejects longer or dotted cluster names)", what, name, cnpgClusterNameMaxLength)
+}
+
+// postgresqlClusterMember returns the `cnpg-cluster` member the rule emits for
+// component, named as the component is and carrying the name resolved for its
+// Cluster (role oam.NameRolePostgresqlCluster): the authored `clusterObjectName`,
+// else the consumer hook's, else the component name. The name is held to the
+// Cluster-name rule whichever of the three it is. It is the one place the name
+// is resolved, for the Cluster LowerComponent emits and for the selector
+// EndpointsNamed builds, so the two ask the hook the same request. Every
+// reference the rule writes to the Cluster reads the member's ObjectName.
+func postgresqlClusterMember(lctx oam.LoweringContext, component *oam.Component) (oam.Component, error) {
+	member := oam.Component{Name: component.Name, Type: "cnpg-cluster"}
+	if err := nameRoleMember(component, lctx, &member, &CnpgClusterHandler{}, oam.NameRolePostgresqlCluster, postgresqlClusterNameProperty, "Cluster"); err != nil {
+		return oam.Component{}, err
+	}
+	if err := validatePostgresqlClusterName(component.Name, member.ObjectName()); err != nil {
+		return oam.Component{}, err
+	}
+	return member, nil
 }
 
 // Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoints are
-// the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>, which equals the
-// OAM component name) on the PostgreSQL port and, when the component declares a pooler, the
+// the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>: the OAM component
+// name unless `clusterObjectName` names the Cluster) on the PostgreSQL port and, when the
+// component declares a pooler, the
 // pooler (PgBouncer) pods (labelled cnpg.io/poolerName=<pooler name>) on the same port.
 // A downstream platform uses these to synthesize the target-side ingress allow(s) without
 // hardcoding the operator selectors; a consumer that dials the pooler needs the second endpoint
@@ -116,6 +153,12 @@ var (
 // resolved, for the Pooler LowerComponent emits and for the selector
 // EndpointsNamed builds, so the two ask the hook the same request. It reads the
 // raw property, as poolerEnabled does.
+//
+// The name is held to the Pooler's own rule here (validateCnpgPoolerName). An
+// authored name and the hook's answer were held to it when they were resolved,
+// so what this refuses is the default: the Cluster-name rule no longer bounds
+// `<name>-pooler` once the Cluster is named apart from the component, and the
+// refusal says what settles it.
 func postgresqlPoolerName(lctx oam.LoweringContext, component *oam.Component) (string, error) {
 	spec := oam.NameSpec{Role: oam.NameRolePooler, Kind: cnpgPoolerKind}
 	authored, present, err := parseRawStringField(component.Properties, "poolerName", "poolerName")
@@ -126,21 +169,31 @@ func postgresqlPoolerName(lctx oam.LoweringContext, component *oam.Component) (s
 		spec.Property, spec.Authored = "poolerName", authored
 	}
 	lctx.Component = component
-	return lctx.ResolveName(component.Name, "pooler", spec)
+	name, err := lctx.ResolveName(component.Name, "pooler", spec)
+	if err != nil {
+		return "", err
+	}
+	if err := validateCnpgPoolerName(name); err != nil {
+		return "", errors.Errorf("%s; the default derives from the component name: set poolerName to name the Pooler otherwise", err.Error())
+	}
+	return name, nil
 }
 
 // EndpointsNamed implements oam.NamedEndpointProvider: Endpoints, with the
-// pooler endpoint's selector carrying the name lctx resolves for the Pooler
-// (postgresqlPoolerName), which is the consumer hook's where the caller set one
-// and the author wrote no `poolerName`.
+// cluster endpoint's selector carrying the name lctx resolves for the Cluster
+// (postgresqlClusterMember) and the pooler endpoint's the one it resolves for
+// the Pooler (postgresqlPoolerName): the consumer hook's where the caller set
+// one and the author wrote no `clusterObjectName` or `poolerName`.
 func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.LoweringContext) ([]netpol.Endpoint, error) {
-	// The selector carries the name verbatim, so a name the Cluster cannot
-	// have is refused here too, as cnpg-cluster refuses it.
-	if err := validatePostgresqlClusterName(component.Name); err != nil {
+	// The selector carries the Cluster's name verbatim, resolved as
+	// LowerComponent resolves it, so a name the Cluster cannot have is refused
+	// here too, as cnpg-cluster refuses it.
+	cluster, err := postgresqlClusterMember(lctx, component)
+	if err != nil {
 		return nil, err
 	}
 	eps := []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: cluster.ObjectName()}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}
 	enabled, err := poolerEnabled(component)
@@ -148,8 +201,8 @@ func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Lowering
 		return nil, err
 	}
 	if enabled {
-		// The selector value is the Pooler's name, resolved as LowerComponent
-		// resolves it.
+		// The selector value is the Pooler's name, resolved and held to the
+		// Pooler's rule as LowerComponent resolves and holds it.
 		poolerName, err := postgresqlPoolerName(lctx, component)
 		if err != nil {
 			return nil, errors.Wrapf(err, "pooler")
@@ -197,7 +250,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: itemDesc},
 		}
 	}
-	return map[string]oam.PropertySchema{
+	schema := map[string]oam.PropertySchema{
 		"provider":          {Type: oam.PropertyTypeString, Default: "cnpg", Enum: []any{"cnpg"}, Description: "Database provider (only cnpg is supported)."},
 		"version":           {Type: oam.PropertyTypeString, Default: "16", Description: "PostgreSQL major version for the cluster image. An empty string is refused; omit the property to take the default."},
 		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi", Description: "Persistent storage size requested for each instance."},
@@ -218,16 +271,31 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"managedRoles":      openArr("Database roles created and reconciled by the operator.", "A single managed role definition."),
 		"databases":         openArr("Databases created and reconciled within the cluster.", "A single database definition."),
 	}
+	// The names of the Cluster and the ObjectStore (go-kure/launcher#787).
+	schema[postgresqlClusterNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup path moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."}
+	schema[postgresqlObjectStoreNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated ObjectStore, in place of the component name, used as written. The Cluster's backup plugin names the store by it. Only with objectStore."}
+	return schema
 }
 
 // Parse is postgresql's full parse, the former handler's ToApplicationConfig
 // sequence unchanged: it validates component as a postgresql component and
 // returns what it authored, with postgresql's defaults filled in. LowerComponent
-// runs it first; it is exported for the tests that pin the parse.
-func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error) {
-	if err := validatePostgresqlClusterName(component.Name); err != nil {
+// runs it after it has named the Cluster; it is exported for the tests that pin
+// the parse.
+//
+// No naming hook is consulted here: the Cluster is named by the authored
+// `clusterObjectName`, else by the component, and that name is held to the
+// Cluster-name rule first, as LowerComponent holds the one it resolved.
+func (r PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error) {
+	if _, err := postgresqlClusterMember(oam.LoweringContext{}, component); err != nil {
 		return nil, err
 	}
+	return r.parse(component)
+}
+
+// parse is Parse past the naming of the Cluster, which the caller has resolved
+// and checked.
+func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error) {
 	config := &PostgresqlConfig{
 		Name: component.Name,
 	}
@@ -662,6 +730,13 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 		}
 		config.ObjectStore = os
 	}
+	// The name itself is read and resolved by LowerComponent; here only its
+	// type, and that there is an ObjectStore to name.
+	if _, named, err := parseRawStringField(props, postgresqlObjectStoreNameProperty, postgresqlObjectStoreNameProperty); err != nil {
+		return nil, err
+	} else if named && config.ObjectStore == nil {
+		return nil, errors.Errorf("%s: names the ObjectStore, and objectStore is not set; remove it, or set objectStore", postgresqlObjectStoreNameProperty)
+	}
 
 	dbList, _, err := parseObjectListField(props, "databases", "databases")
 	if err != nil {
@@ -875,6 +950,10 @@ type ManagedRoleConfig struct {
 
 // ObjectStoreConfig holds config for a CNPG ObjectStore CR.
 type ObjectStoreConfig struct {
+	// ObjectName is the name LowerComponent resolved for the ObjectStore (role
+	// oam.NameRolePostgresqlObjectStore), which the Cluster's plugin entry
+	// names. Empty for the component's name: Parse resolves none.
+	ObjectName      string
 	DestinationPath string
 	EndpointURL     string
 	SecretName      string

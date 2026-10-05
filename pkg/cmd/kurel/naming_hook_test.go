@@ -156,16 +156,24 @@ const namingDB = `    - name: db
             owner: app
 `
 
+// namingDBStore is namingDB with an object store, so that the rule generates
+// an ObjectStore as well.
+const namingDBStore = namingDB + `        objectStore:
+          destinationPath: s3://backups/db
+`
+
 const (
-	poolerKindName   = "Pooler.postgresql.cnpg.io"
-	databaseKindName = "Database.postgresql.cnpg.io"
+	poolerKindName      = "Pooler.postgresql.cnpg.io"
+	databaseKindName    = "Database.postgresql.cnpg.io"
+	clusterKindName     = "Cluster.postgresql.cnpg.io"
+	objectStoreKindName = "ObjectStore.barmancloud.cnpg.io"
 )
 
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
 	artifact := ociNamesComponent("artifact", "artifact", "", "")
-	namingTransform(t, namingApp("", namingDB+namingChart+jobs+artifact), namingContext(declineEveryName(&requests)))
+	namingTransform(t, namingApp("", namingDBStore+namingChart+jobs+artifact), namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -183,11 +191,15 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// rule's generated source is the document's, so its request carries no
 	// component. The webservice rule asks for its Deployment, its Service and its
 	// ServiceAccount, the helm rule for its HelmRelease and the oci rule for the
-	// two objects it names after its component, each under its own role.
+	// two objects it names after its component, each under its own role. The
+	// postgresql rule asks for its Cluster first and its ObjectStore next, each
+	// named after the component, before the Pooler and the Database.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},

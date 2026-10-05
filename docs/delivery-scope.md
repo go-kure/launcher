@@ -204,7 +204,8 @@ Decided in the ticket:
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
   (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
-  `databases[].objectName`), the object of every kind component (`objectName`), the source
+  `databases[].objectName`) and its Cluster and ObjectStore (`clusterObjectName`,
+  `objectStoreObjectName`), the object of every kind component (`objectName`), the source
   a `helm` or `oci` component generates (`source.name`) and the `helm` values ConfigMap and
   Secret (`valuesConfigMapName`, `valuesSecretName`), the HelmRelease of a `helm`
   component (`helmReleaseName`), the Kustomization of an `oci`
@@ -265,13 +266,13 @@ Decided in the ticket:
     object of a kind component it emits under its component's name
     (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
-    a DNS-1123 subdomain (a DNS-1035 label for the Pooler and for the Service of a
-    `webservice`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
+    a DNS-1123 subdomain (a DNS-1035 label for the Pooler, for the Service of a
+    `webservice` and, of at most 50 characters, for the Cluster of a `postgresql`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
   - A lowering rule's request carries the name of the document the rule is lowering,
     which a later document rule may still change. The hook is asked only inside
     `Transform`: `LowerRaws` and a rule driven directly keep the defaults.
   - `Transformer.ComponentEndpointsNamed` asks the hook the transform's request, so the
-    `postgresql` pooler selector follows a hook-given name; `ComponentEndpoints` asks no
+    `postgresql` pooler and cluster selectors follow a hook-given name; `ComponentEndpoints` asks no
     hook. The hook must therefore be a pure function of its request.
   - A sub-application's name is no longer its object's: a hook that renames the
     sub-application of a `configmap`, `secret`, `ingress`, `httproute` or `volsync` trait
@@ -351,6 +352,26 @@ Decided in the ticket:
   - A sibling group accepts a member that runs no pods and names the account its one
     pod-running member runs as: the same answer, not a second one
     (`checkSiblingGroups`, `pkg/oam/sibling_group.go`).
+- **Shipped: the Cluster and the ObjectStore of a `postgresql`** (`PostgresqlRule`,
+  `pkg/oam/builtin/components/postgresql.go` and `postgresql_lowering.go`; the components
+  README, **postgresql**). `clusterObjectName` and `objectStoreObjectName` name the two
+  objects, under roles `postgresql-cluster` and `postgresql-objectstore`, asked with the
+  component; the default of each is the component name, so a document that sets neither
+  builds as before.
+  - Each names its object alone and is claimed (`LoweringContext.ResolveMemberName`). The
+    members keep the component's name. The Cluster's name is held to the Cluster's rule, a
+    DNS-1035 label of at most 50 characters, whoever chose it.
+  - The references launcher writes follow: the Pooler's and each Database's `cluster.name`
+    and the `cnpg.io/cluster` endpoint selector (`ComponentEndpointsNamed` with the hook)
+    the Cluster; the backup plugin's `barmanObjectName` the ObjectStore. The default names
+    of the Pooler and the Databases keep deriving from the component name; a component
+    name the Pooler's default cannot be built from is refused, naming `poolerName` as what
+    settles it.
+  - **CloudNativePG derives the Cluster's Services and Secrets from the Cluster's name, and
+    the default backup path moves with it. Renaming an existing Cluster creates a new one:
+    the old one is pruned with its data unless it is protected.**
+  - `objectStoreObjectName` is refused without `objectStore`: the component then generates
+    no store, and the hook is not asked.
 - **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
   hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
@@ -1301,7 +1322,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`). Open: the Cluster and the ObjectStore of a `postgresql` component | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`). Open: an author override for bundle, ordered-group and synthesized NetworkPolicy names; a hook role for the names outside the roles of §3.2, among them the claim a `pvc` volume generates | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
