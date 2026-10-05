@@ -957,6 +957,11 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		if named, ok := config.(ApplicationNameSetter); ok {
 			named.SetApplicationName(app.Metadata.Name)
 		}
+		if prefixed, ok := config.(HookGroupNamePrefixSetter); ok {
+			if err := ctx.names.resolveHookGroupNamePrefix(component.Name, prefixed); err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+		}
 
 		if enforceable, ok := config.(Enforceable); ok {
 			if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {

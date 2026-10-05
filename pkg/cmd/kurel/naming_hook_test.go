@@ -163,7 +163,8 @@ const (
 
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
-	namingTransform(t, namingApp("", namingDB+namingChart), namingContext(declineEveryName(&requests)))
+	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
+	namingTransform(t, namingApp("", namingDB+namingChart+jobs), namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -173,8 +174,9 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	)
 	// Each name once, in the order the transform reaches it: the names the
 	// lowering rules make, the object of each authored kind component, the
-	// bundles, each trait's objects and then its sub-application, the
-	// synthesized policy last. agent is the one authored kind component: the
+	// hook-group prefix of the helmtemplate component, the bundles, each trait's
+	// objects and then its sub-application, the synthesized policy last. agent
+	// is the one authored kind component: the
 	// members the webservice, postgresql and helm rules emit are named by their
 	// rule, and the hook is not asked for them. The helm rule's generated source
 	// is the document's, so its request carries no component.
@@ -185,8 +187,10 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesConfigMap, Kind: "ConfigMap", Default: chartConfigMapDefault},
 		{Application: "shop", Role: oam.NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: chartSourceDefault},
 		{Application: "shop", Component: "agent", Role: oam.NameRoleObject, Kind: "DaemonSet.apps", Default: "agent"},
+		// The prefix of jobs' hook-group layouts: no object, so no kind.
+		{Application: "shop", Component: "jobs", Role: oam.NameRoleHookGroup, Default: "shop-jobs"},
 		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
-		// db and chart are placed in no tier and share the first group with agent,
+		// db, chart and jobs are placed in no tier and share the first group with agent,
 		// so that group is numbered: a group carries a tier's name only when it is
 		// that tier and nothing else.
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-00"},

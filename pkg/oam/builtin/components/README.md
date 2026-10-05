@@ -3473,7 +3473,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `values`, `valuesMode` (`inline` |
   `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive part of the
   values tree, see below), `valuesSecretName`,
-  `scopeOverrides` (under `delivery: template` only, see below),
+  `scopeOverrides` and `hookGroupNamePrefix` (each under `delivery: template` only, see below),
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
@@ -3718,7 +3718,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `chart`, `version`, `values`, `secretValues`, `scopeOverrides` and an authored `releaseName`,
     which the `helmtemplate` checks and, when unset, defaults to the component
     name, the release name the `delivery: flux` HelmRelease carries too
-    (go-kure/launcher#785; see **helmrelease**). No source is emitted, and an authored
+    (go-kure/launcher#785; see **helmrelease**). An authored `hookGroupNamePrefix`
+    (go-kure/launcher#787) is passed on as written and is the `helmtemplate`'s; under
+    `delivery: flux` it is refused with a `helm:` message, since a HelmRelease installs the
+    chart, no hook-group layout exists and the prefix would name nothing. No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
@@ -3963,6 +3966,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
   checks are shared with the `helm` rule's inline source rather than copied. `scopeOverrides`
   states the scope of a kind the chart renders (see **Scope overrides** below).
+  `hookGroupNamePrefix` (go-kure/launcher#787) is the prefix of the names of the hook-group
+  layouts, in place of `<application>-<component>`; see the hook-group paragraph below.
 
   `secretValues` (go-kure/launcher#786) is a second open object, for the sensitive part of the
   values tree; it is what the `helm` rule forwards its own `secretValues` as. The chart is
@@ -4321,11 +4326,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   children carry no mode of their own, so under such a default each hook group is written as one
   file, `<component dir>/<child>.yaml`, instead of a sub-directory, and the component's
   `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout integrator keeps
-  every child a directory with its own Flux Kustomization, whatever the default. That
-  Kustomization's default name is the bundle's Kustomization name, a hyphen and the child's name,
-  and kure refuses a name over 63 characters there, while the child's name is held to 253: a
-  known limit, since launcher sets no override on the child yet (`pkg/oam/README.md`,
-  "Pipeline"). A single-group
+  every child a directory with its own Flux Kustomization, whatever the default. Each child
+  carries that Kustomization's name (`ManifestLayout.KustomizationName`,
+  go-kure/launcher#787): the child's own name shortened to 63 characters, the limit kure
+  holds a Kustomization name to, while the child's name, its directory, is held to 253
+  (`pkg/oam/README.md`, "Pipeline"). A single-group
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
@@ -4338,10 +4343,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   built directly, outside a transform, has none unless the caller sets the field, and its
   children are then named `<layout name>-NN-<phase-slug>`. **Breaking output change**: every
   hook-group child name, and so its directory and the Flux Kustomization a consumer derives
-  from it, gains the leading `<application>-`. Since go-kure/kure#973 the default name of the
-  Kustomization kure generates for the child under `FluxIntegratedPerLayout` also begins with
-  the bundle's Kustomization name, so for an application that is its own bundle the
-  application name leads it twice (`shop-shop-db-01-main`). A name over 253 characters is shortened by the
+  from it, gains the leading `<application>-`. The Kustomization kure generates for the child
+  under `FluxIntegratedPerLayout` is named by the child (`KustomizationName`), not after the
+  bundle's Kustomization and the child, so the application name leads it once
+  (`shop-db-01-main`); that name is shortened to 63 characters by the same rule, suffix whole,
+  and the next group's `spec.dependsOn` follows it. **Breaking output change**
+  (go-kure/launcher#787): it was `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`),
+  and refused by kure over 63 characters. A layout name over 253 characters is shortened by the
   one shortening rule (`oam.ShortenNameWithSuffix`, which `helm` uses for its values ConfigMap
   name): the `-NN-<phase-slug>` suffix is kept whole and `<application>-<component>` becomes
   its own beginning plus 10 hex digits of its sha256 (8 before go-kure/launcher#793), so two
@@ -4350,8 +4358,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component `c` and application `a` with component `b-c` still get the same child names. The
   default carries no namespace either: like the bundle name, a child name is built from the
   application's name alone, so two Applications with one name in different namespaces get the
-  same child names. Keeping those apart is the consumer's, through the naming hook of
-  go-kure/launcher#787; no property or hook overrides a child name yet. `GenerateCoversAugmentLayout` is always true —
+  same child names. Keeping those apart is the author's or the consumer's: the
+  `hookGroupNamePrefix` property, or the `Naming` hook's answer for the `hook-group` role
+  (go-kure/launcher#787), replaces `<application>-<component>` in the name of every child,
+  directory and Kustomization alike. Such a prefix is a DNS-1123 subdomain and is never
+  shortened: a child name over 63 characters built from it fails `AugmentLayout`, in an error
+  with the component, the role and the full name, and two components of one document that
+  resolve to one prefix fail the transform (`pkg/oam/README.md`, "Name roles and the `Naming`
+  hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated

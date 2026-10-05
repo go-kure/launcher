@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -439,44 +440,60 @@ func (r *chartRender) objects() []*client.Object {
 // single-tier flattening never absorbs a layout that has children. A caller
 // that sets the layout's mode explicitly keeps it.
 //
-// A child is named after application and ml (hookGroupChildName). Component
+// A child is named after naming and ml (hookGroupNaming.childNames). By
+// default that is the application and ml (hookGroupChildName): component
 // names are unique only within one application, while the Kustomization CRs a
 // consumer generates for the children of every application can share one
 // namespace, so the application name is what keeps two differently named
 // applications with a same-named component apart (go-kure/launcher#792). An
 // empty application — a config built directly — leaves the names beginning
 // with ml.Name.
-func (r *chartRender) partition(application string, ml *layout.ManifestLayout) {
+//
+// Each child carries the name of its Flux Kustomization
+// (ManifestLayout.KustomizationName, go-kure/launcher#787), which the base
+// library's layout integrator reads under per-layout placement in place of
+// its own default, "<unit>-<child name>". A child's DependsOn lists the
+// previous child's layout name; the integrator writes that sibling's
+// Kustomization name into spec.dependsOn. A child name naming refuses is
+// returned before ml is touched.
+func (r *chartRender) partition(naming hookGroupNaming, ml *layout.ManifestLayout) error {
 	if len(r.hookGroups) <= 1 {
-		return
+		return nil
 	}
 	if r.emitted == nil {
 		r.objects()
+	}
+	suffixes := make([]string, len(r.emitted))
+	for i, g := range r.emitted {
+		suffixes[i] = hookGroupSuffix(i, g)
+	}
+	names, err := naming.childNames(ml.Name, suffixes)
+	if err != nil {
+		return err
 	}
 	ml.Resources = nil
 	if ml.ApplicationFileMode == layout.AppFileUnset {
 		ml.ApplicationFileMode = layout.AppFilePerResource
 	}
 	parentPath := ml.FullRepoPath()
-	var prevName string
 	for i, g := range r.emitted {
-		dirName := hookGroupChildName(application, ml.Name, i, g)
 		child := &layout.ManifestLayout{
-			Name:          dirName,
-			Namespace:     parentPath,
-			Resources:     append([]client.Object(nil), g.Resources...),
-			Mode:          ml.Mode,
-			FluxPlacement: ml.FluxPlacement,
-			FileNaming:    ml.FileNaming,
-			FilePer:       ml.FilePer,
+			Name:              names[i].dir,
+			Namespace:         parentPath,
+			Resources:         append([]client.Object(nil), g.Resources...),
+			Mode:              ml.Mode,
+			FluxPlacement:     ml.FluxPlacement,
+			FileNaming:        ml.FileNaming,
+			FilePer:           ml.FilePer,
+			KustomizationName: names[i].kustomization,
 			// ApplicationFileMode intentionally omitted (left AppFileUnset) — see the doc comment above.
 		}
 		if i > 0 {
-			child.DependsOn = []string{prevName}
+			child.DependsOn = []string{names[i-1].dir}
 		}
 		ml.Children = append(ml.Children, child)
-		prevName = dirName
 	}
+	return nil
 }
 
 // parseChartManifests decodes multi-doc YAML produced by renderChart and
@@ -980,10 +997,89 @@ func jsonString(raw json.RawMessage, key string) string {
 // names do not. Two applications with one name do, whatever their namespaces:
 // the prefix, like the bundle name, carries no namespace.
 func hookGroupChildName(application, mlName string, i int, g helm.HookGroup) string {
-	prefix := mlName
-	if application != "" {
-		prefix = application + "-" + mlName
+	return oam.ShortenNameWithSuffix(hookGroupDefaultPrefix(application, mlName), hookGroupSuffix(i, g), oam.ShortenLimitSubdomain)
+}
+
+// hookGroupDefaultPrefix is what leads a hook-group child's default name:
+// "<application>-<ml.Name>", or ml.Name alone when application is empty.
+func hookGroupDefaultPrefix(application, mlName string) string {
+	if application == "" {
+		return mlName
 	}
-	suffix := fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
-	return oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitSubdomain)
+	return application + "-" + mlName
+}
+
+// hookGroupSuffix is what ends the name of hook group i, whatever leads it:
+// "-<%02d>-<hookGroupDir(g)>". It is at most 44 characters for a chart with
+// fewer than 100 groups.
+func hookGroupSuffix(i int, g helm.HookGroup) string {
+	return fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
+}
+
+// hookGroupKustomizationNameLimit is the longest name a Flux Kustomization may
+// have: the base library refuses a longer one where it creates the object
+// (stack.ValidateKustomizationName).
+const hookGroupKustomizationNameLimit = oam.ShortenLimitLabel
+
+// hookGroupNaming is what a helmtemplate config names its hook-group child
+// layouts by: the component they belong to, for a refusal; the application,
+// which leads the default; and prefix, the author's or the consumer's own in
+// place of the default (HelmTemplateConfig.HookGroupNamePrefix).
+type hookGroupNaming struct {
+	component   string
+	application string
+	prefix      string
+}
+
+// hookGroupChildNames are the two names of one hook-group child layout: dir is
+// its layout name, which is its directory, and kustomization the name of its
+// Flux Kustomization.
+type hookGroupChildNames struct{ dir, kustomization string }
+
+// childNames returns the names of the hook-group children of the layout named
+// mlName, one per suffix (hookGroupSuffix), in order.
+//
+// With no prefix both names of a child come from the default prefix
+// (hookGroupDefaultPrefix), each shortened by the one shortening rule to its
+// own limit with the suffix kept whole: the layout name to 253 characters
+// (hookGroupChildName), the Kustomization name to 63. The two are equal unless
+// the name is over 63 characters. Shortening only the Kustomization name
+// leaves every directory where it was (go-kure/launcher#787).
+//
+// A prefix is used as written, for both names, and never shortened: a child
+// name built from it that is over 63 characters, or no DNS-1123 subdomain, is
+// refused, naming the component, the role and the whole name. The longest
+// child name is the one refused for its length, so the prefix length the
+// message asks for fits every child.
+func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGroupChildNames, error) {
+	names := make([]hookGroupChildNames, len(suffixes))
+	if n.prefix == "" {
+		prefix := hookGroupDefaultPrefix(n.application, mlName)
+		for i, suffix := range suffixes {
+			names[i] = hookGroupChildNames{
+				dir:           oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitSubdomain),
+				kustomization: oam.ShortenNameWithSuffix(prefix, suffix, hookGroupKustomizationNameLimit),
+			}
+		}
+		return names, nil
+	}
+	longest := ""
+	for _, suffix := range suffixes {
+		if len(suffix) > len(longest) {
+			longest = suffix
+		}
+	}
+	if name := n.prefix + longest; len(name) > hookGroupKustomizationNameLimit {
+		return nil, errors.Errorf("%s: component %q: hook-group name %q (role %q) is %d characters, and a Flux Kustomization name has at most %d; its prefix %q was set by %s or returned by the Naming hook and is never shortened: use a prefix of at most %d characters, or none for the default, which is shortened",
+			helmTemplateType, n.component, name, oam.NameRoleHookGroup, len(name), hookGroupKustomizationNameLimit, n.prefix, oam.HookGroupNamePrefixProperty, hookGroupKustomizationNameLimit-len(longest))
+	}
+	for i, suffix := range suffixes {
+		name := n.prefix + suffix
+		if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+			return nil, errors.Errorf("%s: component %q: hook-group name %q (role %q) is not a valid DNS-1123 subdomain: %s; its prefix %q was set by %s or returned by the Naming hook",
+				helmTemplateType, n.component, name, oam.NameRoleHookGroup, strings.Join(errs, "; "), n.prefix, oam.HookGroupNamePrefixProperty)
+		}
+		names[i] = hookGroupChildNames{dir: name, kustomization: name}
+	}
+	return names, nil
 }

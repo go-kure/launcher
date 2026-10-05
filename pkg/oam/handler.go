@@ -161,6 +161,30 @@ type ApplicationNameSetter interface {
 	SetApplicationName(name string)
 }
 
+// HookGroupNamePrefixProperty is the component property an author writes the
+// prefix of a component's hook-group layout names in (NameRoleHookGroup).
+const HookGroupNamePrefixProperty = "hookGroupNamePrefix"
+
+// HookGroupNamePrefixSetter is an optional interface for component
+// ApplicationConfig types whose layout is split into hook-group layouts named
+// "<prefix>-<NN>-<phase>" (a helmtemplate component). The transform resolves the
+// prefix once per component under NameRoleHookGroup, right after
+// SetApplicationName: the prefix the config says its author wrote
+// (AuthoredHookGroupNamePrefix), else the answer of TransformContext.Naming,
+// else the default "<application>-<component>". It calls SetHookGroupNamePrefix
+// with a prefix that is not the default, and not at all for the default, which
+// the config builds itself. A prefix it is handed is used as written: the
+// config never shortens it, and refuses a layout name built from it that
+// cannot be a Flux Kustomization's. A config built directly, outside a
+// transform, is never handed one.
+type HookGroupNamePrefixSetter interface {
+	// AuthoredHookGroupNamePrefix returns the prefix the author wrote and
+	// whether the author wrote one: a present empty string is an authored
+	// prefix, and refused.
+	AuthoredHookGroupNamePrefix() (prefix string, authored bool)
+	SetHookGroupNamePrefix(prefix string)
+}
+
 // ServiceAccountNamer is an optional interface for component ApplicationConfig
 // types. name is the ServiceAccount the component's pods run as: the authored
 // `serviceAccountName`, or "" when none was authored — no pod kind generates a

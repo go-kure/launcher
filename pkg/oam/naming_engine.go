@@ -47,6 +47,31 @@ func (r *nameResolver) resolveBundleName(role NameRole, def string) (string, err
 	return name, nil
 }
 
+// resolveHookGroupNamePrefix resolves the prefix of the hook-group layout names
+// of component (NameRoleHookGroup) and hands config a prefix that is not the
+// default: the author's, or the hook's answer. The default,
+// "<application>-<component>", is claimed like any other and left for the config
+// to build: it is the only prefix the config may shorten. Two components that
+// resolve one prefix are refused with both named.
+func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookGroupNamePrefixSetter) error {
+	def := component
+	if r != nil && r.application != "" {
+		def = r.application + "-" + component
+	}
+	spec := NameSpec{Role: NameRoleHookGroup, Default: def}
+	if authored, ok := config.AuthoredHookGroupNamePrefix(); ok {
+		spec.Property, spec.Authored = HookGroupNamePrefixProperty, authored
+	}
+	prefix, source, err := r.resolveFrom(nameOwner{component: component, role: NameRoleHookGroup, def: def}, spec)
+	if err != nil {
+		return err
+	}
+	if source != nameFromDefault {
+		config.SetHookGroupNamePrefix(prefix)
+	}
+	return nil
+}
+
 // synthesizedPolicy is a config of the NetworkPolicy synthesis: one generated
 // NetworkPolicy, named by the transform after the synthesis has run.
 type synthesizedPolicy interface {

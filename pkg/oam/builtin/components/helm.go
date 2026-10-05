@@ -193,7 +193,8 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"valuesFrom": {Type: oam.PropertyTypeArray, Description: "HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values. Refused under delivery: template.", Items: &oam.PropertySchema{
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional).",
 		}},
-		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
+		oam.HookGroupNamePrefixProperty: str(hookGroupNamePrefixDescription + " Under delivery: template only; refused under delivery: flux, where a HelmRelease installs the chart and no hook-group layout exists."),
+		scopeOverridesKey:               scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
 	}
 }
 
@@ -209,6 +210,10 @@ type helmProperties struct {
 	// absent or null. A present empty string is an authored name, and refused.
 	ValuesConfigMapName *string `json:"valuesConfigMapName"`
 	ValuesSecretName    *string `json:"valuesSecretName"`
+	// The authored prefix of the hook-group layout names under delivery:
+	// template, forwarded to the helmtemplate terminal as written; nil when
+	// absent or null.
+	HookGroupNamePrefix *string `json:"hookGroupNamePrefix"`
 }
 
 // helmSource is an inline source or a reference to an existing source CR
@@ -419,6 +424,12 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	}
 	if props.ValuesConfigMapName != nil && props.ValuesMode != "configMap" {
 		return oam.LoweringResult{}, errors.Errorf("%s: valuesConfigMapName: names the values ConfigMap, and valuesMode is not configMap, so none is generated; remove it, or set valuesMode: configMap", helmType)
+	}
+	// A HelmRelease has no hook-group layouts: Helm runs the chart's hooks in
+	// the cluster. Dropping the property silently would let an author believe it
+	// named something.
+	if props.HookGroupNamePrefix != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: %s: names the hook-group layouts of a chart rendered at build time, and under delivery: flux the chart is installed by a HelmRelease, so it names nothing; remove it, or set delivery: template", helmType, oam.HookGroupNamePrefixProperty)
 	}
 	// The names this rule resolves are the component's, also where a caller
 	// built the context without it.
@@ -994,6 +1005,11 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, 
 		if v, ok := passthrough[key]; ok {
 			rendered[key] = v
 		}
+	}
+	// As written: the transform checks it where it resolves the prefix of the
+	// helmtemplate component, under the same property name.
+	if props.HookGroupNamePrefix != nil {
+		rendered[oam.HookGroupNamePrefixProperty] = *props.HookGroupNamePrefix
 	}
 	// The helmtemplate reads scopeOverrides with the same parser; a malformed
 	// entry is refused here first, so the message names the component type the

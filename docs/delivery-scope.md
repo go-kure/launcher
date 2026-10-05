@@ -206,11 +206,11 @@ Decided in the ticket:
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
   `databases[].objectName`), the object of every kind component (`objectName`), the source
   a `helm` or `oci` component generates (`source.name`) and the `helm` values ConfigMap and
-  Secret (`valuesConfigMapName`, `valuesSecretName`). Still
+  Secret (`valuesConfigMapName`, `valuesSecretName`), and the prefix of a `helmtemplate`
+  component's hook-group child layouts (`hookGroupNamePrefix`). Still
   none for:
   bundle and ordered-group
-  names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others) and Helm
-  hook-group child layouts. The Helm release name has one under both deliveries
+  names and synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others). The Helm release name has one under both deliveries
   (`releaseName`, go-kure/launcher#785, §4.2).
 - **Object name = component name** for every kind component unless `objectName` or the
   hook names the object otherwise (§3.2). Two kind components `app` are still refused as a
@@ -250,8 +250,9 @@ Decided in the ticket:
     group's bundle, each sub-application a trait or a synthesized policy adds, each
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects and the
     `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, the object
-    of an authored kind component, and the generated source and values ConfigMap and
-    Secret of a `helm` component. A trait
+    of an authored kind component, the generated source and values ConfigMap and
+    Secret of a `helm` component, and the prefix of a `helmtemplate` component's
+    hook-group layouts. A trait
     handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
     `LoweringContext.ResolveName` (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
@@ -311,12 +312,26 @@ Decided in the ticket:
     interval, unless the object is watched.
   - These objects land in the Flux namespace when one is set, and their names are claimed
     there (`NameSpec.FluxScoped`).
+- **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
+  hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
+  layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
+  under `delivery: template`, else the hook, else `<application>-<component>`.
+  - It is the one role whose answer is a prefix: the group count is known only after the
+    render, which follows the name resolution. Two components resolving to one prefix are
+    refused in the transform.
+  - Each child carries the name of its Flux Kustomization
+    (`ManifestLayout.KustomizationName`). The default is shortened to 63 characters by the
+    one shortening rule, while the directory keeps its 253-character name, so the two differ
+    for a long default. An authored or hook-given prefix is never shortened, and a child
+    name over 63 characters built from it is refused.
+  - **Breaking:** under per-layout placement a child's Kustomization was named
+    `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`), and refused over 63
+    characters; it is now `shop-db-01-main`.
 - **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
   - A name the `Namer` builds (`NameAllocator.Name` and
     `NameOrAdopt`, `pkg/oam/lowering.go`) reaches the hook only where its rule calls
     `LoweringContext.ResolveName` or `ResolveSharedName`.
-  - The names with no role yet: the hook-group children.
 
 ### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
@@ -327,7 +342,8 @@ Decided in the ticket:
   whole name; a fixed suffix is kept whole, unless it leaves less room than the digest
   needs (a long routing `scope`): name and suffix are then shortened together. The caller
   passes the limit:
-  - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`.
+  - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`, and the
+    default name of a hook-group child's Flux Kustomization (go-kure/launcher#787, §3.2).
   - `ShortenLimitSubdomain` (253): every object name launcher generates by default, the
     hook-group child layouts and the ordered-group bundles.
   - `ShortenLimitHelmRelease` (53): the one exception to the rule. The result is what Flux
@@ -964,7 +980,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler` and `secret` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
