@@ -308,6 +308,15 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"endpointSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
 		"ingress": []any{map[string]any{"fromEndpoints": []any{
 			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
+	// The three kinds below emit identity and the authored fields too, with no
+	// `app` label and no pods: a ServiceCIDR is cluster-scoped, the budget and
+	// the autoscaler are namespaced. None checks a name rule of its own. The
+	// budget authors no selector, so it selects no pod.
+	"servicecidr":         {props: map[string]any{"cidrs": []any{"10.96.0.0/16"}}},
+	"poddisruptionbudget": {props: map[string]any{"maxUnavailable": 1}},
+	"horizontalpodautoscaler": {props: map[string]any{
+		"scaleTargetRef": map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "web"},
+		"maxReplicas":    3}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

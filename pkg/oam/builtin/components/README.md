@@ -159,6 +159,9 @@ reads it.
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; no environment policy applies — see below. |
 | `cilium-networkpolicy` | CiliumNetworkPolicy | Kind-named CiliumNetworkPolicy: its `spec` (one rule) and `specs` (a list of rules), each the whole Cilium rule, strictly decoded. At least one is required; each rule needs an `endpointSelector` and an entry in `ingress`, `ingressDeny`, `egress` or `egressDeny`, and `nodeSelector` is refused. An authored object, not the `cilium-networkpolicy` trait; no environment policy applies — see below. |
+| `servicecidr` | ServiceCIDR | Kind-named ServiceCIDR: the whole `ServiceCIDRSpec` (`cidrs`, required, at least one), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
+| `poddisruptionbudget` | PodDisruptionBudget | Kind-named PodDisruptionBudget: the whole `PodDisruptionBudgetSpec` (`minAvailable`, `maxUnavailable`, `selector`, `unhealthyPodEvictionPolicy`), strictly decoded; no field is required and the `selector` is the author's. No environment policy applies — see below. |
+| `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -201,7 +204,7 @@ Every object the base library can construct, and how a document reaches it
   says so.
 - `TestKindInventory_MatchesCallSites` holds the Status and Type columns to this package and
   `../traits`: a `kind` row's constructor is called here, a `trait` row's there or here (a
-  trait may build through this package, as `configmap` does), and a `missing` or
+  trait may build through this package, as `configmap` does), and a `missing`, `held` or
   `not authorable` row's by neither. A `kind` or `component` row's Type is a type a handler
   or lowering rule of this package declares contract metadata for, a `trait` row's one of
   `../traits`, so a row stops passing when its handler is removed.
@@ -219,6 +222,8 @@ Status is one of:
   kind component.
 - `trait`: a trait emits it and no component does; Type is the trait `type`.
 - `missing`: authorable, with no component yet. go-kure/launcher#790 adds these group by group.
+- `held`: authorable, with no component until a named question is decided; Notes gives the
+  reason. A component for it would not do what the kind is authored for.
 - `not authorable`: no component is planned; Notes gives the reason.
 
 Decode is how the properties become the object: `hand-written parser` (a schema and parser this
@@ -232,7 +237,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
-| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. Its labels and annotations are not authorable. No environment policy applies. |
+| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are not authorable. No environment policy applies. |
 | `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
 | `kubernetes.CreateCSIStorageCapacity` | storage.k8s.io/v1 CSIStorageCapacity | not authorable | - | - | Written by a CSI driver's provisioner. |
 | `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | trait | `rbac` | hand-written parser | - |
@@ -244,15 +249,15 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
-| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | missing | - | - | - |
-| `kubernetes.CreateEndpoints` | v1 Endpoints | missing | - | - | - |
+| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, and a kind component's metadata is not authorable. Held until go-kure/launcher#790's open point on object metadata is decided. |
+| `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
 | `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | missing | - | - | - |
 | `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | missing | - | - | - |
 | `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | kind | `httproute` | strict decode of `HTTPRouteSpec` | No type under `HTTPRouteSpec` unmarshals itself, so the decode reaches every depth. The `httproute` trait, which `expose` lowers onto, builds its own HTTPRoute with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis, takes its parent from a capability and is held to the policy's capability lists. |
-| `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
+| `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | kind | `horizontalpodautoscaler` | strict decode of `HorizontalPodAutoscalerSpec` | `scaleTargetRef` and `maxReplicas` must be written. `maxReplicas` is held to the environment policy's replica maximum. The `scaler` trait emits one for its workload too, through its own parser. |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | kind | `ingress` | strict decode of `IngressSpec` | The `ingress` trait, which `expose` lowers onto, builds its own Ingress with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis and is held to the platform's hostname constraint and the policy's capability lists. |
 | `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. `controller` must be written. No environment policy applies. |
@@ -269,7 +274,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
 | `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
-| `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
+| `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | kind | `poddisruptionbudget` | strict decode of `PodDisruptionBudgetSpec` | No field is required. No environment policy applies. The `scaler` trait emits one for its workload too (`enablePDB`), through its own parser. |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
 | `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. An unauthored `value` is emitted as `0`. No environment policy applies. |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
@@ -283,7 +288,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateSecret` | v1 Secret | trait | `secret` | hand-written parser | The trait builds through a generator of this package, so a `secret` kind can use the same path. The `helm` component's `secretValues` synthesizes the trait. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
-| `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. At least one of `cidrs` must be written. No environment policy applies. |
 | `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
 | `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
@@ -2599,7 +2604,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies. A kind is a value of it naming the upstream type, an
+  policy applies; `servicecidr` and `poddisruptionbudget`, below, are built
+  on it too. A kind is a value of it naming the upstream type, an
   optional check of required fields, and the base-library constructor; the
   helper is the rest: the strict decode of the property map into the upstream
   type under the package's null contract, which refuses a `null` list element
@@ -2667,8 +2673,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component's object name must be the driver's (`csi.example.com`), written as
   the component name or as `objectName`. The build namespace does not apply to
   these objects. The handlers check no name rule of their own on either name:
-  one the API refuses for the kind (a CSIDriver name over 63 characters)
-  builds here and is refused at apply.
+  one the API server refuses for the kind builds here and is refused at
+  apply. **A CSIDriver's name is not held to the limit the API documents for
+  it.** The type's documentation gives a driver name at most 63 characters;
+  the API server does not hold the CSIDriver object to that, and accepts any
+  DNS subdomain name. It does refuse a PersistentVolume that names a driver
+  longer than 63 characters, so such a CSIDriver is created and no volume can
+  use it. The `csidriver` kind refuses what the API server refuses of the
+  object and no more, so it builds that name too.
 
   **Policy.** None of the six has a field an `oam.Policy` method speaks to,
   so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
@@ -2891,6 +2903,108 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   registers. **Not covered:** the object's own metadata, so its labels and
   annotations cannot be authored, and its `status`, which the Cilium agent
   writes.
+- **servicecidr** (go-kure/launcher#790) is the kind-named projection of a
+  cluster-scoped `networking.k8s.io/v1` ServiceCIDR: a range the API server
+  assigns Service cluster IPs from, beside the one it was started with. It is
+  built on `policyFreeKind`, as the six kinds above are, and what that entry
+  says of them holds here: one object, named after the component unless
+  `objectName` names it, with no namespace, declared cluster-scoped, holding
+  exactly what was authored, the same under every policy and under none.
+  - **Authored:** the one field of `ServiceCIDRSpec`, `cidrs`, a list of IP
+    blocks in CIDR notation, decoded strictly. **Required:** at least one
+    block (`cidrs: required …`); the API server refuses a ServiceCIDR
+    without one. Every other value rule is left to the API server: that a
+    block is a valid CIDR, that there are at most two, and that two are of
+    different IP families.
+  - **Not covered.** The object's metadata, so its labels and annotations
+    cannot be authored. The API server refuses a change to a block once the
+    object exists; a ServiceCIDR of one block may only gain a second.
+    Launcher does not compare a build with the cluster, so a changed block
+    builds here and is refused at apply. The object's status is the API
+    server's and is not written.
+- **poddisruptionbudget** (go-kure/launcher#790) is the kind-named projection
+  of a `policy/v1` PodDisruptionBudget, built on `policyFreeKind`. It emits
+  that one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default. The handler declares its object as
+  namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** the four fields of `PodDisruptionBudgetSpec`, decoded
+    strictly: `minAvailable` and `maxUnavailable` (each a count or a
+    percentage string such as `"50%"`), `selector` (a label selector) and
+    `unhealthyPodEvictionPolicy`. A count is emitted as a number and a
+    percentage as a string, and an authored `0` is kept (`maxUnavailable: 0`
+    allows no voluntary eviction).
+  - **Required:** nothing. The API server accepts a budget with an empty
+    spec. Its value rules are left to it, the one that `minAvailable` and
+    `maxUnavailable` exclude each other included: a component that authors
+    both builds here and is refused at apply.
+  - **The selector is the author's.** Launcher points it at no component: an
+    unauthored `selector` selects no pod, and `selector: {}` selects every
+    pod of the namespace. To cover a workload component, select its `app`
+    label (`matchLabels: {app: <component>}`), which holds the component
+    name up to 63 characters and its label projection beyond.
+  - **Beside the `scaler` trait.** `scaler` with `enablePDB: true` derives a
+    budget for its own workload, selector included, and refuses one that
+    would block every eviction. This kind is the authored object and applies
+    none of that: it is for a budget the trait does not express (a
+    percentage, `maxUnavailable`, an eviction policy, pods launcher does not
+    own).
+  - **Policy.** No field of the spec is one an `oam.Policy` method speaks to,
+    so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Not covered.** The object's metadata, so its labels and annotations
+    cannot be authored. Whether the selector matches any pod. The object's
+    status is the disruption controller's and is not written.
+- **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
+  projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
+  one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default. The handler declares its object as
+  namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
+    strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
+    `metrics` and `behavior`. An unknown key is refused wherever it sits (a
+    metric source, a scaling rule), a quantity written as a number is
+    emitted in its canonical string form, and an authored `0` is kept
+    (`stabilizationWindowSeconds: 0`). The type has no number or boolean
+    that is omitted when zero, which
+    `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
+  - **Required** are the two top-level fields the API server refuses an
+    autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
+    a `maxReplicas` of at least 1 (`maxReplicas: required …`; an authored
+    `0` is refused the same way, since the type cannot tell it from an unset
+    one). The config is exported, so `Generate` repeats both. Every other
+    value rule is left to the API server: the `kind` and `name` inside
+    `scaleTargetRef`, `minReplicas` against `maxReplicas`, which metric
+    source goes with which `type`.
+  - **Policy.** `maxReplicas` is held to the environment policy's replica
+    maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
+    HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
+    or a `manifests` source yields is held: `component "web": maxReplicas:
+    replicas 4 exceeds enforced maximum 3`. Nothing else is held, and no
+    default is filled: the policy's `scalerMinReplicas` and
+    `scalerMaxReplicas` defaults belong to the `scaler` trait. A nil policy
+    checks nothing.
+  - **The target is the author's, and is not checked.** `scaleTargetRef`
+    names an object by `kind`, `name` and `apiVersion`; launcher points it
+    at no component and does not look for the object in the document. To
+    scale a workload component, name its object: the component name, or its
+    `objectName`. **The guards the `scaler` trait applies to its own
+    workload do not see this kind:** a `deployment`, `webservice` or
+    `worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
+    whose `maxReplicas` is above 1, and builds beside a
+    `horizontalpodautoscaler` component that scales it further. That is the
+    state of an autoscaler emitted through `passthrough`, `manifests` or
+    template delivery.
+  - **Beside the `scaler` trait.** The trait derives an autoscaler for the
+    workload it is attached to, from a target CPU or memory utilization.
+    This kind is the authored object, for what the trait does not express:
+    other metric sources, scaling behavior, a target launcher does not own.
+    The two name their objects apart (`<component>-hpa` for the trait), and
+    two that are given one name in one namespace are refused as a name
+    collision.
+  - **Not covered.** The object's metadata, so its labels and annotations
+    cannot be authored. Whether the target exists or can be scaled. The
+    object's status is the controller's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5513,7 +5627,8 @@ name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `sta
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
-`csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
+`csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four
+`cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`

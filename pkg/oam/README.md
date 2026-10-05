@@ -736,7 +736,7 @@ where the handler decodes its properties strictly, refuses it as a field it does
 (`namespace`, `helmrelease`, `cnpg-cluster`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
 kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
-`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`), and in the Flux namespace for a Flux kind when the
+`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`), and in the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
 
 ```
@@ -834,7 +834,8 @@ parseable-but-undispatchable, and in both cases a handler-level test suite stays
 The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`,
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
-`ingress`, `httproute`, `networkpolicy` and `cilium-networkpolicy`
+`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`,
+`poddisruptionbudget` and `horizontalpodautoscaler`
 (go-kure/launcher#790) are on this list. `ingress`, `httproute`, `networkpolicy` and
 `cilium-networkpolicy` are also trait types: the two lists are separate, and a component
 of such a type is the authored object, not the trait.

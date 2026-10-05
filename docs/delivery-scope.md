@@ -590,8 +590,9 @@ be closed at build time.
 
 - **Shipped: the kind inventory.** `pkg/oam/builtin/components/README.md` "Kind
   inventory" has one row per constructor the base library generates, with a status
-  (`kind`, `component`, `trait`, `missing`, `not authorable`), the component or trait type
-  and, for a kind judged not authorable, the reason. Two tests hold it to the code
+  (`kind`, `component`, `trait`, `missing`, `held`, `not authorable`), the component or
+  trait type and, for a kind held or judged not authorable, the reason. Two tests hold it
+  to the code
   (`TestKindInventory_CoversEveryConstructor`, `TestKindInventory_MatchesCallSites`,
   `kind_inventory_internal_test.go`): a base-library bump that adds a kind fails until the
   table has its row.
@@ -656,6 +657,10 @@ be closed at build time.
     unauthored, it is emitted as `0`. Other value rules are left to the API server.
   - Metadata is not authorable, as on every kind component, so a default StorageClass or
     IngressClass (an annotation) cannot be written with these kinds.
+  - A CSIDriver's name is not held to the 63 characters the API documents for it: the
+    API server does not hold the object to that limit, and refuses a PersistentVolume
+    that names a longer driver. The kind refuses what the API server refuses of the
+    object and no more.
 - **Shipped: the routing kinds** `ingress` and `httproute` (`ingress.go`,
   `httproute.go`), on the recipe of the core kinds above.
   - `ingress` projects `IngressSpec`, `httproute` projects `HTTPRouteSpec`. No field is
@@ -693,6 +698,41 @@ be closed at build time.
   - An unknown key inside an endpoint selector is refused by its path, as in the trait:
     the selector unmarshals itself and would drop a misspelt key, leaving the selector
     that matches everything. The positions are found from the Cilium types.
+- **Shipped: `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`**
+  (`servicecidr.go`, `poddisruptionbudget.go`, `horizontalpodautoscaler.go`), each the
+  strict projection of its spec type, declaring its object and taking `objectName`.
+  - `servicecidr` (cluster-scoped) and `poddisruptionbudget` (namespaced) are built on
+    `policyFreeKind`: no environment policy applies. A ServiceCIDR needs at least one of
+    `cidrs`; a PodDisruptionBudget has no required field. That `minAvailable` and
+    `maxUnavailable` exclude each other is left to the API server.
+  - `horizontalpodautoscaler` (namespaced) requires `scaleTargetRef` and a `maxReplicas`
+    of at least 1, and `maxReplicas` is held to `MaxReplicas`, as a rendered
+    HorizontalPodAutoscaler is. No policy default is filled.
+  - The selector of a budget and the target of an autoscaler are the author's: launcher
+    points neither at a component and checks neither against the document. **The
+    `scaler` trait's guard on a workload whose claim is not ReadWriteMany does not see a
+    `horizontalpodautoscaler` component that targets that workload,** as it does not see
+    an autoscaler a chart renders or a `passthrough` component holds.
+  - The `scaler` trait's objects and these kinds are claimed as the same kinds, so one
+    name given to both in one namespace is a name collision.
+- **Held: `endpointslice`.** A slice belongs to a Service only through the
+  `kubernetes.io/service-name` label, and a kind component's metadata is not authorable,
+  so the kind could not do what it is authored for. Its inventory row is `held`, with
+  that reason, until the open point below is decided.
+- **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
+  inventory row is `not authorable` with that note.
+- **Open point, not decided: object metadata on kind components.** No kind component
+  lets its object's labels or annotations be authored. Three concrete cases need them:
+  - the `kubernetes.io/service-name` label of an EndpointSlice, without which the slice
+    belongs to no Service;
+  - the default-class annotation of a StorageClass or an IngressClass
+    (`storageclass.kubernetes.io/is-default-class`,
+    `ingressclass.kubernetes.io/is-default-class`);
+  - the Pod Security Admission labels of a Namespace
+    (`pod-security.kubernetes.io/enforce` and its siblings).
+
+  Whether labels and annotations become authorable on kind components is a decision of
+  its own on the ticket.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
@@ -730,7 +770,7 @@ be closed at build time.
 - **Missing kinds:** the inventory's `missing` rows (Secret, Pod, ServiceMonitor,
   Gateway among them), and its `trait` rows, the
   kinds reachable only as traits today (Ingress, HTTPRoute, Certificate, ExternalSecret,
-  HPA, PDB, NetworkPolicy, CiliumNetworkPolicy, Role and RoleBinding, ReplicationSource).
+  NetworkPolicy, CiliumNetworkPolicy, Role and RoleBinding, ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
 
 ---
@@ -890,7 +930,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy` and `cilium-networkpolicy` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

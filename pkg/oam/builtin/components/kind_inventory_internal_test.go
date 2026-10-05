@@ -30,6 +30,7 @@ const (
 	inventoryComponent     = "component"
 	inventoryTrait         = "trait"
 	inventoryMissing       = "missing"
+	inventoryHeld          = "held"
 	inventoryNotAuthorable = "not authorable"
 )
 
@@ -91,7 +92,7 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 			if row.typ != "" || row.decode != "" {
 				t.Errorf("README.md:%d: %s: a %q row has no Type and no Decode", row.line, name, row.status)
 			}
-		case inventoryNotAuthorable:
+		case inventoryHeld, inventoryNotAuthorable:
 			if row.typ != "" || row.decode != "" || row.notes == "" {
 				t.Errorf("README.md:%d: %s: a %q row has no Type and no Decode, and gives its reason in Notes", row.line, name, row.status)
 			}
@@ -103,7 +104,7 @@ func TestKindInventory_CoversEveryConstructor(t *testing.T) {
 
 // TestKindInventory_MatchesCallSites holds the inventory's Status column to the
 // code: a kind row's constructor is called from this package, a trait row's
-// from ../traits or from this package, and a missing or not authorable row's
+// from ../traits or from this package, and a missing, held or not authorable row's
 // from neither. So a component or trait for a missing kind fails here until
 // its row says so, and a row cannot claim one that builds nothing.
 //
@@ -153,7 +154,7 @@ func TestKindInventory_MatchesCallSites(t *testing.T) {
 				t.Errorf("README.md:%d: %s has status %q, but no file of ../traits or of this package calls it", row.line, name, row.status)
 			}
 			checkType(traitTypes, "../traits")
-		case inventoryMissing, inventoryNotAuthorable:
+		case inventoryMissing, inventoryHeld, inventoryNotAuthorable:
 			if here[name] || traits[name] {
 				t.Errorf("README.md:%d: %s has status %q, but this package or ../traits calls it: update the row", row.line, name, row.status)
 			}

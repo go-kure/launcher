@@ -123,7 +123,12 @@ kinds named below. The cluster-scoped kind components `storageclass`,
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass` and
 `csidriver` (go-kure/launcher#790) are registered the same way, with a
 `<type>-component` fixture each; each emits one object, named after the
-component unless `objectName` names it, with no namespace. The
+component unless `objectName` names it, with no namespace. The kind components
+`servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`
+(go-kure/launcher#790) are registered the same way, with a `<type>-component`
+fixture each: a ServiceCIDR with no namespace, and a PodDisruptionBudget and a
+HorizontalPodAutoscaler in the build namespace, each holding what was authored.
+The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
 and the synthesized `pvc` traits. The five pod kinds generate no ServiceAccount
