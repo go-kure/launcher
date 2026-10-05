@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -68,6 +69,71 @@ var imageFieldTypes = []imageFieldType{
 			"volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
 		},
 	},
+	{
+		// The cnpg-cluster kind. Instances is set because the kind's policy step
+		// refuses a Cluster without one before it reads an image.
+		name: "cnpg-cluster spec",
+		typ:  reflect.TypeFor[cnpgv1.ClusterSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"imageName": func(reference string, p oam.Policy) error {
+				return (&CnpgClusterConfig{Name: "db", Spec: cnpgv1.ClusterSpec{Instances: 1, ImageName: reference}}).ApplyPolicy(p)
+			},
+			"postgresql.extensions[].image": func(reference string, p oam.Policy) error {
+				spec := cnpgv1.ClusterSpec{Instances: 1}
+				spec.PostgresConfiguration.Extensions = []cnpgv1.ExtensionConfiguration{{
+					Name:              "ext",
+					ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+				}}
+				return (&CnpgClusterConfig{Name: "db", Spec: spec}).ApplyPolicy(p)
+			},
+		},
+		notHeld: map[string]string{
+			"imageCatalogRef":  "names an image catalog object and a major version, not an image; the catalog's images are the catalog's to hold",
+			"imagePullPolicy":  "says when the image is pulled, not which image",
+			"imagePullSecrets": "names the Secrets holding registry credentials, not an image",
+		},
+	},
+	{
+		// The cnpg-pooler kind: its own image, and the pod template through the
+		// shared check under template.spec.
+		name: "cnpg-pooler spec",
+		typ:  reflect.TypeFor[cnpgv1.PoolerSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"pgbouncer.image": func(reference string, p oam.Policy) error {
+				return (&CnpgPoolerConfig{Name: "pool", Spec: cnpgv1.PoolerSpec{PgBouncer: &cnpgv1.PgBouncerSpec{Image: reference}}}).ApplyPolicy(p)
+			},
+			"template.spec.containers[].image": func(reference string, p oam.Policy) error {
+				return poolerTemplatePolicy(corev1.PodSpec{Containers: []corev1.Container{{Name: "pgbouncer", Image: reference}}}, p)
+			},
+			"template.spec.initContainers[].image": func(reference string, p oam.Policy) error {
+				return poolerTemplatePolicy(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
+			},
+			"template.spec.volumes[].image": func(reference string, p oam.Policy) error {
+				return poolerTemplatePolicy(corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}}, p)
+			},
+		},
+		notHeld: map[string]string{
+			"pgbouncer.imageCatalogRef":                           "names an image catalog object and a key in it, not an image; the catalog's images are the catalog's to hold",
+			"template.spec.ephemeralContainers[].image":           "the kind refuses a template that lists ephemeral containers, at parse and at generation",
+			"template.spec.containers[].imagePullPolicy":          "says when the image is pulled, not which image",
+			"template.spec.initContainers[].imagePullPolicy":      "says when the image is pulled, not which image",
+			"template.spec.ephemeralContainers[].imagePullPolicy": "says when the image is pulled, not which image",
+			"template.spec.imagePullSecrets":                      "names the Secrets holding registry credentials, not an image",
+			"template.spec.volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
+		},
+	},
+}
+
+// poolerTemplatePolicy is the cnpg-pooler kind's policy step on a Pooler whose
+// pod template has the given spec.
+func poolerTemplatePolicy(ps corev1.PodSpec, p oam.Policy) error {
+	return (&CnpgPoolerConfig{Name: "pool", Spec: cnpgv1.PoolerSpec{
+		PgBouncer: &cnpgv1.PgBouncerSpec{},
+		Template:  &cnpgv1.PodTemplateSpec{Spec: ps},
+	}}).ApplyPolicy(p)
 }
 
 // isImageField says whether f could name an image: its json name holds

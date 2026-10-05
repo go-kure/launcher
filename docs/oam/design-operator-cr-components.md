@@ -157,7 +157,8 @@ checks that follow from fields the curated component never exposed: the storage
 maximum on every claim the Cluster creates (`storage`, `walStorage`, each
 tablespace and the ephemeral volume template), the privileged, capability and
 host-process refusals on the two security contexts, and the registry allowlist
-the workload kinds apply to their image, on an authored `imageName`.
+the workload kinds apply to their image, on an authored `imageName` and on the
+image of each `postgresql.extensions[]` entry.
 
 `cnpg-pooler` polices what the `Pooler` runs: its pod template gets the gates
 the workload kinds apply to their pod (host namespaces, hostPath volumes,
@@ -243,6 +244,9 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
   go-kure/launcher#281 a `postgresql` image from a registry outside the list is
   refused. `imageCatalogRef` names a catalog object rather than an image and is
   not checked, nor is the operator's default image when `imageName` is unset.
+  The image of a `postgresql.extensions[]` entry is held to the same list
+  (go-kure/launcher#790); `postgresql` writes no such entry, so only an
+  authored `cnpg-cluster` can meet that refusal.
 - `postgresql` builds its kind properties from the same typed structs, so the
   omitted-zero refusal does not see a `0` or `false` its own parse already
   dropped; its parse decides those, as before.

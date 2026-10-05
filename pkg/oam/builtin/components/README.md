@@ -2593,8 +2593,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   held nor listed with a reason; an image field under another name and
   another type is not found by it. **Not covered:** a custom
   resource that `passthrough`, a `manifests` source or a chart carries passes
-  whatever it holds, the pod template of a CloudNativePG Pooler included;
-  only the kind that builds the object holds its fields. **Breaking:** an
+  whatever it holds, the pod template of a CloudNativePG Pooler and the
+  extension images of a Cluster included; only the kind that builds the
+  object (`cnpg-pooler`, `cnpg-cluster`) holds its fields. **Breaking:** an
   image volume naming a registry outside the list built before, on each of
   those paths, and is refused now.
 
@@ -6290,7 +6291,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `imageCatalogRef` names a catalog object rather than an image, so it is not
   checked either. A `postgresql` component always writes `imageName` (its
   derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
-  so the allowlist applies to its image too.
+  so the allowlist applies to its image too. The allowlist applies as well to
+  the image of each `postgresql.extensions[]` entry, which the operator mounts
+  into the instance pods as an image volume (**breaking**,
+  go-kure/launcher#790: an extension image from a registry outside the list
+  built before): `postgresql.extensions[0].image.reference: image "…" is not
+  from an allowed registry [...]`, with the registry class, the reference read
+  as `imageName` is (see *Image volumes* under **pod** above) and an entry
+  that names no reference not checked. A `postgresql` component writes no
+  such entry. `imageName` and the extension images are every image a Cluster
+  names today; the test that walks the pod spec for image fields walks the
+  Cluster and the Pooler spec the same way.
   Generation refuses `hugepages-<size>`
   in `resources` without `cpu` or `memory` after policy defaults. It also
   applies the shared parser's request/limit cross-check there

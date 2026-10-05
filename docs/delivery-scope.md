@@ -781,6 +781,10 @@ its text:
     fields of a pod spec from the linked `k8s.io/api` type (`TestImageFields_HeldOrListed`).
     Breaking for a document, a chart or a source whose pod names an image volume from a
     registry outside the list. Not covered: a custom resource those three paths carry.
+  - The `cnpg-cluster` kind holds the image of each `postgresql.extensions[]` entry to
+    the same list, as it holds `imageName`; the same test derives the image fields of
+    the Cluster and the Pooler spec. Breaking for a `cnpg-cluster` whose extension image
+    names a registry outside the list.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`
