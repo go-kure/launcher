@@ -8,8 +8,11 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -50,6 +53,52 @@ func kindObjectName(objectName, fallback string) string {
 // or the Naming hook's answer. A handler is handed the resolved name only, and
 // its Generate a config, so it names both.
 const objectNameField = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "` + string(oam.NameRoleObject) + `")`
+
+// cronJobNameMaxLength is the longest name the API server creates a CronJob
+// under: 52 characters. ValidateCronJobCreate (k8s.io/kubernetes,
+// pkg/apis/batch/validation) refuses a longer one, since the controller names
+// each Job it creates after the CronJob plus an 11-character suffix, and that
+// Job's name is held to 63.
+const cronJobNameMaxLength = validation.DNS1035LabelMaxLength - 11
+
+// jobNameMaxLength is the longest name the API server creates a Job under when
+// it generates the Job's selector, as it does for every job component
+// (`manualSelector` is refused): 63 characters. generateSelector
+// (k8s.io/kubernetes, pkg/registry/batch/job) writes the Job's name as the
+// value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
+// labels, and ValidateJobCreate (pkg/apis/batch/validation) refuses a template
+// whose label value is longer than that.
+const jobNameMaxLength = content.LabelValueMaxLength
+
+// validateKindNameLength refuses a name longer than the API server accepts for
+// the object of a kind component (typ, generating kind): a component name is
+// held to 253 characters, an `objectName` to the same. name is the one the
+// object takes, and the refusal says where it came from: the component name,
+// or, when the object is named apart from it, `objectName` or the Naming hook
+// (objectNameField).
+func validateKindNameLength(typ, kind string, limit int, name, componentName string) error {
+	if len(name) <= limit {
+		return nil
+	}
+	if name == componentName {
+		return errors.Errorf("%s %q: the component name is the %s's name, which must be at most %d characters: it has %d",
+			typ, name, kind, limit, len(name))
+	}
+	return errors.Errorf("%s: %q is not a valid %s name, which must be at most %d characters: it has %d",
+		objectNameField, name, kind, limit, len(name))
+}
+
+// validateCronJobName holds the name a cronjob component's CronJob takes to
+// cronJobNameMaxLength.
+func validateCronJobName(name, componentName string) error {
+	return validateKindNameLength("cronjob", "CronJob", cronJobNameMaxLength, name, componentName)
+}
+
+// validateJobName holds the name a job component's Job takes to
+// jobNameMaxLength.
+func validateJobName(name, componentName string) error {
+	return validateKindNameLength("job", "Job", jobNameMaxLength, name, componentName)
+}
 
 func coreKind(kind string) schema.GroupKind { return schema.GroupKind{Kind: kind} }
 

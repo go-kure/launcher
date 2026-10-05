@@ -24,19 +24,27 @@ import (
 // name at conversion, before the container is built. statefulset and daemonset
 // would too, so their properties keep the Service's name off the component
 // name (an authored serviceName) or emit no Service at all (no port).
+//
+// ownLength is set for a kind that holds its object's name to a length of its
+// own (cronjob, job): that rule refuses a name over 63 characters at
+// conversion, before the container is built, and ownLength is what its refusal
+// says. A dotted name it lets through to the container rule.
 var containerNameCases = []struct {
 	typ          string
 	handler      oam.ComponentHandler
 	props        map[string]any
 	serviceNamed bool
+	ownLength    string
 }{
-	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true},
-	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false},
-	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true, ""},
+	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
+	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
+	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
+	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
+	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false,
+		"the component name is the CronJob's name, which must be at most 52 characters"},
+	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false,
+		"the component name is the Job's name, which must be at most 63 characters"},
 }
 
 // generateWorkload runs a component through ToApplicationConfig and Generate,
@@ -86,7 +94,8 @@ func TestWorkloadHandlers_DottedComponentName_Refused(t *testing.T) {
 // TestWorkloadHandlers_LongComponentName_Refused pins the label's other rule:
 // a DNS-1123 label is at most 63 characters, a component name (a subdomain) up
 // to 253. An undotted 64-character name is refused by the same check, so the
-// message must state the length rule too, not only the dot.
+// message must state the length rule too, not only the dot. A kind with a
+// name-length rule of its own (ownLength) refuses the name by that rule first.
 func TestWorkloadHandlers_LongComponentName_Refused(t *testing.T) {
 	name := strings.Repeat("a", 64)
 	for _, tc := range containerNameCases {
@@ -96,7 +105,11 @@ func TestWorkloadHandlers_LongComponentName_Refused(t *testing.T) {
 				t.Fatalf("Generate accepted a 64-character component name for type %s, want a refusal — "+
 					"the emitted container name would be rejected at admission", tc.typ)
 			}
-			for _, want := range containerNameRefusal(tc.serviceNamed, name, "at most 63 characters") {
+			wants := containerNameRefusal(tc.serviceNamed, name, "at most 63 characters")
+			if tc.ownLength != "" {
+				wants = []string{name, tc.ownLength}
+			}
+			for _, want := range wants {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error = %q, want it to mention %q", err, want)
 				}

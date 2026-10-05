@@ -87,8 +87,13 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 	return m
 }
 
-// ToApplicationConfig converts an OAM job component to a JobConfig.
+// ToApplicationConfig converts an OAM job component to a JobConfig. The Job's
+// name is held to the length the API server creates one under
+// (validateJobName).
 func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	if err := validateJobName(component.ObjectName(), component.Name); err != nil {
+		return nil, err
+	}
 	config := &JobConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
@@ -361,8 +366,12 @@ func (c *JobConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes Job, and nothing beside it: no ServiceAccount
-// and no claim (go-kure/launcher#702).
+// and no claim (go-kure/launcher#702). The name-length check is repeated, since
+// the config is exported.
 func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := validateJobName(kindObjectName(c.ObjectName, app.Name), app.Name); err != nil {
+		return nil, err
+	}
 	job, err := c.createJob(app)
 	if err != nil {
 		return nil, err
