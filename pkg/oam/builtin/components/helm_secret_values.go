@@ -170,7 +170,8 @@ func nestedGlobalPath(tree map[string]any, top bool) (string, bool) {
 // Two objects at the same key are not a shared path: they are compared key by
 // key, since a merge keeps both. Anything else at a key both trees have is: a
 // scalar, a list or a null on either side would replace, or be replaced by,
-// what the other side set. Only a map[string]any is read as an object.
+// what the other side set. Only a map[string]any is read as an object, and a
+// nil one is a null, as it is in the JSON a HelmRelease reads.
 //
 // The first shared path in sorted key order is named, by its keys joined with
 // dots and never by a value; an empty key is written "". owner is the component
@@ -197,7 +198,7 @@ func sharedValuePath(a, b map[string]any) (string, bool) {
 		}
 		am, aok := av.(map[string]any)
 		bm, bok := b[k].(map[string]any)
-		if !aok || !bok {
+		if !aok || !bok || am == nil || bm == nil {
 			return name, true
 		}
 		if sub, shared := sharedValuePath(am, bm); shared {
