@@ -238,7 +238,7 @@ func TestObjectName_TwoKindsShareAName(t *testing.T) {
 // kinds the `horizontalpodautoscaler` and `poddisruptionbudget` components
 // declare, so one name given to both in one namespace is refused. The default
 // names (`<component>-hpa`, `<component>-pdb`) keep the two apart, which the
-// last case builds.
+// last two cases build, one for each kind.
 func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 	web := componentLabelFixtures["webservice"]
 	scaler := map[string]any{"minReplicas": 2, "maxReplicas": 3, "enablePDB": true}
@@ -246,6 +246,10 @@ func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 		name, typ, objectName string
 		trait                 map[string]any
 		want                  string
+		// builtKind, builtGroup and built are read when want is empty: the
+		// names of the objects of that kind the build must hold.
+		builtKind, builtGroup string
+		built                 []string
 	}{
 		{name: "autoscaler", typ: "horizontalpodautoscaler", objectName: "shared",
 			trait: map[string]any{"hpaName": "shared"},
@@ -255,7 +259,10 @@ func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 			want:  `name collision: PodDisruptionBudget.policy "default/shared"`},
 		{name: "autoscaler named like the trait's default", typ: "horizontalpodautoscaler", objectName: "web-hpa",
 			want: `name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa"`},
-		{name: "default names", typ: "horizontalpodautoscaler"},
+		{name: "default names of the autoscalers", typ: "horizontalpodautoscaler",
+			builtKind: "HorizontalPodAutoscaler", builtGroup: "autoscaling", built: []string{"scaling", "web-hpa"}},
+		{name: "default names of the budgets", typ: "poddisruptionbudget",
+			builtKind: "PodDisruptionBudget", builtGroup: "policy", built: []string{"scaling", "web-pdb"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,9 +277,9 @@ func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 				if err != nil {
 					t.Fatalf("kurel build failed: %v", err)
 				}
-				got := docsOfKind(docs, "HorizontalPodAutoscaler", "autoscaling")
-				if want := []string{"scaling", "web-hpa"}; !slices.Equal(got, want) {
-					t.Errorf("the HorizontalPodAutoscaler objects are %v, want %v", got, want)
+				got := docsOfKind(docs, tc.builtKind, tc.builtGroup)
+				if !slices.Equal(got, tc.built) {
+					t.Errorf("the %s objects are %v, want %v", tc.builtKind, got, tc.built)
 				}
 				return
 			}
