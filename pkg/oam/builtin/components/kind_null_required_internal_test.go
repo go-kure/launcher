@@ -705,6 +705,23 @@ func (k nullRequiredKind) showRefused(t *testing.T, crd crdValidation, row nullR
 		t.Fatalf("with the field authored, the CRD refuses the object: %v", refused)
 	}
 
+	// The decode folds field names, so the field under another spelling of
+	// its key is authored too: the kind builds the same object.
+	spelled := row.properties(t)
+	parent, name = fieldAt(t, spelled, row.at)
+	other := strings.ToUpper(name)
+	if other == name {
+		t.Fatalf("%s has no other spelling to author it under", name)
+	}
+	parent[other] = row.authored
+	respelled, err := k.object(spelled)
+	if err != nil {
+		t.Fatalf("with the field authored as %s: %v, want it built", other, err)
+	}
+	if !reflect.DeepEqual(respelled["spec"], object["spec"]) {
+		t.Errorf("with the field authored as %s, the kind's spec is not the one it builds for %s:\n  %s %v\n  %s %v", other, name, other, respelled["spec"], name, object["spec"])
+	}
+
 	// An authored empty list is a value: the kind writes it as one.
 	if _, list := row.authored.([]any); list {
 		empty := row.properties(t)
