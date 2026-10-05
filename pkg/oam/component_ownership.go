@@ -161,20 +161,53 @@ func (o *ownedConfig) stamp(obj client.Object) error {
 	return stampComponentLabel(obj, o.labelKey, ComponentLabelValue(o.component))
 }
 
-// stampLayout checks and labels every resource on l and on its child layouts.
-// kure's walker hands an augmenter a layout holding only its own application's
-// objects, so everything reachable from l belongs to the component.
-func (o *ownedConfig) stampLayout(l *layout.ManifestLayout) error {
-	if l == nil || (o.component == "" && o.reserved == nil) {
+// layoutResources is the resources on a layout and on its child layouts, told
+// apart by identity: each is the pointer the layout holds.
+type layoutResources map[client.Object]struct{}
+
+// resourceIdentity returns obj as the key that tells it apart from every other
+// object, which only a pointer is. An object of another shape has none.
+func resourceIdentity(obj client.Object) (client.Object, bool) {
+	if isNullValue(obj) || reflect.ValueOf(obj).Kind() != reflect.Pointer {
+		return nil, false
+	}
+	return obj, true
+}
+
+// collect adds every resource on l and on its child layouts to r.
+func (r layoutResources) collect(l *layout.ManifestLayout) {
+	if l == nil {
+		return
+	}
+	for _, obj := range l.Resources {
+		if id, ok := resourceIdentity(obj); ok {
+			r[id] = struct{}{}
+		}
+	}
+	for _, c := range l.Children {
+		r.collect(c)
+	}
+}
+
+// stampAdded checks and labels every resource on l and on its child layouts
+// that is not in before: what the wrapped augmenter added. A resource with no
+// identity (resourceIdentity) is taken as added.
+func (o *ownedConfig) stampAdded(l *layout.ManifestLayout, before layoutResources) error {
+	if l == nil {
 		return nil
 	}
 	for _, r := range l.Resources {
+		if id, ok := resourceIdentity(r); ok {
+			if _, was := before[id]; was {
+				continue
+			}
+		}
 		if err := o.stamp(r); err != nil {
 			return err
 		}
 	}
 	for _, c := range l.Children {
-		if err := o.stampLayout(c); err != nil {
+		if err := o.stampAdded(c, before); err != nil {
 			return err
 		}
 	}
@@ -286,14 +319,32 @@ type augmentingOwnedConfig struct {
 	augmenter layout.LayoutAugmenter
 }
 
-// AugmentLayout runs the wrapped augmenter, then checks and labels the layout:
-// what the augmenter adds or moves into child layouts never passed through
-// Generate.
+// AugmentLayout runs the wrapped augmenter, then checks and labels what it
+// added: the resources on l and on its child layouts that were not there before
+// it ran. An augmenter may add an object no Generate returned, which is read
+// nowhere else; one it adds that Generate did return is read again.
+//
+// What was there is left as it is. kure's walker hands over the objects the
+// application's outermost config generated, which passed through Generate here
+// and were checked and labelled then; a config a consumer wraps around this one
+// after the transform may since have added a key the consumer reserved, or an
+// object of its own, and neither is read (go-kure/launcher#790).
+//
+// Two things follow, and neither is checked here. An object that was on the
+// layout and that the wrapped augmenter edits in place is not read again: no
+// augmenter of launcher's edits one. And a caller that hands over a layout
+// holding objects that never passed through Generate gets them back unchecked
+// and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
+	if a.component == "" && a.reserved == nil {
+		return a.augmenter.AugmentLayout(l)
+	}
+	before := layoutResources{}
+	before.collect(l)
 	if err := a.augmenter.AugmentLayout(l); err != nil {
 		return err
 	}
-	return a.stampLayout(l)
+	return a.stampAdded(l, before)
 }
 
 // GenerateCoversAugmentLayout forwards LayoutAugmentationCoverage, false when

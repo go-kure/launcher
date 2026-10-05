@@ -687,6 +687,10 @@ its text:
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
     of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own), and what a
     controller adds.
+  - Not read either: what a config that a consumer wraps around an application's config
+    after the transform adds. On a layout a config augments, the check reads the objects the
+    config's `AugmentLayout` added and leaves what was on the layout before, so a consumer may
+    label a rendered chart's objects under a prefix it reserved.
   - Breaking for a document: an `expose` trait's authored annotation that contradicts a
     value the trait writes is refused where the trait's value used to win silently.
   - It landed before the kind components took `labels` and `annotations` (below), so
