@@ -187,6 +187,9 @@ func TestObjectMetadata_TheComponentLabelWithItsOwnValue(t *testing.T) {
 		{name: "the consumer's key", labels: map[string]any{ownerKey: "web"},
 			ctx: TransformContext{Domain: "example.org", ComponentLabelKey: ownerKey}},
 		{name: "another domain's key is a label like any other", labels: map[string]any{ComponentLabelKeyForDomain("other.example"): "x"}},
+		{name: "the default key with another value, once the consumer chose its own",
+			labels: map[string]any{ComponentLabelKeyForDomain("example.org"): "other"},
+			ctx:    TransformContext{Domain: "example.org", ComponentLabelKey: ownerKey}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newMetaKind()
@@ -247,6 +250,11 @@ func TestObjectMetadata_NotAKindComponent(t *testing.T) {
 		_, _, err := tr.TransformWithPolicy(doc, TransformContext{})
 		if err == nil || !strings.Contains(err.Error(), property+` is not supported on component type "plain"`) {
 			t.Errorf("%s: err = %v\nwant the property refused on a type that declares no object", property, err)
+		}
+
+		null := siblingDoc(Component{Name: "web", Type: "plain", Properties: map[string]any{property: nil}})
+		if _, _, err := tr.TransformWithPolicy(null, TransformContext{}); err != nil {
+			t.Errorf("%s: null: err = %v\nwant a null read as the property left out", property, err)
 		}
 	}
 }
