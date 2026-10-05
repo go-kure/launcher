@@ -101,7 +101,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"webservice", WebserviceRule{}.PropertySchema(), 17, deploymentSpecPropertyKeys, false},
 		{"worker", WorkerRule{}.PropertySchema(), 16, deploymentSpecPropertyKeys, false},
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
-		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, statefulSetSpecPropertyKeys, false},
+		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 20, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 21, jobSpecPropertyKeys, true},
 		{"job", (&JobHandler{}).PropertySchema(), 15, jobSpecPropertyKeys, true},

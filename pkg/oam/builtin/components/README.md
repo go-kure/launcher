@@ -1427,12 +1427,38 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
 |---|---|---|---|
 | `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused (go-kure/launcher#660). A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused. | additive (`daemonset`/`statefulset`: replaces `port`, go-kure/launcher#690) |
 
-#### Raw scheduling properties (`deployment` only)
+#### Raw scheduling properties
 
 `deployment` publishes `affinity`, `tolerations` and
 `topologySpreadConstraints` as their plain `corev1` shapes
 (go-kure/launcher#412), parsed by `scheduling.go`. Nothing is inferred from the
 component: every selector, weight and topology key is authored.
+
+The other kind-named workloads publish the same shapes through the same parsers
+and schemas, so every rule in the table below holds wherever the key is
+published (go-kure/launcher#790):
+
+| kind | `affinity` | `tolerations` | `topologySpreadConstraints` |
+|---|---|---|---|
+| `deployment` | raw | yes | yes |
+| `statefulset` | the four-key shorthand (see "Common config"), not the raw shape | yes | yes |
+| `daemonset` | no | yes | no |
+| `job`, `cronjob` | no | no | no |
+
+- A key a kind does not publish is refused by the authored-property check, not
+  dropped; so is the raw `affinity` shape on a kind that publishes the
+  shorthand.
+- Nothing is defaulted on any of them: an unauthored key emits nothing, and a
+  constraint or an affinity term selects only the pods its authored
+  `labelSelector` names. The pods a kind builds carry `app: <component>` (see
+  [The `app` label](#the-app-label)).
+- **No policy check.** `tolerations` is accepted with no capability gate and no
+  `Policy` method on every kind that publishes it, so a component can tolerate
+  any taint, a control-plane node's included; a platform that reserves nodes
+  by taint has to enforce that at admission.
+- The `topology-spread` trait stays Deployment-only. It is refused on a
+  `statefulset`, with or without authored constraints (`component "<name>"
+  generates no Deployment the trait can act on`).
 
 | property | type | notes | compat |
 |---|---|---|---|
@@ -1445,8 +1471,10 @@ component: every selector, weight and topology key is authored.
 `affinity` and `topologySpreadConstraints` are new properties on a kind that did
 not have them, so they are additive outright. `tolerations` is not: `deployment`
 reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
-`daemonset` has always used, and those two kinds are its only callers, so
-completing the projection changed `daemonset` too. Stating that plainly, per
+`daemonset` has always used, and those two kinds were its only callers then, so
+completing the projection changed `daemonset` too. (A kind that gained
+`tolerations` later, `statefulset` in go-kure/launcher#790, had no earlier
+behaviour to change: for it the property is additive.) Stating that plainly, per
 rule, because "additive" on its own would be false:
 
 | change | effect on `daemonset` | why it is kept rather than gated to `deployment` |
@@ -2395,7 +2423,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below. `ports` declares the main container's
   ports (see "Main container ports"). It emits no Service
-  (go-kure/launcher#690).
+  (go-kure/launcher#690). For scheduling it takes `tolerations` and
+  `topologySpreadConstraints` as the raw `corev1` shapes
+  (go-kure/launcher#790, see "Raw scheduling properties" above) beside the
+  four-key `affinity` shorthand; the raw `affinity` shape is not published on
+  this kind.
   - **`serviceName` names the governing Service, which the component does
     not emit.** Author it as a headless `service` component (`clusterIP:
     None`, selecting `app: <component>`) and name it here. It has no default:

@@ -598,7 +598,8 @@ be closed at build time.
   - `podtemplate` projects a PodTemplate's one field, `template`. A PodTemplate is
     stored, not run: no `app` label, no ServiceAccount reported, and not a trait target.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
-  - `statefulset`: `tolerations`, `topologySpreadConstraints`;
+  - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
+    `tolerations` and `topologySpreadConstraints` are read;
   - `daemonset`: `affinity`, `topologySpreadConstraints`;
   - `job`, `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`;
   - all workloads: the container fields `restartPolicy` and `restartPolicyRules` (a

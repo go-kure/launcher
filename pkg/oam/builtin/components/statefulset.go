@@ -45,6 +45,10 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"initContainers":       schemaInitContainers(),
 		"sidecars":             schemaSidecars(),
 		"affinity":             schemaAffinity(),
+		// The two raw scheduling shapes scheduling.go projects beside the
+		// shorthand above; `affinity` stays the shorthand on this kind.
+		"tolerations":               schemaTolerations(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -233,6 +237,16 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, err
 	}
 	config.Affinity = affinity
+	tolerations, err := parseTolerations(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Tolerations = tolerations
+	tscs, err := parseTopologySpreadConstraints(props)
+	if err != nil {
+		return nil, err
+	}
+	config.TopologySpreadConstraints = tscs
 
 	sidecars, err := parseSidecars(props)
 	if err != nil {
@@ -292,6 +306,11 @@ type StatefulsetConfig struct {
 	InitContainers       []InitContainerConfig
 	Sidecars             []SidecarContainerConfig
 	Affinity             AffinityConfig
+	// Tolerations and TopologySpreadConstraints are the raw corev1 scheduling
+	// shapes (see scheduling.go), carried as the API types because nothing is
+	// inferred from them. Affinity above is the four-key shorthand.
+	Tolerations               []corev1.Toleration
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
 	PodSpec PodSpecConfig
 	// StatefulSetSpec holds the StatefulSetSpec-level properties that are
@@ -491,6 +510,9 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		Sidecars:       c.Sidecars,
 		Volumes:        c.Volumes,
 		Affinity:       buildAffinity(c.Affinity, appLabels(app.Name)),
+
+		Tolerations:               c.Tolerations,
+		TopologySpreadConstraints: c.TopologySpreadConstraints,
 	})
 	if err != nil {
 		return nil, err
