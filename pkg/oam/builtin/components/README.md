@@ -58,6 +58,57 @@ handlers its own documents reach (a `postgresql` without the pooler, say) now fa
 first transform, and registers the rest. See Contract metadata in
 [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
+## Traits a lowering rule forwards
+
+A rule that emits several components decides which of them carries each authored trait,
+and a trait acts where it is carried: on that member's objects, or on the bundle that
+member's group is applied in. The rules of this package forward by what a trait covers
+(go-kure/launcher#794, item 8):
+
+- **A trait that covers every object the component generates** (`prune-protection`,
+  `force-replace`: a delivery intent on the application of the member that carries it)
+  goes to every member the rule emits for that component: each member of `webservice`
+  and `worker`, the Kustomization and the own source of `oci`, the Cluster and every
+  other member of `postgresql`. A source `helm` generates, and a source several `oci`
+  components share, belongs to the document and carries no trait.
+- **A trait that configures how a bundle is delivered** (`fluxcd-patches`,
+  `fluxcd-postbuild`: not built in; a consumer that delivers through Flux registers
+  them) goes to one member per bundle, never to two members of one group, so its
+  handler sees it once per bundle. `webservice`, `worker` and an `oci` with its own
+  source emit one same-name sibling group, which is one bundle: the `deployment` member
+  carries the trait for the first two, the Kustomization for the third. `helm`, and an
+  `oci` on a shared source, emit one component beside the source, and that component
+  carries it.
+- **Any other trait** goes to the one member whose objects or contracts it acts on; each
+  rule's entry under "Per-type highlights" says which.
+
+**A rule whose members can land in different groups forwards a bundle trait only where
+it can tell the groups, and refuses the document where it cannot.** Groups are computed
+after lowering has settled, so a rule cannot ask which bundle a member will be applied
+in. Applying a forwarded trait once per resulting bundle, whatever the grouping turns out
+to be, is not offered: it would have to happen in the engine, after grouping, and the
+refusal was kept instead.
+
+`postgresql` is the one built-in case. Its Cluster carries every authored trait. Unless
+the document orders its components (a `dependency` policy with a rule), the other
+members stay in the Cluster's bundle, which the Cluster's copy configures. When it
+does, the Pooler and the Databases are ordered after the Cluster, wait for nothing else
+and are placed where it is, so they share one later group, and the first of them carries
+a second copy for that group's bundle. A policy of the document that orders or places
+one of those members on its own (a `dependency` rule or a `placement` whose `component`
+is a generated name) could move it to a group neither copy reaches, so a document that
+authors one of the two traits on the `postgresql` component and holds such a policy is
+refused, with this cause:
+
+```text
+trait "fluxcd-patches" configures the bundle of every object this component generates, but placement policy "pooler-last" names "db-pooler", a component generated for it, on its own: that component could be applied in a bundle the trait does not reach; name "db" in the policy instead, or remove the trait
+```
+
+A policy that makes another component wait for a member separates nothing and is left
+alone. A rule an extension registers owes the same: one copy per bundle where the
+members provably share a group, a refusal naming the trait and the policy where a
+document could separate them.
+
 ## How to read the wrong-type notes below
 
 This document states wrong-type handling **per field**, and makes no blanket
@@ -2307,9 +2358,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `flexVolume` source. Each names a driver and options only the driver
   interprets, and no field says whether a node path is exposed; a pod's `csi`
   and `flexVolume` volumes are unchecked for the same reason. A driver that
-  exposes a node path therefore passes the gate. Whether the environment
-  policy gets a statement about driver-defined volumes, on pods and
-  PersistentVolumes alike, is item 12 of go-kure/launcher#794, not decided.
+  exposes a node path therefore passes the gate. This is a decided limit
+  (go-kure/launcher#794, item 12): the environment policy makes no statement
+  about driver-defined volumes, on pods or on PersistentVolumes. One (an
+  allowlist of driver names, for instance) would be a new part of the policy
+  every consumer implements, and no use case asked for it.
 
   **Breaking:** before this kind, a PersistentVolume that a chart rendered, a
   `passthrough` component held or a `manifests` source yielded reached the
@@ -3764,8 +3817,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   parser does not unpack. A list is told there by a top-level `items` array, so a custom resource
   that names a field `items` is refused in that position too. Not checked: an object of a dropped hook (never emitted); the pods a
   custom resource's controller creates, and the replica count a custom resource sets; the host of the chart archive a Helm repository's index
-  points at, and any redirect, which kure's renderer follows (go-kure/launcher#794, item 6,
-  decides whether those are held to the allowlist). A nil policy (a direct
+  points at, and any redirect, which kure's renderer follows. That one is a decided limit
+  (go-kure/launcher#794, item 6): the allowlist is checked on the chart's source URL before
+  anything is fetched, and holding every later request to it needs a hook in kure's chart
+  renderer, which takes a release name and a namespace and nothing about its requests
+  (`helm.RenderChart`). A nil policy (a direct
   `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing, and
   `ApplyPolicy(nil)` withdraws no policy applied before. A chart
   delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under `delivery: flux`) is rendered
@@ -4135,7 +4191,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   order or place a member on its own (a `dependency` rule or a `placement`
   whose component is the Pooler's or a Database's generated name): the
   member could leave the group the trait reaches, so the rule refuses it and
-  asks for the postgresql component's name instead. Policies that name the
+  asks for the postgresql component's name instead (the rule for every
+  lowering rule, and the message, are under "Traits a lowering rule
+  forwards"). Policies that name the
   postgresql component are extended to the members the same way. A `placement` of it is repeated
   for each member, so they stay in the Cluster's tier and, without a
   dependency policy, in its bundle. When the document orders its components
