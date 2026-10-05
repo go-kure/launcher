@@ -106,6 +106,22 @@ func TestJob_NameAllowsCompletions(t *testing.T) {
 	if _, err := cfg.Generate(stack.NewApplication("migrate", "default", cfg)); err != nil {
 		t.Fatalf("Generate with an undotted ObjectName: err = %v, want it accepted", err)
 	}
+
+	// The conversion refuses an Indexed job without completions, but a config
+	// built by hand can leave completions and parallelism unset. The API server
+	// then reads both as 1 and holds the name to "<job>-0": 61 characters fit,
+	// 62 do not.
+	unset := &components.JobConfig{Name: "migrate", Image: "busybox:1", JobSpec: components.JobSpecConfig{CompletionMode: &mode}}
+	unset.ObjectName = strings.Repeat("a", 61)
+	if _, err := unset.Generate(stack.NewApplication("migrate", "default", unset)); err != nil {
+		t.Fatalf("Generate with completions unset and a 61-character ObjectName: err = %v, want it accepted", err)
+	}
+	unset.ObjectName = strings.Repeat("a", 62)
+	want = `"` + unset.ObjectName + `" is not a valid name for this Job: with completionMode Indexed and completions and parallelism unset, ` +
+		`which the API server reads as completions 1, the pod of the last index takes the hostname "` + unset.ObjectName + `-0", which must be a DNS-1123 label: `
+	if _, err := unset.Generate(stack.NewApplication("migrate", "default", unset)); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Generate with completions unset and a 62-character ObjectName: err = %v\nwant one containing %q", err, want)
+	}
 }
 
 // TestBatchKinds_GenerateRepeatsNameLength: the configs are exported, so
