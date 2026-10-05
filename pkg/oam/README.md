@@ -916,6 +916,39 @@ name for two of its objects is refused as naming it twice. A synthesized policy 
 by its component, or by its Service (`external backend Service "db"`): two external Services
 whose shortened default policy names meet are refused too.
 
+A caller tells this refusal from every other error of the transform without reading its
+text. The transform returns it behind a prefix of its own (`component "api": …`), and through
+that prefix `errors.Is(err, oam.ErrNameCollision)` is true and `errors.As` finds the
+`*oam.NameCollisionError`:
+
+```go
+var collision *oam.NameCollisionError
+if errors.As(err, &collision) {
+	// collision.Kind (group and kind), collision.Namespace, collision.Name
+	// collision.First, collision.Second: the two members that named it
+}
+```
+
+Each member (`NameCollisionMember`) holds its `Component`, the `Trait` type when a trait named
+it, the `Role`, the `Property` the author wrote the name in, `FromHook` when the `Naming` hook
+returned it, and `Description`, the member as the text names it. A caller with a `Naming` hook
+reads from the two whether the name is the author's to change or its own hook's. What the
+fields leave empty:
+
+- `Kind` is zero for a name that is no object's: a bundle's, or a hook-group name prefix (the
+  members' `Role` says which);
+- `Namespace` is empty for a cluster-scoped object and for a name that is no object's, and
+  also for two names lowering rules resolved for one object: those are refused while lowering,
+  before the namespace the object lands in is settled, and the text prints none either;
+- `Component` is empty for a name the document as a whole owns (the bundle, a group, a
+  shared source, the policy synthesized for an external backend Service), which
+  `Description` then says;
+- `Role` is empty for an object a trait names itself (`ClaimObjectName`, below);
+- `First` and `Second` are equal when one member named the object twice.
+
+Only this refusal answers to it. The generated-object collision below and a lowering rule's
+generated name the allocator refuses (`generated name "…" collides`) are other errors.
+
 The names a lowering rule resolved are in it with the ones resolved after lowering. They are
 held until the document's namespace is known and claimed first, so a `pooler` and another
 resolved name of one kind, namespace and name are refused with both named, and two of one
