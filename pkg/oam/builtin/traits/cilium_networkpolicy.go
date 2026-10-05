@@ -1,6 +1,8 @@
 package traits
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
@@ -11,6 +13,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
 
 // CiliumNetworkPolicyHandler handles OAM cilium-networkpolicy traits.
@@ -192,6 +195,63 @@ func (c *CiliumNetworkPolicyConfig) toAPIRule() (*ciliumapi.Rule, error) {
 	if path := builtin.UnknownCiliumKeyPath[ciliumapi.Rule](raw); path != "" {
 		return nil, errors.Errorf("unknown field %q (Cilium drops a key it does not know there instead of refusing it, and a selector that loses a key selects more than was written)", path)
 	}
+	// The rule type writes some fields the CiliumNetworkPolicy CRD requires
+	// whether or not they were authored: a match expression's `operator` as "",
+	// a TLS context's `secret` as null. The decoded rule cannot tell an
+	// authored empty value from none, so what was authored is read, and a
+	// required field left out where its parent was written is refused by its
+	// path (requiredfields.CiliumTraitRule).
+	authored, err := authoredCiliumRule(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := requiredfields.Refuse(authored, requiredfields.CiliumTraitRule()); err != nil {
+		return nil, err
+	}
 
 	return rule, nil
+}
+
+// authoredCiliumRule returns raw, the three rule properties, as the tree the
+// required check reads: string-keyed maps, lists and scalars in which a field
+// authored as null is absent. It is read from raw's JSON, the form the decode
+// read, so that a typed Go map or slice is seen as a document's is. A null
+// entry of a list is read as an entry with nothing authored in it, which is
+// what the decode builds from one.
+func authoredCiliumRule(raw map[string]any) (map[string]any, error) {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal properties")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var tree map[string]any
+	if err := dec.Decode(&tree); err != nil {
+		return nil, errors.Wrap(err, "read properties")
+	}
+	withoutNulls(tree)
+	return tree, nil
+}
+
+// withoutNulls removes every null-valued key under node, in place, and
+// replaces a null entry of a list with an empty object.
+func withoutNulls(node any) {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, value := range v {
+			if value == nil {
+				delete(v, key)
+				continue
+			}
+			withoutNulls(value)
+		}
+	case []any:
+		for i, value := range v {
+			if value == nil {
+				v[i] = map[string]any{}
+				continue
+			}
+			withoutNulls(value)
+		}
+	}
 }

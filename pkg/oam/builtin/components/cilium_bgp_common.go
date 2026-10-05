@@ -3,6 +3,8 @@ package components
 import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
 
 // This file holds what the kind components of Cilium's BGP control plane share
@@ -33,10 +35,8 @@ func ciliumBGPKind(kind string) schema.GroupKind {
 // ciliumSelectorRequired is the required list of one label selector under the
 // path at ("nodeSelector", "advertisements[].selector"): the two fields the
 // API requires of a match expression, each of which the Go type would write
-// empty.
+// empty. The list is requiredfields.CiliumSelector, which a Cilium policy
+// rule's list is built from as well.
 func ciliumSelectorRequired(at string) map[string]string {
-	return map[string]string{
-		at + ".matchExpressions[].key":      "the label key the expression applies to",
-		at + ".matchExpressions[].operator": "the expression's operator: In, NotIn, Exists or DoesNotExist",
-	}
+	return requiredfields.CiliumSelector(at)
 }

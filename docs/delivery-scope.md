@@ -789,6 +789,11 @@ its text:
     and the `kind` of its `envoyConfig`, which the type writes with a value the API
     refuses. Such a document was emitted before, with the empty value in place of the
     field. A test holds the list to the CRD of the linked module.
+  - The `cilium-networkpolicy` trait refuses the same, under the three fields of a rule
+    it publishes (`endpointSelector`, `ingress`, `egress`): it decodes into the same
+    type, and a trait that left such a field out was emitted with the empty value too.
+    Its list is the kind's, cut to those fields, and a test holds it to the same CRD.
+    Both read the list from the internal `pkg/oam/internal/requiredfields`.
   - An unknown key inside an endpoint selector is refused by its path, as in the trait:
     the selector unmarshals itself and would drop a misspelt key, leaving the selector
     that matches everything. The positions are found from the Cilium types.

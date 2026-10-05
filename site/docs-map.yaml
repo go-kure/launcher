@@ -56,6 +56,10 @@ packages:
     readme: pkg/oam/internal/fluxduration/README.md
     mounted: false
     reason: "Internal Flux duration check used by the Flux components."
+  - path: pkg/oam/internal/requiredfields
+    readme: pkg/oam/internal/requiredfields/README.md
+    mounted: false
+    reason: "Internal required-field check shared by the kind components and the cilium-networkpolicy trait."
   - path: pkg/cmd/shared
     readme: pkg/cmd/shared/README.md
     mounted: false

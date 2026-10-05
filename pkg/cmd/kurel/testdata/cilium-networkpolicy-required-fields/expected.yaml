@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: api
+        launcher.gokure.dev/component: api
+    spec:
+      containers:
+      - image: ghcr.io/example/api:v1.0.0
+        name: api
+        ports:
+        - containerPort: 8443
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app: api
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: default
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: api
+  name: api-edge
+  namespace: default
+spec:
+  egress:
+  - authentication:
+      mode: disabled
+    toCIDRSet:
+    - cidrGroupSelector:
+        matchExpressions:
+        - key: zone
+          operator: In
+          values:
+          - backends
+    toEndpoints:
+    - matchExpressions:
+      - key: role
+        operator: DoesNotExist
+    toNodes:
+    - matchExpressions:
+      - key: node-role
+        operator: Exists
+    toPorts:
+    - originatingTLS:
+        secret:
+          name: api-upstream-ca
+      ports:
+      - port: "443"
+        protocol: TCP
+  - toServices:
+    - k8sServiceSelector:
+        selector:
+          matchExpressions:
+          - key: role
+            operator: In
+            values:
+            - metrics
+  - icmps:
+    - fields:
+      - family: IPv6
+        type: EchoRequest
+  endpointSelector:
+    matchExpressions:
+    - key: tier
+      operator: In
+      values:
+      - edge
+  ingress:
+  - authentication:
+      mode: required
+    fromCIDRSet:
+    - cidrGroupSelector:
+        matchExpressions:
+        - key: zone
+          operator: NotIn
+          values:
+          - public
+    fromEndpoints:
+    - matchExpressions:
+      - key: role
+        operator: Exists
+    fromNodes:
+    - matchExpressions:
+      - key: node-role
+        operator: Exists
+    toPorts:
+    - ports:
+      - port: "8443"
+        protocol: TCP
+      rules:
+        http:
+        - headerMatches:
+          - name: X-Token
+            secret:
+              name: api-edge-token
+          method: GET
+      terminatingTLS:
+        secret:
+          name: api-edge-tls
+    - listener:
+        envoyConfig:
+          kind: CiliumEnvoyConfig
+          name: api-edge-listener
+        name: edge
+        priority: 1
+      ports:
+      - port: "9443"
+        protocol: TCP
+  - icmps:
+    - fields:
+      - type: 8

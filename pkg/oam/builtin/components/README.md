@@ -337,7 +337,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cilium.CreateCiliumIdentity` | cilium.io/v2 CiliumIdentity (cluster-scoped) | not authorable | - | - | Written by Cilium when it allocates an identity. |
 | `cilium.CreateCiliumLoadBalancerIPPool` | cilium.io/v2 CiliumLoadBalancerIPPool (cluster-scoped) | kind | `cilium-loadbalancerippool` | strict decode of `CiliumLoadBalancerIPPoolSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. An authored `disabled: false` is the API's default and is not written. No environment policy applies. |
 | `cilium.CreateCiliumLocalRedirectPolicy` | cilium.io/v2 CiliumLocalRedirectPolicy | kind | `cilium-localredirectpolicy` | strict decode of `CiliumLocalRedirectPolicySpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's choice of one frontend matcher is checked; its three rules against a change are the API server's. No environment policy applies. |
-| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | kind | `cilium-networkpolicy` | strict decode of `spec` and `specs` into the Cilium `Rule` | The endpoint selector, the ICMP field and the rule label unmarshal themselves and drop an unknown key; the kind refuses one by its path at every position that holds any of them (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. The `cilium-networkpolicy` trait builds its own CiliumNetworkPolicy from one rule's `endpointSelector`, `ingress` and `egress`, with the same decode and the same check. |
+| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | kind | `cilium-networkpolicy` | strict decode of `spec` and `specs` into the Cilium `Rule` | The endpoint selector, the ICMP field and the rule label unmarshal themselves and drop an unknown key; the kind refuses one by its path at every position that holds any of them (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. The `cilium-networkpolicy` trait builds its own CiliumNetworkPolicy from one rule's `endpointSelector`, `ingress` and `egress`, with the same decode, the same check and the kind's required list cut to those three fields. |
 | `cilium.CreateCiliumNode` | cilium.io/v2 CiliumNode (cluster-scoped) | not authorable | - | - | Written by the Cilium agent for its node. |
 | `cilium.CreateCiliumNodeConfig` | cilium.io/v2 CiliumNodeConfig | kind | `cilium-nodeconfig` | strict decode of `CiliumNodeConfigSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The keys and the values of `defaults` are not checked. No environment policy applies. |
 | `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | missing | - | - | - |
@@ -3030,7 +3030,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   incomplete one is refused by this rule, a complete one by the rule above. A
   rule label without its `key` is refused earlier, by Cilium's own decoding,
   as an `icmps` field without its `type` is (below). An authored empty value
-  in a required field is not checked: it is the API server's to refuse.
+  in a required field is not checked: it is the API server's to refuse. The
+  list of a rule is held in the internal `pkg/oam/internal/requiredfields`
+  (`CiliumRule`), since the `cilium-networkpolicy` trait reads it too, cut to
+  the three fields of a rule it publishes.
 
   **An unknown key inside a selector is refused**, by its path
   (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's

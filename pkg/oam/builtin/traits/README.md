@@ -57,7 +57,7 @@ preflight reject every valid use of the trait.
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`), `name` (optional; the policy's name, default `<component>-allow`) |
-| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector` (required), `ingress`/`egress` (raw Cilium rules, at least one rule between them — decoded strictly, see below) |
+| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector` (required), `ingress`/`egress` (raw Cilium rules, at least one rule between them — decoded strictly, and a field the CRD requires must be authored where its parent is, see below) |
 
 ### Security
 | `type` | Produces | Key properties |
@@ -947,6 +947,52 @@ before, with a selector wider than written, and is now refused.
 rule type and the panic (`the decoder of api.Rule panicked on this value: …`); it does not
 name the field's position, so look for an `icmps` field without a `type`. Before this the
 build crashed on that document.
+
+**Required fields.** Cilium's rule type writes some fields the CiliumNetworkPolicy CRD
+requires whether or not they were authored, so a rule that left one out built, and its
+policy carried a value the document does not hold: a match expression without its
+`operator` was emitted as `operator: ""`, an `authentication: {}` as `mode: ""`, a
+`terminatingTLS: {}` as `secret: null`. The API server refuses each of these, and nothing
+in the build showed the omission. The trait refuses such a field where its parent is
+authored, by its path (`cilium-networkpolicy "api-edge": ingress[0].authentication.mode:
+required (…)`), under the three properties it takes:
+
+- the `key` and `operator` of a match expression, in every selector: `endpointSelector`,
+  `fromEndpoints`, `toEndpoints`, `fromNodes`, `toNodes`, a CIDR entry's
+  `cidrGroupSelector`, a `k8sServiceSelector`'s `selector`;
+- a `k8sServiceSelector`'s `selector`;
+- an `authentication`'s `mode`;
+- a port's `listener` `name`, its `envoyConfig` and that configuration's `name`;
+- the `secret` of a port's `terminatingTLS` and `originatingTLS`, and that Secret's
+  `name`;
+- an HTTP header match's `name`, and the `name` of its `secret` where one is authored.
+
+Two more are optional to the API and required here, a listener's `priority` and the
+`kind` of its `envoyConfig`: the type writes an unauthored one as `0` and as the empty
+string, and the API refuses both (a priority is 1 to 100, a kind is `CiliumEnvoyConfig`
+or `CiliumClusterwideEnvoyConfig`).
+
+A field is required only where its parent is authored: a rule with no `authentication`
+needs no `mode`. A null is absence, so `operator:` with no value is a field left out, and
+a null entry of a list (`matchExpressions: [null]`) is an entry with nothing authored in
+it. An authored empty value is not checked: it is the API server's to refuse. The `type`
+of an `icmps` field is required too and is refused earlier, by Cilium's own decoding
+(above).
+
+Field names match case-insensitively in the decode, so a rule can write one field in two
+spellings (`fromEndpoints` and `FromEndpoints`); the decode then keeps one of them, or
+merges the two. The trait does not refuse that, but each spelling is held to the list,
+and the refusal names the one that leaves the field out
+(`ingress[0].FromEndpoints[0].matchExpressions[0].operator`).
+
+The list is the `cilium-networkpolicy` kind's, cut to what the trait publishes
+(`requiredfields.CiliumTraitRule` in the internal `pkg/oam/internal/requiredfields`), and
+`TestCiliumNetworkPolicyTrait_RequiredMatchCRD` holds it to the CiliumNetworkPolicy CRD
+of the linked Cilium module: it fails when the CRD requires a field under a published
+property that the list lacks.
+
+**Breaking**: a `cilium-networkpolicy` trait that leaves one of these fields out built
+before, into a policy the API server refuses, and is now refused at build time.
 
 ### Null or empty `endpointSelector` / `egress` / `ingress`
 

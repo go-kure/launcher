@@ -11,6 +11,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
 
 // CiliumNetworkPolicyHandler handles OAM cilium-networkpolicy components: the
@@ -67,14 +68,14 @@ func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySch
 }
 
 // ciliumNetworkPolicyRequired is the required list of a cilium-networkpolicy
-// component: that of a Cilium rule (ciliumRuleRequired), under `spec` and under
-// every entry of `specs`. These are the fields the API requires inside a rule
+// component: that of a Cilium rule (requiredfields.CiliumRule), under `spec` and
+// under every entry of `specs`. These are the fields the API requires inside a rule
 // that the Go type writes whether or not they were authored, and the two it
 // writes with a value the API refuses; without the list the object would carry
 // the type's empty value where the document left the field out, and would not
 // show the omission. TestCiliumNetworkPolicy_RequiredMatchCRD holds it to the
 // CiliumNetworkPolicy CRD of the linked module.
-var ciliumNetworkPolicyRequired = requiredFields(ciliumRuleRequired("spec"), ciliumRuleRequired("specs[]"))
+var ciliumNetworkPolicyRequired = requiredFields(requiredfields.CiliumRule("spec"), requiredfields.CiliumRule("specs[]"))
 
 // ToApplicationConfig decodes an OAM cilium-networkpolicy component into a
 // CiliumNetworkPolicyConfig, under the package's null contract and the strict
