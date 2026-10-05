@@ -294,6 +294,11 @@ type listDocument struct {
 	// unregistered is a list of a kind the scheme does not register. Its items
 	// are documents of their own too, read with itemIdentity.
 	unregistered bool
+	// identity is what a list of an unregistered kind states of apiVersion and
+	// kind, as the members of a JSON object: every statement of each key as
+	// the document wrote it, then what the document is given where it leaves
+	// that key out (listIdentityMembers).
+	identity []byte
 }
 
 // itemsAreDocuments reports whether an item of the list is a document of its
@@ -319,17 +324,48 @@ func (l listDocument) itemIdentity() listIdentity {
 // (withListIdentity); a list of one item makes the parser do that itself, so
 // the objects are the ones it made of the item in the document, and nothing
 // here writes the item again.
+//
+// That list states apiVersion and kind as the document's list does, every
+// statement of each (identity), and not once with the values listDocumentOf read.
+// The parser reads the two twice: the Kubernetes decoder, which finds the kind
+// unregistered, keeps a string that a null follows, and the parser's own
+// reading, which the items are given, takes the null for left out. A list that
+// states its apiVersion and then null decodes by the first reading and gives
+// its items none by the second; written once, as the empty string the second
+// reads, it would not decode at all.
 func (l listDocument) parseItem(item json.RawMessage) ([]client.Object, error) {
 	if !l.unregistered {
 		return kureio.ParseYAMLWithOptions(item, manifestParseOptions)
 	}
-	head, err := json.Marshal(map[string]string{"apiVersion": l.apiVersion, "kind": l.kind})
-	if err != nil {
-		return nil, errors.Wrapf(err, "writing the head of %s", l.kind)
-	}
-	// head is a JSON object of two string members, so its last byte closes it.
-	alone := slices.Concat(head[:len(head)-1], []byte(`,"items":[`), item, []byte(`]}`))
+	alone := slices.Concat([]byte(`{`), l.identity, []byte(`,"items":[`), item, []byte(`]}`))
 	return kureio.ParseYAMLWithOptions(alone, manifestParseOptions)
+}
+
+// listIdentityMembers returns what doc, a list of an unregistered kind, states
+// of apiVersion and kind, as the members of a JSON object: the statements of
+// apiVersion, then those of kind, each as doc wrote it and each key's in the
+// order doc states them. The order between the two keys is not doc's, and no
+// reader depends on it: each takes a key by itself. Behind a key's statements
+// stands what doc is given for it (given) where the last of them leaves it
+// out, which is when the parser adds it to an item of a list, behind the
+// item's last field (kure pkg/io: withListIdentity). A document the parser has
+// accepted states a kind, so the result is never empty.
+func listIdentityMembers(doc []byte, fields map[string]json.RawMessage, given listIdentity) []byte {
+	var members [][]byte
+	for _, id := range []struct{ key, given string }{{"apiVersion", given.apiVersion}, {"kind", given.kind}} {
+		name := `"` + id.key + `":`
+		for _, value := range jsonExactMembers(doc, id.key) {
+			members = append(members, slices.Concat([]byte(name), value))
+		}
+		if stated, _ := statedString(fields, id.key); stated != "" || id.given == "" {
+			continue
+		}
+		// A string always marshals.
+		if value, err := json.Marshal(id.given); err == nil {
+			members = append(members, slices.Concat([]byte(name), value))
+		}
+	}
+	return bytes.Join(members, []byte(`,`))
 }
 
 // listDocumentOf reports whether doc is a list document to kure's parser, which
@@ -385,6 +421,7 @@ func listDocumentOf(doc []byte, given listIdentity) (listDocument, bool) {
 			return listDocument{}, false
 		}
 		out.unregistered = true
+		out.identity = listIdentityMembers(doc, fields, given)
 		return out, true
 	}
 	if _, isObject := list.(client.Object); isObject || !meta.IsListType(list) {
@@ -489,40 +526,37 @@ func splitManifestDocuments(raw []byte) ([][]byte, error) {
 // out, and nil for a document that states its own: the unstructured object that
 // stands in for such an item is given it.
 //
-// An object of a kind the scheme does not register has no undeclared field. It
-// is returned as the parser made it unless it carries a top-level `items`
-// array (refuseItemsOnNoList).
+// An object the parser left untyped is of a kind the scheme does not register
+// and has no undeclared field: nothing of it is dropped. It is returned as the
+// parser made it unless it carries a top-level `items` array
+// (refuseItemsOnNoList), and doc is not decoded again. The strict decode can
+// read such a document as a registered kind where the parser does not (an item
+// that states `v1` and then null, in a list of an unregistered kind), and a
+// value that kind's type cannot hold is no defect of the object that is emitted.
 //
 // The strict decode must have read doc as the kind of the Go type the parser
 // made of it: checked as another kind, the fields of the object that is emitted
 // went unread, and the document is refused (refuseAnotherReading).
 func keepUndeclaredFields(doc []byte, objs []client.Object, itemKind *schema.GroupVersionKind) ([]client.Object, error) {
-	readAs, paths, err := undeclaredFieldsAs(doc, itemKind)
-	if err != nil {
-		if len(objs) == 1 {
-			return nil, errors.Wrap(err, renderedObjectRef(objs[0]))
-		}
-		return nil, errors.Wrap(err, "reading a document for fields its kind does not declare")
-	}
-	for _, obj := range objs {
-		if err := refuseAnotherReading(obj, readAs); err != nil {
+	// One object: keepFieldsAs refuses any other count for a document that is
+	// no list, and keepListItemFields passes an item of a typed list with its own.
+	obj := objs[0]
+	if _, untyped := obj.(*unstructured.Unstructured); untyped {
+		if err := refuseItemsOnNoList(obj); err != nil {
 			return nil, err
-		}
-	}
-	if len(paths) == 0 {
-		for _, obj := range objs {
-			if err := refuseItemsOnNoList(obj); err != nil {
-				return nil, err
-			}
 		}
 		return objs, nil
 	}
-	// Only a registered kind has undeclared fields, and the parser makes one
-	// object of such a document.
-	if len(objs) != 1 {
-		return nil, errors.Errorf("a document with undeclared fields decoded to %d objects, want 1", len(objs))
+	readAs, paths, err := undeclaredFieldsAs(doc, itemKind)
+	if err != nil {
+		return nil, errors.Wrap(err, renderedObjectRef(obj))
 	}
-	obj := objs[0]
+	if err := refuseAnotherReading(obj, readAs); err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return objs, nil
+	}
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	if isWorkloadGVK(gvk) {
 		return nil, errors.Wrap(undeclaredFieldsError(gvk, paths), renderedObjectRef(obj))
@@ -550,12 +584,9 @@ func keepUndeclaredFields(doc []byte, objs []client.Object, itemKind *schema.Gro
 // apiVersion and then a null for it. The parser reads the last statement, takes
 // the null for left out and gives the item its list's apiVersion; the Kubernetes
 // decoder keeps the string the null follows. The parser refuses the same
-// disagreement in an item of a typed list itself. An unstructured object passes:
-// nothing of it is dropped, whatever the strict decode read.
+// disagreement in an item of a typed list itself. An unstructured object never
+// gets here: keepUndeclaredFields does not decode its document again.
 func refuseAnotherReading(obj client.Object, readAs schema.GroupVersionKind) error {
-	if _, untyped := obj.(*unstructured.Unstructured); untyped {
-		return nil
-	}
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	if gvk == readAs {
 		return nil

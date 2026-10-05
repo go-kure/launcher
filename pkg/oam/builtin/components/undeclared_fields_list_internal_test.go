@@ -365,6 +365,73 @@ func TestDecodeManifestDocuments_UnregisteredListItemsAreDocuments(t *testing.T)
 			t.Errorf("control decoded %d objects, the first a %T; want the one unstructured example.com/v1 Deployment", len(objs), objs[0])
 		}
 	})
+
+	t.Run("an item the parser leaves untyped is not checked as a type", func(t *testing.T) {
+		// The reverse of the case above: the item states `v1` and then null, so
+		// the parser gives it its list's apiVersion and it is of no registered
+		// kind, while the Kubernetes decoder reads a `v1` ConfigMap. Nothing of an
+		// unstructured object is dropped, so there is no field to look for, and a
+		// value the ConfigMap type cannot hold is none of this build's concern.
+		input := []byte(`{"apiVersion":"example.com/v1","kind":"WidgetList","items":[` +
+			`{"apiVersion":"v1","apiVersion":null,"kind":"ConfigMap","metadata":{"name":"x"},"data":1}]}`)
+		parsed, err := kureio.ParseYAMLWithOptions(input, manifestParseOptions)
+		if err != nil || len(parsed) != 1 {
+			t.Fatalf("test premise: the parser returned %d objects, %v; want one", len(parsed), err)
+		}
+		if _, untyped := parsed[0].(*unstructured.Unstructured); !untyped {
+			t.Fatalf("test premise: the parser returned a %T, want an unstructured object", parsed[0])
+		}
+
+		objs, err := decodeManifestDocuments(input)
+		if err != nil {
+			t.Fatalf("decodeManifestDocuments: %v", err)
+		}
+		if len(objs) != 1 {
+			t.Fatalf("decoded %d objects, want 1", len(objs))
+		}
+		u, untyped := objs[0].(*unstructured.Unstructured)
+		if !untyped || u.GetAPIVersion() != "example.com/v1" || u.GetKind() != "ConfigMap" {
+			t.Fatalf("x is %T %s, want an unstructured example.com/v1 ConfigMap", objs[0], objs[0].GetObjectKind().GroupVersionKind())
+		}
+		if written := writtenYAML(t, u); !strings.Contains(written, "data: 1\n") {
+			t.Errorf("written item lacks what it stated:\n%s", written)
+		}
+	})
+
+	t.Run("a list that states its apiVersion and then null", func(t *testing.T) {
+		// The Kubernetes decoder keeps the string, so the kind is found
+		// unregistered and the document is a list; the parser reads the null, so
+		// the items are given no apiVersion. An item is parsed inside a list that
+		// states what this one states, or that reading is lost and the item's
+		// list no longer decodes.
+		const list = `{"apiVersion":"example.com/v1","apiVersion":null,"kind":"WidgetList","items":[ITEM]}`
+		doc := func(item string) []byte { return []byte(strings.Replace(list, "ITEM", item, 1)) }
+		const configMap = `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"x"}}`
+		const deployment = `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"},"spec":{"template":{"spec":{"fieldOfALaterVersion":"x"}}}}`
+
+		for name, input := range map[string][]byte{
+			"at the top":         doc(configMap),
+			"inside a `v1` List": []byte(`{"apiVersion":"v1","kind":"List","items":[` + string(doc(configMap)) + `]}`),
+		} {
+			t.Run(name, func(t *testing.T) {
+				if parsed, err := kureio.ParseYAMLWithOptions(input, manifestParseOptions); err != nil || len(parsed) != 1 {
+					t.Fatalf("test premise: the parser returned %d objects, %v; want one", len(parsed), err)
+				}
+				objs, err := decodeManifestDocuments(input)
+				if err != nil {
+					t.Fatalf("decodeManifestDocuments: %v", err)
+				}
+				if _, ok := objs[0].(*corev1.ConfigMap); !ok || len(objs) != 1 {
+					t.Errorf("decoded %d objects, the first a %T; want the one *corev1.ConfigMap", len(objs), objs[0])
+				}
+			})
+		}
+
+		// The items of such a list are held to the rule like any other's.
+		_, err := decodeManifestDocuments(doc(deployment))
+		assertErrorMentions(t, err, "item 0 of WidgetList", `Deployment "web"`,
+			"undeclared field spec.template.spec.fieldOfALaterVersion:")
+	})
 }
 
 // nestedItems indents the items of a list two columns, to nest them in an item
