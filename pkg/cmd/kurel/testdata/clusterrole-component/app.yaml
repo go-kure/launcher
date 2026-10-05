@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: node-reader
+      type: clusterrole
+      properties:
+        labels:
+          rbac.example.com/aggregate-to-monitoring: "true"
+        rules:
+          - apiGroups: [""]
+            resources: [nodes]
+            verbs: [get, list, watch]
+          - nonResourceURLs: [/metrics]
+            verbs: [get]
+    - name: monitoring
+      type: clusterrole
+      properties:
+        aggregationRule:
+          clusterRoleSelectors:
+            - matchLabels:
+                rbac.example.com/aggregate-to-monitoring: "true"

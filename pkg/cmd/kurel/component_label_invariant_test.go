@@ -412,6 +412,18 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"endpoints":   []any{map[string]any{"addresses": []any{"192.0.2.10"}}},
 		"ports":       []any{map[string]any{"name": "http", "port": 8080}},
 	}},
+	// The four kinds of the RBAC API are identity and the authored fields too.
+	// They select no pod, and check no name rule of their own.
+	"role": {props: map[string]any{"rules": []any{
+		map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}},
+	"clusterrole": {props: map[string]any{"rules": []any{
+		map[string]any{"apiGroups": []any{""}, "resources": []any{"nodes"}, "verbs": []any{"get"}}}}},
+	"rolebinding": {props: map[string]any{
+		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web"}},
+		"roleRef":  map[string]any{"kind": "Role", "name": "reader"}}},
+	"clusterrolebinding": {props: map[string]any{
+		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web", "namespace": "default"}},
+		"roleRef":  map[string]any{"kind": "ClusterRole", "name": "node-reader"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

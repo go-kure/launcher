@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: node-reader
+      type: clusterrole
+      properties:
+        rules:
+          - apiGroups: [""]
+            resources: [nodes]
+            verbs: [get, list]
+    - name: read-nodes
+      type: clusterrolebinding
+      properties:
+        subjects:
+          - kind: ServiceAccount
+            name: web
+            namespace: default
+          - kind: Group
+            name: ops
+            apiGroup: rbac.authorization.k8s.io
+        roleRef:
+          kind: ClusterRole
+          name: node-reader

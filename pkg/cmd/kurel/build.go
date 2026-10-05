@@ -356,6 +356,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"backendtlspolicy": &components.BackendTLSPolicyHandler{},
 
 		"endpointslice": &components.EndpointSliceHandler{},
+
+		"role":               &components.RoleHandler{},
+		"rolebinding":        &components.RoleBindingHandler{},
+		"clusterrole":        &components.ClusterRoleHandler{},
+		"clusterrolebinding": &components.ClusterRoleBindingHandler{},
 	}
 }
 

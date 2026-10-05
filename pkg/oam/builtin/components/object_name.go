@@ -19,6 +19,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/validate/content"
@@ -520,6 +521,29 @@ func (h *BackendTLSPolicyHandler) ComponentObject() (schema.GroupKind, oam.Objec
 // ComponentObject declares the endpointslice kind's EndpointSlice.
 func (h *EndpointSliceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: discoveryv1.GroupName, Kind: "EndpointSlice"}, oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the role kind's Role. The rbac trait claims a Role
+// too: one of the same name and namespace in a document collides with this.
+func (h *RoleHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: rbacv1.GroupName, Kind: "Role"}, oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the rolebinding kind's RoleBinding.
+func (h *RoleBindingHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: rbacv1.GroupName, Kind: "RoleBinding"}, oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the clusterrole kind's ClusterRole, which is
+// cluster-scoped.
+func (h *ClusterRoleHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: rbacv1.GroupName, Kind: "ClusterRole"}, oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the clusterrolebinding kind's ClusterRoleBinding,
+// which is cluster-scoped.
+func (h *ClusterRoleBindingHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: rbacv1.GroupName, Kind: "ClusterRoleBinding"}, oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

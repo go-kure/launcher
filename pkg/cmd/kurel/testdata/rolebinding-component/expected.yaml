@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    launcher.gokure.dev/component: pod-reader
+  name: pod-reader
+  namespace: default
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: read-pods
+  name: read-pods
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-reader
+subjects:
+- kind: ServiceAccount
+  name: web
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: jane
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: view
+  name: view
+  namespace: default
+roleRef:
+  apiGroup: ""
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: Group
+  name: ops

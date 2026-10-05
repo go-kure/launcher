@@ -18,6 +18,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -125,6 +126,11 @@ var coreKindSchemas = []struct {
 	// An EndpointSlice has no spec type either: the component projects the
 	// object, less its identity.
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
+	// The four kinds of the RBAC API have no spec type either.
+	{"role", reflect.TypeFor[rbacv1.Role](), &components.RoleHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 Role")},
+	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), &components.RoleBindingHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 RoleBinding")},
+	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), &components.ClusterRoleHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRole")},
+	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), &components.ClusterRoleBindingHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRoleBinding")},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no
