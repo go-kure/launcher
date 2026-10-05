@@ -61,7 +61,7 @@ func (h *CnpgObjectStoreHandler) ToApplicationConfig(component *oam.Component, n
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgObjectStoreDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgObjectStoreConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
+	cfg := &CnpgObjectStoreConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -72,9 +72,12 @@ func (h *CnpgObjectStoreHandler) ToApplicationConfig(component *oam.Component, n
 // cnpg-objectstore components. Spec is the decoded ObjectStoreSpec exactly as
 // authored.
 type CnpgObjectStoreConfig struct {
-	Name      string
-	Namespace string
-	Spec      barmanv1.ObjectStoreSpec
+	Name string
+	// ObjectName names the ObjectStore (oam.Component.ObjectName). Empty for
+	// the application's name.
+	ObjectName string
+	Namespace  string
+	Spec       barmanv1.ObjectStoreSpec
 }
 
 // validate refuses a spec the ObjectStore CRD would refuse for a reason the
@@ -116,7 +119,7 @@ func (c *CnpgObjectStoreConfig) Generate(app *stack.Application) ([]*client.Obje
 	if err := validateCnpgResources("instanceSidecarConfiguration", c.Spec.InstanceSidecarConfiguration.Resources); err != nil {
 		return nil, err
 	}
-	store := kurecnpg.CreateObjectStore(app.Name, app.Namespace)
+	store := kurecnpg.CreateObjectStore(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&store.Spec)
 	obj := client.Object(store)
 	return []*client.Object{&obj}, nil

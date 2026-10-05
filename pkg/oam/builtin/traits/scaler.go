@@ -47,6 +47,7 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	if err := config.resolveNames(trait, app.Namespace); err != nil {
 		return err
 	}
+	config.TargetName = trait.ComponentObjectName()
 	subAppName, err := resolveSubApplicationName(trait, app.Name+"-scaler")
 	if err != nil {
 		return err
@@ -205,6 +206,12 @@ type ScalerConfig struct {
 	HPAName string
 	PDBName string
 
+	// TargetName is the name of the Deployment the HPA scales: the component's
+	// object name (oam.Trait.ComponentObjectName), stored by Apply. "" on a
+	// config built directly leaves the component name. The HPA and PDB default
+	// names and the PDB selector keep the component name whatever this is.
+	TargetName string
+
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
 
@@ -292,7 +299,11 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(name, app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
-	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.componentName)
+	target := c.TargetName
+	if target == "" {
+		target = c.componentName
+	}
+	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", target)
 	kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
 	if c.CPUUtilization != nil {
 		kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)

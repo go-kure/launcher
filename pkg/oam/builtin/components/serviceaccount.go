@@ -63,12 +63,26 @@ func (h *ServiceAccountHandler) ToApplicationConfig(component *oam.Component, na
 // ServiceAccountConfig implements stack.ApplicationConfig for serviceaccount
 // components.
 type ServiceAccountConfig struct {
-	Name      string
-	Namespace string
+	Name string
+	// ObjectName names the ServiceAccount (oam.Component.ObjectName); its
+	// labels keep the application's name. Empty for Name.
+	ObjectName string
+	Namespace  string
 	// AutomountToken is the authored automountServiceAccountToken, nil when
 	// unauthored.
 	AutomountToken   *bool
 	ImagePullSecrets []corev1.LocalObjectReference
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer for an account named
+// by ObjectName: the `rbac` trait on this component then grants its rules to
+// the account as it is named. Without one the answer is "", and the trait keeps
+// the component name, which is the account's. A ServiceAccount runs no pods.
+func (c *ServiceAccountConfig) ServiceAccountName() (name string, runsPods bool) {
+	if c.ObjectName != c.Name {
+		return c.ObjectName, false
+	}
+	return "", false
 }
 
 // Generate creates the ServiceAccount.
@@ -76,8 +90,8 @@ func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Objec
 	// Named from the component, so a role rule's deployment member, which is
 	// handed that same name as its serviceAccountName, runs as exactly this
 	// account; the Application's name is the fallback for a config built
-	// without one.
-	name := c.Name
+	// without one. An authored component's `objectName` names it instead.
+	name := kindObjectName(c.ObjectName, c.Name)
 	if name == "" {
 		name = app.Name
 	}
@@ -97,7 +111,7 @@ func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Objec
 // parseServiceAccount reads a serviceaccount component's properties.
 func parseServiceAccount(component *oam.Component) (*ServiceAccountConfig, error) {
 	props := component.Properties
-	c := &ServiceAccountConfig{Name: component.Name}
+	c := &ServiceAccountConfig{Name: component.Name, ObjectName: componentObjectName(component)}
 
 	automount, err := parseBoolField(props, "automountServiceAccountToken", "automountServiceAccountToken")
 	if err != nil {

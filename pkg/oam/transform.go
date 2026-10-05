@@ -280,9 +280,11 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 		Traits:     make(map[string]map[string]PropertySchema),
 		Policies:   make(map[string]map[string]PropertySchema),
 	}
+	// A kind component's schema is published with `objectName`, which the engine
+	// reads off it (ComponentObjectProvider).
 	for name, h := range t.componentHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
-			set.Components[name] = p.PropertySchema()
+			set.Components[name] = withObjectNameProperty(h, p.PropertySchema())
 		}
 	}
 	for name, h := range t.traitHandlers {
@@ -565,9 +567,19 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 	}
 	// A type is a rule or a handler, never both (RegisterComponent,
 	// RegisterComponentLowering), so this is never a choice.
-	var provider any = t.findComponentHandler(comp.Type)
+	handler := t.findComponentHandler(comp.Type)
+	var provider any = handler
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 		provider = rule
+	} else if handler != nil {
+		// As the transform does before ToApplicationConfig: a kind component's
+		// endpoint that selects by its object's name selects by the name the object
+		// gets (Component.ObjectName). Nothing is claimed.
+		named, err := withObjectName(*comp, handler, "", "", &nameResolver{hook: naming, application: application})
+		if err != nil {
+			return nil, errors.Wrapf(err, "component %q", comp.Name)
+		}
+		comp = &named
 	}
 	var eps []netpol.Endpoint
 	var err error
@@ -884,6 +896,14 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 			component.Properties = filled
 		}
+
+		// Last before the handler: it reads the object's name off the component
+		// and never sees the property.
+		named, err := withObjectName(component, handler, namespace, ctx.FluxNamespace, ctx.names)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+		component = named
 
 		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
@@ -1392,6 +1412,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				member = entry.component.Type
 			}
 			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
+			if resolved.naming != nil {
+				resolved.naming.objectName = entry.component.ObjectName()
+			}
 			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{

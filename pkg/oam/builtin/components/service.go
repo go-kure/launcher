@@ -144,9 +144,12 @@ func (h *ServiceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint,
 
 // ServiceConfig implements stack.ApplicationConfig for service components.
 type ServiceConfig struct {
-	Name      string
-	Namespace string
-	Type      corev1.ServiceType
+	Name string
+	// ObjectName names the Service (oam.Component.ObjectName); its labels and
+	// default selector keep Name. Empty for the application's name.
+	ObjectName string
+	Namespace  string
+	Type       corev1.ServiceType
 	// ClusterIP is "" (a virtual IP is allocated) or "None" (headless).
 	ClusterIP string
 	// Selector is the pod selector: authored, or app: <component name>.
@@ -185,7 +188,14 @@ func (c *ServiceConfig) ServicePortName() (string, bool) {
 // treat a route naming it as an external backend and trust that route's
 // backendSelector. It returns "" when the Service has ports, leaving that
 // path unchanged.
+//
+// A Service named apart from its component (`objectName`) is named here with
+// or without ports: a route reaches it by the Service's name, and one that
+// names the component's instead names no Service of this document.
 func (c *ServiceConfig) BackendServiceName() string {
+	if c.ObjectName != "" && c.ObjectName != c.Name {
+		return c.ObjectName
+	}
 	if len(c.Ports) > 0 {
 		return ""
 	}
@@ -230,10 +240,11 @@ func (c *ServiceConfig) IdentityTargetPorts() bool {
 // Generate creates the Service. Nothing else: the selected pods' workload
 // component owns their ServiceAccount.
 func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateServiceName("name", app.Name); err != nil {
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateServiceName(serviceNameField(name, app.Name), name); err != nil {
 		return nil, err
 	}
-	svc := kubernetes.CreateService(app.Name, app.Namespace)
+	svc := kubernetes.CreateService(name, app.Namespace)
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
 	svc.Spec.Type = c.Type
@@ -283,16 +294,28 @@ func validateComponentServiceName(name string) error {
 	return validateServiceName("name", name)
 }
 
+// serviceNameField names where a service component's Service name came from,
+// for validateServiceName: the component name, or `objectName` when the Service
+// is named apart from it.
+func serviceNameField(serviceName, componentName string) string {
+	if serviceName != componentName {
+		return oam.ObjectNameProperty
+	}
+	return "name"
+}
+
 // parseService reads a service component's properties, applying the defaults
-// and the checks ValidateService applies to the same fields. The component
-// name is the Service's name, so it is checked against the Service-name rule
-// first.
+// and the checks ValidateService applies to the same fields. The Service is
+// named after the component, or by its `objectName`: that name is checked
+// against the Service-name rule first, and the component name is then held to
+// no more than every component name is.
 func parseService(component *oam.Component) (*ServiceConfig, error) {
-	if err := validateServiceName("name", component.Name); err != nil {
+	name := component.ObjectName()
+	if err := validateServiceName(serviceNameField(name, component.Name), name); err != nil {
 		return nil, err
 	}
 	props := component.Properties
-	c := &ServiceConfig{Name: component.Name, Type: corev1.ServiceTypeClusterIP}
+	c := &ServiceConfig{Name: component.Name, ObjectName: componentObjectName(component), Type: corev1.ServiceTypeClusterIP}
 
 	if t, present, err := parseStringField(props, "type", "type"); err != nil {
 		return nil, err

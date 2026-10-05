@@ -143,9 +143,10 @@ func (h *FluxcdKustomizationHandler) ToApplicationConfig(component *oam.Componen
 		return nil, err
 	}
 	cfg := &FluxcdKustomizationConfig{
-		Name:      component.Name,
-		Namespace: namespace,
-		Spec:      *spec,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
+		Spec:       *spec,
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -156,8 +157,12 @@ func (h *FluxcdKustomizationHandler) ToApplicationConfig(component *oam.Componen
 // FluxcdKustomizationConfig implements stack.ApplicationConfig for
 // fluxcd-kustomization components.
 type FluxcdKustomizationConfig struct {
-	// Name is the component name, and the Kustomization's name.
+	// Name is the component name, and the Kustomization's name unless
+	// ObjectName names it.
 	Name string
+	// ObjectName names the Kustomization (oam.Component.ObjectName). Empty for
+	// Name.
+	ObjectName string
 	// Namespace is the application namespace. The Kustomization lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -214,7 +219,7 @@ func (c *FluxcdKustomizationConfig) Generate(_ *stack.Application) ([]*client.Ob
 		return nil, err
 	}
 
-	kz := fluxcd.CreateKustomization(c.Name, c.fluxNamespace())
+	kz := fluxcd.CreateKustomization(kindObjectName(c.ObjectName, c.Name), c.fluxNamespace())
 	// A deep copy, so neither this render nor a later one shares a pointer or
 	// slice with the config.
 	kz.Spec = *c.Spec.DeepCopy()

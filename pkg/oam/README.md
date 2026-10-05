@@ -471,6 +471,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
+| `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a component a lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
@@ -513,7 +514,10 @@ same object is refused as well, also where its component, role and default are t
 object and the later one are two. Under `LowerRaws`, which lowers several
 documents with one allocator, two documents may resolve one kind and name only where their
 `metadata.namespace` differs. A document without one counts as a document of `default`, the
-namespace `Transform` gives it when its context names none.
+namespace `Transform` gives it when its context names none. The comparison is by the authored
+namespace: `LowerRaws` does not see a `TransformContext.Namespace` a later `Transform` lands a
+document in. A caller that lands two documents in one namespace that way compares the objects
+they generate with `CheckCrossDocumentCollisions`, which reads each object's own namespace.
 
 A rule takes its object to land in the document's namespace: `NameSpec.Namespace` chooses
 none for it. A cluster-scoped object (a ClusterRole) has no namespace, and the rule says so
@@ -577,11 +581,13 @@ rule (two `databases` entries given one `objectName`) at once:
 name collision: Database.postgresql.cnpg.io "db-orders" is named by component "db" (role "database", its default) and by component "db" (role "database", set by databases[1].objectName); give one of them another name
 ```
 
-This knows only the names resolved this way: the roles above. An object a component
-generates, one a lowering rule names without a role (a generated Helm source), and the object
-of a trait that is not in the table are not in it, so `CheckInDocumentCollisions` (below) is
-still what compares every generated object. The component names and the remaining
-lowering-rule names join it in later changes of go-kure/launcher#787.
+This knows only the names resolved this way: the roles above. An object of a component that
+is not a kind component, one a lowering rule names without a role (a generated Helm source),
+and the object of a trait that is not in the table (a `configmap` trait's ConfigMap, a
+`secret` trait's Secret) are not in it, so
+`CheckInDocumentCollisions` (below) is still what compares every generated object: a
+`configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
+there. The remaining lowering-rule names join it in later changes of go-kure/launcher#787.
 
 A sub-application's name is resolved and validated but not kept apart: it is not unique. A
 `configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
@@ -596,6 +602,92 @@ built outside a transform (a handler's `Apply` called directly) `ResolveName` va
 authored name and returns it or the default, the hook is not consulted and nothing is kept
 apart. The handler names the namespace its object is generated in (`NameSpec.Namespace`), or
 sets `NameSpec.ClusterScoped` for an object that has none.
+
+### `objectName`: the object of a kind component
+
+A kind component (`deployment`, `service`, `configmap`, `cnpg-cluster`, `helmrelease`, …) is
+one object, named after the component. `objectName` gives that object another name:
+
+```yaml
+- name: api
+  type: deployment
+  properties:
+    objectName: shop-api
+    image: ghcr.io/example/api:v1.0.0
+```
+
+The name is resolved in the order of every role: the author's `objectName`, else the `Naming`
+hook's answer for role `object`, else the component name. A name that is not the default is a
+DNS-1123 subdomain used as given or refused, and the kind's own name rule then runs on it as
+it runs on a component name (a Service's is a DNS-1035 label).
+
+It names the object alone. The component keeps its name everywhere else: the `app` label, the
+pod template's labels, the selectors, the component label, the main container, and every name
+a trait derives (`<component>-hpa`, a `configmap` trait's default).
+
+The engine reads the property, not the handler. A handler opts its type in by declaring its
+object's kind and scope (`ComponentObjectProvider.ComponentObject`); the engine adds
+`objectName` to that type's schema, resolves and claims the name, removes the property, and
+hands the handler the result as `Component.ObjectName()`. A type that declares no object
+(`helmtemplate`, `manifests`, `crd`, `passthrough`) refuses the property. A kind handler
+driven directly, outside a transform, does not read it: its own `PropertySchema` does not
+declare the property, its `ToApplicationConfig` passes over it, and the object keeps the
+component name.
+The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
+kind (`namespace`, `persistentvolume`), and in the Flux namespace for a Flux kind when the
+transform has one, so it is held against every other resolved name:
+
+```
+name collision: Pooler.postgresql.cnpg.io "default/db-pooler" is named by component "db" (role "pooler", its default) and by component "pgb" (role "object", set by properties.objectName); give one of them another name
+```
+
+`objectName` and the `object` request apply only to a component no rule emitted. On a member
+a lowering rule emitted the property is refused and the hook is not asked: a rule that wants a
+member's name choosable resolves it itself at lowering time, under its own role (`pooler`,
+`database`).
+
+The party that writes a reference names its target. What launcher writes to a renamed
+component's object carries the object name:
+
+- the `scaler` trait's `scaleTargetRef` (the HPA, the PDB and the PDB's selector keep the
+  component name);
+- a routing trait's own backend, the Service of the `service` component it is on;
+- the Service a route is resolved against for the synthesized NetworkPolicy: a route that
+  names the renamed Service resolves to the component, and one that names the component's
+  name names a Service the document does not own, an external one;
+- the `rbac` trait's subject on a `serviceaccount` component;
+- the pod selector of a `cnpg-cluster` or `cnpg-pooler` endpoint (`cnpg.io/cluster`,
+  `cnpg.io/poolerName`), which `ComponentEndpoints` reads with the authored name and
+  `ComponentEndpointsNamed` with the hook's as well. A `cnpg-pooler` is refused its cluster's
+  name by its object name.
+
+What the author writes stays as written, so a reference to a renamed component is written with
+its object name: a HelmRelease's `chartRef.name` or `sourceRef.name` naming a renamed
+`helmrepository`, a `cnpg-pooler`'s `cluster.name`, a volume's claim name, a `statefulset`'s
+`serviceName`.
+
+```yaml
+- name: charts
+  type: helmrepository
+  properties:
+    objectName: shop-charts
+    url: https://charts.example.com
+- name: app
+  type: helmrelease
+  properties:
+    chart:
+      spec:
+        chart: app
+        sourceRef:
+          kind: HelmRepository
+          name: shop-charts   # the object name, not "charts"
+```
+
+Two consequences follow from the object's own kind. A `statefulset`'s pods and volume claims
+are named by its controller after the StatefulSet, so they follow `objectName`. A
+`helmrelease`'s release name does not: launcher writes `spec.releaseName` from the component
+name unless it is authored, so renaming the HelmRelease object leaves the release, and the
+names its chart derives from it, where they were.
 
 ## Parsing
 

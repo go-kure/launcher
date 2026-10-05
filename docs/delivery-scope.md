@@ -198,21 +198,23 @@ Decided in the ticket:
   `ComponentLabelKey`, and the `Naming` hook for the names of a closed set of roles
   (go-kure/launcher#787, §3.2), which include the `postgresql` Pooler and Databases: a
   lowering rule resolves such a name with `LoweringContext.ResolveName`, and
-  `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. No hook
-  yet for a component's own object name or a source name.
+  `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. The roles
+  also include a kind component's own object. No hook yet for a source name.
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
   (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
-  policy (`name`), and the `postgresql` Pooler and Databases (`poolerName`,
-  `databases[].objectName`). Still none for:
+  policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
+  `databases[].objectName`), and the object of every kind component (`objectName`). Still
+  none for:
   generated Helm source names (`<document>-source-<digest>`), the values ConfigMap name
   (`helmValuesConfigMapName`, `pkg/oam/builtin/components/helm.go`), bundle and ordered-group
   names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others) and Helm
   hook-group child layouts. The Helm release name has one under both deliveries
   (`releaseName`, go-kure/launcher#785, §4.2).
-- **Object name = component name** for every kind component. A Service named like its
-  StatefulSet is only reachable through `passthrough` or `manifests`: two kind components
-  `app` are refused as a duplicate component name (`validateComponent`,
-  `pkg/oam/validate.go`).
+- **Object name = component name** for every kind component unless `objectName` or the
+  hook names the object otherwise (§3.2). Two kind components `app` are still refused as a
+  duplicate component name (`validateComponent`, `pkg/oam/validate.go`); a Service named
+  like its StatefulSet is two components of different names, one given the other's name as
+  its `objectName`.
 - **Shortening** is one rule for every name launcher generates (§3.3). CNPG and Service
   names, which are the component's name, are validated, never shortened.
 - **Collisions:** `CheckInDocumentCollisions` (`pkg/oam/in_document_collisions.go`) refuses
@@ -245,7 +247,8 @@ Decided in the ticket:
   - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
     group's bundle, each sub-application a trait or a synthesized policy adds, each
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects and the
-    `networkpolicy` trait's policy, and the `postgresql` Pooler and Databases. A trait
+    `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, and the object
+    of an authored kind component. A trait
     handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
     `LoweringContext.ResolveName` (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
@@ -265,22 +268,35 @@ Decided in the ticket:
   names a lowering rule resolves are held in the same space as the ones resolved after
   lowering, and two rules that resolve one kind and name for one component are refused
   when the second resolves it. Every other name is still compared only by
-  `CheckInDocumentCollisions` over `GenerateApplications`: a component's own objects, the
-  lowering-rule names without a role, and the objects of a trait outside the roles.
+  `CheckInDocumentCollisions` over `GenerateApplications`: the objects of a component that
+  is not a kind component, the lowering-rule names without a role, and the objects of a
+  trait outside the roles.
 - **Shipped: `postgresql` `poolerName` and `databases[].objectName`**
   (`PostgresqlRule`, `pkg/oam/builtin/components/postgresql_lowering.go`). The Pooler's
   endpoint selector follows the chosen name. `poolerName` without `pooler.enabled: true`
   is refused, and so is either name when it is already a component of the document.
-- **Target, author:** an override for each remaining name of §3.1, plus an object name
-  separate from the component name. The latter allows a Service named like its StatefulSet
-  as kind components (rule 4 permits different kinds to share a name).
+- **Shipped: `objectName` on every kind component** (`pkg/oam/object_name.go`,
+  `pkg/oam/README.md` "`objectName`: the object of a kind component"). It names the
+  component's one object and nothing else: labels, selectors and trait-derived names keep
+  the component name. The engine reads it and asks the hook under role `object`; a handler
+  opts in by declaring its object's kind and scope (`ComponentObjectProvider`), and a test
+  walks the registry so that a new type either declares it or is listed as taking none.
+  - Only for a component no rule emitted: on an emitted member it is refused and the hook
+    is not asked. The party that writes a reference names its target, so a rule that wants
+    a member's name choosable resolves it itself.
+  - The references launcher writes to the object follow it (`scaleTargetRef`, a routing
+    trait's own backend and the Service a route resolves to, the `rbac` subject on a
+    `serviceaccount` component, the CloudNativePG endpoint selectors). A reference the
+    author writes is written with the object name.
+  - It allows a Service named like its StatefulSet as kind components (rule 4 permits
+    different kinds to share a name).
+- **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
   - The remaining lowering-rule names: the `helm` rule's source and values objects and
     the `oci` rule's source. A name the `Namer` builds (`NameAllocator.Name` and
     `NameOrAdopt`, `pkg/oam/lowering.go`) reaches the hook only where its rule calls
     `LoweringContext.ResolveName`.
-  - The names with no role yet: a component's own object name and the hook-group
-    children.
+  - The names with no role yet: the hook-group children.
 
 ### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
@@ -715,7 +731,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller` and `podtemplate` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

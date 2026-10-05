@@ -175,9 +175,10 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, err
 	}
 	cfg := &HelmReleaseConfig{
-		Name:      component.Name,
-		Namespace: namespace,
-		Spec:      *spec,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
+		Spec:       *spec,
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -188,8 +189,12 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 // HelmReleaseConfig implements stack.ApplicationConfig for helmrelease
 // components.
 type HelmReleaseConfig struct {
-	// Name is the component name, and the HelmRelease's name.
+	// Name is the component name, and the HelmRelease's name unless ObjectName
+	// names it. The default release name is derived from Name either way.
 	Name string
+	// ObjectName names the HelmRelease (oam.Component.ObjectName). Empty for
+	// Name. It does not move the release name.
+	ObjectName string
 	// Namespace is the application namespace. The HelmRelease lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -344,7 +349,7 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 		return nil, err
 	}
 
-	hr := fluxcd.CreateHelmRelease(c.Name, c.fluxNamespace())
+	hr := fluxcd.CreateHelmRelease(kindObjectName(c.ObjectName, c.Name), c.fluxNamespace())
 	// A deep copy, so neither this render nor a later one shares a pointer or
 	// slice with the config.
 	hr.Spec = *c.Spec.DeepCopy()

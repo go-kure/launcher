@@ -80,17 +80,20 @@ func (h *CnpgClusterHandler) CanHandle(componentType string) bool {
 }
 
 // Endpoints implements oam.EndpointProvider: the Cluster's instance pods,
-// labelled cnpg.io/cluster=<cluster name> (the OAM component name), on the
-// PostgreSQL port. It is the same primary endpoint postgresql publishes; the
-// pooler endpoint belongs to a Pooler, which this kind does not emit.
+// labelled cnpg.io/cluster=<cluster name> (the component's object name: the
+// OAM component name unless `objectName` or the naming hook names the Cluster
+// otherwise), on the PostgreSQL port. It is the same primary endpoint
+// postgresql publishes; the pooler endpoint belongs to a Pooler, which this
+// kind does not emit.
 func (h *CnpgClusterHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	// Refused here as well as at parse time: endpoints are collected
 	// separately, and the name is copied into the selector verbatim.
-	if err := validateCnpgClusterName(component.Name); err != nil {
+	name := component.ObjectName()
+	if err := validateCnpgClusterName(name); err != nil {
 		return nil, err
 	}
 	return []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}, nil
 }
@@ -188,7 +191,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 // cnpgv1.ClusterSpec, so an unknown key or a wrongly typed value is an error;
 // an unknown key is an error even when its value is null.
 func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	if err := validateCnpgClusterName(component.Name); err != nil {
+	if err := validateCnpgClusterName(component.ObjectName()); err != nil {
 		return nil, err
 	}
 	props, raw, err := jsonProperties(component.Properties)
@@ -247,6 +250,7 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 
 	return &CnpgClusterConfig{
 		Name:                component.Name,
+		ObjectName:          componentObjectName(component),
 		Namespace:           namespace,
 		Spec:                *spec,
 		explicitInstances:   explicitInstances,
@@ -598,9 +602,12 @@ func withoutNullsAtDepth(value any, path string) (any, error) {
 // components. Spec is the decoded ClusterSpec exactly as authored, apart from
 // the instance default and whatever ApplyPolicy fills in.
 type CnpgClusterConfig struct {
-	Name      string
-	Namespace string
-	Spec      cnpgv1.ClusterSpec
+	Name string
+	// ObjectName names the Cluster (oam.Component.ObjectName). Empty for the
+	// application's name.
+	ObjectName string
+	Namespace  string
+	Spec       cnpgv1.ClusterSpec
 
 	explicitInstances   bool
 	explicitStorageSize bool
@@ -855,8 +862,10 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	// The config is exported, so a caller can build it without
 	// ToApplicationConfig. The parse-time refusals that guard what
 	// CloudNativePG admits are repeated on what is emitted, as the workload
-	// kinds repeat their name check: the Cluster is named from app.Name.
-	if err := validateCnpgClusterName(app.Name); err != nil {
+	// kinds repeat their name check: the Cluster is named by ObjectName, else
+	// from app.Name.
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateCnpgClusterName(name); err != nil {
 		return nil, err
 	}
 	if c.Spec.Instances < 1 {
@@ -882,7 +891,7 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if err := validateResourceRequestLimit(c.Spec.Resources.Requests, c.Spec.Resources.Limits); err != nil {
 		return nil, err
 	}
-	cluster := kurecnpg.CreateCluster(app.Name, app.Namespace)
+	cluster := kurecnpg.CreateCluster(name, app.Namespace)
 	c.Spec.DeepCopyInto(&cluster.Spec)
 	obj := client.Object(cluster)
 	return []*client.Object{&obj}, nil

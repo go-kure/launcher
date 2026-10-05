@@ -69,7 +69,10 @@ func (h *ConfigMapHandler) ToApplicationConfig(component *oam.Component, namespa
 
 // ConfigMapConfig implements stack.ApplicationConfig for configmap components.
 type ConfigMapConfig struct {
-	Name       string
+	Name string
+	// ObjectName names the ConfigMap (oam.Component.ObjectName); its labels
+	// keep Name. Empty for the application's name.
+	ObjectName string
 	Namespace  string
 	Data       map[string]string
 	BinaryData map[string][]byte
@@ -79,7 +82,7 @@ type ConfigMapConfig struct {
 
 // Generate creates the ConfigMap.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return GenerateConfigMap(*c, app.Name, app.Namespace, appLabels(app.Name))
+	return GenerateConfigMap(*c, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
 }
 
 // parseConfigMap reads a configmap component's properties.
@@ -89,6 +92,7 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 		return nil, err
 	}
 	c.Name = component.Name
+	c.ObjectName = componentObjectName(component)
 	return &c, nil
 }
 

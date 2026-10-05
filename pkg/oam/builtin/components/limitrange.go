@@ -57,7 +57,7 @@ func (h *LimitRangeHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	cfg := &LimitRangeConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
+	cfg := &LimitRangeConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -67,9 +67,12 @@ func (h *LimitRangeHandler) ToApplicationConfig(component *oam.Component, namesp
 // LimitRangeConfig implements stack.ApplicationConfig for limitrange
 // components. Spec is the decoded LimitRangeSpec exactly as authored.
 type LimitRangeConfig struct {
-	Name      string
-	Namespace string
-	Spec      corev1.LimitRangeSpec
+	Name string
+	// ObjectName names the LimitRange (oam.Component.ObjectName). Empty for the
+	// application's name.
+	ObjectName string
+	Namespace  string
+	Spec       corev1.LimitRangeSpec
 }
 
 // validate refuses what the strict decode cannot see and the Go type cannot
@@ -111,7 +114,7 @@ func (c *LimitRangeConfig) Generate(app *stack.Application) ([]*client.Object, e
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
-	lr := kubernetes.CreateLimitRange(app.Name, app.Namespace)
+	lr := kubernetes.CreateLimitRange(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&lr.Spec)
 	obj := client.Object(lr)
 	return []*client.Object{&obj}, nil

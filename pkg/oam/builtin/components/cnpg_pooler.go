@@ -45,18 +45,20 @@ func (h *CnpgPoolerHandler) CanHandle(componentType string) bool {
 }
 
 // Endpoints implements oam.EndpointProvider: the Pooler's PgBouncer pods,
-// labelled cnpg.io/poolerName=<pooler name> (the OAM component name), on the
-// PostgreSQL port. It is the pooler endpoint postgresql publishes, which names
+// labelled cnpg.io/poolerName=<pooler name> (the component's object name: the
+// OAM component name unless `objectName` or the naming hook names the Pooler
+// otherwise), on the PostgreSQL port. It is the pooler endpoint postgresql publishes, which names
 // its Pooler <component name>-pooler unless the author or the consumer's naming
 // hook names it otherwise: a cnpg-pooler component of that name
 // declares an identical selector, so a synthesized ingress allow does not
 // change when a pooler moves from one to the other.
 func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	if err := validateCnpgPoolerName(component.Name); err != nil {
+	name := component.ObjectName()
+	if err := validateCnpgPoolerName(name); err != nil {
 		return nil, err
 	}
 	return []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: component.Name}},
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}, nil
 }
@@ -94,7 +96,8 @@ var cnpgPoolerDefaultedZeroFields = map[string]string{}
 // cluster.name, and pgbouncer, which the Go type would otherwise encode as
 // null.
 func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	if err := validateCnpgPoolerName(component.Name); err != nil {
+	name := component.ObjectName()
+	if err := validateCnpgPoolerName(name); err != nil {
 		return nil, err
 	}
 	spec, props, err := decodeKindSpec[cnpgv1.PoolerSpec](component.Properties, "postgresql.cnpg.io/v1 PoolerSpec")
@@ -104,8 +107,8 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgPoolerConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
-	if err := cfg.validate(component.Name); err != nil {
+	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	if err := cfg.validate(name); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -114,9 +117,12 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 // CnpgPoolerConfig implements stack.ApplicationConfig for cnpg-pooler
 // components. Spec is the decoded PoolerSpec exactly as authored.
 type CnpgPoolerConfig struct {
-	Name      string
-	Namespace string
-	Spec      cnpgv1.PoolerSpec
+	Name string
+	// ObjectName names the Pooler (oam.Component.ObjectName). Empty for the
+	// application's name.
+	ObjectName string
+	Namespace  string
+	Spec       cnpgv1.PoolerSpec
 }
 
 // validate refuses a spec the Pooler CRD or CloudNativePG's webhook would
@@ -184,7 +190,8 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 
 // Generate emits the Pooler: kure's identity-only constructor plus a deep copy
 // of the spec. The parse-time refusals are repeated on what is emitted, since
-// the config is exported and the Pooler is named from app.Name. The template's
+// the config is exported and the Pooler is named by ObjectName, else from
+// app.Name. The template's
 // pod and container resources get admission's request/limit and hugepages
 // checks (validatePodTemplateResources), as cnpg-cluster's do.
 //
@@ -194,10 +201,11 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 // so a metadata-only template would be refused. To the operator an empty list
 // means what an omitted spec does: it adds its pgbouncer container either way.
 func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateCnpgPoolerName(app.Name); err != nil {
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateCnpgPoolerName(name); err != nil {
 		return nil, err
 	}
-	if err := c.validate(app.Name); err != nil {
+	if err := c.validate(name); err != nil {
 		return nil, err
 	}
 	if t := c.Spec.Template; t != nil {
@@ -205,7 +213,7 @@ func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, e
 			return nil, err
 		}
 	}
-	pooler := kurecnpg.CreatePooler(app.Name, app.Namespace)
+	pooler := kurecnpg.CreatePooler(name, app.Namespace)
 	c.Spec.DeepCopyInto(&pooler.Spec)
 	if t := pooler.Spec.Template; t != nil && t.Spec.Containers == nil {
 		t.Spec.Containers = []corev1.Container{}

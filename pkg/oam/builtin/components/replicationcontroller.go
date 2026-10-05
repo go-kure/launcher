@@ -57,7 +57,7 @@ func (h *ReplicationControllerHandler) ToApplicationConfig(component *oam.Compon
 	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
 		return nil, err
 	}
-	cfg := &ReplicationControllerConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
+	cfg := &ReplicationControllerConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
@@ -68,9 +68,12 @@ func (h *ReplicationControllerHandler) ToApplicationConfig(component *oam.Compon
 // replicationcontroller components. Spec is the decoded
 // ReplicationControllerSpec exactly as authored.
 type ReplicationControllerConfig struct {
-	Name      string
-	Namespace string
-	Spec      corev1.ReplicationControllerSpec
+	Name string
+	// ObjectName names the ReplicationController (oam.Component.ObjectName);
+	// its labels keep Name. Empty for the application's name.
+	ObjectName string
+	Namespace  string
+	Spec       corev1.ReplicationControllerSpec
 }
 
 // validate refuses a spec the ReplicationController cannot be emitted from and
@@ -137,7 +140,7 @@ func (c *ReplicationControllerConfig) Generate(app *stack.Application) ([]*clien
 	if err != nil {
 		return nil, err
 	}
-	rc := kubernetes.CreateReplicationController(app.Name, app.Namespace)
+	rc := kubernetes.CreateReplicationController(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&rc.Spec)
 	rc.Spec.Template.Labels = labelled
 	obj := client.Object(rc)

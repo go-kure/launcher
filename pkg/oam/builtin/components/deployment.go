@@ -93,8 +93,9 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig converts an OAM deployment component to a DeploymentConfig.
 func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &DeploymentConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
 	}
 
 	// Null as omission, applied to this kind's whole top-level surface rather
@@ -262,15 +263,18 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 
 // DeploymentConfig implements stack.ApplicationConfig for deployment components.
 type DeploymentConfig struct {
-	Name      string
-	Namespace string
-	Image     string
-	Replicas  int32
-	Env       []corev1.EnvVar
-	EnvFrom   []corev1.EnvFromSource
-	Resources ResourceRequirements
-	Command   []string
-	Args      []string
+	Name string
+	// ObjectName names the Deployment (oam.Component.ObjectName); its labels,
+	// selector and main container keep Name. Empty for the application's name.
+	ObjectName string
+	Namespace  string
+	Image      string
+	Replicas   int32
+	Env        []corev1.EnvVar
+	EnvFrom    []corev1.EnvFromSource
+	Resources  ResourceRequirements
+	Command    []string
+	Args       []string
 	// Ports are the main container's declared ports (parseContainerPorts).
 	Ports           []corev1.ContainerPort
 	Probes          ProbeConfig
@@ -425,7 +429,7 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		return nil, err
 	}
 
-	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
+	dep := kubernetes.CreateDeployment(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	dep.Labels = deploymentComponentLabels(app.Name)
 	dep.Annotations = nil
 	// kure's constructor no longer injects spec.selector (removed default,

@@ -91,6 +91,11 @@ type Component struct {
 	// one after with OrderAfter (ordering.go). Unexported, so a document can
 	// neither author nor carry one.
 	orderAfter []string
+	// objectName is the name the engine resolved for a kind component's object
+	// (withObjectName, object_name.go), "" before that and on every other
+	// component. Unexported, so a document can neither author nor carry one: the
+	// author writes the `objectName` property.
+	objectName string
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

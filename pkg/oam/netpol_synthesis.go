@@ -42,8 +42,9 @@ type serviceBackendNamer interface {
 }
 
 // servicePortProvider is optionally implemented by a component config that exposes a Service port
-// (the webservice/service convention: Service name == component name). Used to decide whether a
-// component actually owns a routable Service.
+// (the webservice/service convention: the Service is named after the component, or by a `service`
+// component's `objectName`, which BackendServiceName reports). Used to decide whether a component
+// actually owns a routable Service.
 type servicePortProvider interface {
 	ServicePort() int32
 }
