@@ -2,7 +2,6 @@ package components
 
 import (
 	"maps"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -12,23 +11,14 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
-// builtinMarkerSources maps each Go package whose types the kinds below reach
-// to the linked module and the directory in it that holds the package's
-// source. The API types of Kubernetes publish their field comments, but not
-// whether a field is required: that is the +required and +optional markers of
-// the source, which the generated OpenAPI is built from.
-var builtinMarkerSources = map[string][2]string{
-	"k8s.io/api/discovery/v1":              {"k8s.io/api", "discovery/v1"},
-	"k8s.io/api/rbac/v1":                   {"k8s.io/api", "rbac/v1"},
-	"k8s.io/api/core/v1":                   {"k8s.io/api", "core/v1"},
-	"k8s.io/apimachinery/pkg/apis/meta/v1": {"k8s.io/apimachinery", "pkg/apis/meta/v1"},
-}
-
 // builtinMarkerKinds lists the whole-object kind components of the Kubernetes
-// API whose required lists are derived from those markers, with the type each
-// decodes into. emittedEmpty names the fields the type writes when they are
-// not authored and the API does not require: the object carries them empty,
-// and the kind's README entry says so.
+// API whose required lists are derived from the markers of the linked
+// modules' source (markerAPISource), with the type each decodes into. The API
+// types of Kubernetes publish their field comments, but not whether a field
+// is required: that is the +required and +optional markers of the source,
+// which the generated OpenAPI is built from. emittedEmpty names the fields the
+// type writes when they are not authored and the API does not require: the
+// object carries them empty, and the kind's README entry says so.
 var builtinMarkerKinds = []struct {
 	component    string
 	typ          reflect.Type
@@ -40,24 +30,6 @@ var builtinMarkerKinds = []struct {
 	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), roleBindingKind.required, []string{"roleRef.apiGroup"}},
 	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), clusterRoleKind.required, []string{"rules"}},
 	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), clusterRoleBindingKind.required, []string{"roleRef.apiGroup"}},
-}
-
-// builtinFieldMarkers reads the markers of every package in
-// builtinMarkerSources, keyed by "<package path>.<type>.<Go field name>".
-func builtinFieldMarkers(t *testing.T) map[string]fieldMarkers {
-	t.Helper()
-	out := map[string]fieldMarkers{}
-	dirs := map[string]string{}
-	for _, pkg := range slices.Sorted(maps.Keys(builtinMarkerSources)) {
-		source := builtinMarkerSources[pkg]
-		if _, ok := dirs[source[0]]; !ok {
-			dirs[source[0]] = linkedModuleDir(t, source[0])
-		}
-		for field, markers := range packageFieldMarkers(t, filepath.Join(dirs[source[0]], source[1])) {
-			out[pkg+"."+field] = markers
-		}
-	}
-	return out
 }
 
 // fieldClasses is how the fields a kind's type reaches divide, by what the API
@@ -84,33 +56,22 @@ type fieldClasses struct {
 	unread []string
 }
 
-// apiRequires says the API requires a field of those markers and json options:
-// it is marked +required, or it is not marked +optional and is not omitted
-// when empty (the rule the OpenAPI generator of Kubernetes applies).
-func apiRequires(m fieldMarkers, f kindField) bool {
-	return m.required || (!m.optional && !slices.Contains(f.jsonOptions(), "omitempty"))
-}
-
 // classifyKindFields classifies every field the encoding of typ reaches, less
-// those under one of skip's top-level keys. markers returns a field's markers
-// and whether its source was read.
-func classifyKindFields(typ reflect.Type, skip []string, markers func(kindField) (fieldMarkers, bool)) fieldClasses {
+// those under one of skip's top-level keys, by what src says of it: whether
+// the API requires the field, and whether the source describes it at all.
+func classifyKindFields(typ reflect.Type, skip []string, src apiSource) fieldClasses {
 	var out fieldClasses
-	walkKindFields(typ, func(f kindField) bool {
-		m, _ := markers(f)
-		return apiRequires(m, f)
-	}, func(f kindField) {
+	walkKindFields(typ, src.required, func(f kindField) {
 		top, _, _ := strings.Cut(f.path, ".")
 		if slices.Contains(skip, top) {
 			return
 		}
 		out.fields++
-		m, read := markers(f)
-		if !read {
+		if !src.known(f) {
 			out.unread = append(out.unread, f.path+" ("+f.owner.String()+"."+f.field.Name+")")
 			return
 		}
-		required, written := apiRequires(m, f), f.writtenUnauthored()
+		required, written := src.required(f), f.writtenUnauthored()
 		switch {
 		case required && !written:
 			out.omitted = append(out.omitted, f.path)
@@ -148,30 +109,37 @@ func classifyKindFields(typ reflect.Type, skip []string, markers func(kindField)
 // dependency bump that adds, drops or moves a field of any class fails here,
 // as does a type that reaches a package whose source is not read.
 //
-// The markers are what the source declares. What the API server's validation
-// requires beyond them is in no linked module, and is not derived here.
+// The markers are what the source declares, read by markerAPISource, the
+// source the table of apiSetKinds reads the same kinds from: that table holds
+// the second set and the API's defaults, this test the first set and what is
+// emitted empty. What the API server's validation requires beyond the markers
+// is in no linked module, and is not derived here.
 func TestBuiltinMarkerKinds_RequiredMatchMarkers(t *testing.T) {
-	all := builtinFieldMarkers(t)
+	src := markerAPISource(t)
 	// Vacuity guards: the markers are read, in both forms.
-	if m := all["k8s.io/api/discovery/v1.EndpointSlice.AddressType"]; !m.required || m.optional {
-		t.Fatalf("EndpointSlice.AddressType is read as %+v, want it marked required; the source is not being read", m)
+	field := func(typ reflect.Type, name string) kindField {
+		f, ok := typ.FieldByName(name)
+		if !ok {
+			t.Fatalf("%s has no field %s", typ, name)
+		}
+		return kindField{owner: typ, field: f}
 	}
-	if m := all["k8s.io/api/discovery/v1.Endpoint.Hostname"]; m.required || !m.optional {
-		t.Fatalf("Endpoint.Hostname is read as %+v, want it marked optional; the source is not being read", m)
+	if f := field(reflect.TypeFor[discoveryv1.EndpointSlice](), "AddressType"); !src.known(f) || !src.required(f) {
+		t.Fatalf("EndpointSlice.AddressType is read as described %v and required %v, want it marked required; the source is not being read", src.known(f), src.required(f))
+	}
+	if f := field(reflect.TypeFor[discoveryv1.Endpoint](), "Hostname"); !src.known(f) || src.required(f) {
+		t.Fatalf("Endpoint.Hostname is read as described %v and required %v, want it marked optional; the source is not being read", src.known(f), src.required(f))
 	}
 	for _, kind := range builtinMarkerKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			classes := classifyKindFields(kind.typ, objectIdentityKeys, func(f kindField) (fieldMarkers, bool) {
-				m, ok := all[f.owner.PkgPath()+"."+f.owner.Name()+"."+f.field.Name]
-				return m, ok
-			})
+			classes := classifyKindFields(kind.typ, objectIdentityKeys, src)
 			if classes.fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
 			t.Logf("classified %d fields; required and written unauthored: %v; written unauthored and not required: %v",
 				classes.fields, classes.listed, classes.emittedEmpty)
 			for _, field := range classes.unread {
-				t.Errorf("%s has no field in the source read; add its package to builtinMarkerSources", field)
+				t.Errorf("%s has no field in the source read; its module is not in markerModules", field)
 			}
 			if got := slices.Sorted(maps.Keys(kind.required)); !slices.Equal(got, classes.listed) {
 				t.Errorf("required list = %v\nthe source marks %v", got, classes.listed)
@@ -219,24 +187,27 @@ func TestClassifyKindFields(t *testing.T) {
 		Foreign  reflect.Method  `json:"foreign,omitempty"`
 		Unread   string          `json:"unread"`
 	}
-	markers := map[string]fieldMarkers{
-		"object.Kind":     {required: true},
-		"object.Listed":   {},
-		"object.Marked":   {required: true},
-		"object.Omitted":  {required: true},
-		"object.Optional": {optional: true},
-		"object.Empty":    {optional: true},
-		"object.Pointer":  {optional: true},
-		"object.Items":    {optional: true},
-		"object.Parent":   {optional: true},
-		"object.Needed":   {required: true},
-		"object.ByKey":    {optional: true},
-		"object.Foreign":  {optional: true},
-		"leaf.Name":       {},
+	// What a source says of each field: whether the API requires it. A field
+	// without an entry is one the source does not describe.
+	required := map[string]bool{
+		"object.Kind":     true,
+		"object.Listed":   true,
+		"object.Marked":   true,
+		"object.Omitted":  true,
+		"object.Optional": false,
+		"object.Empty":    false,
+		"object.Pointer":  false,
+		"object.Items":    false,
+		"object.Parent":   false,
+		"object.Needed":   true,
+		"object.ByKey":    false,
+		"object.Foreign":  false,
+		"leaf.Name":       true,
 	}
-	got := classifyKindFields(reflect.TypeFor[object](), []string{"kind", "foreign"}, func(f kindField) (fieldMarkers, bool) {
-		m, ok := markers[f.owner.Name()+"."+f.field.Name]
-		return m, ok
+	name := func(f kindField) string { return f.owner.Name() + "." + f.field.Name }
+	got := classifyKindFields(reflect.TypeFor[object](), []string{"kind", "foreign"}, apiSource{
+		required: func(f kindField) bool { return required[name(f)] },
+		known:    func(f kindField) bool { _, ok := required[name(f)]; return ok },
 	})
 	want := fieldClasses{
 		// Every field but kind and those of foreign, which skip leaves out.
