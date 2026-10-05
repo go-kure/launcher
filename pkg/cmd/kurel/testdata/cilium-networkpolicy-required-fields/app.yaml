@@ -1,0 +1,104 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8443
+      traits:
+        # Every object below that holds a field the CiliumNetworkPolicy CRD
+        # requires authors it: a match expression its key and operator, an
+        # authentication its mode, a TLS context its secret and that Secret's
+        # name, a listener its name, priority and Envoy configuration, a header
+        # match its name, a Service selector its selector, an ICMP field its type.
+        - type: cilium-networkpolicy
+          properties:
+            name: api-edge
+            endpointSelector:
+              matchExpressions:
+                - key: tier
+                  operator: In
+                  values: [edge]
+            ingress:
+              - fromEndpoints:
+                  - matchExpressions:
+                      - key: role
+                        operator: Exists
+                fromNodes:
+                  - matchExpressions:
+                      - key: node-role
+                        operator: Exists
+                fromCIDRSet:
+                  - cidrGroupSelector:
+                      matchExpressions:
+                        - key: zone
+                          operator: NotIn
+                          values: [public]
+                authentication:
+                  mode: required
+                toPorts:
+                  - ports:
+                      - port: "8443"
+                        protocol: TCP
+                    terminatingTLS:
+                      secret:
+                        name: api-edge-tls
+                    rules:
+                      http:
+                        - method: GET
+                          headerMatches:
+                            - name: X-Token
+                              secret:
+                                name: api-edge-token
+                  - ports:
+                      - port: "9443"
+                        protocol: TCP
+                    listener:
+                      name: edge
+                      priority: 1
+                      envoyConfig:
+                        kind: CiliumEnvoyConfig
+                        name: api-edge-listener
+              - icmps:
+                  - fields:
+                      - type: 8
+            egress:
+              - toEndpoints:
+                  - matchExpressions:
+                      - key: role
+                        operator: DoesNotExist
+                toNodes:
+                  - matchExpressions:
+                      - key: node-role
+                        operator: Exists
+                toCIDRSet:
+                  - cidrGroupSelector:
+                      matchExpressions:
+                        - key: zone
+                          operator: In
+                          values: [backends]
+                authentication:
+                  mode: disabled
+                toPorts:
+                  - ports:
+                      - port: "443"
+                        protocol: TCP
+                    originatingTLS:
+                      secret:
+                        name: api-upstream-ca
+              - toServices:
+                  - k8sServiceSelector:
+                      selector:
+                        matchExpressions:
+                          - key: role
+                            operator: In
+                            values: [metrics]
+              - icmps:
+                  - fields:
+                      - family: IPv6
+                        type: EchoRequest

@@ -11,6 +11,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
 
 // These tests hold the cilium-clusterwidenetworkpolicy kind to the CRD the
@@ -58,7 +59,7 @@ func TestCiliumClusterwideNetworkPolicy_EmitsTheServedVersion(t *testing.T) {
 
 // TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD derives, from the CRD and
 // the Cilium rule type, the fields of a rule that the API requires and the
-// type would write unauthored, and holds ciliumRuleRequired to them, under
+// type would write unauthored, and holds requiredfields.CiliumRule to them, under
 // `spec` and under an entry of `specs`.
 //
 // The list reads what was authored, so a required field under a struct the
@@ -74,9 +75,40 @@ func TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD(t *testing.T) {
 	ciliumRuleRequiredMatchesCRD(t, ciliumClusterwidePolicyCRD, ciliumClusterwideNetworkPolicyRequired)
 }
 
-// ciliumRuleRequiredMatchesCRD is that derivation for one kind: the CRD in
+// ciliumRuleRequiredMatchesCRD holds one kind to that derivation: the CRD in
 // file, and the required list the kind refuses by.
 func ciliumRuleRequiredMatchesCRD(t *testing.T, file string, kindRequired map[string]string) {
+	t.Helper()
+	for at, schema := range ciliumPolicyRuleSchemas(t, file) {
+		t.Run(at, func(t *testing.T) {
+			var listed []string
+			for _, path := range ciliumRuleRequiredFromCRD(t, schema) {
+				listed = append(listed, at+"."+path)
+			}
+			required := requiredfields.CiliumRule(at)
+			if got := slices.Sorted(maps.Keys(required)); !slices.Equal(got, listed) {
+				t.Errorf("requiredfields.CiliumRule(%q) = %v\nthe CRD and the type give %v", at, got, listed)
+			}
+			for path, says := range required {
+				if strings.TrimSpace(says) == "" {
+					t.Errorf("required field %s says nothing of itself", path)
+				}
+				if _, ok := kindRequired[path]; !ok {
+					t.Errorf("the kind's required list lacks %s", path)
+				}
+			}
+		})
+	}
+	if got, want := len(kindRequired), len(requiredfields.CiliumRule("spec"))+len(requiredfields.CiliumRule("specs[]")); got != want {
+		t.Errorf("the kind's required list holds %d fields, want the %d of a rule at its two positions", got, want)
+	}
+}
+
+// ciliumRuleRequiredFromCRD is the derivation: from the schema of one rule of
+// a CRD and from the Cilium rule type, the fields a required list must name,
+// by their paths from the rule, sorted. It fails the test where the CRD and
+// the type disagree in a way a list cannot express.
+func ciliumRuleRequiredFromCRD(t *testing.T, schema apiextensionsv1.JSONSchemaProps) []string {
 	t.Helper()
 	fields := ciliumBGPTypeFields(reflect.TypeFor[ciliumapi.Rule]())
 	// Optional, written unauthored, and the written value refused by the CRD.
@@ -89,89 +121,71 @@ func ciliumRuleRequiredMatchesCRD(t *testing.T, file string, kindRequired map[st
 	// Optional, written unauthored, and admitted: a label without a source
 	// carries `source: ""`, which Cilium reads as any source.
 	wantAdmittedZero := []string{"labels[].source"}
-	for at, schema := range ciliumPolicyRuleSchemas(t, file) {
-		t.Run(at, func(t *testing.T) {
-			crdRequired := ciliumPlainRequired(schema)
-			if len(crdRequired) == 0 || len(fields) == 0 {
-				t.Fatalf("the CRD requires %d fields and the type has %d; a walk is broken", len(crdRequired), len(fields))
-			}
-			schemas := map[string]apiextensionsv1.JSONSchemaProps{}
-			walkCiliumBGPSchema(schema, "", func(path string, s apiextensionsv1.JSONSchemaProps) { schemas[path] = s })
-
-			var refusedZero, admittedZero []string
-			for path, f := range fields {
-				if !f.writtenUnauthored() || slices.Contains(crdRequired, path) {
-					continue
-				}
-				s, ok := schemas[path]
-				if !ok {
-					t.Errorf("%s is written unauthored and the CRD has no schema for it", path)
-					continue
-				}
-				refused, known := ciliumZeroRefused(f.field.Type.Kind(), s)
-				switch {
-				case !known:
-					t.Errorf("%s (%s) is written unauthored; this test cannot tell whether the CRD admits its empty value", path, f.field.Type)
-				case refused:
-					refusedZero = append(refusedZero, path)
-				default:
-					admittedZero = append(admittedZero, path)
-				}
-			}
-			slices.Sort(refusedZero)
-			slices.Sort(admittedZero)
-			if !slices.Equal(refusedZero, wantRefusedZero) {
-				t.Errorf("optional fields written unauthored with a value the CRD refuses: %v, want %v", refusedZero, wantRefusedZero)
-			}
-			if !slices.Equal(admittedZero, wantAdmittedZero) {
-				t.Errorf("optional fields written unauthored with a value the CRD admits: %v, want %v; say what the object then carries", admittedZero, wantAdmittedZero)
-			}
-
-			var listed []string
-			for _, path := range slices.Concat(crdRequired, refusedZero) {
-				f, ok := fields[path]
-				switch {
-				case !ok:
-					t.Errorf("the CRD requires %s, which is no field of the rule type", path)
-				case strings.Contains(path, "{}"):
-					t.Errorf("%s is required under a map value, which a required list cannot name", path)
-				case !f.writtenUnauthored():
-					t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; the kind does not list it, and its documentation must say so", path)
-				default:
-					listed = append(listed, at+"."+path)
-				}
-				segments := strings.Split(path, ".")
-				for i := 1; i < len(segments); i++ {
-					parent := strings.TrimSuffix(strings.Join(segments[:i], "."), "[]")
-					above, ok := fields[parent]
-					if !ok {
-						t.Errorf("%s: its parent %s is no field of the rule type", path, parent)
-						continue
-					}
-					if above.field.Type.Kind() == reflect.Struct && above.writtenUnauthored() && !slices.Contains(crdRequired, parent) {
-						t.Errorf("%s is required under %s, a struct the type writes unauthored that the CRD does not require", path, parent)
-					}
-				}
-			}
-			slices.Sort(listed)
-			t.Logf("the CRD requires %d fields in a rule, all written unauthored; %d more are written with a value it refuses", len(crdRequired), len(refusedZero))
-			required := ciliumRuleRequired(at)
-			if got := slices.Sorted(maps.Keys(required)); !slices.Equal(got, listed) {
-				t.Errorf("ciliumRuleRequired(%q) = %v\nthe CRD and the type give %v", at, got, listed)
-			}
-			for path, says := range required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-				if _, ok := kindRequired[path]; !ok {
-					t.Errorf("the kind's required list lacks %s", path)
-				}
-			}
-		})
+	crdRequired := ciliumPlainRequired(schema)
+	if len(crdRequired) == 0 || len(fields) == 0 {
+		t.Fatalf("the CRD requires %d fields and the type has %d; a walk is broken", len(crdRequired), len(fields))
 	}
-	if got, want := len(kindRequired), len(ciliumRuleRequired("spec"))+len(ciliumRuleRequired("specs[]")); got != want {
-		t.Errorf("the kind's required list holds %d fields, want the %d of a rule at its two positions", got, want)
+	schemas := map[string]apiextensionsv1.JSONSchemaProps{}
+	walkCiliumBGPSchema(schema, "", func(path string, s apiextensionsv1.JSONSchemaProps) { schemas[path] = s })
+
+	var refusedZero, admittedZero []string
+	for path, f := range fields {
+		if !f.writtenUnauthored() || slices.Contains(crdRequired, path) {
+			continue
+		}
+		s, ok := schemas[path]
+		if !ok {
+			t.Errorf("%s is written unauthored and the CRD has no schema for it", path)
+			continue
+		}
+		refused, known := ciliumZeroRefused(f.field.Type.Kind(), s)
+		switch {
+		case !known:
+			t.Errorf("%s (%s) is written unauthored; this test cannot tell whether the CRD admits its empty value", path, f.field.Type)
+		case refused:
+			refusedZero = append(refusedZero, path)
+		default:
+			admittedZero = append(admittedZero, path)
+		}
 	}
+	slices.Sort(refusedZero)
+	slices.Sort(admittedZero)
+	if !slices.Equal(refusedZero, wantRefusedZero) {
+		t.Errorf("optional fields written unauthored with a value the CRD refuses: %v, want %v", refusedZero, wantRefusedZero)
+	}
+	if !slices.Equal(admittedZero, wantAdmittedZero) {
+		t.Errorf("optional fields written unauthored with a value the CRD admits: %v, want %v; say what the object then carries", admittedZero, wantAdmittedZero)
+	}
+
+	var listed []string
+	for _, path := range slices.Concat(crdRequired, refusedZero) {
+		f, ok := fields[path]
+		switch {
+		case !ok:
+			t.Errorf("the CRD requires %s, which is no field of the rule type", path)
+		case strings.Contains(path, "{}"):
+			t.Errorf("%s is required under a map value, which a required list cannot name", path)
+		case !f.writtenUnauthored():
+			t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; the kind does not list it, and its documentation must say so", path)
+		default:
+			listed = append(listed, path)
+		}
+		segments := strings.Split(path, ".")
+		for i := 1; i < len(segments); i++ {
+			parent := strings.TrimSuffix(strings.Join(segments[:i], "."), "[]")
+			above, ok := fields[parent]
+			if !ok {
+				t.Errorf("%s: its parent %s is no field of the rule type", path, parent)
+				continue
+			}
+			if above.field.Type.Kind() == reflect.Struct && above.writtenUnauthored() && !slices.Contains(crdRequired, parent) {
+				t.Errorf("%s is required under %s, a struct the type writes unauthored that the CRD does not require", path, parent)
+			}
+		}
+	}
+	slices.Sort(listed)
+	t.Logf("the CRD requires %d fields in a rule, all written unauthored; %d more are written with a value it refuses", len(crdRequired), len(refusedZero))
+	return listed
 }
 
 // ciliumZeroRefused says whether the schema of a field refuses the value the Go

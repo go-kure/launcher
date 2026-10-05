@@ -11,6 +11,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
 
 // CiliumClusterwideNetworkPolicyHandler handles OAM
@@ -56,85 +57,13 @@ func (h *CiliumClusterwideNetworkPolicyHandler) PropertySchema() map[string]oam.
 	}
 }
 
-// ciliumRuleRequired is the required list of one Cilium rule under the path
-// at ("spec", "specs[]"): every field the API requires inside a rule that the
-// Go type writes whether or not it was authored, so that the object would not
-// show the omission. Each must be authored wherever its parent is.
-// TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD holds the list to the CRD
-// of the linked module and to the Cilium rule type.
-//
-// Two more are optional to the API and listed all the same, a listener's
-// `priority` and the `kind` of its Envoy configuration: the type writes each
-// when it is not authored, as 0 and as the empty string, and the API refuses
-// both values (a priority is 1 to 100, a kind one of two names). A listener
-// that leaves one out cannot be emitted, so it is refused here.
-//
-// Two of the required ones never reach this list: Cilium's own decoding
-// refuses an `icmps` field without its `type` and a label without its `key`
-// before the list is read. They are listed all the same, so that the list is
-// the CRD's and stays so if that decoding changes.
-func ciliumRuleRequired(at string) map[string]string {
-	const (
-		icmpType = "the ICMP type, a number or a name Cilium knows"
-		secret   = "the Secret the value is read from"
-		name     = "the Secret's name"
-	)
-	lists := []map[string]string{
-		ciliumSelectorRequired(at + ".endpointSelector"),
-		ciliumSelectorRequired(at + ".nodeSelector"),
-		{at + ".labels[].key": "the label's key"},
-	}
-	for _, list := range []string{"ingress", "ingressDeny"} {
-		entry := at + "." + list + "[]"
-		lists = append(lists,
-			ciliumSelectorRequired(entry+".fromEndpoints[]"),
-			ciliumSelectorRequired(entry+".fromNodes[]"),
-			ciliumSelectorRequired(entry+".fromCIDRSet[].cidrGroupSelector"),
-			map[string]string{entry + ".icmps[].fields[].type": icmpType},
-		)
-	}
-	for _, list := range []string{"egress", "egressDeny"} {
-		entry := at + "." + list + "[]"
-		services := entry + ".toServices[].k8sServiceSelector.selector"
-		lists = append(lists,
-			ciliumSelectorRequired(entry+".toEndpoints[]"),
-			ciliumSelectorRequired(entry+".toNodes[]"),
-			ciliumSelectorRequired(entry+".toCIDRSet[].cidrGroupSelector"),
-			ciliumSelectorRequired(services),
-			map[string]string{
-				entry + ".icmps[].fields[].type": icmpType,
-				services:                         "the label query over the Services; an empty one selects every Service",
-			},
-		)
-	}
-	// What only an allow list holds: a deny entry has no authentication, and
-	// its ports carry no listener, no TLS context and no layer 7 rule.
-	for _, list := range []string{"ingress", "egress"} {
-		entry := at + "." + list + "[]"
-		ports := entry + ".toPorts[]"
-		headers := ports + ".rules.http[].headerMatches[]"
-		lists = append(lists, map[string]string{
-			entry + ".authentication.mode":        "the authentication mode: disabled, required or test-always-fail",
-			ports + ".listener.envoyConfig":       "the CiliumEnvoyConfig or CiliumClusterwideEnvoyConfig that defines the listener",
-			ports + ".listener.envoyConfig.kind":  "CiliumEnvoyConfig or CiliumClusterwideEnvoyConfig; the API does not require it, but an unauthored one is written empty, which the API refuses",
-			ports + ".listener.envoyConfig.name":  "the name of that Envoy configuration",
-			ports + ".listener.name":              "the listener's name in that Envoy configuration",
-			ports + ".listener.priority":          "1 to 100; the API does not require it, but an unauthored one is written as 0, which the API refuses",
-			ports + ".originatingTLS.secret":      secret,
-			ports + ".originatingTLS.secret.name": name,
-			ports + ".terminatingTLS.secret":      secret,
-			ports + ".terminatingTLS.secret.name": name,
-			headers + ".name":                     "the header's name",
-			headers + ".secret.name":              name,
-		})
-	}
-	return requiredFields(lists...)
-}
-
 // ciliumClusterwideNetworkPolicyRequired is the required list of a
-// cilium-clusterwidenetworkpolicy component: that of a rule, under `spec` and
-// under every entry of `specs`.
-var ciliumClusterwideNetworkPolicyRequired = requiredFields(ciliumRuleRequired("spec"), ciliumRuleRequired("specs[]"))
+// cilium-clusterwidenetworkpolicy component: that of a Cilium rule
+// (requiredfields.CiliumRule, which the cilium-networkpolicy kind and trait
+// read too), under `spec` and under every entry of `specs`.
+// TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD holds it to the CRD of
+// the linked module and to the Cilium rule type.
+var ciliumClusterwideNetworkPolicyRequired = requiredFields(requiredfields.CiliumRule("spec"), requiredfields.CiliumRule("specs[]"))
 
 // ToApplicationConfig decodes an OAM cilium-clusterwidenetworkpolicy component
 // into a CiliumClusterwideNetworkPolicyConfig, under the package's null
