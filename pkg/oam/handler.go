@@ -200,3 +200,17 @@ type LayoutAugmentationCoverage interface {
 type EndpointProvider interface {
 	Endpoints(component *Component) ([]netpol.Endpoint, error)
 }
+
+// NamedEndpointProvider is an optional interface beside EndpointProvider, for a
+// provider one of whose endpoints selects pods by a name launcher generates (the
+// pooler of a postgresql component). EndpointsNamed resolves that name through
+// lctx.ResolveName with the base, suffix and NameSpec the provider resolves it with
+// when it generates the object, so the selector carries the name the object gets:
+// the author's, else the consumer hook's, else the default. lctx carries the
+// component and a Namer and no Document.
+//
+// Transformer.ComponentEndpoints and ComponentEndpointsNamed both call it where it
+// is implemented, the first with no hook; Endpoints is then not called.
+type NamedEndpointProvider interface {
+	EndpointsNamed(component *Component, lctx LoweringContext) ([]netpol.Endpoint, error)
+}

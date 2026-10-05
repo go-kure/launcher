@@ -194,7 +194,7 @@ consumer connects to. `cnpg-cluster` declares the primary endpoint
 declares, so a synthesized ingress allow does not change when a component moves
 from one to the other. `cnpg-pooler` declares its PgBouncer pods
 (`cnpg.io/poolerName: <component-name>` on port `5432`); `postgresql` names its
-`Pooler` `<component-name>-pooler`, so a `cnpg-pooler` of that name declares the
+`Pooler` `<component-name>-pooler` by default, so a `cnpg-pooler` of that name declares the
 identical endpoint, which a test pins byte for byte. `cnpg-database` and
 `cnpg-objectstore` run no pods and declare no endpoint.
 

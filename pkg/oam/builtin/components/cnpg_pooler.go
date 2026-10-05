@@ -47,7 +47,8 @@ func (h *CnpgPoolerHandler) CanHandle(componentType string) bool {
 // Endpoints implements oam.EndpointProvider: the Pooler's PgBouncer pods,
 // labelled cnpg.io/poolerName=<pooler name> (the OAM component name), on the
 // PostgreSQL port. It is the pooler endpoint postgresql publishes, which names
-// its Pooler <component name>-pooler: a cnpg-pooler component of that name
+// its Pooler <component name>-pooler unless the author or the consumer's naming
+// hook names it otherwise: a cnpg-pooler component of that name
 // declares an identical selector, so a synthesized ingress allow does not
 // change when a pooler moves from one to the other.
 func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {

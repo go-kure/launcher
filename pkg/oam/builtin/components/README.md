@@ -3583,18 +3583,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   generates a `helmchart`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
-  `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  `backup.*`, `monitoring.enabled`, `pooler.enabled`, `poolerName`, `managedRoles`,
+  `databases` (each with an optional `objectName`).
   **A component lowering rule** (`PostgresqlRule`, `postgresql_lowering.go`,
   go-kure/launcher#281), not a dispatchable handler: it reads the properties
-  as before (`Parse`; the published schema is pinned byte for byte against
-  the former handler's, `testdata/postgresql-property-schema.json`) and emits
+  as before (`Parse`; the published schema is pinned byte for byte,
+  `testdata/postgresql-property-schema.json`: the former handler's, with
+  `poolerName` added) and emits
   the CNPG kind components that build the same objects — a `cnpg-cluster`
   under the component's name, a `cnpg-objectstore` under the same name (one
   same-name sibling group) when `objectStore` is set, a `cnpg-pooler`
   `<name>-pooler` when `pooler.enabled`, and a `cnpg-database` `<name>-<db>`
-  per `databases` entry (a database named `pooler` beside an enabled pooler
-  generates the Pooler's name and joins its same-name sibling group, as two
-  objects of different kinds). `replicas` and `storageSize` are written to the
+  per `databases` entry (a Database given the Pooler's name, by default the
+  one named `pooler` beside an enabled pooler, joins its same-name sibling
+  group, as two objects of different kinds). `replicas` and `storageSize` are written to the
   Cluster only when authored, so the policy applies to them exactly as
   before. The two values postgresql derived from the policy are set after
   it by a post-policy step the rule attaches to the Cluster
@@ -3632,8 +3634,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `dependency` policy the Pooler and the Databases are deployed from
   one bundle they share, after the Cluster's, unless the document orders
   or places a generated member on its own (was one bundle for all of
-  postgresql's objects). A generated `<name>-pooler` or
-  `<name>-<db>` that is already the name of another component in the
+  postgresql's objects). A Pooler or Database name, generated or
+  chosen, that is already the name of another component in the
   document is refused, naming both. A database name repeated in
   `databases` is refused, naming both entries: each entry is one Database
   object, so the Flux build already failed on it, and the plain manifest
@@ -3652,8 +3654,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   is refused when the rule lowers it and when endpoints are collected
   (`postgresql name "db.main": must be a DNS-1035 label of at most 50
   characters …`). The cap also keeps both endpoint selector values, the
-  name and the pooler's `<name>-pooler`, within the 63-character label-value
-  limit. **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
+  name and the pooler's default `<name>-pooler`, within the 63-character label-value
+  limit (a `poolerName` or a hook-given name is held to it as a DNS-1035
+  label). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
   such a name used to build and was then refused by CloudNativePG at apply,
   or, over 63 characters (56 with the pooler), gave a network-policy
   selector the API server refuses; it is now refused at build
@@ -3780,13 +3783,38 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `PostgresqlConfig` built directly rather than parsed. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
+  **The Pooler's and the Databases' names** (go-kure/launcher#787) are
+  resolved in the order of every name role (see "Name roles and the `Naming`
+  hook" in `pkg/oam/README.md`): the author's property, else the consumer's
+  `Naming` hook, else the default. `poolerName` names the Pooler (role
+  `pooler`, default `<name>-pooler`) and must be a DNS-1035 label, since
+  CloudNativePG names the pooler's Service after it; it is refused when
+  `pooler.enabled` is not true. `databases[].objectName` names that entry's
+  Database object (role `database`, default `<name>-<db>`) and must be a
+  DNS-1123 subdomain; the entry's `name` stays the database created in
+  PostgreSQL. A database whose `name` cannot be part of an object name
+  (`app_data`) has no default and needs an `objectName`: without one it is
+  refused, and the hook is not asked for it. A name is used as written or
+  refused, never shortened. Each is
+  also the name of the component the rule emits, so one that is already a
+  component of the document, the postgresql component's own name included, is
+  refused, naming both; two Databases given one name are refused, naming
+  both entries; a Database given the Pooler's name is its sibling, as above.
+  The hook is asked only inside `Transform`: a rule driven directly keeps
+  the author's names and the defaults. With neither an authored name nor a
+  hook the output is what it was.
   Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
   without hardcoding the operator selector. When `pooler.enabled` is set it declares a **second**
-  endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <component-name>-pooler` on port
+  endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <pooler name>` on port
   `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
-  matched by the direct-cluster selector — also gets its connection synthesized.
+  matched by the direct-cluster selector — also gets its connection synthesized. The pooler
+  name there is the authored `poolerName`, else `<component-name>-pooler`:
+  `Transformer.ComponentEndpoints` asks no naming hook. The rule also implements
+  `oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed` resolves the
+  name with the consumer's hook, asked the request the transform asks, so a consumer that
+  names the Pooler through the hook gets a selector for the name the Pooler has.
 - **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
   `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
   component name becomes the Cluster's name and its `cnpg.io/cluster`
@@ -3978,7 +4006,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   present, and the operator adds its `pgbouncer` container either way.
   `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
   <component-name>` on port `5432`), byte-identical to `postgresql`'s pooler
-  endpoint for a pooler named `<cluster>-pooler`.
+  endpoint for a pooler of that name (`<cluster>-pooler` by default).
   `cnpg-database` also refuses the names the CRD reserves (`postgres`,
   `template0`, `template1`). The `ensure` of each schema, extension, fdw and
   server has no `omitempty` but a CRD default of `present`, so `Generate` writes

@@ -38,6 +38,24 @@ const (
 	NameRoleRBAC NameRole = "rbac"
 	// NameRoleNetworkPolicy is the networkpolicy trait's NetworkPolicy.
 	NameRoleNetworkPolicy NameRole = "networkpolicy"
+	// NameRolePooler is the CloudNativePG Pooler the postgresql component
+	// generates. Default: "<component>-pooler". CloudNativePG names the pooler's
+	// Service after it, so a name that is not the default must be a DNS-1035
+	// label.
+	NameRolePooler NameRole = "pooler"
+	// NameRoleDatabase is one CloudNativePG Database object the postgresql
+	// component generates. Default: "<component>-<database name>".
+	NameRoleDatabase NameRole = "database"
+)
+
+// nameSyntax is the rule a name that is not the default is held to.
+type nameSyntax int
+
+const (
+	// nameSyntaxSubdomain is a DNS-1123 subdomain of at most 253 characters.
+	nameSyntaxSubdomain nameSyntax = iota
+	// nameSyntaxLabel1035 is a DNS-1035 label of at most 63 characters.
+	nameSyntaxLabel1035
 )
 
 // nameClass is how a role's names are held apart.
@@ -58,17 +76,20 @@ const (
 
 // nameRoles is the closed set, in the order NameRoles returns it.
 var nameRoles = []struct {
-	role  NameRole
-	class nameClass
+	role   NameRole
+	class  nameClass
+	syntax nameSyntax
 }{
-	{NameRoleBundle, nameClassBundle},
-	{NameRoleGroup, nameClassBundle},
-	{NameRoleSubApplication, nameClassSubApplication},
-	{NameRoleNetpolSynth, nameClassObject},
-	{NameRoleHPA, nameClassObject},
-	{NameRolePDB, nameClassObject},
-	{NameRoleRBAC, nameClassObject},
-	{NameRoleNetworkPolicy, nameClassObject},
+	{NameRoleBundle, nameClassBundle, nameSyntaxSubdomain},
+	{NameRoleGroup, nameClassBundle, nameSyntaxSubdomain},
+	{NameRoleSubApplication, nameClassSubApplication, nameSyntaxSubdomain},
+	{NameRoleNetpolSynth, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleHPA, nameClassObject, nameSyntaxSubdomain},
+	{NameRolePDB, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleRBAC, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleNetworkPolicy, nameClassObject, nameSyntaxSubdomain},
+	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
+	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
@@ -81,21 +102,25 @@ func NameRoles() []NameRole {
 	return out
 }
 
-func classOfNameRole(role NameRole) (nameClass, bool) {
+func classOfNameRole(role NameRole) (nameClass, nameSyntax, bool) {
 	for _, r := range nameRoles {
 		if r.role == role {
-			return r.class, true
+			return r.class, r.syntax, true
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 // NameRequest is what a TransformContext.Naming hook is asked: one name
 // launcher is about to use, and the name it uses when the hook declines.
 type NameRequest struct {
-	// Application is the name of the document being transformed: the name the
-	// defaults are built from, which is the lowered one where a document
-	// lowering rule renamed the document.
+	// Application is the name of the document being transformed, as it stands
+	// when the name is made. For a name made after lowering has settled, and for
+	// one a component, trait or policy lowering rule makes, that is the lowered
+	// name where a document lowering rule renamed the document: such a rule runs
+	// only on a document no document rule will change again. For a name a
+	// document lowering rule itself makes it is the name of the document that
+	// rule was given, which the rule, or a later one, may still change.
 	Application string
 	// Component is the component the name belongs to. It is empty for a name the
 	// document as a whole owns: the bundle, a group, and the NetworkPolicy
@@ -261,26 +286,32 @@ func (n *NameAllocator) claimName(key nameClaimKey, claim resolvedNameClaim) err
 		if prior.owner == claim.owner {
 			return nil
 		}
-		// The two are told apart in the fewest words that do.
-		var first, second string
-		for detail := describeSlot; detail <= describeOutput; detail++ {
-			first, second = prior.owner.describe(prior.source, prior.property, detail), claim.owner.describe(claim.source, claim.property, detail)
-			if first != second {
-				break
-			}
-		}
-		if first == second {
-			// One trait that resolved one name for two of its objects.
-			return errors.Errorf("name collision: %s is named twice by %s; give one of them another name",
-				key, claim.owner.describe(claim.source, claim.property, describeSlot))
-		}
-		return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
+		return nameCollision(key, prior, claim)
 	}
 	if n.resolved == nil {
 		n.resolved = make(map[nameClaimKey]resolvedNameClaim)
 	}
 	n.resolved[key] = claim
 	return nil
+}
+
+// nameCollision is the error for two owners, prior and claim, that resolved the
+// name key identifies.
+func nameCollision(key nameClaimKey, prior, claim resolvedNameClaim) error {
+	// The two are told apart in the fewest words that do.
+	var first, second string
+	for detail := describeSlot; detail <= describeOutput; detail++ {
+		first, second = prior.owner.describe(prior.source, prior.property, detail), claim.owner.describe(claim.source, claim.property, detail)
+		if first != second {
+			break
+		}
+	}
+	if first == second {
+		// One trait that resolved one name for two of its objects.
+		return errors.Errorf("name collision: %s is named twice by %s; give one of them another name",
+			key, claim.owner.describe(claim.source, claim.property, describeSlot))
+	}
+	return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
 }
 
 // nameResolver resolves every name of one transform: the author's own, else the
@@ -399,7 +430,7 @@ func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {
 
 // resolveFrom is resolve, also returning where the name came from.
 func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, nameSource, error) {
-	class, known := classOfNameRole(spec.Role)
+	class, syntax, known := classOfNameRole(spec.Role)
 	if !known {
 		return "", nameFromDefault, errors.Errorf("naming: %q is not a name role (the roles: %s)", spec.Role, joinNameRoles())
 	}
@@ -416,7 +447,7 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 	name, source := spec.Default, nameFromDefault
 	switch {
 	case spec.Property != "":
-		if problem := overrideNameProblem(spec.Authored); problem != "" {
+		if problem := overrideNameProblem(spec.Authored, syntax); problem != "" {
 			return "", nameFromDefault, errors.Errorf("%s %q cannot be the name for role %q: %s; write a valid name, or leave the property out for the default %q",
 				spec.Property, spec.Authored, spec.Role, problem, spec.Default)
 		}
@@ -430,7 +461,7 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 			Default:     spec.Default,
 		})
 		if ok {
-			if problem := overrideNameProblem(answer); problem != "" {
+			if problem := overrideNameProblem(answer, syntax); problem != "" {
 				return "", nameFromDefault, errors.Errorf("the Naming hook returned %q for role %q in place of %q: %s; return a valid name, or false to keep the default",
 					answer, spec.Role, spec.Default, problem)
 			}
@@ -452,13 +483,20 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 }
 
 // overrideNameProblem returns why name cannot be an authored or hook-given
-// name, or "". Every role takes one rule, the DNS-1123 subdomain, at most 253
+// name under syntax, or "". Most roles take the DNS-1123 subdomain, at most 253
 // characters: an object's own rule for the kinds launcher names, and launcher's
 // rule for a bundle, a group and a sub-application, whose defaults are built
-// from an application or component name it already holds to it.
-func overrideNameProblem(name string) string {
+// from an application or component name it already holds to it. A role whose
+// object lends its name to a Service (the pooler) takes the DNS-1035 label.
+func overrideNameProblem(name string, syntax nameSyntax) string {
 	if name == "" {
 		return "it is empty"
+	}
+	if syntax == nameSyntaxLabel1035 {
+		if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
+			return "not a valid DNS-1035 label: " + strings.Join(errs, "; ")
+		}
+		return ""
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return "not a valid DNS-1123 subdomain: " + strings.Join(errs, "; ")

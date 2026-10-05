@@ -5,9 +5,11 @@ import (
 	"fmt"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -87,16 +89,51 @@ func validatePostgresqlClusterName(name string) error {
 // Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoints are
 // the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>, which equals the
 // OAM component name) on the PostgreSQL port and, when the component declares a pooler, the
-// pooler (PgBouncer) pods (labelled cnpg.io/poolerName=<cluster name>-pooler) on the same port.
+// pooler (PgBouncer) pods (labelled cnpg.io/poolerName=<pooler name>) on the same port.
 // A downstream platform uses these to synthesize the target-side ingress allow(s) without
 // hardcoding the operator selectors; a consumer that dials the pooler needs the second endpoint
 // because pooler pods carry a different label set and are not matched by the direct-cluster
 // selector.
 //
 // The endpoints are the authored component's: the pooler endpoint names the
-// Pooler the rule emits (`<name>-pooler`), which carries its own endpoint as a
-// cnpg-pooler as well.
-func (PostgresqlRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+// Pooler the rule emits (`poolerName`, else `<name>-pooler`), which carries its
+// own endpoint as a cnpg-pooler as well. No consumer naming hook is consulted
+// here; EndpointsNamed is this with one.
+func (r PostgresqlRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	return r.EndpointsNamed(component, oam.LoweringContext{Component: component, Namer: oam.NewNameAllocator()})
+}
+
+// cnpgPoolerKind and cnpgDatabaseKind are the kinds the Pooler and Database
+// names are resolved and claimed for.
+var (
+	cnpgPoolerKind   = schema.GroupKind{Group: cnpgv1.SchemeGroupVersion.Group, Kind: cnpgv1.PoolerKind}
+	cnpgDatabaseKind = schema.GroupKind{Group: cnpgv1.SchemeGroupVersion.Group, Kind: cnpgv1.DatabaseKind}
+)
+
+// postgresqlPoolerName resolves the name of the Pooler the rule emits for
+// component (role oam.NameRolePooler): the authored `poolerName`, else the
+// consumer hook's, else `<name>-pooler`. It is the one place the name is
+// resolved, for the Pooler LowerComponent emits and for the selector
+// EndpointsNamed builds, so the two ask the hook the same request. It reads the
+// raw property, as poolerEnabled does.
+func postgresqlPoolerName(lctx oam.LoweringContext, component *oam.Component) (string, error) {
+	spec := oam.NameSpec{Role: oam.NameRolePooler, Kind: cnpgPoolerKind}
+	authored, present, err := parseRawStringField(component.Properties, "poolerName", "poolerName")
+	if err != nil {
+		return "", err
+	}
+	if present {
+		spec.Property, spec.Authored = "poolerName", authored
+	}
+	lctx.Component = component
+	return lctx.ResolveName(component.Name, "pooler", spec)
+}
+
+// EndpointsNamed implements oam.NamedEndpointProvider: Endpoints, with the
+// pooler endpoint's selector carrying the name lctx resolves for the Pooler
+// (postgresqlPoolerName), which is the consumer hook's where the caller set one
+// and the author wrote no `poolerName`.
+func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.LoweringContext) ([]netpol.Endpoint, error) {
 	// The selector carries the name verbatim, so a name the Cluster cannot
 	// have is refused here too, as cnpg-cluster refuses it.
 	if err := validatePostgresqlClusterName(component.Name); err != nil {
@@ -106,14 +143,19 @@ func (PostgresqlRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, er
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}
-	// The pooler resource name mirrors createPooler: <component name>-pooler.
 	enabled, err := poolerEnabled(component)
 	if err != nil {
 		return nil, err
 	}
 	if enabled {
+		// The selector value is the Pooler's name, resolved as LowerComponent
+		// resolves it.
+		poolerName, err := postgresqlPoolerName(lctx, component)
+		if err != nil {
+			return nil, errors.Wrapf(err, "pooler")
+		}
 		eps = append(eps, netpol.Endpoint{
-			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: component.Name + "-pooler"}},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: poolerName}},
 			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 		})
 	}
@@ -139,8 +181,9 @@ func poolerEnabled(component *oam.Component) (bool, error) {
 // PropertySchema declares the postgresql component's top-level user-facing
 // properties. The CNPG-shaped sub-objects (backup, pooler, bootstrap, databases,
 // …) are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
-// rather than modeled field-by-field. Unchanged by the move to a lowering
-// rule: TestPostgresqlRule_PropertySchemaUnchanged pins it byte for byte.
+// rather than modeled field-by-field, so a database's `objectName` is declared
+// by no entry of its own. TestPostgresqlRule_PropertySchemaUnchanged pins it
+// byte for byte.
 func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 	// The CNPG-shaped sub-objects are kept open; each reuses the same open shape
 	// but carries its own description, so a per-key helper supplies the prose.
@@ -164,6 +207,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters)."),
+		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, a DNS-1035 label used as written (default: the component name followed by -pooler). Only with pooler.enabled: true."},
 		"bootstrap":         openObj("Cluster bootstrap source (recovery or pg_basebackup)."),
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
 		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),
@@ -366,6 +410,13 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, err
 			}
 		}
+	}
+	// The name itself is read and resolved by postgresqlPoolerName; here only
+	// its type, and that there is a Pooler to name.
+	if _, present, err := parseRawStringField(props, "poolerName", "poolerName"); err != nil {
+		return nil, err
+	} else if present && !config.PoolerEnabled {
+		return nil, errors.New("poolerName: names the Pooler, and pooler.enabled is not true; remove it, or enable the pooler")
 	}
 
 	bootstrap, present, err := parseObjectField(props, "bootstrap", "bootstrap")
@@ -641,6 +692,11 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, errors.Errorf("%s: 'owner' is required", label)
 		}
 		entry := DatabaseEntry{Name: name, Owner: owner}
+		// An explicit "" is kept: it is an authored name, and is refused when
+		// the name is resolved.
+		if entry.ObjectName, entry.explicitObjectName, err = parseRawStringField(dMap, "objectName", label+".objectName"); err != nil {
+			return nil, err
+		}
 		if ensure, present, err := parseRawStringField(dMap, "ensure", label+".ensure"); err != nil {
 			return nil, err
 		} else if present {
@@ -833,6 +889,11 @@ type DatabaseEntry struct {
 	Ensure        string
 	ReclaimPolicy string
 	Extensions    []DatabaseExtension
+	// ObjectName is the authored `objectName`, the name of the Database object
+	// when the author wrote one (explicitObjectName); the default is
+	// `<component>-<Name>`.
+	ObjectName         string
+	explicitObjectName bool
 }
 
 // DatabaseExtension holds config for a single extension within a Database CR.
