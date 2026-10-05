@@ -53,6 +53,8 @@ func DecodeStrict[T any](src map[string]any) (*T, error) {
 // Known gap: encoding/json does not apply DisallowUnknownFields inside a type with
 // its own UnmarshalJSON, so unknown keys nested in such a field are still dropped.
 // Key matching is case-insensitive, as in encoding/json, and so is the owned split.
+//
+// A panic inside the decode is returned as an error: see decodeJSONRecovering.
 func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[string]any, error) {
 	rest := make(map[string]any, len(src))
 	split := make(map[string]any)
@@ -72,10 +74,29 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	var out T
-	if err := dec.Decode(&out); err != nil {
+	if err := decodeJSONRecovering(dec, &out); err != nil {
 		return nil, nil, err
 	}
 	return &out, split, nil
+}
+
+// decodeJSONRecovering is dec.Decode(out) with a panic turned into an error
+// that names T and the panic's value. T is an external API type, and a type
+// under it may decode itself with code that does not expect every value an
+// author can write: Cilium's ICMPField.UnmarshalJSON dereferences a nil pointer
+// when `type` is absent. An authored document must end as a build error, not as
+// a crash, for that decoder and for the next one a dependency bump brings.
+//
+// Only the decode call is covered. No launcher type decoded through
+// DecodeStrictJSON has an UnmarshalJSON of its own, so the panics this catches
+// are encoding/json's and an external type's.
+func decodeJSONRecovering[T any](dec *json.Decoder, out *T) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.Errorf("the decoder of %s panicked on this value: %v (a type under it decodes itself and does not handle what was written, a required field left out for one)", reflect.TypeFor[T](), r)
+		}
+	}()
+	return dec.Decode(out)
 }
 
 func isOwned(owned []string, key string) bool {

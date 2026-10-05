@@ -12,6 +12,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 )
 
@@ -190,6 +191,80 @@ func TestUnknownJSONFieldPath(t *testing.T) {
 	}
 }
 
+// panickyField decodes itself the way Cilium's ICMPField does: it reads its
+// value into a pointer field and dereferences it without checking for nil.
+type panickyField struct {
+	Type *string `json:"type"`
+}
+
+func (p *panickyField) UnmarshalJSON(b []byte) error {
+	var shape struct {
+		Type *string `json:"type"`
+	}
+	if err := json.Unmarshal(b, &shape); err != nil {
+		return err
+	}
+	if *shape.Type == "" {
+		return errors.New("type must not be empty")
+	}
+	p.Type = shape.Type
+	return nil
+}
+
+type panickyTarget struct {
+	Fields []panickyField `json:"fields"`
+	Count  int            `json:"count"`
+}
+
+// TestDecodeStrictJSON_RecoversDecoderPanic: a type that panics in its own
+// decoding on a value an author can write ends as an error naming the target
+// type and the panic, not as a crash. Where the decoder does not panic nothing
+// changes: a valid document decodes, and a refused one keeps the decoder's own
+// error.
+func TestDecodeStrictJSON_RecoversDecoderPanic(t *testing.T) {
+	t.Run("panic", func(t *testing.T) {
+		spec, owned, err := builtin.DecodeStrictJSON[panickyTarget](map[string]any{"fields": []any{map[string]any{}}})
+		if err == nil {
+			t.Fatal("DecodeStrictJSON succeeded, want the decoder's panic as an error")
+		}
+		if spec != nil || owned != nil {
+			t.Errorf("spec = %v, owned = %v, want neither beside the error", spec, owned)
+		}
+		for _, want := range []string{"builtin_test.panickyTarget", "panicked", "nil pointer dereference"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want it to contain %q", err, want)
+			}
+		}
+	})
+	t.Run("valid document", func(t *testing.T) {
+		spec, _, err := builtin.DecodeStrictJSON[panickyTarget](map[string]any{"fields": []any{map[string]any{"type": "a"}}, "count": 2})
+		if err != nil {
+			t.Fatalf("DecodeStrictJSON: %v", err)
+		}
+		if len(spec.Fields) != 1 || spec.Fields[0].Type == nil || *spec.Fields[0].Type != "a" || spec.Count != 2 {
+			t.Errorf("spec = %+v, want the authored field and count", spec)
+		}
+	})
+	for name, tc := range map[string]struct {
+		src  map[string]any
+		want string
+	}{
+		"the type's own error": {map[string]any{"fields": []any{map[string]any{"type": ""}}}, "type must not be empty"},
+		"unknown field":        {map[string]any{"bogus": 1}, `unknown field "bogus"`},
+		"wrong type":           {map[string]any{"count": "x"}, "cannot unmarshal string"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := builtin.DecodeStrictJSON[panickyTarget](tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "panicked") {
+				t.Errorf("err = %v, want the decoder's own error, not a recovered panic", err)
+			}
+		})
+	}
+}
+
 // shapedSelector decodes itself the way a selector type does: into its own
 // fields, dropping any other key.
 type shapedSelector struct {
@@ -286,6 +361,50 @@ func TestUnknownJSONFieldPathIn(t *testing.T) {
 		src := map[string]any{"mode": "x", "selector": typo}
 		if got := builtin.UnknownJSONFieldPathIn[shapedTarget](src, shapes, "Mode"); got != "selector.mtach" {
 			t.Errorf("UnknownJSONFieldPathIn = %q, want selector.mtach", got)
+		}
+	})
+}
+
+// panickyHolder holds panickyField by value, so encoding/json hands a null
+// written for the key to the field's own decoder, which panics on it.
+type panickyHolder struct {
+	Field panickyField `json:"field"`
+	Count int          `json:"count"`
+}
+
+type panickyFieldShape struct {
+	Type *string `json:"type"`
+}
+
+// TestUnknownJSONFieldPathIn_ValueFieldWhoseDecoderPanicsOnNull: the walk asks
+// the decoder whether it knows a key by decoding a null for it. A value-typed
+// field whose own decoder panics on that null is a declared key all the same:
+// its valid value passes, and an unknown key inside it is reported under it.
+func TestUnknownJSONFieldPathIn_ValueFieldWhoseDecoderPanicsOnNull(t *testing.T) {
+	shapes := builtin.SelfDecodedShapes{
+		reflect.TypeFor[panickyField](): reflect.TypeFor[panickyFieldShape](),
+	}
+	valid := map[string]any{"field": map[string]any{"type": "a"}, "count": 1}
+	if _, _, err := builtin.DecodeStrictJSON[panickyHolder](valid); err != nil {
+		t.Fatalf("DecodeStrictJSON refused the valid document: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		src  map[string]any
+		want string
+	}{
+		"valid":                 {valid, ""},
+		"unknown key inside":    {map[string]any{"field": map[string]any{"type": "a", "typo": 1}}, "field.typo"},
+		"unknown key beside it": {map[string]any{"feild": map[string]any{"type": "a"}}, "feild"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := builtin.UnknownJSONFieldPathIn[panickyHolder](tc.src, shapes); got != tc.want {
+				t.Errorf("UnknownJSONFieldPathIn = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("without a shape the field is still a declared key", func(t *testing.T) {
+		if got := builtin.UnknownJSONFieldPath[panickyHolder](valid); got != "" {
+			t.Errorf("UnknownJSONFieldPath = %q, want nothing", got)
 		}
 	})
 }

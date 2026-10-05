@@ -825,6 +825,12 @@ is not checked.
 **Breaking**: a `cilium-networkpolicy` trait whose selector holds an unknown key built
 before, with a selector wider than written, and is now refused.
 
+**An ICMP field needs its `type`.** Cilium's own decoding of `icmps[].fields[]` panics when
+`type` is absent or null. The build refuses such a rule with an error that names the Cilium
+rule type and the panic (`the decoder of api.Rule panicked on this value: …`); it does not
+name the field's position, so look for an `icmps` field without a `type`. Before this the
+build crashed on that document.
+
 ### Null or empty `endpointSelector` / `egress` / `ingress`
 
 A `null` is **absence**, whatever its Go shape — the same contract as the
