@@ -139,8 +139,8 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 	replicationController := &corev1.ReplicationController{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	replicationController.Spec.Template = &corev1.PodTemplateSpec{ObjectMeta: typedPods(map[string]string{"platform.example/zone": "a"}, nil)}
 
-	const prefix = `the prefix "platform.example/" is reserved`
-	const exact = "it is a reserved key"
+	const prefix = `the prefix "platform.example/" is reserved for the platform`
+	const exact = "the key is reserved for the platform"
 	for name, tc := range map[string]struct {
 		obj  client.Object
 		want []string
@@ -266,10 +266,14 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 			if objs != nil {
 				t.Errorf("Generate returned %d objects beside the refusal", len(objs))
 			}
-			for _, want := range append([]string{`component "web"`, "TransformContext.ReservedMetadataKeys"}, tc.want...) {
+			for _, want := range append([]string{`component "web"`}, tc.want...) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not say %s", err, want)
 				}
+			}
+			// The text is the document author's: it names no Go field.
+			if strings.Contains(err.Error(), "TransformContext") {
+				t.Errorf("refusal %q names a Go field", err)
 			}
 			// Refused before the stamp: the object is as its config made it.
 			if _, stamped := tc.obj.GetLabels()[ownershipKey]; stamped {
@@ -887,7 +891,7 @@ func TestTransform_ReservedMetadataKeys(t *testing.T) {
 	if !errors.Is(err, ErrReservedMetadataKey) {
 		t.Fatalf("GenerateApplications = %v, want ErrReservedMetadataKey", err)
 	}
-	for _, want := range []string{`component "tagged"`, `ConfigMap "tagged"`, `label "example.org/tenant"`, "it is a reserved key"} {
+	for _, want := range []string{`component "tagged"`, `ConfigMap "tagged"`, `label "example.org/tenant"`, "the key is reserved for the platform"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not say %s", err, want)
 		}

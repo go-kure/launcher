@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -168,12 +169,20 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 		return errors.Errorf("reserved metadata keys: %s: %w", where, err)
 	}
 	platform := platformAnnotationsUnder(o.inner)
+	// What a refusal says of the object, whichever of its metadata holds the key.
+	refusal := ReservedMetadataKeyError{
+		Component: o.component,
+		Kind:      schema.GroupKind{Group: group, Kind: kind},
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
+		Object:    where,
+	}
 
 	metadata, _, err := objectField(content, "metadata")
 	if err != nil {
 		return errors.Errorf("reserved metadata keys: %s: %w", where, err)
 	}
-	if err := o.checkReservedHolder(metadata, where, "", platform); err != nil {
+	if err := o.checkReservedHolder(metadata, refusal, ReservedKeyInObjectMetadata, platform); err != nil {
 		return err
 	}
 
@@ -186,7 +195,7 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 			return errors.Errorf("reserved metadata keys: %s: %w", where, err)
 		}
 		if found {
-			if err := o.checkReservedHolder(template, where, "pod template ", nil); err != nil {
+			if err := o.checkReservedHolder(template, refusal, ReservedKeyInPodTemplate, nil); err != nil {
 				return err
 			}
 		}
@@ -198,7 +207,7 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 			return errors.Errorf("reserved metadata keys: %s: %w", where, err)
 		}
 		if found {
-			if err := o.checkReservedHolder(inherited, where, "spec.inheritedMetadata ", nil); err != nil {
+			if err := o.checkReservedHolder(inherited, refusal, ReservedKeyInInheritedMetadata, nil); err != nil {
 				return err
 			}
 		}
@@ -239,26 +248,29 @@ func platformAnnotationsUnder(cfg stack.ApplicationConfig) []map[string]string {
 }
 
 // checkReservedHolder checks the labels and annotations holder holds, which is
-// an object's metadata, a pod template's, or a Cluster's inheritedMetadata. part
-// says which in the refusal, "" for the object's own. platform holds the
-// annotation pairs that are exempt, on an object's own metadata only: a pair any
-// of its layers states.
-func (o *ownedConfig) checkReservedHolder(holder map[string]any, where, part string, platform []map[string]string) error {
+// an object's metadata, a pod template's, or a Cluster's inheritedMetadata: in
+// says which. refusal says the owner and the object, and is returned with the
+// key and the entry that reserves it filled in (a *ReservedMetadataKeyError).
+// platform holds the annotation pairs that are exempt, on an object's own
+// metadata only: a pair any of its layers states.
+func (o *ownedConfig) checkReservedHolder(holder map[string]any, refusal ReservedMetadataKeyError, in ReservedKeyHolder, platform []map[string]string) error {
+	refusal.Holder = in
 	labels, _, err := objectField(holder, "labels")
 	if err != nil {
-		return errors.Errorf("reserved metadata keys: %s: %s%w", where, part, err)
+		return errors.Errorf("reserved metadata keys: %s: %s%w", refusal.Object, in.prefix(), err)
 	}
 	for _, key := range slices.Sorted(maps.Keys(labels)) {
 		if key == appLabelKey || key == o.labelKey {
 			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
-			return o.reservedKeyError(where, part+"label", key, entry)
+			refusal.Key, refusal.Entry = key, entry
+			return &refusal
 		}
 	}
 	annotations, _, err := objectField(holder, "annotations")
 	if err != nil {
-		return errors.Errorf("reserved metadata keys: %s: %s%w", where, part, err)
+		return errors.Errorf("reserved metadata keys: %s: %s%w", refusal.Object, in.prefix(), err)
 	}
 	for _, key := range slices.Sorted(maps.Keys(annotations)) {
 		if got, isString := annotations[key].(string); isString && slices.ContainsFunc(platform, func(pairs map[string]string) bool {
@@ -268,27 +280,100 @@ func (o *ownedConfig) checkReservedHolder(holder map[string]any, where, part str
 			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
-			return o.reservedKeyError(where, part+"annotation", key, entry)
+			refusal.Annotation, refusal.Key, refusal.Entry = true, key, entry
+			return &refusal
 		}
 	}
 	return nil
 }
 
-// reservedKeyError is the refusal of one reserved key: it names the owner (the
-// component, or the document for an application the document as a whole owns),
-// the object, the key and the entry that reserves it.
-func (o *ownedConfig) reservedKeyError(where, what, key, entry string) error {
-	owner := "the document"
-	if o.component != "" {
-		owner = fmt.Sprintf("component %q", o.component)
-	}
-	reason := "it is a reserved key"
-	if entry != key {
-		reason = fmt.Sprintf("the prefix %q is reserved", entry)
-	}
-	return errors.Wrapf(ErrReservedMetadataKey,
-		"%s: %s: %s %q may not be set: %s (TransformContext.ReservedMetadataKeys)", owner, where, what, key, reason)
+// ReservedMetadataKeyError is the refusal of one label or annotation key the
+// consumer reserved (TransformContext.ReservedMetadataKeys), on an object an
+// application generated (go-kure/launcher#790). It says whose object it is,
+// which object, where on it the key is, and the entry that reserves it.
+//
+// Generation returns it, on its own or wrapped, so it is found with errors.As.
+// It answers to ErrReservedMetadataKey under errors.Is, which it unwraps to.
+type ReservedMetadataKeyError struct {
+	// Component is the component that owns the object. It is empty for an object
+	// of an application the document as a whole owns (a generated source several
+	// components share), which the text calls "the document".
+	Component string
+	// Kind is the object's group and kind: the ones it states, else, for a typed
+	// object of a kind the check reads more than the metadata of, its Go type's.
+	// It is zero for any other typed object that states no kind.
+	Kind schema.GroupKind
+	// Namespace is the object's namespace as it was generated, empty when the
+	// object states none. The text does not print it.
+	Namespace string
+	// Name is the object's name. For a key on a member of a list envelope, Kind,
+	// Namespace and Name are the member's.
+	Name string
+	// Object is the object as the text names it: `Ingress "web-ingress"`, with
+	// the Go type in place of the kind when Kind is zero.
+	Object string
+	// Holder says which metadata of the object holds the key.
+	Holder ReservedKeyHolder
+	// Annotation says the key is an annotation's. It is a label's otherwise.
+	Annotation bool
+	// Key is the key that may not be set.
+	Key string
+	// Entry is the entry of the consumer's list that reserves Key: Key itself,
+	// or a prefix ending in "/" that Key is under.
+	Entry string
 }
+
+// ReservedKeyHolder says which metadata of an object holds the key a
+// ReservedMetadataKeyError refuses. Its value is what the text prints before
+// "label" or "annotation".
+type ReservedKeyHolder string
+
+const (
+	// ReservedKeyInObjectMetadata is the object's own metadata.labels or
+	// metadata.annotations.
+	ReservedKeyInObjectMetadata ReservedKeyHolder = ""
+	// ReservedKeyInPodTemplate is the metadata of the object's pod template,
+	// which becomes the metadata of its pods.
+	ReservedKeyInPodTemplate ReservedKeyHolder = "pod template"
+	// ReservedKeyInInheritedMetadata is spec.inheritedMetadata of a
+	// CloudNativePG Cluster, which the operator copies onto every object it
+	// creates for the cluster.
+	ReservedKeyInInheritedMetadata ReservedKeyHolder = "spec.inheritedMetadata"
+)
+
+// prefix is the holder as a text puts it before what it holds: "" for the
+// object's own metadata, else the holder and a space.
+func (h ReservedKeyHolder) prefix() string {
+	if h == ReservedKeyInObjectMetadata {
+		return ""
+	}
+	return string(h) + " "
+}
+
+// Error returns the refusal's text. It names the owner (the component, or the
+// document), the object, the key and the entry that reserves it. The text is
+// read by the document's author, who does not know the list or who wrote it: it
+// says the key is reserved for the platform, as ErrPlatformReserved says of a
+// property.
+func (e *ReservedMetadataKeyError) Error() string {
+	owner := "the document"
+	if e.Component != "" {
+		owner = fmt.Sprintf("component %q", e.Component)
+	}
+	what := "label"
+	if e.Annotation {
+		what = "annotation"
+	}
+	reason := "the key is reserved for the platform"
+	if e.Entry != e.Key {
+		reason = fmt.Sprintf("the prefix %q is reserved for the platform", e.Entry)
+	}
+	return fmt.Sprintf("%s: %s: %s%s %q may not be set: %s: %s",
+		owner, e.Object, e.Holder.prefix(), what, e.Key, reason, ErrReservedMetadataKey)
+}
+
+// Unwrap makes the error answer to ErrReservedMetadataKey under errors.Is.
+func (e *ReservedMetadataKeyError) Unwrap() error { return ErrReservedMetadataKey }
 
 // objectContent returns obj as the object the cluster would be sent: an
 // unstructured object's own content, a typed object's converted. The check only
