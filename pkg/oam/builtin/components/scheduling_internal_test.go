@@ -26,6 +26,7 @@ var rawSchedulingKinds = []struct {
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, []string{"tolerations", "topologySpreadConstraints"}},
 	{"daemonset", (&DaemonsetHandler{}).PropertySchema, rawSchedulingKeys},
 	{"job", (&JobHandler{}).PropertySchema, rawSchedulingKeys},
+	{"cronjob", (&CronjobHandler{}).PropertySchema, rawSchedulingKeys},
 }
 
 // TestSchedulingKeysAbsentFromSharedFragments is the first half of the ordering

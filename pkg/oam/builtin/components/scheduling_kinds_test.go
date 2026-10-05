@@ -29,7 +29,7 @@ var rawSchedulingByKind = map[string][]string{
 	"statefulset": {"tolerations", "topologySpreadConstraints"},
 	"daemonset":   {"affinity", "tolerations", "topologySpreadConstraints"},
 	"job":         {"affinity", "tolerations", "topologySpreadConstraints"},
-	"cronjob":     {},
+	"cronjob":     {"affinity", "tolerations", "topologySpreadConstraints"},
 }
 
 var allRawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConstraints"}

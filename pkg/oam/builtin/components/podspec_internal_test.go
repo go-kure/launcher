@@ -103,7 +103,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 20, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 17, daemonSetSpecPropertyKeys, false},
-		{"cronjob", (&CronjobHandler{}).PropertySchema(), 21, jobSpecPropertyKeys, true},
+		{"cronjob", (&CronjobHandler{}).PropertySchema(), 24, jobSpecPropertyKeys, true},
 		{"job", (&JobHandler{}).PropertySchema(), 18, jobSpecPropertyKeys, true},
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
