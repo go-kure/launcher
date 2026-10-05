@@ -108,12 +108,14 @@ build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
 components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `ingress`,
-`httproute` and `networkpolicy` (go-kure/launcher#790) are registered the same
-way; the `<type>-component` fixtures build each. The `ingress` and `httproute`
-kinds emit the authored object and, unlike the traits of the same names, no
-NetworkPolicy allow rule. The `networkpolicy` kind emits the authored spec and,
-unlike the trait of the same name, selects every pod of the namespace when no
-`podSelector` is written. The `pod` kind emits the authored spec and the `app`
+`httproute`, `networkpolicy` and `cilium-networkpolicy` (go-kure/launcher#790)
+are registered the same way; the `<type>-component` fixtures build each. The
+`ingress` and `httproute` kinds emit the authored object and, unlike the traits
+of the same names, no NetworkPolicy allow rule. The `networkpolicy` kind emits
+the authored spec and, unlike the trait of the same name, selects every pod of
+the namespace when no `podSelector` is written. The `cilium-networkpolicy` kind
+emits the authored `spec` and `specs` and refuses a policy Cilium would reject
+when it reads it. The `pod` kind emits the authored spec and the `app`
 label, the `replicaset` and `replicationcontroller` kinds the authored spec
 with the `app` label on the pod template, and the `podtemplate` kind the
 authored template with no `app` label; none of them is one of the five pod

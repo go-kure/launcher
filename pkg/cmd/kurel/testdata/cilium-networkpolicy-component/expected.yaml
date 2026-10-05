@@ -1,0 +1,48 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: db-allow
+  name: db-allow
+  namespace: default
+spec:
+  description: database access
+  egressDeny:
+  - toCIDR:
+    - 169.254.169.254/32
+  endpointSelector:
+    matchLabels:
+      role: db
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        role: api
+    toPorts:
+    - ports:
+      - port: "5432"
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: namespace-rules
+  name: namespace-rules
+  namespace: default
+specs:
+- egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s-app: kube-dns
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: "53"
+        protocol: UDP
+  endpointSelector: {}
+- endpointSelector:
+    matchLabels:
+      role: cache
+  ingressDeny:
+  - fromEntities:
+    - world

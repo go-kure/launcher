@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -66,6 +67,14 @@ var coreKindSchemas = []struct {
 	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
 	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
+	// A CiliumNetworkPolicy has no spec type: it holds one rule under `spec` and
+	// a list of them under `specs`, and the component projects those two fields.
+	{"cilium-networkpolicy", reflect.TypeFor[ciliumv2.CiliumNetworkPolicy](), &components.CiliumNetworkPolicyHandler{}, map[string]string{
+		"kind":       "launcher emits a cilium.io/v2 CiliumNetworkPolicy; the object's type is not authored",
+		"apiVersion": "launcher emits a cilium.io/v2 CiliumNetworkPolicy; the object's type is not authored",
+		"metadata":   "launcher sets the object's name and namespace, as on every kind component",
+		"status":     "the Cilium agent writes it",
+	}},
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole

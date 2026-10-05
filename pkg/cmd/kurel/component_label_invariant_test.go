@@ -302,6 +302,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"networkpolicy": {props: map[string]any{
 		"podSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
 		"policyTypes": []any{"Ingress"}}},
+	// A CiliumNetworkPolicy's endpoint selectors are the author's, as a
+	// NetworkPolicy's podSelector is.
+	"cilium-networkpolicy": {props: map[string]any{"spec": map[string]any{
+		"endpointSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
+		"ingress": []any{map[string]any{"fromEndpoints": []any{
+			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

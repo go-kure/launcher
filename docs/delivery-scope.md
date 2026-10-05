@@ -681,6 +681,18 @@ be closed at build time.
     `egress: []` alone isolates no egress.
   - A null rule, peer or port is refused by its path: decoded, it would be the empty
     one, which allows everything.
+- **Shipped: the `cilium-networkpolicy` kind** (`cilium_networkpolicy.go`), ungated
+  under the same terms.
+  - A CiliumNetworkPolicy has no spec type: the kind projects its `spec` (one rule) and
+    `specs` (a list of rules), each the whole Cilium rule.
+  - It refuses a policy Cilium rejects: no rule at all, a rule with no
+    `endpointSelector`, a rule with a `nodeSelector`, a rule with no entry in `ingress`,
+    `ingressDeny`, `egress` or `egressDeny`. Cilium's CRD schema refuses some of these
+    at admission; the rest the API server would store and the agent reject when it
+    reads the object, unenforced. No selector is filled in.
+  - An unknown key inside an endpoint selector is refused by its path, as in the trait:
+    the selector unmarshals itself and would drop a misspelt key, leaving the selector
+    that matches everything. The positions are found from the Cilium types.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
@@ -878,7 +890,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute` and `networkpolicy` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy` and `cilium-networkpolicy` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

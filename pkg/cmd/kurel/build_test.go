@@ -481,7 +481,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"replicationcontroller", "resourcequota",
 		"csidriver", "ingressclass", "priorityclass", "runtimeclass", "storageclass",
 		"volumeattributesclass",
-		"httproute", "ingress", "networkpolicy",
+		"cilium-networkpolicy", "httproute", "ingress", "networkpolicy",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}
