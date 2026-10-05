@@ -12,12 +12,26 @@ import (
 // the deployment kind.
 var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConstraints"}
 
+// rawSchedulingKinds names, per kind, the raw scheduling keys its own literal
+// map publishes. `deployment` was the first (go-kure/launcher#412);
+// go-kure/launcher#790 adds the kinds below it. A kind that publishes `affinity`
+// as the four-key shorthand is not listed with that key here — see
+// TestOpinionatedKindsKeepAffinityShorthand.
+var rawSchedulingKinds = []struct {
+	kind   string
+	schema func() map[string]oam.PropertySchema
+	keys   []string
+}{
+	{"deployment", (&DeploymentHandler{}).PropertySchema, rawSchedulingKeys},
+	{"statefulset", (&StatefulsetHandler{}).PropertySchema, []string{"tolerations", "topologySpreadConstraints"}},
+}
+
 // TestSchedulingKeysAbsentFromSharedFragments is the first half of the ordering
-// guard: the three raw scheduling keys must live in the deployment handler's own
-// literal map and NOT in either fragment it merges. If one ever migrates into
-// schemaPodSpec, this fails here rather than silently changing three other
-// kinds — see TestDocumentsMapsCopyOverwriteMechanism for why a migrated key
-// would overwrite rather than collide.
+// guard: the three raw scheduling keys must live in each publishing kind's own
+// literal map and NOT in any fragment it merges. If one ever migrates into
+// schemaPodSpec, this fails here rather than silently changing the kinds that
+// do not publish it — see TestDocumentsMapsCopyOverwriteMechanism for why a
+// migrated key would overwrite rather than collide.
 //
 // All four (reserved, jobPods) combinations are walked, not the two production
 // handlers actually pass. Today only jobPods can change the key set (schema.go:451
@@ -30,7 +44,9 @@ var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConst
 // re-derive that argument.
 func TestSchedulingKeysAbsentFromSharedFragments(t *testing.T) {
 	fragments := map[string]map[string]oam.PropertySchema{
-		"schemaDeploymentSpec()": schemaDeploymentSpec(),
+		"schemaDeploymentSpec()":  schemaDeploymentSpec(),
+		"schemaStatefulSetSpec()": schemaStatefulSetSpec(),
+		"schemaContainerFields()": schemaContainerFields(),
 	}
 	for _, reserved := range []bool{false, true} {
 		for _, jobPods := range []bool{false, true} {
@@ -41,32 +57,51 @@ func TestSchedulingKeysAbsentFromSharedFragments(t *testing.T) {
 	for name, fragment := range fragments {
 		for _, key := range rawSchedulingKeys {
 			if _, found := fragment[key]; found {
-				t.Errorf("%s declares %q; the raw scheduling shapes belong to the deployment kind's own map, not a shared fragment", name, key)
+				t.Errorf("%s declares %q; the raw scheduling shapes belong to a kind's own map, not a shared fragment", name, key)
 			}
 		}
 	}
 }
 
 // TestSchedulingKeysSurviveFragmentCopies is the second half: the keys are set
-// in the literal map BEFORE the two maps.Copy calls, so a fragment gaining one
-// of them later would overwrite the deployment kind's version rather than
-// collide visibly. Asserting the merged result, not the literal, is the point —
-// this test sees what an author sees.
+// in the literal map BEFORE the maps.Copy calls, so a fragment gaining one of
+// them later would overwrite the kind's version rather than collide visibly.
+// Asserting the merged result, not the literal, is the point — this test sees
+// what an author sees.
+//
+// Identity, not just presence: a clobbered key would still be present, just
+// holding the wrong shape. Each raw shape is recognised by a member only it
+// has.
 func TestSchedulingKeysSurviveFragmentCopies(t *testing.T) {
-	s := (&DeploymentHandler{}).PropertySchema()
-	for _, key := range rawSchedulingKeys {
-		if _, found := s[key]; !found {
-			t.Errorf("PropertySchema() lost %q to a fragment copy", key)
+	isRaw := map[string]func(oam.PropertySchema) bool{
+		"affinity": func(s oam.PropertySchema) bool { _, ok := s.Properties["nodeAffinity"]; return ok },
+		"tolerations": func(s oam.PropertySchema) bool {
+			if s.Items == nil {
+				return false
+			}
+			_, ok := s.Items.Properties["tolerationSeconds"]
+			return ok
+		},
+		"topologySpreadConstraints": func(s oam.PropertySchema) bool {
+			if s.Items == nil {
+				return false
+			}
+			_, ok := s.Items.Properties["maxSkew"]
+			return ok
+		},
+	}
+	for _, k := range rawSchedulingKinds {
+		s := k.schema()
+		for _, key := range k.keys {
+			got, found := s[key]
+			if !found {
+				t.Errorf("%s: PropertySchema() lost %q to a fragment copy", k.kind, key)
+				continue
+			}
+			if !isRaw[key](got) {
+				t.Errorf("%s: %q is not the raw corev1 shape after the fragment copies", k.kind, key)
+			}
 		}
-	}
-	// Identity, not just presence: a clobbered `affinity` would still be
-	// present, just holding the wrong shape.
-	affinity, found := s["affinity"]
-	if !found {
-		t.Fatal(`PropertySchema() has no "affinity"`)
-	}
-	if _, isRaw := affinity.Properties["nodeAffinity"]; !isRaw {
-		t.Error(`"affinity" is not the raw corev1.Affinity shape after the fragment copies`)
 	}
 }
 

@@ -16,7 +16,10 @@ import (
 // This file projects the three raw corev1 pod-level scheduling shapes —
 // `affinity`, `topologySpreadConstraints` and (via the pre-existing
 // parseTolerations) `tolerations` — for the kind-named `deployment` component
-// (go-kure/launcher#412).
+// (go-kure/launcher#412). Other workload kinds publish the ones their
+// PropertySchema names, through the same parsers (go-kure/launcher#790):
+// `statefulset` takes `tolerations` and `topologySpreadConstraints` and keeps
+// the shorthand for `affinity`.
 //
 // These are NOT alternatives to the four-key `affinity` shorthand that
 // webservice, worker and statefulset publish (schemaAffinity/parseAffinity in

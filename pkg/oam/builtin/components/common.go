@@ -3336,14 +3336,15 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 // go-kure/launcher#412 published this property on a second kind.
 var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
 
-// parseTolerations is SHARED: daemonset (daemonset.go) and deployment
-// (deployment.go) are its only two callers, and schemaTolerations has the same
-// two. Every rejection below therefore lands on both kinds, so completing the
+// parseTolerations is SHARED: daemonset (daemonset.go), deployment
+// (deployment.go) and, since go-kure/launcher#790, statefulset (statefulset.go)
+// are its callers, and schemaTolerations has the same ones. Every rejection
+// below therefore lands on all of them, so completing the
 // projection for go-kure/launcher#412 narrowed what daemonset accepts as well —
 // deliberately, and not additively. What each rule costs daemonset, and why none
 // of them is gated behind a deployment-only option, is set out in
 // README.md's "What `tolerations` changed for `daemonset`". A rejection added
-// here in future changes both kinds; say so there in the same change.
+// here in future changes every calling kind; say so there in the same change.
 // parseObjectList, not a bare props["tolerations"].([]any) assertion: a
 // comma-ok read cannot tell an ABSENT key from one authored with the wrong
 // container type, and returning (nil, nil) for both silently discarded the

@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -585,6 +586,42 @@ func TestTopologySpread_NoDeploymentFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Deployment") {
 		t.Errorf("error should say a Deployment is required, got: %v", err)
+	}
+}
+
+// TestTopologySpread_OtherWorkloadKindsAreRefused pins the trait to
+// Deployments. A workload kind that publishes raw `topologySpreadConstraints`
+// of its own (go-kure/launcher#790) is still not a target: the trait is
+// refused, with or without authored constraints, rather than merged with what
+// the component wrote or accepted as a no-op beside it.
+func TestTopologySpread_OtherWorkloadKindsAreRefused(t *testing.T) {
+	constraints := []any{map[string]any{
+		"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsatisfiable": "DoNotSchedule",
+	}}
+	for _, tc := range []struct {
+		kind    string
+		handler oam.ComponentHandler
+		props   map[string]any
+	}{
+		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}},
+	} {
+		for name, extra := range map[string]map[string]any{
+			"no constraints":       nil,
+			"authored constraints": {"topologySpreadConstraints": constraints},
+		} {
+			t.Run(tc.kind+"/"+name, func(t *testing.T) {
+				props := maps.Clone(tc.props)
+				maps.Copy(props, extra)
+				_, err := generateWithTopologySpread(t, tc.handler,
+					&oam.Component{Name: "api", Type: tc.kind, Properties: props}, nil)
+				if err == nil {
+					t.Fatalf("topology-spread on a %s must be refused, got no error", tc.kind)
+				}
+				if !strings.Contains(err.Error(), "generates no Deployment") {
+					t.Errorf("error = %v, want it to say the component generates no Deployment", err)
+				}
+			})
+		}
 	}
 }
 
