@@ -2685,6 +2685,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
   `values`, `valuesMode` (`inline` |
   `configMap`), `secretValues` (the sensitive part of the values tree, see below),
+  `scopeOverrides` (under `delivery: template` only, see below),
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
@@ -2843,7 +2844,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     references by `source.name` is the author's own component and the rule
     orders nothing after it.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
-    `chart`, `version`, `values`, `secretValues` and an authored `releaseName`,
+    `chart`, `version`, `values`, `secretValues`, `scopeOverrides` and an authored `releaseName`,
     which the `helmtemplate` checks and, when unset, defaults to the component
     name, the release name the `delivery: flux` HelmRelease carries too
     (go-kure/launcher#785; see **helmrelease**). No source is emitted, and an authored
@@ -2856,6 +2857,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     - every other HelmRelease key (`interval`, `targetNamespace`,
       `driftDetection`, `install`, `upgrade`, `valuesFrom`), which `helmtemplate`
       does not accept.
+  - **`scopeOverrides`** (go-kure/launcher#794, item 11) states the scope of a kind
+    the chart renders, for `delivery: template`: the list of `{apiVersion, kind,
+    scope}` the `helmtemplate` and `manifests` components take, with the meaning it
+    has there (see **Scope overrides** under **helmtemplate**). The rule forwards
+    the authored list to the `helmtemplate` as written, under the declared spelling
+    of the key, so a chart delivered through `helm` and one authored as a
+    `helmtemplate` with the same list render the same objects. `null` reads as
+    omission under either delivery.
+    - *A malformed entry is refused by the rule*, with the shared parser's message
+      under its own prefix (`helm: scopeOverrides[0]: scope "cluster" is invalid;
+      must be "Cluster" or "Namespaced"`), so the message names the component type
+      the author wrote. An entry that contradicts a `CustomResourceDefinition` the
+      chart renders is refused when the chart is rendered, by the `helmtemplate`.
+    - *`delivery: flux` refuses the property*, set or defaulted and whatever its
+      shape: `helm: delivery: flux does not support scopeOverrides (only a
+      client-side render reads it)`. Helm creates a HelmRelease's objects in the
+      cluster, so nothing in the build could apply a stated scope, and dropping the
+      property would let an author believe it took effect.
   - Strict, unlike the removed `helmchart` composite. An undeclared key at the top level or inside
     `source` is refused, and so are:
     - `delivery: native`;
@@ -3201,10 +3220,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the object. A `HelmTemplateConfig` built directly holds the overrides in `ScopeOverrides`,
   where a value other than the two scopes is refused before the render.
 
-  *Not covered:* the `helm` rule does not take the property under either delivery and refuses
-  it as an unknown key, so a chart delivered through `helm` with `delivery: template` cannot
-  state a scope; author a `helmtemplate` for it. No policy or placement check on template
-  output reads an object's scope, so the overrides change the namespace stamp and nothing else.
+  The `helm` rule takes the same property under `delivery: template` and forwards it here as
+  written, after refusing a malformed entry under its own prefix; under `delivery: flux` it
+  refuses the property (see **helm**).
+
+  *Not covered:* no policy or placement check on template output reads an object's scope, so
+  the overrides change the namespace stamp and nothing else.
   Not breaking: a document that does not use the property renders as before.
 
   **Breaking output change** (go-kure/launcher#794): such objects gain `metadata.namespace` in
