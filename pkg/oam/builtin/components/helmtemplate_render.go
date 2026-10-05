@@ -41,18 +41,20 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // chartSource is what one client-side render fetches: an inline chart source
 // whose Kind inlineChartSourceKind has already resolved and checked against
 // URL's scheme, the chart name within a HelmRepository, the chart version, the
-// values tree handed to the render as-is, the namespace the render uses as
-// .Release.Namespace (empty leaves kure's default, "default"), the release
-// name it uses as .Release.Name, which templateReleaseName has already resolved
-// and checked (empty leaves kure's default, "release"), and the scope the
-// document states for a rendered kind, which the namespace stamp reads
-// (stampRenderedNamespaces).
+// values tree handed to the render as-is, the sensitive values merged over it
+// for the render (mergeSecretValues; the two share no path), the namespace the
+// render uses as .Release.Namespace (empty leaves kure's default, "default"),
+// the release name it uses as .Release.Name, which templateReleaseName has
+// already resolved and checked (empty leaves kure's default, "release"), and
+// the scope the document states for a rendered kind, which the namespace stamp
+// reads (stampRenderedNamespaces).
 type chartSource struct {
 	URL            string
 	Kind           string // "HelmRepository" or "OCIRepository"
 	Chart          string
 	Version        string
 	Values         map[string]any
+	SecretValues   map[string]any
 	Namespace      string
 	ReleaseName    string
 	ScopeOverrides map[schema.GroupVersionKind]manifest.ScopeResult
@@ -242,6 +244,13 @@ type chartRender struct {
 // hand out — already carry it. A scope override the rendered objects contradict
 // is refused there, as `<componentType> "<name>": object <kind> "<name>": …`,
 // and nothing is cached.
+//
+// With src.SecretValues set, the chart is rendered with them merged over
+// src.Values, and neither render failure above is reported as it came: a
+// template error can quote the value it failed on, and a parse error the
+// rendered text around it. secretRenderFailure reports what can be said
+// without them. The scope-override refusal is reported as it is either way: it
+// names the object's kind and name and the two scopes, never a value.
 func (r *chartRender) render(renderFn renderChartFunc, componentType, name string, src chartSource) error {
 	if r.rendered {
 		return nil
@@ -249,12 +258,11 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	if renderFn == nil {
 		renderFn = helm.RenderChart
 	}
-	raw, err := renderFn(src.chartURL(), src.Version, src.Values, src.renderOptions()...)
+	groups, err := renderChartGroups(renderFn, componentType, name, src, mergeSecretValues(src.Values, src.SecretValues))
 	if err != nil {
-		return errors.Wrapf(err, "%s %q: rendering chart", componentType, name)
-	}
-	groups, err := parseChartManifests(raw)
-	if err != nil {
+		if len(src.SecretValues) > 0 {
+			return secretRenderFailure(renderFn, componentType, name, src)
+		}
 		return err
 	}
 	if err := stampRenderedNamespaces(src.Namespace, src.ScopeOverrides, groups); err != nil {
@@ -263,6 +271,33 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	r.hookGroups = groups
 	r.rendered = true
 	return nil
+}
+
+// renderChartGroups renders src with values and parses the result into hook
+// groups, with render's two errors.
+func renderChartGroups(renderFn renderChartFunc, componentType, name string, src chartSource, values map[string]any) ([]helm.HookGroup, error) {
+	raw, err := renderFn(src.chartURL(), src.Version, values, src.renderOptions()...)
+	if err != nil {
+		return nil, errors.Wrapf(err, "%s %q: rendering chart", componentType, name)
+	}
+	return parseChartManifests(raw)
+}
+
+// secretRenderFailure reports a render with secretValues that failed, without
+// the failure's own text. It renders src once more with src.Values alone, a
+// render no sensitive value is part of, so whatever that render reports can be
+// shown: a chart that cannot be fetched, or a template that fails either way,
+// is then still named. A chart that requires a value set only in secretValues
+// fails this second render for that reason, which is why the message says the
+// reported cause is the one without them. When the second render succeeds, the
+// cause lies in secretValues and is withheld.
+func secretRenderFailure(renderFn renderChartFunc, componentType, name string, src chartSource) error {
+	const withheld = "the cause is withheld because it can repeat a sensitive value"
+	_, err := renderChartGroups(renderFn, componentType, name, src, src.Values)
+	if err == nil {
+		return errors.Errorf("%s %q: rendering chart with %s failed, and without them it renders; %s", componentType, name, helmSecretValuesKey, withheld)
+	}
+	return errors.Wrapf(err, "%s %q: rendering chart with %s failed; %s. Without them it fails with", componentType, name, helmSecretValuesKey, withheld)
 }
 
 // stampRenderedNamespaces sets namespace on every emitted object that is

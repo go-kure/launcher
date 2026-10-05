@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -196,6 +197,31 @@ func enforcePersistentVolumePolicy(prefix string, spec *corev1.PersistentVolumeS
 		return enforceMaxResource(q.String(), p.MaxStorageSize(), prefix+"capacity.storage")
 	}
 	return nil
+}
+
+// enforceExplicitSecretObject refuses a core Secret a document carries as an
+// object, under a policy that forbids explicit secrets
+// (oam.ExplicitSecretPolicy): the passthrough component's object, and each
+// object a manifests source yields. It asks what the secret trait asks, and
+// like the trait it does not look at what the Secret holds: one with no entry
+// is refused too. The message quotes nothing of the object.
+//
+// A Secret is told by its group and kind, so one that stayed unstructured
+// because it sets a field the vendored type does not declare is refused as
+// well, and a custom resource of that kind in another group is not.
+//
+// Not covered: a Secret a chart renders under template delivery. Its content
+// comes from the chart and its values, not from the document, and the
+// document's own sensitive values are refused where they are set (secretValues).
+func enforceExplicitSecretObject(obj client.Object, p oam.Policy) error {
+	if oam.ExplicitSecretsAllowed(p) {
+		return nil
+	}
+	_, typed := obj.(*corev1.Secret)
+	if gvk := obj.GetObjectKind().GroupVersionKind(); !typed && (gvk.Group != "" || gvk.Kind != "Secret") {
+		return nil
+	}
+	return errors.New("the object is a Secret, and the environment policy forbids explicit secrets; reference a Secret created out of band instead")
 }
 
 // enforceExtraContainer checks one non-main container (an init container or

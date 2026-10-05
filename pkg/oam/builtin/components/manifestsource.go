@@ -472,7 +472,11 @@ func (c *manifestConfig) ApplyPolicy(p oam.Policy) error {
 // p and names the object in what it refuses; each caller adds the component.
 func enforceManifestPolicy(objs []client.Object, p oam.Policy) error {
 	for _, obj := range objs {
-		if err := enforceRenderedObjectPolicy(obj, p); err != nil {
+		err := enforceExplicitSecretObject(obj, p)
+		if err == nil {
+			err = enforceRenderedObjectPolicy(obj, p)
+		}
+		if err != nil {
 			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
 		}
 	}

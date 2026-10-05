@@ -86,6 +86,7 @@ var validTraitTypes = map[string]bool{
 	"certificate":          true,
 	"external-secret":      true,
 	"configmap":            true,
+	"secret":               true,
 	"networkpolicy":        true,
 	"cilium-networkpolicy": true,
 	"volsync":              true,

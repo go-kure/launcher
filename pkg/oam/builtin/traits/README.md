@@ -65,6 +65,7 @@ preflight reject every valid use of the trait.
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`, `name` (optional). The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. The objects are named after the component unless `name` is authored: the one `name` names the Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding, and is the `roleRef.name` of both bindings (go-kure/launcher#787; see Conventions). It names neither the subject nor the `app` label, which stay the component's. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
+| `secret` | Secret | A Secret the document carries (go-kure/launcher#786). `name` (required, a DNS-1123 subdomain), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. Applies to the pod spec of a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
 ### Storage
@@ -97,10 +98,10 @@ own trait handler (`RegisterTrait`) and applies the result to the delivery objec
 `prune-protection` and `force-replace` cover every object the component owns, by a delivery
 intent rather than by an annotation (go-kure/launcher#782). Each sets its field of
 `stack.DeliveryIntent` on the component's application and on every sub-application its other
-traits append to the bundle — the applications of `pvc`, `configmap`, `volsync`, `certificate`,
-`ingress`, `httproute`, `rbac`, `scaler`, `networkpolicy`, `cilium-networkpolicy` and
-`external-secret`. Trait order does not matter: both implement `oam.SubApplicationDecorator`, and
-the engine applies them to the component's sub-applications in a last build step, after every
+traits append to the bundle — the applications of `pvc`, `configmap`, `secret`, `volsync`,
+`certificate`, `ingress`, `httproute`, `rbac`, `scaler`, `networkpolicy`, `cilium-networkpolicy`
+and `external-secret`. Trait order does not matter: both implement `oam.SubApplicationDecorator`,
+and the engine applies them to the component's sub-applications in a last build step, after every
 trait of every component has run. A sibling group is delivered as one application, and that
 application takes each intent that any of its members has: a lowering rule that forwards the
 trait to one member only still covers the whole group, its sub-applications included.
@@ -751,7 +752,7 @@ carrying `security-context`), which would otherwise be wrongly rejected by `kure
 ## Trait objects under a Flux namespace
 
 Under `TransformContext.FluxNamespace` a trait's objects stay in the application namespace,
-except a `configmap` trait's ConfigMap or the Secret an `external-secret` trait's ExternalSecret
+except a `configmap` trait's ConfigMap, a `secret` trait's Secret, or the Secret an `external-secret` trait's ExternalSecret
 or a `certificate` trait's Certificate writes, when the component's own Flux object reads it by
 name from the namespace that object moves to: a `helmrelease`'s `valuesFrom`, a `helmrepository`'s
 `secretRef` or `certSecretRef` and the like. That one moves with it — the ExternalSecret or
@@ -761,7 +762,7 @@ the application namespace does not change (go-kure/launcher#740). The default
 SecretStore`) is resolved in the ExternalSecret's own namespace, so a store of that name must
 exist in the Flux namespace too. Likewise a Certificate's `ClusterIssuer` serves it anywhere, while
 a namespaced `Issuer` must exist in the Flux namespace. The transform cannot see which stores or
-issuers a cluster has, so it does not check this. The three sub-application
+issuers a cluster has, so it does not check this. The four sub-application
 configs name their object through `FluxNamespaceInput() (kind, name string)`; the component configs
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
 `pkg/oam` README for the full rule.
@@ -770,7 +771,45 @@ The `helm` component's `valuesMode: configMap` relies on this: its rule appends 
 `configmap` trait holding the values to the `helmrelease` it lowers to, and names that ConfigMap
 in `valuesFrom`, so it follows the HelmRelease (go-kure/launcher#702). Synthesized, the trait goes
 through the same `configmap` checks as an authored one (key validity, the size limit), and its
-ConfigMap is emitted after the HelmRelease.
+ConfigMap is emitted after the HelmRelease. Its `secretValues` works the same way through a
+synthesized `secret` trait (go-kure/launcher#786), appended after the `configmap` one.
+
+## The secret trait
+
+`secret` (go-kure/launcher#786) emits one Secret, owned by the component: its `app` label, the
+application namespace (or the Flux namespace, when the component's Flux object reads it by name,
+see above), and the component's pruning and replacement traits.
+
+- `stringData` values are strings and `data` values base64; both are emitted under `data`, which
+  is how the API stores them, so a manifest diff shows no plain text. A key in both is refused:
+  the API server would let `stringData` win silently.
+- `name` is the Secret's `metadata.name` and must be a DNS-1123 subdomain; anything else is
+  refused when the trait is applied.
+- Keys must be valid Secret keys (the ConfigMap key rule), and the decoded values may total at
+  most 1,048,576 bytes, the API server's Secret limit.
+- `type` is the Secret type, emitted as written (unset is `Opaque` on the cluster); the trait
+  does not check that the keys suit the type. `immutable` is emitted as written.
+- No refusal repeats a value: a message names the key and the type of what is wrong, and a base64
+  failure is reported without the decoder's text.
+
+**Security note.** The Secret is in the build output in clear form; base64 is an encoding, not
+encryption. The output is therefore as sensitive as the input document, wherever it is written.
+Encrypting it is left to the consumer. To keep a value out of both, use `external-secret`, or
+reference a Secret created out of band.
+
+**Policy.** A policy may forbid explicit secrets through the optional interface
+`oam.ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`). The trait's sub-application asks it
+in `ApplyPolicy` and, on `false`, fails the transform with a `ViolationError` naming the
+component: `secret "creds": the environment policy forbids explicit secrets; reference a Secret
+created out of band instead`. **The default is to allow**: a policy that does not implement the
+interface, `NoopPolicy` included, permits the trait. A consumer that must forbid Secrets in
+documents has to implement it. The `helm` component's `secretValues` and the `helmtemplate`
+kind's are held to the same answer, and so is a core Secret the `passthrough` or `manifests`
+component carries.
+
+`components.ParseSecretProperties` and `components.GenerateSecret` are the parse and generate
+pair, placed in the components package so a `secret` kind can be built on the same code, as the
+`configmap` kind and trait share theirs.
 
 ## Component attribution
 
@@ -888,7 +927,7 @@ the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
 
 Every `app` label and `app` selector a trait generates to identify its component — on
-the `configmap`, `pvc`, `rbac`, `scaler`, `ingress`, `httproute`, `networkpolicy` and
+the `configmap`, `secret`, `pvc`, `rbac`, `scaler`, `ingress`, `httproute`, `networkpolicy` and
 `external-secret` objects, and the PodDisruptionBudget and NetworkPolicy `podSelector`
 that pick the component's pods — is valued at `oam.ComponentLabelValue(<component>)`,
 through the unexported `componentLabels` (`labels.go`); `external-secret` calls the
