@@ -45,6 +45,12 @@ func kindObjectName(objectName, fallback string) string {
 	return fallback
 }
 
+// objectNameField names, in a refusal of a kind's own name rule, where an
+// object name that is not the component's came from: the author's `objectName`
+// or the Naming hook's answer. A handler is handed the resolved name only, and
+// its Generate a config, so it names both.
+const objectNameField = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "` + string(oam.NameRoleObject) + `")`
+
 func coreKind(kind string) schema.GroupKind { return schema.GroupKind{Kind: kind} }
 
 func appsKind(kind string) schema.GroupKind {

@@ -571,10 +571,12 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 	var provider any = handler
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 		provider = rule
-	} else if handler != nil {
+	} else if declaresEndpoints(handler) {
 		// As the transform does before ToApplicationConfig: a kind component's
 		// endpoint that selects by its object's name selects by the name the object
-		// gets (Component.ObjectName). Nothing is claimed.
+		// gets (Component.ObjectName). Nothing is claimed. A handler that declares
+		// no endpoints is not asked for a name: the answer is (nil, nil) whatever
+		// its component holds.
 		named, err := withObjectName(*comp, handler, "", "", &nameResolver{hook: naming, application: application})
 		if err != nil {
 			return nil, errors.Wrapf(err, "component %q", comp.Name)
@@ -603,6 +605,16 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 		}
 	}
 	return eps, nil
+}
+
+// declaresEndpoints reports whether handler is one componentEndpoints reads
+// endpoints from. A nil handler is not.
+func declaresEndpoints(handler ComponentHandler) bool {
+	switch handler.(type) {
+	case NamedEndpointProvider, EndpointProvider:
+		return true
+	}
+	return false
 }
 
 func (t *Transformer) findComponentHandler(componentType string) ComponentHandler {

@@ -71,15 +71,16 @@ type NamespaceConfig struct {
 }
 
 // validateNamespaceObjectName is validateNamespaceName for the name the
-// Namespace takes: the component's, or the `objectName` that names it apart
-// from the component, which is then the one held to the rule.
+// Namespace takes: the component's, or the one that names it apart from the
+// component, the author's `objectName` or the Naming hook's answer
+// (objectNameField), which is then the one held to the rule.
 func validateNamespaceObjectName(name, componentName string) error {
 	if name == componentName {
 		return validateNamespaceName(name)
 	}
 	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
 		return errors.Errorf("%s: %q is not a valid Namespace name, which must be a DNS-1123 label of at most %d characters: %s",
-			oam.ObjectNameProperty, name, validation.DNS1123LabelMaxLength, strings.Join(errs, "; "))
+			objectNameField, name, validation.DNS1123LabelMaxLength, strings.Join(errs, "; "))
 	}
 	return nil
 }
