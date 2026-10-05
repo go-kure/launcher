@@ -65,7 +65,7 @@ preflight reject every valid use of the trait.
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`, `name` (optional). The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject, except a `serviceaccount` component given an `objectName`: the subject is the account under that name. The objects are named after the component unless `name` is authored: the one `name` names the Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding, and is the `roleRef.name` of both bindings (go-kure/launcher#787; see Conventions). It names neither the subject nor the `app` label, which stay the component's. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
-| `secret` | Secret | A Secret the document carries (go-kure/launcher#786). `name` (required, a DNS-1123 subdomain), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
+| `secret` | Secret | A Secret the document carries (go-kure/launcher#786), the `secret` kind's twin. `name` (required, a DNS-1123 subdomain), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. Applies to the pod spec of a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod. On a component that generates none of these, `psaLevel` alone is accepted as a declaration and any other property is refused (see [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)). On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
 ### Storage
@@ -876,13 +876,18 @@ in `ApplyPolicy` and, on `false`, fails the transform with a `ViolationError` na
 component: `secret "creds": the environment policy forbids explicit secrets; reference a Secret
 created out of band instead`. **The default is to allow**: a policy that does not implement the
 interface, `NoopPolicy` included, permits the trait. A consumer that must forbid Secrets in
-documents has to implement it. The `helm` component's `secretValues` and the `helmtemplate`
-kind's are held to the same answer, and so is a core Secret the `passthrough` or `manifests`
-component carries.
+documents has to implement it. The `secret` kind component, the `helm` component's
+`secretValues` and the `helmtemplate` kind's are held to the same answer, and so is a core
+Secret the `passthrough` or `manifests` component carries.
 
-`components.ParseSecretProperties` and `components.GenerateSecret` are the parse and generate
-pair, placed in the components package so a `secret` kind can be built on the same code, as the
-`configmap` kind and trait share theirs.
+**The `secret` kind's twin.** `components.ParseSecretProperties` and
+`components.GenerateSecret` are the parse and generate pair, placed in the components package:
+the `secret` kind component (go-kure/launcher#790) runs the same two, as the `configmap` kind
+and trait share theirs. The trait's schema is the kind's plus `name`, so the same properties
+give the same Secret and the same refusals on both paths; only the ownership fields differ (the
+name, the labels, the namespace, the bundle). The trait names its Secret under no role and
+claims nothing, so a `secret` component and a `secret` trait that name one Secret are refused
+among the generated objects, with both named (`oam.CheckInDocumentCollisions`).
 
 ## Component attribution
 

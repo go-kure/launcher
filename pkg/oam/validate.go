@@ -85,6 +85,8 @@ var validComponentTypes = map[string]bool{
 	"horizontalpodautoscaler": true,
 	"poddisruptionbudget":     true,
 	"servicecidr":             true,
+
+	"secret": true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

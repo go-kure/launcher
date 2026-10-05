@@ -3,6 +3,7 @@ package traits_test
 import (
 	"encoding/base64"
 	"maps"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -49,6 +51,25 @@ func TestSecretHandler_CanHandle(t *testing.T) {
 	h := &traits.SecretHandler{}
 	if !h.CanHandle("secret") || h.CanHandle("configmap") || h.CanHandle("external-secret") {
 		t.Error("CanHandle must be true for secret only")
+	}
+}
+
+// TestSecretHandler_PropertySchema_IsTheKindsPlusName: the trait declares the
+// secret kind's properties, word for word, and `name`, which the kind takes
+// from its component.
+func TestSecretHandler_PropertySchema_IsTheKindsPlusName(t *testing.T) {
+	got := (&traits.SecretHandler{}).PropertySchema()
+	name, ok := got["name"]
+	if !ok || !name.Required || name.Type != oam.PropertyTypeString {
+		t.Errorf("name = %+v (declared %t), want a required string", name, ok)
+	}
+	delete(got, "name")
+	kind := (&components.SecretHandler{}).PropertySchema()
+	if _, own := kind["name"]; own {
+		t.Error("the secret kind declares name; its Secret is named after the component")
+	}
+	if len(kind) == 0 || !reflect.DeepEqual(got, kind) {
+		t.Errorf("the trait's properties beside name are %v, want the kind's %v", got, kind)
 	}
 }
 

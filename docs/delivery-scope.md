@@ -454,11 +454,11 @@ Explicit values are written into a Secret by `secretValues` under Flux delivery 
   goes under the top-level `global`, which reaches every dependency and is not printed.
 - **The `secret` trait** is new with this ticket (`pkg/oam/builtin/traits/secret.go`). It
   builds through the one Secret path, `ParseSecretProperties` and `GenerateSecret`
-  (`pkg/oam/builtin/components/secret.go`), which a `secret` kind of go-kure/launcher#790
-  (§6.2) can use.
+  (`pkg/oam/builtin/components/secret.go`), which the `secret` kind of go-kure/launcher#790
+  (§6.2) runs too.
 - **Policy:** `oam.ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`,
   `pkg/oam/policy.go`) is an interface a `Policy` may also implement. Where it answers
-  false these are refused: the `secret` trait, `secretValues` on `helm` and on
+  false these are refused: the `secret` trait, the `secret` kind, `secretValues` on `helm` and on
   `helmtemplate`, and a core Secret a `passthrough` or `manifests` component carries
   (`enforceExplicitSecretObject`, `enforce.go`; told by group and kind, whatever it holds).
   The author then references a Secret created out of band. A policy that does not
@@ -720,6 +720,19 @@ be closed at build time.
   - An unknown key inside an endpoint selector is refused by its path, as in the trait:
     the selector unmarshals itself and would drop a misspelt key, leaving the selector
     that matches everything. The positions are found from the Cilium types.
+- **Shipped: the `secret` kind** (`secret.go`), the `secret` trait's twin (§4.3).
+  - It projects a v1 Secret through the parser and the generator the trait runs
+    (`ParseSecretProperties`, `GenerateSecret`): `stringData`, `data`, `type`,
+    `immutable`. Every entry is emitted under `data`, base64 and not encrypted, and no
+    refusal repeats a value.
+  - It is held to the environment policy, unlike the other kinds of this group: a policy
+    that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses it, as it refuses
+    the trait.
+  - The trait names its Secret under no role, so a `secret` component and a `secret`
+    trait that name one Secret are refused among the generated objects with both named,
+    as a `configmap` component and trait are. The Secret a `helm` component generates for
+    `secretValues` is claimed under role `values-secret`, so a `secret` component under
+    that name is refused as a name collision.
 - **Shipped: `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`**
   (`servicecidr.go`, `poddisruptionbudget.go`, `horizontalpodautoscaler.go`), each the
   strict projection of its spec type, declaring its object and taking `objectName`.
@@ -791,10 +804,10 @@ be closed at build time.
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Missing kinds:** the inventory's `missing` rows (Secret, Pod, ServiceMonitor,
+- **Missing kinds:** the inventory's `missing` rows (Pod, ServiceMonitor,
   Gateway among them), and its `trait` rows, the
-  kinds reachable only as traits today (Ingress, HTTPRoute, Certificate, ExternalSecret,
-  NetworkPolicy, CiliumNetworkPolicy, Role and RoleBinding, ReplicationSource).
+  kinds reachable only as traits today (Certificate, ExternalSecret, Role and RoleBinding,
+  ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
 
 ---
@@ -954,7 +967,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler` and `secret` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

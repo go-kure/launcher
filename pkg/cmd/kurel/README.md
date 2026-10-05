@@ -108,8 +108,13 @@ build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
 components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `ingress`,
-`httproute`, `networkpolicy` and `cilium-networkpolicy` (go-kure/launcher#790)
-are registered the same way; the `<type>-component` fixtures build each. The
+`httproute`, `networkpolicy`, `cilium-networkpolicy` and `secret`
+(go-kure/launcher#790) are registered the same way; the `<type>-component`
+fixtures build each but `secret`. The `secret` kind is the `secret` trait's
+twin: it emits the same Secret from the same properties, under the component's
+name, and is refused under a policy that forbids explicit secrets. It has no
+fixture, which would be a Secret manifest with entries; `secret_twin_test.go`
+builds it through `kurel build` instead. The
 `ingress` and `httproute` kinds emit the authored object and, unlike the traits
 of the same names, no NetworkPolicy allow rule. The `networkpolicy` kind emits
 the authored spec and, unlike the trait of the same name, selects every pod of
