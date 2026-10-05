@@ -514,6 +514,15 @@ object and the later one are two. Under `LowerRaws`, which lowers several
 documents with one allocator, two documents may resolve one kind and name only where their
 `metadata.namespace` differs.
 
+A rule takes its object to land in the document's namespace, and reads no
+`NameSpec.Namespace`. A cluster-scoped object (a ClusterRole) has no namespace, and the rule
+says so with `NameSpec.ClusterScoped`. Its name is then one object whatever the document's
+namespace is: it is refused against a trait's cluster-scoped object of the same kind and name
+(the `rbac` trait's ClusterRole with `clusterWide`), and under `LowerRaws` against the same
+kind and name resolved for a document of another namespace. `ClusterScoped` is the one way to
+say an object has no namespace, for a rule and a trait handler alike: a `NameSpec` that sets
+both it and `Namespace` is refused.
+
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
 `poolerName` or the default. A consumer that sets `Naming` calls
@@ -583,7 +592,8 @@ A trait handler resolves a name with `(*Trait).ResolveName(NameSpec)`, on the tr
 `Apply` received. Only a trait the engine applies has a hook and a claim space: on a trait
 built outside a transform (a handler's `Apply` called directly) `ResolveName` validates an
 authored name and returns it or the default, the hook is not consulted and nothing is kept
-apart.
+apart. The handler names the namespace its object is generated in (`NameSpec.Namespace`), or
+sets `NameSpec.ClusterScoped` for an object that has none.
 
 ## Parsing
 

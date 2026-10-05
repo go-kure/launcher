@@ -521,6 +521,94 @@ func TestLoweringResolveName_TwoOfOneKind(t *testing.T) {
 	}
 }
 
+var clusterRoleKind = schema.GroupKind{Group: "rbac.authorization.k8s.io", Kind: "ClusterRole"}
+
+// A cluster-scoped object has no namespace (NameSpec.ClusterScoped): its name is
+// one object for two documents of two namespaces, and it is claimed with none,
+// so one resolved after lowering for the same kind and name is refused whatever
+// the document's namespace is.
+func TestLoweringResolveName_ClusterScoped(t *testing.T) {
+	authored := func(kind schema.GroupKind, clusterScoped bool) NameSpec {
+		return NameSpec{Role: NameRoleRBAC, Kind: kind, ClusterScoped: clusterScoped, Property: "roleName", Authored: "reader"}
+	}
+	// Two components of two documents, of namespaces "one" and "two", lowered
+	// with one allocator, each resolving spec.
+	acrossDocuments := func(spec NameSpec) error {
+		h := newLoweringHarness(nil)
+		one, two := h.lctx("db"), h.lctx("cache")
+		one.Origin.Namespace, two.Origin.Namespace = "one", "two"
+		if _, err := one.ResolveName("db", "reader", spec); err != nil {
+			t.Fatalf("ResolveName: %v", err)
+		}
+		_, err := two.ResolveName("cache", "reader", spec)
+		return err
+	}
+
+	t.Run("two documents of two namespaces", func(t *testing.T) {
+		err := acrossDocuments(authored(clusterRoleKind, true))
+		const want = `name collision: ClusterRole.rbac.authorization.k8s.io "reader" is named by ` +
+			`component "db" (role "rbac", set by roleName) and by ` +
+			`component "cache" (role "rbac", set by roleName); give one of them another name`
+		if err == nil || err.Error() != want {
+			t.Fatalf("err = %v\nwant %s", err, want)
+		}
+		// The control: a namespaced object of that name is two objects there.
+		role := schema.GroupKind{Group: clusterRoleKind.Group, Kind: "Role"}
+		if err := acrossDocuments(authored(role, false)); err != nil {
+			t.Fatalf("one Role name in two namespaces: %v", err)
+		}
+	})
+
+	t.Run("claimed with no namespace", func(t *testing.T) {
+		later := func(kind schema.GroupKind, clusterScoped bool) error {
+			h := newLoweringHarness(nil)
+			if _, err := h.lctx("db").ResolveName("db", "reader", NameSpec{Role: NameRoleRBAC, Kind: clusterRoleKind, ClusterScoped: true}); err != nil {
+				t.Fatalf("ResolveName: %v", err)
+			}
+			if err := h.namer.claimLowered("prod"); err != nil {
+				t.Fatalf("claimLowered: %v", err)
+			}
+			spec := NameSpec{Role: NameRoleRBAC, Kind: kind, ClusterScoped: clusterScoped, Default: "web", Property: "name", Authored: "db-reader"}
+			if !clusterScoped {
+				spec.Namespace = "prod"
+			}
+			owner := nameOwner{component: "web", role: spec.Role, trait: "rbac", authored: true, def: spec.Default}
+			_, err := (&nameResolver{application: "shop", claims: h.namer}).resolve(owner, spec)
+			return err
+		}
+
+		err := later(clusterRoleKind, true)
+		const want = `name collision: ClusterRole.rbac.authorization.k8s.io "db-reader" is named by ` +
+			`component "db" (role "rbac", its default) and by ` +
+			`component "web" traits[0] "rbac" (role "rbac", set by name); give one of them another name`
+		if err == nil || err.Error() != want {
+			t.Fatalf("err = %v\nwant %s", err, want)
+		}
+		// The control: the same kind and name in the document's namespace is not
+		// the cluster-scoped object.
+		if err := later(clusterRoleKind, false); err != nil {
+			t.Fatalf("a namespaced claim of that kind and name: %v", err)
+		}
+	})
+
+	t.Run("a namespace on a cluster-scoped spec", func(t *testing.T) {
+		const want = `naming: the NameSpec for role "rbac" is ClusterScoped and has Namespace "prod"; a cluster-scoped object has no namespace`
+		spec := NameSpec{Role: NameRoleRBAC, Kind: clusterRoleKind, ClusterScoped: true, Namespace: "prod", Default: "web"}
+
+		h := newLoweringHarness(nil)
+		if _, err := h.lctx("db").ResolveName("db", "reader", spec); err == nil || err.Error() != want {
+			t.Errorf("a lowering rule: err = %v\nwant %s", err, want)
+		}
+		if len(h.asked) != 0 || len(h.namer.lowered) != 0 {
+			t.Errorf("the refused spec asked the hook %d times and recorded %d names, want neither", len(h.asked), len(h.namer.lowered))
+		}
+		owner := nameOwner{component: "web", role: spec.Role, trait: "rbac", authored: true, def: spec.Default}
+		if _, err := (&nameResolver{application: "shop", claims: NewNameAllocator()}).resolve(owner, spec); err == nil || err.Error() != want {
+			t.Errorf("after lowering: err = %v\nwant %s", err, want)
+		}
+	})
+}
+
 // The names lowering rules resolved are claimed with the document's namespace
 // before any other, so one resolved after lowering that names the same object
 // is refused with both named, and one in another namespace or of another kind

@@ -233,12 +233,14 @@ func (c *rbacTraitConfig) resolveNames(trait *oam.Trait) error {
 		if clusterScoped && !c.ClusterWide {
 			continue
 		}
-		namespace := c.Namespace
+		groupKind := schema.GroupKind{Group: rbacv1.GroupName, Kind: kind}
+		var name string
+		var err error
 		if clusterScoped {
-			namespace = ""
+			name, err = resolveClusterObjectName(trait, oam.NameRoleRBAC, groupKind, "name", c.objectName, c.componentName)
+		} else {
+			name, err = resolveObjectName(trait, oam.NameRoleRBAC, groupKind, c.Namespace, "name", c.objectName, c.componentName)
 		}
-		name, err := resolveObjectName(trait, oam.NameRoleRBAC,
-			schema.GroupKind{Group: rbacv1.GroupName, Kind: kind}, namespace, "name", c.objectName, c.componentName)
 		if err != nil {
 			return err
 		}
