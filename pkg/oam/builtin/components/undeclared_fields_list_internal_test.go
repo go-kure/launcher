@@ -246,8 +246,11 @@ func TestDecodeManifestDocuments_UnregisteredListItemsAreDocuments(t *testing.T)
 		if err != nil {
 			t.Fatalf("control: with a declared field in its place: %v", err)
 		}
-		if _, ok := objs[0].(*appsv1.Deployment); !ok || len(objs) != 1 {
-			t.Errorf("control decoded %v, the first a %T; want the one *appsv1.Deployment", resourceNames(objs), objs[0])
+		// Not fatal: the nested list below is a case of its own.
+		if len(objs) != 1 {
+			t.Errorf("control decoded %v, want the one *appsv1.Deployment", resourceNames(objs))
+		} else if _, ok := objs[0].(*appsv1.Deployment); !ok {
+			t.Errorf("control decoded a %T, want a *appsv1.Deployment", objs[0])
 		}
 
 		// Inside a `v1` List inside the list, the item is named by both positions.
@@ -361,8 +364,11 @@ func TestDecodeManifestDocuments_UnregisteredListItemsAreDocuments(t *testing.T)
 		if err != nil {
 			t.Fatalf("control: %v", err)
 		}
-		if _, untyped := objs[0].(*unstructured.Unstructured); !untyped || len(objs) != 1 {
-			t.Errorf("control decoded %d objects, the first a %T; want the one unstructured example.com/v1 Deployment", len(objs), objs[0])
+		if len(objs) != 1 {
+			t.Fatalf("control decoded %d objects, want the one unstructured example.com/v1 Deployment", len(objs))
+		}
+		if _, untyped := objs[0].(*unstructured.Unstructured); !untyped {
+			t.Errorf("control decoded a %T, want an unstructured example.com/v1 Deployment", objs[0])
 		}
 	})
 
@@ -421,8 +427,11 @@ func TestDecodeManifestDocuments_UnregisteredListItemsAreDocuments(t *testing.T)
 				if err != nil {
 					t.Fatalf("decodeManifestDocuments: %v", err)
 				}
-				if _, ok := objs[0].(*corev1.ConfigMap); !ok || len(objs) != 1 {
-					t.Errorf("decoded %d objects, the first a %T; want the one *corev1.ConfigMap", len(objs), objs[0])
+				if len(objs) != 1 {
+					t.Fatalf("decoded %d objects, want the one *corev1.ConfigMap", len(objs))
+				}
+				if _, ok := objs[0].(*corev1.ConfigMap); !ok {
+					t.Errorf("decoded a %T, want a *corev1.ConfigMap", objs[0])
 				}
 			})
 		}
