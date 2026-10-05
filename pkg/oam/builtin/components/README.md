@@ -47,7 +47,7 @@ The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
 |------|------------|--------|----------|
 | `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
-| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap` | |
+| `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database` | | `dependency`, `placement` |
 
 `Transformer.Seal`, which every transform runs first, refuses a registry that holds a rule
@@ -100,9 +100,9 @@ reads it.
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
-| `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
+| `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
@@ -115,7 +115,7 @@ reads it.
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, and a workload, claim or autoscaler is held to the environment policy. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 
@@ -219,7 +219,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateSecret` | v1 Secret | missing | - | - | - |
+| `kubernetes.CreateSecret` | v1 Secret | trait | `secret` | hand-written parser | The trait builds through a generator of this package, so a `secret` kind can use the same path. The `helm` component's `secretValues` synthesizes the trait. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | missing | - | - | - |
@@ -2682,7 +2682,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `provider`, `region`, `prefix`; or a reference `{name, kind, namespace}` to an
   existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
   `values`, `valuesMode` (`inline` |
-  `configMap`), and the HelmRelease keys `interval`, `releaseName`,
+  `configMap`), `secretValues` (the sensitive part of the values tree, see below),
+  and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
     authored traits and annotations. A HelmRepository, GitRepository or Bucket
@@ -2724,6 +2725,76 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     kind's string-only typing never refuses them. Known gap, shared with authored traits
     (go-kure/launcher#757): an authored `configmap` trait on the same component that
     takes the same name is not refused, and both ConfigMaps are emitted.
+  - **`secretValues`** (go-kure/launcher#786) is a second values tree, for the
+    values that must not sit in the HelmRelease or in a ConfigMap. It is an object
+    like `values`; absent, `null` or empty it changes nothing. The `helmrelease`
+    kind has no such property: there, name a Secret in `valuesFrom`.
+    - *Under `delivery: flux`* the rule appends a `secret` trait to the
+      `helmrelease`, after its authored traits and after the values ConfigMap's
+      trait. The trait's Secret holds the tree under the key `values.json`,
+      serialized as the values ConfigMap's is, and is named
+      `<component>-secret-values-<first 10 hex digits of the sha256 of those
+      bytes>`, shortened past 253 bytes by the same rule
+      (`oam.ShortenNameWithSuffix`). A `valuesFrom` entry
+      `{kind: Secret, name: <it>, valuesKey: values.json}` is placed after the
+      values ConfigMap's entry and before the authored entries, so the order is:
+      values ConfigMap, values Secret, authored. No value of `secretValues` is
+      written to the HelmRelease or to the values ConfigMap. Being an ordinary
+      `secret` trait, it is checked by that trait (the 1 MiB limit), labelled
+      `app: <label value>`, emitted after the HelmRelease, and moved with the
+      release into the Flux namespace. A change in `secretValues` renames the
+      Secret and so changes the HelmRelease, which is what makes Flux upgrade the
+      release.
+    - *Under `delivery: template`* the tree is passed to the `helmtemplate`, which
+      merges it over `values` for the render (see **helmtemplate**). Nothing is
+      emitted for it: a value is in the output only where the chart renders it.
+    - *A path set in both `values` and `secretValues` is refused*, under either
+      delivery and either values mode:
+      `helm: auth.password is set in both values and secretValues; a path may be
+      set in only one of them`. Two objects at the same key are compared key by
+      key; anything else at a key both trees set (a scalar, a list, a null) is a
+      shared path. An empty key is a key like any other and is written `""` in
+      the message. Without the refusal the winner would depend on the values mode,
+      since Flux applies inline `spec.values` after every `valuesFrom` entry.
+    - *A key named `global` below the top level of `secretValues` is refused*,
+      under either delivery and either values mode, before anything is rendered or
+      emitted (go-kure/launcher#794, item 9):
+      `helm: secretValues: redis.global: a key named global is allowed only at the
+      top level, …`. Helm reads `<dependency>.global` as that dependency's globals.
+      Where their shape conflicts with the chart's own `global` at a key, a table
+      on one side and a plain value on the other, it drops the dependency's entry
+      and prints it in a warning that cannot be intercepted: in the build's log
+      under `delivery: template`, in the Flux controller's under `delivery: flux`.
+      Launcher does not read the chart, so it cannot tell a dependency from any
+      other key: a key named `global` below the top level that is not a
+      dependency's globals cannot be given through `secretValues` either, only
+      through `values`. Put a sensitive global under the top-level `global`, which
+      every dependency receives and Helm does not print. The tree is searched as
+      JSON, through objects only: a key in a list element is not refused. The
+      message names the path by its keys and no value.
+    - *Policy.* A policy that forbids explicit secrets
+      (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README) refuses a component
+      with `secretValues`, under either delivery, with a violation naming the
+      component. A policy that does not implement that optional interface allows
+      it.
+    - *No refusal of the property repeats a value.* It names `secretValues`, a
+      path by its keys, or the type of a wrong value, and never wraps an encoding
+      or decoding error, which could quote one. Under `delivery: template` an
+      error about an object the chart rendered is another matter (see
+      **helmtemplate**, "not covered").
+
+    **Security note.** `secretValues` keeps sensitive values out of the
+    HelmRelease and the values ConfigMap. It does not encrypt them. The generated
+    Secret is in the build output in clear form (`data` is base64, an encoding):
+    the output is exactly as sensitive as the input document, and so is every
+    place it is written to, a Git repository or an OCI artifact included.
+    Encrypting it is the consumer's business (SOPS or the like, on the written
+    manifests). The Secret's name, and the HelmRelease naming it, carry 40 bits of
+    a digest of the tree, so whoever reads either can test a guess of the whole
+    tree against it. To keep a value out of the document and the output altogether,
+    create the Secret out of band (an `external-secret` trait, a sealed or
+    externally managed Secret) and name it in `valuesFrom`, or use the chart's own
+    existing-secret values.
   - An inline source also emits the source: a `helmrepository` with only the URL
     for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
     A Git repository needs `kind: GitRepository` set (an `http(s)://` URL alone
@@ -2764,9 +2835,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     references by `source.name` is the author's own component and the rule
     orders nothing after it.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
-    `chart`, `version`, `values` and an authored `releaseName`, which the
-    `helmtemplate` checks and, when unset, defaults to the component name, the
-    release name the `delivery: flux` HelmRelease carries too
+    `chart`, `version`, `values`, `secretValues` and an authored `releaseName`,
+    which the `helmtemplate` checks and, when unset, defaults to the component
+    name, the release name the `delivery: flux` HelmRelease carries too
     (go-kure/launcher#785; see **helmrelease**). No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
@@ -2990,6 +3061,52 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   checks are shared with the `helm` rule's inline source rather than copied. `scopeOverrides`
   states the scope of a kind the chart renders (see **Scope overrides** below).
 
+  `secretValues` (go-kure/launcher#786) is a second open object, for the sensitive part of the
+  values tree; it is what the `helm` rule forwards its own `secretValues` as. The chart is
+  rendered with `secretValues` merged over `values`, object by object, with the authored value
+  types. The terminal emits nothing for it, so a value is in the output only where the chart
+  renders it: a chart that puts it in a Secret emits that Secret in clear form, and one that
+  puts it in a ConfigMap or an environment variable emits it there. The output is as sensitive
+  as the input; see the security note under **helm**. Further:
+  - a path set in both trees is refused, naming the path
+    (`helmtemplate: auth.password is set in both values and secretValues; …`), by the rule the
+    `helm` component states;
+  - a key named `global` below the top level is refused, naming the path, before any fetch
+    (`helmtemplate: secretValues: redis.global: a key named global is allowed only at the top
+    level, …`), by the rule the `helm` component states and with its trade-off: such a key that
+    is not a dependency's globals can be given through `values` only, and a sensitive global
+    goes under the top-level `global`;
+  - a policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses the component
+    in `ApplyPolicy`, before any fetch
+    (`helmtemplate: secretValues is set and the environment policy forbids explicit secrets; …`).
+    **Not covered:** a Secret the chart itself renders. It is emitted under such a policy, where
+    the `passthrough` and `manifests` components refuse a Secret they carry: its content comes
+    from the chart and its values, and most charts render one;
+  - a render or decode failure is not reported as Helm reports it, since a template error can
+    quote a value (`fail`, `required`, a YAML parse error showing the line). The chart is
+    rendered a second time with `values` alone. If that fails too, its error is the one
+    reported, after `rendering chart with secretValues failed; the cause is withheld because it
+    can repeat a sensitive value. Without them it fails with: …`. If it succeeds, the message is
+    only `rendering chart with secretValues failed, and without them it renders; the cause is
+    withheld because it can repeat a sensitive value`. To debug such a chart, render it
+    with placeholder values in `values`. The second render repeats the fetch;
+  - *not covered:* an error about a rendered object. No check that runs on what the chart
+    rendered, once it has decoded, scrubs its error. It names the object it refuses by kind
+    and name, and can quote any part of the object it refuses or locates the refusal by. The
+    policy checks (see **Policy**) quote a container's or a volume's name, an image reference,
+    a resource quantity, a capability; the transform's component label quotes the key of a
+    label that is not a string. So any part of a rendered object can reach an error: a chart
+    that builds one from a sensitive value has it quoted there. The refusal of a field the kind's type does not
+    declare is not among them: it is a decode failure, withheld as above. The refusal of a
+    `scopeOverrides` entry that contradicts a CustomResourceDefinition the chart renders (see
+    **Scope overrides** below) is such an error and is not withheld: it names the kind, the
+    object's name and the two scopes, never a value;
+  - Helm's own warnings about a values conflict quote the value Helm drops. With the refusal
+    above that is never a value of `secretValues`: for a top-level `global` it is the
+    dependency's `global` entry from `values`, and for a dependency's ordinary key it is the
+    dependency's default. A test pins both, each way round, on the process's standard log and
+    its default `slog` logger.
+
   **Release name.** `releaseName` is the render's `.Release.Name`. Unset, it is the default the
   `helmrelease` terminal writes to `spec.releaseName` (go-kure/launcher#785): the component
   name, and for a name over 53 characters, Flux helm-controller's shortened form of it — its
@@ -3009,11 +3126,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   go-kure/launcher#776 every render used kure's default `release`; the project is pre-GA, so the
   changed object names of an existing template-rendered chart carry no compatibility shim.
 
-  **Decoding.** `values` and `scopeOverrides` are split off, and the rest of the property map is decoded with
+  **Decoding.** `values`, `secretValues` and `scopeOverrides` are split off, and the rest of the property map is decoded with
   `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
   name, as is a wrongly typed value. `values` itself reaches the render exactly as authored, with
   its YAML-decoded value types, rather than the strict decoder's `json.Number` re-reading, which
-  a chart template comparing a value with a number would treat differently. The schema declares
+  a chart template comparing a value with a number would treat differently; `secretValues` likewise.
+  A `secretValues` that is not an object is refused by its type, never by its content. The schema declares
   the same keys, with `source` closed to `url` and `kind`, and a test ties it to the struct. Keys
   match case-insensitively in the handler, as in `encoding/json`; schema validation, which a
   `kurel build` runs first, is exact.
@@ -4085,6 +4203,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the field (`passthrough: object Deployment "demo/web":
   spec.template.spec.containers[0] "app": …`).
 
+  A core Secret is refused under a policy that forbids explicit secrets
+  (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README), as the `secret` trait is
+  (go-kure/launcher#794, item 2): `passthrough: object Secret "demo/creds": the object is a
+  Secret, and the environment policy forbids explicit secrets; …`. The check does not read
+  what the Secret holds, so one with no entry is refused too, and the message quotes nothing
+  of the object. A policy that does not implement the interface, and no policy, allow it.
+  **Breaking** only under a policy that answers `false`: a `passthrough` Secret built under
+  it before.
+
   The object is authored as a map and the check reads Go types, so an object whose group,
   version and kind kure's scheme registers is decoded as that kind **for the check only**.
   What is emitted stays the authored map, so a field the Go type does not declare is
@@ -4189,6 +4316,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
   holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
   before.
+
+  A core Secret a `manifests` source yields, `inline` or fetched, is refused under a policy
+  that forbids explicit secrets (`oam.ExplicitSecretPolicy`), as the `secret` trait and a
+  `passthrough` Secret are (go-kure/launcher#794, item 10): `manifest source: object Secret
+  "demo/creds": the object is a Secret, and the environment policy forbids explicit
+  secrets; …`. The check does not read what the Secret holds, and the message quotes
+  nothing of it. **Breaking** only under a policy that answers `false`. **Not covered:** a
+  Secret a chart renders under template delivery (`helmtemplate`, `helm` with
+  `delivery: template`), whose content comes from the chart and its values; the document's
+  own sensitive values are refused there where they are set (`secretValues`).
 
   When the check runs depends on the source. An `inline` source is checked by
   `ApplyPolicy`, the transform's policy step, and the refusal is that step's
@@ -4484,7 +4621,7 @@ byte-identical, and projects a longer one onto a readable prefix of at most 52 c
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
-characters; the `helm` values ConfigMap does (a values
+characters; the `helm` values ConfigMap and values Secret do (a values
 ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.

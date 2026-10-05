@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack"
@@ -21,9 +22,10 @@ import (
 // which the render code returns unprefixed (chartRender.render).
 const helmTemplateType = "helmtemplate"
 
-// helmTemplateValuesKey is the one property the strict decode splits off: the
-// Helm values tree, which reaches the render exactly as authored (see
-// helmTemplateValues).
+// helmTemplateValuesKey is the Helm values tree, which the strict decode splits
+// off and which reaches the render exactly as authored (see
+// helmTemplateObject). helmSecretValuesKey, the sensitive part of the tree, is
+// split off the same way, so its content never reaches a decode error.
 const helmTemplateValuesKey = "values"
 
 // HelmTemplateHandler handles the kind-named `helmtemplate` component: a Helm
@@ -40,10 +42,10 @@ func (h *HelmTemplateHandler) CanHandle(componentType string) bool {
 }
 
 // PropertySchema declares exactly the keys helmTemplateProperties decodes plus
-// values and scopeOverrides, so authored-property validation and the handler's
-// strict decode admit the same set: source (url, kind), chart, version,
-// releaseName, values and scopeOverrides. A test ties this schema to the
-// struct.
+// values, secretValues and scopeOverrides, so authored-property validation and
+// the handler's strict decode admit the same set: source (url, kind), chart,
+// version, releaseName, values, secretValues and scopeOverrides. A test ties
+// this schema to the struct.
 func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
@@ -55,17 +57,21 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 				"kind": {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "OCIRepository"}, Description: "Source kind. Inferred from the URL scheme when unset (oci:// is OCIRepository, anything else HelmRepository); when set, it must agree with the scheme."},
 			},
 		},
-		"chart":           {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
-		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
-		"releaseName":     {Type: oam.PropertyTypeString, Description: "The render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, as a Helm release name is. Defaults to the release name Flux gives a HelmRelease named after the component: the component name, a name over 53 characters shortened as Flux shortens it (its first 40 characters, '-', and 12 hex digits of its SHA-256)."},
-		"values":          {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		"chart":       {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
+		"version":     {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
+		"releaseName": {Type: oam.PropertyTypeString, Description: "The render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, as a Helm release name is. Defaults to the release name Flux gives a HelmRelease named after the component: the component name, a name over 53 characters shortened as Flux shortens it (its first 40 characters, '-', and 12 hex digits of its SHA-256)."},
+		"values":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		helmSecretValuesKey: {
+			Type: oam.PropertyTypeObject, AdditionalProperties: true,
+			Description: "Sensitive part of the Helm values tree, merged over values for the client-side render and written nowhere else by this component; whatever the chart renders from it is in the output in clear form. A path set in both values and secretValues is refused, and so is a key named global below the top level. Must be representable as JSON. An environment policy may forbid it.",
+		},
 		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
 	}
 }
 
 // helmTemplateProperties is the property surface the strict decode checks,
-// values and scopeOverrides excepted, which are split off before it (see
-// ToApplicationConfig). Any key it does not declare, at any depth, is refused — in
+// values, secretValues and scopeOverrides excepted, which are split off before
+// it (see ToApplicationConfig). Any key it does not declare, at any depth, is refused — in
 // particular targetNamespace (this terminal renders into the application
 // namespace), every property only a Flux-reconciled release reads (interval,
 // driftDetection, install, upgrade, valuesFrom, valuesMode), the helm rule's
@@ -85,24 +91,30 @@ type helmTemplateSource struct {
 }
 
 // ToApplicationConfig decodes the component's properties strictly, with
-// scopeOverrides and values split off first, and checks the inline source:
-// source.url required, the kind inferred from or checked against the URL
-// scheme, chart required for a HelmRepository, version required for an
-// OCIRepository, values an object that encodes as JSON, and the release name,
-// authored or defaulted from the component name as Flux defaults a
-// HelmRelease's, a valid Helm release name (templateReleaseName).
-// scopeOverrides is read as the manifests component reads its own
-// (parseScopeOverrides), with the same refusals of a malformed entry.
+// scopeOverrides, values and secretValues split off first, and checks the
+// inline source: source.url required, the kind inferred from or checked against
+// the URL scheme, chart required for a HelmRepository, version required for an
+// OCIRepository, values and secretValues each an object that encodes as JSON,
+// with no path set in both and no key named global below the top level of
+// secretValues, and the release name, authored or defaulted from
+// the component name as Flux defaults a HelmRelease's, a valid Helm release
+// name (templateReleaseName). scopeOverrides is read as the manifests component
+// reads its own (parseScopeOverrides), with the same refusals of a malformed
+// entry.
 func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	overrides, rest, err := parseScopeOverrides(component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("%s: %w", helmTemplateType, err)
 	}
-	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](rest, helmTemplateValuesKey)
+	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](rest, helmTemplateValuesKey, helmSecretValuesKey)
 	if err != nil {
 		return nil, errors.Errorf("%s: properties do not decode: %w", helmTemplateType, err)
 	}
-	values, err := helmTemplateValues(owned)
+	values, err := helmTemplateObject(owned, helmTemplateValuesKey)
+	if err != nil {
+		return nil, err
+	}
+	secretValues, err := helmTemplateObject(owned, helmSecretValuesKey)
 	if err != nil {
 		return nil, err
 	}
@@ -110,15 +122,16 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 		return nil, errors.Errorf("%s: source is required", helmTemplateType)
 	}
 	cfg := &HelmTemplateConfig{
-		Name:        component.Name,
-		Namespace:   namespace,
-		SourceURL:   props.Source.URL,
-		SourceKind:  props.Source.Kind,
-		Chart:       props.Chart,
-		Version:     props.Version,
-		ReleaseName: props.ReleaseName,
-		Values:      values,
-		renderChart: helm.RenderChart,
+		Name:         component.Name,
+		Namespace:    namespace,
+		SourceURL:    props.Source.URL,
+		SourceKind:   props.Source.Kind,
+		Chart:        props.Chart,
+		Version:      props.Version,
+		ReleaseName:  props.ReleaseName,
+		Values:       values,
+		SecretValues: secretValues,
+		renderChart:  helm.RenderChart,
 
 		ScopeOverrides: overrides,
 	}
@@ -132,27 +145,33 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	return cfg, nil
 }
 
-// helmTemplateValues reads the values key split off before the strict decode.
-// Absent, or null (typed or not), means no values; anything else must be an
-// object. The map is kept exactly as authored, with the YAML-decoded value
+// helmTemplateObject reads key, values or secretValues, from the keys split off
+// before the strict decode. Absent, or null (typed or not), means none; anything
+// else must be an object, and a refusal names the value's type, never the
+// value. The map is kept exactly as authored, with the YAML-decoded value
 // types, rather than taken from the strict decoder, whose json.Number numbers a chart template would compare and
 // print differently. The owned split matches keys case-insensitively, so two
 // spellings of the key are refused rather than one silently winning.
-func helmTemplateValues(owned map[string]any) (map[string]any, error) {
-	if len(owned) > 1 {
-		return nil, errors.Errorf("%s: %s is given more than once", helmTemplateType, helmTemplateValuesKey)
-	}
-	for _, v := range owned {
-		if oam.IsNullValue(v) {
-			return nil, nil
+func helmTemplateObject(owned map[string]any, key string) (map[string]any, error) {
+	var found []any
+	for k, v := range owned {
+		if strings.EqualFold(k, key) {
+			found = append(found, v)
 		}
-		m, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("%s: %s: must be an object, got %T", helmTemplateType, helmTemplateValuesKey, v)
-		}
-		return m, nil
 	}
-	return nil, nil
+	switch {
+	case len(found) == 0:
+		return nil, nil
+	case len(found) > 1:
+		return nil, errors.Errorf("%s: %s is given more than once", helmTemplateType, key)
+	case oam.IsNullValue(found[0]):
+		return nil, nil
+	}
+	m, ok := found[0].(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: %s: must be an object, got %T", helmTemplateType, key, found[0])
+	}
+	return m, nil
 }
 
 // HelmTemplateConfig implements stack.ApplicationConfig for helmtemplate
@@ -194,6 +213,13 @@ type HelmTemplateConfig struct {
 	// Values is the Helm values tree handed to the render as-is. It must be
 	// representable as JSON.
 	Values map[string]any
+	// SecretValues is the sensitive part of the values tree
+	// (go-kure/launcher#786), merged over Values for the render and kept out of
+	// every error this config returns. It must be representable as JSON, share
+	// no path with Values and carry no key named global below its top level
+	// (refuseNestedGlobal). A policy that forbids explicit secrets refuses a
+	// config that sets it (ApplyPolicy).
+	SecretValues map[string]any
 	// ScopeOverrides states the scope of a kind the chart renders, by
 	// apiVersion and kind: manifest.ScopeNamespaced or manifest.ScopeCluster,
 	// any other value is refused. The namespace stamp reads it
@@ -229,6 +255,15 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 	if _, err := json.Marshal(c.Values); err != nil {
 		return chartSource{}, errors.Errorf("%s: values is not representable as JSON: %w", helmTemplateType, err)
 	}
+	if len(c.SecretValues) > 0 {
+		// No message carries a value: the encoding error is not wrapped.
+		if err := refuseNestedGlobal(helmTemplateType, c.SecretValues); err != nil {
+			return chartSource{}, err
+		}
+		if err := refuseSharedValuePath(helmTemplateType, c.Values, c.SecretValues); err != nil {
+			return chartSource{}, err
+		}
+	}
 	releaseName, err := templateReleaseName(helmTemplateType, c.ReleaseName, c.Name)
 	if err != nil {
 		return chartSource{}, err
@@ -238,7 +273,7 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 			return chartSource{}, errors.Errorf("%s: the scope override for %s %s is neither Namespaced nor Cluster", helmTemplateType, gvk.GroupVersion().String(), gvk.Kind)
 		}
 	}
-	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace, ReleaseName: releaseName, ScopeOverrides: c.ScopeOverrides}, nil
+	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, SecretValues: c.SecretValues, Namespace: c.Namespace, ReleaseName: releaseName, ScopeOverrides: c.ScopeOverrides}, nil
 }
 
 // ensureRendered checks c and renders its chart, once: Generate and

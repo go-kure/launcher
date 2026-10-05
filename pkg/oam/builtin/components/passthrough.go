@@ -286,9 +286,12 @@ func (c *PassthroughConfig) ApplyPolicy(p oam.Policy) error {
 // enforcePassthroughPolicy checks the object passthrough emits against p and
 // names the object in what it refuses; each caller adds the component.
 func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error {
-	obj, err := policyObject(u)
+	err := enforceExplicitSecretObject(u, p)
 	if err == nil {
-		err = enforceRenderedObjectPolicy(obj, p)
+		var obj client.Object
+		if obj, err = policyObject(u); err == nil {
+			err = enforceRenderedObjectPolicy(obj, p)
+		}
 	}
 	if err != nil {
 		return errors.Wrapf(err, "passthrough: object %s", renderedObjectRef(u))
