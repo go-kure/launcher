@@ -289,3 +289,95 @@ func TestReservedMetadataKeys_EveryCarrier(t *testing.T) {
 		})
 	}
 }
+
+// TestReservedMetadataKeys_NullEntryIsAbsent: an annotation authored with a
+// null value is absent (go-kure/launcher#790), under a key the consumer
+// reserved like under any other. The object carries no such key, so nothing is
+// refused; the same key with a value is. Held for the two traits whose
+// annotations map is read entry by entry.
+func TestReservedMetadataKeys_NullEntryIsAbsent(t *testing.T) {
+	const reserved = "platform.example/zone"
+	carriers := map[string]struct {
+		kind  string
+		trait string // %s is the value authored under the reserved key
+	}{
+		"an ingress trait's annotation": {kind: "Ingress", trait: `        - type: ingress
+          properties:
+            rules:
+              - host: shop.example.com
+                paths:
+                  - path: /
+            annotations:
+              platform.example/zone: %s
+              example.com/team: checkout
+`},
+		"an httproute trait's annotation": {kind: "HTTPRoute", trait: `        - type: httproute
+          properties:
+            parentRefs:
+              - name: my-gateway
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: /
+            annotations:
+              platform.example/zone: %s
+              example.com/team: checkout
+`},
+	}
+
+	generate := func(t *testing.T, trait, value string) ([]oam.GeneratedApplication, error) {
+		t.Helper()
+		doc := "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Application\nmetadata:\n  name: shop\n  namespace: default\nspec:\n  components:\n" +
+			"    - name: carrier\n      type: webservice\n      properties:\n        image: ghcr.io/example/web:v1.0.0\n        port: 8080\n      traits:\n" +
+			fmt.Sprintf(trait, value)
+		transformer := newBuiltinTransformer()
+		app, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes())
+		if err != nil {
+			t.Fatalf("parsing: %v\n%s", err, doc)
+		}
+		if err := transformer.ValidateAuthoredProperties(app); err != nil {
+			t.Fatalf("validating: %v", err)
+		}
+		cluster, err := transformer.Transform(app, oam.TransformContext{
+			Domain:               kurelDomain,
+			ReservedMetadataKeys: []string{"platform.example/"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return oam.GenerateApplications(cluster)
+	}
+
+	for name, tc := range carriers {
+		t.Run(name, func(t *testing.T) {
+			if _, err := generate(t, tc.trait, "a"); !errors.Is(err, oam.ErrReservedMetadataKey) {
+				t.Fatalf("with a value under %s: %v, want ErrReservedMetadataKey", reserved, err)
+			}
+
+			generated, err := generate(t, tc.trait, "null")
+			if err != nil {
+				t.Fatalf("with a null under %s: %v, want the entry absent and nothing refused", reserved, err)
+			}
+			found := false
+			for _, app := range generated {
+				for _, obj := range app.Objects {
+					if (*obj).GetObjectKind().GroupVersionKind().Kind != tc.kind {
+						continue
+					}
+					found = true
+					annotations := (*obj).GetAnnotations()
+					if v, written := annotations[reserved]; written {
+						t.Errorf("%s carries %s: %q; a null entry is absent", tc.kind, reserved, v)
+					}
+					if v := annotations["example.com/team"]; v != "checkout" {
+						t.Errorf("%s carries example.com/team: %q, want %q", tc.kind, v, "checkout")
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no %s among the generated objects", tc.kind)
+			}
+		})
+	}
+}

@@ -179,10 +179,14 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	// Optional: additional annotations on the generated HTTPRoute. Mirrors
 	// IngressHandler.parseProperties's identical block (ingress.go) — annotations
 	// are a generic Kubernetes concept, not nginx-ingress-specific, so both
-	// controllerType paths support them the same way.
+	// controllerType paths support them the same way. A null value is absent
+	// there as here.
 	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
+			if oam.IsNullValue(v) {
+				continue
+			}
 			config.Annotations[k] = fmt.Sprintf("%v", v)
 		}
 	}

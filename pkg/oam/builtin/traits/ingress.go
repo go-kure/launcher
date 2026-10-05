@@ -324,10 +324,14 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.Scope = scope
 	}
 
-	rawAnnotations, _ := props["annotations"].(map[string]any)
-	if rawAnnotations != nil {
+	// An annotation authored with a null value is absent, per the package's
+	// null contract: it is not written as the text "<nil>".
+	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
+			if oam.IsNullValue(v) {
+				continue
+			}
 			config.Annotations[k] = fmt.Sprintf("%v", v)
 		}
 	}
@@ -338,7 +342,8 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	// expose rule refuses the same before it emits the trait, naming the
 	// property it writes the value from; this covers a rendering of the ingress
 	// capability. An authored null states no value, as it does for the expose
-	// rule, and the platform's is written.
+	// rule: it is absent from the authored annotations above, and the
+	// platform's is written.
 	if raw, ok := props[platformAnnotationsProperty]; ok && !oam.IsNullValue(raw) {
 		platform, err := platformAnnotationsOf(raw)
 		if err != nil {
@@ -347,7 +352,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.platformAnnotations = make(map[string]string, len(platform))
 		for _, k := range slices.Sorted(maps.Keys(platform)) {
 			v := platform[k]
-			if authored, ok := config.Annotations[k]; ok && authored != v && !oam.IsNullValue(rawAnnotations[k]) {
+			if authored, ok := config.Annotations[k]; ok && authored != v {
 				return nil, errors.Errorf("annotations.%s: %q is not the value the platform sets for this annotation (%q, %s) and cannot override it; remove the annotation",
 					k, authored, v, platformAnnotationsProperty)
 			}
