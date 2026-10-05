@@ -170,15 +170,16 @@ func (HelmRule) ContractMetadata() oam.ContractMetadata { return contract(helmTy
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the release
 // ("helmrelease") or the rendered chart ("helmtemplate"), the Flux source the
-// rule generates for an inline chart location, and the "configmap" trait that
-// carries a release's values.
+// rule generates for an inline chart location, the "configmap" trait that
+// carries a release's values and the "secret" trait that carries its
+// secretValues.
 func (HelmRule) LoweringTargets() oam.LoweringTargets {
 	return oam.LoweringTargets{
 		ComponentTypes: []string{
 			"helmrelease", helmTemplateType,
 			"helmrepository", "ocirepository", "gitrepository", "bucket",
 		},
-		TraitTypes: []string{"configmap"},
+		TraitTypes: []string{"configmap", "secret"},
 	}
 }
 

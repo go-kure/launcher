@@ -45,6 +45,9 @@ func (h *ExternalSecretHandler) ContractMetadata() oam.ContractMetadata {
 func (h *ConfigMapHandler) ContractMetadata() oam.ContractMetadata { return contract("configmap") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *SecretHandler) ContractMetadata() oam.ContractMetadata { return contract(secretTraitType) }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *NetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("networkpolicy")
 }

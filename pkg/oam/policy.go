@@ -1,7 +1,10 @@
 package oam
 
 // Policy provides environment-level constraints and defaults for OAM component
-// and trait handlers. Handlers call its methods; they must not type-assert.
+// and trait handlers. Handlers call its methods; they must not type-assert. A
+// constraint added after the interface was fixed is an optional interface
+// beside it (ExplicitSecretPolicy), asked through its own pkg/oam function, so
+// an existing Policy implementation keeps compiling.
 //
 // The 23 typed accessor methods correspond to every piece of data that handlers
 // currently access via the downstream runtime's *api.EnvironmentPolicy. See the finalized design
@@ -48,6 +51,30 @@ type Policy interface {
 	// Forbidden means no forbids. Forbidden wins when both are set and overlap.
 	AllowedContainerCapabilities() []string
 	ForbiddenContainerCapabilities() []string
+}
+
+// ExplicitSecretPolicy is an optional interface of a Policy: whether a document
+// may carry secret material itself, which then lands in the build output as a
+// Secret (base64-encoded, not encrypted) or in a chart rendered at build time.
+// The built-in sources of such material are the secret trait, the secretValues
+// of a helm or helmtemplate component (go-kure/launcher#786), and a core Secret
+// the passthrough or manifests component carries (go-kure/launcher#794).
+//
+// A Policy that does not implement it allows explicit secrets, and so does
+// NoopPolicy: the interface exists so that adding the constraint changes
+// nothing for a consumer that has not asked for it. A consumer that forbids
+// them returns false, and its authors reference a Secret created out of band
+// instead.
+type ExplicitSecretPolicy interface {
+	AllowExplicitSecrets() bool
+}
+
+// ExplicitSecretsAllowed reports whether policy allows a document to carry
+// secret material itself: false only for a policy that implements
+// ExplicitSecretPolicy and forbids it.
+func ExplicitSecretsAllowed(policy Policy) bool {
+	p, ok := policy.(ExplicitSecretPolicy)
+	return !ok || p.AllowExplicitSecrets()
 }
 
 // Enforceable is implemented by component and trait ApplicationConfig types that
