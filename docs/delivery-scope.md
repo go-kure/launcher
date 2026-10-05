@@ -844,6 +844,18 @@ its text:
     not checked, and a digest without a tag passes; CloudNativePG's own rules on
     `imageName` are left to the operator. Breaking for a document, a chart or a source
     that names an untagged or `:latest` image in one of those fields.
+  - The `cnpg-cluster` and `cnpg-pooler` kinds refuse a string their CRD requires and
+    bounds (a minimum length, an enumeration, a pattern) that the Go type writes as `""`
+    when it is unauthored under an authored parent: eleven of a Cluster (among them
+    `replica.source`, `postgresql.synchronous.method` and
+    `backup.barmanObjectStore.destinationPath`; the list is in the components README) and
+    the `key` of a Pooler's `pgbouncer.imageCatalogRef`. An authored empty one is written
+    and left to the API server. A test derives, for the cert-manager and CloudNativePG
+    kinds, every field the type writes unauthored as a zero value the CRD's own rule
+    refuses (23) and holds each to an answer shown with the CRD's validator
+    (`TestKindComponents_NullRequired`): these twelve, six a kind already refused, and
+    five a kind writes a default for. Breaking for a document that leaves one of the
+    twelve out; the API server refused its object.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`

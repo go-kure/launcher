@@ -142,8 +142,9 @@ func pruneNullsAsAPIServer(value any, schema *spec.Schema) {
 	}
 }
 
-// nullRequiredRow is the answer for one required field a kind's type writes
-// unauthored in a form the CRD refuses.
+// nullRequiredRow is the answer for one field a kind's type writes unauthored
+// in a form the CRD refuses: a required field written as null, or a field
+// written as a zero value the CRD's own rule for the value refuses.
 type nullRequiredRow struct {
 	// path is the field's json path, with [] for a list element, and at the
 	// path of the one the properties below hold.
@@ -157,18 +158,29 @@ type nullRequiredRow struct {
 	// the kind builds and the CRD accepts.
 	reason   string
 	authored any
-	// writesEmpty says the type writes the field as an empty string and not
-	// as null, and the schema's own rule refuses that value. Such a field is
-	// not of the set the test derives.
-	writesEmpty bool
+	// writesZero says the row is of the second set: the type writes the field
+	// as its zero value, an empty string or 0, and not as null, and the
+	// schema's own rule for the value refuses that one.
+	writesZero bool
+	// refusesEmpty says the kind refuses an authored empty string at the field
+	// as it refuses the omission, where the other kinds leave that value to
+	// the API server.
+	refusesEmpty bool
 
 	// Not refused: built is the JSON the kind's object carries at the field,
 	// and why the reason the CRD accepts the object.
 	built, why string
 }
 
-// nullRequiredKind is one kind component with a row for every required field
-// its type writes as null.
+// nullRequiredKind is one kind component with a row for every field of the two
+// sets TestKindComponents_NullRequired derives for it: the required fields its
+// type writes as null, and the fields its type writes as a zero value the CRD
+// refuses. A row of the second set says by its comment which list of the kind
+// refuses the omission, or by its why what the kind does in its place.
+//
+// A kind added to the table brings its rows for all three: the required fields
+// written as null, the fields written as a refused zero value that the kind
+// refuses when they are unauthored, and the ones it answers another way.
 type nullRequiredKind struct {
 	component  string
 	typ        reflect.Type
@@ -234,13 +246,45 @@ func issuerNullRequiredRows() []nullRequiredRow {
 			}}}),
 			reason: nodeSelectorTermsReason, authored: someNodeSelectorTerms(),
 		},
+		// The two rows below are of the second set. Each is refused by the
+		// kind's required list, as an omission.
 		{
 			path: "acme.solvers[].http01.gatewayHTTPRoute.parentRefs[].name", at: "acme.solvers[0].http01.gatewayHTTPRoute.parentRefs[0].name",
 			omitted: acmeIssuerWith(map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{
 				"parentRefs": []any{map[string]any{"namespace": "gateways"}},
 			}}}),
-			reason: "the name of the Gateway the route attaches to", authored: "public", writesEmpty: true,
+			reason: "the name of the Gateway the route attaches to", authored: "public", writesZero: true,
 		},
+		{
+			path: "vault.auth.aws.role", at: "vault.auth.aws.role",
+			omitted: func() map[string]any {
+				return map[string]any{"vault": map[string]any{
+					"server": "https://vault.example", "path": "pki/sign/example", "auth": map[string]any{"aws": map[string]any{}},
+				}}
+			},
+			reason: "the Vault role to assume", authored: "issuer", writesZero: true,
+		},
+	}
+}
+
+// databaseWith returns a database's properties with the one list, of a single
+// object that is named and nothing else.
+func databaseWith(list string) func() map[string]any {
+	return func() map[string]any {
+		return map[string]any{
+			"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app",
+			list: []any{map[string]any{"name": "one"}},
+		}
+	}
+}
+
+// databaseEnsureRow is the row of the ensure of a database's list: the kind
+// writes the CRD's default where the author wrote none.
+func databaseEnsureRow(list string) nullRequiredRow {
+	return nullRequiredRow{
+		path: list + "[].ensure", at: list + "[0].ensure", omitted: databaseWith(list), writesZero: true,
+		built: `"present"`,
+		why:   "the kind writes the value itself: an unauthored ensure is emitted as present, the CRD's default, which the API server cannot fill in the place of an empty string",
 	}
 }
 
@@ -282,18 +326,45 @@ var nullRequiredKinds = []nullRequiredKind{
 		component: "clusterissuer", typ: reflect.TypeFor[certv1.IssuerSpec](), handler: &ClusterIssuerHandler{},
 		modulePath: certManagerModulePath, crd: certManagerCRDs + "clusterissuers.yaml", rows: issuerNullRequiredRows(),
 	},
-	// The three kinds without a row have no such field in the linked versions.
+	// The next three kinds have no required field their type writes as null
+	// in the linked versions: their rows are of the second set.
 	{
 		component: "certificate", typ: reflect.TypeFor[certv1.CertificateSpec](), handler: &CertificateHandler{},
 		modulePath: certManagerModulePath, crd: certManagerCRDs + "certificates.yaml",
+		rows: []nullRequiredRow{
+			// Refused by the kind's required list, as an omission.
+			{
+				path: "additionalOutputFormats[].type", at: "additionalOutputFormats[0].type",
+				omitted: func() map[string]any {
+					return map[string]any{
+						"secretName": "tls", "issuerRef": map[string]any{"name": "ca"}, "dnsNames": []any{"example.com"},
+						"additionalOutputFormats": []any{map[string]any{}},
+					}
+				},
+				reason: "the format: DER or CombinedPEM", authored: "DER", writesZero: true,
+			},
+		},
 	},
 	{
 		component: "cnpg-database", typ: reflect.TypeFor[cnpgv1.DatabaseSpec](), handler: &CnpgDatabaseHandler{},
 		modulePath: cnpgModulePath, crd: cnpgCRDs + "databases.yaml",
+		rows: []nullRequiredRow{
+			databaseEnsureRow("extensions"), databaseEnsureRow("fdws"), databaseEnsureRow("schemas"), databaseEnsureRow("servers"),
+		},
 	},
 	{
 		component: "cnpg-objectstore", typ: reflect.TypeFor[barmanv1.ObjectStoreSpec](), handler: &CnpgObjectStoreHandler{},
 		modulePath: barmanCloudModulePath, crd: "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml",
+		rows: []nullRequiredRow{
+			// Refused by the kind's own check of the decoded value, which
+			// cannot tell an authored empty path from none: both are refused.
+			{
+				path: "configuration.destinationPath", at: "configuration.destinationPath",
+				omitted: func() map[string]any { return map[string]any{"configuration": map[string]any{}} },
+				reason:  "the object store path backups and WAL are written to", authored: "s3://backups/db",
+				writesZero: true, refusesEmpty: true,
+			},
+		},
 	},
 	{
 		component: "cnpg-pooler", typ: reflect.TypeFor[cnpgv1.PoolerSpec](), handler: &CnpgPoolerHandler{},
@@ -336,6 +407,16 @@ var nullRequiredKinds = []nullRequiredKind{
 				built:   "[]",
 				why:     "the kind writes the list itself: a template that lists no container is emitted with containers: [], which the CRD accepts and the operator reads as it reads an omitted spec, adding its own container",
 			},
+			// Refused by cnpgPoolerRequired.
+			{
+				path: "pgbouncer.imageCatalogRef.key", at: "pgbouncer.imageCatalogRef.key",
+				omitted: func() map[string]any {
+					return map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{
+						"imageCatalogRef": map[string]any{"apiGroup": "postgresql.cnpg.io", "kind": "ImageCatalog", "name": "poolers"},
+					}}
+				},
+				reason: "the key of the image in the catalog", authored: "pgbouncer", writesZero: true,
+			},
 		},
 	},
 	{
@@ -360,6 +441,82 @@ var nullRequiredKinds = []nullRequiredKind{
 				omitted: clusterWith(map[string]any{"replicationSlots": map[string]any{"synchronizeReplicas": map[string]any{}}}),
 				built:   "null",
 				why:     "the CRD defaults the field (to true), and the API server puts a field's default in the place of the null it drops",
+			},
+			{
+				path: "instances", at: "instances", writesZero: true,
+				omitted: func() map[string]any { return map[string]any{"storage": map[string]any{"size": "1Gi"}} },
+				built:   "1",
+				why:     "the kind writes the value itself: an unauthored instances is emitted as 1, the CRD's default, which the API server cannot fill in the place of a 0",
+			},
+			// The rows below are refused by cnpgClusterRequired.
+			{
+				path: "backup.barmanObjectStore.destinationPath", at: "backup.barmanObjectStore.destinationPath",
+				omitted: clusterWith(map[string]any{"backup": map[string]any{"barmanObjectStore": map[string]any{}}}),
+				reason:  "the object store path backups and WAL are written to", authored: "s3://backups/db", writesZero: true,
+			},
+			{
+				path: "bootstrap.initdb.import.type", at: "bootstrap.initdb.import.type",
+				omitted: clusterWith(map[string]any{"bootstrap": map[string]any{"initdb": map[string]any{"import": map[string]any{
+					"databases": []any{"app"}, "source": map[string]any{"externalCluster": "origin"},
+				}}}}),
+				reason: "how the databases are imported: microservice or monolith", authored: "microservice", writesZero: true,
+			},
+			{
+				path: "bootstrap.pg_basebackup.source", at: "bootstrap.pg_basebackup.source",
+				omitted: clusterWith(map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{}}}),
+				reason:  "the name of the external cluster the base backup is taken from", authored: "origin", writesZero: true,
+			},
+			{
+				path: "externalClusters[].barmanObjectStore.destinationPath", at: "externalClusters[0].barmanObjectStore.destinationPath",
+				omitted: clusterWith(map[string]any{"externalClusters": []any{map[string]any{"name": "origin", "barmanObjectStore": map[string]any{}}}}),
+				reason:  "the object store path the cluster's backups and WAL are read from", authored: "s3://backups/origin", writesZero: true,
+			},
+			{
+				path: "managed.services.additional[].selectorType", at: "managed.services.additional[0].selectorType",
+				omitted: clusterWith(map[string]any{"managed": map[string]any{"services": map[string]any{"additional": []any{
+					map[string]any{"serviceTemplate": map[string]any{"metadata": map[string]any{"name": "fast-extra"}}},
+				}}}}),
+				reason: "the instances the service selects: rw, r or ro", authored: "rw", writesZero: true,
+			},
+			{
+				path: "podSelectorRefs[].name", at: "podSelectorRefs[0].name",
+				omitted: clusterWith(map[string]any{"podSelectorRefs": []any{
+					map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"app": "client"}}},
+				}}),
+				reason: "the name pg_hba rules refer to the selector by", authored: "clients", writesZero: true,
+			},
+			{
+				path: "postgresql.extensions[].env[].name", at: "postgresql.extensions[0].env[0].name",
+				omitted: clusterWith(map[string]any{"postgresql": map[string]any{"extensions": []any{map[string]any{
+					"name": "vector", "image": map[string]any{"reference": "registry.example/vector:1"},
+					"env": []any{map[string]any{"value": "on"}},
+				}}}}),
+				reason: "the name of the environment variable", authored: "VECTOR_MODE", writesZero: true,
+			},
+			{
+				path: "postgresql.extensions[].env[].value", at: "postgresql.extensions[0].env[0].value",
+				omitted: clusterWith(map[string]any{"postgresql": map[string]any{"extensions": []any{map[string]any{
+					"name": "vector", "image": map[string]any{"reference": "registry.example/vector:1"},
+					"env": []any{map[string]any{"name": "VECTOR_MODE"}},
+				}}}}),
+				reason: "the value of the environment variable", authored: "on", writesZero: true,
+			},
+			{
+				path: "postgresql.extensions[].name", at: "postgresql.extensions[0].name",
+				omitted: clusterWith(map[string]any{"postgresql": map[string]any{"extensions": []any{map[string]any{
+					"image": map[string]any{"reference": "registry.example/vector:1"},
+				}}}}),
+				reason: "the name of the extension", authored: "vector", writesZero: true,
+			},
+			{
+				path: "postgresql.synchronous.method", at: "postgresql.synchronous.method",
+				omitted: clusterWith(map[string]any{"postgresql": map[string]any{"synchronous": map[string]any{"number": 1}}}),
+				reason:  "how the synchronous standbys are chosen: any or first", authored: "any", writesZero: true,
+			},
+			{
+				path: "replica.source", at: "replica.source",
+				omitted: clusterWith(map[string]any{"replica": map[string]any{"enabled": true}}),
+				reason:  "the name of the external cluster this one replicates", authored: "origin", writesZero: true,
 			},
 		},
 	},
@@ -447,11 +604,14 @@ func (k nullRequiredKind) encoded(t *testing.T, props map[string]any) map[string
 	return out
 }
 
-// TestKindComponents_NullRequired derives, for each kind of nullRequiredKinds,
-// the fields its CRD requires that its type writes as null when they are
-// unauthored, and holds the kind to a row for each. It then shows every row
-// with the CRD's validator, after the two steps the API server takes on a null
-// before it validates (pruneNullsAsAPIServer).
+// TestKindComponents_NullRequired derives two sets for each kind of
+// nullRequiredKinds, of the fields its type writes when they are unauthored:
+// the ones its CRD requires that are written as null, and the ones written as
+// a zero value, an empty string or 0, that the CRD's own rule for the value
+// refuses (a minimum length, a pattern, an enumeration, a minimum). It holds
+// the kind to a row for each field of each set, and shows every row with the
+// CRD's validator, after the two steps the API server takes on a null before
+// it validates (pruneNullsAsAPIServer).
 //
 // A refused row: the kind refuses the properties that leave the field out, by
 // the field's path. With the field authored the kind builds them, into an
@@ -459,7 +619,9 @@ func (k nullRequiredKind) encoded(t *testing.T, props map[string]any) map[string
 // properties. The spec the type encodes for the properties without the field,
 // in that object, is then what the kind would emit, and the validator refuses
 // it for that field alone. Where the field is a list, an authored empty one is
-// built, written as [] and accepted by the validator.
+// built, written as [] and accepted by the validator. Where it is of the
+// second set, an authored empty string is built and the validator refuses the
+// object for that field alone, unless the row says the kind refuses that too.
 //
 // A row that is not refused: the kind builds the properties that leave the
 // field out, its object carries at the field what the row says, and the
@@ -469,22 +631,36 @@ func TestKindComponents_NullRequired(t *testing.T) {
 		t.Run(kind.component, func(t *testing.T) {
 			file := filepath.Join(linkedModuleDir(t, kind.modulePath), filepath.FromSlash(kind.crd))
 			props, required := crdSpecProperties(t, file)
-			var derived []string
+			var null, zero []string
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
-				if _, ok := props[f.path]; ok && required[f.path] && f.writtenUnauthored() && f.encodesNull() {
-					derived = append(derived, f.path)
+				prop, ok := props[f.path]
+				switch {
+				case !ok || !f.writtenUnauthored():
+				case f.encodesNull():
+					if required[f.path] {
+						null = append(null, f.path)
+					}
+				case crdRefusesZero(prop, f.field.Type) != "":
+					zero = append(zero, f.path)
 				}
 			})
-			slices.Sort(derived)
-			var answered []string
+			slices.Sort(null)
+			slices.Sort(zero)
+			var answeredNull, answeredZero []string
 			for _, row := range kind.rows {
-				if !row.writesEmpty {
-					answered = append(answered, row.path)
+				if row.writesZero {
+					answeredZero = append(answeredZero, row.path)
+					continue
 				}
+				answeredNull = append(answeredNull, row.path)
 			}
-			slices.Sort(answered)
-			if !slices.Equal(answered, derived) {
-				t.Errorf("required by the CRD and written as null by the type:\n  derived  %v\n  answered %v", derived, answered)
+			slices.Sort(answeredNull)
+			slices.Sort(answeredZero)
+			if !slices.Equal(answeredNull, null) {
+				t.Errorf("required by the CRD and written as null by the type:\n  derived  %v\n  answered %v", null, answeredNull)
+			}
+			if !slices.Equal(answeredZero, zero) {
+				t.Errorf("written by the type as a zero value the CRD refuses:\n  derived  %v\n  answered %v", zero, answeredZero)
 			}
 
 			crd := crdValidationOf(t, kind.modulePath, kind.crd)
@@ -548,17 +724,24 @@ func (k nullRequiredKind) showRefused(t *testing.T, crd crdValidation, row nullR
 	}
 
 	// An authored empty string is a value too: the kind builds it, and the
-	// refusal of it is left to the API server.
-	if row.writesEmpty {
+	// refusal of it is left to the API server. One kind reads the decoded
+	// value, where the two cannot be told apart, and refuses both.
+	if row.writesZero {
 		empty := row.properties(t)
 		parent, name = fieldAt(t, empty, row.at)
 		parent[name] = ""
 		object, err := k.object(empty)
-		if err != nil {
+		switch {
+		case row.refusesEmpty:
+			if want := row.at + ": required (" + row.reason + ")"; err == nil || err.Error() != want {
+				t.Errorf("with an authored empty string: %v, want the refusal %q", err, want)
+			}
+		case err != nil:
 			t.Fatalf("with an authored empty string: %v", err)
-		}
-		if refused, want := crd.refusals(object), "spec."+row.at+" in body "; len(refused) != 1 || !strings.HasPrefix(refused[0], want) {
-			t.Errorf("with an authored empty string, the CRD refuses %v, want one refusal of spec.%s", refused, row.at)
+		default:
+			if refused, want := crd.refusals(object), "spec."+row.at+" in body "; len(refused) != 1 || !strings.HasPrefix(refused[0], want) {
+				t.Errorf("with an authored empty string, the CRD refuses %v, want one refusal of spec.%s", refused, row.at)
+			}
 		}
 	}
 
@@ -568,9 +751,9 @@ func (k nullRequiredKind) showRefused(t *testing.T, crd crdValidation, row nullR
 	switch {
 	case !held:
 		t.Fatalf("the type leaves %s out; the object would show the omission", row.at)
-	case row.writesEmpty && written != "":
+	case row.writesZero && written != "":
 		t.Fatalf("the type writes %s as %v, want an empty string", row.at, written)
-	case !row.writesEmpty && written != nil:
+	case !row.writesZero && written != nil:
 		t.Fatalf("the type writes %s as %v, want null", row.at, written)
 	}
 	object["spec"] = spec

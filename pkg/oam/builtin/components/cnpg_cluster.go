@@ -250,6 +250,9 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgClusterDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredRequired(props, cnpgClusterRequired); err != nil {
+		return nil, err
+	}
 	if err := validateCnpgClusterImageRefs(spec); err != nil {
 		return nil, err
 	}
@@ -284,6 +287,29 @@ func refuseOmittedClusterFields(spec *cnpgv1.ClusterSpec) error {
 		return nil
 	}
 	return refuseOmittedPodCertificateFields("projectedVolumeTemplate.sources", spec.ProjectedVolumeTemplate.Sources)
+}
+
+// cnpgClusterRequired lists the strings the Cluster CRD requires and bounds,
+// with a minimum length or an enumeration, that the Go type writes as "" when
+// they are unauthored: the Cluster would carry an empty value the author did
+// not write, and the API server refuse it. Each is refused where its parent is
+// authored and it is not (refuseUnauthoredRequired). An authored empty one is
+// a value, and the API server's to refuse. Each key is a json path with [] for
+// a list element; each value is what the refusal says of the field.
+// TestKindComponents_NullRequired derives the list from the linked module's
+// CRD and shows each refusal with the CRD's validator.
+var cnpgClusterRequired = map[string]string{
+	"backup.barmanObjectStore.destinationPath":             "the object store path backups and WAL are written to",
+	"bootstrap.initdb.import.type":                         "how the databases are imported: microservice or monolith",
+	"bootstrap.pg_basebackup.source":                       "the name of the external cluster the base backup is taken from",
+	"externalClusters[].barmanObjectStore.destinationPath": "the object store path the cluster's backups and WAL are read from",
+	"managed.services.additional[].selectorType":           "the instances the service selects: rw, r or ro",
+	"podSelectorRefs[].name":                               "the name pg_hba rules refer to the selector by",
+	"postgresql.extensions[].env[].name":                   "the name of the environment variable",
+	"postgresql.extensions[].env[].value":                  "the value of the environment variable",
+	"postgresql.extensions[].name":                         "the name of the extension",
+	"postgresql.synchronous.method":                        "how the synchronous standbys are chosen: any or first",
+	"replica.source":                                       "the name of the external cluster this one replicates",
 }
 
 // cnpgClusterDefaultedZeroFields lists the ClusterSpec fields on which an

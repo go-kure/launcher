@@ -6401,6 +6401,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the API server puts the default (`true`) in the place of the null.
   `TestKindComponents_NullRequired` derives the three from the CRD and shows
   each answer by running the CRD's schema validator on the object.
+  Eleven strings the CRD requires and bounds, with a minimum length or an
+  enumeration, which the Go type writes as `""` when they are unauthored, are
+  refused when unauthored, each where its parent is authored
+  (`replica.source: required (…)`):
+  `backup.barmanObjectStore.destinationPath`,
+  `bootstrap.initdb.import.type` (`microservice` or `monolith`),
+  `bootstrap.pg_basebackup.source`,
+  `externalClusters[].barmanObjectStore.destinationPath`,
+  `managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
+  `podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry
+  and the `name` and the `value` of its `env[]` entries,
+  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`.
+  The Cluster would carry an empty value the author did not write, and the
+  API server refuse it. An authored empty one is a value: it is written, and
+  refusing it is left to the API server. The same test derives every field
+  the type writes unauthored as a zero value the CRD's own rule refuses, and
+  shows each answer with the validator; the twelfth of a Cluster is
+  `instances`, which is not refused (below).
   `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
   the CRD and shows the refusals. It also holds the two fields the CRD
   defaults and the type writes unauthored to a reason they are harmless:
@@ -6572,7 +6590,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a field too and is not refused: the kind writes `containers: []` itself
   (below). `TestKindComponents_NullRequired` derives these fields and
   `pgbouncer` from the CRD and shows each answer by running the CRD's schema
-  validator on the object. The instance count is deliberately not policed:
+  validator on the object. One string the CRD requires and bounds with a
+  pattern, which the type writes as `""` when it is unauthored, is refused
+  when unauthored under an authored `pgbouncer.imageCatalogRef`: its `key`
+  (`pgbouncer.imageCatalogRef.key: required (…)`). An authored empty one is
+  written, and refusing it is left to the API server. The same test derives
+  it, as the one field of a Pooler the type writes unauthored as a zero value
+  the CRD's own rule refuses. The instance count is deliberately not policed:
   `postgresql`, which lowers its pooler onto this kind, never applied a
   policy to the pooler's count, so a maximum here would refuse a document
   that built before.
