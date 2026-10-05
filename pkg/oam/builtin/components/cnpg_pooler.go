@@ -27,6 +27,18 @@ func validateCnpgPoolerName(name string) error {
 	return nil
 }
 
+// refusePoolerNamedAsCluster refuses a Pooler whose cluster reference is the
+// Pooler's own name. It is the one text of that refusal: for the object
+// (CnpgPoolerConfig.validate) and wherever a pooler's endpoint is answered
+// (PostgresqlRule.EndpointsNamed), so no caller is handed a selector for a
+// pooler the build refuses.
+func refusePoolerNamedAsCluster(pooler, cluster string) error {
+	if cluster == pooler {
+		return errors.Errorf("cluster.name %q: a pooler cannot have the same name as its cluster", pooler)
+	}
+	return nil
+}
+
 // CnpgPoolerHandler handles OAM cnpg-pooler components: the kind-named,
 // full-fidelity projection of a CloudNativePG postgresql.cnpg.io/v1 Pooler.
 //
@@ -142,8 +154,8 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 	if err := requireCnpgClusterRef(c.Spec.Cluster.Name); err != nil {
 		return err
 	}
-	if c.Spec.Cluster.Name == name {
-		return errors.Errorf("cluster.name %q: a pooler cannot have the same name as its cluster", name)
+	if err := refusePoolerNamedAsCluster(name, c.Spec.Cluster.Name); err != nil {
+		return err
 	}
 	if c.Spec.PgBouncer == nil {
 		return errors.New("pgbouncer: required (an empty object selects PgBouncer's defaults)")

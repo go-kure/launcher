@@ -207,6 +207,12 @@ func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Lowering
 		if err != nil {
 			return nil, errors.Wrapf(err, "pooler")
 		}
+		// The Pooler refers to the Cluster by the name resolved above, and a
+		// Pooler that carries that name itself is refused where it is built
+		// (CnpgPoolerConfig.validate): refused here in the same words.
+		if err := refusePoolerNamedAsCluster(poolerName, cluster.ObjectName()); err != nil {
+			return nil, err
+		}
 		eps = append(eps, netpol.Endpoint{
 			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: poolerName}},
 			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
