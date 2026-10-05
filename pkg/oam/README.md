@@ -81,6 +81,50 @@ enforce it. kure's layout walker writes a bundle's applications, then its childr
 caller that walks the tree itself must visit the own applications of a bundle that has
 children; `GenerateApplications` does.
 
+**Where a layout-walking consumer finds the application.** Launcher writes no directory;
+kure's layout walker does. Since go-kure/kure#979 the root node's directory renders no
+bundle: the application bundle has a directory of its own inside it, named after the bundle,
+which the root's `kustomization.yaml` does not list. **Breaking output change** for such a
+consumer: with `layout.DefaultLayoutRules()`, everything launcher returns is written one
+directory down. Below, `<bundle>` is the application bundle's name: the Application's name,
+unless the `Naming` hook renames the bundle. A flat application has an unnamed root node, an
+ordered one a root node named `<bundle>`:
+
+| Application | Before | Now |
+|-------------|--------|-----|
+| Flat: every component | `cluster/` | `cluster/<bundle>/` |
+| Ordered: the generated sources | `<bundle>/` | `<bundle>/<bundle>/` |
+| Ordered: a group | `<bundle>/<group>/` | `<bundle>/<bundle>/<group>/` |
+
+With `LayoutRules.ClusterName`, `<cluster>` takes the place of `cluster` for a flat
+application (`<cluster>/<bundle>/`) and comes in front of an ordered one
+(`<cluster>/<bundle>/<bundle>/`). A `ClusterName` whose last segment is the ordered
+application's root node name adds no directory for it: the root node is that directory
+(`ClusterName: <bundle>` gives `<bundle>/<bundle>/`, as with none). A component with a
+directory of its own, a `helmtemplate` component or any component under
+`ApplicationGrouping: GroupByName`, is a directory inside the one above
+(`cluster/<bundle>/<component>/`). The `spec.path` of the Flux Kustomization, or the
+`source.path` of the ArgoCD Application, that kure generates for the bundle moves with it.
+
+With the default `BundleGrouping: GroupFlat`, `ManifestLayout.OriginUnit()` on the root
+node's layout returns the bundle directory's layout; it is nil on every other layout, and on
+every layout under `BundleGrouping: GroupByName`. `WalkCluster` returns the root node's
+layout, except for an ordered application under a `ClusterName` whose last segment is not
+the root node's name: it then returns a layout for `<cluster>` whose one child is the root
+node's.
+
+Launcher adds no limit of a delivery engine to the names it returns. A document name over
+63 characters builds, and kure's Flux workflow then refuses its bundle unless the consumer
+names it: `Bundle.KustomizationName` on the bundle launcher returned, or the `Naming` hook
+for the `bundle` and `group` roles
+([Name roles and the `Naming` hook](#name-roles-and-the-naming-hook)).
+
+**Known limit.** Under `FluxIntegratedPerLayout` placement kure also makes a Kustomization
+for each application layout and each hook-group layout, named after the layout, and refuses
+a layout name over 63 characters. A `helmtemplate` hook-group child,
+`<application>-<component>-NN-<phase>`, is held to 253 characters, not 63, and no consumer
+override names it yet: go-kure/launcher#787 adds one. Launcher does not shorten it to 63.
+
 Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
 `Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
 stay unset (go-kure/launcher#781). How an application is delivered (which Flux

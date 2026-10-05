@@ -683,7 +683,7 @@ func TestHelmTemplateConfig_AugmentLayout_DirectoryPin(t *testing.T) {
 // WalkCluster and written by WriteManifest with a Config-wide AppFileSingle
 // default, under a placement other than FluxIntegratedPerLayout, the component
 // stays a directory that lists one file per hook group, and every rendered
-// object is reachable from the root.
+// object is reachable from the directory of the root node's bundle.
 func TestHelmTemplateConfig_WriteManifestUnderAppFileSingleDefault(t *testing.T) {
 	for _, placement := range []layout.FluxPlacement{layout.FluxSeparate, layout.FluxIntegratedPerBundle} {
 		t.Run(string(placement), func(t *testing.T) {
@@ -720,10 +720,17 @@ func TestHelmTemplateConfig_WriteManifestUnderAppFileSingleDefault(t *testing.T)
 					t.Errorf("%s/kustomization.yaml does not list hook group file %q (listed: %v)", appDir, entry, listed)
 				}
 			}
-			got := reachableObjectNames(t, filepath.Join(base, wcfg.ManifestsDir, root.FullRepoPath()))
+			// The root node's directory renders no bundle (go-kure/kure#979): the
+			// bundle has a directory of its own inside it, which the root's
+			// kustomization.yaml does not list.
+			unit := root.OriginUnit()
+			if unit == nil {
+				t.Fatal("the root node's layout names no directory for its bundle")
+			}
+			got := reachableObjectNames(t, filepath.Join(base, wcfg.ManifestsDir, unit.FullRepoPath()))
 			for _, name := range []string{"pre", "main", "post"} {
 				if !got[name] {
-					t.Errorf("object %q is not reachable from the root kustomization.yaml (reachable: %v)", name, got)
+					t.Errorf("object %q is not reachable from the bundle directory's kustomization.yaml (reachable: %v)", name, got)
 				}
 			}
 		})

@@ -3436,7 +3436,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   children carry no mode of their own, so under such a default each hook group is written as one
   file, `<component dir>/<child>.yaml`, instead of a sub-directory, and the component's
   `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout integrator keeps
-  every child a directory with its own Flux Kustomization, whatever the default. A single-group
+  every child a directory with its own Flux Kustomization, whatever the default. That
+  Kustomization is named after the child, and kure refuses a name over 63 characters there, while
+  the child's name is held to 253: a known limit, with no consumer override yet (`pkg/oam/README.md`,
+  "Pipeline"). A single-group
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
