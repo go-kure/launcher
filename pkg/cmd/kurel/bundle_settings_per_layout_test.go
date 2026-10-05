@@ -60,9 +60,10 @@ func treeKustomizationSettings(root *layout.ManifestLayout) map[string]kustomiza
 	return out
 }
 
-// bundleSettingsTree is hookGroupTree with set called on every bundle that
-// holds applications before the tree is walked, as a consumer sets a delivery
-// field on a bundle launcher returned.
+// bundleSettingsTree is hookGroupTree with set called on every bundle before
+// the tree is walked, as a consumer sets a delivery field on a bundle launcher
+// returned. A flat application has one bundle; an ordered one has its own and
+// one per group below it.
 func bundleSettingsTree(t *testing.T, doc string, set func(b *stack.Bundle)) (*layout.ManifestLayout, error) {
 	t.Helper()
 	cluster, err := hookGroupCluster(t, doc, oam.TransformContext{})
@@ -74,9 +75,7 @@ func bundleSettingsTree(t *testing.T, doc string, set func(b *stack.Bundle)) (*l
 		if b == nil {
 			return
 		}
-		if len(b.Applications) > 0 {
-			set(b)
-		}
+		set(b)
 		for _, child := range b.Children {
 			bundles(child)
 		}
@@ -102,6 +101,25 @@ func bundleSettingsTree(t *testing.T, doc string, set func(b *stack.Bundle)) (*l
 	return root, nil
 }
 
+// setBundleSettings sets the five on b, as a consumer does, and
+// bundleSettingsSet is what a Kustomization that takes them then carries.
+func setBundleSettings(b *stack.Bundle) {
+	wait := true
+	b.Wait = &wait
+	b.Timeout = "5m"
+	b.RetryInterval = "1m"
+	b.Labels = map[string]string{"team": "shop"}
+	b.Annotations = map[string]string{"example.org/owner": "shop"}
+}
+
+var bundleSettingsSet = kustomizationSettings{
+	Wait:          true,
+	Timeout:       "5m0s",
+	RetryInterval: "1m0s",
+	Labels:        map[string]string{"team": "shop"},
+	Annotations:   map[string]string{"example.org/owner": "shop"},
+}
+
 // bundleSettingsChain is the tree of a flat application with one helmtemplate
 // component of three hook groups: every Kustomization, with its spec.dependsOn.
 // The settings of a bundle change none of it.
@@ -120,31 +138,13 @@ var bundleSettingsChain = map[string][]string{
 // layout above, and spec.dependsOn chains the groups as before.
 func TestBundleSettings_ReachPerLayoutKustomizations(t *testing.T) {
 	doc := hookApp("shop", hookComponent("db", "helmtemplate", serveHookChart(t), ""), "")
-	wait := true
-	set := kustomizationSettings{
-		Wait:          true,
-		Timeout:       "5m0s",
-		RetryInterval: "1m0s",
-		Labels:        map[string]string{"team": "shop"},
-		Annotations:   map[string]string{"example.org/owner": "shop"},
-	}
 	for _, tc := range []struct {
 		name string
 		set  func(b *stack.Bundle)
 		want kustomizationSettings
 	}{
 		{name: "a bundle as launcher returns it", set: func(*stack.Bundle) {}},
-		{
-			name: "a bundle with the five settings",
-			set: func(b *stack.Bundle) {
-				b.Wait = &wait
-				b.Timeout = "5m"
-				b.RetryInterval = "1m"
-				b.Labels = map[string]string{"team": "shop"}
-				b.Annotations = map[string]string{"example.org/owner": "shop"}
-			},
-			want: set,
-		},
+		{name: "a bundle with the five settings", set: setBundleSettings, want: bundleSettingsSet},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, err := bundleSettingsTree(t, doc, tc.set)
@@ -161,6 +161,70 @@ func TestBundleSettings_ReachPerLayoutKustomizations(t *testing.T) {
 			for _, name := range slices.Sorted(maps.Keys(got)) {
 				if !reflect.DeepEqual(got[name], tc.want) {
 					t.Errorf("Kustomization %s has %+v, want %+v", name, got[name], tc.want)
+				}
+			}
+		})
+	}
+}
+
+// In an ordered application the components are in the group bundles below the
+// application's bundle, and a per-layout Kustomization takes the five from the
+// bundle that holds its application: the group's. Set on the application's
+// bundle alone they reach its own Kustomization and no other; set on a group's
+// bundle they reach that group's Kustomization, its component's and the
+// component's hook groups', and none of another group. Each group here holds a
+// helmtemplate component, so each has per-layout Kustomizations to keep bare.
+func TestBundleSettings_OrderedApplicationTakesTheGroupBundle(t *testing.T) {
+	const placed = `  policies:
+    - name: db-first
+      type: placement
+      properties:
+        component: db
+        tier: infra
+    - name: web-last
+      type: placement
+      properties:
+        component: web
+        tier: apps
+`
+	url := serveHookChart(t)
+	doc := hookApp("shop", hookComponent("db", "helmtemplate", url, "")+hookComponent("web", "helmtemplate", url, ""), placed)
+	infra := []string{"shop-db-00-pre-install", "shop-db-01-main", "shop-db-02-post-install", "shop-infra", "shop-infra-db"}
+	apps := []string{"shop-apps", "shop-apps-web", "shop-web-00-pre-install", "shop-web-01-main", "shop-web-02-post-install"}
+	all := slices.Sorted(slices.Values(slices.Concat([]string{"shop"}, infra, apps)))
+	for _, tc := range []struct {
+		bundle string
+		want   []string
+	}{
+		{bundle: "shop", want: []string{"shop"}},
+		{bundle: "shop-infra", want: infra},
+		{bundle: "shop-apps", want: apps},
+	} {
+		t.Run("set on bundle "+tc.bundle, func(t *testing.T) {
+			found := false
+			root, err := bundleSettingsTree(t, doc, func(b *stack.Bundle) {
+				if b.Name == tc.bundle {
+					found = true
+					setBundleSettings(b)
+				}
+			})
+			if err != nil {
+				t.Fatalf("integrating: %v", err)
+			}
+			if !found {
+				t.Fatalf("the cluster has no bundle %q", tc.bundle)
+			}
+			got := treeKustomizationSettings(root)
+			if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, all) {
+				t.Fatalf("Kustomizations = %v, want %v", names, all)
+			}
+			for _, name := range all {
+				want := kustomizationSettings{}
+				if slices.Contains(tc.want, name) {
+					want = bundleSettingsSet
+				}
+				if !reflect.DeepEqual(got[name], want) {
+					t.Errorf("Kustomization %s has %+v, want %+v", name, got[name], want)
 				}
 			}
 		})
