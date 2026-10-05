@@ -290,11 +290,18 @@ func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing
 
 	const want = `cluster.name "main": a pooler cannot have the same name as its cluster`
 	same := pooler(map[string]any{"name": "main"})
-	_, buildErr := h.ToApplicationConfig(same, "data")
-	_, endpointsErr := h.Endpoints(same)
-	for reader, err := range map[string]error{"ToApplicationConfig": buildErr, "Endpoints": endpointsErr} {
-		if err == nil || err.Error() != want {
-			t.Errorf("%s: err = %v\nwant %q", reader, err, want)
+	// The decode matches field names in any case, so this spelling is the same
+	// pooler to the build, and to the endpoint.
+	otherCase := &oam.Component{Name: "main", Type: "cnpg-pooler", Properties: map[string]any{
+		"Cluster": map[string]any{"Name": "main"}, "pgbouncer": map[string]any{},
+	}}
+	for spelling, comp := range map[string]*oam.Component{"as the API spells it": same, "in another case": otherCase} {
+		_, buildErr := h.ToApplicationConfig(comp, "data")
+		_, endpointsErr := h.Endpoints(comp)
+		for reader, err := range map[string]error{"ToApplicationConfig": buildErr, "Endpoints": endpointsErr} {
+			if err == nil || err.Error() != want {
+				t.Errorf("%s, %s: err = %v\nwant %q", spelling, reader, err, want)
+			}
 		}
 	}
 
