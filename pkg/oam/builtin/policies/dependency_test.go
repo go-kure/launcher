@@ -2,7 +2,6 @@ package policies_test
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -87,11 +86,8 @@ func TestDependencyHandler_AccumulatesAcrossPolicies(t *testing.T) {
 		"rules": []any{map[string]any{"component": "c", "dependsOn": []any{"a"}}},
 	}}
 	err := h.Apply(third, components, result)
-	if err == nil || !strings.Contains(err.Error(), "circular dependency") {
-		t.Fatalf("error = %v, want a circular dependency across policies", err)
-	}
-	if !strings.Contains(err.Error(), `policy "third"`) {
-		t.Errorf("error = %q, want it to name the policy that closed the cycle", err)
+	if want := "circular dependency detected: a -> c -> a"; err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q: a circular dependency across policies", err, want)
 	}
 }
 
@@ -152,30 +148,33 @@ func TestDependencyHandler_RejectedPolicyLeavesResultUnchanged(t *testing.T) {
 	}
 }
 
+// TestDependencyHandler_Errors holds the handler's own message for each refusal.
+// It does not name the policy: the transform does, once
+// (TestRefusalsNameThePolicyOnce).
 func TestDependencyHandler_Errors(t *testing.T) {
 	cases := []struct {
 		name       string
 		props      map[string]any
 		components []string
-		wantSub    string
+		want       string
 	}{
 		{
 			name:       "unknown component",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "nonexistent", "dependsOn": []any{"db"}}}},
 			components: []string{"web", "db"},
-			wantSub:    `references unknown component "nonexistent"`,
+			want:       `references unknown component "nonexistent"`,
 		},
 		{
 			name:       "unknown dependency",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{"nonexistent"}}}},
 			components: []string{"web", "db"},
-			wantSub:    `component "web" depends on unknown component "nonexistent"`,
+			want:       `component "web" depends on unknown component "nonexistent"`,
 		},
 		{
 			name:       "self dependency",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{"web"}}}},
 			components: []string{"web"},
-			wantSub:    `component "web" cannot depend on itself`,
+			want:       `component "web" cannot depend on itself`,
 		},
 		{
 			name: "cycle",
@@ -185,85 +184,85 @@ func TestDependencyHandler_Errors(t *testing.T) {
 				map[string]any{"component": "c", "dependsOn": []any{"a"}},
 			}},
 			components: []string{"a", "b", "c"},
-			wantSub:    "circular dependency detected: a -> b -> c -> a",
+			want:       "circular dependency detected: a -> b -> c -> a",
 		},
 		{
 			name:       "missing rules",
 			props:      map[string]any{},
 			components: []string{"web"},
-			wantSub:    "missing required property 'rules'",
+			want:       "missing required property 'rules'",
 		},
 		{
 			name:       "rules not a list",
 			props:      map[string]any{"rules": "web"},
 			components: []string{"web"},
-			wantSub:    "property 'rules' must be a list",
+			want:       "property 'rules' must be a list",
 		},
 		{
 			name:       "rules empty",
 			props:      map[string]any{"rules": []any{}},
 			components: []string{"web"},
-			wantSub:    "property 'rules' must not be empty",
+			want:       "property 'rules' must not be empty",
 		},
 		{
 			name:       "rules typed nil",
 			props:      map[string]any{"rules": []any(nil)},
 			components: []string{"web"},
-			wantSub:    "property 'rules' must not be empty",
+			want:       "property 'rules' must not be empty",
 		},
 		{
 			name:       "rule not a map",
 			props:      map[string]any{"rules": []any{"web"}},
 			components: []string{"web"},
-			wantSub:    "rules[0] must be a map",
+			want:       "rules[0] must be a map",
 		},
 		{
 			name:       "component missing",
 			props:      map[string]any{"rules": []any{map[string]any{"dependsOn": []any{"db"}}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].component is required and must be a string",
+			want:       "rules[0].component is required and must be a string",
 		},
 		{
 			name:       "component empty",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "", "dependsOn": []any{"db"}}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].component is required and must be a string",
+			want:       "rules[0].component is required and must be a string",
 		},
 		{
 			name:       "dependsOn missing",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web"}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn is required",
+			want:       "rules[0].dependsOn is required",
 		},
 		{
 			name:       "dependsOn not a list",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": "db"}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn must be a list",
+			want:       "rules[0].dependsOn must be a list",
 		},
 		{
 			name:       "dependsOn empty",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{}}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn must not be empty",
+			want:       "rules[0].dependsOn must not be empty",
 		},
 		{
 			name:       "dependsOn typed nil",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any(nil)}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn must not be empty",
+			want:       "rules[0].dependsOn must not be empty",
 		},
 		{
 			name:       "dependsOn entry empty",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{"db", ""}}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn[1] must be a non-empty string",
+			want:       "rules[0].dependsOn[1] must be a non-empty string",
 		},
 		{
 			name:       "dependsOn entry not a string",
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{42}}}},
 			components: []string{"web", "db"},
-			wantSub:    "rules[0].dependsOn[0] must be a non-empty string",
+			want:       "rules[0].dependsOn[0] must be a non-empty string",
 		},
 	}
 	for _, tc := range cases {
@@ -272,13 +271,10 @@ func TestDependencyHandler_Errors(t *testing.T) {
 			policy := &oam.ApplicationPolicy{Name: "deps", Type: "dependency", Properties: tc.props}
 			err := h.Apply(policy, tc.components, oam.NewPolicyResult())
 			if err == nil {
-				t.Fatalf("expected error containing %q", tc.wantSub)
+				t.Fatalf("expected error %q", tc.want)
 			}
-			if !strings.Contains(err.Error(), tc.wantSub) {
-				t.Errorf("error = %q, want to contain %q", err, tc.wantSub)
-			}
-			if !strings.Contains(err.Error(), `policy "deps"`) {
-				t.Errorf("error = %q, want it to name the policy", err)
+			if got := err.Error(); got != tc.want {
+				t.Errorf("error = %q, want %q", got, tc.want)
 			}
 		})
 	}
