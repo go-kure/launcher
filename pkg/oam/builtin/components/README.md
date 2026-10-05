@@ -163,8 +163,8 @@ Status is one of:
 Decode is how the properties become the object: `hand-written parser` (a schema and parser this
 package or `../traits` maintains) or a strict decode into the named upstream type, where an
 unknown or wrongly typed key is an error at every depth the decoder reaches. It does not reach
-inside an upstream type that unmarshals itself, where an unknown nested key is dropped: the
-CiliumNetworkPolicy row names two such fields, and the list is not held by a test.
+inside an upstream type that unmarshals itself, where an unknown nested key is dropped unless
+the row says the type is checked separately, as the CiliumNetworkPolicy row does.
 
 | Constructor | Kind | Status | Type | Decode | Notes |
 |---|---|---|---|---|---|
@@ -253,7 +253,7 @@ CiliumNetworkPolicy row names two such fields, and the list is not held by a tes
 | `cilium.CreateCiliumIdentity` | cilium.io/v2 CiliumIdentity (cluster-scoped) | not authorable | - | - | Written by Cilium when it allocates an identity. |
 | `cilium.CreateCiliumLoadBalancerIPPool` | cilium.io/v2 CiliumLoadBalancerIPPool (cluster-scoped) | missing | - | - | - |
 | `cilium.CreateCiliumLocalRedirectPolicy` | cilium.io/v2 CiliumLocalRedirectPolicy | missing | - | - | - |
-| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | trait | `cilium-networkpolicy` | strict decode of each rule into the Cilium `Rule` | An unknown key nested inside `endpointSelector` or `icmps` is dropped: both types unmarshal themselves. |
+| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | trait | `cilium-networkpolicy` | strict decode of each rule into the Cilium `Rule` | The endpoint selector and the ICMP field unmarshal themselves and drop an unknown key; the trait refuses one by its path at every position that holds either (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. |
 | `cilium.CreateCiliumNode` | cilium.io/v2 CiliumNode (cluster-scoped) | not authorable | - | - | Written by the Cilium agent for its node. |
 | `cilium.CreateCiliumNodeConfig` | cilium.io/v2 CiliumNodeConfig | missing | - | - | - |
 | `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | missing | - | - | - |
@@ -3234,9 +3234,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   Known limit: a type that unmarshals itself decodes its own keys, so an undeclared key inside
   one is not reported and is still dropped. A CustomResourceDefinition's `items` schema is
-  such a type — the limit the kind inventory records for `CiliumNetworkPolicy`, whose
-  `endpointSelector` and `icmps` unmarshal themselves. A key next to `properties` in the same
-  schema is reported and kept. No type under a workload or a claim does this beyond scalar
+  such a type: the same kind of type as a `CiliumNetworkPolicy`'s endpoint selector, which
+  the kind inventory records and an authored Cilium policy checks on its own. A key next to
+  `properties` in the same schema is reported and kept. No type under a workload or a claim does this beyond scalar
   leaves (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`; a test
   walks those types and fails when one starts to.
 

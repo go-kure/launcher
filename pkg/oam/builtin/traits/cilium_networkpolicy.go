@@ -176,14 +176,17 @@ func (c *CiliumNetworkPolicyConfig) toAPIRule() (*ciliumapi.Rule, error) {
 	// loudly rather than be dropped. Lenient decoding silently widened policies when
 	// Cilium removed api.L7Rules fields — 1.20 dropped kafka, l7proto and l7, which
 	// would have turned an L7-restricted policy into an L4-only one with no error.
-	//
-	// Limitation: encoding/json does not propagate DisallowUnknownFields into types
-	// with a custom UnmarshalJSON. In this API that is EndpointSelector and ICMPField,
-	// so unknown keys nested inside endpointSelector or icmps are still dropped
-	// silently. The toPorts.rules.* shapes that motivated this are covered.
 	rule, _, err := builtin.DecodeStrictJSON[ciliumapi.Rule](raw)
 	if err != nil {
 		return nil, errors.Wrap(err, "decode into api.Rule (a rejected field is not supported by the linked Cilium API version)")
+	}
+	// encoding/json does not carry DisallowUnknownFields into a type with its own
+	// UnmarshalJSON, and the endpoint selector is one: the decode above drops an
+	// unknown key inside it. A selector whose only key was misspelt is then the
+	// empty selector, which matches every endpoint of the namespace, so the key is
+	// refused here, at every position that holds such a type.
+	if path := builtin.UnknownCiliumKeyPath[ciliumapi.Rule](raw); path != "" {
+		return nil, errors.Errorf("unknown field %q (Cilium drops a key it does not know there instead of refusing it, and a selector that loses a key selects more than was written)", path)
 	}
 
 	return rule, nil
