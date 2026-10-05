@@ -356,11 +356,12 @@ Decided in the ticket:
 
 | Path | Release name | Values |
 |---|---|---|
-| `helm` or `helmrelease`, Flux delivery, no Flux namespace | `spec.releaseName` is always written: the authored `releaseName`, else `<component>`, shortened when over 53 characters (`HelmReleaseConfig.releaseName`, `helmrelease.go`; §4.2). | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`helmValuesConfigMap`, `pkg/oam/builtin/components/helm.go`); `helmrelease` refuses the key (`helmReleaseValuesModeHint`, `helmrelease.go`). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
-| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`HelmReleaseConfig.Generate`, `helmrelease.go`). The release name is the one of the row above: `spec.releaseName` is written, so Flux does not compute `<appns>-<component>`. | As above. The `helm` values ConfigMap follows the HelmRelease into the Flux namespace. |
-| `helm` with `delivery: template`, or `helmtemplate` | The same name as `.Release.Name`: the authored `releaseName`, which must be a valid Helm release name, else the default a HelmRelease gets (`templateReleaseName`, `helmtemplate_render.go`; §4.2). The application namespace as `.Release.Namespace` (`chartSource`, `helmtemplate_render.go`); the chart's templates decide the object names. | Inline values, rendered into the output. `valuesFrom` is refused: a build cannot read a cluster object. |
+| `helm` or `helmrelease`, Flux delivery, no Flux namespace | `spec.releaseName` is always written: the authored `releaseName`, else `<component>`, shortened when over 53 characters (`HelmReleaseConfig.releaseName`, `helmrelease.go`; §4.2). | Inline `values`. On `helm` only, `valuesMode: configMap`: a ConfigMap `<component>-values-<hash>`, prepended to `valuesFrom` (`helmValuesConfigMap`, `pkg/oam/builtin/components/helm.go`); `helmrelease` refuses the key (`helmReleaseValuesModeHint`, `helmrelease.go`). On `helm` only, `secretValues`: a Secret `<component>-secret-values-<hash>`, in `valuesFrom` after the values ConfigMap and before the authored entries (§4.3). `valuesFrom` references to out-of-band ConfigMaps or Secrets work. |
+| Same, Flux namespace set | The HelmRelease moves to the Flux namespace and launcher defaults `targetNamespace` to the app namespace (`HelmReleaseConfig.Generate`, `helmrelease.go`). The release name is the one of the row above: `spec.releaseName` is written, so Flux does not compute `<appns>-<component>`. | As above. The `helm` values ConfigMap and values Secret follow the HelmRelease into the Flux namespace. |
+| `helm` with `delivery: template`, or `helmtemplate` | The same name as `.Release.Name`: the authored `releaseName`, which must be a valid Helm release name, else the default a HelmRelease gets (`templateReleaseName`, `helmtemplate_render.go`; §4.2). The application namespace as `.Release.Namespace` (`chartSource`, `helmtemplate_render.go`); the chart's templates decide the object names. | Inline values, rendered into the output; `secretValues` is merged over them for the render (§4.3). `valuesFrom` is refused: a build cannot read a cluster object. |
 
-No path writes explicit values into a Secret.
+Explicit values are written into a Secret by `secretValues` under Flux delivery only
+(§4.3).
 
 ### 4.2 Shipped (go-kure/launcher#785): release name
 
@@ -386,26 +387,59 @@ No path writes explicit values into a Secret.
     a new release instead of renaming the installed one. A template render no longer runs
     under `release`. The components README states how to keep an installed release.
 
-### 4.3 Target (go-kure/launcher#786): Secret values
+### 4.3 Shipped (go-kure/launcher#786): Secret values
 
-- A property for marked sensitive values (proposed name `secretValues`), on the `helm`
-  component only. The `helmrelease` kind decodes its properties strictly as a
-  `HelmReleaseSpec` and takes no `valuesMode` (§4.1), so it gets no `secretValues` either:
-  an author using the kind writes the Secret as its own component and references it in
-  `valuesFrom`.
-- **Flux delivery:** a Secret `<component>-secret-values-<hash>` in the HelmRelease's
-  namespace (it follows the Flux namespace as the values ConfigMap does), referenced in
-  `valuesFrom` ahead of the authored entries, mirroring the ConfigMap mode.
-- **Template delivery:** merged into the render values.
-- launcher has no Secret kind or secret trait today. The ConfigMap mode emits its object
-  through a synthesized `configmap` trait. go-kure/launcher#786 needs an equivalent Secret path; it can reuse
-  the Secret kind of go-kure/launcher#790.
-- **Decide in the ticket:** the `valuesFrom` order when both `valuesMode: configMap` and
-  `secretValues` are set, and whether a key present in both `values` and `secretValues` is
-  refused.
-- **Documented limit:** a Secret in the output is base64, not encrypted. A consumer that
-  forbids explicit secrets by policy requires a reference to an out-of-band Secret instead.
-  Under template delivery, out-of-band secrets go through the chart's own
+- `secretValues` is a second values tree, for the values that must not sit in the
+  HelmRelease or in a ConfigMap, on the `helm` component and on the `helmtemplate` kind.
+  The `helmrelease` kind decodes its properties strictly as a `HelmReleaseSpec` (§4.1) and
+  has no such property: an author using the kind names a Secret in `valuesFrom`.
+- **Flux delivery:** the `helm` rule appends a `secret` trait to the `helmrelease`
+  (`helmSecretValuesTrait`, `pkg/oam/builtin/components/helm_secret_values.go`). Its
+  Secret holds the tree under the key `values.json`, serialized as the values ConfigMap's
+  is, and is named `<component>-secret-values-<hash>`: ten hex digits of the sha256 of
+  those bytes, shortened by the rule of §3.3. It is in the HelmRelease's namespace and
+  follows it into the Flux namespace, as the values ConfigMap does. The `valuesFrom` order
+  is: values ConfigMap, values Secret, authored entries. No value of the tree is written
+  to the HelmRelease or to the values ConfigMap.
+- **Template delivery:** the tree is merged over `values` for the render
+  (`mergeSecretValues`). Nothing is emitted for it: a value is in the output only where
+  the chart renders it.
+- **A path set in both `values` and `secretValues` is refused,** under either delivery and
+  either values mode (`refuseSharedValuePath`). Flux applies inline `spec.values` after
+  every `valuesFrom` entry, so without the refusal the winner would depend on the values
+  mode.
+- **A key named `global` below the top level of `secretValues` is refused,** under either
+  delivery, naming the path and no value (`refuseNestedGlobal`; go-kure/launcher#794,
+  item 9). Helm reads such a key as a dependency's globals and, where their shape conflicts
+  with the chart's own, prints the dropped entry in a warning that cannot be intercepted:
+  in the build's log under template delivery, in the Flux controller's under Flux
+  delivery. Launcher does not read the chart, so a key named `global` that is not a
+  dependency's is refused too and can be given through `values` only. A sensitive global
+  goes under the top-level `global`, which reaches every dependency and is not printed.
+- **The `secret` trait** is new with this ticket (`pkg/oam/builtin/traits/secret.go`). It
+  builds through the one Secret path, `ParseSecretProperties` and `GenerateSecret`
+  (`pkg/oam/builtin/components/secret.go`), which a `secret` kind of go-kure/launcher#790
+  (§6.2) can use.
+- **Policy:** `oam.ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`,
+  `pkg/oam/policy.go`) is an interface a `Policy` may also implement. Where it answers
+  false these are refused: the `secret` trait, `secretValues` on `helm` and on
+  `helmtemplate`, and a core Secret a `passthrough` or `manifests` component carries
+  (`enforceExplicitSecretObject`, `enforce.go`; told by group and kind, whatever it holds).
+  The author then references a Secret created out of band. A policy that does not
+  implement the interface allows them, as does no policy. Breaking only for a consumer
+  whose policy answers false.
+- **Not covered:** a Secret a chart renders under template delivery is emitted under such
+  a policy. Its content comes from the chart and its values, and most charts render one.
+- **Limits:** a Secret in the output is base64, not encrypted: the output is as sensitive
+  as the document. The Secret's name carries 40 bits of a digest of the tree. No refusal of
+  the property repeats a value, and the cause of a render that fails with `secretValues` is
+  withheld. An error about an object the render produced is not scrubbed: it names that
+  object and can quote any part of it the check refuses or locates the refusal by (a
+  container's or a volume's name, an image reference, a label key), so a chart that
+  renders a sensitive value into the object has it quoted there; the refusal of a
+  `scopeOverrides` entry that contradicts a rendered CustomResourceDefinition (§7,
+  item 11) is reported as it is, since it names a kind, an object and two scopes, never a
+  value. Under template delivery, out-of-band secrets go through the chart's own
   `existingSecret`-style values.
 
 ---
@@ -620,9 +654,11 @@ and the disposition of every item. The four this document started from:
     `oam.ViolationError`.
   - A PersistentVolume is among the kinds the check reads since the `persistentvolume`
     kind (§6.2), on both.
-  - Not covered: an object of a kind the check does not read passes, a custom resource
-    included, so the pods its controller creates are not checked. With no policy passed
-    to the handler, nothing is checked.
+  - A core Secret is refused on both under a policy that forbids explicit secrets
+    (go-kure/launcher#786, §4.3).
+  - Not covered: an object of any other kind the check does not read passes, a custom
+    resource included, so the pods its controller creates are not checked. With no policy
+    passed to the handler, nothing is checked.
   - Breaking for a document that relied on either bypass.
   - **Documented, no change:** `service`, `serviceaccount` and `configmap` have no
     `ApplyPolicy`, deliberately. None of their properties maps to an environment-policy
@@ -639,6 +675,14 @@ and the disposition of every item. The four this document started from:
   every workload kind without it, and is not among the labels it returns.
 - **Namespace on template output (item 4): shipped** (§5.1). An object of unknown scope
   is left as rendered.
+- **Helm's values warning quoting a sensitive value (item 9): shipped, as a refusal**
+  (go-kure/launcher#786, §4.3). A key named `global` below the top level of `secretValues`
+  is refused on `helm`, under either delivery, and on `helmtemplate`
+  (`refuseNestedGlobal`, `pkg/oam/builtin/components/helm_secret_values.go`), so the one
+  Helm warning that quoted a value of that tree cannot occur. Helm's logging is not
+  captured or filtered. The two shapes that can still meet a values conflict, a top-level
+  `global` and a dependency's ordinary key, are pinned by a test to print the plain side
+  only. Not breaking: `secretValues` is new with go-kure/launcher#786.
 - **Scope overrides on template delivery (item 11): shipped for `helmtemplate`.** The
   component takes the `scopeOverrides` property `manifests` has, read by the same parser
   and resolved by one function both call (`resolveObjectScope`,
@@ -670,7 +714,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#783](https://github.com/go-kure/launcher/issues/783) | Explicit ordering only; one bundle shape | §2.2 | Shipped | go-kure/launcher#781; go-kure/launcher#787 for the name override (can follow) |
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
-| [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
+| [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
@@ -678,5 +722,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), `scopeOverrides` on `helmtemplate` (item 11); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` (item 11); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
