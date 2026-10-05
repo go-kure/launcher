@@ -163,6 +163,42 @@ stay unset (go-kure/launcher#781). How an application is delivered (which Flux
 Kustomization applies it, how readiness is judged, how often it reconciles) belongs to the
 consumer that delivers it; see `docs/delivery-scope.md`.
 
+A consumer that sets one on a bundle launcher returned gets what kure's Flux workflow makes
+of it. Under `FluxIntegratedPerLayout` placement five settings of the bundle reach further
+than its own Kustomization since go-kure/kure#1016: `Wait`, `Timeout`, `RetryInterval`,
+`Labels` and `Annotations` are also on the Kustomization of each component layout and of each
+`helmtemplate` hook-group child (`shop-db` and `shop-db-NN-<phase>`, beside `shop`). The
+other fields stay on the bundle's Kustomization; `spec.interval` and `spec.prune` of a
+per-layout Kustomization are the generator's. With `Wait`, a hook group's Kustomization is
+Ready once the objects it applied are, not once it has applied them, so the next group, whose
+`spec.dependsOn` names it, starts after that. A hook group depends on the group before it and
+never on the layout above, so the tree integrates with an inherited wait, and the names and
+the `dependsOn` chain do not change. A walked layout can set its own value before the
+integration (`ManifestLayout.Wait`, `Timeout`, `RetryInterval`, `Labels`, `Annotations`): one
+`Timeout` inherited by the bundle's, the component's and the hook groups' Kustomizations gives
+the innermost as long as the outermost, and a shorter one on the layouts below is the
+consumer's to set. kure refuses three things it wrote out before: a bundle label or annotation
+the Kubernetes API does not accept, where a per-layout Kustomization inherits it; a layout a
+consumer added that depends on the application layout above it, once the bundle sets `Wait`
+(set `Wait` to a pointer to `false` on the application's layout); and, under any placement, a
+duration the Flux API does not take, a negative one or one above zero and under a millisecond,
+in a bundle's `Interval`, `Timeout` or `RetryInterval` (in a layout's `Timeout` or
+`RetryInterval` only where the layout gets a Kustomization of its own). kure's
+`pkg/stack/fluxcd` README has the rules under "Per-layout settings" and "Durations".
+
+**Breaking output change** for a consumer (go-kure/kure#1016, with the kure commit `go.mod`
+pins). Under `FluxIntegratedPerLayout` placement, a bundle that sets one of the five gives
+them to the component's and the hook groups' Kustomizations, and a tree kure refuses for the
+first or the second reason above no longer renders. Under any placement, a tree with a
+duration kure refuses no longer renders. What launcher returns does not change, and a tree
+that sets none of the five and no such duration renders as before.
+
+kure reads the resources a layout holds as kustomize builds them, a List standing for its
+items, by one rule in its pre-write checks and in its Flux integration (go-kure/kure#1017).
+Launcher's own decode paths put no List into a layout (kure's parser replaces a list document
+by its items, and `passthrough` refuses a list); a Go caller's own `ApplicationConfig` that
+returns one has it read by that rule.
+
 An application can carry a delivery intent, `stack.Application.Delivery`: what it asks of the
 engine that delivers its objects, stated without naming the engine. The `prune-protection` and
 `force-replace` traits set it (go-kure/launcher#782), on the component's application and on
