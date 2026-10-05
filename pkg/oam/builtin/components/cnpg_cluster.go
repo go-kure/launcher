@@ -125,7 +125,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"description":               str("Description of this PostgreSQL cluster."),
 		"inheritedMetadata":         obj("Labels and annotations inherited by every object related to the Cluster."),
-		"imageName":                 str("Container image for the instances, by tag or digest. The operator's own default applies when omitted. A policy registry allowlist applies to an authored image."),
+		"imageName":                 str("Container image for the instances, by tag or digest. When omitted, the operator takes the image from imageCatalogRef or, without one, runs its own default. A policy registry allowlist applies to an authored image."),
 		"imageCatalogRef":           obj("Reference to an ImageCatalog or ClusterImageCatalog entry selecting the image by PostgreSQL major version."),
 		"imagePullPolicy":           str("Image pull policy: Always, Never or IfNotPresent."),
 		"schedulerName":             str("Kubernetes scheduler that places the instance pods."),
@@ -626,8 +626,9 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if err := c.enforceMaxStorage(p.MaxStorageSize()); err != nil {
 		return err
 	}
-	// Only an authored image is checked: without imageName the operator runs its
-	// own default image, which the document did not choose.
+	// Only an authored image is checked: without imageName the operator takes the
+	// image from the catalog imageCatalogRef names, or runs its own default image
+	// when there is none. Neither is an image the document names.
 	if c.Spec.ImageName != "" {
 		if err := enforceAllowedRegistries(c.Spec.ImageName, p.AllowedRegistries()); err != nil {
 			return errors.Wrap(err, "imageName")
@@ -635,8 +636,10 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	}
 	// An extension's image is mounted into the instance pods as an image volume,
 	// which the kubelet pulls as it pulls a container's image: its reference is
-	// held to the same list and read the same way. An extension that names no
-	// reference names no image here, and nothing is checked for it.
+	// held to the same list and read the same way. An entry without a reference
+	// is not checked: the operator takes its image from the catalog that
+	// imageCatalogRef names, or refuses the Cluster when there is none, and a
+	// catalog's images are the catalog's to hold, as for imageName.
 	for i, ext := range c.Spec.PostgresConfiguration.Extensions {
 		if ext.ImageVolumeSource.Reference == "" {
 			continue

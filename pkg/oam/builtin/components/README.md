@@ -6286,10 +6286,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   privileged workloads, and an added capability the policy forbids or leaves
   off a non-empty allowlist. The registry allowlist the workload kinds apply
   to their image applies to an authored `imageName`
-  (`imageName: image "…" is not from an allowed registry [...]`); an unset
-  `imageName` leaves the operator's default image, which is not checked, and
-  `imageCatalogRef` names a catalog object rather than an image, so it is not
-  checked either. A `postgresql` component always writes `imageName` (its
+  (`imageName: image "…" is not from an allowed registry [...]`). When
+  `imageName` is unset, the operator takes the image from the catalog
+  `imageCatalogRef` names or, without one, runs its default image; neither is
+  checked by this kind. A `postgresql` component always writes `imageName` (its
   derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
   so the allowlist applies to its image too. The allowlist applies as well to
   the image of each `postgresql.extensions[]` entry, which the operator mounts
@@ -6297,11 +6297,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   go-kure/launcher#790: an extension image from a registry outside the list
   built before): `postgresql.extensions[0].image.reference: image "…" is not
   from an allowed registry [...]`, with the registry class, the reference read
-  as `imageName` is (see *Image volumes* under **pod** above) and an entry
-  that names no reference not checked. A `postgresql` component writes no
-  such entry. `imageName` and the extension images are every image a Cluster
-  names today; the test that walks the pod spec for image fields walks the
-  Cluster and the Pooler spec the same way.
+  as `imageName` is (see *Image volumes* under **pod** above). An entry
+  without a reference is not checked: the operator takes that image from the
+  catalog `imageCatalogRef` names (and refuses the Cluster without one), and
+  a catalog's images are not checked by this kind, as for an unset
+  `imageName`. A build reads the objects a document brings, not an object a
+  reference points at: a catalog's images are held where the catalog is
+  authored, by a kind that builds it. No kind here builds an image catalog
+  today, so nothing in this library holds a catalog's images: not for a raw
+  catalog on `manifests`, `passthrough` or a chart, and not for one that
+  already exists in the cluster. A `postgresql` component writes no
+  extension entry. `imageName` and the extension images are every image a
+  Cluster names today; the test that walks the pod spec for image fields
+  walks the Cluster and the Pooler spec the same way.
   Generation refuses `hugepages-<size>`
   in `resources` without `cpu` or `memory` after policy defaults. It also
   applies the shared parser's request/limit cross-check there
