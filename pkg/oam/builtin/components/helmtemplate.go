@@ -217,7 +217,10 @@ type HelmTemplateConfig struct {
 	// (go-kure/launcher#786), merged over Values for the render and kept out of
 	// every error this config returns. It must be representable as JSON, share
 	// no path with Values and carry no key named global below its top level
-	// (refuseNestedGlobal). A policy that forbids explicit secrets refuses a
+	// (refuseNestedGlobal). The two trees are compared and merged with their Go
+	// types, as the render takes them: an object is a map[string]any, and a
+	// map of another type at a key both set is a shared path
+	// (refuseSharedValuePath). A policy that forbids explicit secrets refuses a
 	// config that sets it (ApplyPolicy).
 	SecretValues map[string]any
 	// ScopeOverrides states the scope of a kind the chart renders, by

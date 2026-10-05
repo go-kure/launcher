@@ -12,7 +12,8 @@ import (
 
 // A sub-application's name is not its object's name (go-kure/launcher#787): a
 // Naming hook that renames only sub-applications changes no generated object.
-// These four traits used to name their object after the sub-application.
+// These traits name their object apart from the sub-application; four of them
+// used to name it after the sub-application.
 func TestNamingHook_SubApplicationRenameLeavesObjectNames(t *testing.T) {
 	app := func() *oam.Application {
 		return &oam.Application{
@@ -33,6 +34,7 @@ func TestNamingHook_SubApplicationRenameLeavesObjectNames(t *testing.T) {
 						"rules":      []any{map[string]any{}},
 					}},
 					{Type: "volsync", Properties: map[string]any{"sourcePVC": "data", "schedule": "@daily", "copyMethod": "Clone"}},
+					{Type: "secret", Properties: map[string]any{"name": "web-creds", "stringData": map[string]any{"a": "1"}}},
 				},
 			}}},
 		}
@@ -45,6 +47,7 @@ func TestNamingHook_SubApplicationRenameLeavesObjectNames(t *testing.T) {
 		tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 		tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 		tr.RegisterBuiltinTrait("volsync", &traits.VolSyncHandler{})
+		tr.RegisterBuiltinTrait("secret", &traits.SecretHandler{})
 		cluster, err := tr.Transform(app(), oam.TransformContext{
 			Namespace: "default",
 			Naming:    hook,
@@ -80,7 +83,7 @@ func TestNamingHook_SubApplicationRenameLeavesObjectNames(t *testing.T) {
 		return "renamed-" + req.Default, true
 	})
 
-	for _, kind := range []string{"ConfigMap", "Ingress", "HTTPRoute", "ReplicationSource"} {
+	for _, kind := range []string{"ConfigMap", "Ingress", "HTTPRoute", "ReplicationSource", "Secret"} {
 		if !slices.ContainsFunc(plainObjects, func(o string) bool { return strings.HasPrefix(o, kind+" ") }) {
 			t.Fatalf("no %s generated: the test covers nothing for it; objects: %v", kind, plainObjects)
 		}
@@ -94,7 +97,7 @@ func TestNamingHook_SubApplicationRenameLeavesObjectNames(t *testing.T) {
 			renamed++
 		}
 	}
-	if renamed != 4 {
-		t.Errorf("%d sub-applications carry the hook's name, want the 4 traits': %v (without the hook: %v)", renamed, renamedApps, plainApps)
+	if renamed != 5 {
+		t.Errorf("%d sub-applications carry the hook's name, want the 5 traits': %v (without the hook: %v)", renamed, renamedApps, plainApps)
 	}
 }
