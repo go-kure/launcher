@@ -164,12 +164,19 @@ Kustomization applies it, how readiness is judged, how often it reconciles) belo
 consumer that delivers it; see `docs/delivery-scope.md`.
 
 A consumer that sets one on a bundle launcher returned gets what kure's Flux workflow makes
-of it. Under `FluxIntegratedPerLayout` placement five settings of the bundle reach further
+of it. Under `FluxIntegratedPerLayout` placement five settings of a bundle reach further
 than its own Kustomization since go-kure/kure#1016: `Wait`, `Timeout`, `RetryInterval`,
-`Labels` and `Annotations` are also on the Kustomization of each component layout and of each
-`helmtemplate` hook-group child (`shop-db` and `shop-db-NN-<phase>`, beside `shop`). The
-other fields stay on the bundle's Kustomization; `spec.interval` and `spec.prune` of a
-per-layout Kustomization are the generator's. With `Wait`, a hook group's Kustomization is
+`Labels` and `Annotations` are also on the Kustomization of the layout of each component the
+bundle holds and of each `helmtemplate` hook-group child of such a component (`shop-db` and
+`shop-db-NN-<phase>`, beside `shop`). The bundle they come from is the one that holds the
+component, and kure hands none of them down from a bundle to its child bundles. In a flat
+application that is the application's bundle. In an ordered one the components are in the
+group bundles below it ([Pipeline](#pipeline)), so a consumer sets the five on each group
+bundle: on `shop-infra` they reach `shop-infra`, `shop-infra-db` and the `shop-db-NN-<phase>`
+hook groups, and no other group. Set on the application's bundle alone they reach its own
+Kustomization, and no group's and no grouped component's. The other fields stay on the
+bundle's Kustomization; `spec.interval` and `spec.prune` of a per-layout Kustomization are
+the generator's. With `Wait`, a hook group's Kustomization is
 Ready once the objects it applied are, not once it has applied them, so the next group, whose
 `spec.dependsOn` names it, starts after that. A hook group depends on the group before it and
 never on the layout above, so the tree integrates with an inherited wait, and the names and
@@ -188,16 +195,18 @@ in a bundle's `Interval`, `Timeout` or `RetryInterval` (in a layout's `Timeout` 
 
 **Breaking output change** for a consumer (go-kure/kure#1016, with the kure commit `go.mod`
 pins). Under `FluxIntegratedPerLayout` placement, a bundle that sets one of the five gives
-them to the component's and the hook groups' Kustomizations, and a tree kure refuses for the
-first or the second reason above no longer renders. Under any placement, a tree with a
-duration kure refuses no longer renders. What launcher returns does not change, and a tree
-that sets none of the five and no such duration renders as before.
+them to the Kustomizations of the components it holds and of their hook groups, and a tree
+kure refuses for the first or the second reason above no longer renders. Under any placement,
+a tree with a duration kure refuses no longer renders. What launcher returns does not change,
+and a tree that sets none of the five and no such duration renders as before.
 
 kure reads the resources a layout holds as kustomize builds them, a List standing for its
 items, by one rule in its pre-write checks and in its Flux integration (go-kure/kure#1017).
 Launcher's own decode paths put no List into a layout (kure's parser replaces a list document
 by its items, and `passthrough` refuses a list); a Go caller's own `ApplicationConfig` that
-returns one has it read by that rule.
+returns one has it read by that rule. `CheckInDocumentCollisions` and
+`CheckCrossDocumentCollisions` compare such a List as the one object it is, not its items: an
+item another application or document also generates is not reported.
 
 An application can carry a delivery intent, `stack.Application.Delivery`: what it asks of the
 engine that delivers its objects, stated without naming the engine. The `prune-protection` and
