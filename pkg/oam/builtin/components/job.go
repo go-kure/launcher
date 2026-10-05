@@ -89,7 +89,8 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // ToApplicationConfig converts an OAM job component to a JobConfig. The Job's
 // name is held to the length the API server creates one under
-// (validateJobName).
+// (validateJobName) and, on an Indexed job, to one its pods can be named after
+// (validateJobNameAllowsCompletions).
 func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	if err := validateJobName(component.ObjectName(), component.Name); err != nil {
 		return nil, err
@@ -160,6 +161,9 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.JobSpec = jobSpec
+	if err := validateJobNameAllowsCompletions(component.ObjectName(), component.Name, jobSpec); err != nil {
+		return nil, err
+	}
 
 	env, err := parseEnv(props)
 	if err != nil {
@@ -366,10 +370,14 @@ func (c *JobConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes Job, and nothing beside it: no ServiceAccount
-// and no claim (go-kure/launcher#702). The name-length check is repeated, since
-// the config is exported.
+// and no claim (go-kure/launcher#702). The checks of the Job's name are
+// repeated, since the config is exported.
 func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateJobName(kindObjectName(c.ObjectName, app.Name), app.Name); err != nil {
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateJobName(name, app.Name); err != nil {
+		return nil, err
+	}
+	if err := validateJobNameAllowsCompletions(name, app.Name, c.JobSpec); err != nil {
 		return nil, err
 	}
 	job, err := c.createJob(app)

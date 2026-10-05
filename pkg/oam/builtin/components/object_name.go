@@ -1,6 +1,9 @@
 package components
 
 import (
+	"strconv"
+	"strings"
+
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -98,6 +101,33 @@ func validateCronJobName(name, componentName string) error {
 // jobNameMaxLength.
 func validateJobName(name, componentName string) error {
 	return validateKindNameLength("job", "Job", jobNameMaxLength, name, componentName)
+}
+
+// validateJobNameAllowsCompletions refuses the name of an Indexed job whose
+// pods could not be named after it. The job controller gives the pod of each
+// index the hostname "<job>-<index>", the last being completions-1, and
+// validateNameAllowsCompletions (k8s.io/kubernetes, pkg/apis/batch/validation,
+// called from ValidateJobCreate) refuses a Job for which that last hostname is
+// not a DNS-1123 label: at most 63 characters, and no dot. name is the one the
+// Job takes, and the refusal says where it came from, as validateKindNameLength
+// does.
+func validateJobNameAllowsCompletions(name, componentName string, spec JobSpecConfig) error {
+	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion ||
+		spec.Completions == nil || *spec.Completions <= 0 {
+		return nil
+	}
+	hostname := name + "-" + strconv.Itoa(int(*spec.Completions)-1)
+	errs := validation.IsDNS1123Label(hostname)
+	if len(errs) == 0 {
+		return nil
+	}
+	const rule = "with completionMode Indexed and completions %d the pod of the last index takes the hostname %q, which must be a DNS-1123 label: %s"
+	if name == componentName {
+		return errors.Errorf("job %q: the component name is the Job's name, and "+rule,
+			name, *spec.Completions, hostname, strings.Join(errs, "; "))
+	}
+	return errors.Errorf("%s: %q is not a valid name for this Job: "+rule,
+		objectNameField, name, *spec.Completions, hostname, strings.Join(errs, "; "))
 }
 
 func coreKind(kind string) schema.GroupKind { return schema.GroupKind{Kind: kind} }
