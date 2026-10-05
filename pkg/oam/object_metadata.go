@@ -57,8 +57,10 @@ func (c Component) ObjectMetadata() ObjectMetadata {
 // config set. A key the config set to another value is refused: the config's
 // own labels are the ones selectors are built from. The maps obj held are left
 // as they are and obj gets maps of its own, since a config may use one label
-// map for an object, its selector and its pod template. A refusal leaves obj
-// as it was: both maps are checked before either is set.
+// map for an object, its selector and its pod template. The authored
+// annotations were held to the API server's size limit on their own; with the
+// ones the config set they are held to it again. A refusal leaves obj as it
+// was: both maps are checked before either is set.
 func (m ObjectMetadata) ApplyTo(obj client.Object) error {
 	labels, err := withAuthored(obj.GetLabels(), m.Labels, ObjectLabelsProperty)
 	if err != nil {
@@ -67,6 +69,11 @@ func (m ObjectMetadata) ApplyTo(obj client.Object) error {
 	annotations, err := withAuthored(obj.GetAnnotations(), m.Annotations, ObjectAnnotationsProperty)
 	if err != nil {
 		return err
+	}
+	if len(m.Annotations) > 0 {
+		if size := annotationsSize(annotations); size > apivalidation.TotalAnnotationSizeLimitB {
+			return errors.Errorf("%s: with the annotations the component sets on its object, the keys and values hold %d bytes, over the %d-byte limit of an object's annotations", ObjectAnnotationsProperty, size, apivalidation.TotalAnnotationSizeLimitB)
+		}
 	}
 	if len(m.Labels) > 0 {
 		obj.SetLabels(labels)
@@ -89,6 +96,17 @@ func withAuthored(own, authored map[string]string, property string) (map[string]
 		merged[key] = authored[key]
 	}
 	return merged, nil
+}
+
+// annotationsSize is the size the API server holds an object's annotations to:
+// the bytes of every key and value (ValidateAnnotations,
+// k8s.io/apimachinery/pkg/api/validation).
+func annotationsSize(annotations map[string]string) int {
+	var size int
+	for key, value := range annotations {
+		size += len(key) + len(value)
+	}
+	return size
 }
 
 // objectLabelsSchema and objectAnnotationsSchema are the declarations the
@@ -198,16 +216,14 @@ func withObjectMetadata(component Component, handler ComponentHandler, labelKey 
 				ObjectLabelsProperty, labelKey, got, owner, ComponentLabelValue(owner))
 		}
 	}
-	var size int
 	for _, key := range slices.Sorted(maps.Keys(annotations)) {
 		// The API server validates an annotation key in lower case
 		// (ValidateAnnotations, k8s.io/apimachinery/pkg/api/validation).
 		if errs := validation.IsQualifiedName(strings.ToLower(key)); len(errs) > 0 {
 			return component, errors.Errorf("%s[%q]: not a valid annotation key: %s", ObjectAnnotationsProperty, key, strings.Join(errs, "; "))
 		}
-		size += len(key) + len(annotations[key])
 	}
-	if size > apivalidation.TotalAnnotationSizeLimitB {
+	if size := annotationsSize(annotations); size > apivalidation.TotalAnnotationSizeLimitB {
 		return component, errors.Errorf("%s: the keys and values hold %d bytes, over the %d-byte limit of an object's annotations", ObjectAnnotationsProperty, size, apivalidation.TotalAnnotationSizeLimitB)
 	}
 	component.objectMetadata = ObjectMetadata{Labels: labels, Annotations: annotations}

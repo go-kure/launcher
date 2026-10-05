@@ -364,7 +364,9 @@ func TestObjectMetadata_ApplyTo(t *testing.T) {
 	}
 
 	// A key the config set to another value is refused, for labels and
-	// annotations alike, and the object is left as it was.
+	// annotations alike, and so are authored annotations that are within the
+	// API server's size limit alone and over it with the object's own. The
+	// object is left as it was.
 	for _, tt := range []struct {
 		name string
 		meta ObjectMetadata
@@ -373,6 +375,9 @@ func TestObjectMetadata_ApplyTo(t *testing.T) {
 		{name: "a label", meta: ObjectMetadata{Labels: map[string]string{"app": "other", "team": "x"}}, want: `labels["app"]: "other" is not the value the component sets on its object ("web")`},
 		{name: "an annotation", meta: ObjectMetadata{Annotations: map[string]string{"own": "other"}}, want: `annotations["own"]: "other" is not the value the component sets on its object ("kept")`},
 		{name: "an annotation, beside labels that would have been added", meta: ObjectMetadata{Labels: map[string]string{"team": "x"}, Annotations: map[string]string{"own": "other"}}, want: `annotations["own"]: "other" is not the value the component sets on its object ("kept")`},
+		{name: "annotations over the size limit with the object's own, beside labels that would have been added",
+			meta: ObjectMetadata{Labels: map[string]string{"team": "x"}, Annotations: map[string]string{"big": strings.Repeat("x", 262_140)}},
+			want: `annotations: with the annotations the component sets on its object, the keys and values hold 262150 bytes, over the 262144-byte limit`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}, Annotations: map[string]string{"own": "kept"}}}
@@ -384,5 +389,15 @@ func TestObjectMetadata_ApplyTo(t *testing.T) {
 				t.Errorf("the refused object now holds labels %v and annotations %v", obj.Labels, obj.Annotations)
 			}
 		})
+	}
+
+	// At the limit exactly, the object's own annotations counted in, they are
+	// taken.
+	atLimit := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"own": "kept"}}}
+	if err := (ObjectMetadata{Annotations: map[string]string{"big": strings.Repeat("x", 262_134)}}).ApplyTo(atLimit); err != nil {
+		t.Errorf("ApplyTo of annotations that reach the size limit with the object's own: %v", err)
+	}
+	if len(atLimit.Annotations) != 2 {
+		t.Errorf("annotations at the size limit: the object holds %d, want its own and the authored one", len(atLimit.Annotations))
 	}
 }
