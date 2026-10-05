@@ -997,10 +997,10 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`,
 `poddisruptionbudget`, `horizontalpodautoscaler`, `servicemonitor`, `podmonitor`,
-`prometheus-probe` and `prometheusrule`
-(go-kure/launcher#790) are on this list. `ingress`, `httproute`, `networkpolicy` and
-`cilium-networkpolicy` are also trait types: the two lists are separate, and a component
-of such a type is the authored object, not the trait.
+`prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer` and `certificate`
+(go-kure/launcher#790) are on this list. `ingress`, `httproute`, `networkpolicy`,
+`cilium-networkpolicy` and `certificate` are also trait types: the two lists are
+separate, and a component of such a type is the authored object, not the trait.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type

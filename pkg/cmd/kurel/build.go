@@ -331,6 +331,10 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"podmonitor":       &components.PodMonitorHandler{},
 		"prometheus-probe": &components.PrometheusProbeHandler{},
 		"prometheusrule":   &components.PrometheusRuleHandler{},
+
+		"issuer":        &components.IssuerHandler{},
+		"clusterissuer": &components.ClusterIssuerHandler{},
+		"certificate":   &components.CertificateHandler{},
 	}
 }
 

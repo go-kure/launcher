@@ -22,7 +22,9 @@ func policyFreeTypeOf[T any](k *policyFreeKind[T]) policyFreeType {
 // publishes its field comments (SwaggerDoc). A kind added without a row here
 // is not held by the tests below. The kinds of the Prometheus operator's API
 // publish none and are held by TestMonitoringKinds_NoDefaultedZeros instead,
-// from the markers of their source.
+// from the markers of their source. The kinds of cert-manager publish none
+// either and are held by TestCertManagerKinds_NoDefaultedZeros, from their
+// CRDs.
 var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(storageClassKind),
 	policyFreeTypeOf(volumeAttributesClassKind),

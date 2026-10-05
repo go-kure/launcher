@@ -1,0 +1,24 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: vault
+      type: clusterissuer
+      properties:
+        vault:
+          server: https://vault.example.com:8200
+          path: pki_int/sign/example-dot-com
+          auth:
+            kubernetes:
+              role: issuer
+              mountPath: /v1/auth/kubernetes
+              serviceAccountRef:
+                name: vault-issuer
+    - name: bootstrap
+      type: clusterissuer
+      properties:
+        objectName: selfsigned-bootstrap
+        selfSigned: {}
