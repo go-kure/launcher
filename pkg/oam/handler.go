@@ -72,7 +72,9 @@ type ComponentCapabilityDefaults interface {
 // volumeClaimTemplates entries take the `pvc` capability's storageClassName
 // (go-kure/launcher#761). FillCapabilityDefaults runs right after
 // ComponentCapabilityDefaults, on unsynthesized components only, and returns the
-// properties ToApplicationConfig receives. It must not mutate props: it returns
+// properties ToApplicationConfig receives. On a kind component
+// (ComponentObjectProvider) props no longer holds `objectName`, which the engine
+// took out. It must not mutate props: it returns
 // props itself when it fills nothing, and copies what it changes. It reads a
 // binding only through lctx.Capability, which records the key as consumed; lctx
 // carries nothing else. An error fails the component.

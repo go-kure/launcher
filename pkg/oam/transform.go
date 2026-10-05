@@ -892,6 +892,15 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 		}
 
+		// Before any of the handler's own code runs on the properties, a capability
+		// filler included: the handler reads the object's name off the component and
+		// never sees the property.
+		named, err := withObjectName(component, handler, namespace, ctx.FluxNamespace, ctx.names)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+		component = named
+
 		// After D3, which checks only what was authored: the capability defaults a
 		// ComponentCapabilityDefaults handler names fill the keys left unauthored.
 		if d, ok := handler.(ComponentCapabilityDefaults); ok && !component.synthesized {
@@ -908,14 +917,6 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 			component.Properties = filled
 		}
-
-		// Last before the handler: it reads the object's name off the component
-		// and never sees the property.
-		named, err := withObjectName(component, handler, namespace, ctx.FluxNamespace, ctx.names)
-		if err != nil {
-			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
-		}
-		component = named
 
 		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
