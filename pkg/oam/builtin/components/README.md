@@ -103,7 +103,7 @@ reads it.
 | `priorityclass` | PriorityClass | Kind-named PriorityClass: `value` (`0` when unauthored), `globalDefault`, `description`, `preemptionPolicy`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `runtimeclass` | RuntimeClass | Kind-named RuntimeClass: `handler` (required), `overhead`, `scheduling`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
-| `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the component name is the driver's name; no environment policy applies — see below. |
+| `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -177,7 +177,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
-| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The component name is the CSI driver's name. Its labels and annotations are not authorable. No environment policy applies. |
+| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. Its labels and annotations are not authorable. No environment policy applies. |
 | `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
 | `kubernetes.CreateCSIStorageCapacity` | storage.k8s.io/v1 CSIStorageCapacity | not authorable | - | - | Written by a CSI driver's provisioner. |
 | `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | trait | `rbac` | hand-written parser | - |
@@ -200,7 +200,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
-| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The component name is the object's name. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
+| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
@@ -216,7 +216,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
-| `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The component name is the object's name. Its labels and annotations are not authorable. An unauthored `value` is emitted as `0`. No environment policy applies. |
+| `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. An unauthored `value` is emitted as `0`. No environment policy applies. |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
@@ -224,13 +224,13 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
-| `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The component name is the object's name. Its labels and annotations are not authorable. No environment policy applies. |
+| `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. No environment policy applies. |
 | `kubernetes.CreateSecret` | v1 Secret | trait | `secret` | hand-written parser | The trait builds through a generator of this package, so a `secret` kind can use the same path. The `helm` component's `secretValues` synthesizes the trait. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
-| `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The component name is the object's name. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
+| `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
 | `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | missing | - | - | - |
 | `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | missing | - | - | - |
@@ -238,7 +238,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
-| `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The component name is the object's name. Its labels and annotations are not authorable. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
+| `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
 | `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | trait | `certificate` | hand-written parser | - |
 | `certmanager.CreateCertificateRequest` | cert-manager.io/v1 CertificateRequest | not authorable | - | - | A one-shot request cert-manager creates for a Certificate. |
 | `certmanager.CreateChallenge` | acme.cert-manager.io/v1 Challenge | not authorable | - | - | Created by cert-manager's ACME issuer. |
@@ -2470,10 +2470,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `storage.k8s.io/v1` StorageClass, VolumeAttributesClass and CSIDriver, a
   `scheduling.k8s.io/v1` PriorityClass, a `node.k8s.io/v1` RuntimeClass and a
   `networking.k8s.io/v1` IngressClass. Each emits that one object, named after
-  the component, with no namespace, holding exactly what was authored: the
-  handler adds no label, no annotation and no default, and the transform sets
-  the component label, as on every object a component owns
-  (go-kure/launcher#788).
+  the component unless `objectName` names it, with no namespace, holding
+  exactly what was authored: the handler adds no label, no annotation and no
+  default, and the transform sets the component label, as on every object a
+  component owns (go-kure/launcher#788).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
@@ -2483,15 +2483,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   type under the package's null contract, which refuses a `null` list element
   by its path (`decodeKindSpec`), the refusal of a key written in two
   spellings (`refuseUncarriedSpecValues`), a config whose `ApplyPolicy` does
-  nothing, and a `Generate` that returns the constructor's object with a deep
-  copy of what was decoded, so two builds of one config share nothing. The
-  config type is unexported: a component is only built from properties that
-  went through the decode. The helper keeps no list of defaulted zeros, so it
-  suits a type only when none of its omit-when-zero numbers or booleans has a
-  non-zero API default; `TestPolicyFreeKinds_NoDefaultedZeros` reads the field
-  comments of every type built on it and fails on one whose comment states
-  such a default in a form it recognises (`Defaults to 1`, `Default is true`).
-  A default the comment words otherwise, or does not state, is not found.
+  nothing, and a `Generate` that returns the constructor's object, under the
+  object name the config carries, with a deep copy of what was decoded, so two
+  builds of one config share nothing. The config type is unexported: a
+  component is only built from properties that went through the decode. The
+  helper keeps no list of defaulted zeros, so it suits a type only when none
+  of its omit-when-zero numbers or booleans has a non-zero API default;
+  `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
+  type built on it and fails on one whose comment states such a default in a
+  form it recognises (`Defaults to 1`, `Default is true`). A default the
+  comment words otherwise, or does not state, is not found.
 
   **What is authored.**
   - `ingressclass` and `csidriver` have a spec type, and the properties are
@@ -2506,7 +2507,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     object type, and the object's own `kind`, `apiVersion` and `metadata` are
     refused by name under any spelling the decoder would match (`metadata:
     not authorable: launcher sets the object's kind, apiVersion and metadata
-    (its name is the component's)`). `storageclass`: `provisioner`,
+    (its name is the component's, or the one objectName gives it)`).
+    `storageclass`: `provisioner`,
     `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
     `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
     `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
@@ -2529,12 +2531,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the object, which the API reads as the same value: `globalDefault: false`
     and an empty `description` or `controller`.
 
-  **The component name is the object's name**, so a StorageClass is referred
-  to by the name of its component, and a `csidriver` component is named after
-  the CSI driver (`csi.example.com`), which the API requires of a CSIDriver.
-  The build namespace does not apply to these objects. The handlers check no
-  name rule of their own: a name the API refuses for the kind (a CSIDriver
-  name over 63 characters) builds here and is refused at apply.
+  **The object's name** is the component's unless `objectName`, or the
+  `Naming` hook under role `object`, names it otherwise (see "The object name"
+  below). Each handler declares its object as cluster-scoped, so the name is
+  claimed in no namespace: two `storageclass` components given one object
+  name are refused, whatever namespace the application is built for. What
+  refers to the object names it by its object name: a claim's
+  `storageClassName`, a pod's `runtimeClassName` or `priorityClassName`. The
+  API identifies a CSI driver by the CSIDriver's name, so a `csidriver`
+  component's object name must be the driver's (`csi.example.com`), written as
+  the component name or as `objectName`. The build namespace does not apply to
+  these objects. The handlers check no name rule of their own on either name:
+  one the API refuses for the kind (a CSIDriver name over 63 characters)
+  builds here and is refused at apply.
 
   **Policy.** None of the six has a field an `oam.Policy` method speaks to,
   so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
@@ -5053,7 +5062,9 @@ Every kind component takes `objectName`, which names its one object in place of 
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
 `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
-`limitrange`, `resourcequota`, the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
+`limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
+(`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
+`csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`

@@ -683,7 +683,8 @@ over it, the object keeping the component name (`configmap`, `service`, `deploym
 where the handler decodes its properties strictly, refuses it as a field it does not know
 (`namespace`, `helmrelease`, `cnpg-cluster`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
-kind (`namespace`, `persistentvolume`), and in the Flux namespace for a Flux kind when the
+kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
+`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`), and in the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
 
 ```

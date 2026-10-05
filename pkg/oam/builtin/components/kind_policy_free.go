@@ -38,8 +38,10 @@ type policyFreeKind[T any] struct {
 	validate func(decoded *T) error
 	// build returns the object: the base library's identity-only constructor
 	// for the name (and the namespace, unless the kind is cluster-scoped) and
-	// a deep copy of decoded. It is called once per Generate, and must not
-	// hand out decoded itself.
+	// a deep copy of decoded. name is the one the object takes: the
+	// component's object name where the engine resolved another than the
+	// component's, else the application's (kindObjectName). It is called once
+	// per Generate, and must not hand out decoded itself.
 	build func(name, namespace string, decoded *T) client.Object
 }
 
@@ -68,7 +70,7 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 			return nil, err
 		}
 	}
-	return &policyFreeKindConfig[T]{kind: k, decoded: decoded}, nil
+	return &policyFreeKindConfig[T]{kind: k, objectName: componentObjectName(component), decoded: decoded}, nil
 }
 
 // objectIdentityKeys are the json keys of an object that are launcher's to
@@ -84,7 +86,7 @@ var objectIdentityKeys = []string{"apiVersion", "kind", "metadata"}
 func refuseObjectIdentityKeys(props map[string]any) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		if slices.ContainsFunc(objectIdentityKeys, func(id string) bool { return strings.EqualFold(id, key) }) {
-			return errors.Errorf("%s: not authorable: launcher sets the object's kind, apiVersion and metadata (its name is the component's)", key)
+			return errors.Errorf("%s: not authorable: launcher sets the object's kind, apiVersion and metadata (its name is the component's, or the one %s gives it)", key, oam.ObjectNameProperty)
 		}
 	}
 	return nil
@@ -95,8 +97,11 @@ func refuseObjectIdentityKeys(props map[string]any) error {
 // config builds one, so what it holds has passed the kind's refusals and
 // Generate does not repeat them.
 type policyFreeKindConfig[T any] struct {
-	kind    *policyFreeKind[T]
-	decoded *T
+	kind *policyFreeKind[T]
+	// objectName names the object (oam.Component.ObjectName). Empty for the
+	// application's name.
+	objectName string
+	decoded    *T
 }
 
 // ApplyPolicy is a no-op, for any policy: see the top of this file.
@@ -104,9 +109,10 @@ func (c *policyFreeKindConfig[T]) ApplyPolicy(oam.Policy) error {
 	return nil
 }
 
-// Generate emits the kind's one object, named after the application. The
-// handler adds no label and no annotation.
+// Generate emits the kind's one object, under the object name the config
+// carries, else named after the application. The handler adds no label and no
+// annotation.
 func (c *policyFreeKindConfig[T]) Generate(app *stack.Application) ([]*client.Object, error) {
-	obj := c.kind.build(app.Name, app.Namespace, c.decoded)
+	obj := c.kind.build(kindObjectName(c.objectName, app.Name), app.Namespace, c.decoded)
 	return []*client.Object{&obj}, nil
 }

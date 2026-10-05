@@ -14,9 +14,10 @@ import (
 //
 // Its properties are exactly the top-level fields of storagev1.CSIDriverSpec,
 // under their json names, decoded strictly (decodeKindSpec). It emits the
-// CSIDriver, named after the component, and nothing else. A CSIDriver is
-// cluster-scoped: the object carries no namespace, whatever namespace the
-// application is built for. The component name is the name the CSI driver
+// CSIDriver, named after the component unless `objectName` names it, and
+// nothing else. A CSIDriver is cluster-scoped: the object carries no
+// namespace, whatever namespace the application is built for. The object's
+// name, the component's or its `objectName`, is the name the CSI driver
 // reports, since the API identifies the driver by the object's name.
 // TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
 // upstream json tags.

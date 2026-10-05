@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -609,5 +611,150 @@ func TestPolicyFreeKinds_ThroughTheTransform(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestPolicyFreeKinds_DeclareTheirObject: each handler declares the object it
+// emits, by group and kind, as cluster-scoped, so the type takes `objectName`
+// and the engine claims the name in no namespace.
+func TestPolicyFreeKinds_DeclareTheirObject(t *testing.T) {
+	for _, kind := range policyFreeKinds {
+		t.Run(kind.component, func(t *testing.T) {
+			provider, declares := kind.handler.(oam.ComponentObjectProvider)
+			if !declares {
+				t.Fatalf("%T declares no object (oam.ComponentObjectProvider)", kind.handler)
+			}
+			got, scope := provider.ComponentObject()
+			if got != kind.gvk.GroupKind() || scope != oam.ObjectScopeCluster {
+				t.Errorf("ComponentObject() = %s, scope %d; want %s, cluster scope (%d)",
+					got, scope, kind.gvk.GroupKind(), oam.ObjectScopeCluster)
+			}
+		})
+	}
+}
+
+// policyFreeTransform transforms a document of the given components, all of
+// one kind, with that kind's handler alone registered, and returns every
+// generated object. naming is the transform's Naming hook, nil for none.
+func policyFreeTransform(typ string, h oam.ComponentHandler, naming func(oam.NameRequest) (string, bool), components ...oam.Component) ([]client.Object, error) {
+	for i := range components {
+		components[i].Type = typ
+	}
+	app := &oam.Application{Metadata: oam.Metadata{Name: "shop"}, Spec: oam.ApplicationSpec{Components: components}}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{typ: h}, nil)
+	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: naming})
+	if err != nil {
+		return nil, err
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		return nil, err
+	}
+	var out []client.Object
+	for _, a := range apps {
+		for _, o := range a.Objects {
+			out = append(out, *o)
+		}
+	}
+	return out, nil
+}
+
+// TestPolicyFreeKinds_ObjectName: through the transform, the author's
+// `objectName` names the object, and without one the Naming hook's answer for
+// role "object" does; the author's wins over the hook's. It names the object
+// and nothing else: the object has no namespace, its component label keeps the
+// component's name, and but for its name it is the object the same properties
+// build under the component name. The hook is asked for the declared kind.
+func TestPolicyFreeKinds_ObjectName(t *testing.T) {
+	const component, authored = "web", "renamed.example.com"
+	for _, kind := range policyFreeKinds {
+		wantKind := kind.gvk.GroupKind().String()
+		var asked []oam.NameRequest
+		hook := func(req oam.NameRequest) (string, bool) {
+			if req.Role != oam.NameRoleObject {
+				return "", false
+			}
+			asked = append(asked, req)
+			return "hooked-" + req.Default, true
+		}
+		build := func(t *testing.T, objectName string, naming func(oam.NameRequest) (string, bool)) client.Object {
+			t.Helper()
+			props := map[string]any{}
+			maps.Copy(props, kind.full)
+			if objectName != "" {
+				props[oam.ObjectNameProperty] = objectName
+			}
+			objs, err := policyFreeTransform(kind.component, kind.handler, naming, oam.Component{Name: component, Properties: props})
+			if err != nil {
+				t.Fatalf("transform: %v", err)
+			}
+			if len(objs) != 1 {
+				t.Fatalf("generated %d objects, want one", len(objs))
+			}
+			return objs[0]
+		}
+		for name, tc := range map[string]struct {
+			objectName string
+			naming     func(oam.NameRequest) (string, bool)
+			want       string
+		}{
+			"objectName":               {authored, nil, authored},
+			"the Naming hook":          {"", hook, "hooked-" + component},
+			"objectName over the hook": {authored, hook, authored},
+		} {
+			t.Run(kind.component+"/"+name, func(t *testing.T) {
+				plain := build(t, "", nil)
+				if plain.GetName() != component {
+					t.Fatalf("without objectName the object is named %q, want the component's %q", plain.GetName(), component)
+				}
+				asked = nil
+				obj := build(t, tc.objectName, tc.naming)
+				if obj.GetName() != tc.want || obj.GetNamespace() != "" {
+					t.Errorf("identity = %q/%q, want the cluster-scoped %q", obj.GetNamespace(), obj.GetName(), tc.want)
+				}
+				wantLabels := map[string]string{oam.ComponentLabelKeyForDomain(""): component}
+				if !reflect.DeepEqual(obj.GetLabels(), wantLabels) {
+					t.Errorf("labels = %v, want %v: the component label keeps the component's name", obj.GetLabels(), wantLabels)
+				}
+				obj.SetName(plain.GetName())
+				if got, want := policyFreeJSON(t, obj), policyFreeJSON(t, plain); !reflect.DeepEqual(got, want) {
+					t.Errorf("but for its name the object differs from the one built under the component name:\n got %v\nwant %v", got, want)
+				}
+				switch {
+				case tc.naming == nil || tc.objectName != "":
+					if len(asked) != 0 {
+						t.Errorf("the hook was asked %+v, want it not asked for an authored name", asked)
+					}
+				case len(asked) == 0:
+					t.Error("the hook was not asked for the object's name")
+				default:
+					for _, req := range asked {
+						if req.Kind != wantKind || req.Component != component || req.Default != component {
+							t.Errorf("the hook was asked %+v, want kind %q, component and default %q", req, wantKind, component)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestPolicyFreeKinds_ObjectNameIsClaimedClusterWide: two components of one
+// kind given one object name are refused, and the refusal names the object
+// with no namespace before its name, as it does for a cluster-scoped object.
+func TestPolicyFreeKinds_ObjectNameIsClaimedClusterWide(t *testing.T) {
+	for _, kind := range policyFreeKinds {
+		t.Run(kind.component, func(t *testing.T) {
+			named := func(name string) oam.Component {
+				props := map[string]any{oam.ObjectNameProperty: "shared"}
+				maps.Copy(props, kind.minimal)
+				return oam.Component{Name: name, Properties: props}
+			}
+			_, err := policyFreeTransform(kind.component, kind.handler, nil, named("a"), named("b"))
+			want := fmt.Sprintf("name collision: %s %q is named by component %q", kind.gvk.GroupKind(), "shared", "a")
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want it to contain %q", err, want)
+			}
+		})
 	}
 }

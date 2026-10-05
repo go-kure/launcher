@@ -11,6 +11,10 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -159,6 +163,10 @@ func batchKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: batchv1.GroupName, Kind: kind}
 }
 
+func storageKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: storagev1.GroupName, Kind: kind}
+}
+
 func cnpgKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: cnpgv1.SchemeGroupVersion.Group, Kind: kind}
 }
@@ -254,6 +262,42 @@ func (h *NamespaceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope)
 // ComponentObject declares the serviceaccount kind's ServiceAccount.
 func (h *ServiceAccountHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return coreKind("ServiceAccount"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the storageclass kind's StorageClass, which is
+// cluster-scoped.
+func (h *StorageClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return storageKind("StorageClass"), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the volumeattributesclass kind's
+// VolumeAttributesClass, which is cluster-scoped.
+func (h *VolumeAttributesClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return storageKind("VolumeAttributesClass"), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the csidriver kind's CSIDriver, which is
+// cluster-scoped.
+func (h *CSIDriverHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return storageKind("CSIDriver"), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the priorityclass kind's PriorityClass, which is
+// cluster-scoped.
+func (h *PriorityClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: schedulingv1.GroupName, Kind: "PriorityClass"}, oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the runtimeclass kind's RuntimeClass, which is
+// cluster-scoped.
+func (h *RuntimeClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: nodev1.GroupName, Kind: "RuntimeClass"}, oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the ingressclass kind's IngressClass, which is
+// cluster-scoped.
+func (h *IngressClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: networkingv1.GroupName, Kind: "IngressClass"}, oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

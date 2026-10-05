@@ -16,10 +16,11 @@ import (
 // A RuntimeClass has no spec: its properties are the object's own top-level
 // fields, under their json names, decoded strictly; its kind, apiVersion and
 // metadata are launcher's to set and are refused. It emits the RuntimeClass,
-// named after the component, and nothing else. A RuntimeClass is
-// cluster-scoped: the object carries no namespace, whatever namespace the
-// application is built for. TestCoreKindSchemas_CoverSpec keeps the published
-// key set equal to the upstream json tags, less the object's own identity.
+// named after the component unless `objectName` names it, and nothing else. A
+// RuntimeClass is cluster-scoped: the object carries no namespace, whatever
+// namespace the application is built for. TestCoreKindSchemas_CoverSpec keeps
+// the published key set equal to the upstream json tags, less the object's own
+// identity.
 type RuntimeClassHandler struct{}
 
 // CanHandle returns true for the runtimeclass component type.
