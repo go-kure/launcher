@@ -602,8 +602,8 @@ be closed at build time.
     `tolerations` and `topologySpreadConstraints` are read;
   - `daemonset`: no scheduling field is left; the raw `affinity`, `tolerations`,
     `topologySpreadConstraints` and `sidecars` are read;
-  - `job`: the raw `affinity`, `tolerations` and `topologySpreadConstraints` are read;
-  - `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`;
+  - `job`, `cronjob`: the raw `affinity`, `tolerations` and `topologySpreadConstraints`
+    are read;
   - `job`, `cronjob`: `sidecars` (a plain sidecar keeps the Job's pod from completing;
     it needs the restartable init container below);
   - all workloads: the container fields `restartPolicy` and `restartPolicyRules` (a

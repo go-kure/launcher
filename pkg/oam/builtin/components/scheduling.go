@@ -19,7 +19,8 @@ import (
 // (go-kure/launcher#412). Other workload kinds publish the ones their
 // PropertySchema names, through the same parsers (go-kure/launcher#790):
 // `statefulset` takes `tolerations` and `topologySpreadConstraints` and keeps
-// the shorthand for `affinity`; `daemonset` and `job` take all three.
+// the shorthand for `affinity`; `daemonset`, `job` and `cronjob` take all
+// three.
 //
 // These are NOT alternatives to the four-key `affinity` shorthand that
 // webservice, worker and statefulset publish (schemaAffinity/parseAffinity in

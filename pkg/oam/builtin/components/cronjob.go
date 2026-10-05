@@ -100,6 +100,10 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"suspend":                    schemaCronJobSuspend(),
 		"startingDeadlineSeconds":    schemaCronJobStartingDeadlineSeconds(),
 		"timeZone":                   schemaCronJobTimeZone(),
+		// The three raw scheduling shapes scheduling.go projects.
+		"affinity":                  schemaRawAffinity(),
+		"tolerations":               schemaTolerations(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaJobSpec(false))
@@ -307,6 +311,16 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 
+	if config.Affinity, err = parseRawAffinity(props); err != nil {
+		return nil, err
+	}
+	if config.Tolerations, err = parseTolerations(props); err != nil {
+		return nil, err
+	}
+	if config.TopologySpreadConstraints, err = parseTopologySpreadConstraints(props); err != nil {
+		return nil, err
+	}
+
 	podSpec, err := parsePodSpec(props, true)
 	if err != nil {
 		return nil, err
@@ -358,6 +372,12 @@ type CronjobConfig struct {
 	VolumeDevices   []corev1.VolumeDevice
 	InitContainers  []InitContainerConfig
 	PVCs            []PVCConfig
+	// Affinity, Tolerations and TopologySpreadConstraints are the raw
+	// scheduling shapes, written onto the pod template of the Job the CronJob
+	// creates as authored (see scheduling.go).
+	Affinity                  *corev1.Affinity
+	Tolerations               []corev1.Toleration
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	// PodSpec holds the shared pod-level properties (see parsePodSpec). Parsed
 	// with jobPods=true, so `podActiveDeadlineSeconds` (the pod's own
 	// deadline) is accepted alongside the job-level `activeDeadlineSeconds`
@@ -490,6 +510,10 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		InitContainers: c.InitContainers,
 		Volumes:        c.Volumes,
 		RestartPolicy:  c.RestartPolicy,
+
+		Affinity:                  c.Affinity,
+		Tolerations:               c.Tolerations,
+		TopologySpreadConstraints: c.TopologySpreadConstraints,
 	})
 	if err != nil {
 		return nil, err

@@ -98,7 +98,7 @@ reads it.
 | `replicaset` | ReplicaSet | Kind-named bare ReplicaSet: the whole `ReplicaSetSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and gains the `app` label; `replicas` and the template are held to environment policy, no default filled — see below. |
 | `replicationcontroller` | ReplicationController | Kind-named bare ReplicationController: the whole `ReplicationControllerSpec`, strictly decoded; `template` is required, `selector` (a plain label map) optional. The pod template and `replicas` are held as the `replicaset` kind's are, `activeDeadlineSeconds` refused included, and the template gains the `app` label — see below. |
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
-| `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
+| `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
@@ -1444,11 +1444,10 @@ published (go-kure/launcher#790):
 | `statefulset` | the four-key shorthand (see "Common config"), not the raw shape | yes | yes |
 | `daemonset` | raw | yes | yes |
 | `job` | raw | yes | yes |
-| `cronjob` | no | no | no |
+| `cronjob` | raw | yes | yes |
 
-- A key a kind does not publish is refused by the authored-property check, not
-  dropped; so is the raw `affinity` shape on a kind that publishes the
-  shorthand.
+- The raw `affinity` shape on a kind that publishes the shorthand is refused by
+  the authored-property check, not dropped.
 - Nothing is defaulted on any of them: an unauthored key emits nothing, and a
   constraint or an affinity term selects only the pods its authored
   `labelSelector` names. The pods a kind builds carry `app: <component>` (see
@@ -1458,9 +1457,12 @@ published (go-kure/launcher#790):
   any taint, a control-plane node's included; a platform that reserves nodes
   by taint has to enforce that at admission.
 - The `topology-spread` trait stays Deployment-only. It is refused on a
-  `statefulset`, a `daemonset` and a `job`, with or without authored
-  constraints (`component "<name>" generates no Deployment the trait can act
-  on`).
+  `statefulset`, a `daemonset`, a `job` and a `cronjob`, with or without
+  authored constraints (`component "<name>" generates no Deployment the trait
+  can act on`).
+- On a `cronjob` the three keys are written onto the pod template of the Job
+  template (`spec.jobTemplate.spec.template.spec`), so they apply to the pods of
+  every Job the CronJob creates.
 - On a `daemonset` the three keys reach the DaemonSet's pod template as
   authored. The DaemonSet controller creates one pod for each node the
   template's node affinity, node selector and tolerations admit, and pins the
@@ -1481,7 +1483,7 @@ not have them, so they are additive outright. `tolerations` is not: `deployment`
 reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
 `daemonset` has always used, and those two kinds were its only callers then, so
 completing the projection changed `daemonset` too. (A kind that gained
-`tolerations` later, `statefulset` and `job` in go-kure/launcher#790, had no earlier
+`tolerations` later, `statefulset`, `job` and `cronjob` in go-kure/launcher#790, had no earlier
 behaviour to change: for it the property is additive.) Stating that plainly, per
 rule, because "additive" on its own would be false:
 
@@ -2557,7 +2559,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `sidecars` schema key (init containers only): a plain sidecar keeps running
   after the main container exits, so the Job's pod would never complete. The
   container that fits is the restartable init container, which this package
-  does not model (see "Container fields").
+  does not model (see "Container fields"). Since go-kure/launcher#790 it
+  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
+  (see "Raw scheduling properties"), written onto the Job template's pod
+  template.
   CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
   own default is `Allow`, but this is only ever written when authored —
   `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
