@@ -89,13 +89,13 @@ func TestHelmReleaseName_NamesTheObjectAlone(t *testing.T) {
 		name        string
 		base, extra string // the document without a renamed object, and what the author adds to rename it
 		hook        func(oam.NameRequest) (string, bool)
-		wantAsked   bool
+		wantAsked   int    // how often the hook is asked for the HelmRelease
 		wantRelease string // spec.releaseName
 	}{
 		{name: "the author", base: namingChart, extra: authored, hook: answer, wantRelease: "chart"},
-		{name: "the hook", base: namingChart, hook: answer, wantAsked: true, wantRelease: "chart"},
+		{name: "the hook", base: namingChart, hook: answer, wantAsked: 1, wantRelease: "chart"},
 		{name: "the author, beside releaseName", base: namingChart + releaseName, extra: authored, hook: answer, wantRelease: "podinfo"},
-		{name: "the hook, beside releaseName", base: namingChart + releaseName, hook: answer, wantAsked: true, wantRelease: "podinfo"},
+		{name: "the hook, beside releaseName", base: namingChart + releaseName, hook: answer, wantAsked: 1, wantRelease: "podinfo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plainCluster, plainApps := namingTransform(t, helmNamesApp(tc.base), oam.TransformContext{})
@@ -110,8 +110,8 @@ func TestHelmReleaseName_NamesTheObjectAlone(t *testing.T) {
 				return tc.hook(req)
 			}
 			cluster, apps := namingTransform(t, helmNamesApp(tc.base+tc.extra), oam.TransformContext{Naming: hook})
-			if asked := len(helmReleaseRequests(requests)) == 1; asked != tc.wantAsked {
-				t.Errorf("the hook was asked for the HelmRelease: %+v, want asked = %v", helmReleaseRequests(requests), tc.wantAsked)
+			if asked := helmReleaseRequests(requests); len(asked) != tc.wantAsked {
+				t.Errorf("the hook was asked for the HelmRelease %d times, want %d: %+v", len(asked), tc.wantAsked, asked)
 			}
 
 			hr := componentRelease(t, apps, "chart")
