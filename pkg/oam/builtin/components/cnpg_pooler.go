@@ -111,7 +111,18 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := cfg.validate(name); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredRequired(props, cnpgPoolerRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// cnpgPoolerRequired is cnpgClusterRequired for the Pooler CRD: the one string
+// it requires and bounds, with a pattern, that the Go type writes as "" when
+// it is unauthored. It is refused where its parent is authored and it is not;
+// an authored empty one is a value, and the API server's to refuse.
+var cnpgPoolerRequired = map[string]string{
+	"pgbouncer.imageCatalogRef.key": "the key of the image in the catalog",
 }
 
 // CnpgPoolerConfig implements stack.ApplicationConfig for cnpg-pooler
