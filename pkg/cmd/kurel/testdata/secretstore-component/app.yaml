@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: vault
+      type: secretstore
+      properties:
+        provider:
+          vault:
+            server: https://vault.example.com:8200
+            path: secret
+            version: v2
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: app
+                serviceAccountRef:
+                  name: vault-auth
+        retrySettings:
+          maxRetries: 5
+          retryInterval: 10s
+    - name: aws
+      type: secretstore
+      properties:
+        objectName: aws-secrets
+        provider:
+          aws:
+            service: SecretsManager
+            region: eu-west-1

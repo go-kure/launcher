@@ -122,6 +122,11 @@ var validComponentTypes = map[string]bool{
 	"rolebinding":        true,
 	"clusterrole":        true,
 	"clusterrolebinding": true,
+
+	"secretstore":           true,
+	"clustersecretstore":    true,
+	"externalsecret":        true,
+	"clusterexternalsecret": true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

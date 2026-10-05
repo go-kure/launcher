@@ -9,6 +9,7 @@ import (
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -131,6 +132,12 @@ var coreKindSchemas = []struct {
 	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), &components.RoleBindingHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 RoleBinding")},
 	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), &components.ClusterRoleHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRole")},
 	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), &components.ClusterRoleBindingHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRoleBinding")},
+	// And the external-secrets kinds. A SecretStore and a ClusterSecretStore hold
+	// one spec type.
+	{"secretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.SecretStoreHandler{}, nil},
+	{"clustersecretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.ClusterSecretStoreHandler{}, nil},
+	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
+	{"clusterexternalsecret", reflect.TypeFor[esv1.ClusterExternalSecretSpec](), &components.ClusterExternalSecretHandler{}, nil},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no

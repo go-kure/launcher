@@ -361,6 +361,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"rolebinding":        &components.RoleBindingHandler{},
 		"clusterrole":        &components.ClusterRoleHandler{},
 		"clusterrolebinding": &components.ClusterRoleBindingHandler{},
+
+		"secretstore":           &components.SecretStoreHandler{},
+		"clustersecretstore":    &components.ClusterSecretStoreHandler{},
+		"externalsecret":        &components.ExternalSecretHandler{},
+		"clusterexternalsecret": &components.ClusterExternalSecretHandler{},
 	}
 }
 

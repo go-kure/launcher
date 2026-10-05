@@ -1110,10 +1110,12 @@ where the handler decodes its properties strictly, refuses it as a field it does
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
 kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
 `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`,
-`cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`,
-`cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`,
-`cilium-egressgatewaypolicy`, `cilium-clusterwidenetworkpolicy`, `clusterrole`,
-`clusterrolebinding`), and in the Flux namespace for a Flux kind when the
+`clusterissuer`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`,
+`cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`,
+`cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`,
+`cilium-clusterwidenetworkpolicy`, `gatewayclass`, `clusterrole`,
+`clusterrolebinding`, `clustersecretstore`, `clusterexternalsecret`), and in
+the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
 
 ```
@@ -1324,7 +1326,8 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`,
 `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`,
 `referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`,
-`clusterrole` and `clusterrolebinding` (go-kure/launcher#790) are on this list.
+`clusterrole`, `clusterrolebinding`, `secretstore`, `clustersecretstore`,
+`externalsecret` and `clusterexternalsecret` (go-kure/launcher#790) are on this list.
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are
 also trait types: the two lists are separate, and a component of such a type is the
 authored object, not the trait.
@@ -2372,7 +2375,7 @@ A `RefusalClass` is a string, and the value is what a consumer may log or store.
 | `RefusalResourceMaximum` | `resource-maximum` | A cpu or memory request or limit over `MaxCPU` or `MaxMemory`: on a container, on the pod, or on the pod template of an ACME HTTP01 solver of an `issuer` or `clusterissuer`. |
 | `RefusalStorageMaximum` | `storage-maximum` | A storage request, or the capacity of a PersistentVolume, over `MaxStorageSize`. |
 | `RefusalReplicaMaximum` | `replica-maximum` | A replica count, an autoscaler's `maxReplicas` or a database cluster's instance count over `MaxReplicas`. |
-| `RefusalExplicitSecret` | `explicit-secret` | Secret material the document carries itself, under a policy that forbids explicit secrets (`ExplicitSecretPolicy`): a `secret` component or trait, a Secret that `passthrough` or a `manifests` source carries, `secretValues`, and a `certificate`'s keystore password. |
+| `RefusalExplicitSecret` | `explicit-secret` | Secret material the document carries itself, under a policy that forbids explicit secrets (`ExplicitSecretPolicy`): a `secret` component or trait, a Secret that `passthrough` or a `manifests` source carries, `secretValues`, a `certificate`'s keystore password, and a credential or the `fake` provider's data written into a `secretstore` or `clustersecretstore`. |
 | `RefusalTraitCapability` | `trait-capability` | A trait type the policy forbids or does not list as allowed, and one it requires that the application does not use. |
 | `RefusalUnreadableObject` | `unreadable-object` | An object written elsewhere (rendered by a chart, carried by `passthrough` or by a `manifests` source) that the build cannot read, so that it cannot be held to the policy and is refused instead of passed. |
 
