@@ -90,8 +90,9 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig converts an OAM job component to a JobConfig.
 func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &JobConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
 	}
 
 	props := component.Properties
@@ -255,7 +256,10 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 
 // JobConfig implements stack.ApplicationConfig for job components.
 type JobConfig struct {
-	Name          string
+	Name string
+	// ObjectName names the Job (oam.Component.ObjectName); its labels and main
+	// container keep Name. Empty for the application's name.
+	ObjectName    string
 	Namespace     string
 	Image         string
 	RestartPolicy corev1.RestartPolicy
@@ -388,7 +392,7 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 		return nil, err
 	}
 
-	job := kubernetes.CreateJob(app.Name, app.Namespace)
+	job := kubernetes.CreateJob(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	// CreateJob is identity-only (go-kure/launcher#361); labels/annotations
 	// are stamped explicitly below instead. Spec.Selector is left unset: the
 	// job controller generates the selector from its own unique label, which

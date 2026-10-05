@@ -46,6 +46,11 @@ const (
 	// NameRoleDatabase is one CloudNativePG Database object the postgresql
 	// component generates. Default: "<component>-<database name>".
 	NameRoleDatabase NameRole = "database"
+	// NameRoleObject is the one object of a kind component
+	// (ComponentObjectProvider): an authored `deployment`, `service`,
+	// `configmap`. Default: the component name. It is asked only for an authored
+	// component: what a lowering rule emits is named by the rule.
+	NameRoleObject NameRole = "object"
 )
 
 // nameSyntax is the rule a name that is not the default is held to.
@@ -90,6 +95,7 @@ var nameRoles = []struct {
 	{NameRoleNetworkPolicy, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
@@ -370,6 +376,9 @@ type traitNaming struct {
 	authored  bool
 	apply     int
 	nth       int
+	// objectName is the name of the object of the component the trait is applied
+	// on (Component.ObjectName).
+	objectName string
 	// subApps holds, by name, every sub-application name this trait resolved
 	// since the engine last took them.
 	subApps map[string][]subAppName
@@ -446,6 +455,19 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default})
 	}
 	return name, err
+}
+
+// ComponentObjectName returns the name of the object of the component the trait
+// is applied on, for a trait that refers to that object by name (the scaler's
+// scaleTargetRef): the name a kind component's object was given
+// (`objectName`, the Naming hook), else the component name. On a trait built
+// outside a transform (a handler's Apply called directly) it is "", and the
+// caller falls back to the application's name.
+func (t *Trait) ComponentObjectName() string {
+	if t.naming == nil {
+		return ""
+	}
+	return t.naming.objectName
 }
 
 func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {

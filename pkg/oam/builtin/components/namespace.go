@@ -53,8 +53,8 @@ func (h *NamespaceHandler) ToApplicationConfig(component *oam.Component, _ strin
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	cfg := &NamespaceConfig{Name: component.Name, Spec: *spec}
-	if err := validateNamespaceName(cfg.Name); err != nil {
+	cfg := &NamespaceConfig{Name: component.Name, ObjectName: componentObjectName(component), Spec: *spec}
+	if err := validateNamespaceObjectName(component.ObjectName(), cfg.Name); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -64,7 +64,24 @@ func (h *NamespaceHandler) ToApplicationConfig(component *oam.Component, _ strin
 // Spec is the decoded NamespaceSpec exactly as authored.
 type NamespaceConfig struct {
 	Name string
-	Spec corev1.NamespaceSpec
+	// ObjectName names the Namespace (oam.Component.ObjectName). Empty for the
+	// application's name.
+	ObjectName string
+	Spec       corev1.NamespaceSpec
+}
+
+// validateNamespaceObjectName is validateNamespaceName for the name the
+// Namespace takes: the component's, or the `objectName` that names it apart
+// from the component, which is then the one held to the rule.
+func validateNamespaceObjectName(name, componentName string) error {
+	if name == componentName {
+		return validateNamespaceName(name)
+	}
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return errors.Errorf("%s: %q is not a valid Namespace name, which must be a DNS-1123 label of at most %d characters: %s",
+			oam.ObjectNameProperty, name, validation.DNS1123LabelMaxLength, strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // validateNamespaceName refuses a name the API refuses for a Namespace: a
@@ -87,10 +104,11 @@ func (c *NamespaceConfig) ApplyPolicy(oam.Policy) error {
 // Generate emits the Namespace: kure's identity-only constructor plus a deep
 // copy of the spec. The name check is repeated, since the config is exported.
 func (c *NamespaceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateNamespaceName(app.Name); err != nil {
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateNamespaceObjectName(name, app.Name); err != nil {
 		return nil, err
 	}
-	ns := kubernetes.CreateNamespace(app.Name)
+	ns := kubernetes.CreateNamespace(name)
 	c.Spec.DeepCopyInto(&ns.Spec)
 	obj := client.Object(ns)
 	return []*client.Object{&obj}, nil

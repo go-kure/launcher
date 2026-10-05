@@ -4911,6 +4911,36 @@ application bundle holds (the repository a `helm` component generates) carries n
 See "Component label and ownership" in the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
+### The object name (`objectName`)
+
+Every kind component takes `objectName`, which names its one object in place of the component
+name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
+`job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
+`configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`limitrange`, `resourcequota`, the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
+`helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
+`fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
+single object named after the component and refuse it. The rules for the name, the `Naming`
+hook's role `object` and the references that follow it are under "`objectName`: the object of
+a kind component" in the
+[OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
+
+The property is not in any handler's `PropertySchema`: the engine adds it to the schema of
+every type whose handler declares its object (`ComponentObject`, all in `object_name.go`),
+reads it, and hands `ToApplicationConfig` the resolved name as `Component.ObjectName()`. A
+handler's config carries it as `ObjectName`, empty when it is the component's name, and
+`Generate` names the object with it. Everything else the handler writes keeps the component
+name: the `app` label and selectors, the pod template's labels, the main container's name.
+A handler's own check of the name (a Service's DNS-1035 label, a CloudNativePG Cluster's
+length) runs on the object name, since that is what the object carries.
+
+What a config tells a trait or the transform about its object follows the object name: a
+`service` component's `BackendServiceName`, a `serviceaccount` component's
+`ServiceAccountName`, and the pod selector of a `cnpg-cluster` or `cnpg-pooler` endpoint. Two
+consequences are the kind's own: a `statefulset`'s pods and claims take the StatefulSet's
+name, so they follow `objectName`; a `helmrelease`'s `spec.releaseName` default stays the
+component name, so the release does not.
+
 ### Every spec field is this package's to write
 
 Since go-kure/launcher#361 this package builds against kure's release-1 builder

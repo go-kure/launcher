@@ -61,7 +61,7 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 	if err := checkAuthoredFluxDurations("helmrepository", component.Properties, helmRepositoryDurations); err != nil {
 		return nil, err
 	}
-	cfg := &HelmRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
+	cfg := &HelmRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -71,8 +71,12 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 // HelmRepositoryConfig implements stack.ApplicationConfig for helmrepository
 // components.
 type HelmRepositoryConfig struct {
-	// Name is the component name, and the HelmRepository's name.
+	// Name is the component name, and the HelmRepository's name unless
+	// ObjectName names it.
 	Name string
+	// ObjectName names the HelmRepository (oam.Component.ObjectName). Empty
+	// for Name.
+	ObjectName string
 	// Namespace is the application namespace. The HelmRepository lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -123,7 +127,7 @@ func (c *HelmRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object,
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
-	repo := fluxcd.CreateHelmRepository(c.Name, fluxSourceNamespace(c.Namespace, c.fluxNS))
+	repo := fluxcd.CreateHelmRepository(kindObjectName(c.ObjectName, c.Name), fluxSourceNamespace(c.Namespace, c.fluxNS))
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	// Flux does not poll an OCI HelmRepository, so it gets no default.

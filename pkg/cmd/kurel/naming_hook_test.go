@@ -172,11 +172,15 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		synthNP = "web-allow-egress-traffic"
 	)
 	// Each name once, in the order the transform reaches it: the names the
-	// lowering rules make, the bundles, each trait's objects and then its
-	// sub-application, the synthesized policy last.
+	// lowering rules make, the object of each authored kind component, the
+	// bundles, each trait's objects and then its sub-application, the
+	// synthesized policy last. agent is the one authored kind component: the
+	// members the webservice and postgresql rules emit are named by their rule,
+	// and the hook is not asked for them.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
+		{Application: "shop", Component: "agent", Role: oam.NameRoleObject, Kind: "DaemonSet.apps", Default: "agent"},
 		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
 		// db is placed in no tier and shares the first group with agent, so that
 		// group is numbered: a group carries a tier's name only when it is that

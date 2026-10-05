@@ -123,7 +123,7 @@ func (h *PersistentVolumeHandler) ToApplicationConfig(component *oam.Component, 
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &PersistentVolumeConfig{Name: component.Name, Spec: *spec}, nil
+	return &PersistentVolumeConfig{Name: component.Name, ObjectName: componentObjectName(component), Spec: *spec}, nil
 }
 
 // PersistentVolumeConfig implements stack.ApplicationConfig for
@@ -131,7 +131,10 @@ func (h *PersistentVolumeHandler) ToApplicationConfig(component *oam.Component, 
 // as authored.
 type PersistentVolumeConfig struct {
 	Name string
-	Spec corev1.PersistentVolumeSpec
+	// ObjectName names the PersistentVolume (oam.Component.ObjectName). Empty
+	// for the application's name.
+	ObjectName string
+	Spec       corev1.PersistentVolumeSpec
 }
 
 // ApplyPolicy holds the volume to the environment policy
@@ -148,7 +151,7 @@ func (c *PersistentVolumeConfig) ApplyPolicy(p oam.Policy) error {
 // Generate emits the PersistentVolume: kure's identity-only constructor plus a
 // deep copy of the spec.
 func (c *PersistentVolumeConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	pv := kubernetes.CreatePersistentVolume(app.Name)
+	pv := kubernetes.CreatePersistentVolume(kindObjectName(c.ObjectName, app.Name))
 	c.Spec.DeepCopyInto(&pv.Spec)
 	obj := client.Object(pv)
 	return []*client.Object{&obj}, nil

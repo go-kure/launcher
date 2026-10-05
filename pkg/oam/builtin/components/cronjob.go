@@ -114,8 +114,9 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig converts an OAM cronjob component to a CronjobConfig.
 func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &CronjobConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
 	}
 
 	props := component.Properties
@@ -332,7 +333,10 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 
 // CronjobConfig implements stack.ApplicationConfig for cronjob components.
 type CronjobConfig struct {
-	Name                       string
+	Name string
+	// ObjectName names the CronJob (oam.Component.ObjectName); its labels and
+	// main container keep Name. Empty for the application's name.
+	ObjectName                 string
 	Namespace                  string
 	Image                      string
 	Schedule                   string
@@ -476,7 +480,7 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		return nil, err
 	}
 
-	cj := kubernetes.CreateCronJob(app.Name, app.Namespace)
+	cj := kubernetes.CreateCronJob(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	cj.Spec.Schedule = c.Schedule
 	cj.Labels = appLabels(app.Name)
 	cj.Annotations = nil

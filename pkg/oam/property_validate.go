@@ -1373,6 +1373,13 @@ func (a exactNumber) equal(b exactNumber) bool {
 func (t *Transformer) validateEmittedComponent(comp *Component) error {
 	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
 	if h, ok := t.componentHandlers[comp.Type]; ok {
+		// Said here, before the schema says only that the key is unsupported: a
+		// kind component's `objectName` is the author's, never a rule's.
+		if _, takes := h.(ComponentObjectProvider); takes {
+			if raw, has := comp.Properties[ObjectNameProperty]; has && raw != nil {
+				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
+			}
+		}
 		return validateEmittedProperties(h, &comp.Properties, path)
 	}
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {

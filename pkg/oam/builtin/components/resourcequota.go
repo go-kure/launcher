@@ -58,15 +58,18 @@ func (h *ResourceQuotaHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &ResourceQuotaConfig{Name: component.Name, Namespace: namespace, Spec: *spec}, nil
+	return &ResourceQuotaConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}, nil
 }
 
 // ResourceQuotaConfig implements stack.ApplicationConfig for resourcequota
 // components. Spec is the decoded ResourceQuotaSpec exactly as authored.
 type ResourceQuotaConfig struct {
-	Name      string
-	Namespace string
-	Spec      corev1.ResourceQuotaSpec
+	Name string
+	// ObjectName names the ResourceQuota (oam.Component.ObjectName). Empty for
+	// the application's name.
+	ObjectName string
+	Namespace  string
+	Spec       corev1.ResourceQuotaSpec
 }
 
 // ApplyPolicy is a no-op: a ResourceQuota runs no pod and requests nothing. It
@@ -79,7 +82,7 @@ func (c *ResourceQuotaConfig) ApplyPolicy(oam.Policy) error {
 // Generate emits the ResourceQuota: kure's identity-only constructor plus a
 // deep copy of the spec.
 func (c *ResourceQuotaConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	rq := kubernetes.CreateResourceQuota(app.Name, app.Namespace)
+	rq := kubernetes.CreateResourceQuota(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&rq.Spec)
 	obj := client.Object(rq)
 	return []*client.Object{&obj}, nil

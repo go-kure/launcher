@@ -110,8 +110,9 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 // ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.
 func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &StatefulsetConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
 	}
 
 	props := component.Properties
@@ -282,7 +283,11 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 
 // StatefulsetConfig implements stack.ApplicationConfig for statefulset components.
 type StatefulsetConfig struct {
-	Name                 string
+	Name string
+	// ObjectName names the StatefulSet (oam.Component.ObjectName), and with it
+	// the pods and volume claims the controller names after it; its labels,
+	// selector and main container keep Name. Empty for the application's name.
+	ObjectName           string
 	Namespace            string
 	Image                string
 	Replicas             int32
@@ -494,7 +499,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		return nil, err
 	}
 
-	sts := kubernetes.CreateStatefulSet(app.Name, app.Namespace)
+	sts := kubernetes.CreateStatefulSet(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	sts.Labels = appLabels(app.Name)
 	sts.Annotations = nil
 	sts.Spec.Template.Labels = appLabels(app.Name)

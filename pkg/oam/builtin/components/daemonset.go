@@ -54,8 +54,9 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig converts an OAM daemonset component to a DaemonsetConfig.
 func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &DaemonsetConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:       component.Name,
+		ObjectName: componentObjectName(component),
+		Namespace:  namespace,
 	}
 
 	props := component.Properties
@@ -184,7 +185,10 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 
 // DaemonsetConfig implements stack.ApplicationConfig for daemonset components.
 type DaemonsetConfig struct {
-	Name            string
+	Name string
+	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels,
+	// selector and main container keep Name. Empty for the application's name.
+	ObjectName      string
 	Namespace       string
 	Image           string
 	Ports           []corev1.ContainerPort // the main container's ports; no Service
@@ -320,7 +324,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		return nil, err
 	}
 
-	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
+	ds := kubernetes.CreateDaemonSet(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	ds.Labels = appLabels(app.Name)
 	ds.Annotations = nil
 	// kure's constructor no longer injects spec.selector (removed default,

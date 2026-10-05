@@ -82,10 +82,13 @@ func (h *PersistentVolumeClaimHandler) ToApplicationConfig(component *oam.Compon
 // PersistentVolumeClaimConfig implements stack.ApplicationConfig for
 // persistentvolumeclaim components.
 type PersistentVolumeClaimConfig struct {
-	Name      string
-	Namespace string
+	Name string
+	// ObjectName names the PersistentVolumeClaim (oam.Component.ObjectName);
+	// its labels keep Name. Empty for the application's name.
+	ObjectName string
+	Namespace  string
 	// Claim carries the claim's fields; its Name is unused, since Generate
-	// names the claim after the Application. Claim.Size is "" until a policy
+	// names the claim by ObjectName or after the Application. Claim.Size is "" until a policy
 	// default fills an unauthored size.
 	Claim PVCConfig
 }
@@ -99,7 +102,7 @@ func (c *PersistentVolumeClaimConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates the PersistentVolumeClaim, named and labelled after the
 // Application.
 func (c *PersistentVolumeClaimConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return GenerateClaim(c.Claim, app.Name, app.Namespace, appLabels(app.Name))
+	return GenerateClaim(c.Claim, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
 }
 
 // parsePersistentVolumeClaim reads a persistentvolumeclaim component's
@@ -109,7 +112,7 @@ func parsePersistentVolumeClaim(component *oam.Component) (*PersistentVolumeClai
 	if err != nil {
 		return nil, err
 	}
-	return &PersistentVolumeClaimConfig{Name: component.Name, Claim: claim}, nil
+	return &PersistentVolumeClaimConfig{Name: component.Name, ObjectName: componentObjectName(component), Claim: claim}, nil
 }
 
 // The three functions below are the kind's whole claim path: parse, policy,
