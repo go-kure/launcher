@@ -643,9 +643,9 @@ func TestPassthrough_ObjectTheDecoderPanicsOnIsRefused(t *testing.T) {
 			}
 
 			_, err := transform("", ptStrictPolicy())
-			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on the document", "nil pointer dereference")
+			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on "+kind, "nil pointer dereference")
 			_, err = transform("", nil)
-			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on the document", "nil pointer dereference")
+			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on "+kind, "nil pointer dereference")
 
 			objs, err := transform("              type: 8\n", ptStrictPolicy())
 			if err != nil {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -117,59 +116,33 @@ func undeclaredFieldsAs(doc []byte, itemKind *schema.GroupVersionKind) ([]string
 	return paths, nil
 }
 
-// errDecoderPanicked is the error a panic of a decode over kure's scheme is
-// turned into (recoverDecoderPanic); the panic's value follows it.
+// errDecoderPanicked is the error a panic of the strict decode is turned into
+// (strictDecode); the panic's value follows it.
 //
 // A document of a registered kind is decoded into the API type of that kind,
 // and such a type may decode itself with code that does not handle what the
 // document wrote. Cilium's ICMPField is one: it dereferences the `type` an
 // `icmps` field left out. The document is not launcher's, so the crash would be
 // a chart's or a manifest source's to cause, and it is reported instead.
+//
+// Kure's parser reports such a panic itself, as the parse error of that
+// document (go-kure/kure#1009), and every reader here parses a document before
+// it decodes it strictly. So this error is not the one a build shows for the
+// known case: it is what keeps the strict decode, which launcher calls on the
+// scheme's decoders itself, from being the place such a document crashes.
 var errDecoderPanicked = errors.New("the decoder panicked on the document instead of refusing it (an API type that decodes itself did not handle what was written; a required field left out is the known cause)")
 
-// recoverDecoderPanic, deferred by a function that does nothing but call a
-// decoder over kure's scheme, turns a panic of that call into *err. It is not
-// for a function that runs code of this package: a defect here must stay a
-// crash.
-func recoverDecoderPanic(err *error) {
-	if r := recover(); r != nil {
-		*err = errors.Errorf("%w: %v", errDecoderPanicked, r)
-	}
-}
-
-// parseManifests is kure's parser (kureio.ParseYAMLWithOptions), a panic of it
-// returned as an error that is errDecoderPanicked. It names no document: the
-// caller does.
-func parseManifests(raw []byte, opts kureio.ParseOptions) (objs []client.Object, err error) {
-	defer recoverDecoderPanic(&err)
-	return kureio.ParseYAMLWithOptions(raw, opts)
-}
-
 // strictDecode is decoder.Decode for its error alone, a panic of it returned as
-// an error that is errDecoderPanicked.
+// an error that is errDecoderPanicked. It does nothing but call the decoder: a
+// defect in code of this package must stay a crash.
 func strictDecode(decoder runtime.Decoder, doc []byte, itemKind *schema.GroupVersionKind) (err error) {
-	defer recoverDecoderPanic(&err)
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.Errorf("%w: %v", errDecoderPanicked, r)
+		}
+	}()
 	_, _, err = decoder.Decode(doc, itemKind, nil)
 	return err
-}
-
-// documentRef names document i of a manifest input for an error: its position,
-// counted from one over the documents that are not empty, and the kind and name
-// it states when they can be read. It is for a document the parser gave no
-// object for, which renderedObjectRef cannot name.
-func documentRef(i int, doc []byte) string {
-	var object map[string]any
-	if err := utiljson.Unmarshal(doc, &object); err != nil {
-		return fmt.Sprintf("document %d", i+1)
-	}
-	u := &unstructured.Unstructured{Object: object}
-	switch {
-	case u.GetKind() == "":
-		return fmt.Sprintf("document %d", i+1)
-	case u.GetName() == "":
-		return fmt.Sprintf("document %d (%s)", i+1, u.GetKind())
-	}
-	return fmt.Sprintf("document %d (%s)", i+1, renderedObjectRef(u))
 }
 
 // undeclaredFieldsError is the refusal of a workload or claim that sets fields
@@ -211,34 +184,28 @@ func undeclaredFieldsError(gvk schema.GroupVersionKind, paths []string) error {
 // together, as it always did: that error is kure's own, unchanged, and it is
 // returned before any undeclared field is looked at.
 //
-// A document the parser panics on is an error too (errDecoderPanicked), named
-// by its position and by the kind and name it states (documentRef), and the
-// first such document ends the decode: the parser would panic on it again when
-// asked for every error of the input.
+// A document the decoder of its kind panics on is one of them: the parser
+// reports the panic as that document's error, naming the object by kind,
+// namespace and name (go-kure/kure#1009), beside the other documents' errors.
 //
-// Input that stops being YAML part-way is read in the same order: the documents
-// ahead of that point are decoded first, so one of them that the parser panics
-// on, or that does not decode, is reported and is not lost to the YAML error
-// after it.
+// Input that stops being YAML or JSON part-way is an error as well, reported
+// with the errors of the documents ahead of that point. The parser ends at
+// malformed JSON it cannot read past (go-kure/kure#1012); what follows is not
+// read.
 func decodeManifestDocuments(raw []byte) ([]client.Object, error) {
 	docs, splitErr := splitManifestDocuments(raw)
 	decoded := make([][]client.Object, len(docs))
 	var err error
 	for i := 0; err == nil && i < len(docs); i++ {
-		decoded[i], err = parseManifests(docs[i], manifestParseOptions)
-		if errors.Is(err, errDecoderPanicked) {
-			return nil, errors.Wrap(err, documentRef(i, docs[i]))
-		}
+		decoded[i], err = kureio.ParseYAMLWithOptions(docs[i], manifestParseOptions)
 	}
 	if err == nil {
 		err = splitErr
 	}
 	if err != nil {
 		// The parser reports every bad document of the input in one error; a
-		// document alone would give only its own. That is what is returned when
-		// a later document makes the parser panic: its turn comes once this one
-		// decodes.
-		if _, whole := parseManifests(raw, manifestParseOptions); whole != nil && !errors.Is(whole, errDecoderPanicked) {
+		// document alone would give only its own.
+		if _, whole := kureio.ParseYAMLWithOptions(raw, manifestParseOptions); whole != nil {
 			return nil, whole
 		}
 		return nil, err
@@ -384,7 +351,7 @@ func keepListItemFields(list listDocument, objs []client.Object) ([]client.Objec
 	}
 	read := 0
 	for i, item := range list.items {
-		itemObjs, err := parseManifests(item, manifestParseOptions)
+		itemObjs, err := kureio.ParseYAMLWithOptions(item, manifestParseOptions)
 		if err != nil {
 			return nil, errors.Wrapf(err, "item %d of %s", i, list.kind)
 		}
