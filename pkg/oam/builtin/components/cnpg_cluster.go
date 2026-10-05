@@ -582,7 +582,7 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	}
 
 	if maxInstances := p.MaxReplicas(); maxInstances != nil && instances > *maxInstances {
-		return errors.Errorf("instances %d exceeds enforced maximum %d", instances, *maxInstances)
+		return oam.NewPolicyRefusal(oam.RefusalReplicaMaximum, fmt.Sprintf("instances %d exceeds enforced maximum %d", instances, *maxInstances))
 	}
 	// The direct form, as in postgresql: Generate copies spec.resources onto the
 	// Cluster unchanged, so there is no intrinsic default tier to enforce
@@ -621,7 +621,7 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	}
 	if psc := c.Spec.PodSecurityContext; psc != nil && !p.AllowPrivileged() {
 		if wo := psc.WindowsOptions; wo != nil && wo.HostProcess != nil && *wo.HostProcess {
-			return errors.New("podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
+			return oam.NewPolicyRefusal(oam.RefusalPrivileged, "podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
 		}
 	}
 	return nil
@@ -706,7 +706,7 @@ func (c *CnpgClusterConfig) enforceMaxStorage(maxSize string) error {
 		return nil
 	}
 	for _, v := range c.storageVolumes() {
-		if err := enforceMaxResource(v.size, maxSize, v.label); err != nil {
+		if err := enforceMaxStorageAt(v.size, maxSize, v.label); err != nil {
 			return err
 		}
 	}

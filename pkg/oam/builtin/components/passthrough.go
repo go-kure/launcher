@@ -325,10 +325,19 @@ func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error 
 // type, for one; an object the decoder of its kind panics on, for another, which
 // kure's parser reports as an error: go-kure/kure#1009).
 func policyObject(u *unstructured.Unstructured) (client.Object, error) {
-	const unreadable = "the object cannot be read, so it cannot be checked against environment policy"
+	// unreadable is the refusal, with what kept the object from being read after
+	// it when there is one: the text errors.Wrap gave, and the cause still in the
+	// chain.
+	unreadable := func(cause error) error {
+		refusal := oam.NewPolicyRefusal(oam.RefusalUnreadableObject, "the object cannot be read, so it cannot be checked against environment policy")
+		if cause == nil {
+			return refusal
+		}
+		return errors.Errorf("%w: %w", refusal, cause)
+	}
 	raw, err := json.Marshal(u.Object)
 	if err != nil {
-		return nil, errors.Wrap(err, unreadable)
+		return nil, unreadable(err)
 	}
 	if err := kubernetes.RegisterSchemes(); err != nil {
 		return nil, errors.Wrap(err, "registering the kinds this build can read")
@@ -336,16 +345,16 @@ func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 	if !kubernetes.Scheme.Recognizes(u.GroupVersionKind()) {
 		var object map[string]any
 		if err := utiljson.Unmarshal(raw, &object); err != nil {
-			return nil, errors.Wrap(err, unreadable)
+			return nil, unreadable(err)
 		}
 		return &unstructured.Unstructured{Object: object}, nil
 	}
 	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{})
 	if err != nil {
-		return nil, errors.Wrap(err, unreadable)
+		return nil, unreadable(err)
 	}
 	if len(objs) != 1 {
-		return nil, errors.New(unreadable)
+		return nil, unreadable(nil)
 	}
 	return objs[0], nil
 }
@@ -373,7 +382,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	}
 	if c.policy != nil {
 		if err := enforcePassthroughPolicy(u, c.policy); err != nil {
-			return nil, &oam.ViolationError{Component: c.componentName, Cause: err}
+			return nil, oam.NewViolationError(c.componentName, err)
 		}
 	}
 	out := client.Object(u)

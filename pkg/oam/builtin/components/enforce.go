@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -11,32 +12,61 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
+// Every refusal by the environment policy in this package is built by
+// oam.NewPolicyRefusal, with the class a consumer reads from the violation
+// (go-kure/launcher#849). An error that is not such a refusal, a quantity or a
+// policy value that does not parse among them, is a plain error and stays
+// unclassified.
+
 func enforceMaxReplicas(current int32, max *int32) error {
 	if max == nil {
 		return nil
 	}
 	if current > *max {
-		return errors.Errorf("replicas %d exceeds enforced maximum %d", current, *max)
+		return oam.NewPolicyRefusal(oam.RefusalReplicaMaximum, fmt.Sprintf("replicas %d exceeds enforced maximum %d", current, *max))
 	}
 	return nil
 }
 
+// enforceMaxResource holds a cpu or memory quantity to the policy's maximum.
 func enforceMaxResource(current, max, label string) error {
+	over, err := overMaximum(current, max, label)
+	if err != nil || over == "" {
+		return err
+	}
+	return oam.NewPolicyRefusal(oam.RefusalResourceMaximum, over)
+}
+
+// enforceMaxStorageAt holds a storage quantity to the policy's maximum; label
+// names the field the quantity came from.
+func enforceMaxStorageAt(current, max, label string) error {
+	over, err := overMaximum(current, max, label)
+	if err != nil || over == "" {
+		return err
+	}
+	return oam.NewPolicyRefusal(oam.RefusalStorageMaximum, over)
+}
+
+// overMaximum is the one comparison of a quantity with a policy maximum. It
+// returns the text of the refusal when current is over max, and "" when it is
+// not or either is unset. The text is the same for every resource, so the
+// class cannot be read from it: the caller gives it.
+func overMaximum(current, max, label string) (string, error) {
 	if max == "" || current == "" {
-		return nil
+		return "", nil
 	}
 	currentQty, err := resource.ParseQuantity(current)
 	if err != nil {
-		return errors.Wrapf(err, "invalid %s value %q", label, current)
+		return "", errors.Wrapf(err, "invalid %s value %q", label, current)
 	}
 	maxQty, err := resource.ParseQuantity(max)
 	if err != nil {
-		return errors.Wrapf(err, "invalid enforced max %s value %q", label, max)
+		return "", errors.Wrapf(err, "invalid enforced max %s value %q", label, max)
 	}
 	if currentQty.Cmp(maxQty) > 0 {
-		return errors.Errorf("%s %q exceeds enforced maximum %q", label, current, max)
+		return fmt.Sprintf("%s %q exceeds enforced maximum %q", label, current, max), nil
 	}
-	return nil
+	return "", nil
 }
 
 func enforceAllowedRegistries(image string, allowed []string) error {
@@ -49,7 +79,7 @@ func enforceAllowedRegistries(image string, allowed []string) error {
 			return nil
 		}
 	}
-	return errors.Errorf("image %q is not from an allowed registry %v", image, allowed)
+	return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("image %q is not from an allowed registry %v", image, allowed))
 }
 
 func registryHost(image string) string {
@@ -74,7 +104,7 @@ func registryHost(image string) string {
 }
 
 func enforceMaxStorageSize(current, max string) error {
-	return enforceMaxResource(current, max, "storageSize")
+	return enforceMaxStorageAt(current, max, "storageSize")
 }
 
 // enforcePrivileged rejects an authored `securityContext.privileged: true` when
@@ -118,10 +148,10 @@ func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 		return nil
 	}
 	if sc.Privileged != nil && *sc.Privileged {
-		return errors.New("securityContext.privileged is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalPrivileged, "securityContext.privileged is not allowed by environment policy")
 	}
 	if wo := sc.WindowsOptions; wo != nil && wo.HostProcess != nil && *wo.HostProcess {
-		return errors.New("securityContext.windowsOptions.hostProcess is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalPrivileged, "securityContext.windowsOptions.hostProcess is not allowed by environment policy")
 	}
 	return nil
 }
@@ -140,7 +170,7 @@ func enforcePodHostProcess(cfg PodSpecConfig, allowed bool) error {
 	}
 	wo := cfg.SecurityContext.WindowsOptions
 	if wo != nil && wo.HostProcess != nil && *wo.HostProcess {
-		return errors.New("podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalPrivileged, "podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
 	}
 	return nil
 }
@@ -159,7 +189,7 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 	}
 	for _, v := range volumes {
 		if v.HostPath != nil {
-			return errors.Errorf("volume %q: hostPath volumes are not allowed by environment policy", v.Name)
+			return oam.NewPolicyRefusal(oam.RefusalHostPath, fmt.Sprintf("volume %q: hostPath volumes are not allowed by environment policy", v.Name))
 		}
 	}
 	return nil
@@ -187,14 +217,14 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 func enforcePersistentVolumePolicy(prefix string, spec *corev1.PersistentVolumeSpec, p oam.Policy) error {
 	if !p.AllowHostPathVolumes() {
 		if spec.HostPath != nil {
-			return errors.Errorf("%shostPath: hostPath volumes are not allowed by environment policy", prefix)
+			return oam.NewPolicyRefusal(oam.RefusalHostPath, fmt.Sprintf("%shostPath: hostPath volumes are not allowed by environment policy", prefix))
 		}
 		if spec.Local != nil {
-			return errors.Errorf("%slocal: local volumes expose a path on the node, as hostPath volumes do, and are not allowed by environment policy", prefix)
+			return oam.NewPolicyRefusal(oam.RefusalHostPath, fmt.Sprintf("%slocal: local volumes expose a path on the node, as hostPath volumes do, and are not allowed by environment policy", prefix))
 		}
 	}
 	if q, ok := spec.Capacity[corev1.ResourceStorage]; ok {
-		return enforceMaxResource(q.String(), p.MaxStorageSize(), prefix+"capacity.storage")
+		return enforceMaxStorageAt(q.String(), p.MaxStorageSize(), prefix+"capacity.storage")
 	}
 	return nil
 }
@@ -221,7 +251,7 @@ func enforceExplicitSecretObject(obj client.Object, p oam.Policy) error {
 	if gvk := obj.GetObjectKind().GroupVersionKind(); !typed && (gvk.Group != "" || gvk.Kind != "Secret") {
 		return nil
 	}
-	return errors.New("the object is a Secret, and the environment policy forbids explicit secrets; reference a Secret created out of band instead")
+	return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, "the object is a Secret, and the environment policy forbids explicit secrets; reference a Secret created out of band instead")
 }
 
 // enforceExtraContainer checks one non-main container (an init container or
@@ -302,20 +332,20 @@ func enforceContainerCapabilities(sc *corev1.SecurityContext, allowed, forbidden
 		return nil
 	}
 	if len(sc.Capabilities.Add) > 0 && containsCapability(forbidden, "ALL") {
-		return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy (forbidden list contains ALL)", string(sc.Capabilities.Add[0]))
+		return oam.NewPolicyRefusal(oam.RefusalContainerCapability, fmt.Sprintf("securityContext.capabilities.add: %q is forbidden by environment policy (forbidden list contains ALL)", string(sc.Capabilities.Add[0])))
 	}
 	for _, raw := range sc.Capabilities.Add {
 		capability := string(raw)
 		normalized := normalizeCapability(capability)
 
 		if normalized == "ALL" && len(forbidden) > 0 {
-			return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy", capability)
+			return oam.NewPolicyRefusal(oam.RefusalContainerCapability, fmt.Sprintf("securityContext.capabilities.add: %q is forbidden by environment policy", capability))
 		}
 		if containsCapability(forbidden, capability) {
-			return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy", capability)
+			return oam.NewPolicyRefusal(oam.RefusalContainerCapability, fmt.Sprintf("securityContext.capabilities.add: %q is forbidden by environment policy", capability))
 		}
 		if len(allowed) > 0 && !containsCapability(allowed, capability) {
-			return errors.Errorf("securityContext.capabilities.add: %q is not allowed by environment policy", capability)
+			return oam.NewPolicyRefusal(oam.RefusalContainerCapability, fmt.Sprintf("securityContext.capabilities.add: %q is not allowed by environment policy", capability))
 		}
 	}
 	return nil
@@ -453,13 +483,13 @@ func enforcePodResources(cfg PodSpecConfig, maxCPU, maxMemory string) error {
 
 func enforceHostNamespaces(cfg PodSpecConfig, p oam.Policy) error {
 	if cfg.HostNetwork && !p.AllowHostNetwork() {
-		return errors.New("hostNetwork is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalHostNamespace, "hostNetwork is not allowed by environment policy")
 	}
 	if cfg.HostPID && !p.AllowHostPID() {
-		return errors.New("hostPID is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalHostNamespace, "hostPID is not allowed by environment policy")
 	}
 	if cfg.HostIPC && !p.AllowHostIPC() {
-		return errors.New("hostIPC is not allowed by environment policy")
+		return oam.NewPolicyRefusal(oam.RefusalHostNamespace, "hostIPC is not allowed by environment policy")
 	}
 	return nil
 }

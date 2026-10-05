@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 
@@ -107,7 +108,7 @@ func (c *SecretConfig) FluxNamespaceInput() (kind, name string) { return "Secret
 // component.
 func (c *SecretConfig) ApplyPolicy(policy oam.Policy) error {
 	if !oam.ExplicitSecretsAllowed(policy) {
-		return errors.Errorf("secret %q: the environment policy forbids explicit secrets; reference a Secret created out of band instead", c.Name)
+		return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, fmt.Sprintf("secret %q: the environment policy forbids explicit secrets; reference a Secret created out of band instead", c.Name))
 	}
 	return nil
 }

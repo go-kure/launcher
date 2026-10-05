@@ -1920,6 +1920,49 @@ own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy` and
 path from the generated object back into the config — a writer through the
 object would change what the next `Generate` emits.
 
+## Policy refusal classes
+
+Every refusal by the environment policy this package raises is an `oam.PolicyRefusal` with
+a class, which a consumer reads from `oam.ViolationError.Class` instead of matching text
+(go-kure/launcher#849). The classes, what each covers and what stays unclassified are in
+`pkg/oam/README.md`, "Refusal classes". What is particular to this package:
+
+- **The class does not depend on the path.** A privileged container is
+  `oam.RefusalPrivileged` on a workload kind's own `ApplyPolicy`, on an operator CR's pod
+  template, on an object a chart renders, and on a `passthrough` or `manifests` object, at
+  the transform and at generation: one check raises it (`enforce.go`,
+  `enforcePodTemplatePolicy`, `enforceRenderedObjectPolicy`).
+- **cpu and memory are one class, storage another.** The comparison with a maximum is
+  shared and its text is the same for every resource, so the class comes from the caller:
+  `oam.RefusalResourceMaximum` for a cpu or memory request or limit (a container's, a
+  pod's, the block a CloudNativePG kind carries, and the pod template of an ACME HTTP01
+  solver on an `issuer` or a `clusterissuer`), `oam.RefusalStorageMaximum` for a claim's
+  request, a claim template's, a generic ephemeral volume's, a PersistentVolume's capacity
+  and a `cnpg-cluster` volume. `oam.RefusalReplicaMaximum` covers `replicas`, a
+  HorizontalPodAutoscaler's `maxReplicas` and `cnpg-cluster`'s `instances`.
+- **Secret material in the document is `oam.RefusalExplicitSecret`:** a `secret`
+  component, a Secret that `passthrough` or a `manifests` source carries, `helmtemplate`'s
+  `secretValues`, and a `certificate`'s keystore password (`keystores.jks.password`,
+  `keystores.pkcs12.password`).
+- **A source host is `oam.RefusalRegistry`,** as an image's registry is: the `url` of a
+  `manifests` or `crd` source, a `helmtemplate` chart source, the Flux source kinds, an
+  `oci://` url that does not name its registry, and a `bucket` endpoint on Amazon S3.
+- **An object that cannot be read is `oam.RefusalUnreadableObject`** on the three paths that
+  take an object written elsewhere (template delivery, `passthrough`, `manifests`): the
+  refusals under "What cannot be read is refused, not passed" in the `passthrough` and
+  `manifests` entries.
+- **Unclassified, though it is the component's violation:** the rules that hold with or
+  without a policy and are checked at the policy step (`ephemeralContainers` and the image
+  rule on an object written elsewhere, an undeclared field on a workload or a claim a chart
+  renders), a policy default or maximum that does not parse, and a chart that does not
+  render.
+- **A redirect of a `manifests` `url` source to a host outside the allowed registries** is a
+  fetch failure, with the error a fetch failure has and no `oam.ViolationError`; that error
+  holds the `oam.PolicyRefusal` of class `oam.RefusalRegistry`, which `errors.As` reaches.
+
+A new policy check in this package builds its refusal with `oam.NewPolicyRefusal` and a class
+constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that does not.
+
 ## Per-type highlights
 
 Wrong-type handling for the optional top-level properties go-kure/launcher#405

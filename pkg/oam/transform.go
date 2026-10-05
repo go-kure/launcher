@@ -803,7 +803,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// authoredTraitTypes (captured before t.lower() ran), not a fresh
 	// collectTraitTypes(app) call here — see the comment at that capture site.
 	if err := enforceCapabilityConstraints(authoredTraitTypes, ctx.Policy); err != nil {
-		return nil, nil, &ViolationError{Component: app.Metadata.Name, Cause: err}
+		return nil, nil, NewViolationError(app.Metadata.Name, err)
 	}
 
 	// Phase 2: apply OAM policies (placement overrides, dependency graph).
@@ -965,7 +965,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 
 		if enforceable, ok := config.(Enforceable); ok {
 			if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
-				return nil, &ViolationError{Component: component.Name, Cause: err}
+				return nil, NewViolationError(component.Name, err)
 			}
 		}
 
@@ -1495,7 +1495,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			for _, newApp := range added {
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
-						return nil, &ViolationError{Component: entry.component.Name, Cause: err}
+						return nil, NewViolationError(entry.component.Name, err)
 					}
 					// The policy runs after the trait's check, so it is held to the
 					// same names (go-kure/launcher#752).
@@ -1960,7 +1960,7 @@ func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 		}
 		for _, t := range traitTypes {
 			if forbiddenSet[t] {
-				return fmt.Errorf("capability %q is forbidden by environment policy", t)
+				return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is forbidden by environment policy", t))
 			}
 		}
 	}
@@ -1972,14 +1972,14 @@ func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 		}
 		for _, t := range traitTypes {
 			if !allowedSet[t] {
-				return fmt.Errorf("capability %q is not in the allowed list", t)
+				return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is not in the allowed list", t))
 			}
 		}
 	}
 
 	for _, r := range required {
 		if !used[r] {
-			return fmt.Errorf("required capability %q is missing", r)
+			return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("required capability %q is missing", r))
 		}
 	}
 

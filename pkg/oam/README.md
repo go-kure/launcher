@@ -1987,7 +1987,8 @@ document may carry secret values itself: the `secret` trait, the `secret` kind c
 `manifests` component carries (go-kure/launcher#794). `ExplicitSecretsAllowed(policy)` is how
 a handler asks. **A policy that does not implement it allows them**, as does no policy at all: this is
 the permissive side, so a consumer that must keep secrets out of documents has to implement the
-interface and answer `false`. A refusal is a `ViolationError` naming the component.
+interface and answer `false`. A refusal is a `ViolationError` naming the component, of class
+`RefusalExplicitSecret` (below).
 
 Handlers apply values with the precedence **authored > policy default > handler default**,
 then enforce the limits on the resulting effective value — for cpu/memory this explicitly
@@ -2001,6 +2002,77 @@ For example the `scaler` trait fills
 nor a policy default supplies them), and the `pvc`/`postgresql` handlers default the storage
 size from `DefaultStorageSize`. See the Policy Interface design note under the Concepts
 section for the full accessor list and rationale.
+
+### Refusal classes
+
+Whatever an `ApplyPolicy` returns reaches the caller as a `*ViolationError` naming the
+component, and so does a trait-type constraint of the policy (`ForbiddenCapabilities`,
+`AllowedCapabilities`, `RequiredCapabilities`). Its `Class` says what the refusal is about, so
+a consumer that reports a security refusal differently from a resource limit does not match
+error text (go-kure/launcher#849):
+
+```go
+var v *oam.ViolationError
+if errors.As(err, &v) {
+	switch v.Class {
+	case oam.RefusalHostNamespace, oam.RefusalPrivileged, oam.RefusalHostPath:
+		// a security refusal of v.Component
+	case oam.RefusalUnclassified:
+		// not a refusal by the policy, or one that carries no class
+	}
+}
+```
+
+The classes the library gives are a closed set, the constants below and `RefusalClasses()`.
+A `RefusalClass` is a string, and the value is what a consumer may log or store.
+
+| Constant | Value | A refusal of |
+|---|---|---|
+| `RefusalHostNamespace` | `host-namespace` | `hostNetwork`, `hostPID` or `hostIPC` on a pod, under a policy that does not allow that namespace. |
+| `RefusalPrivileged` | `privileged` | A privileged container, and a Windows HostProcess container or pod, under a policy that does not allow privileged workloads. |
+| `RefusalHostPath` | `host-path` | A pod's `hostPath` volume, and a PersistentVolume's `hostPath` or `local` source, under a policy that does not allow hostPath volumes. |
+| `RefusalContainerCapability` | `container-capability` | A Linux capability a container adds that the policy forbids or does not list as allowed. |
+| `RefusalRegistry` | `registry` | A host outside `AllowedRegistries`, or one that cannot be held to that list: the registry of a container image; the host a chart, a `manifests` `url` source or a Flux source is fetched from; an `oci://` url that does not name its registry; an Amazon S3 bucket endpoint, whose host Flux picks at runtime. |
+| `RefusalResourceMaximum` | `resource-maximum` | A cpu or memory request or limit over `MaxCPU` or `MaxMemory`: on a container, on the pod, or on the pod template of an ACME HTTP01 solver of an `issuer` or `clusterissuer`. |
+| `RefusalStorageMaximum` | `storage-maximum` | A storage request, or the capacity of a PersistentVolume, over `MaxStorageSize`. |
+| `RefusalReplicaMaximum` | `replica-maximum` | A replica count, an autoscaler's `maxReplicas` or a database cluster's instance count over `MaxReplicas`. |
+| `RefusalExplicitSecret` | `explicit-secret` | Secret material the document carries itself, under a policy that forbids explicit secrets (`ExplicitSecretPolicy`): a `secret` component or trait, a Secret that `passthrough` or a `manifests` source carries, `secretValues`, and a `certificate`'s keystore password. |
+| `RefusalTraitCapability` | `trait-capability` | A trait type the policy forbids or does not list as allowed, and one it requires that the application does not use. |
+| `RefusalUnreadableObject` | `unreadable-object` | An object written elsewhere (rendered by a chart, carried by `passthrough` or by a `manifests` source) that the build cannot read, so that it cannot be held to the policy and is refused instead of passed. |
+
+The class is the same on every path a refusal comes from: a component's `ApplyPolicy`, a
+trait sub-application's, the check on the objects a chart renders under template delivery,
+and the `passthrough` and `manifests` checks, at the transform and again at generation. Of a
+`manifests` `url` source the transform checks the host of the url; the objects it yields are
+first known at generation, so a violation about one of them comes from `Generate`, not from
+the transform. The text of no refusal changed with the class: it is the
+`PolicyRefusal` at the end of the cause chain, whose `Error()` is the text the refusal had.
+
+**Unclassified.** `RefusalUnclassified`, the empty string, is the class of a violation whose
+cause is not a refusal by the policy. No class is guessed from text. It covers:
+
+- an `ApplyPolicy` error of another kind: a chart that does not render, a policy default or
+  maximum that does not parse, and the library's own rules on an object, which hold with or
+  without a policy (no ephemeral containers, an image with no tag or digest, an undeclared
+  field on a workload or a claim a chart renders);
+- a refusal a consumer's own `Enforceable` returns as a plain error;
+- a `ViolationError` literal that leaves `Class` out.
+
+Not violations, and so without a class: `ErrPlatformReserved` and `ErrReservedMetadataKey`,
+which stay the sentinels they were, and a `manifests` `url` source that cannot be fetched. One
+fetch failure is a refusal by the policy all the same, a redirect to a host outside the allowed
+registries: its error holds a `PolicyRefusal` of class `RefusalRegistry`, which `errors.As`
+reaches, under no `ViolationError`.
+
+**A consumer's own `Enforceable`** returns `NewPolicyRefusal(class, message)`, bare or wrapped
+with `%w`, for its violation to carry the class: one of the constants above or a value of its
+own, which the library passes on as given. The class of a violation is that of the first
+`PolicyRefusal` in its cause chain. `NewViolationError(component, cause)` builds a violation
+the same way, for a config that reports one itself at generation, as `passthrough` and
+`manifests` do.
+
+**Breaking** only for an unkeyed `ViolationError` literal, which no longer compiles; a keyed
+one is unaffected.
 
 ## Capability system
 

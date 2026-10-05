@@ -60,9 +60,16 @@ const (
 var TierOrder = []Tier{TierInfra, TierServices, TierApps}
 
 // ViolationError is returned when an Enforceable config rejects the current Policy.
+// Whatever ApplyPolicy returns is wrapped in one, so it is wider than a refusal
+// by the policy: Class tells the two apart.
 type ViolationError struct {
 	Component string
 	Cause     error
+	// Class is what the refusal is about: the class of the first PolicyRefusal
+	// in the cause chain, and RefusalUnclassified when the cause is not a
+	// refusal by the policy or carries no class. NewViolationError fills it; a
+	// literal that leaves it out is unclassified.
+	Class RefusalClass
 }
 
 func (e *ViolationError) Error() string {
