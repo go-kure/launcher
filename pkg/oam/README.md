@@ -667,6 +667,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component keeps to itself, which is the component's own (`oci-source`). | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
 | `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
 | `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
+| `helm-release` | The HelmRelease a `helm` component generates under `delivery: flux`. It names the object alone: the Helm release name (`releaseName`, `spec.releaseName`) and the default names of the values ConfigMap and Secret keep following the component name. | The component's name. | `helmReleaseName` | unless `helmReleaseName` is set; not under `delivery: template` |
 | `oci-kustomization` | The Flux Kustomization an `oci` component generates, whether the component keeps its source or shares one. | The component's name. | `kustomizationName` | unless `kustomizationName` is set |
 | `oci-source` | The OCIRepository an `oci` component keeps to itself: the one no other `oci` component of the document shares and no `source.name` names. | The component's name. | `source.objectName` | unless `source.objectName` is set; not for a shared source or one `source.name` names (`helm-source`) |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
@@ -726,7 +727,7 @@ default.
 document rule may still change. Most names are made after lowering, and carry the lowered
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
 lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
-`oci-kustomization`, `oci-source`)
+`helm-release`, `oci-kustomization`, `oci-source`)
 carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
@@ -743,7 +744,8 @@ hook, which has no default to be asked about, is not asked.
 
 `LoweringContext.ResolveMemberName(member, spec)` names the one object of a kind component
 the rule is about to emit under the component's name, where the rule lets the author and the
-hook choose that name (the Kustomization and the kept OCIRepository of an `oci` component).
+hook choose that name (the HelmRelease of a `helm` component, the Kustomization and the kept
+OCIRepository of an `oci` component).
 The order is the same, the default being the member's component name, used as written. The
 name is resolved, recorded for the transform to claim and set on the member in the one call,
 and a rule has no other way to give a member's object a name of its own, so no such name
@@ -951,7 +953,7 @@ a component or trait lowering rule emitted the property is refused and the hook 
 a rule that wants a member's name choosable resolves it itself at lowering time, under its
 own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`),
 `LoweringContext.ResolveMemberName` for the object of a member it emits under the
-component's name (`oci-kustomization`, `oci-source`). What a document rule or a raw document rule returns is
+component's name (`helm-release`, `oci-kustomization`, `oci-source`). What a document rule or a raw document rule returns is
 authored input, the components it built as much as the ones it forwarded: the property and
 the request apply there, so a document rule that wants to fix a kind component's object name
 writes `objectName` itself.
@@ -968,7 +970,9 @@ component's object carries the object name:
 - the `rbac` trait's subject on a `serviceaccount` component;
 - the `sourceRef` of an `oci` component's Kustomization, where the component keeps its
   source: it names the OCIRepository by the name that object takes (`source.objectName`, or
-  the hook's answer for `oci-source`);
+  the hook's answer for `oci-source`). Nothing launcher writes names the Kustomization of an
+  `oci` component or the HelmRelease of a `helm` component, so `kustomizationName` and
+  `helmReleaseName` move no reference;
 - the pod selector of a `cnpg-cluster` or `cnpg-pooler` endpoint (`cnpg.io/cluster`,
   `cnpg.io/poolerName`), which `ComponentEndpoints` reads with the authored name and
   `ComponentEndpointsNamed` with the hook's as well. A `cnpg-pooler` is refused its cluster's

@@ -180,14 +180,16 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// is the one authored kind component: the
 	// members the webservice, postgresql and helm rules emit are named by their
 	// rule, and the hook is not asked for them. The helm rule's generated source
-	// is the document's, so its request carries no component. The oci rule asks
-	// for the two objects it names after its component, under its own roles.
+	// is the document's, so its request carries no component. The helm rule asks
+	// for its HelmRelease and the oci rule for the two objects it names after its
+	// component, each under its own role.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesConfigMap, Kind: "ConfigMap", Default: chartConfigMapDefault},
 		{Application: "shop", Role: oam.NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: chartSourceDefault},
+		{Application: "shop", Component: "chart", Role: oam.NameRoleHelmRelease, Kind: helmReleaseKindName, Default: "chart"},
 		{Application: "shop", Component: "artifact", Role: oam.NameRoleOCISource, Kind: ociRepositoryKindName, Default: "artifact"},
 		{Application: "shop", Component: "artifact", Role: oam.NameRoleOCIKustomization, Kind: ociKustomizationKindName, Default: "artifact"},
 		{Application: "shop", Component: "agent", Role: oam.NameRoleObject, Kind: "DaemonSet.apps", Default: "agent"},

@@ -100,8 +100,8 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // The properties decode strictly: a key the schema does not declare, at any
 // depth of source, is refused. delivery: template refuses every key only a
 // HelmRelease reads (helmFluxOnlyKeys), source.name (it generates no source and
-// reads none from the cluster), valuesMode: configMap, valuesConfigMapName and
-// valuesSecretName, and an OCI source without a version, each with a helm:
+// reads none from the cluster), valuesMode: configMap, valuesConfigMapName,
+// valuesSecretName and helmReleaseName, and an OCI source without a version, each with a helm:
 // message naming what the author wrote rather than the terminal it would reach.
 // delivery: flux refuses scopeOverrides, which only a client-side render reads:
 // under delivery: template it is checked as the manifests component checks its
@@ -120,6 +120,14 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // with no hash. Either property is refused where it names nothing: under
 // delivery: template, valuesConfigMapName without valuesMode: configMap, and
 // either one when the tree it names the object of is empty.
+//
+// The HelmRelease is named by the author (helmReleaseName), else by the Naming
+// hook (role oam.NameRoleHelmRelease), else after the component
+// (go-kure/launcher#787). It names the object alone: the helmrelease member
+// keeps the component's name, and so do the Helm release name (releaseName,
+// spec.releaseName) and the default names of the values ConfigMap and Secret.
+// helmReleaseName is refused under delivery: template, which generates no
+// HelmRelease.
 //
 // secretValues is the sensitive part of the values tree (go-kure/launcher#786)
 // and is never written into the HelmRelease or a ConfigMap. Under delivery: flux
@@ -185,7 +193,8 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"valuesConfigMapName": str("Name of the ConfigMap valuesMode: configMap generates, in place of <component>-values-<hash>. It is used as written, with no hash: the name then stays the same when the values change. Refused without valuesMode: configMap, with empty values, and under delivery: template."),
 		"valuesSecretName":    str("Name of the Secret generated for secretValues, in place of <component>-secret-values-<hash>. It is used as written, with no hash: the name then stays the same when secretValues changes. Refused with empty secretValues and under delivery: template."),
 		"interval":            str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
-		"releaseName":         str("Release name. Under delivery: flux, HelmRelease spec.releaseName. Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters. Under both it defaults to the component name, shortened as Flux shortens a name over 53 characters."),
+		"releaseName":         str("Release name. Under delivery: flux, HelmRelease spec.releaseName. Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters. Under both it defaults to the component name, shortened as Flux shortens a name over 53 characters. It is the name Helm gives the release and the chart reads as .Release.Name; helmReleaseName is the name of the HelmRelease object."),
+		"helmReleaseName":     str("Name of the HelmRelease object (its metadata.name), in place of the component name. It is used as written: a DNS-1123 subdomain of at most 253 characters. It is not the Helm release name: releaseName, the values ConfigMap and the values Secret keep following the component name. Refused under delivery: template."),
 		"targetNamespace":     str("HelmRelease spec.targetNamespace. Refused under delivery: template."),
 		"driftDetection":      object("HelmRelease spec.driftDetection. Refused under delivery: template."),
 		"install":             object("HelmRelease spec.install: Helm install options. Refused under delivery: template."),
@@ -210,6 +219,9 @@ type helmProperties struct {
 	// absent or null. A present empty string is an authored name, and refused.
 	ValuesConfigMapName *string `json:"valuesConfigMapName"`
 	ValuesSecretName    *string `json:"valuesSecretName"`
+	// The authored name of the HelmRelease object; nil when absent or null. A
+	// present empty string is an authored name, and refused.
+	HelmReleaseName *string `json:"helmReleaseName"`
 	// The authored prefix of the hook-group layout names under delivery:
 	// template, forwarded to the helmtemplate terminal as written; nil when
 	// absent or null.
@@ -563,6 +575,15 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	// source the author wrote is the author's to order.
 	if src.inline() {
 		helmRelease.OrderAfter(ref["name"].(string))
+	}
+	// The object's name alone: the member keeps the component's, which the
+	// terminal defaults spec.releaseName from.
+	spec := memberNameSpec(&HelmReleaseHandler{}, oam.NameRoleHelmRelease)
+	if props.HelmReleaseName != nil {
+		spec.Property, spec.Authored = "helmReleaseName", *props.HelmReleaseName
+	}
+	if err := lctx.ResolveMemberName(&helmRelease, spec); err != nil {
+		return oam.LoweringResult{}, errors.Wrapf(err, "%s: naming the HelmRelease", helmType)
 	}
 	result.Components = append(result.Components, helmRelease)
 	return result, nil
@@ -967,6 +988,9 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, 
 		if name.authored != nil {
 			return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support %s (values are baked into the client-side render at build time, so no values %s is generated)", helmType, name.property, name.object)
 		}
+	}
+	if props.HelmReleaseName != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support helmReleaseName (the chart is rendered at build time, so no HelmRelease is generated; releaseName names the render's release)", helmType)
 	}
 	if src.Kind == "GitRepository" || src.Kind == "Bucket" {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support source.kind %s (a client-side render fetches the chart from a HelmRepository or OCIRepository only)", helmType, src.Kind)
