@@ -48,7 +48,7 @@ func gatewayCARef() map[string]any {
 }
 
 // gatewayListenersFull is three listeners that between them set every field of
-// one, with an authored empty hostname left out: the type omits it.
+// one.
 func gatewayListenersFull() []any {
 	return []any{
 		gatewayListener(),

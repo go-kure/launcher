@@ -1046,7 +1046,7 @@ its text:
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Missing kinds:** the inventory's `missing` rows (Pod, GRPCRoute among
+- **Missing kinds:** the inventory's `missing` rows (APIService, GRPCRoute among
   them), and its `trait` rows, the
   kinds reachable only as traits today (ExternalSecret, Role and RoleBinding,
   ReplicationSource).
