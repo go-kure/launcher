@@ -293,19 +293,56 @@ func TestReservedMetadataKeys_EveryCarrier(t *testing.T) {
 			if err := generate(t, tc.component, "example.com/owner"); err != nil {
 				t.Fatalf("with a key that is not reserved: %v", err)
 			}
-			for key, reason := range map[string]string{
-				"platform.example/zone": `the prefix "platform.example/" is reserved`,
-				"example.org/tenant":    "it is a reserved key",
+			for key, reserved := range map[string]struct{ entry, reason string }{
+				"platform.example/zone": {"platform.example/", `the prefix "platform.example/" is reserved for the platform`},
+				"example.org/tenant":    {"example.org/tenant", "the key is reserved for the platform"},
 			} {
 				err := generate(t, tc.component, key)
 				if !errors.Is(err, oam.ErrReservedMetadataKey) {
 					t.Fatalf("with %s: %v, want ErrReservedMetadataKey", key, err)
 				}
-				for _, want := range []string{`component "carrier"`, tc.object, tc.what + ` "` + key + `"`, reason} {
+				for _, want := range []string{`component "carrier"`, tc.object, tc.what + ` "` + key + `"`, reserved.reason} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("with %s: refusal %q does not say %s", key, err, want)
 					}
 				}
+				if strings.Contains(err.Error(), "TransformContext") {
+					t.Errorf("with %s: refusal %q names a Go field", key, err)
+				}
+
+				// The same, as errors.As finds it: what tc.what says in words.
+				var got *oam.ReservedMetadataKeyError
+				if !errors.As(err, &got) {
+					t.Fatalf("with %s: %v, want a *oam.ReservedMetadataKeyError", key, err)
+				}
+				field, annotation := strings.CutSuffix(tc.what, "annotation")
+				holder := oam.ReservedKeyHolder(strings.TrimSpace(strings.TrimSuffix(field, "label")))
+				if got.Component != "carrier" || !strings.HasPrefix(got.Object, tc.object) ||
+					got.Holder != holder || got.Annotation != annotation || got.Key != key || got.Entry != reserved.entry {
+					t.Errorf("with %s: the refusal is %+v, want component carrier, %s, holder %q, annotation %v and entry %s",
+						key, *got, tc.object, holder, annotation, reserved.entry)
+				}
+				if got.Kind.Kind == "" || got.Name == "" || !strings.HasPrefix(got.Object, got.Kind.Kind+` "`+got.Name) {
+					t.Errorf("with %s: the refusal's kind %v and name %q are not the object %s", key, got.Kind, got.Name, got.Object)
+				}
+				if !strings.HasSuffix(err.Error(), got.Error()) {
+					t.Errorf("with %s: refusal %q does not end with what errors.As finds: %s", key, err, got)
+				}
+			}
+		})
+	}
+
+	// The whole text, as the document's author reads it, for a key on an object's
+	// own metadata and for one on a pod template's.
+	const reason = ` may not be set: the prefix "platform.example/" is reserved for the platform: oam: metadata key is reserved`
+	for carrier, want := range map[string]string{
+		"a kind component's label":                         `component "carrier": ConfigMap "carrier": label "platform.example/team"` + reason,
+		"a passthrough workload's pod template annotation": `component "carrier": Deployment "worker": pod template annotation "platform.example/team"` + reason,
+	} {
+		t.Run("the whole text of "+carrier, func(t *testing.T) {
+			err := generate(t, reservedKeyCarriers[carrier].component, "platform.example/team")
+			if err == nil || err.Error() != want {
+				t.Errorf("refusal = %v\nwant      %s", err, want)
 			}
 		})
 	}

@@ -717,7 +717,9 @@ its text:
   keeps to itself in `TransformContext.ReservedMetadataKeys` (exact keys, or a prefix ending
   in `/`), and one rule refuses such a key on every object that reaches the output, whatever
   component type or trait carries it (`pkg/oam/README.md` "Reserved metadata keys";
-  `reserved_metadata.go`).
+  `reserved_metadata.go`). The refusal is a `*ReservedMetadataKeyError`, found with
+  `errors.As` and answering to `ErrReservedMetadataKey`: it says the owning component, the
+  object, the key and the entry that reserves it, and its text names no Go field.
   - It is one check in one place, the ownership wrapper of go-kure/launcher#788 (§3.4),
     so it reads what each config generated: `passthrough`, `manifests`, template delivery,
     the `annotations` of `ingress`, `httproute` and `expose`, and `inheritedMetadata` of a

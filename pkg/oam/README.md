@@ -588,15 +588,38 @@ wrapper ([Component label and ownership](#component-label-and-ownership)), so it
 object as its config generated it, in `GenerateApplications` (or `Generate` on an
 application), and each object the config adds to a layout it augments
 (`layout.LayoutAugmenter`): one that was not on the layout, or on a layout below it, before
-the config's `AugmentLayout` ran. The error wraps `ErrReservedMetadataKey` and names the
-component, the object, the key and the entry that reserves it:
+the config's `AugmentLayout` ran. The error names the component, the object, the key and the
+entry that reserves it. Its text is the document author's to read, so it names no Go field
+and says the key is reserved for the platform:
 
 ```text
-component "web": Ingress "web-ingress": annotation "platform.example/zone" may not be set: the prefix "platform.example/" is reserved (TransformContext.ReservedMetadataKeys): oam: metadata key is reserved
+component "web": Ingress "web-ingress": annotation "platform.example/zone" may not be set: the prefix "platform.example/" is reserved for the platform: oam: metadata key is reserved
 ```
 
-An application the document as a whole owns (a generated source several components share)
-is checked too, and the refusal names `the document` in place of a component.
+A key reserved by an entry of its own reads `the key is reserved for the platform`. An
+application the document as a whole owns (a generated source several components share) is
+checked too, and the refusal names `the document` in place of a component.
+
+**Recognising it.** The error is a `*ReservedMetadataKeyError`, and answers to the sentinel
+`ErrReservedMetadataKey`, which it unwraps to:
+
+```go
+var refused *oam.ReservedMetadataKeyError
+if errors.As(err, &refused) {
+    // refused.Component, refused.Kind, refused.Namespace, refused.Name,
+    // refused.Holder, refused.Annotation, refused.Key, refused.Entry
+}
+```
+
+`Component` is empty for an object the document as a whole owns. `Kind` (group and kind),
+`Namespace` and `Name` are the object's as it was generated: the namespace is empty when the
+object states none, and the kind is zero for a typed object that states none and that the
+check reads only the metadata of, which `Object` (the object as the text names it) then names
+by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
+the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate` or
+`ReservedKeyInInheritedMetadata`. `Annotation` is false for a label. `Entry` is the entry
+that reserves `Key`: the key itself, or the prefix it is under. Metadata the check cannot
+read fails generation with another error, which is neither.
 
 **What is read.** On every object, and on each member of an unstructured list envelope as
 Flux applies it (a `List`, or an envelope with `items`):
@@ -655,7 +678,8 @@ object named, and is not read as holding no key.
   a layout holding objects that never came from `Generate` gets them unchecked.
 
 **Library changes** (go-kure/launcher#790): a new exported field,
-`TransformContext.ReservedMetadataKeys`, the sentinel `ErrReservedMetadataKey`, and the
+`TransformContext.ReservedMetadataKeys`, the sentinel `ErrReservedMetadataKey`, the error
+type `ReservedMetadataKeyError` with its `ReservedKeyHolder` values, and the
 method `PlatformAnnotations()` on the `ingress` trait's config (`traits.IngressConfig`).
 The check reads that method through an unexported contract of this package, which a config
 of another package can only meet with an exported method. A consumer's own config that

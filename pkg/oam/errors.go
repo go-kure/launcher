@@ -17,7 +17,9 @@ var ErrPlatformReserved = errors.New("oam: property is platform-reserved")
 // ErrReservedMetadataKey is returned when an object an application generates
 // carries a label or annotation key TransformContext.ReservedMetadataKeys
 // reserves. It comes from generation, not from the transform: the objects of a
-// rendered chart and of a trait exist only then.
+// rendered chart and of a trait exist only then. The error that answers to it is
+// a *ReservedMetadataKeyError, which errors.As finds and which says the owner,
+// the object, the key and the entry that reserves it.
 var ErrReservedMetadataKey = errors.New("oam: metadata key is reserved")
 
 // TransformError represents a failure in the OAM-to-kure transformation pipeline.
