@@ -525,7 +525,7 @@ A sub-application's name is resolved and validated but not kept apart: it is not
 holding a ConfigMap and one a PersistentVolumeClaim, and that is accepted. A sub-application's
 name is also not its object's: a hook that renames the sub-application leaves the object's name
 alone. A consumer that read a sub-application's `Name` to learn the name of its ConfigMap,
-Ingress, HTTPRoute or ReplicationSource must read the generated object instead.
+Secret, Ingress, HTTPRoute or ReplicationSource must read the generated object instead.
 
 A trait handler resolves a name with `(*Trait).ResolveName(NameSpec)`, on the trait its
 `Apply` received. Only a trait the engine applies has a hook and a claim space: on a trait

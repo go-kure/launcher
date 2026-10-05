@@ -249,8 +249,8 @@ Decided in the ticket:
     a DNS-1123 subdomain, refused when invalid or too long. Only launcher's own defaults
     go through the shortening rule (§3.3).
   - A sub-application's name is no longer its object's: a hook that renames the
-    sub-application of a `configmap`, `ingress`, `httproute` or `volsync` trait leaves
-    the object's name alone.
+    sub-application of a `configmap`, `secret`, `ingress`, `httproute` or `volsync` trait
+    leaves the object's name alone.
 - **Shipped: the transform keeps the names of those roles apart.** Two that name one
   object, or one bundle, fail the transform, naming both and where each came from. Every
   other name is still compared only by `CheckInDocumentCollisions` over

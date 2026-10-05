@@ -87,7 +87,11 @@ func (h *SecretHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		componentName: app.Name,
 		Secret:        secret,
 	}
-	bundle.Applications = append(bundle.Applications, stack.NewApplication(name, app.Namespace, cfg))
+	subAppName, err := resolveSubApplicationName(trait, name)
+	if err != nil {
+		return err
+	}
+	bundle.Applications = append(bundle.Applications, stack.NewApplication(subAppName, app.Namespace, cfg))
 	return nil
 }
 
@@ -122,9 +126,17 @@ func (c *SecretConfig) ApplyPolicy(policy oam.Policy) error {
 }
 
 // Generate builds the Secret through components.GenerateSecret, under the
-// trait's name and with the owning component's labels.
+// trait's name and with the owning component's labels. The name is Name, not
+// the sub-application's: a consumer may name the sub-application apart
+// (go-kure/launcher#787), and every reference goes by Name (a helmrelease's
+// valuesFrom, FluxNamespaceInput). A config built directly without one is
+// named after its application.
 func (c *SecretConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return components.GenerateSecret(c.Secret, app.Name, app.Namespace, componentLabels(c.componentName))
+	name := c.Name
+	if name == "" {
+		name = app.Name
+	}
+	return components.GenerateSecret(c.Secret, name, app.Namespace, componentLabels(c.componentName))
 }
 
 var _ oam.Enforceable = (*SecretConfig)(nil)
