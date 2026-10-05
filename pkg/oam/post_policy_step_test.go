@@ -144,8 +144,9 @@ func TestPostPolicyStep_SurvivesATraitRule(t *testing.T) {
 	}
 }
 
-// A failing step fails the transform with a TransformError naming the
-// component and wrapping the step's own error, and nothing after it runs.
+// A step that fails with no refusal by the policy fails the transform with a
+// TransformError naming the component and wrapping the step's own error, and
+// nothing after it runs.
 func TestPostPolicyStep_ErrorNamesTheComponent(t *testing.T) {
 	var log []string
 	boom := errors.New("boom")

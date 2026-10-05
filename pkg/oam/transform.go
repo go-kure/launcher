@@ -973,6 +973,12 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// config the policy has just decided, before any trait of the component.
 		for _, step := range component.afterPolicy {
 			if err := step(config); err != nil {
+				// A step that holds the config to the policy refuses as ApplyPolicy
+				// does: a refusal by the policy is a violation, any other error is not.
+				var refusal *PolicyRefusal
+				if errors.As(err, &refusal) {
+					return nil, NewViolationError(component.Name, err)
+				}
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 		}

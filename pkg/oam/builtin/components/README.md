@@ -1938,7 +1938,8 @@ a class, which a consumer reads from `oam.ViolationError.Class` instead of match
   pod's, the block a CloudNativePG kind carries, and the pod template of an ACME HTTP01
   solver on an `issuer` or a `clusterissuer`), `oam.RefusalStorageMaximum` for a claim's
   request, a claim template's, a generic ephemeral volume's, a PersistentVolume's capacity
-  and a `cnpg-cluster` volume. `oam.RefusalReplicaMaximum` covers `replicas`, a
+  and a `cnpg-cluster` volume, the `1Gi` fallback of `postgresql` included, which its
+  post-policy step holds to the maximum. `oam.RefusalReplicaMaximum` covers `replicas`, a
   HorizontalPodAutoscaler's `maxReplicas` and `cnpg-cluster`'s `instances`.
 - **Secret material in the document is `oam.RefusalExplicitSecret`:** a `secret`
   component, a Secret that `passthrough` or a `manifests` source carries, `helmtemplate`'s
@@ -5412,7 +5413,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `1Gi` fallback is postgresql's, applied after the policy by the post-policy
   step its rule attaches
   (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
-  `enablePDB` is set from the instance count). That method is for that step,
+  `enablePDB` is set from the instance count; a fallback over the maximum is the
+  component's `oam.ViolationError` of class `oam.RefusalStorageMaximum`, as a
+  refusal of `ApplyPolicy` is). That method is for that step,
   not an authoring surface. A storage-size default that is
   not a quantity is refused (`policy default for storage.size: invalid
   quantity "lots"`), as an invalid cpu or memory default is, since with no

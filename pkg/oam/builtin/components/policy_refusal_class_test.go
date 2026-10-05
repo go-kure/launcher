@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
 )
 
 // A refusal by the environment policy carries a class a consumer reads from the
@@ -400,6 +401,41 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			_, err := pvTransform(tc.typ, tc.handler, tc.props(t), policy())
 			rcWantClass(t, err, tc.class)
 		})
+	}
+}
+
+// TestPolicyRefusalClass_PostgresqlStorageFallback: postgresql's 1Gi storage
+// fallback is held to the policy maximum by the post-policy step its rule
+// attaches, after ApplyPolicy. Its refusal is the component's violation with
+// the storage class, in the text it had as a transform error.
+func TestPolicyRefusalClass_PostgresqlStorageFallback(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(components.PostgresqlRule{})
+	tr.RegisterComponent("cnpg-cluster", &components.CnpgClusterHandler{})
+	tr.RegisterComponent("cnpg-objectstore", &components.CnpgObjectStoreHandler{})
+	tr.RegisterComponent("cnpg-pooler", &components.CnpgPoolerHandler{})
+	tr.RegisterComponent("cnpg-database", &components.CnpgDatabaseHandler{})
+	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
+	tr.RegisterPolicy("placement", &policies.PlacementHandler{})
+	build := func(props map[string]any) error {
+		_, err := tr.Transform(&oam.Application{
+			APIVersion: oam.SupportedAPIVersion,
+			Kind:       "Application",
+			Metadata:   oam.Metadata{Name: "myapp", Namespace: "demo"},
+			Spec:       oam.ApplicationSpec{Components: []oam.Component{{Name: "web", Type: "postgresql", Properties: props}}},
+		}, oam.TransformContext{Namespace: "demo", Policy: &stubPolicy{maxStorageSize: "512Mi"}})
+		return err
+	}
+
+	err := build(map[string]any{})
+	rcWantClass(t, err, oam.RefusalStorageMaximum)
+	if want := `component "web": storageSize "1Gi" exceeds enforced maximum "512Mi"`; err == nil || err.Error() != want {
+		t.Errorf("error = %v, want %q", err, want)
+	}
+	// The control: with a size under the maximum authored, the same document
+	// builds, so the refusal above is the fallback's.
+	if err := build(map[string]any{"storageSize": "256Mi"}); err != nil {
+		t.Errorf("an authored size under the maximum: %v, want the document to build", err)
 	}
 }
 
