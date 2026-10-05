@@ -3135,7 +3135,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       generates. The name is the component's own choice. Components that write
       the same name for the same identity share one source; a component that
       writes none does not share it, and gets the document's source beside it
-      (two sources of one identity). One name for two identities, or for two
+      (two sources of one identity), unless the name written is that source's
+      own (its default, or the hook's answer): one name for one identity is one
+      source. One name for two identities, or for two
       kinds, is refused as a collision naming both components, and so is a hook
       answer that gives two identities one name.
     - A name from the author or the hook is used as written: it must be a
@@ -3850,7 +3852,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Components that write the same name for the same identity share the source;
     a component that writes none does not share it and is not counted among
     its consumers, so it keeps its own source, or shares the document's with
-    the other components that name none. The name is used as written: it must
+    the other components that name none. A name equal to that shared source's
+    own names that source: one name for one identity is one source. The name
+    is used as written: it must
     be a DNS-1123 subdomain of at most 253 characters, and cannot be the
     component's own name or that of another component of the document (`oci:
     source.name "base" is the component's own name; the generated source is a

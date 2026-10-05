@@ -84,8 +84,10 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // the document, with no component. source.name beside the inline source names
 // the generated source instead (go-kure/launcher#787): the name is the
 // component's own choice, so a component that writes it does not share the
-// source of one that does not, two components that write the same name for the
-// same identity share one, and the same name for two identities is refused.
+// source of one that does not (unless it writes that source's own name: one
+// name for one identity is one source), two components that write the same
+// name for the same identity share one, and the same name for two identities
+// is refused.
 // The source is a component of the lowered document under its name, so it
 // cannot take the name of another component, its own consumer included.
 //
