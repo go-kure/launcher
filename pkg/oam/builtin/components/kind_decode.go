@@ -106,6 +106,9 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 				if def, ok := lookupFolded(defaulted.fields, join(field, k)); ok && isOmittedZero(a[k]) {
 					return errors.Errorf("%s: %v cannot be carried by the %s API types (the field is omitted when zero, so the %s would apply its default %s)", child, a[k], defaulted.api, defaulted.defaulter, def)
 				}
+				if err := foldedDuplicateIn(a[k], child); err != nil {
+					return err
+				}
 				continue
 			}
 			if other, dup := claimed[ek]; dup {
@@ -123,6 +126,39 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 		}
 		for i := range min(len(a), len(e)) {
 			if err := compareCarriedIn(a[i], e[i], fmt.Sprintf("%s[%d]", path, i), field+"[]", defaulted); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// foldedDuplicateIn refuses two spellings of one field anywhere inside an
+// authored value of which nothing is encoded. compareCarriedIn walks what the
+// encoding kept, and so does not reach it: a struct the type omits when zero
+// (`omitzero`) is absent exactly when the spelling that won the decode is the
+// zero one. `log: {Value: audit, value: ""}` decodes to an empty log, which is
+// then omitted together with the authored "audit".
+//
+// A map with free keys is not mistaken for a struct here: two keys in one would
+// both have been decoded and encoded, and its parent would not be absent.
+func foldedDuplicateIn(authored any, path string) error {
+	switch a := authored.(type) {
+	case map[string]any:
+		keys := slices.Sorted(maps.Keys(a))
+		for i, k := range keys {
+			for _, prev := range keys[:i] {
+				if strings.EqualFold(prev, k) {
+					return errors.Errorf("%s.%s: sets the same field as %s.%s (field names match case-insensitively, so one value would be dropped)", path, k, path, prev)
+				}
+			}
+			if err := foldedDuplicateIn(a[k], path+"."+k); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i := range a {
+			if err := foldedDuplicateIn(a[i], fmt.Sprintf("%s[%d]", path, i)); err != nil {
 				return err
 			}
 		}

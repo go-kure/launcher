@@ -158,6 +158,7 @@ reads it.
 | `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; no environment policy applies — see below. |
+| `cilium-networkpolicy` | CiliumNetworkPolicy | Kind-named CiliumNetworkPolicy: its `spec` (one rule) and `specs` (a list of rules), each the whole Cilium rule, strictly decoded. At least one is required; each rule needs an `endpointSelector` and an entry in `ingress`, `ingressDeny`, `egress` or `egressDeny`, and `nodeSelector` is refused. An authored object, not the `cilium-networkpolicy` trait; no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -313,7 +314,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cilium.CreateCiliumIdentity` | cilium.io/v2 CiliumIdentity (cluster-scoped) | not authorable | - | - | Written by Cilium when it allocates an identity. |
 | `cilium.CreateCiliumLoadBalancerIPPool` | cilium.io/v2 CiliumLoadBalancerIPPool (cluster-scoped) | missing | - | - | - |
 | `cilium.CreateCiliumLocalRedirectPolicy` | cilium.io/v2 CiliumLocalRedirectPolicy | missing | - | - | - |
-| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | trait | `cilium-networkpolicy` | strict decode of each rule into the Cilium `Rule` | The endpoint selector and the ICMP field unmarshal themselves and drop an unknown key; the trait refuses one by its path at every position that holds either (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. |
+| `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | kind | `cilium-networkpolicy` | strict decode of `spec` and `specs` into the Cilium `Rule` | The endpoint selector, the ICMP field and the rule label unmarshal themselves and drop an unknown key; the kind refuses one by its path at every position that holds any of them (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. The `cilium-networkpolicy` trait builds its own CiliumNetworkPolicy from one rule's `endpointSelector`, `ingress` and `egress`, with the same decode and the same check. |
 | `cilium.CreateCiliumNode` | cilium.io/v2 CiliumNode (cluster-scoped) | not authorable | - | - | Written by the Cilium agent for its node. |
 | `cilium.CreateCiliumNodeConfig` | cilium.io/v2 CiliumNodeConfig | missing | - | - | - |
 | `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | missing | - | - | - |
@@ -2822,6 +2823,74 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`<component>-allow`, or its `name`) or of a synthesized one is refused, with
   both named. **Not covered:** the NetworkPolicy's own metadata, so its
   labels and annotations cannot be authored.
+- **cilium-networkpolicy** (go-kure/launcher#790) is the kind-named projection
+  of a cilium.io/v2 CiliumNetworkPolicy. The object has no spec type of its
+  own: it holds one rule under `spec`, a list of rules under `specs`, or both,
+  each a Cilium `api.Rule`. The component's properties are those two fields,
+  decoded strictly into that type under the null contract, and
+  `TestCoreKindSchemas_CoverSpec` holds the two keys to the linked
+  `CiliumNetworkPolicy` type. It emits one CiliumNetworkPolicy named after the
+  component in the build namespace, with the authored rules and nothing else.
+  The whole rule is authorable: `endpointSelector`, `ingress`, `ingressDeny`,
+  `egress`, `egressDeny`, `labels`, `enableDefaultDeny`, `description`, `log`.
+
+  **Refused at build, because Cilium rejects the policy.** Its CRD schema
+  refuses some of these at admission (a rule with no selector, or without any of
+  the four rule keys); the rest the API server stores and the agent rejects when
+  it reads the object, so that nothing enforces it. Launcher refuses all of them
+  instead of emitting the object:
+  - no rule at all: neither `spec` nor an entry in `specs`. An empty `specs`
+    holds none; beside a `spec` it is accepted and not emitted;
+  - a rule with no `endpointSelector`. None is filled in: `{}` selects every
+    endpoint of the namespace and is carried as written, and a null or absent
+    one is refused;
+  - a rule with a `nodeSelector`, which belongs to a
+    CiliumClusterwideNetworkPolicy and which Cilium rejects in a namespaced
+    policy;
+  - a rule with no entry in any of `ingress`, `ingressDeny`, `egress` and
+    `egressDeny`. A deny list counts as much as an allow list; a null or empty
+    list holds no entry.
+
+  These are the checks Cilium's own reader makes that need no agent
+  configuration; the code names the Cilium functions they mirror. The rest of
+  a rule's value rules (a port's range, an entity's name, which peers may be
+  combined) are left to Cilium. A null list element (`specs: [null]`, a null
+  ingress entry or peer) is refused by its path.
+
+  **An unknown key inside a selector is refused**, by its path
+  (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's
+  endpoint selector unmarshals itself and drops a key it does not know, which
+  the strict decode cannot see: `endpointSelector: {matchLabel: {...}}` would be
+  the empty selector, which selects every endpoint of the namespace, and a peer
+  misspelt the same way would match every endpoint. The check covers every
+  position that holds a selector (`endpointSelector`, `fromEndpoints`,
+  `toEndpoints`, `fromNodes`, `toNodes`, a CIDR entry's `cidrGroupSelector`,
+  under the deny lists too) and the two other types under a rule that unmarshal
+  themselves: an `icmps` field (`family`, `type`) and an entry of `labels` in
+  its object form (`key`, `value`, `source`). The positions are found from the
+  Cilium types, and a test fails when a Cilium bump adds a type that unmarshals
+  itself and is not checked.
+
+  **An `icmps` field needs its `type`.** Cilium's own decoding of the field
+  panics when `type` is absent or null; the component is refused with an error
+  that names the panic (`… the decoder of … panicked on this value: …`) and not
+  the field's position, so look for an `icmps` field without a `type`.
+
+  **It is an authored object, not the `cilium-networkpolicy` trait**, although
+  the two share the type name. The trait attaches to a component and publishes
+  one rule's `name`, `endpointSelector`, `ingress` and `egress`; this kind is a
+  component of its own, named after the component or by its `objectName`, and
+  publishes the whole rule and `specs`. A component and a trait whose policy
+  would carry one name (the trait's `name`) are refused, with both named.
+  Neither fills a selector. **No environment policy
+  applies:** `ApplyPolicy` is a no-op, and the policy's capability lists gate
+  trait types, so a policy that forbids the `cilium-networkpolicy` trait does
+  not refuse a `cilium-networkpolicy` component. `passthrough`, `manifests`
+  and template delivery emit a CiliumNetworkPolicy under the same terms. A
+  consumer that restricts network policy restricts the component types it
+  registers. **Not covered:** the object's own metadata, so its labels and
+  annotations cannot be authored, and its `status`, which the Cilium agent
+  writes.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5326,7 +5395,7 @@ See "Component label and ownership" in the
 Every kind component takes `objectName`, which names its one object in place of the component
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`ingress`, `httproute`, `networkpolicy`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -250,6 +251,13 @@ func (h *HTTPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope)
 // all three are held apart.
 func (h *NetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return networkingKind("NetworkPolicy"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the cilium-networkpolicy kind's
+// CiliumNetworkPolicy. The `cilium-networkpolicy` trait claims its own policy
+// under the same kind, so the two are held apart.
+func (h *CiliumNetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: ciliumv2.CustomResourceDefinitionGroup, Kind: ciliumv2.CNPKindDefinition}, oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the configmap kind's ConfigMap.

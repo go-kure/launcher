@@ -54,6 +54,21 @@ var kindTraitPairs = []struct {
           - Ingress
 `,
 	},
+	{
+		// The trait's `name` is required: its object has no default name.
+		typ: "cilium-networkpolicy", identity: `CiliumNetworkPolicy.cilium.io "default/api-policy"`,
+		trait: claimCiliumTrait("api-policy"), object: "api-policy",
+		traitOwner: `component "api" traits[0] "cilium-networkpolicy" (its own object, set by name)`,
+		kind: `        spec:
+          endpointSelector:
+            matchLabels:
+              app: api
+          ingress:
+            - fromEndpoints:
+                - matchLabels:
+                    app: frontend
+`,
+	},
 }
 
 // claimKind is a kind component of type typ.

@@ -318,6 +318,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"ingress":       &components.IngressHandler{},
 		"httproute":     &components.HTTPRouteHandler{},
 		"networkpolicy": &components.NetworkPolicyHandler{},
+
+		"cilium-networkpolicy": &components.CiliumNetworkPolicyHandler{},
 	}
 }
 

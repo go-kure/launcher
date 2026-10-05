@@ -177,6 +177,11 @@ func (h *NetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumNetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-networkpolicy")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
