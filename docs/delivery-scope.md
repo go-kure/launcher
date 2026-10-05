@@ -822,10 +822,11 @@ be closed at build time.
     for a certificate). An issuer has none at the top level; a required field under a
     parent the author left out is not asked for.
   - **cert-manager's validating webhook refuses more than the CRDs do, and launcher
-    repeats none of it:** an issuer of no type or of two, a keystore with both or neither
-    of its password fields, a certificate that names no subject. Such a component builds
-    and is refused at apply. The one rule the CRDs write as an expression (a `venafi`
-    issuer names exactly one platform) is not repeated either.
+    repeats none of it:** an issuer of no type or of two, a keystore with a password
+    beside a reference that names a Secret or with neither, a certificate that names no
+    subject. Such a component builds and is refused at apply. The one rule the CRDs
+    write as an expression (a `venafi` issuer names exactly one platform) is not
+    repeated either.
   - **No host these objects name is held to the allowed registries** (an ACME directory,
     a Vault server, a certificate platform, a DNS server, a CRL or OCSP endpoint): none
     is an artifact source. **No field of an issuer is checked for a literal secret:** a

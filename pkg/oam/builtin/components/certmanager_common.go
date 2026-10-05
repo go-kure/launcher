@@ -23,9 +23,9 @@ import (
 // that no authored 0 or false is lost on these types.
 //
 // cert-manager's validating webhook refuses more than the CRDs do: an Issuer
-// that configures no issuer type or more than one, a keystore with both or
-// neither of its password fields, a Certificate that names no subject. Those
-// are the webhook's, and launcher repeats none of them.
+// that configures no issuer type or more than one, a keystore with a password
+// beside a reference that names a Secret or with neither, a Certificate that
+// names no subject. Those are the webhook's, and launcher repeats none of them.
 //
 // A host these objects name is one cert-manager reaches, not an artifact
 // source: an ACME directory, a Vault or a certificate platform, a DNS server
