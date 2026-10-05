@@ -311,7 +311,7 @@ func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error 
 // An object that does not come out so is an error, since nothing in it can be
 // read: one that does not serialize, and one of a registered kind that does not
 // decode as a single object of that kind (a field whose value has the wrong
-// type, for one).
+// type, for one; an object the parser panics on, for another: parseManifests).
 func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 	const unreadable = "the object cannot be read, so it cannot be checked against environment policy"
 	raw, err := json.Marshal(u.Object)
@@ -328,7 +328,7 @@ func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 		}
 		return &unstructured.Unstructured{Object: object}, nil
 	}
-	objs, err := kureio.ParseYAMLWithOptions(raw, kureio.ParseOptions{})
+	objs, err := parseManifests(raw, kureio.ParseOptions{})
 	if err != nil {
 		return nil, errors.Wrap(err, unreadable)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -95,7 +96,7 @@ func undeclaredFieldsAs(doc []byte, itemKind *schema.GroupVersionKind) ([]string
 	if err != nil {
 		return nil, err
 	}
-	_, _, err = decoder.Decode(doc, itemKind, nil)
+	err = strictDecode(decoder, doc, itemKind)
 	if err == nil || runtime.IsNotRegisteredError(err) {
 		return nil, nil
 	}
@@ -114,6 +115,61 @@ func undeclaredFieldsAs(doc []byte, itemKind *schema.GroupVersionKind) ([]string
 		return nil, errStrictRecordFull
 	}
 	return paths, nil
+}
+
+// errDecoderPanicked is the error a panic of a decode over kure's scheme is
+// turned into (recoverDecoderPanic); the panic's value follows it.
+//
+// A document of a registered kind is decoded into the API type of that kind,
+// and such a type may decode itself with code that does not handle what the
+// document wrote. Cilium's ICMPField is one: it dereferences the `type` an
+// `icmps` field left out. The document is not launcher's, so the crash would be
+// a chart's or a manifest source's to cause, and it is reported instead.
+var errDecoderPanicked = errors.New("the decoder panicked on the document instead of refusing it (an API type that decodes itself did not handle what was written; a required field left out is the known cause)")
+
+// recoverDecoderPanic, deferred by a function that does nothing but call a
+// decoder over kure's scheme, turns a panic of that call into *err. It is not
+// for a function that runs code of this package: a defect here must stay a
+// crash.
+func recoverDecoderPanic(err *error) {
+	if r := recover(); r != nil {
+		*err = errors.Errorf("%w: %v", errDecoderPanicked, r)
+	}
+}
+
+// parseManifests is kure's parser (kureio.ParseYAMLWithOptions), a panic of it
+// returned as an error that is errDecoderPanicked. It names no document: the
+// caller does.
+func parseManifests(raw []byte, opts kureio.ParseOptions) (objs []client.Object, err error) {
+	defer recoverDecoderPanic(&err)
+	return kureio.ParseYAMLWithOptions(raw, opts)
+}
+
+// strictDecode is decoder.Decode for its error alone, a panic of it returned as
+// an error that is errDecoderPanicked.
+func strictDecode(decoder runtime.Decoder, doc []byte, itemKind *schema.GroupVersionKind) (err error) {
+	defer recoverDecoderPanic(&err)
+	_, _, err = decoder.Decode(doc, itemKind, nil)
+	return err
+}
+
+// documentRef names document i of a manifest input for an error: its position,
+// counted from one over the documents that are not empty, and the kind and name
+// it states when they can be read. It is for a document the parser gave no
+// object for, which renderedObjectRef cannot name.
+func documentRef(i int, doc []byte) string {
+	var object map[string]any
+	if err := utiljson.Unmarshal(doc, &object); err != nil {
+		return fmt.Sprintf("document %d", i+1)
+	}
+	u := &unstructured.Unstructured{Object: object}
+	switch {
+	case u.GetKind() == "":
+		return fmt.Sprintf("document %d", i+1)
+	case u.GetName() == "":
+		return fmt.Sprintf("document %d (%s)", i+1, u.GetKind())
+	}
+	return fmt.Sprintf("document %d (%s)", i+1, renderedObjectRef(u))
 }
 
 // undeclaredFieldsError is the refusal of a workload or claim that sets fields
@@ -154,16 +210,35 @@ func undeclaredFieldsError(gvk schema.GroupVersionKind, paths []string) error {
 // Every document that does not decode is an error, and the parser reports them
 // together, as it always did: that error is kure's own, unchanged, and it is
 // returned before any undeclared field is looked at.
+//
+// A document the parser panics on is an error too (errDecoderPanicked), named
+// by its position and by the kind and name it states (documentRef), and the
+// first such document ends the decode: the parser would panic on it again when
+// asked for every error of the input.
+//
+// Input that stops being YAML part-way is read in the same order: the documents
+// ahead of that point are decoded first, so one of them that the parser panics
+// on, or that does not decode, is reported and is not lost to the YAML error
+// after it.
 func decodeManifestDocuments(raw []byte) ([]client.Object, error) {
-	docs, err := splitManifestDocuments(raw)
+	docs, splitErr := splitManifestDocuments(raw)
 	decoded := make([][]client.Object, len(docs))
+	var err error
 	for i := 0; err == nil && i < len(docs); i++ {
-		decoded[i], err = kureio.ParseYAMLWithOptions(docs[i], manifestParseOptions)
+		decoded[i], err = parseManifests(docs[i], manifestParseOptions)
+		if errors.Is(err, errDecoderPanicked) {
+			return nil, errors.Wrap(err, documentRef(i, docs[i]))
+		}
+	}
+	if err == nil {
+		err = splitErr
 	}
 	if err != nil {
 		// The parser reports every bad document of the input in one error; a
-		// document alone would give only its own.
-		if _, whole := kureio.ParseYAMLWithOptions(raw, manifestParseOptions); whole != nil {
+		// document alone would give only its own. That is what is returned when
+		// a later document makes the parser panic: its turn comes once this one
+		// decodes.
+		if _, whole := parseManifests(raw, manifestParseOptions); whole != nil && !errors.Is(whole, errDecoderPanicked) {
 			return nil, whole
 		}
 		return nil, err
@@ -309,7 +384,7 @@ func keepListItemFields(list listDocument, objs []client.Object) ([]client.Objec
 	}
 	read := 0
 	for i, item := range list.items {
-		itemObjs, err := kureio.ParseYAMLWithOptions(item, manifestParseOptions)
+		itemObjs, err := parseManifests(item, manifestParseOptions)
 		if err != nil {
 			return nil, errors.Wrapf(err, "item %d of %s", i, list.kind)
 		}
@@ -327,7 +402,9 @@ func keepListItemFields(list listDocument, objs []client.Object) ([]client.Objec
 }
 
 // splitManifestDocuments splits raw into its documents as kure's parser does,
-// each in the JSON form that parser decodes, empty documents dropped.
+// each in the JSON form that parser decodes, empty documents dropped. Where raw
+// stops being YAML, the split ends: the documents ahead of that point are
+// returned beside the error.
 func splitManifestDocuments(raw []byte) ([][]byte, error) {
 	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)
 	var docs [][]byte
@@ -337,7 +414,7 @@ func splitManifestDocuments(raw []byte) ([][]byte, error) {
 			if stderrors.Is(err, io.EOF) {
 				return docs, nil
 			}
-			return nil, err
+			return docs, err
 		}
 		if len(bytes.TrimSpace(doc.Raw)) > 0 {
 			docs = append(docs, doc.Raw)

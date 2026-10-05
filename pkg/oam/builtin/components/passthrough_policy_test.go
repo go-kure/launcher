@@ -594,6 +594,79 @@ func TestPassthrough_UnserializableObjectIsRefused(t *testing.T) {
 	}
 }
 
+// TestPassthrough_ObjectTheDecoderPanicsOnIsRefused: the policy check decodes an
+// object of a registered kind into its API type, and that type's own decoding
+// may panic on what was written. Cilium's ICMP field does, on a field that
+// leaves its `type` out. The build reports that as an object that cannot be
+// read, naming the component and the object, and does not crash, under a strict
+// policy and under the one the transform applies when the environment sets none.
+// The same object with the type written builds, and a config no policy was
+// applied to does not decode the object at all and emits it as authored.
+func TestPassthrough_ObjectTheDecoderPanicsOnIsRefused(t *testing.T) {
+	policy := func(kind, icmpType string) string {
+		return "apiVersion: cilium.io/v2\nkind: " + kind + "\nmetadata:\n  name: thing\n" +
+			"spec:\n  endpointSelector: {}\n  egress:\n    - icmps:\n        - fields:\n            - family: IPv4\n" + icmpType
+	}
+	for kind, ref := range map[string]string{
+		"CiliumNetworkPolicy":            `passthrough: object CiliumNetworkPolicy "demo/thing"`,
+		"CiliumClusterwideNetworkPolicy": `passthrough: object CiliumClusterwideNetworkPolicy "thing"`,
+	} {
+		t.Run(kind, func(t *testing.T) {
+			properties := func(icmpType string) map[string]any {
+				p := map[string]any{"object": ptObject(t, policy(kind, icmpType))}
+				if kind == "CiliumClusterwideNetworkPolicy" {
+					p["clusterScoped"] = true
+				}
+				return p
+			}
+			transform := func(icmpType string, p oam.Policy) ([]client.Object, error) {
+				tr := oam.NewTransformer(map[string]oam.ComponentHandler{"passthrough": &components.PassthroughHandler{}}, nil)
+				cluster, err := tr.Transform(&oam.Application{
+					Metadata: oam.Metadata{Name: "shop"},
+					Spec: oam.ApplicationSpec{Components: []oam.Component{{
+						Name: "web", Type: "passthrough", Properties: properties(icmpType),
+					}}},
+				}, oam.TransformContext{Namespace: "demo", Policy: p})
+				if err != nil {
+					return nil, err
+				}
+				apps, err := oam.GenerateApplications(cluster)
+				if err != nil {
+					return nil, err
+				}
+				var out []client.Object
+				for _, a := range apps {
+					for _, o := range a.Objects {
+						out = append(out, *o)
+					}
+				}
+				return out, nil
+			}
+
+			_, err := transform("", ptStrictPolicy())
+			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on the document", "nil pointer dereference")
+			_, err = transform("", nil)
+			htWantViolation(t, err, ref, "cannot be read", "the decoder panicked on the document", "nil pointer dereference")
+
+			objs, err := transform("              type: 8\n", ptStrictPolicy())
+			if err != nil {
+				t.Fatalf("control: the policy with its ICMP type written does not build: %v", err)
+			}
+			if len(objs) != 1 {
+				t.Fatalf("control: generated %d objects, want 1", len(objs))
+			}
+
+			cfg, err := (&components.PassthroughHandler{}).ToApplicationConfig(passthroughComponent(properties("")), "demo")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			if _, err := cfg.Generate(nil); err != nil {
+				t.Fatalf("Generate with no policy applied: %v", err)
+			}
+		})
+	}
+}
+
 // TestPassthroughConfig_ApplyPolicy_NilIsANoOp: a nil policy checks nothing.
 func TestPassthroughConfig_ApplyPolicy_NilIsANoOp(t *testing.T) {
 	cfg, err := (&components.PassthroughHandler{}).ToApplicationConfig(passthroughComponent(map[string]any{
