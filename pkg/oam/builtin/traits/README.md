@@ -1010,6 +1010,30 @@ Each remaining comma-ok assertion in these files is safe for one of three reason
 `TestTypedNilSweep` and `TestTypedNilSweepFollowUp` pin each fixed site against the
 untyped answer.
 
+### Null entries in a string map
+
+Four properties are maps whose values are written as strings: `ingress` and `httproute`
+`annotations`, and `external-secret` `target.template.data` and `dataFrom[].find.tags`.
+An entry authored with a null value, typed or untyped, is **absent**: it is left out of
+the object (go-kure/launcher#790). **Pre-GA output change:** such an entry used to be
+written as the text `<nil>`, or `map[]` for a typed nil map. Any other value is still
+written as its text (`8080`, `true`).
+
+```yaml
+annotations:
+  example.com/owner:              # null -> absent: the object carries no such annotation
+  example.com/team: checkout
+```
+
+A map holding only null entries reads as an empty one, so a `find` with such `tags` and
+no `name` is refused as one with neither. An `ingress` annotation the platform also sets
+takes the platform's value, as before (see `platformAnnotations` above). An entry
+authored as null under a key the consumer reserves (`ReservedMetadataKeys`) is absent
+like any other, so it is not refused; the same key with a value is.
+`TestNullStringMapValue_IsAbsence` pins the four maps at their parsers, a typed nil
+included, `TestBuild_NullStringMapValueIsAbsent` in the output of `kurel build`, and
+`TestReservedMetadataKeys_NullEntryIsAbsent` the reserved key.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access

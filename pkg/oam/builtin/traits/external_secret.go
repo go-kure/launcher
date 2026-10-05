@@ -250,6 +250,10 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			if rawData, ok := rawTemplate["data"].(map[string]any); ok && rawData != nil {
 				tmpl.Data = make(map[string]string, len(rawData))
 				for k, v := range rawData {
+					// A null value is absent, not the text "<nil>".
+					if oam.IsNullValue(v) {
+						continue
+					}
 					tmpl.Data[k] = fmt.Sprintf("%v", v)
 				}
 			}
@@ -353,6 +357,10 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 				if rawTags, ok := rawFind["tags"].(map[string]any); ok && rawTags != nil {
 					find.Tags = make(map[string]string, len(rawTags))
 					for k, v := range rawTags {
+						// A null value is absent, not the text "<nil>".
+						if oam.IsNullValue(v) {
+							continue
+						}
 						find.Tags[k] = fmt.Sprintf("%v", v)
 					}
 				}
