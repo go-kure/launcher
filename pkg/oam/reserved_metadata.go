@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,7 @@ import (
 // appLabelKey and the component label key, which a consumer may well configure
 // under a prefix it reserves. An annotation launcher wrote from the platform's
 // own input is exempt as a key and value pair, which the config states
-// (platformAnnotated).
+// (platformAnnotated), also from under a wrapper (platformAnnotationsUnder).
 
 // appLabelKey is the label launcher's own configs put on what they generate,
 // valued ComponentLabelValue(component).
@@ -160,10 +161,7 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 	if err != nil {
 		return errors.Errorf("reserved metadata keys: %s: %w", where, err)
 	}
-	var platform map[string]string
-	if p, ok := o.inner.(platformAnnotated); ok {
-		platform = p.PlatformAnnotations()
-	}
+	platform := platformAnnotationsUnder(o.inner)
 
 	metadata, _, err := objectField(content, "metadata")
 	if err != nil {
@@ -202,11 +200,35 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 	return nil
 }
 
+// platformAnnotationsUnder returns what cfg and every config under it vouch for
+// (platformAnnotated), one answer per layer that has any. It looks under each
+// wrapper that says it wraps (ConfigWrapper), down to the config UnwrapConfig
+// returns, so a wrapper around the config that writes the platform's annotations
+// does not hide them, and needs no method of its own to hand them on. A wrapper
+// that is no ConfigWrapper ends the walk: what it wraps is not read.
+func platformAnnotationsUnder(cfg stack.ApplicationConfig) []map[string]string {
+	var platform []map[string]string
+	for cfg != nil {
+		if p, ok := cfg.(platformAnnotated); ok {
+			if pairs := p.PlatformAnnotations(); len(pairs) > 0 {
+				platform = append(platform, pairs)
+			}
+		}
+		w, ok := cfg.(ConfigWrapper)
+		if !ok {
+			break
+		}
+		cfg = w.WrappedApplicationConfig()
+	}
+	return platform
+}
+
 // checkReservedHolder checks the labels and annotations holder holds, which is
 // an object's metadata, a pod template's, or a Cluster's inheritedMetadata. part
 // says which in the refusal, "" for the object's own. platform holds the
-// annotation pairs that are exempt, on an object's own metadata only.
-func (o *ownedConfig) checkReservedHolder(holder map[string]any, where, part string, platform map[string]string) error {
+// annotation pairs that are exempt, on an object's own metadata only: a pair any
+// of its layers states.
+func (o *ownedConfig) checkReservedHolder(holder map[string]any, where, part string, platform []map[string]string) error {
 	labels, _, err := objectField(holder, "labels")
 	if err != nil {
 		return errors.Errorf("reserved metadata keys: %s: %s%w", where, part, err)
@@ -224,10 +246,11 @@ func (o *ownedConfig) checkReservedHolder(holder map[string]any, where, part str
 		return errors.Errorf("reserved metadata keys: %s: %s%w", where, part, err)
 	}
 	for _, key := range slices.Sorted(maps.Keys(annotations)) {
-		if want, isPlatform := platform[key]; isPlatform {
-			if got, isString := annotations[key].(string); isString && got == want {
-				continue
-			}
+		if got, isString := annotations[key].(string); isString && slices.ContainsFunc(platform, func(pairs map[string]string) bool {
+			want, isPlatform := pairs[key]
+			return isPlatform && got == want
+		}) {
+			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
 			return o.reservedKeyError(where, part+"annotation", key, entry)
