@@ -106,8 +106,13 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 	return m
 }
 
-// ToApplicationConfig converts an OAM cronjob component to a CronjobConfig.
+// ToApplicationConfig converts an OAM cronjob component to a CronjobConfig. The
+// CronJob's name is held to the length the API server creates one under
+// (validateCronJobName).
 func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	if err := validateCronJobName(component.ObjectName(), component.Name); err != nil {
+		return nil, err
+	}
 	config := &CronjobConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
@@ -422,8 +427,12 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes CronJob, and nothing beside it: no
-// ServiceAccount and no claim (go-kure/launcher#702).
+// ServiceAccount and no claim (go-kure/launcher#702). The name-length check is
+// repeated, since the config is exported.
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := validateCronJobName(kindObjectName(c.ObjectName, app.Name), app.Name); err != nil {
+		return nil, err
+	}
 	cronjob, err := c.createCronJob(app)
 	if err != nil {
 		return nil, err

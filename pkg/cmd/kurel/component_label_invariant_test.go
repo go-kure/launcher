@@ -126,7 +126,8 @@ type componentLabelFixture struct {
 	// longRefusal is empty when the type accepts a name over 63 characters.
 	// Otherwise it is a substring of the refusal the type already gives such a
 	// name (go-kure/launcher#407 container name, go-kure/launcher#546 Service
-	// name); the test pins that the refusal is unchanged.
+	// name, a kind's own name length); the test pins that the refusal is
+	// unchanged.
 	longRefusal string
 	// nameBound, when set, is a name bound of the type's own below 63
 	// characters. The type is rendered at a DNS-1035 name of exactly that
@@ -202,8 +203,11 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"worker": {props: workloadProps(map[string]any{"replicas": 3, "topologySpread": true,
 		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 4},
 	"deployment": {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
-	"cronjob":    {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}), longRefusal: containerNameRefusal, labelled: true},
-	"job":        {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true},
+	// The two batch kinds refuse a long name by the length of their own object
+	// first: a CronJob's name is at most 52 characters, a Job's at most 63.
+	"cronjob": {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}),
+		nameBound: 52, longRefusal: "the component name is the CronJob's name, which must be at most 52 characters", labelled: true},
+	"job": {props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true},
 	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
 	// their long-name refusal is the container name's, as deployment's.
 	"daemonset":   {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},

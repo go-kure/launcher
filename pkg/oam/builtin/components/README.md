@@ -399,6 +399,9 @@ the component (`webservice`) refuses a dotted or longer name earlier, at
 conversion, by the stricter Service-name rule described under each kind in
 "Per-type highlights" (go-kure/launcher#546). `daemonset` and `statefulset`
 named one too until they stopped emitting a Service (go-kure/launcher#690).
+`cronjob` and `job` refuse a name past the length of their own object earlier
+too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
+63 (see each kind in "Per-type highlights").
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
@@ -2473,6 +2476,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
   to have been authored. Those three are always written, taking `OnFailure`, 3
   and 1 when omitted.
+  The CronJob's name is at most 52 characters, the longest the API server
+  creates one under (`ValidateCronJobCreate`: the controller names each Job
+  after the CronJob plus an 11-character suffix, and that Job's name is held to
+  63). The rule is held on the name the CronJob takes, the component name or
+  its `objectName` (or the `Naming` hook's answer), when the component is read
+  and again at `Generate`: `cronjob "<name>": the component name is the
+  CronJob's name, which must be at most 52 characters: it has 53`, or
+  `objectName (or the Naming hook's answer for role "object"): "<name>" is not
+  a valid CronJob name, which must be at most 52 characters: it has 53`. A
+  component named with 53 to 63 characters built before this rule and is
+  refused now (go-kure/launcher#787); a longer one was already refused by the
+  container-name rule.
   Known limitation: the plain 5-field `schedule` form accepts any 5
   whitespace-separated tokens with no per-field semantic check (e.g.
   `99 99 99 99 99` builds successfully here and is only rejected later, by
@@ -2490,6 +2505,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   hook name a port; no `sidecars` schema key (init containers only), matching
   `cronjob`.
   It emits a `Job` and nothing else (go-kure/launcher#702).
+
+  The Job's name is at most 63 characters: the API server writes it as the
+  value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
+  labels (`generateSelector`), and a label value is at most 63. The rule is
+  held on the name the Job takes, the component name or its `objectName` (or
+  the `Naming` hook's answer), when the component is read and again at
+  `Generate`, in the words the `cronjob` rule uses. A component name over 63
+  characters was already refused at generation, by the container-name rule; it
+  is now refused when the component is read, by this one
+  (go-kure/launcher#787).
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
   job template, projected here onto `spec` directly. Every one is
@@ -4717,7 +4742,8 @@ handler's config carries it as `ObjectName`, empty when it is the component's na
 `Generate` names the object with it. Everything else the handler writes keeps the component
 name: the `app` label and selectors, the pod template's labels, the main container's name.
 A handler's own check of the name (a Service's DNS-1035 label, a CloudNativePG Cluster's
-length) runs on the object name, since that is what the object carries.
+length, a CronJob's 52 characters, a Job's 63) runs on the object name, since that is what
+the object carries.
 
 What a config tells a trait or the transform about its object follows the object name: a
 `service` component's `BackendServiceName`, a `serviceaccount` component's

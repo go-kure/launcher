@@ -619,7 +619,8 @@ one object, named after the component. `objectName` gives that object another na
 The name is resolved in the order of every role: the author's `objectName`, else the `Naming`
 hook's answer for role `object`, else the component name. A name that is not the default is a
 DNS-1123 subdomain used as given or refused, and the kind's own name rule then runs on it as
-it runs on a component name (a Service's is a DNS-1035 label).
+it runs on a component name (a Service's is a DNS-1035 label, a CronJob's at most 52
+characters, a Job's at most 63).
 
 It names the object alone. The component keeps its name everywhere else: the `app` label, the
 pod template's labels, the selectors, the component label, the main container, and every name

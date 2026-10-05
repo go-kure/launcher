@@ -525,9 +525,10 @@ func TestNamingHook_PostgresqlRefusals(t *testing.T) {
 }
 
 // TestNamingHook_KindNameRuleNamesBothSources: a kind that holds its object's
-// name to a rule of its own (a Service, a Namespace) is handed the resolved name
-// only, so its refusal names both places that name can come from. A hook's
-// answer is not reported as the author's `objectName`.
+// name to a rule of its own (a Service, a Namespace, the length of a CronJob's
+// or a Job's) is handed the resolved name only, so its refusal names both places
+// that name can come from. A hook's answer is not reported as the author's
+// `objectName`.
 func TestNamingHook_KindNameRuleNamesBothSources(t *testing.T) {
 	const source = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "object"): `
 	app := func(name, typ, props string) string {
@@ -544,11 +545,16 @@ spec:
 %s`, name, typ, props)
 	}
 	const servicePorts = "        selector:\n          app: api\n        ports:\n          - port: 80\n"
+	over52, over63 := strings.Repeat("a", 53), strings.Repeat("a", 64)
 	for _, tc := range []struct {
 		name, component, typ, props, bad, want string
 	}{
 		{"service", "api", "service", servicePorts, "1api", `"1api" is not a valid Service name`},
 		{"namespace", "tenant", "namespace", "        finalizers: []\n", "tenant.a", `"tenant.a" is not a valid Namespace name`},
+		{"cronjob", "nightly", "cronjob", "        image: busybox:1\n        schedule: \"0 2 * * *\"\n", over52,
+			`"` + over52 + `" is not a valid CronJob name, which must be at most 52 characters`},
+		{"job", "migrate", "job", "        image: busybox:1\n", over63,
+			`"` + over63 + `" is not a valid Job name, which must be at most 63 characters`},
 	} {
 		t.Run(tc.name+" authored", func(t *testing.T) {
 			authored := app(tc.component, tc.typ, tc.props+"        "+oam.ObjectNameProperty+": "+tc.bad+"\n")
