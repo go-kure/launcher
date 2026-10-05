@@ -38,13 +38,14 @@ import (
 // field the kind does not refuse is one the validator accepts, for the reason
 // its row gives.
 //
-// These are the kinds no other test holds to this set: the cert-manager kinds
-// derive their required list from the CRD for cert-manager's own types
-// (TestCertManagerKinds_RequiredMatchCRD), not for the Kubernetes and Gateway
-// API types those embed, and the CloudNativePG kinds have no derived required
-// list. A new kind of either family joins with one entry: its component, the
-// type its properties decode into, its handler and its CRD. The test then
-// names every field of the set that has no row.
+// The cert-manager kinds' required list is held to the CRDs by
+// TestCertManagerKinds_RequiredMatchCRD, which derives these fields among the
+// others from the schemas' required lists and runs no validator: here each is
+// shown refused by one. The CloudNativePG kinds have no derived required list,
+// and no other test holds them to this set. A new kind of either family joins
+// with one entry: its component, the type its properties decode into, its
+// handler and its CRD. The test then names every field of the set that has no
+// row.
 
 // crdValidation is the schema of the v1 version of one CRD and its validator.
 type crdValidation struct {
