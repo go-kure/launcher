@@ -48,8 +48,9 @@ const (
 	NameRoleDatabase NameRole = "database"
 	// NameRoleObject is the one object of a kind component
 	// (ComponentObjectProvider): an authored `deployment`, `service`,
-	// `configmap`. Default: the component name. It is asked only for an authored
-	// component: what a lowering rule emits is named by the rule.
+	// `configmap`. Default: the component name. It is not asked for a member a
+	// component or trait lowering rule emitted: the rule names its members. A
+	// component of a document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
 )
 

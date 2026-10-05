@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
+
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -125,6 +127,80 @@ func TestObjectName_RenamesTheObjectAlone(t *testing.T) {
 				t.Errorf("%s with objectName matched %d pod selectors against its pod template, want at least %d", typ, n.selectors, fx.selectors)
 			}
 		})
+	}
+}
+
+// TestObjectName_HandlerDrivenDirectly hands every kind handler `objectName`
+// directly, outside a transform, where no engine reads the property off the
+// component first. No handler names its object with it. A handler that reads
+// the fields it knows passes over the property, and the object keeps the
+// component name (`configmap`, `service`, `deployment`); one that decodes its
+// properties strictly refuses it as a field it does not know (`namespace`,
+// `helmrelease`, `cnpg-cluster`). Both are met among the built-in kinds.
+func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
+	const component = "widget"
+	handlers := builtinComponentHandlers()
+	var refuses, passesOver []string
+	for _, typ := range slices.Sorted(maps.Keys(handlers)) {
+		if _, declares := handlers[typ].(oam.ComponentObjectProvider); !declares {
+			continue
+		}
+		fx, has := componentLabelFixtures[typ]
+		if !has {
+			t.Errorf("component type %q has no fixture in componentLabelFixtures", typ)
+			continue
+		}
+		props := fx.props
+		if fx.propsFor != nil {
+			props = fx.propsFor(t)
+		}
+		direct := func(props map[string]any) ([]string, error) {
+			cfg, err := handlers[typ].ToApplicationConfig(&oam.Component{Name: component, Type: typ, Properties: props}, "default")
+			if err != nil {
+				return nil, err
+			}
+			objs, err := cfg.Generate(stack.NewApplication(component, "default", cfg))
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(objs))
+			for _, obj := range objs {
+				names = append(names, (*obj).GetName())
+			}
+			return names, nil
+		}
+
+		if names, err := direct(maps.Clone(props)); err != nil || !slices.Contains(names, component) {
+			t.Errorf("%s driven directly without objectName: objects %v, err %v; want one named %q", typ, names, err, component)
+			continue
+		}
+		withName := maps.Clone(props)
+		if withName == nil {
+			withName = map[string]any{}
+		}
+		withName[oam.ObjectNameProperty] = "other"
+		names, err := direct(withName)
+		switch {
+		case err != nil && strings.Contains(err.Error(), oam.ObjectNameProperty):
+			refuses = append(refuses, typ)
+		case err != nil:
+			t.Errorf("%s driven directly with objectName: %v; want the property passed over or refused by name", typ, err)
+		case slices.Contains(names, "other") || !slices.Contains(names, component):
+			t.Errorf("%s driven directly with objectName names its objects %v; want the component name %q kept", typ, names, component)
+		default:
+			passesOver = append(passesOver, typ)
+		}
+	}
+	// The three named on each side in the README and in this test's comment.
+	for _, typ := range []string{"configmap", "service", "deployment"} {
+		if !slices.Contains(passesOver, typ) {
+			t.Errorf("%s no longer passes over objectName when driven directly (passing over: %v); the oam README names it", typ, passesOver)
+		}
+	}
+	for _, typ := range []string{"namespace", "helmrelease", "cnpg-cluster"} {
+		if !slices.Contains(refuses, typ) {
+			t.Errorf("%s no longer refuses objectName when driven directly (refusing: %v); the oam README names it", typ, refuses)
+		}
 	}
 }
 

@@ -515,7 +515,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
-| `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a component a lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
+| `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
@@ -674,9 +674,11 @@ object's kind and scope (`ComponentObjectProvider.ComponentObject`); the engine 
 `objectName` to that type's schema, resolves and claims the name, removes the property, and
 hands the handler the result as `Component.ObjectName()`. A type that declares no object
 (`helmtemplate`, `manifests`, `crd`, `passthrough`) refuses the property. A kind handler
-driven directly, outside a transform, does not read it: its own `PropertySchema` does not
-declare the property, its `ToApplicationConfig` passes over it, and the object keeps the
-component name.
+driven directly, outside a transform, never names its object with it: its own
+`PropertySchema` does not declare the property, and its `ToApplicationConfig` either passes
+over it, the object keeping the component name (`configmap`, `service`, `deployment`), or,
+where the handler decodes its properties strictly, refuses it as a field it does not know
+(`namespace`, `helmrelease`, `cnpg-cluster`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
 kind (`namespace`, `persistentvolume`), and in the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
@@ -686,9 +688,12 @@ name collision: Pooler.postgresql.cnpg.io "default/db-pooler" is named by compon
 ```
 
 `objectName` and the `object` request apply only to a component no rule emitted. On a member
-a lowering rule emitted the property is refused and the hook is not asked: a rule that wants a
-member's name choosable resolves it itself at lowering time, under its own role (`pooler`,
-`database`).
+a component or trait lowering rule emitted the property is refused and the hook is not asked:
+a rule that wants a member's name choosable resolves it itself at lowering time, under its
+own role (`pooler`, `database`). What a document rule or a raw document rule returns is
+authored input, the components it built as much as the ones it forwarded: the property and
+the request apply there, so a document rule that wants to fix a kind component's object name
+writes `objectName` itself.
 
 The party that writes a reference names its target. What launcher writes to a renamed
 component's object carries the object name:

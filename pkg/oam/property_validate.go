@@ -1371,14 +1371,33 @@ func (a exactNumber) equal(b exactNumber) bool {
 // *publication* (transform.go): a rule-claimed type's schema was discoverable
 // through HandlerSchemas but was never actually enforced against what a rule emits.
 func (t *Transformer) validateEmittedComponent(comp *Component) error {
+	return t.validateEmittedComponentAs(comp, true)
+}
+
+// validateEmittedComponentAs is validateEmittedComponent, told whether comp is a
+// member a component or trait lowering rule emitted. One that is not is a
+// component of a document a document rule or a raw document rule returned
+// (validateEmittedDocument): authored input, forwarded or built. The two differ
+// at a kind component's `objectName` only, which is the author's and never a
+// member's:
+//
+//   - on a member it is refused, and said here, before the schema says only that
+//     the key is unsupported;
+//   - on a document's component it is checked as on the authored path, with the
+//     property folded into the handler's schema (withObjectNameProperty), and
+//     left for the transform to resolve.
+func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) error {
 	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
 	if h, ok := t.componentHandlers[comp.Type]; ok {
-		// Said here, before the schema says only that the key is unsupported: a
-		// kind component's `objectName` is the author's, never a rule's.
-		if _, takes := h.(ComponentObjectProvider); takes {
+		_, takes := h.(ComponentObjectProvider)
+		p, declares := h.(PropertySchemaProvider)
+		switch {
+		case takes && member:
 			if raw, has := comp.Properties[ObjectNameProperty]; has && raw != nil {
 				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
 			}
+		case takes && declares:
+			return validateEmittedAgainst(withObjectNameProperty(h, p.PropertySchema()), &comp.Properties, path)
 		}
 		return validateEmittedProperties(h, &comp.Properties, path)
 	}
@@ -1437,8 +1456,14 @@ func validateEmittedProperties(handler any, props *map[string]any, path string) 
 	if !ok {
 		return nil
 	}
+	return validateEmittedAgainst(p.PropertySchema(), props, path)
+}
+
+// validateEmittedAgainst is validateEmittedProperties for a schema already in
+// hand.
+func validateEmittedAgainst(schema map[string]PropertySchema, props *map[string]any, path string) error {
 	*props = copyPropertyMap(*props)
-	return validateProperties(p.PropertySchema(), *props, path)
+	return validateProperties(schema, *props, path)
 }
 
 // copyPropertyMap copies m and every map, slice and array in it, whatever its Go
@@ -1542,9 +1567,13 @@ func copyPropertyValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) 
 // RawDocumentLoweringRule (lowerRawOnce) there is no such pass: every trait it writes
 // is authored input: the caller's ValidateAuthoredProperties checks its shape, and
 // its later Transform merges capability rendering and enforces platform-reserved keys.
+//
+// Its components are authored input, not members a component or trait rule
+// emitted, so a kind component's `objectName` is checked and kept, not refused
+// (validateEmittedComponentAs).
 func (t *Transformer) validateEmittedDocument(app *Application) error {
 	for i := range app.Spec.Components {
-		if err := t.validateEmittedComponent(&app.Spec.Components[i]); err != nil {
+		if err := t.validateEmittedComponentAs(&app.Spec.Components[i], false); err != nil {
 			return err
 		}
 	}
