@@ -46,6 +46,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"sidecars":             schemaSidecars(),
 		"affinity":             schemaAffinity(),
 	}
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaStatefulSetSpec())
 	return m
@@ -191,6 +192,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	} else if present {
 		config.WorkingDir = workingDir
 	}
+	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+		return nil, err
+	}
 
 	vcts, err := parseVolumeClaimTemplates(props)
 	if err != nil {
@@ -279,6 +283,7 @@ type StatefulsetConfig struct {
 	Lifecycle            *corev1.Lifecycle
 	SecurityContext      *corev1.SecurityContext
 	WorkingDir           string
+	ContainerFields      ContainerFields // the main container's fields every container accepts (see parseContainerFields)
 	VolumeClaimTemplates []VolumeClaimTemplate
 	Volumes              []corev1.Volume
 	VolumeMounts         []corev1.VolumeMount
@@ -464,6 +469,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    mounts,
 		VolumeDevices:   devices,
+		Fields:          c.ContainerFields,
 	})
 	if err != nil {
 		return nil, err

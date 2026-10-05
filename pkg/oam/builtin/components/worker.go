@@ -97,6 +97,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 		"sidecars":        schemaSidecars(),
 		"affinity":        schemaAffinity(),
 	}
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	return m
@@ -222,6 +223,9 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 		return out, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return out, err
+	}
+	if _, err := parseContainerFields(props, false); err != nil {
 		return out, err
 	}
 

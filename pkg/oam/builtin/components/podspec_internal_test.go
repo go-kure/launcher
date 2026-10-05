@@ -120,8 +120,16 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 			if tc.jobPods {
 				podKeys = len(podSpecPropertyKeys)
 			}
-			if got, want := len(tc.schema), tc.ownKeys+podKeys+len(tc.specKeys); got != want {
-				t.Fatalf("PropertySchema() has %d keys, want %d (%d own + %d pod-level + %d kind-level); a smaller count means a key collision", got, want, tc.ownKeys, podKeys, len(tc.specKeys))
+			// containerFieldKeys is the fourth fragment every kind copies in
+			// (schemaContainerFields, go-kure/launcher#790), held as the
+			// parser's list for the same reason specKeys is.
+			if got, want := len(tc.schema), tc.ownKeys+podKeys+len(tc.specKeys)+len(containerFieldKeys); got != want {
+				t.Fatalf("PropertySchema() has %d keys, want %d (%d own + %d pod-level + %d kind-level + %d container fields); a smaller count means a key collision", got, want, tc.ownKeys, podKeys, len(tc.specKeys), len(containerFieldKeys))
+			}
+			for _, k := range containerFieldKeys {
+				if _, ok := tc.schema[k]; !ok {
+					t.Errorf("PropertySchema() lacks container field %q", k)
+				}
 			}
 			for _, k := range podSpecPropertyKeys {
 				jobOnly := slices.Contains(podSpecJobOnlyKeys, k)

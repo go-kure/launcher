@@ -182,8 +182,8 @@ func TestExtraContainer_Errors(t *testing.T) {
 		{
 			name:  "init unknown key",
 			key:   "initContainers",
-			entry: map[string]any{"imagePullPolicy": "Always"},
-			want:  []string{`initContainers[0] "c"`, `unrecognized key "imagePullPolicy"`},
+			entry: map[string]any{"restartPolicy": "Always"},
+			want:  []string{`initContainers[0] "c"`, `unrecognized key "restartPolicy"`},
 		},
 		{
 			name:  "init ports are not an init container key",

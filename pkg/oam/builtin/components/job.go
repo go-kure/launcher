@@ -78,6 +78,7 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"initContainers":  schemaInitContainers(),
 	}
 	maps.Copy(m, schemaJobSpec(false))
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, true))
 	return m
 }
@@ -204,6 +205,9 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	} else if present {
 		config.WorkingDir = workingDir
 	}
+	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+		return nil, err
+	}
 
 	parsed, err := parsePodVolumes(props)
 	if err != nil {
@@ -257,6 +261,9 @@ type JobConfig struct {
 	Lifecycle       *corev1.Lifecycle
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
+	// ContainerFields are the main container's fields every container of the
+	// pod accepts (see parseContainerFields).
+	ContainerFields ContainerFields
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
 	VolumeDevices   []corev1.VolumeDevice
@@ -355,6 +362,7 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 		VolumeDevices:   c.VolumeDevices,
+		Fields:          c.ContainerFields,
 	})
 	if err != nil {
 		return nil, err

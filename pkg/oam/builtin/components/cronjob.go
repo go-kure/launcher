@@ -101,6 +101,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"startingDeadlineSeconds":    schemaCronJobStartingDeadlineSeconds(),
 		"timeZone":                   schemaCronJobTimeZone(),
 	}
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaJobSpec(false))
 	maps.Copy(m, schemaPodSpec(false, true))
 	return m
@@ -281,6 +282,9 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	} else if present {
 		config.WorkingDir = workingDir
 	}
+	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+		return nil, err
+	}
 
 	parsed, err := parsePodVolumes(props)
 	if err != nil {
@@ -346,11 +350,14 @@ type CronjobConfig struct {
 	Lifecycle               *corev1.Lifecycle
 	SecurityContext         *corev1.SecurityContext
 	WorkingDir              string
-	Volumes                 []corev1.Volume
-	VolumeMounts            []corev1.VolumeMount
-	VolumeDevices           []corev1.VolumeDevice
-	InitContainers          []InitContainerConfig
-	PVCs                    []PVCConfig
+	// ContainerFields are the main container's fields every container of the
+	// pod accepts (see parseContainerFields).
+	ContainerFields ContainerFields
+	Volumes         []corev1.Volume
+	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
+	InitContainers  []InitContainerConfig
+	PVCs            []PVCConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec). Parsed
 	// with jobPods=true, so `podActiveDeadlineSeconds` (the pod's own
 	// deadline) is accepted alongside the job-level `activeDeadlineSeconds`
@@ -443,6 +450,7 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 		VolumeDevices:   c.VolumeDevices,
+		Fields:          c.ContainerFields,
 	})
 	if err != nil {
 		return nil, err
