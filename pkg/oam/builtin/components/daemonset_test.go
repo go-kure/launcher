@@ -685,8 +685,9 @@ func TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *tes
 // The four tests below are daemonset's siblings of the
 // TestWebserviceConfig_ApplyPolicy_InitContainer* tests (go-kure/launcher#312)
 // — same shared ApplyPolicy gap, same enforceExtraContainer fix. daemonset
-// has no sidecars schema key (see the field-coverage note in the plan), so
-// only the init container loop applies here.
+// had no sidecars schema key then, so these cover the init container loop;
+// TestDaemonsetConfig_ApplyPolicy_Sidecars below covers the sidecar loop it
+// gained with the key (go-kure/launcher#790).
 
 func TestDaemonsetConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
 	h := &components.DaemonsetHandler{}
@@ -816,5 +817,86 @@ func TestDaemonsetConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.
 	}
 	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
 		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}
+
+// TestDaemonsetConfig_ApplyPolicy_Sidecars: a daemonset sidecar is held to the
+// four checks an init container is (resources, registry, privileged,
+// capabilities), each refusal naming the sidecar, and passes a policy that
+// allows it. A sidecar on a DaemonSet runs on every node, so an unenforced one
+// would be the widest hole of any kind.
+func TestDaemonsetConfig_ApplyPolicy_Sidecars(t *testing.T) {
+	cases := []struct {
+		name    string
+		sidecar map[string]any
+		deny    *stubPolicy
+		allow   *stubPolicy
+		want    string
+	}{
+		{
+			name:    "generated default resources over the maximum",
+			sidecar: map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1"},
+			deny:    &stubPolicy{maxCPU: "50m"},
+			allow:   &stubPolicy{},
+			want:    "generated default",
+		},
+		{
+			name:    "registry not allowed",
+			sidecar: map[string]any{"name": "proxy", "image": "docker.io/x/y:v1"},
+			deny:    &stubPolicy{allowedRegistries: []string{"ghcr.io"}},
+			allow:   &stubPolicy{},
+			want:    "not from an allowed registry",
+		},
+		{
+			name: "privileged",
+			sidecar: map[string]any{
+				"name": "proxy", "image": "ghcr.io/org/proxy:v1",
+				"securityContext": map[string]any{"privileged": true},
+			},
+			deny:  &stubPolicy{allowPrivileged: false},
+			allow: &stubPolicy{allowPrivileged: true},
+			want:  "privileged",
+		},
+		{
+			name: "forbidden capability",
+			sidecar: map[string]any{
+				"name": "proxy", "image": "ghcr.io/org/proxy:v1",
+				"securityContext": map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}},
+			},
+			deny:  &stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}},
+			allow: &stubPolicy{},
+			want:  "NET_ADMIN",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			build := func() oam.Enforceable {
+				cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(&oam.Component{
+					Name: "agent",
+					Type: "daemonset",
+					Properties: map[string]any{
+						"image":     "ghcr.io/org/agent:v1.0.0",
+						"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+						"sidecars":  []any{tc.sidecar},
+					},
+				}, "default")
+				if err != nil {
+					t.Fatalf("ToApplicationConfig: %v", err)
+				}
+				return cfg.(oam.Enforceable)
+			}
+			err := build().ApplyPolicy(tc.deny)
+			if err == nil {
+				t.Fatal("expected the policy to refuse the sidecar, got no error")
+			}
+			for _, want := range []string{`sidecars[0] "proxy"`, tc.want} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+			if err := build().ApplyPolicy(tc.allow); err != nil {
+				t.Errorf("expected no error under a policy that allows the sidecar, got %v", err)
+			}
+		})
 	}
 }

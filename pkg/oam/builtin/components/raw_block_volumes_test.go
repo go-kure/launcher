@@ -40,7 +40,7 @@ func blockKinds() []blockKind {
 		{"worker", workerViaRule{}, map[string]any{}, true},
 		{"deployment", &components.DeploymentHandler{}, map[string]any{}, true},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{}, true},
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{}, false},
+		{"daemonset", &components.DaemonsetHandler{}, map[string]any{}, true},
 		{"job", &components.JobHandler{}, map[string]any{}, false},
 		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}, false},
 	}
@@ -380,6 +380,44 @@ func TestRawBlock_ExtraContainers_VolumeDevices(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRawBlock_SidecarAlone_VolumeModes: the cross-check reaches a sidecar when
+// no init container is authored beside it. The cases above give both entries
+// the same lists, so the init container's refusal comes first and a kind that
+// passed its sidecars to no check would still pass them.
+func TestRawBlock_SidecarAlone_VolumeModes(t *testing.T) {
+	volumes := map[string]any{"volumes": []any{
+		blockPVCVolume(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"}),
+		map[string]any{"name": "scratch", "type": "emptyDir", "mountPath": "/scratch"},
+	}}
+	cases := []struct {
+		name    string
+		lists   map[string]any
+		wantErr string
+	}{
+		{"device naming a filesystem volume", map[string]any{
+			"volumeDevices": []any{map[string]any{"name": "scratch", "devicePath": "/dev/block0"}},
+		}, `sidecars[0] "side": volumeDevices[0]: volume "scratch" is not a Block volume`},
+		{"mount naming a Block volume", map[string]any{
+			"volumeMounts": []any{map[string]any{"name": "disk", "mountPath": "/mnt/disk"}},
+		}, `sidecars[0] "side": volumeMounts[0]: volume "disk" is a Block volume`},
+	}
+	for _, k := range blockKinds() {
+		if !k.sidecars {
+			continue
+		}
+		for _, tc := range cases {
+			t.Run(k.kind+"/"+tc.name, func(t *testing.T) {
+				sidecar := map[string]any{"name": "side", "image": "ghcr.io/org/helper:v1"}
+				for key, v := range tc.lists {
+					sidecar[key] = v
+				}
+				_, err := k.configure(t, mergeProps(volumes, map[string]any{"sidecars": []any{sidecar}}))
+				wantErrContaining(t, err, tc.wantErr)
+			})
+		}
 	}
 }
 

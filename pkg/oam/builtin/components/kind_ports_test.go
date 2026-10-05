@@ -224,21 +224,25 @@ func TestKindPorts_NamedProbePorts(t *testing.T) {
 	}
 }
 
-// TestKindPorts_SidecarNameCollision refuses a statefulset sidecar port named
-// like one of the main container's `ports` (checkPodPortNames sees the whole
-// list). statefulset is the only one of these kinds with sidecars.
+// TestKindPorts_SidecarNameCollision refuses a sidecar port named like one of
+// the main container's `ports` (checkPodPortNames sees the whole list), on the
+// two of these kinds with sidecars: statefulset and, since
+// go-kure/launcher#790, daemonset.
 func TestKindPorts_SidecarNameCollision(t *testing.T) {
-	k := portKinds[1]
-	props := k.props(map[string]any{
-		"ports": extraPorts(),
-		"sidecars": []any{map[string]any{
-			"name": "exporter", "image": "busybox:1.36",
-			"ports": []any{map[string]any{"name": "metrics", "containerPort": 9100}},
-		}},
-	})
 	want := `sidecars[0] "exporter": ports[0].name: port name "metrics" is also declared by the main container`
-	if err := k.convertErr(props); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("error = %v, want one containing %q", err, want)
+	for _, k := range portKinds[:2] {
+		t.Run(k.typ, func(t *testing.T) {
+			props := k.props(map[string]any{
+				"ports": extraPorts(),
+				"sidecars": []any{map[string]any{
+					"name": "exporter", "image": "busybox:1.36",
+					"ports": []any{map[string]any{"name": "metrics", "containerPort": 9100}},
+				}},
+			})
+			if err := k.convertErr(props); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want one containing %q", err, want)
+			}
+		})
 	}
 }
 
