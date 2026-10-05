@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -206,6 +207,11 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 			"minimal": kind.minimal, "minimal, the rest null": withNulls, "full": kind.full,
 		} {
 			t.Run(kind.component+"/"+name, func(t *testing.T) {
+				// What was authored is read before the handler sees the
+				// properties, so a handler that changed its input could not
+				// change what its object is compared with.
+				authored, data := authoredProperties(t, props)
+
 				obj := generateCoreKind(t, kind.handler, kind.component, "fast", props)
 				if got := obj.GetObjectKind().GroupVersionKind(); got != kind.gvk {
 					t.Errorf("GVK = %s, want %s", got, kind.gvk)
@@ -213,20 +219,13 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 				if obj.GetNamespace() != "" {
 					t.Errorf("namespace = %q, want none on a cluster-scoped object", obj.GetNamespace())
 				}
+				if _, after := authoredProperties(t, props); !bytes.Equal(after, data) {
+					t.Errorf("the handler changed its input: %s, was %s", after, data)
+				}
 
 				// What the object must encode to: its identity and the authored
 				// fields, as the upstream type encodes those fields.
-				authored := map[string]any{}
-				for name, value := range props {
-					if value != nil {
-						authored[name] = value
-					}
-				}
 				decoded := reflect.New(kind.typ).Interface()
-				data, err := json.Marshal(authored)
-				if err != nil {
-					t.Fatalf("marshal the authored properties: %v", err)
-				}
 				if err := json.Unmarshal(data, decoded); err != nil {
 					t.Fatalf("decode the authored properties into %s: %v", kind.typ, err)
 				}
@@ -263,14 +262,68 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 	}
 }
 
+// authoredProperties returns the names of the properties that are not null,
+// and those properties as JSON. encoding/json writes map keys sorted, so two
+// encodings of the same content are equal.
+func authoredProperties(t *testing.T, props map[string]any) (map[string]struct{}, []byte) {
+	t.Helper()
+	authored := map[string]any{}
+	names := map[string]struct{}{}
+	for name, value := range props {
+		if value != nil {
+			authored[name] = value
+			names[name] = struct{}{}
+		}
+	}
+	data, err := json.Marshal(authored)
+	if err != nil {
+		t.Fatalf("marshal the authored properties: %v", err)
+	}
+	return names, data
+}
+
 // TestPolicyFreeKinds_GenerateCopies: each Generate returns an object of its
 // own, sharing no map, slice or pointer with the next, so what the transform
 // writes on one (the component label, for one) does not reach another build
-// of the same config.
+// of the same config. reaches names, per case, references the authored fields
+// hold: the walk must find each when an object is compared with itself, or it
+// would pass without having looked there.
 func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
+	reaches := map[string][]string{
+		"storageclass":          {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
+		"volumeattributesclass": {".Parameters"},
+		"priorityclass":         {".PreemptionPolicy"},
+		"runtimeclass":          {".Overhead", ".Overhead.PodFixed", ".Scheduling.NodeSelector", ".Scheduling.Tolerations"},
+		"ingressclass":          {".Spec.Parameters", ".Spec.Parameters.APIGroup"},
+		"csidriver":             {".Spec.AttachRequired", ".Spec.VolumeLifecycleModes", ".Spec.TokenRequests"},
+	}
+	type copyCase struct {
+		name      string
+		component string
+		handler   oam.ComponentHandler
+		props     map[string]any
+		reaches   []string
+	}
+	var cases []copyCase
 	for _, kind := range policyFreeKinds {
-		t.Run(kind.component, func(t *testing.T) {
-			cfg, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: kind.full}, coreKindNamespace)
+		if len(reaches[kind.component]) == 0 {
+			t.Fatalf("%s names no reference the walk must reach", kind.component)
+		}
+		cases = append(cases, copyCase{kind.component, kind.component, kind.handler, kind.full, reaches[kind.component]})
+	}
+	// A quantity too large for its integer form keeps its number behind an
+	// unexported pointer, which only the type's own DeepCopy copies.
+	cases = append(cases, copyCase{
+		name: "runtimeclass/decimal-backed quantity", component: "runtimeclass", handler: &components.RuntimeClassHandler{},
+		props: map[string]any{
+			"handler":  "kata",
+			"overhead": map[string]any{"podFixed": map[string]any{"memory": "100000000000Gi"}},
+		},
+		reaches: []string{".Overhead.PodFixed[memory].d.Dec"},
+	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: tc.component, Properties: tc.props}, coreKindNamespace)
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
@@ -289,18 +342,21 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			if len(shared) != 0 {
 				t.Errorf("two builds share %v", shared)
 			}
-			// Vacuity guard: the walk reaches the authored maps, slices and
-			// pointers, which a build that handed out the decoded value would
-			// share. It finds them when an object is compared with itself.
-			if len(sharedReferences(objs[0], objs[0], "")) == 0 {
-				t.Fatalf("the walk found no map, slice or pointer in %s; it is broken", kind.typ)
+			// Vacuity guard: compared with itself, an object shares every
+			// reference it holds, so the walk must report the named ones.
+			self := sharedReferences(objs[0], objs[0], "")
+			for _, path := range tc.reaches {
+				if !slices.Contains(self, path) {
+					t.Errorf("the walk did not reach %s; it found %v", path, self)
+				}
 			}
 		})
 	}
 }
 
 // sharedReferences returns the paths at which a and b, two values of one
-// type, hold the same non-nil pointer, map or slice backing array.
+// type, hold the same non-nil pointer, map or slice backing array. It reads
+// unexported fields too: a copy that left one shared is not a copy.
 func sharedReferences(a, b reflect.Value, path string) []string {
 	var shared []string
 	switch a.Kind() {
@@ -314,9 +370,6 @@ func sharedReferences(a, b reflect.Value, path string) []string {
 		return append(shared, sharedReferences(a.Elem(), b.Elem(), path)...)
 	case reflect.Struct:
 		for i := range a.NumField() {
-			if !a.Type().Field(i).IsExported() {
-				continue
-			}
 			shared = append(shared, sharedReferences(a.Field(i), b.Field(i), path+"."+a.Type().Field(i).Name)...)
 		}
 	case reflect.Map:
