@@ -119,9 +119,10 @@ what that covers.
 - A sibling group's application takes the intent of any member, so the trait on one member
   covers every object of the group.
 - `GeneratedApplication.Forced` is also true for an application with the `ForceReplace`
-  intent, not only for one whose bundle sets `Force`. A forced-volume warning then gives `its
-  application sets the force-replace delivery intent` as its reason, where it named the
-  annotation.
+  intent, not only for one whose bundle sets `Force`. A volume under the intent alone is
+  warned about conditionally (`is covered by the force-replace delivery intent of its
+  application: where the delivery workflow maps that intent ...`), where the warning named
+  the annotation: the generated objects carry no force for it.
 - The two traits no longer wrap `stack.Application.Config`, and the trait decorators' internal
   post-augment hook is gone.
 
@@ -747,9 +748,10 @@ traits of one component whose sub-applications share a name read as `2 sub-appli
 "dup" of component "web"`, a trait named after its own component and that component as
 `2 applications "web" of component "web"` (go-kure/launcher#757). A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
-A force-applied PersistentVolume or PersistentVolumeClaim is warned about, not refused
-(go-kure/launcher#720): when an update changes one of its immutable fields, Flux deletes
-and recreates it instead of failing the apply, which can lose a claim's data. Pass the same
+A PersistentVolume or PersistentVolumeClaim that is force-applied, or covered by the
+`ForceReplace` delivery intent, is warned about, not refused (go-kure/launcher#720): when an
+update changes an immutable field of a force-applied object, Flux deletes and recreates it
+instead of failing the apply, which can lose a claim's data. Pass the same
 `GenerateApplications` result, after `CheckInDocumentCollisions`, to
 `Transformer.WarnForcedVolumes`. It emits one warning through the warning handler
 (`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
@@ -761,9 +763,17 @@ bundle whose `Force` the caller set before generating, go-kure/launcher#781). Th
 names the kind, `namespace/name`, the producer and every reason the object is forced — the
 annotation, the intent, the bundle, in that order:
 `PersistentVolumeClaim shop/data (component "db") is force-applied
-(its application sets the force-replace delivery intent): when an update changes an
-immutable field, Flux deletes and recreates it instead of failing the apply, which can lose
-its data`.
+(kustomize.toolkit.fluxcd.io/force: enabled; its application sets the force-replace
+delivery intent): when an update changes an immutable field, Flux deletes and recreates it
+instead of failing the apply, which can lose its data`.
+An object whose only reason is the intent is forced by nothing in the generated objects, so
+its warning is conditional on the workflow that delivers them:
+`PersistentVolumeClaim shop/data (component "db") is covered by the force-replace delivery
+intent of its application: where the delivery workflow maps that intent (kure's Flux layout
+integration writes kustomize.toolkit.fluxcd.io/force: enabled), an update that changes an
+immutable field deletes and recreates it instead of failing the apply, which can lose its
+data`. `kurel build` output carries no mapping of the intent, so there the warning describes
+what a consumer's delivery workflow would do, not what the output does.
 An object counts as annotated as Flux's force selector matches it: the force key as a label
 or an annotation, with `enabled` in any letter case. Objects are read as Flux applies them:
 a list envelope still in the output stands for its members — Kustomize's build expands a

@@ -258,10 +258,13 @@ after the HelmRelease.
 
 A build that renders no objects warns `no resources generated` on stderr and writes no
 `<app>.yaml` (one an earlier build wrote stays). A build also warns, on stderr and with
-unchanged output, once per PersistentVolume or PersistentVolumeClaim that the
-`force-replace` trait covers or that carries the Flux force annotation itself, because
-Flux then deletes and recreates it on an immutable-field change (go-kure/launcher#720;
-`force_warning_test.go`).
+unchanged output, once per PersistentVolume or PersistentVolumeClaim that carries the Flux
+force annotation itself or that the `force-replace` trait covers. One that carries the
+annotation is force-applied: Flux deletes and recreates it on an immutable-field change, and
+the warning lists the trait's intent as a second reason where both hold. One under the
+trait's intent alone gets a conditional warning: the output carries no mapping of that
+intent, so the warning describes what a consumer's delivery workflow would do where it maps
+the intent, not what the output does (go-kure/launcher#720; `force_warning_test.go`).
 
 ### No delivery output
 

@@ -19,8 +19,9 @@ const (
 	fluxForceAnnotationEnabled = stack.AnnotationFluxForceEnabled
 )
 
-// forcedVolume is one force-applied PersistentVolume or PersistentVolumeClaim, with
-// the first application that generates it and every reason it is forced.
+// forcedVolume is one PersistentVolume or PersistentVolumeClaim that is
+// force-applied or under the ForceReplace delivery intent, with the first
+// application that generates it and every reason it is forced.
 // annotated is set by any copy generated with the force key enabled, forceReplace
 // by any copy in an application with the ForceReplace delivery intent, and
 // bundleForce by any copy in an application whose bundle sets Force.
@@ -29,7 +30,8 @@ type forcedVolume struct {
 	annotated, forceReplace, bundleForce bool
 }
 
-// forceScan collects the force-applied volumes of a document in generation order.
+// forceScan collects the volumes of a document that are warned about, in
+// generation order.
 type forceScan struct {
 	order []objectIdentity
 	found map[objectIdentity]*forcedVolume
@@ -55,7 +57,8 @@ func (s *forceScan) add(id objectIdentity, app GeneratedApplication, annotated b
 	}
 }
 
-// forced reports whether anything force-applies the volume.
+// forced reports whether the volume is warned about: something force-applies it,
+// or its application sets the intent.
 func (v *forcedVolume) forced() bool {
 	return v.annotated || v.forceReplace || v.bundleForce
 }
@@ -105,18 +108,22 @@ func fluxExpanded(obj client.Object) []client.Object {
 
 // WarnForcedVolumes emits one warning through the warning handler (SetWarningHandler)
 // for every PersistentVolume and PersistentVolumeClaim in apps that is
-// force-applied (GeneratedApplication.Forced, or the object's own metadata): one in
-// an application with the ForceReplace delivery intent (the force-replace trait
-// sets it on everything its component owns), one in an application whose bundle
-// sets Force, or one an author wrote kustomize.toolkit.fluxcd.io/force: enabled
-// on. The object is then deleted and recreated when an update changes an immutable
-// field, instead of the apply failing, and a claim's data can be lost with it.
+// force-applied or to be (GeneratedApplication.Forced, or the object's own
+// metadata): one in an application with the ForceReplace delivery intent (the
+// force-replace trait sets it on everything its component owns), one in an
+// application whose bundle sets Force, or one an author wrote
+// kustomize.toolkit.fluxcd.io/force: enabled on. A force-applied object is deleted
+// and recreated when an update changes an immutable field, instead of the apply
+// failing, and a claim's data can be lost with it.
 //
 // The intent is read from the application, not from the objects: launcher writes
 // no force annotation, the workflow that delivers the application does
-// (go-kure/launcher#782). An object an author annotated is read as Flux's force
-// selector matches it: the force key in its labels or its annotations, with the
-// value enabled in any letter case.
+// (go-kure/launcher#782). The objects alone therefore do not carry the intent's
+// effect, and a volume whose only reason is the intent is warned about
+// conditionally: the warning says what happens where the delivery workflow maps
+// the intent, which kure's Flux layout integration does. An object an author
+// annotated is read as Flux's force selector matches it: the force key in its
+// labels or its annotations, with the value enabled in any letter case.
 //
 // Objects are read as Flux applies them (appliedObjects): a list envelope stands for
 // its members, and a member is forced by its own metadata, not the envelope's. Each
@@ -200,7 +207,18 @@ func listMembers(u *unstructured.Unstructured) []client.Object {
 	return out
 }
 
+// warning is the volume's warning text. A volume the generated objects or its
+// bundle force is stated as force-applied, with every reason. One whose only
+// reason is the delivery intent is stated conditionally: nothing in the objects
+// forces it, the workflow that maps the intent does.
 func (v *forcedVolume) warning() string {
+	if v.forceReplace && !v.annotated && !v.bundleForce {
+		return fmt.Sprintf("%s %s (%s) is covered by the force-replace delivery intent of its application: "+
+			"where the delivery workflow maps that intent (kure's Flux layout integration writes %s: %s), "+
+			"an update that changes an immutable field deletes and recreates it instead of failing the apply, "+
+			"which can lose its data",
+			v.kind, v.name, v.producer, fluxForceAnnotation, fluxForceAnnotationEnabled)
+	}
 	var reasons []string
 	if v.annotated {
 		reasons = append(reasons, fluxForceAnnotation+": "+fluxForceAnnotationEnabled)

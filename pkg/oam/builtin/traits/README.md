@@ -125,11 +125,13 @@ generator. A consumer that applies launcher's objects without such a workflow re
 `Application.Delivery` itself, or the two traits have no effect.
 
 `force-replace` covers claims too — a component's `volumes` claims and the `pvc`
-sub-application's (`volsync` generates none; it backs up an existing claim): a claim whose
-immutable field changes is then deleted and recreated, losing its data unless its volume is
-retained, so `Transformer.WarnForcedVolumes` (which `kurel build` runs) warns once per
-PersistentVolume and PersistentVolumeClaim under the intent (go-kure/launcher#720; see the
-`pkg/oam` README).
+sub-application's (`volsync` generates none; it backs up an existing claim): where the
+delivery workflow maps the intent, a claim whose immutable field changes is deleted and
+recreated, losing its data unless its volume is retained, so `Transformer.WarnForcedVolumes`
+(which `kurel build` runs) warns once per PersistentVolume and PersistentVolumeClaim under
+the intent: in those conditional terms when the intent is its only reason, as force-applied
+when the object also carries the Flux force annotation or its bundle sets `Force`
+(go-kure/launcher#720; see the `pkg/oam` README).
 
 ## Capability-aware traits
 
