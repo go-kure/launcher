@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -246,6 +248,56 @@ func TestNameCollision_NoObject(t *testing.T) {
 			t.Errorf("err = %v\nwant  %s", err, text)
 		}
 	})
+}
+
+// Two names lowering rules resolved are refused while lowering with no
+// namespace. One pair is left until the namespace is settled, a Flux-scoped name
+// and one that is not. Where both land in one namespace (no Flux namespace, or
+// the document's own), that refusal carries the namespace.
+func TestNameCollision_LoweredNamesAndTheNamespace(t *testing.T) {
+	configMapKind := schema.GroupKind{Kind: "ConfigMap"}
+	plain := NameSpec{Role: NameRoleObject, Kind: configMapKind, Property: "objectName", Authored: "web-values"}
+	collision := func(t *testing.T, err error) *NameCollisionError {
+		t.Helper()
+		var got *NameCollisionError
+		if !errors.Is(err, ErrNameCollision) || !errors.As(err, &got) {
+			t.Fatalf("err = %v\nwant a name collision", err)
+		}
+		if got.Kind != configMapKind || got.Name != "web-values" || got.First.Component != "web" || got.Second.Component != "api" {
+			t.Fatalf("the collision is %+v, want ConfigMap web-values named by web and by api", *got)
+		}
+		return got
+	}
+
+	t.Run("refused while lowering", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		if _, err := h.lctx("web").ResolveName("web", "values", NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind}); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		_, err := h.lctx("api").ResolveName("api", "config", plain)
+		got := collision(t, err)
+		const text = `name collision: ConfigMap "web-values" is named by `
+		if got.Namespace != "" || !strings.HasPrefix(got.Error(), text) {
+			t.Errorf("namespace %q, text %s\nwant no namespace, and %s…", got.Namespace, got.Error(), text)
+		}
+	})
+
+	for _, fluxNamespace := range []string{"", "prod"} {
+		t.Run("refused once the namespace is settled, Flux namespace "+strconv.Quote(fluxNamespace), func(t *testing.T) {
+			h := newLoweringHarness(nil)
+			if _, err := h.lctx("web").ResolveName("web", "values", NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: true}); err != nil {
+				t.Fatalf("the Flux-scoped name: %v", err)
+			}
+			if _, err := h.lctx("api").ResolveName("api", "config", plain); err != nil {
+				t.Fatalf("the same name, not Flux-scoped: %v", err)
+			}
+			got := collision(t, h.namer.claimLowered("prod", fluxNamespace))
+			const text = `name collision: ConfigMap "prod/web-values" is named by `
+			if got.Namespace != "prod" || !strings.HasPrefix(got.Error(), text) {
+				t.Errorf("namespace %q, text %s\nwant prod, and %s…", got.Namespace, got.Error(), text)
+			}
+		})
+	}
 }
 
 // The error names what was named as the claim key prints it, for every class of
