@@ -364,6 +364,7 @@ func TestObjectMetadata_ApplyTo(t *testing.T) {
 	}{
 		{name: "a label", meta: ObjectMetadata{Labels: map[string]string{"app": "other", "team": "x"}}, want: `labels["app"]: "other" is not the value the component sets on its object ("web")`},
 		{name: "an annotation", meta: ObjectMetadata{Annotations: map[string]string{"own": "other"}}, want: `annotations["own"]: "other" is not the value the component sets on its object ("kept")`},
+		{name: "an annotation, beside labels that would have been added", meta: ObjectMetadata{Labels: map[string]string{"team": "x"}, Annotations: map[string]string{"own": "other"}}, want: `annotations["own"]: "other" is not the value the component sets on its object ("kept")`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}, Annotations: map[string]string{"own": "kept"}}}
