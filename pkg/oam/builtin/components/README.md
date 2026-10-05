@@ -6359,7 +6359,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `postgresql.synchronous.method` (`any` or `first`) and `replica.source`.
   The Cluster would carry an empty value the author did not write, and the
   API server refuse it. An authored empty one is a value: it is written, and
-  refusing it is left to the API server. The same test derives every field
+  refusing it is left to the API server. The refusal reads the authored
+  properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
+  in Go is not held to it. The same test derives every field
   the type writes unauthored as a zero value the CRD's own rule refuses, and
   shows each answer with the validator; the twelfth of a Cluster is
   `instances`, which is not refused (below).
@@ -6469,7 +6471,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `1800`, on the ObjectStore) and of two spellings of one field, and the same
   reflection tests pinning the schema and both derived lists to the linked
   modules. `Generate` emits one object named after the component in the build
-  namespace with the authored spec, and repeats the parse-time refusals. The
+  namespace with the authored spec, and repeats the parse-time refusals made
+  on the decoded spec. The
   fields each CRD requires are refused when
   unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
   (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
@@ -6536,7 +6539,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   pattern, which the type writes as `""` when it is unauthored, is refused
   when unauthored under an authored `pgbouncer.imageCatalogRef`: its `key`
   (`pgbouncer.imageCatalogRef.key: required (…)`). An authored empty one is
-  written, and refusing it is left to the API server. The same test derives
+  written, and refusing it is left to the API server. The refusal reads the
+  authored properties, so `Generate` does not repeat it: a `CnpgPoolerConfig`
+  built in Go is not held to it. The same test derives
   it, as the one field of a Pooler the type writes unauthored as a zero value
   the CRD's own rule refuses. The instance count is deliberately not policed:
   `postgresql`, which lowers its pooler onto this kind, never applied a
