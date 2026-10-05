@@ -10,7 +10,11 @@ import (
 // until the transform claims it (claimLowered).
 type loweredName struct {
 	group, kind, name string
-	claim             resolvedNameClaim
+	// namespace is the authored document's (Origin.Namespace), which is not the
+	// namespace the object lands in: it holds apart the names of two documents
+	// lowered with one allocator (LowerRaws).
+	namespace string
+	claim     resolvedNameClaim
 }
 
 // ResolveName returns the name of an object a lowering rule generates, in this
@@ -30,12 +34,16 @@ type loweredName struct {
 // hook: under LowerRaws, and on a context built outside the engine, the hook is
 // not consulted and the name is the author's or the default.
 //
-// The name is claimed as the object it names: two names a rule resolves for one
-// kind and name are refused here, and the transform holds every one of them
-// against the names it resolves after lowering, by kind, namespace and name. It
-// is not reserved as a component name. A rule that emits a component under it
-// reserves it with Namer.Reserve, once per component name: two components of
-// one name that one rule emits on purpose are a sibling group.
+// The name is claimed as the object it names. Each call names one object the
+// rule generates: a second call that resolves the same kind and name for a
+// document of the same namespace is refused here with both named, whichever
+// rule made it and also when it is the first one made again, so a rule
+// resolves a name once and keeps it. The transform then holds every one of
+// them against the names it resolves after lowering, by kind, namespace and
+// name. The name is not reserved as a component name. A rule that emits a
+// component under it reserves it with Namer.Reserve, once per component name:
+// two components of one name that one rule emits on purpose are a sibling
+// group.
 func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string, error) {
 	if l.Namer == nil {
 		return "", errors.New("lowering: ResolveName needs a LoweringContext with a Namer")
@@ -62,16 +70,24 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	}
 	spec.Default, spec.Namespace = def, ""
 
-	owner := nameOwner{role: spec.Role, def: def}
-	if l.Component != nil {
-		owner.component = l.Component.Name
-	}
 	application := l.application
 	if application == "" {
 		application = l.Origin.Document
 		if l.Document != nil {
 			application = l.Document.Metadata.Name
 		}
+	}
+	owner := nameOwner{role: spec.Role, def: def}
+	switch {
+	case l.Component == nil:
+		owner.document = application
+	case l.Origin.TraitType != "":
+		// A trait rule: the authored trait it lowers tells it from another rule
+		// of the same component.
+		owner.component = l.Component.Name
+		owner.trait, owner.slot, owner.authored = l.Origin.TraitType, l.Origin.Index, true
+	default:
+		owner.component = l.Component.Name
 	}
 	// No claim space: the name is recorded below and claimed by the transform.
 	resolver := &nameResolver{hook: l.Namer.hook, application: application}
@@ -80,7 +96,7 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 		return "", err
 	}
 	lowered := loweredName{
-		group: spec.Kind.Group, kind: spec.Kind.Kind, name: name,
+		group: spec.Kind.Group, kind: spec.Kind.Kind, name: name, namespace: l.Origin.Namespace,
 		claim: resolvedNameClaim{owner: owner, source: source, property: spec.Property},
 	}
 	if err := l.Namer.recordLowered(lowered); err != nil {
@@ -90,16 +106,21 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 }
 
 // recordLowered holds a name a lowering rule resolved until the transform
-// claims it. Two owners resolving one kind and name is an error naming both:
-// every lowered name of one transform lands in one namespace.
+// claims it. A second resolution of one kind and name for a document of the
+// same namespace is an error naming both. Every lowered name of one transform
+// lands in one namespace; LowerRaws lowers documents of several.
+//
+// An equal owner is no exception, as it is none for Reserve: nothing a rule is
+// given tells two rule calls on one authored element apart, so the same owner
+// resolving the name again cannot be told from a second rule generating a
+// second object of that name.
 func (n *NameAllocator) recordLowered(lowered loweredName) error {
 	for _, prior := range n.lowered {
-		if prior.group != lowered.group || prior.kind != lowered.kind || prior.name != lowered.name {
+		if prior.group != lowered.group || prior.kind != lowered.kind || prior.namespace != lowered.namespace || prior.name != lowered.name {
 			continue
 		}
-		if prior.claim.owner == lowered.claim.owner {
-			return nil
-		}
+		// Printed without the namespace: the authored one is not where the object
+		// lands.
 		key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{group: lowered.group, kind: lowered.kind, name: lowered.name}}
 		return nameCollision(key, prior.claim, lowered.claim)
 	}

@@ -197,6 +197,10 @@ type nameOwner struct {
 	// service is the external backend Service a NetworkPolicy was synthesized
 	// for, which no component owns; empty for every other name.
 	service string
+	// document is the document a lowering rule resolved the name for, at
+	// document or policy position; empty for every other name. LowerRaws lowers
+	// several with one allocator, so the name tells two of them apart.
+	document string
 	// def is the default: what tells apart two names of one component and role.
 	def string
 }
@@ -227,6 +231,8 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 	switch {
 	case o.service != "":
 		who = fmt.Sprintf("external backend Service %q", o.service)
+	case o.component == "" && o.document != "":
+		who = fmt.Sprintf("document %q", o.document)
 	case o.component == "":
 		who = "the application"
 	case o.trait == "":
