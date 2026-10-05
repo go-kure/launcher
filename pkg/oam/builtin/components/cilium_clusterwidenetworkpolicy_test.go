@@ -339,7 +339,15 @@ func TestCiliumClusterwideNetworkPolicyHandler_RequiredFields(t *testing.T) {
 	_, manifest := generateClusterwidePolicy(t, map[string]any{"spec": ciliumCompleteRule(), "specs": []any{ciliumCompleteRule()}})
 	sameJSON(t, "the complete rule under spec", manifest["spec"], ciliumCompleteRule())
 	sameJSON(t, "the complete rule under specs", manifest["specs"], []any{ciliumCompleteRule()})
+	ciliumRuleRequiredFieldsRefused(t, clusterwideErr)
+}
 
+// ciliumRuleRequiredFieldsRefused takes one required field at a time out of
+// the complete rule, under `spec` and under an entry of `specs`, and wants the
+// component refused by that field's path. errOf converts the properties of a
+// component of the kind under test.
+func ciliumRuleRequiredFieldsRefused(t *testing.T, errOf func(props map[string]any) error) {
+	t.Helper()
 	for name, tc := range map[string]struct {
 		parent []any
 		drop   string
@@ -376,7 +384,7 @@ func TestCiliumClusterwideNetworkPolicyHandler_RequiredFields(t *testing.T) {
 				if position != "spec" {
 					props = map[string]any{"specs": []any{rule}}
 				}
-				err := clusterwideErr(props)
+				err := errOf(props)
 				if want := position + "." + tc.want + ": required ("; err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("err = %v, want one mentioning %q", err, want)
 				}

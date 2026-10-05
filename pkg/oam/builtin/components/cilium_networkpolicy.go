@@ -66,10 +66,21 @@ func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySch
 	}
 }
 
+// ciliumNetworkPolicyRequired is the required list of a cilium-networkpolicy
+// component: that of a Cilium rule (ciliumRuleRequired), under `spec` and under
+// every entry of `specs`. These are the fields the API requires inside a rule
+// that the Go type writes whether or not they were authored, and the two it
+// writes with a value the API refuses; without the list the object would carry
+// the type's empty value where the document left the field out, and would not
+// show the omission. TestCiliumNetworkPolicy_RequiredMatchCRD holds it to the
+// CiliumNetworkPolicy CRD of the linked module.
+var ciliumNetworkPolicyRequired = requiredFields(ciliumRuleRequired("spec"), ciliumRuleRequired("specs[]"))
+
 // ToApplicationConfig decodes an OAM cilium-networkpolicy component into a
 // CiliumNetworkPolicyConfig, under the package's null contract and the strict
 // decode every spec-projecting kind uses. An unknown key inside a selector is
-// refused as well, and so is a policy Cilium rejects: see validate.
+// refused as well, then a required field that was not authored
+// (ciliumNetworkPolicyRequired), and a policy Cilium rejects: see validate.
 func (h *CiliumNetworkPolicyHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	authored, props, err := decodeKindSpec[ciliumNetworkPolicyProperties](component.Properties, "cilium.io/v2 CiliumNetworkPolicy (a cilium-networkpolicy component authors its `spec` and `specs` only)")
 	if err != nil {
@@ -84,6 +95,9 @@ func (h *CiliumNetworkPolicyHandler) ToApplicationConfig(component *oam.Componen
 		return nil, errors.Errorf("%s: unknown field (Cilium drops a key it does not know there instead of refusing it, and a selector that loses a key selects more than was written)", path)
 	}
 	if err := refuseUncarriedSpecValues(props, authored, defaultedZeroFields{}); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, ciliumNetworkPolicyRequired); err != nil {
 		return nil, err
 	}
 	cfg := &CiliumNetworkPolicyConfig{

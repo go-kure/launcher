@@ -782,6 +782,13 @@ its text:
     `ingressDeny`, `egress` or `egressDeny`. Cilium's CRD schema refuses some of these
     at admission; the rest the API server would store and the agent reject when it
     reads the object, unenforced. No selector is filled in.
+  - It refuses a required field that was not authored, by its path: the fields the
+    CiliumNetworkPolicy CRD requires inside a rule that the Cilium type writes whether
+    or not they were authored (a match expression's `key` and `operator`, an
+    `authentication`'s `mode`, a TLS context's `secret`), and a listener's `priority`
+    and the `kind` of its `envoyConfig`, which the type writes with a value the API
+    refuses. Such a document was emitted before, with the empty value in place of the
+    field. A test holds the list to the CRD of the linked module.
   - An unknown key inside an endpoint selector is refused by its path, as in the trait:
     the selector unmarshals itself and would drop a misspelt key, leaving the selector
     that matches everything. The positions are found from the Cilium types.
