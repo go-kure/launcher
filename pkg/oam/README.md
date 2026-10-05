@@ -512,7 +512,8 @@ same object is refused as well, also where its component, role and default are t
 (a rule naming the NetworkPolicy the transform synthesizes for its component): the rule's
 object and the later one are two. Under `LowerRaws`, which lowers several
 documents with one allocator, two documents may resolve one kind and name only where their
-`metadata.namespace` differs.
+`metadata.namespace` differs. A document without one counts as a document of `default`, the
+namespace `Transform` gives it when its context names none.
 
 A rule takes its object to land in the document's namespace: `NameSpec.Namespace` chooses
 none for it. A cluster-scoped object (a ClusterRole) has no namespace, and the rule says so

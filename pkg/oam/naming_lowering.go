@@ -4,6 +4,10 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
+// defaultNamespace is the namespace a transform gives a document where neither
+// its context nor the document names one.
+const defaultNamespace = "default"
+
 // loweredName is one object name a lowering rule resolved
 // (LoweringContext.ResolveName). The namespace the object lands in is the
 // document's, known only once lowering has settled, so the name is held here
@@ -12,8 +16,10 @@ type loweredName struct {
 	group, kind, name string
 	// namespace is the authored document's (Origin.Namespace), which is not the
 	// namespace the object lands in: it holds apart the names of two documents
-	// lowered with one allocator (LowerRaws). It is empty for a cluster-scoped
-	// object, which no namespace holds apart.
+	// lowered with one allocator (LowerRaws). A document that authors none is
+	// held as one of defaultNamespace, so it is not held apart from a document
+	// that authors that namespace. It is empty for a cluster-scoped object,
+	// which no namespace holds apart.
 	namespace string
 	// clusterScoped is NameSpec.ClusterScoped: the object is claimed with no
 	// namespace.
@@ -117,8 +123,11 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 		clusterScoped: spec.ClusterScoped,
 		claim:         resolvedNameClaim{owner: owner, source: source, property: spec.Property},
 	}
-	if lowered.clusterScoped {
+	switch {
+	case lowered.clusterScoped:
 		lowered.namespace = ""
+	case lowered.namespace == "":
+		lowered.namespace = defaultNamespace
 	}
 	if err := l.Namer.recordLowered(lowered); err != nil {
 		return "", err

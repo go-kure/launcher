@@ -427,6 +427,23 @@ func TestLowerRaws_ResolveNameAcrossDocuments(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %v\nwant one containing %s", err, want)
 	}
+
+	// A document that authors no namespace lands in default unless the transform
+	// is given one, and then both land there: it is not held apart from a
+	// document that authors default, in either order.
+	for _, raws := range [][]json.RawMessage{
+		{rawWebApplicationNS("a", ""), rawWebApplicationNS("b", "default")},
+		{rawWebApplicationNS("a", "default"), rawWebApplicationNS("b", "")},
+		{rawWebApplicationNS("a", ""), rawWebApplicationNS("b", "")},
+	} {
+		if _, err := tr.LowerRaws(raws, TransformContext{}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v\nwant one containing %s", err, want)
+		}
+	}
+	unnamed := []json.RawMessage{rawWebApplicationNS("a", ""), rawWebApplicationNS("b", "two")}
+	if _, err := tr.LowerRaws(unnamed, TransformContext{}); err != nil {
+		t.Errorf("one name in no namespace and in another than default: %v", err)
+	}
 }
 
 // resolvingTraitRule lowers its trait to a terminal one, after resolving the

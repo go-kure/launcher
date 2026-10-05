@@ -953,7 +953,7 @@ can rename it. That name is not the object's: the `configmap`, `ingress`, `httpr
 | `pvc` | `name` | The PersistentVolumeClaim. |
 | `volsync` | `repository`, `sourcePVC` | The repository Secret, and the claim to back up (which also starts the ReplicationSource name). |
 | `scaler` | `hpaName`, `pdbName` | The HorizontalPodAutoscaler, and the PodDisruptionBudget (`pdbName` needs `enablePDB: true`). |
-| `rbac` | `name` | The Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding: one name for all four, and the `roleRef.name` of both bindings. |
+| `rbac` | `name` | The Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding: one name for all four, and the `roleRef.name` of both bindings. The ClusterRole and the ClusterRoleBinding are claimed with no namespace (`oam.NameSpec.ClusterScoped`), so a lowering rule's cluster-scoped object of the same kind and name is refused with both named. |
 | `networkpolicy` | `name` | The NetworkPolicy. |
 
 A routing trait's `scope` (on `ingress`, `httproute`, and `expose`, which hands its own on) is

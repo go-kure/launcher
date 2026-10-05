@@ -725,7 +725,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		namespace = app.Metadata.Namespace
 	}
 	if namespace == "" {
-		namespace = "default"
+		namespace = defaultNamespace
 	}
 	// The names lowering rules resolved are claimed first, now that the namespace
 	// their objects land in is known: a name resolved from here on that names one
