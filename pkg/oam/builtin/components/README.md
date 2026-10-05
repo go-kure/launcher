@@ -2933,10 +2933,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   kind-named terminals below. Properties: `chart`, `version`, `delivery`
   (`flux` default | `template`), `source` (inline `url` with optional `kind` and,
   for a GitRepository, `ref`; an inline Bucket's `kind`, `endpoint`, `bucketName`,
-  `provider`, `region`, `prefix`; or a reference `{name, kind, namespace}` to an
+  `provider`, `region`, `prefix`; beside any of these a `name` for the generated
+  source; or a reference `{name, kind, namespace}` to an
   existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
   `values`, `valuesMode` (`inline` |
-  `configMap`), `secretValues` (the sensitive part of the values tree, see below),
+  `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive part of the
+  values tree, see below), `valuesSecretName`,
   `scopeOverrides` (under `delivery: template` only, see below),
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
@@ -2968,7 +2970,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     before go-kure/launcher#793, so such a name changes once), and the suffix is kept, so
     it is always a legal DNS-1123 subdomain and always carries the values hash. Identical values hash alike whatever their key order, and any change
     to them renames the ConfigMap and so changes the HelmRelease's spec, which is what
-    makes Flux upgrade the release on a values-only edit. Empty or absent `values`
+    makes Flux upgrade the release at once on a values-only edit (under this default
+    name; see `valuesConfigMapName` below). Empty or absent `values`
     add no trait and no entry; `values` that are not a JSON object, a non-finite
     number in them, or a `valuesFrom` that is not a list are `helm:` build errors.
     Being an ordinary `configmap` trait, it is checked by that trait (a key it refuses,
@@ -2980,6 +2983,41 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     kind's string-only typing never refuses them. Known gap, shared with authored traits
     (go-kure/launcher#757): an authored `configmap` trait on the same component that
     takes the same name is not refused, and both ConfigMaps are emitted.
+  - **`valuesConfigMapName` and `valuesSecretName`** (go-kure/launcher#787) name
+    the values ConfigMap and the values Secret (`secretValues`, below). Each name
+    is resolved in the one order of every generated name: the author's property,
+    else the consumer's `Naming` hook (roles `values-configmap` and
+    `values-secret`, asked with the component and the hashed default), else the
+    default `<component>-values-<hash>` or `<component>-secret-values-<hash>`.
+    A name from the author or the hook is used as written and gets no hash. It
+    must be a DNS-1123 subdomain of at most 253 characters, and is refused
+    otherwise, never shortened. Both objects follow the HelmRelease to the Flux
+    namespace, so the name is held there against any other ConfigMap or Secret
+    launcher names: one of the same name in the application namespace is another
+    object.
+
+    **The cost of a fixed name.** The default name moves with the content, so a
+    values-only edit changes the HelmRelease's `spec.valuesFrom`, and Flux
+    upgrades the release as soon as it sees the new HelmRelease. Under a name
+    that does not move, the edit changes only the ConfigMap's or Secret's
+    content, and the HelmRelease is unchanged. helm-controller still merges the
+    referenced values on every reconciliation and upgrades the release when the
+    result differs from the last one applied, so the edit is picked up at the
+    release's next reconciliation: within its `interval`, not at once. Flux
+    reconciles at once only where the ConfigMap or Secret carries the label
+    `reconcile.fluxcd.io/watch: Enabled`, or helm-controller runs with a
+    `--watch-configs-label-selector` that selects it. The rule sets no such
+    label.
+
+    A property that names nothing is refused: `valuesConfigMapName` without
+    `valuesMode: configMap` or with empty `values`, `valuesSecretName` with
+    empty or absent `secretValues`, and either under `delivery: template`, which
+    generates neither object. Two components of one document cannot write the
+    same name for the same kind: each generates its own object, and the second
+    is refused (`helm: naming the values ConfigMap: name collision: ConfigMap
+    "shared" is named by component "a" (role "values-configmap", set by
+    valuesConfigMapName) and by component "b" (…); give one of them another
+    name`).
   - **`secretValues`** (go-kure/launcher#786) is a second values tree, for the
     values that must not sit in the HelmRelease or in a ConfigMap. It is an object
     like `values`; absent, `null` or empty it changes nothing. The `helmrelease`
@@ -2999,7 +3037,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `app: <label value>`, emitted after the HelmRelease, and moved with the
       release into the Flux namespace. A change in `secretValues` renames the
       Secret and so changes the HelmRelease, which is what makes Flux upgrade the
-      release.
+      release at once (under this default name; see `valuesSecretName` above).
     - *Under `delivery: template`* the tree is passed to the `helmtemplate`, which
       merges it over `values` for the render (see **helmtemplate**). Nothing is
       emitted for it: a value is in the output only where the chart renders it.
@@ -3080,11 +3118,56 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     bucketName, region, prefix>` (JSON, so a `:` inside a URL or endpoint cannot
     make two identities collide).
     Components of one document with the same identity share one source; the
-    first emits it and the rest only reference it (`NameAllocator.NameOrAdopt`).
+    first emits it and the rest only reference it
+    (`LoweringContext.ResolveSharedName`).
     Different documents never share or collide, because the document name is part
     of the source name. The source carries no traits and keeps its terminal's
     interval default rather than the release `interval`. The source terminal's
     registry allowlist (`ApplyPolicy`) applies to it.
+  - **Naming the generated source** (go-kure/launcher#787). The name is
+    resolved in the one order of every generated name: the author's
+    `source.name`, else the consumer's `Naming` hook, else the default above.
+    - *The hook* is asked under role `helm-source`, once for each source
+      identity of a document, with the default `<document>-source-<digest>` and
+      no component, since the source belongs to the document: every component of
+      that identity that names no source adopts the answer.
+    - *`source.name` beside an inline source* names the source that component
+      generates. The name is the component's own choice. Components that write
+      the same name for the same identity share one source; a component that
+      writes none does not share it, and gets the document's source beside it
+      (two sources of one identity). One name for two identities, or for two
+      kinds, is refused as a collision naming both components, and so is a hook
+      answer that gives two identities one name.
+    - A name from the author or the hook is used as written: it must be a
+      DNS-1123 subdomain of at most 253 characters and is refused otherwise,
+      never shortened.
+    - *The source cannot take the name of a component.* It is a component of the
+      lowered document itself, so `source.name` equal to the component's own
+      name, or to the name of another component the document holds, is refused
+      (`helm: source.name "web" is the component's own name; the generated
+      source is a component of the document too, so give it another name`). The
+      default and a hook answer are held to the same rule (`helm: the generated
+      source would be named "shop-source-…", the name of a helmrepository
+      component of the document; … so rename that component, name the source
+      with source.name, or have the Naming hook return another name for role
+      "helm-source"`). To give a HelmRepository and its HelmRelease one name,
+      author the `helmrepository` component with `objectName` and reference it.
+    - The source lands beside the HelmRelease, in the Flux namespace when one is
+      set. Its name is held there against every other object of its kind
+      launcher names; an object of the same name and kind in the application
+      namespace is another object.
+    - `source.name` alone, with no inline source, references an existing source
+      as before, and `source.namespace` belongs to that form only.
+
+    **Breaking** (go-kure/launcher#787). A `helm` component with both
+    `source.url` and `source.name` was refused and builds now, under
+    `delivery: flux`. The refusal of `source.namespace` beside an inline source
+    reads `helm: source.namespace is only valid with a reference to an existing
+    source (source.name and no inline source); a generated source is created
+    beside the HelmRelease`. An authored component that already has the name a
+    generated source would take by default was refused by `pkg/oam` as a
+    duplicate component name, and is now refused by the rule with the message
+    above.
   - **The generated source is applied with the application bundle, ahead of
     every group** (go-kure/launcher#783). The rule orders the release after the
     source it generates or adopts (`Component.OrderAfter`), and `pkg/oam` puts
@@ -3103,6 +3186,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
+    - `source.name` beside an inline source, `valuesConfigMapName` and
+      `valuesSecretName` (go-kure/launcher#787): the render generates no source,
+      no values ConfigMap and no values Secret, so each would name nothing;
     - an inline GitRepository or Bucket source, since the render fetches only
       from a Helm or OCI repository;
     - an OCI source without `version`;
@@ -3163,8 +3249,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       (`chart` and `Chart`): the decode would match both to one field and keep
       either.
 
-  An authored component already named like a generated source fails the build
-  as a duplicate component name.
+  An authored component already named like a generated source fails the build:
+  the rule refuses it when the document holds that component as the rule runs
+  (see **Naming the generated source**), and `pkg/oam` refuses it as a duplicate
+  component name when another rule emits it in the same lowering round.
 - **helmchart** — since go-kure/launcher#351, the kind-named terminal for Flux's `HelmChart`:
   see **helmrepository / ocirepository / gitrepository / bucket / helmchart** below. Until
   go-kure/launcher#350 the name belonged to a role-level composite (a HelmRelease plus its source,
@@ -3717,7 +3805,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   go-kure/launcher#787; no property or hook overrides a child name yet. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
-- **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
+- **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
+  OCIRepository, see below), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
 
   **Lowering (go-kure/launcher#784).** `oci` is a role-named component: `OCIRule`
@@ -3740,13 +3829,35 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     it. The source then belongs to the document, not to the component that
     comes first: it is emitted once, named `<document>-source-<digest>` (the
     10-hex digest of the source identity, through
-    `NameAllocator.NameOrAdopt`, which shortens a name over 253 characters by
-    the one rule), and each component lowers to its Kustomization alone,
+    `LoweringContext.ResolveSharedName`, which shortens a default over 253
+    characters by the one rule), and each component lowers to its Kustomization alone,
     referencing it and ordered after it (`Component.OrderAfter`). Like a
     source `helm` generates, it is then a generated source: `pkg/oam` applies
     it with the application bundle, ahead of every group, wherever its
     consumers are placed. It carries no trait and no annotation of any
     consumer, and may not be placed in a tier or made to wait on a component.
+    The consumer's `Naming` hook may rename it: it is asked under role
+    `helm-source`, once for each source identity of a document, with that
+    default and no component (go-kure/launcher#787).
+  - *`source.name` names the source* (go-kure/launcher#787), and makes it the
+    shared form whatever the number of consumers: the OCIRepository is emitted
+    once under that name, applied with the application bundle ahead of every
+    group, and the component lowers to its Kustomization alone. **A source
+    named this way carries no annotations and no traits of the component**, not
+    even for a component alone on its artifact: `prune-protection` and
+    `force-replace` then cover the Kustomization only, and a tier annotation
+    places only the Kustomization. The name is the component's own choice.
+    Components that write the same name for the same identity share the source;
+    a component that writes none does not share it and is not counted among
+    its consumers, so it keeps its own source, or shares the document's with
+    the other components that name none. The name is used as written: it must
+    be a DNS-1123 subdomain of at most 253 characters, and cannot be the
+    component's own name or that of another component of the document (`oci:
+    source.name "base" is the component's own name; the generated source is a
+    component of the document too, so give it another name`). One name for two
+    identities is refused as a collision. `source.name: ""` reads as absent.
+    The source a component keeps to itself, with no `source.name`, is named
+    after the component: neither a role nor the hook reaches that name.
   - *The source identity* is the `url`, the `version` and the effective
     `interval`. Unset, `0s`, `60m` and `1h` are one interval. Components
     whose intervals differ do not share: each keeps a source of its own,

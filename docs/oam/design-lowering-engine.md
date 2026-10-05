@@ -539,7 +539,7 @@ Pick the shape by asking these questions in order (go-kure/launcher#741):
 3. **Otherwise**, emit it as a **separately named kind component**. That covers an
    object that is shared or adopted across components, authored directly, or ordered
    or placed on its own. Examples: `helm`'s generated sources, shared per URL through
-   `NameAllocator.NameOrAdopt`; `postgresql`'s `cnpg-pooler` and `cnpg-database`
+   `LoweringContext.ResolveSharedName`; `postgresql`'s `cnpg-pooler` and `cnpg-database`
    components, which carry their own dependency and placement policies.
 
 ### Kind twins

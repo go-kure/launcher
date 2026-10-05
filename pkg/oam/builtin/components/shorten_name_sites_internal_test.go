@@ -48,7 +48,20 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 		gen    func(name string) string
 	}{
 		{"helm values ConfigMap", "-values-0123456789", func(name string) string {
-			return helmValuesConfigMapName(name, valuesDigest)
+			lctx := oam.LoweringContext{Namer: oam.NewNameAllocator()}
+			got, err := helmValuesNamer(lctx, &oam.Component{Name: name}, oam.NameRoleValuesConfigMap, "ConfigMap", "values", "valuesConfigMapName", nil)(valuesDigest)
+			if err != nil {
+				return "helmValuesNamer failed: " + err.Error()
+			}
+			return got
+		}},
+		{"helm values Secret", "-secret-values-0123456789", func(name string) string {
+			lctx := oam.LoweringContext{Namer: oam.NewNameAllocator()}
+			got, err := helmValuesNamer(lctx, &oam.Component{Name: name}, oam.NameRoleValuesSecret, "Secret", "secret-values", "valuesSecretName", nil)(valuesDigest)
+			if err != nil {
+				return "helmValuesNamer failed: " + err.Error()
+			}
+			return got
 		}},
 		// Without an application, so that name is the whole shortened prefix as at
 		// every other site; TestHookGroupChildName_IncludesApplication covers the

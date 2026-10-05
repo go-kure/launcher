@@ -182,7 +182,7 @@ Decided in the ticket:
   component on one artifact do not share.
 - **`SourceDeduplicatable` is removed**, with the engine pass that read it
   (`deduplicateSourceRefs`): no builtin implemented it any more, and a rule that shares a
-  source emits it as a component (`NameAllocator.NameOrAdopt`, `Component.OrderAfter`).
+  source emits it as a component (`LoweringContext.ResolveSharedName`, `Component.OrderAfter`).
 - `targetNamespace` is never defaulted on `fluxcd-kustomization`, for the reason `oci`
   never defaulted it (§7).
 - The name of an authored Kustomization against a delivery Kustomization a consumer
@@ -199,14 +199,16 @@ Decided in the ticket:
   (go-kure/launcher#787, §3.2), which include the `postgresql` Pooler and Databases: a
   lowering rule resolves such a name with `LoweringContext.ResolveName`, and
   `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. The roles
-  also include a kind component's own object. No hook yet for a source name.
+  also include a kind component's own object, and the source and the values ConfigMap and
+  Secret the `helm` rule generates.
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
   (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
-  `databases[].objectName`), and the object of every kind component (`objectName`). Still
+  `databases[].objectName`), the object of every kind component (`objectName`), the source
+  a `helm` or `oci` component generates (`source.name`) and the `helm` values ConfigMap and
+  Secret (`valuesConfigMapName`, `valuesSecretName`). Still
   none for:
-  generated Helm source names (`<document>-source-<digest>`), the values ConfigMap name
-  (`helmValuesConfigMapName`, `pkg/oam/builtin/components/helm.go`), bundle and ordered-group
+  bundle and ordered-group
   names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others) and Helm
   hook-group child layouts. The Helm release name has one under both deliveries
   (`releaseName`, go-kure/launcher#785, §4.2).
@@ -247,8 +249,9 @@ Decided in the ticket:
   - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
     group's bundle, each sub-application a trait or a synthesized policy adds, each
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects and the
-    `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, and the object
-    of an authored kind component. A trait
+    `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, the object
+    of an authored kind component, and the generated source and values ConfigMap and
+    Secret of a `helm` component. A trait
     handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
     `LoweringContext.ResolveName` (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
@@ -292,12 +295,27 @@ Decided in the ticket:
     author writes is written with the object name.
   - It allows a Service named like its StatefulSet as kind components (rule 4 permits
     different kinds to share a name).
+- **Shipped: the generated source and values names** (`HelmRule` and `OCIRule`,
+  `pkg/oam/builtin/components/helm.go` and `oci.go`; the components README, **helm** and
+  **oci**).
+  - `source.name` beside an inline source names the source the component generates. It
+    was refused there before; alone it still references an existing source. The hook is
+    asked under role `helm-source`, once for each source identity of a document and with
+    no component, for the shared `<document>-source-<digest>` source of either rule
+    (`LoweringContext.ResolveSharedName`). The source an `oci` component keeps to itself
+    stays named after the component, with no role.
+  - `valuesConfigMapName` and `valuesSecretName` name the `helm` values ConfigMap and
+    Secret, under roles `values-configmap` and `values-secret`. A name from the author or
+    the hook carries no content hash, so a values-only edit no longer changes the
+    HelmRelease: Flux applies it at the release's next reconciliation, within its
+    interval, unless the object is watched.
+  - These objects land in the Flux namespace when one is set, and their names are claimed
+    there (`NameSpec.FluxScoped`).
 - **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
-  - The remaining lowering-rule names: the `helm` rule's source and values objects and
-    the `oci` rule's source. A name the `Namer` builds (`NameAllocator.Name` and
+  - A name the `Namer` builds (`NameAllocator.Name` and
     `NameOrAdopt`, `pkg/oam/lowering.go`) reaches the hook only where its rule calls
-    `LoweringContext.ResolveName`.
+    `LoweringContext.ResolveName` or `ResolveSharedName`.
   - The names with no role yet: the hook-group children.
 
 ### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening

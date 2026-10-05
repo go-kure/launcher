@@ -23,9 +23,9 @@ import (
 // helmSecretValuesTrait implements secretValues under delivery: flux. values is
 // the component's authored values, still on the release, and secretValues the
 // decoded property. With non-empty secretValues it returns the secret trait
-// that emits a Secret named helmSecretValuesName, for the helmrelease to carry,
-// and the valuesFrom entry naming it; absent or empty secretValues return a nil
-// trait and no entry.
+// that emits a Secret named by name (helmValuesNamer), for the helmrelease to
+// carry, and the valuesFrom entry naming it; absent or empty secretValues
+// return a nil trait and no entry.
 //
 // The trait is the secret trait as authored documents use it, so the Secret
 // follows the HelmRelease to a Flux namespace (it reads the Secret through
@@ -35,17 +35,20 @@ import (
 //
 // The values are serialized once, as the values ConfigMap's are
 // (helmValuesConfigMap). Those exact bytes are stored in the Secret and hashed
-// into its name, so the name changes whenever the content does: the
+// into its default name, so that name changes whenever the content does: the
 // HelmRelease's spec changes with it, which makes Flux reconcile an edit of
-// secretValues alone. The name therefore carries ten hex digits of the content's
-// digest, and so does the HelmRelease that names it; whoever can read either
-// can test a guess of the whole secretValues tree against it.
+// secretValues alone at once. The default name therefore carries ten hex digits
+// of the content's digest, and so does the HelmRelease that names it; whoever
+// can read either can test a guess of the whole secretValues tree against it.
+// A name from the author or the Naming hook carries no hash: nobody can test a
+// guess against it, and an edit of secretValues alone reaches the release as an
+// edit of a values ConfigMap under such a name does (helmValuesConfigMap).
 //
 // A path set in both values and secretValues is refused (refuseSharedValuePath).
 // Without that, which one wins would depend on the values mode: Flux merges
 // valuesFrom in order and applies inline values last, so inline values would
 // win where a values ConfigMap would lose.
-func helmSecretValuesTrait(name string, values any, secretValues map[string]any) (*oam.Trait, map[string]any, error) {
+func helmSecretValuesTrait(values any, secretValues map[string]any, name func(digest string) (string, error)) (*oam.Trait, map[string]any, error) {
 	if len(secretValues) == 0 {
 		return nil, nil, nil
 	}
@@ -68,7 +71,11 @@ func helmSecretValuesTrait(name string, values any, secretValues map[string]any)
 		return nil, nil, errors.Errorf("%s: %s is not representable as JSON", helmType, helmSecretValuesKey)
 	}
 	sum := sha256.Sum256(data)
-	secretName := helmSecretValuesName(name, hex.EncodeToString(sum[:]))
+	// The resolver's messages name a name and a role, never a value.
+	secretName, err := name(hex.EncodeToString(sum[:]))
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "%s: naming the values Secret", helmType)
+	}
 
 	entry := map[string]any{"kind": "Secret", "name": secretName, "valuesKey": helmValuesKey}
 	return &oam.Trait{
@@ -78,15 +85,6 @@ func helmSecretValuesTrait(name string, values any, secretValues map[string]any)
 			"stringData": map[string]any{helmValuesKey: string(data)},
 		},
 	}, entry, nil
-}
-
-// helmSecretValuesName names the values Secret of component name whose
-// serialized secretValues have the hex digest valuesDigest: name with the
-// suffix "-secret-values-<first 10 digest digits>", shortened by the one
-// shortening rule exactly as helmValuesConfigMapName shortens the values
-// ConfigMap's name.
-func helmSecretValuesName(name, valuesDigest string) string {
-	return oam.ShortenNameWithSuffix(name, "-secret-values-"+valuesDigest[:helmValuesHashLen], oam.ShortenLimitSubdomain)
 }
 
 // jsonObject encodes v as JSON and decodes it into a map, numbers kept exact

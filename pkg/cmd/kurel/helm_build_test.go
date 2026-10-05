@@ -404,8 +404,8 @@ spec:
 
 // TestBuildCommand_HelmSourceNameTakenByAuthoredComponent pins what happens
 // when an authored component already carries the name the rule generates for a
-// source (go-kure/launcher#349, Q5): the build fails, naming the duplicate,
-// instead of silently merging two objects.
+// source (go-kure/launcher#349, Q5): the build fails, naming the duplicate
+// and what the author can do about it, instead of silently merging two objects.
 func TestBuildCommand_HelmSourceNameTakenByAuthoredComponent(t *testing.T) {
 	app := helmAppHeader + `    - name: ` + helmSharedSource() + `
       type: helmrepository
@@ -419,8 +419,11 @@ func TestBuildCommand_HelmSourceNameTakenByAuthoredComponent(t *testing.T) {
 	if !strings.Contains(err.Error(), helmSharedSource()) {
 		t.Errorf("error = %q, want it to name %s", err, helmSharedSource())
 	}
-	if !strings.Contains(err.Error(), "duplicate component name") {
-		t.Errorf("error = %q, want the duplicate-name refusal", err)
+	want := `helm: the generated source would be named "` + helmSharedSource() + `", the name of a helmrepository component of the document; ` +
+		`the generated source is a component of the document too, so rename that component, name the source with source.name, ` +
+		`or have the Naming hook return another name for role "helm-source"`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q\nwant one containing %s", err, want)
 	}
 }
 

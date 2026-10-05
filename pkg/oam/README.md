@@ -483,7 +483,7 @@ the whole `name+suffix` is then shortened by the rule.
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
 | 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (a generated Helm source) and the default of `LoweringContext.ResolveName` (the `postgresql` pooler and databases), the `helm` values ConfigMap and values Secret, a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt`, and the default of `LoweringContext.ResolveName` and `ResolveSharedName` (the `postgresql` pooler and databases, the `helm` values ConfigMap and values Secret, a generated Flux source), a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
@@ -521,10 +521,14 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
 | `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
+| `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component generates for itself alone, which carries the component's name. | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
+| `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
+| `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
-(empty for the bundle, a group and an external backend's policy), the role, the object's kind
+(empty for the bundle, a group, an external backend's policy and a generated source the
+document's components share), the role, the object's kind
 as `Kind` or `Kind.group` (empty for a role that names no object) and the default as launcher
 would use it: already shortened where launcher shortens a name (a group's bundle, the `hpa`,
 `pdb`, `networkpolicy` and `netpol-synth` objects), and as long as it is where it does not: a
@@ -533,15 +537,17 @@ component name). The default is what tells apart several names of one component 
 `false` keeps the default. Answers are not cached, and one name is asked for more than once
 (in the transform, and again by `ComponentEndpointsNamed`, below): the hook must be a pure
 function of its request, the same answer for the same `NameRequest` whenever it is asked. A
-component's own application, whose name is the component's, and an
-application a component adds itself (the `helm` values ConfigMap's) are not roles, and the
-hook is not asked for them.
+component's own application, whose name is the component's, is not a role, and the hook is
+not asked for it. The application of a trait a rule appends is a trait's like any other: the
+hook is asked under `sub-application` for the one holding a `helm` component's values
+ConfigMap and for the one holding its values Secret, each with the object's name as the
+default.
 
 `NameRequest.Application` is the document's name at the moment the name is made, which a later
 document rule may still change. Most names are made after lowering, and carry the lowered
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
-lowering rule makes (`pooler`, `database`) carries the name of the document the rule is
-lowering. A component, trait or policy rule runs only once the document's kind is final, so
+lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`)
+carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
 change.
@@ -554,6 +560,20 @@ hook is not asked. A consumer whose raw rule needs a consumer-chosen name writes
 document it emits. Where `<base>-<suffix>` is no valid name (a suffix with a character no
 object name takes), an authored name is still used; without one the name is refused, and the
 hook, which has no default to be asked about, is not asked.
+
+`LoweringContext.ResolveSharedName(base, suffix, identity, spec)` is `ResolveName` for an
+object the components of one document share: one its content identity determines wholly, as
+`NameAllocator.EmitOrAdopt` asks of it (a generated Flux source). The first claim of a name
+returns `adopted=false` and the rule emits the component under it; a later claim of the same
+name and identity, from any element of the same authored document, returns `adopted=true`
+and the rule only references it. Without an authored name the object is the document's: the
+hook is asked once, with no component, and every later consumer of the same kind and default
+takes that answer without the hook being asked again. An authored name is the component's
+own and not a second name for the document's object: a component that names the object and
+one that does not get two objects, two components that write one name for one identity share
+it, and one name for two identities is `EmitOrAdopt`'s collision error. The name is also
+reserved as a component name, since the shared object is a component of the lowered
+document.
 
 A rule resolves a name once and keeps it. Each call names one object, so a second call that
 resolves the same kind and name is refused with both named, whichever rule made it: two trait
@@ -577,6 +597,16 @@ and name resolved for a document of another namespace. A rule and a trait handle
 same way, and a `NameSpec` that sets both `ClusterScoped` and `Namespace` is refused for
 either. For a rule the field is the only way: without it the document's namespace applies. A
 trait handler's spec that sets neither is still claimed with no namespace.
+
+An object that follows its HelmRelease or Kustomization to the Flux namespace
+(`TransformContext.FluxNamespace`) says so with `NameSpec.FluxScoped`: a generated Flux
+source, and the values ConfigMap and values Secret a HelmRelease reads through `valuesFrom`.
+Its name is then claimed in the Flux namespace where the transform has one, so an object of
+the same kind and name in the application namespace is another object and is not refused,
+and one in the Flux namespace is the same object and is. Without a Flux namespace it is
+claimed in the document's, like any other. Only a lowering rule sets the field: a trait
+handler names its namespace itself, and a `NameSpec` that sets it beside `ClusterScoped` is
+refused.
 
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
@@ -631,9 +661,9 @@ name collision: Database.postgresql.cnpg.io "db-orders" is named by component "d
 ```
 
 This knows only the names resolved this way: the roles above. An object of a component that
-is not a kind component, one a lowering rule names without a role (a generated Helm source),
-and the object of a trait that is not in the table (a `configmap` trait's ConfigMap, a
-`secret` trait's Secret) are not in it, so
+is not a kind component, one a lowering rule names without a role (the source an `oci`
+component generates for itself alone), and the object of a trait that is not in the table (an
+authored `configmap` trait's ConfigMap, an authored `secret` trait's Secret) are not in it, so
 `CheckInDocumentCollisions` (below) is still what compares every generated object: a
 `configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
 there. The remaining lowering-rule names join it in later changes of go-kure/launcher#787.
@@ -1256,7 +1286,7 @@ go-kure/launcher#729).
 must be applied before another declares it on the later one:
 `Component.OrderAfter(names...)` (go-kure/launcher#783). Each name is a component of the
 document once lowering has settled, usually one the same rule emits or adopts
-(`NameAllocator.NameOrAdopt`); an unknown name, or the component's own, fails the
+(`LoweringContext.ResolveSharedName`); an unknown name, or the component's own, fails the
 transform, naming the component and the rule's order. Like a post-policy step it is
 part of the component value, survives copies, is not serialized, and cannot be
 authored: an author orders components with a `dependency` policy. It survives further
