@@ -3761,7 +3761,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   rule this component shares with every workload kind; see "The main container
   is named after the component" under "Common config" above.
 
-  **Updating a `job` in place needs the `force-replace` trait.** A Job's pod
+  **Updating a `job` in place needs it force-replaced, which the `force-replace`
+  trait asks for.** A Job's pod
   template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`
   on every update, and the only carve-out is for scheduling directives on a
   suspended Job. By default, changing this component's `image`, `command`, `env`
@@ -3784,8 +3785,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   because kure's `Create<Kind>` constructors now return TypeMeta and identity
   only; the assignment is kept so the field stays empty whatever a future
   constructor does). **Annotating the component itself still does not reach the
-  Job**: this component has no annotation passthrough, and a component's own
-  annotations are read only for the tier annotation. See the
+  Job**: a component's own annotations, the ones beside its `type` and
+  `properties`, are read only for the tier annotation. The `annotations`
+  property is another matter: it goes on the Job's own metadata, as on every
+  kind component ("The object's labels and annotations" below). The Flux force
+  annotation written there is on the Job as authored, and kustomize-controller
+  reads it as it reads the workflow's; the trait is the way that names no
+  delivery engine. See the
   [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
   catalogue.
 
@@ -3796,9 +3802,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   fresh Job.
 
   The generated `Job` carries `app: <component>` as its own labels and its pod
-  template's, carries no annotations at all, and leaves `spec.selector` unset for
-  the job controller to fill. The empty selector is deliberate and is the one
-  workload kind where it stays that way: the Job controller generates
+  template's, carries no annotations of the handler's, and leaves `spec.selector`
+  unset for the job controller to fill. What the `labels` and `annotations`
+  properties author is added to the Job's own metadata, not to its pod template.
+  The empty selector is deliberate and is the one workload kind where it stays
+  that way: the Job controller generates
   `spec.selector` plus its matching `controller-uid`/`job-name` pod labels
   server-side, so writing one here would fight it. Deployment, StatefulSet and
   DaemonSet get no such server-side defaulting and so are written explicitly —
@@ -6115,6 +6123,13 @@ A label that names another object is the author's literal: it does not follow th
 `objectName` or the `Naming` hook's answer for it. An object that belongs to another through
 a label (an EndpointSlice's `kubernetes.io/service-name`) is written with the name the other
 object takes.
+
+An annotation a delivery engine acts on (a Flux annotation such as
+`kustomize.toolkit.fluxcd.io/force`, for one) is written as authored too: launcher does not
+refuse it and does not carry out what the engine does with it. `Transformer.WarnForcedVolumes`
+warns about a PersistentVolume or PersistentVolumeClaim that has the force key enabled, and
+changes nothing. A consumer that keeps such keys to itself reserves them with
+`TransformContext.ReservedMetadataKeys`.
 
 As `objectName`, the two are in no handler's `PropertySchema`: the engine adds them to the
 schema of every type whose handler declares its object, reads and checks them, removes them
