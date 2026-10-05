@@ -209,6 +209,34 @@ func TestCiliumNetworkPolicyConfig_Generate_RefusesUnknownSelectorKey(t *testing
 	}
 }
 
+// TestCiliumNetworkPolicyConfig_Generate_ICMPFieldWithoutType: Cilium's own
+// decoding of an ICMP field dereferences a nil pointer when `type` is absent or
+// null. The build must refuse the document, not crash on it.
+func TestCiliumNetworkPolicyConfig_Generate_ICMPFieldWithoutType(t *testing.T) {
+	for name, field := range map[string]map[string]any{
+		"absent": {"family": "IPv4"},
+		"null":   {"family": "IPv4", "type": nil},
+		"empty":  {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := &traits.CiliumNetworkPolicyConfig{
+				Name:             "p",
+				EndpointSelector: map[string]any{},
+				Egress:           []any{map[string]any{"icmps": []any{map[string]any{"fields": []any{field}}}}},
+			}
+			_, err := cfg.Generate(stack.NewApplication("myapp", "production", nil))
+			if err == nil {
+				t.Fatal("Generate succeeded, want the ICMP field without a type refused")
+			}
+			for _, want := range []string{`cilium-networkpolicy "p"`, "api.Rule", "panicked"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 // TestCiliumNetworkPolicyConfig_Generate_KeepsValidSelectors is the control for
 // the refusal above: every key a selector and an ICMP field declare builds.
 func TestCiliumNetworkPolicyConfig_Generate_KeepsValidSelectors(t *testing.T) {
