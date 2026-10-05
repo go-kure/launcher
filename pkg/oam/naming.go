@@ -158,7 +158,7 @@ type NameSpec struct {
 	// as a trait does, and has no other way to say so:
 	// LoweringContext.ResolveName takes any other object to land in the
 	// document's namespace. A trait's spec that sets neither is claimed with no
-	// namespace too, as an object of a document transformed without one is.
+	// namespace too.
 	ClusterScoped bool
 	// Property names the property the author wrote Authored in ("hpaName"). It is
 	// empty when the author wrote none, and Authored is then not read: a present

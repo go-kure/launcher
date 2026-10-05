@@ -522,8 +522,7 @@ is: it is refused against a trait's cluster-scoped object of the same kind and n
 and name resolved for a document of another namespace. A rule and a trait handler say it the
 same way, and a `NameSpec` that sets both `ClusterScoped` and `Namespace` is refused for
 either. For a rule the field is the only way: without it the document's namespace applies. A
-trait handler's spec that sets neither is still claimed with no namespace, as an object of a
-document transformed without one is.
+trait handler's spec that sets neither is still claimed with no namespace.
 
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
