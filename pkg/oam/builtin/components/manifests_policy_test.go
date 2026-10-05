@@ -93,8 +93,9 @@ func mfPolicyFor(t *testing.T, srvURL string) *stubPolicy {
 // to the image, pod-security, resource, storage and replica policy an authored
 // workload is. Each case is one inline source, refused by the transform with a
 // violation that names the component and the object. An object that cannot be
-// read (a workload kind in an API version the build does not know, an item of
-// a list of an unregistered kind) is refused rather than passed.
+// read (a workload kind in an API version the build does not know) is refused
+// rather than passed. An item of a list is read as a document of its own,
+// whatever the kind of the list, and held to the same checks.
 func TestManifests_ObjectViolations(t *testing.T) {
 	const privileged = "containers:\n  - name: app\n    image: registry.example/team/app:1.2.3\n    securityContext:\n      privileged: true\n"
 	withReplicas := func(doc string, n int) string {
@@ -225,24 +226,28 @@ func TestManifests_ObjectViolations(t *testing.T) {
 			want: []string{`object Deployment "demo/thing"`, "hostNetwork is not allowed"},
 		},
 		{
-			name: "Pod inside a list of an unregistered kind",
+			// An item of a list of an unregistered kind is a document of its own:
+			// the Pod is its Go type and is held to the check as any Pod is.
+			name: "host network Pod inside a list of an unregistered kind",
 			inline: "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
-				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: thing\n      namespace: demo\n    spec:\n" + htIndent(htPlainPod, "      "),
-			want: []string{`object Pod "demo/thing"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
+				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: thing\n    spec:\n      hostNetwork: true\n" + htIndent(htPlainPod, "      "),
+			want: []string{`object Pod "demo/thing"`, "hostNetwork is not allowed"},
 		},
 		{
-			name: "PersistentVolumeClaim inside a list of an unregistered kind",
+			name: "PersistentVolumeClaim over the storage maximum inside a list of an unregistered kind",
 			inline: "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
-				"  - apiVersion: v1\n    kind: PersistentVolumeClaim\n    metadata:\n      name: thing\n      namespace: demo\n",
-			want: []string{`object PersistentVolumeClaim "demo/thing"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
+				"  - apiVersion: v1\n    kind: PersistentVolumeClaim\n    metadata:\n      name: thing\n    spec:\n" +
+				"      resources:\n        requests:\n          storage: 1Ti\n",
+			want: []string{`object PersistentVolumeClaim "demo/thing"`, `spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
 		},
 		{
-			// The parser unpacks the outer list and leaves the inner one whole.
-			name: "list left inside a list of an unregistered kind",
+			// A list among those items is opened in turn, whatever its kind, so
+			// the Pod it holds is checked too.
+			name: "host network Pod inside a list inside a list of an unregistered kind",
 			inline: "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
-				"  - apiVersion: example.io/v1\n    kind: InnerList\n    metadata:\n      name: inner\n      namespace: demo\n    items:\n" +
-				"      - apiVersion: v1\n        kind: ConfigMap\n        metadata:\n          name: thing\n          namespace: demo\n",
-			want: []string{`object InnerList "demo/inner"`, "has a top-level items list and sits inside a list of an unregistered kind"},
+				"  - apiVersion: example.io/v1\n    kind: InnerList\n    metadata:\n      name: inner\n    items:\n" +
+				"      - apiVersion: v1\n        kind: Pod\n        metadata:\n          name: thing\n        spec:\n          hostNetwork: true\n" + htIndent(htPlainPod, "          "),
+			want: []string{`object Pod "demo/thing"`, "hostNetwork is not allowed"},
 		},
 		{
 			name: "second document of a source",
@@ -356,6 +361,54 @@ func TestManifests_UndecodableListItemIsNotAViolation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "manifest source: parse manifests") {
 		t.Errorf("error %q is not the parser's", err)
+	}
+}
+
+// TestManifests_ItemsOnAKindThatIsNoListIsRefusedWithOrWithoutPolicy: an object
+// of an unregistered kind that does not end in List and carries a top-level
+// `items` array is a list to what applies the output, which would apply entries
+// no check has read. The source is refused whether a policy is given or not,
+// and the refusal is the source's, not a policy violation: no policy allows it.
+// The entries here are a Pod the strict policy would refuse and one it would
+// allow; neither is what the error names.
+func TestManifests_ItemsOnAKindThatIsNoListIsRefusedWithOrWithoutPolicy(t *testing.T) {
+	const head = "apiVersion: example.io/v1\nkind: Catalog\nmetadata:\n  name: thing\n  namespace: demo\nitems:\n"
+	entries := map[string]string{
+		"a Pod the policy would refuse": "  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n      hostNetwork: true\n" + htIndent(htPlainPod, "      "),
+		"a Pod the policy would allow":  "  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(htPlainPod, "      "),
+		"values that are no objects":    "  - blue\n  - green\n",
+	}
+	policies := map[string]oam.Policy{"no policy": nil, "the strict policy": ptStrictPolicy()}
+	for entry, items := range entries {
+		for name, policy := range policies {
+			t.Run(entry+"/"+name, func(t *testing.T) {
+				_, err := mfTransform("manifests", mfInline(head+items), policy)
+				if err == nil {
+					t.Fatal("a source holding an object of a kind that is no list with an items array built")
+				}
+				var v *oam.ViolationError
+				if errors.As(err, &v) {
+					t.Errorf("the refusal is reported as a policy violation: %v", err)
+				}
+				for _, want := range []string{`Catalog "demo/thing"`, "an `items` array on an object of a kind that is no list (example.io/v1 Catalog)",
+					"write the entries as documents of their own, or give the object a kind ending in List"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q lacks %q", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "inner") || strings.Contains(err.Error(), "hostNetwork") {
+					t.Errorf("the error names an entry, which was never read as an object: %v", err)
+				}
+			})
+		}
+	}
+
+	// Control: the same object without the array builds under either policy.
+	for name, policy := range policies {
+		objs, err := mfTransform("manifests", mfInline(strings.TrimSuffix(head, "items:\n")), policy)
+		if err != nil || len(objs) != 1 {
+			t.Errorf("control, %s: generated %d objects, %v; want the one Catalog", name, len(objs), err)
+		}
 	}
 }
 

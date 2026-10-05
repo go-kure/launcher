@@ -273,20 +273,29 @@ func TestPolicyRefusalClass_ObjectLeaves(t *testing.T) {
 
 // TestPolicyRefusalClass_PassthroughUnreadable: an object of a registered kind
 // that does not decode as its kind is refused as unreadable, at the transform
-// and at generation; only passthrough carries an object as a map.
+// and at generation; only passthrough carries an object as a map. A MetalLB
+// BGPPeer at metallb.io/v1beta2 is such a kind since kure's scheme registers
+// that version (go-kure/kure#1007): one whose field has the wrong type carries
+// the class as a Deployment's does.
 func TestPolicyRefusalClass_PassthroughUnreadable(t *testing.T) {
-	doc := rcReplicas(ptDeployment(htPlainPod), "three")
-	for _, path := range rcObjectPaths {
-		if !strings.HasPrefix(path.name, "passthrough") {
-			continue
-		}
-		t.Run(path.name, func(t *testing.T) {
-			err := path.build(t, doc, rcStrict)
-			rcWantClass(t, err, oam.RefusalUnreadableObject)
-			if !strings.Contains(err.Error(), "the object cannot be read, so it cannot be checked against environment policy: ") {
-				t.Errorf("the refusal lost the text of what failed to decode: %v", err)
+	docs := map[string]string{
+		"Deployment with replicas that are no integer": rcReplicas(ptDeployment(htPlainPod), "three"),
+		"BGPPeer at v1beta2 with a holdTime that is no duration": "apiVersion: metallb.io/v1beta2\nkind: BGPPeer\nmetadata:\n  name: thing\n" +
+			"spec:\n  myASN: 64512\n  peerASN: 64513\n  peerAddress: 10.0.0.1\n  holdTime: [1]\n",
+	}
+	for name, doc := range docs {
+		for _, path := range rcObjectPaths {
+			if !strings.HasPrefix(path.name, "passthrough") {
+				continue
 			}
-		})
+			t.Run(name+"/"+path.name, func(t *testing.T) {
+				err := path.build(t, doc, rcStrict)
+				rcWantClass(t, err, oam.RefusalUnreadableObject)
+				if err != nil && !strings.Contains(err.Error(), "the object cannot be read, so it cannot be checked against environment policy: ") {
+					t.Errorf("the refusal lost the text of what failed to decode: %v", err)
+				}
+			})
+		}
 	}
 }
 

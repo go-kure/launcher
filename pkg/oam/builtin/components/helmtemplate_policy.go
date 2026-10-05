@@ -100,13 +100,15 @@ func renderedObjectRef(obj client.Object) string {
 // to allow hostPath volumes, and spec.capacity.storage is held to the storage
 // maximum.
 //
-// What reached the build untyped and may hold a workload is refused, since
+// What reached the check untyped and may hold a workload is refused, since
 // nothing in it can be read: a checked kind in an API version kure's scheme
-// does not register (apps/v1beta2, batch/v1beta1) or an item of a list whose
-// kind it does not, and a list left inside such a list, whose own items the
-// parser does not unpack. A list is told by a top-level items array, as
-// apimachinery tells one, so a custom resource that names a field so is
-// refused there too; rendered on its own the parser already reads it as a list.
+// does not register (apps/v1beta2, batch/v1beta1), and an object with a
+// top-level items array, which is a list to what applies it, as apimachinery
+// tells one, whatever its kind. The decode of a chart's render and of a
+// manifests source returns no such object: it replaces a list by its items,
+// each read as a document of its own, and refuses an items array on a kind
+// that is no list (refuseItemsOnNoList). The arm holds an object that reaches
+// the check any other way.
 func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	if err := enforceRenderedClaims(obj, p); err != nil {
 		return err
@@ -124,7 +126,7 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 		case !ok:
 			return nil
 		case u.IsList():
-			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, "the object has a top-level items list and sits inside a list of an unregistered kind, so it is read as a list whose objects cannot be checked against environment policy")
+			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, "the object has a top-level items list, so what applies it reads it as a list, whose objects cannot be checked against environment policy")
 		case isWorkloadGVK(u.GroupVersionKind()):
 			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, fmt.Sprintf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion()))
 		}

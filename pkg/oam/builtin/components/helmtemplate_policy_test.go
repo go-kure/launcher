@@ -276,25 +276,21 @@ func TestHelmTemplate_RenderedWorkloadViolations(t *testing.T) {
 			want: []string{`rendered Deployment "demo/inner"`, "securityContext.privileged is not allowed"},
 		},
 		{
-			name: "Pod inside a list of an unregistered kind",
+			// An item of a list of an unregistered kind is a document of its own:
+			// the Pod is its Go type and is held to the check as any Pod is.
+			name: "privileged container in a Pod inside a list of an unregistered kind",
 			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
-				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(htPlainPod, "      ")},
-			want: []string{`rendered Pod "demo/inner"`, `apiVersion "v1"`, "cannot be checked against environment policy"},
+				"  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n    spec:\n" + htIndent(privileged, "      ")},
+			want: []string{`rendered Pod "demo/inner"`, `spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
 		},
 		{
-			name: "list left inside a list of an unregistered kind",
+			// A list among those items is opened in turn, so the Pod it holds is
+			// checked too.
+			name: "privileged container in a Pod inside a v1 List inside a list of an unregistered kind",
 			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
 				"  - apiVersion: v1\n    kind: List\n    metadata:\n      name: wrapped\n    items:\n" +
 				"      - apiVersion: v1\n        kind: Pod\n        metadata:\n          name: inner\n        spec:\n" + htIndent(privileged, "          ")},
-			want: []string{`rendered List "wrapped"`, "has a top-level items list", "cannot be checked against environment policy"},
-		},
-		{
-			// A list is told by its items array alone, so a custom resource
-			// with a field of that name is refused in the same position.
-			name: "custom resource with an items field inside a list of an unregistered kind",
-			templates: map[string]string{"d.yaml": "apiVersion: example.io/v1\nkind: CatalogList\nitems:\n" +
-				"  - apiVersion: example.io/v1\n    kind: Catalog\n    metadata:\n      name: colors\n    items: [blue, green]\n"},
-			want: []string{`rendered Catalog "colors"`, "has a top-level items list", "cannot be checked against environment policy"},
+			want: []string{`rendered Pod "demo/inner"`, `spec.containers[0] "app"`, "securityContext.privileged is not allowed"},
 		},
 		{
 			name:      "privileged container in a PodTemplate",
@@ -420,6 +416,37 @@ func TestHelmTemplate_NoPolicyDeniesPrivileged(t *testing.T) {
 		"containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n    securityContext:\n      privileged: true\n")})
 	_, err := htTransform(srvURL, nil)
 	htWantViolation(t, err, `rendered Deployment "demo/web"`, "securityContext.privileged is not allowed")
+}
+
+// TestHelmTemplate_ItemsOnAKindThatIsNoListIsRefusedWithOrWithoutPolicy: a
+// chart that renders an object of an unregistered kind that does not end in
+// List with a top-level `items` array does not build, whether a policy is
+// passed or not. The chart is rendered at the transform's policy step, so the
+// refusal is the component's violation, as every chart that does not render or
+// decode is; it is no refusal by the policy, and carries no class.
+func TestHelmTemplate_ItemsOnAKindThatIsNoListIsRefusedWithOrWithoutPolicy(t *testing.T) {
+	const widget = "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: gadget\n"
+	for name, items := range map[string]string{"no entries": "items: []\n", "a Pod": "items:\n  - apiVersion: v1\n    kind: Pod\n    metadata:\n      name: inner\n"} {
+		t.Run(name, func(t *testing.T) {
+			srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", map[string]string{"widget.yaml": widget + items})
+			for policyName, policy := range map[string]oam.Policy{"no policy": nil, "the strict policy": rcStrict(htServerHost(t, srvURL))} {
+				_, err := htTransform(srvURL, policy)
+				rcWantClass(t, err, oam.RefusalUnclassified)
+				for _, want := range []string{`Widget "gadget"`, "an `items` array on an object of a kind that is no list (example.io/v1 Widget)",
+					"write the entries as documents of their own, or give the object a kind ending in List"} {
+					if err != nil && !strings.Contains(err.Error(), want) {
+						t.Errorf("%s: error %q lacks %q", policyName, err, want)
+					}
+				}
+			}
+		})
+	}
+
+	// Control: the same object without the array builds.
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", map[string]string{"widget.yaml": widget})
+	if objs, err := htTransform(srvURL, nil); err != nil || len(objs) != 1 {
+		t.Errorf("control: generated %d objects, %v; want the one Widget", len(objs), err)
+	}
 }
 
 // TestHelmTemplate_DroppedHookIsNotChecked: an object hook grouping drops is

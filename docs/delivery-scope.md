@@ -16,7 +16,7 @@ all. Each issue links back to this document.
 
 **Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
 Paths are relative to the repository root. Kure paths refer to the kure commit `go.mod`
-pins, `v0.2.0-beta.15.0.20261005142203-fef959cefb0a`: a commit of kure's `main` after
+pins, `v0.2.0-beta.15.0.20261005152652-5dd0e22643ce`: a commit of kure's `main` after
 v0.2.0-beta.15, pinned while both libraries are being worked on. Everything here is
 pre-release: output, names and the library contract may change, and live-cluster upgrade
 effects are not a constraint. A section or
@@ -550,8 +550,7 @@ be closed at build time.
      workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
      `AllowHostIPC` and `AllowHostPathVolumes` allow one.
    - **Limits:** a workload, claim or PersistentVolume that cannot be decoded typed (an API
-     version kure's scheme does not register), and a list nested in an unregistered list
-     (any object with a top-level `items` array there), are refused; a
+     version kure's scheme does not register) is refused, inside a list as outside one; a
      custom resource's pods, the archive host a Helm repository
      index names and redirects are not checked (the last two: a decided limit,
      go-kure/launcher#794, item 6, §7).
@@ -564,6 +563,47 @@ be closed at build time.
      A `v1` `List` and a typed list are replaced by their items, and each item is held to
      the check and to the undeclared-field rule as a document of its own is
      (go-kure/launcher#790, with the kure commit that reads such lists).
+   - **List handling** (go-kure/launcher#790, with go-kure/kure#1014, where kure's parser
+     reads a list in one place). A list of a kind the scheme does not register (a kind
+     ending in `List` that states `items`) is replaced by its items as the other two are:
+     an item of a registered kind is its Go type, held to the check and to the
+     undeclared-field rule, and a list among the items is opened in turn. Launcher's two
+     readers of a list, the undeclared-field rule and the hook check, read a list as the
+     parser does and nothing else.
+
+     Built before, refused now, for template delivery, `manifests` and `crd`:
+
+     | Document | Before | Now |
+     |---|---|---|
+     | A list with a label or an annotation on its own metadata | Built, the metadata dropped (template delivery refused `helm.sh/hook` there, and still does) | The parser's error: the list `has metadata of its own that its items cannot keep` |
+     | `Kind` or `apiversion` beside the exact key, on a document or a list item | Built, the object emitted. Refused already, with another text: a workload or a claim (the undeclared-field rule), and an item of a typed list whose other-case key states another value than the list holds (the parser) | The parser's error: the key `equals "kind" only after case folding` |
+     | `Items` on a `v1` `List` or on a list of an unregistered kind | Built: no object, or the list as one object | The same error |
+     | A `null` item in a list of an unregistered kind | Built: an otherwise empty object emitted, of the list's kind without `List` | `the item is null, not an object` |
+     | An item of a registered kind, in a list of an unregistered kind, that does not decode as its type | Built: the item emitted as written (a workload, a claim or a PersistentVolume there was refused already, as unreadable) | The item's decode error |
+     | In a JSON document, an item of a registered kind in a list of an unregistered kind that states `apiVersion` or `kind` and then `null` for it, the stated value not the one its list gives it | Built: the item emitted as written (a workload, a claim or a PersistentVolume there was refused already, as unreadable) | Refused by launcher: the strict decode reads the item as another kind than the parser, so its fields `cannot be checked` |
+     | An object of an unregistered kind that does not end in `List`, with a top-level `items` array | Built: the entries emitted in its place | Refused by launcher, with a policy or with none |
+
+     The last two rows are launcher's own rules. The parser gives such an item its list's
+     `apiVersion` where the last statement of it is `null`, and the Kubernetes decoder
+     keeps the string the `null` follows: where the two differ, the undeclared-field rule
+     would check another kind than the one emitted, so an item that came back as a Go type
+     is refused. For the
+     last row, kure's parser reads such a document as one object. Whatever applies the
+     output tells a list by the `items` array and not by the kind, so the entries would be
+     applied in the object's place, read by no check. It is the envelope `passthrough`
+     refuses, and the one refused on a registered kind that declares no `items`; the three
+     readers now hold one rule. Under template delivery the refusal is the component's
+     unclassified `oam.ViolationError`, as every render that does not decode is.
+     `passthrough` of a registered kind that states `Kind` beside `kind`, or an
+     `apiversion` that names a version the kind is registered in, was read and checked,
+     and is refused as unreadable.
+
+     Not a refusal: a workload, a claim or a PersistentVolume in a list of an unregistered
+     kind was refused as unreadable and is now checked, and builds when the policy allows
+     it; a list inside such a list was refused and is now opened. The policy check's
+     refusal of an object with a top-level `items` array stays for an object that reaches
+     it another way; its text no longer places the object inside a list of an
+     unregistered kind.
 
 ### 5.3 Shipped (go-kure/launcher#849): refusal classes
 
