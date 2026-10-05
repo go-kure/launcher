@@ -43,7 +43,9 @@ const (
 // On a type that does not implement it `objectName` is refused. It is also
 // refused, and the hook not asked, on a member a component or trait lowering
 // rule emitted: a rule that wants its member's name choosable resolves it
-// itself, under its own role (LoweringContext.ResolveName). What a document
+// itself, under its own role (LoweringContext.ResolveName for an object the
+// rule names apart, LoweringContext.ResolveMemberName for the object of a kind
+// component it emits under the component's name). What a document
 // rule or a raw document rule returns is authored input, the components it
 // built included: the property and the hook apply there, and a document rule
 // that wants to fix a kind component's object name writes `objectName` itself.
@@ -59,8 +61,9 @@ var objectNameSchema = PropertySchema{
 }
 
 // ObjectName returns the name of the object a kind component generates: the
-// one the engine resolved for it, else the component name. A handler names its
-// object with it in ToApplicationConfig.
+// one the engine resolved for it, or the lowering rule that emitted it
+// (LoweringContext.ResolveMemberName), else the component name. A handler names
+// its object with it in ToApplicationConfig.
 func (c Component) ObjectName() string {
 	if c.objectName != "" {
 		return c.objectName
@@ -101,13 +104,20 @@ func emittedObjectNameError(origin *Origin) error {
 // The name is resolved only for a component of a type that takes the property
 // that is no emitted member (Component.emitted). On a member a component or
 // trait lowering rule emitted the property is refused, and without it the
-// rule's name for the object stands. A type that does not take the property is
+// rule's name for the object stands: the component name, or the one the rule
+// resolved and claimed for it (LoweringContext.ResolveMemberName), which is
+// kept as it is. A type that does not take the property is
 // left to its handler, whatever it holds under that key: the engine reads the
-// value as a name only where the property is its own.
+// value as a name only where the property is its own. A name a rule resolved
+// for a member of such a type is refused: no single object would take it.
 func withObjectName(component Component, handler ComponentHandler, namespace, fluxNamespace string, names *nameResolver) (Component, error) {
 	raw, present := objectNameSet(component.Properties)
 	provider, takes := handler.(ComponentObjectProvider)
 	if !takes {
+		if component.emitted() && component.objectName != "" {
+			return component, errors.Errorf("a lowering rule named the object of this component %q%s, and component type %q generates no single object named after the component",
+				component.objectName, emittedBy(component.origin), component.Type)
+		}
 		// The property is then the handler's own business, as any other key is: one
 		// that declares a schema without it is told why it is refused; one that
 		// declares it, or no schema at all, reads it itself.

@@ -87,6 +87,63 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	return lowered.name, nil
 }
 
+// ResolveMemberName names the one object of member, a kind component the rule
+// is about to emit, where the rule lets the author and the Naming hook choose
+// that name. The object is named after its component unless one of them says
+// otherwise: the name is the author's (spec.Property set), else the hook's
+// answer, else member's component name, used as written. A name that is not
+// the default is validated for spec.Role and used as given or refused, never
+// shortened. spec.Role must name an object and spec.Kind be the kind of
+// member's type; spec.Default and spec.Namespace choose nothing here, and
+// spec.ClusterScoped and spec.FluxScoped say where the object lands, as they
+// do for ResolveName.
+//
+// The name is resolved, recorded for the transform to claim and set on member
+// in this one call: a rule has no other way to give a member's object a name
+// of its own, so no such name goes unclaimed. member keeps its component name,
+// and with it its sibling group, its place in the layout, its labels and what
+// OrderAfter orders: only the object's name changes, and what the rule writes
+// as a reference to that object (a sourceRef) is the rule's to write from
+// member.ObjectName afterwards. The hook is asked with the enclosing
+// component, as ResolveName asks it, and the claim is held as ResolveName's
+// is.
+//
+// member's type must be a kind component's (ComponentObjectProvider): the
+// transform refuses a name set on any other. `objectName` stays refused on the
+// member, as on every component a rule emitted.
+//
+// On a context with no Namer (a rule driven directly, outside the engine) an
+// authored name is validated and set, the hook is not consulted and nothing is
+// claimed, as for a trait built outside a transform (Trait.ResolveName): the
+// default needs no allocator, and no transform follows to claim anything.
+func (l LoweringContext) ResolveMemberName(member *Component, spec NameSpec) error {
+	if member == nil || member.Name == "" {
+		return errors.New("lowering: ResolveMemberName needs a member component with a name")
+	}
+	if class, _, known := classOfNameRole(spec.Role); known && class != nameClassObject {
+		return errors.Errorf("lowering: role %q names no object; a lowering rule resolves object names only", spec.Role)
+	}
+	if err := clusterScopeProblem(spec); err != nil {
+		return err
+	}
+	lowered, err := l.lowerDefault(member.Name, spec, false)
+	if err != nil {
+		return err
+	}
+	if l.Namer != nil {
+		if err := l.Namer.recordLowered(lowered); err != nil {
+			return err
+		}
+	}
+	// The default leaves the member as the rule built it: the object is named
+	// after its component, as before (Component.ObjectName).
+	member.objectName = ""
+	if lowered.name != member.Name {
+		member.objectName = lowered.name
+	}
+	return nil
+}
+
 // ResolveSharedName is ResolveName for an object the elements of one document
 // share: one its content identity determines wholly, as NameAllocator.EmitOrAdopt
 // asks of it (a generated Flux source). identity is that content identity. The
@@ -183,6 +240,15 @@ func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentO
 		// another of its component and role; it is never the name.
 		def = base + "-" + suffix
 	}
+	return l.lowerDefault(def, spec, documentOwned)
+}
+
+// lowerDefault resolves spec with def as its default and returns the name with
+// what the transform needs to claim it: lowerName past the building of the
+// default, and the whole of it for a name whose default is not built from a
+// base and a suffix (ResolveMemberName). The caller has checked that spec's
+// role names an object and that its scope is one (clusterScopeProblem).
+func (l LoweringContext) lowerDefault(def string, spec NameSpec, documentOwned bool) (loweredName, error) {
 	// Where the object lands is the transform's to say (claimLowered): the
 	// resolver below is given neither.
 	fluxScoped := spec.FluxScoped
@@ -210,8 +276,11 @@ func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentO
 		owner.component = l.Component.Name
 	}
 	// No claim space: the name is recorded by the caller and claimed by the
-	// transform.
-	resolver := &nameResolver{hook: l.Namer.hook, application: application}
+	// transform. No hook without a Namer (ResolveMemberName outside the engine).
+	resolver := &nameResolver{application: application}
+	if l.Namer != nil {
+		resolver.hook = l.Namer.hook
+	}
 	name, source, err := resolver.resolveFrom(owner, spec)
 	if err != nil {
 		return loweredName{}, err

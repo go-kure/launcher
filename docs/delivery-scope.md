@@ -206,7 +206,9 @@ Decided in the ticket:
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
   `databases[].objectName`), the object of every kind component (`objectName`), the source
   a `helm` or `oci` component generates (`source.name`) and the `helm` values ConfigMap and
-  Secret (`valuesConfigMapName`, `valuesSecretName`), and the prefix of a `helmtemplate`
+  Secret (`valuesConfigMapName`, `valuesSecretName`), the Kustomization of an `oci`
+  component and the source it keeps to itself (`kustomizationName`, `source.objectName`),
+  and the prefix of a `helmtemplate`
   component's hook-group child layouts (`hookGroupNamePrefix`). Still
   none for:
   bundle and ordered-group
@@ -251,10 +253,13 @@ Decided in the ticket:
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects and the
     `networkpolicy` trait's policy, the `postgresql` Pooler and Databases, the object
     of an authored kind component, the generated source and values ConfigMap and
-    Secret of a `helm` component, and the prefix of a `helmtemplate` component's
+    Secret of a `helm` component, the Kustomization and the kept source of an `oci`
+    component, and the prefix of a `helmtemplate` component's
     hook-group layouts. A trait
     handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
-    `LoweringContext.ResolveName` (`pkg/oam/naming_lowering.go`).
+    `LoweringContext.ResolveName`, or with `LoweringContext.ResolveMemberName` for the
+    object of a kind component it emits under its component's name
+    (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
     a DNS-1123 subdomain (a DNS-1035 label for the Pooler), refused when invalid or too
     long. Only launcher's own defaults go through the shortening rule (§3.3).
@@ -303,8 +308,13 @@ Decided in the ticket:
     was refused there before; alone it still references an existing source. The hook is
     asked under role `helm-source`, once for each source identity of a document and with
     no component, for the shared `<document>-source-<digest>` source of either rule
-    (`LoweringContext.ResolveSharedName`). The source an `oci` component keeps to itself
-    stays named after the component, with no role.
+    (`LoweringContext.ResolveSharedName`).
+  - `kustomizationName` and `source.objectName` name the Kustomization of an `oci`
+    component and the source it keeps to itself, under roles `oci-kustomization` and
+    `oci-source`, asked with the component; the default of both is the component name.
+    The members keep the component's name, the Kustomization's `sourceRef` follows the
+    source's name, and both names are claimed (`LoweringContext.ResolveMemberName`).
+    `source.objectName` is refused beside `source.name`.
   - `valuesConfigMapName` and `valuesSecretName` name the `helm` values ConfigMap and
     Secret, under roles `values-configmap` and `values-secret`. A name from the author or
     the hook carries no content hash, so a values-only edit no longer changes the
@@ -1251,7 +1261,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`) | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

@@ -49,16 +49,18 @@ const (
 	// NameRoleObject is the one object of a kind component
 	// (ComponentObjectProvider): an authored `deployment`, `service`,
 	// `configmap`. Default: the component name. It is not asked for a member a
-	// component or trait lowering rule emitted: the rule names its members. A
-	// component of a document a document rule returned is authored input.
+	// component or trait lowering rule emitted: the rule names its members, and
+	// one it lets the author or the hook name is asked for under the rule's own
+	// role (NameRoleOCIKustomization, NameRoleOCISource). A component of a
+	// document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
 	// NameRoleHelmSource is a Flux source a lowering rule generates for the
 	// document as a whole: the helm rule's source for an inline `source`, and the
 	// oci rule's when components share one or one of them names it. Default:
 	// "<document>-source-<digest>". The components of a document with one source
 	// identity share the source, so the hook is asked once for it, with no
-	// component. The source an oci component keeps to itself is not asked for: it
-	// is named after the component.
+	// component. The source an oci component keeps to itself is the component's
+	// own, and is asked for under NameRoleOCISource.
 	NameRoleHelmSource NameRole = "helm-source"
 	// NameRoleValuesConfigMap is the ConfigMap the helm rule generates under
 	// valuesMode: configMap. Default: "<component>-values-<values hash>".
@@ -66,6 +68,16 @@ const (
 	// NameRoleValuesSecret is the Secret the helm rule generates for
 	// secretValues. Default: "<component>-secret-values-<values hash>".
 	NameRoleValuesSecret NameRole = "values-secret"
+	// NameRoleOCIKustomization is the Flux Kustomization an oci component
+	// generates, whether the component keeps its source or shares one. Default:
+	// the component name. The hook is asked with the component.
+	NameRoleOCIKustomization NameRole = "oci-kustomization"
+	// NameRoleOCISource is the OCIRepository an oci component keeps to itself:
+	// the one no other oci component of the document shares and no `source.name`
+	// names. Default: the component name. The hook is asked with the component.
+	// A source the document's components share, and one `source.name` names, is
+	// the document's (NameRoleHelmSource).
+	NameRoleOCISource NameRole = "oci-source"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
 	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and the
 	// Flux Kustomization the base library generates for it under per-layout
@@ -128,6 +140,8 @@ var nameRoles = []struct {
 	{NameRoleHelmSource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesConfigMap, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleValuesSecret, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleOCIKustomization, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleOCISource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 }
 

@@ -164,7 +164,8 @@ const (
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
-	namingTransform(t, namingApp("", namingDB+namingChart+jobs), namingContext(declineEveryName(&requests)))
+	artifact := ociNamesComponent("artifact", "artifact", "", "")
+	namingTransform(t, namingApp("", namingDB+namingChart+jobs+artifact), namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -179,18 +180,21 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// is the one authored kind component: the
 	// members the webservice, postgresql and helm rules emit are named by their
 	// rule, and the hook is not asked for them. The helm rule's generated source
-	// is the document's, so its request carries no component.
+	// is the document's, so its request carries no component. The oci rule asks
+	// for the two objects it names after its component, under its own roles.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesConfigMap, Kind: "ConfigMap", Default: chartConfigMapDefault},
 		{Application: "shop", Role: oam.NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: chartSourceDefault},
+		{Application: "shop", Component: "artifact", Role: oam.NameRoleOCISource, Kind: ociRepositoryKindName, Default: "artifact"},
+		{Application: "shop", Component: "artifact", Role: oam.NameRoleOCIKustomization, Kind: ociKustomizationKindName, Default: "artifact"},
 		{Application: "shop", Component: "agent", Role: oam.NameRoleObject, Kind: "DaemonSet.apps", Default: "agent"},
 		// The prefix of jobs' hook-group layouts: no object, so no kind.
 		{Application: "shop", Component: "jobs", Role: oam.NameRoleHookGroup, Default: "shop-jobs"},
 		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
-		// db, chart and jobs are placed in no tier and share the first group with agent,
+		// db, chart, jobs and artifact are placed in no tier and share the first group with agent,
 		// so that group is numbered: a group carries a tier's name only when it is
 		// that tier and nothing else.
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-00"},
