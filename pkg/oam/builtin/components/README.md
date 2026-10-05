@@ -156,6 +156,7 @@ reads it.
 | `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, required, and `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
 | `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
+| `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -248,7 +249,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | missing | - | - | - |
 | `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | missing | - | - | - |
 | `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | trait | `httproute` | hand-written parser | `expose` lowers onto it. |
+| `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | kind | `httproute` | strict decode of `HTTPRouteSpec` | No type under `HTTPRouteSpec` unmarshals itself, so the decode reaches every depth. The `httproute` trait, which `expose` lowers onto, builds its own HTTPRoute with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis, takes its parent from a capability and is held to the policy's capability lists. |
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | kind | `ingress` | strict decode of `IngressSpec` | The `ingress` trait, which `expose` lowers onto, builds its own Ingress with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis and is held to the platform's hostname constraint and the policy's capability lists. |
@@ -2729,6 +2730,48 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Not covered:** the Ingress's own metadata, so its labels and annotations
   (a controller's `nginx.ingress.kubernetes.io/…` annotations among them)
   cannot be authored, and its `status`, which the controller writes.
+- **httproute** (go-kure/launcher#790) is the kind-named projection of a
+  gateway.networking.k8s.io/v1 HTTPRoute, on the same recipe as `ingress`: one
+  schema key per json field of `gatewayv1.HTTPRouteSpec`, those of the
+  `CommonRouteSpec` it inlines included (`parentRefs`, `useDefaultGateways`,
+  `hostnames`, `rules`), decoded strictly into that type. No type under
+  `HTTPRouteSpec` unmarshals itself, so an unknown key is refused at every
+  depth. It emits one HTTPRoute named after the component in the build
+  namespace, with the authored spec and nothing else. No field is required by
+  the decode and none is filled; the API's value rules (a filter's `type`
+  matching the member set, a rule's `matches` and `backendRefs` limits) are
+  left to the API server. A null list element (`rules: [null]`, a null parent
+  or backendRef) is refused by its path. `useDefaultGateways` is a field of the
+  Gateway API's experimental channel: a cluster whose HTTPRoute CRD is the
+  standard channel's refuses a route that sets it.
+
+  **It is an authored object, not the `httproute` trait**, although the two
+  share the type name. The trait attaches to a component and routes to that
+  component's Service; this kind is a component of its own, and a backendRef is
+  a reference carried as written, its `namespace` included. Three things the
+  trait has do not reach it:
+  - **No NetworkPolicy allow rule.** As for `ingress` above: the NetworkPolicy
+    synthesis reads a routing trait's traffic sources and target component,
+    which this kind does not report, so it allows nothing for the route's
+    backends. An author who wants the allow rule puts the `expose` or
+    `httproute` trait on the backend component, or authors the NetworkPolicy.
+  - **No parent from a capability.** The trait builds `parentRefs` from the
+    Gateway its capability rendering names when the author writes none. Here
+    `parentRefs` is what the author wrote; unwritten, the route has no parent.
+  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
+    capability lists gate trait types, so a policy that forbids the
+    `httproute` trait does not refuse an `httproute` component. `passthrough`,
+    `manifests` and template delivery emit an HTTPRoute under the same terms.
+    A consumer that restricts routing restricts the component types it
+    registers.
+
+  **The name** is the component's, or its `objectName`. An `httproute` trait
+  names its own HTTPRoute (`<component>-httproute`, or its `name`); a
+  component and a trait whose HTTPRoute would carry one name are refused, with
+  both named.
+
+  **Not covered:** the HTTPRoute's own metadata, so its labels and annotations
+  cannot be authored, and its `status`, which the Gateway controller writes.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5348,7 +5391,7 @@ See "Component label and ownership" in the
 Every kind component takes `objectName`, which names its one object in place of the component
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`ingress`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`ingress`, `httproute`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

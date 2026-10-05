@@ -290,6 +290,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// no pods and selects none, and its backend is a Service by name.
 	"ingress": {props: map[string]any{"defaultBackend": map[string]any{
 		"service": map[string]any{"name": "web", "port": map[string]any{"number": 80}}}}},
+	// An HTTPRoute name is a DNS-1123 subdomain too, and the object is authored
+	// in the same way: no pods, no selector, a backend by name.
+	"httproute": {props: map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gateway"}},
+		"rules": []any{map[string]any{"backendRefs": []any{
+			map[string]any{"name": "web", "port": 80}}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -234,6 +235,13 @@ func (h *ServiceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 // claims its own Ingress under the same kind, so the two are held apart.
 func (h *IngressHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return networkingKind("Ingress"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the httproute kind's HTTPRoute. The `httproute`
+// trait claims its own HTTPRoute under the same kind, so the two are held
+// apart.
+func (h *HTTPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}, oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the configmap kind's ConfigMap.

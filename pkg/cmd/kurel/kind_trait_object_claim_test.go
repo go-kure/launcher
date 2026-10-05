@@ -30,6 +30,18 @@ var kindTraitPairs = []struct {
               number: 8080
 `,
 	},
+	{
+		typ: "httproute", identity: `HTTPRoute.gateway.networking.k8s.io "default/api-httproute"`,
+		trait: claimHTTPRouteTrait, object: "api-httproute",
+		traitOwner: `component "api" traits[0] "httproute" (its own object, its default name)`,
+		kind: `        parentRefs:
+          - name: gw
+        rules:
+          - backendRefs:
+              - name: api
+                port: 8080
+`,
+	},
 }
 
 // claimKind is a kind component of type typ.
