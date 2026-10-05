@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/fluxcd"
 	"github.com/go-kure/kure/pkg/stack/layout"
@@ -446,6 +447,34 @@ func htChartCluster(t *testing.T, srvURL, application string, componentTraits ..
 	return cluster
 }
 
+// htSourceBundles gives every bundle of cluster that holds applications a
+// source, which the Flux workflow needs to write a Kustomization for it.
+func htSourceBundles(cluster *stack.Cluster) {
+	var source func(b *stack.Bundle)
+	source = func(b *stack.Bundle) {
+		if b == nil {
+			return
+		}
+		if len(b.Applications) > 0 {
+			b.SourceRef = &stack.SourceRef{Kind: "OCIRepository", Name: b.Name, URL: "oci://registry.example/" + b.Name, Tag: "v1"}
+		}
+		for _, child := range b.Children {
+			source(child)
+		}
+	}
+	var nodes func(n *stack.Node)
+	nodes = func(n *stack.Node) {
+		if n == nil {
+			return
+		}
+		source(n.Bundle)
+		for _, child := range n.Children {
+			nodes(child)
+		}
+	}
+	nodes(cluster.Node)
+}
+
 // htHookGroupChildren walks the cluster htChartCluster builds with kure's layout
 // walker and returns the component layout's hook-group children.
 func htHookGroupChildren(t *testing.T, srvURL, application string, componentTraits ...oam.Trait) []*layout.ManifestLayout {
@@ -577,29 +606,7 @@ func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cluster := htChartCluster(t, srvURL, "shop", tc.traits...)
-			var source func(b *stack.Bundle)
-			source = func(b *stack.Bundle) {
-				if b == nil {
-					return
-				}
-				if len(b.Applications) > 0 {
-					b.SourceRef = &stack.SourceRef{Kind: "OCIRepository", Name: b.Name, URL: "oci://registry.example/" + b.Name, Tag: "v1"}
-				}
-				for _, child := range b.Children {
-					source(child)
-				}
-			}
-			var nodes func(n *stack.Node)
-			nodes = func(n *stack.Node) {
-				if n == nil {
-					return
-				}
-				source(n.Bundle)
-				for _, child := range n.Children {
-					nodes(child)
-				}
-			}
-			nodes(cluster.Node)
+			htSourceBundles(cluster)
 
 			root, err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().CreateLayoutWithResources(cluster, layout.DefaultLayoutRules())
 			if err != nil {
@@ -629,6 +636,86 @@ func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 			slices.Sort(rendered)
 			if want := []string{"main", "multi", "post", "pre"}; !slices.Equal(rendered, want) {
 				t.Errorf("the layout holds the chart's objects %v, want %v: the annotation check did not see every hook group", rendered, want)
+			}
+		})
+	}
+}
+
+// TestHelmTemplate_HookGroupKustomizationNames: under per-layout placement the
+// base library gives each hook-group child a Flux Kustomization named after the
+// bundle's Kustomization and the child, so the application name leads it twice
+// for an application that is its own bundle. A consumer that walks the tree
+// itself can name one: KustomizationName set on the walked child before the
+// integration is the name of that child's Kustomization, and the next group's
+// spec.dependsOn follows it, though the child's DependsOn still lists the
+// layout name.
+func TestHelmTemplate_HookGroupKustomizationNames(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
+	rules := layout.DefaultLayoutRules()
+	rules.FluxPlacement = layout.FluxIntegratedPerLayout
+	for _, tc := range []struct {
+		name     string
+		override string // KustomizationName set on the main group's layout
+		want     map[string][]string
+	}{
+		{name: "defaults", want: map[string][]string{
+			"shop-shop-db-00-pre-install":  nil,
+			"shop-shop-db-01-main":         {"shop-shop-db-00-pre-install"},
+			"shop-shop-db-02-post-install": {"shop-shop-db-01-main"},
+		}},
+		{name: "a consumer names the main group", override: "db-main", want: map[string][]string{
+			"shop-shop-db-00-pre-install":  nil,
+			"db-main":                      {"shop-shop-db-00-pre-install"},
+			"shop-shop-db-02-post-install": {"db-main"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := htChartCluster(t, srvURL, "shop")
+			htSourceBundles(cluster)
+			root, err := layout.WalkCluster(cluster, rules)
+			if err != nil {
+				t.Fatalf("WalkCluster: %v", err)
+			}
+			var component *layout.ManifestLayout
+			var find func(ml *layout.ManifestLayout)
+			find = func(ml *layout.ManifestLayout) {
+				if ml.Name == "db" {
+					component = ml
+				}
+				for _, child := range ml.Children {
+					find(child)
+				}
+			}
+			find(root)
+			if component == nil || len(component.Children) != 3 {
+				t.Fatalf("the walked tree has no layout for component db with three hook-group children")
+			}
+			main := component.Children[1]
+			if main.Name != "shop-db-01-main" {
+				t.Fatalf("the second hook-group child is %q, want shop-db-01-main", main.Name)
+			}
+			main.KustomizationName = tc.override
+
+			if err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().IntegrateWithLayout(root, cluster, rules); err != nil {
+				t.Fatalf("IntegrateWithLayout: %v", err)
+			}
+			got := map[string][]string{}
+			for _, o := range component.Resources {
+				kz, isKustomization := o.(*kustv1.Kustomization)
+				if !isKustomization {
+					continue
+				}
+				var deps []string
+				for _, dep := range kz.Spec.DependsOn {
+					deps = append(deps, dep.Name)
+				}
+				got[kz.Name] = deps
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("the component layout holds Kustomizations (name: dependsOn) %v, want %v", got, tc.want)
+			}
+			if want := []string{"shop-db-01-main"}; !slices.Equal(component.Children[2].DependsOn, want) {
+				t.Errorf("the post-install child's DependsOn is %v, want the layout name %v", component.Children[2].DependsOn, want)
 			}
 		})
 	}

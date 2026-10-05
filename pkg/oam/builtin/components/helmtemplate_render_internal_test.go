@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
@@ -716,6 +717,40 @@ func TestDecodeChartManifests_UnstructuredScalarsAreJSONTyped(t *testing.T) {
 				}
 			}
 			assertDeepCopyable(t, objects)
+		})
+	}
+}
+
+// TestDecodeChartManifests_LargeIntegerAsWritten: what kure's manifest writer
+// writes for a large integer a chart rendered into an object of an unregistered
+// kind. One an int64 holds is decoded as an int64 and written with its own
+// digits (go-kure/kure#1006). One above that range is a float64 from the decode
+// on, so it is written as that float, with the shortest digits that read back
+// as it: not the chart's digits, also where the float holds the integer (2^63).
+func TestDecodeChartManifests_LargeIntegerAsWritten(t *testing.T) {
+	for rendered, written := range map[string]string{
+		"9007199254740993":     "9007199254740993",
+		"9223372036854775807":  "9223372036854775807",
+		"9223372036854775808":  "9223372036854776000",
+		"9223372036854775809":  "9223372036854776000",
+		"18446744073709551615": "1.8446744073709552e+19",
+	} {
+		t.Run(rendered, func(t *testing.T) {
+			doc := "apiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\nspec:\n  v: " + rendered + "\n"
+			objects, err := decodeChartManifests([]byte(doc))
+			if err != nil {
+				t.Fatalf("decodeChartManifests: %v", err)
+			}
+			if len(objects) != 1 {
+				t.Fatalf("got %d objects, want 1", len(objects))
+			}
+			out, err := kureio.EncodeObjectsToYAML([]*client.Object{&objects[0]})
+			if err != nil {
+				t.Fatalf("EncodeObjectsToYAML: %v", err)
+			}
+			if want := "  v: " + written + "\n"; !strings.Contains(string(out), want) {
+				t.Errorf("the written object lacks %q:\n%s", want, out)
+			}
 		})
 	}
 }
