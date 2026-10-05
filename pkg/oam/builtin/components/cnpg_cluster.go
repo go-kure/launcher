@@ -550,6 +550,8 @@ type CnpgClusterConfig struct {
 // workload kinds apply to their image also applies to imageName when it is
 // set; postgresql does not enforce it, so this one addition can refuse a
 // postgresql-shaped Cluster whose image comes from a registry outside the list.
+// It applies as well to the image of each postgresql.extensions entry, the one
+// other image a Cluster names; postgresql writes no such entry.
 func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
@@ -629,6 +631,18 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if c.Spec.ImageName != "" {
 		if err := enforceAllowedRegistries(c.Spec.ImageName, p.AllowedRegistries()); err != nil {
 			return errors.Wrap(err, "imageName")
+		}
+	}
+	// An extension's image is mounted into the instance pods as an image volume,
+	// which the kubelet pulls as it pulls a container's image: its reference is
+	// held to the same list and read the same way. An extension that names no
+	// reference names no image here, and nothing is checked for it.
+	for i, ext := range c.Spec.PostgresConfiguration.Extensions {
+		if ext.ImageVolumeSource.Reference == "" {
+			continue
+		}
+		if err := enforceAllowedRegistries(ext.ImageVolumeSource.Reference, p.AllowedRegistries()); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("postgresql.extensions[%d].image.reference", i))
 		}
 	}
 

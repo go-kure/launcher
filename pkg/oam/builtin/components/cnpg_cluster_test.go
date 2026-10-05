@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -768,6 +769,74 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})
+}
+
+// cnpgExtensions is a cnpg-cluster's properties naming one extension per
+// reference, in order; an empty reference is an extension that names no image.
+func cnpgExtensions(references ...string) map[string]any {
+	extensions := make([]any, 0, len(references))
+	for i, reference := range references {
+		image := map[string]any{}
+		if reference != "" {
+			image["reference"] = reference
+		}
+		extensions = append(extensions, map[string]any{"name": fmt.Sprintf("ext%d", i), "image": image})
+	}
+	return map[string]any{"postgresql": map[string]any{"extensions": extensions}}
+}
+
+// An extension's image is mounted into the instance pods as an image volume,
+// which the kubelet pulls as it pulls a container's image: its reference is
+// held to the allowed registries as imageName is, and read the same way.
+func TestCnpgClusterConfig_ApplyPolicy_ExtensionImageRegistry(t *testing.T) {
+	ghcr := []string{"ghcr.io"}
+	refused := []struct {
+		name       string
+		references []string
+		want       string
+	}{
+		{"a registry not allowed", []string{"other.example/team/pgvector:1.0.0"},
+			`postgresql.extensions[0].image.reference: image "other.example/team/pgvector:1.0.0" is not from an allowed registry [ghcr.io]`},
+		{"the second extension, named by its position", []string{"ghcr.io/team/pgvector:1.0.0", "other.example/team/postgis:3.5.0"},
+			`postgresql.extensions[1].image.reference: image "other.example/team/postgis:3.5.0" is not from an allowed registry [ghcr.io]`},
+		{"no registry host is Docker Hub", []string{"team/pgvector:1.0.0"},
+			`postgresql.extensions[0].image.reference: image "team/pgvector:1.0.0" is not from an allowed registry [ghcr.io]`},
+		{"a digest is not part of the host", []string{"other.example/team/pgvector@sha256:" + strings.Repeat("a", 64)},
+			`postgresql.extensions[0].image.reference: image "other.example/team/pgvector@sha256:` + strings.Repeat("a", 64) + `" is not from an allowed registry [ghcr.io]`},
+	}
+	for _, tc := range refused {
+		t.Run("refused: "+tc.name, func(t *testing.T) {
+			err := newCnpgCluster(t, cnpgExtensions(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: ghcr})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			var refusal *oam.PolicyRefusal
+			if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry {
+				t.Errorf("err = %v, want a refusal of class %q", err, oam.RefusalRegistry)
+			}
+		})
+	}
+
+	allowed := []struct {
+		name       string
+		references []string
+		registries []string
+	}{
+		{"an allowed registry", []string{"ghcr.io/team/pgvector:1.0.0"}, ghcr},
+		{"an allowed registry by digest", []string{"ghcr.io/team/pgvector@sha256:" + strings.Repeat("a", 64)}, ghcr},
+		{"Docker Hub when it is listed", []string{"team/pgvector:1.0.0"}, []string{"docker.io"}},
+		// An extension with no reference names no image: the document chose
+		// none, as with an unset imageName.
+		{"no reference", []string{""}, []string{"registry.invalid"}},
+		{"any registry with no list", []string{"other.example/team/pgvector:1.0.0"}, nil},
+	}
+	for _, tc := range allowed {
+		t.Run("allowed: "+tc.name, func(t *testing.T) {
+			if err := newCnpgCluster(t, cnpgExtensions(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: tc.registries}); err != nil {
+				t.Errorf("ApplyPolicy: %v", err)
+			}
+		})
+	}
 }
 
 func TestCnpgClusterConfig_Generate_RequestWithinLimit(t *testing.T) {
