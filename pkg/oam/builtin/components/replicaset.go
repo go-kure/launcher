@@ -48,14 +48,20 @@ func (h *ReplicaSetHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig decodes an OAM replicaset component into a
 // ReplicaSetConfig, under the package's null contract and the strict decode
 // every spec-projecting kind uses. What the ReplicaSet may not hold is refused
-// here, whatever the environment policy: see ReplicaSetConfig.validate and
-// podTemplateDefaultedZeros.
+// here, whatever the environment policy: see ReplicaSetConfig.validate,
+// podTemplateDefaultedZeros and podTemplateLabelSelectorRequired. `selector`
+// is not in that list: validate refuses an expression of it without a key or
+// an operator, with every other selector apimachinery cannot read
+// (refuseSelectorAgainstAppLabel).
 func (h *ReplicaSetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[appsv1.ReplicaSetSpec](component.Properties, "apps/v1 ReplicaSetSpec")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
 	cfg := &ReplicaSetConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}

@@ -74,7 +74,7 @@ var ciliumBGPPeerConfigKind = &policyFreeKind[ciliumv2.CiliumBGPPeerConfigSpec]{
 		"families[].afi":          "the address family identifier: ipv4, ipv6, l2vpn, ls or opaque",
 		"families[].safi":         "the subsequent address family identifier, unicast for one",
 		"gracefulRestart.enabled": "whether graceful restart is negotiated with the peer; no default is filled",
-	}, ciliumSelectorRequired("families[].advertisements")),
+	}, labelSelectorRequired("families[].advertisements")),
 	validate: validateCiliumBGPPeerConfig,
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPPeerConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumBGPPeerConfig(name)

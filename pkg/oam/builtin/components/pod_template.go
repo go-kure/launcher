@@ -31,6 +31,14 @@ func podTemplateDefaultedZeros() defaultedZeroFields {
 	return podSpecDefaultedZeros("template.spec.")
 }
 
+// podTemplateLabelSelectorRequired is the required list of the label selectors
+// of a spec whose pod template is its `template` property: the key and the
+// operator of each match expression (labelSelectorRequired) of the pod spec's
+// selectors (podSpecLabelSelectors) under template.spec.
+func podTemplateLabelSelectorRequired() map[string]string {
+	return labelSelectorRequired(podSpecLabelSelectors("template.spec.")...)
+}
+
 // controllerActiveDeadlineReason is the error text, after the path of the pod
 // spec, for an activeDeadlineSeconds on the pod template of a controller that
 // keeps its pods running.

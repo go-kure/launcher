@@ -1064,9 +1064,11 @@ its text:
     test derives: a rule names `apiGroups` and `resources`, or in a ClusterRole
     `nonResourceURLs` instead, which are refused in a Role and beside resources; a
     ClusterRoleBinding's ServiceAccount subject names its `namespace`; an
-    `aggregationRule` holds a selector. The form of a value that validation checks
-    is left to the API server; whether a verb, a resource or an API group exists is
-    checked by neither.
+    `aggregationRule` holds a selector. A match expression of such a selector is also
+    held to the shared label-selector check: an operator that is none of the four, and
+    `values` that do not go with the operator, are refused. The form of any other value
+    that validation checks is left to the API server; whether a verb, a resource or an
+    API group exists is checked by neither.
   - `roleRef.apiGroup` may be left out: the object carries it empty and the API server
     fills the RBAC group. `roleRef.name` and the names of subjects are the author's
     literals and follow no component's `objectName`.
@@ -1175,8 +1177,10 @@ its text:
     such a PersistentVolume. The other three kinds have nothing to enforce.
 - **Shipped: the `networkpolicy` kind** (`networkpolicy.go`), on the recipe of the four
   core kinds and ungated under the terms of the routing kinds.
-  - It projects `NetworkPolicySpec`. No field is required by the decode and none is
-    filled.
+  - It projects `NetworkPolicySpec`. No top-level field is required and none is
+    filled. A match expression of a selector is refused without its `key` or
+    `operator`, with an unknown operator, or with `values` that do not go with the
+    operator.
   - It is an authored object, not the trait of the same type name, and reads as the
     API reads it. The trait always selects its component's pods; on the kind an
     unwritten `podSelector` selects every pod of the namespace. The trait lists a

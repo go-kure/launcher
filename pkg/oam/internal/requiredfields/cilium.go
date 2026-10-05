@@ -6,17 +6,6 @@ import (
 	"strings"
 )
 
-// CiliumSelector is the required list of one Cilium label selector under the
-// path at ("nodeSelector", "advertisements[].selector"): the two fields the
-// API requires of a match expression, each of which the Go type would write
-// empty.
-func CiliumSelector(at string) map[string]string {
-	return map[string]string{
-		at + ".matchExpressions[].key":      "the label key the expression applies to",
-		at + ".matchExpressions[].operator": "the expression's operator: In, NotIn, Exists or DoesNotExist",
-	}
-}
-
 // CiliumRule is the required list of one Cilium policy rule under the path at
 // ("spec", "specs[]"; "" where the rule is the authored tree itself): every
 // field the API requires inside a rule that the Go type writes whether or not
@@ -46,22 +35,22 @@ func CiliumRule(at string) map[string]string {
 		at += "."
 	}
 	out := map[string]string{at + "labels[].key": "the label's key"}
-	maps.Copy(out, CiliumSelector(at+"endpointSelector"))
-	maps.Copy(out, CiliumSelector(at+"nodeSelector"))
+	maps.Copy(out, LabelSelector(at+"endpointSelector"))
+	maps.Copy(out, LabelSelector(at+"nodeSelector"))
 	for _, list := range []string{"ingress", "ingressDeny"} {
 		entry := at + list + "[]"
-		maps.Copy(out, CiliumSelector(entry+".fromEndpoints[]"))
-		maps.Copy(out, CiliumSelector(entry+".fromNodes[]"))
-		maps.Copy(out, CiliumSelector(entry+".fromCIDRSet[].cidrGroupSelector"))
+		maps.Copy(out, LabelSelector(entry+".fromEndpoints[]"))
+		maps.Copy(out, LabelSelector(entry+".fromNodes[]"))
+		maps.Copy(out, LabelSelector(entry+".fromCIDRSet[].cidrGroupSelector"))
 		out[entry+".icmps[].fields[].type"] = icmpType
 	}
 	for _, list := range []string{"egress", "egressDeny"} {
 		entry := at + list + "[]"
 		services := entry + ".toServices[].k8sServiceSelector.selector"
-		maps.Copy(out, CiliumSelector(entry+".toEndpoints[]"))
-		maps.Copy(out, CiliumSelector(entry+".toNodes[]"))
-		maps.Copy(out, CiliumSelector(entry+".toCIDRSet[].cidrGroupSelector"))
-		maps.Copy(out, CiliumSelector(services))
+		maps.Copy(out, LabelSelector(entry+".toEndpoints[]"))
+		maps.Copy(out, LabelSelector(entry+".toNodes[]"))
+		maps.Copy(out, LabelSelector(entry+".toCIDRSet[].cidrGroupSelector"))
+		maps.Copy(out, LabelSelector(services))
 		out[entry+".icmps[].fields[].type"] = icmpType
 		out[services] = "the label query over the Services; an empty one selects every Service"
 	}

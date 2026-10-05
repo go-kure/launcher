@@ -63,7 +63,7 @@ func (h *CiliumLoadBalancerIPPoolHandler) PropertySchema() map[string]oam.Proper
 // server.
 var ciliumLoadBalancerIPPoolKind = &policyFreeKind[ciliumv2.CiliumLoadBalancerIPPoolSpec]{
 	upstream: "cilium.io/v2 CiliumLoadBalancerIPPoolSpec",
-	required: ciliumSelectorRequired("serviceSelector"),
+	required: labelSelectorRequired("serviceSelector"),
 	build: func(name, _ string, spec *ciliumv2.CiliumLoadBalancerIPPoolSpec) client.Object {
 		pool := kurecilium.CreateCiliumLoadBalancerIPPool(name)
 		spec.DeepCopyInto(&pool.Spec)

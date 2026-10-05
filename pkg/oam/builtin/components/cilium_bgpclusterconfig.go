@@ -60,7 +60,7 @@ var ciliumBGPClusterConfigKind = &policyFreeKind[ciliumv2.CiliumBGPClusterConfig
 		"bgpInstances[].peers[].autoDiscovery.mode": "how the peer is discovered: DefaultGateway",
 		"bgpInstances[].peers[].autoDiscovery.defaultGateway.addressFamily": "the address family of the default gateway the peer is discovered by: ipv4 or ipv6",
 		"bgpInstances[].peers[].peerConfigRef.name":                         "the name of the CiliumBGPPeerConfig the peer is configured by",
-	}, ciliumSelectorRequired("nodeSelector")),
+	}, labelSelectorRequired("nodeSelector")),
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPClusterConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumBGPClusterConfig(name)
 		spec.DeepCopyInto(&config.Spec)

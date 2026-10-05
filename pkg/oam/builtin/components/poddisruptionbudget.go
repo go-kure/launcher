@@ -55,11 +55,19 @@ func (h *PodDisruptionBudgetHandler) PropertySchema() map[string]oam.PropertySch
 }
 
 // podDisruptionBudgetKind is the poddisruptionbudget kind: see policyFreeKind.
-// The API requires no field of the spec; its value rules, the one that
-// minAvailable and maxUnavailable exclude each other included, are left to the
-// API server.
+// The API requires no field of the spec itself. Of a match expression of the
+// selector it requires the key and the operator, which the Go type writes
+// whether or not they were authored (labelSelectorRequired), and it refuses
+// what validateLabelSelector does (ValidatePodDisruptionBudgetSpec in
+// pkg/apis/policy/validation, Kubernetes v1.37.1, validates the selector as a
+// label selector). Its other value rules, the one that minAvailable and
+// maxUnavailable exclude each other included, are left to the API server.
 var podDisruptionBudgetKind = &policyFreeKind[policyv1.PodDisruptionBudgetSpec]{
 	upstream: "policy/v1 PodDisruptionBudgetSpec",
+	required: labelSelectorRequired("selector"),
+	validate: func(spec *policyv1.PodDisruptionBudgetSpec) error {
+		return validateLabelSelector("selector", spec.Selector)
+	},
 	build: func(name, namespace string, spec *policyv1.PodDisruptionBudgetSpec) client.Object {
 		pdb := kubernetes.CreatePodDisruptionBudget(name, namespace)
 		spec.DeepCopyInto(&pdb.Spec)

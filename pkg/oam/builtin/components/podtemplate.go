@@ -53,14 +53,17 @@ func (h *PodTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig decodes an OAM podtemplate component into a
 // PodTemplateConfig, under the package's null contract and the strict decode
 // every spec-projecting kind uses. What a pod may not hold is refused here,
-// whatever the environment policy: see validateAuthoredPodSpec and
-// podTemplateDefaultedZeros.
+// whatever the environment policy: see validateAuthoredPodSpec,
+// podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *PodTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	authored, props, err := decodeKindSpec[podTemplateProperties](component.Properties, "v1 PodTemplate (a podtemplate component authors its `template` only)")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, authored, podTemplateDefaultedZeros()); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
 	cfg := &PodTemplateConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Template: authored.Template}

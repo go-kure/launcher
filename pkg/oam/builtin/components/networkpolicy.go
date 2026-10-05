@@ -1,6 +1,8 @@
 package components
 
 import (
+	"fmt"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -64,10 +66,23 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// networkPolicyLabelSelectors lists the label selectors of a
+// networkingv1.NetworkPolicySpec, as required-list paths: the policy's own and
+// the pod and namespace selectors of every peer.
+var networkPolicyLabelSelectors = []string{
+	"podSelector",
+	"ingress[].from[].podSelector",
+	"ingress[].from[].namespaceSelector",
+	"egress[].to[].podSelector",
+	"egress[].to[].namespaceSelector",
+}
+
 // ToApplicationConfig decodes an OAM networkpolicy component into a
 // NetworkPolicyConfig, under the package's null contract and the strict decode
 // every spec-projecting kind uses. A null rule or peer is refused by path
-// there: decoded, it would be an empty one, which allows everything.
+// there: decoded, it would be an empty one, which allows everything. A match
+// expression of a selector is held to labelSelectorRequired and to
+// NetworkPolicyConfig.validate.
 func (h *NetworkPolicyHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[networkingv1.NetworkPolicySpec](component.Properties, "networking.k8s.io/v1 NetworkPolicySpec")
 	if err != nil {
@@ -76,7 +91,14 @@ func (h *NetworkPolicyHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &NetworkPolicyConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil
+	if err := refuseUnauthoredRequired(props, labelSelectorRequired(networkPolicyLabelSelectors...)); err != nil {
+		return nil, err
+	}
+	cfg := &NetworkPolicyConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // NetworkPolicyConfig implements stack.ApplicationConfig for networkpolicy
@@ -93,6 +115,43 @@ type NetworkPolicyConfig struct {
 	Spec      networkingv1.NetworkPolicySpec
 }
 
+// validate refuses a spec the NetworkPolicy cannot be emitted from: a match
+// expression, in any selector networkPolicyLabelSelectors lists, that the API
+// server refuses on every object (validateLabelSelector;
+// ValidateNetworkPolicySpec and ValidateNetworkPolicyPeer in
+// pkg/apis/networking/validation, Kubernetes v1.37.1, validate each as a label
+// selector). The API's other value rules are left to the API server.
+func (c *NetworkPolicyConfig) validate() error {
+	if err := validateLabelSelector("podSelector", &c.Spec.PodSelector); err != nil {
+		return err
+	}
+	for i := range c.Spec.Ingress {
+		if err := validateNetworkPolicyPeerSelectors(fmt.Sprintf("ingress[%d].from", i), c.Spec.Ingress[i].From); err != nil {
+			return err
+		}
+	}
+	for i := range c.Spec.Egress {
+		if err := validateNetworkPolicyPeerSelectors(fmt.Sprintf("egress[%d].to", i), c.Spec.Egress[i].To); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNetworkPolicyPeerSelectors holds the pod and namespace selectors of
+// the peers at the path at to validateLabelSelector.
+func validateNetworkPolicyPeerSelectors(at string, peers []networkingv1.NetworkPolicyPeer) error {
+	for i := range peers {
+		if err := validateLabelSelector(fmt.Sprintf("%s[%d].podSelector", at, i), peers[i].PodSelector); err != nil {
+			return err
+		}
+		if err := validateLabelSelector(fmt.Sprintf("%s[%d].namespaceSelector", at, i), peers[i].NamespaceSelector); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ApplyPolicy is a no-op: the environment policy holds no rule for a
 // NetworkPolicy. Its capability lists gate trait types, so a policy that
 // forbids the `networkpolicy` trait does not refuse this component; a consumer
@@ -102,8 +161,12 @@ func (c *NetworkPolicyConfig) ApplyPolicy(oam.Policy) error {
 }
 
 // Generate emits the NetworkPolicy: kure's identity-only constructor plus a
-// deep copy of the spec.
+// deep copy of the spec. The parse-time refusals the typed spec can show are
+// repeated, since the config is exported.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
 	np := kubernetes.CreateNetworkPolicy(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&np.Spec)
 	return kindObject(np, c.Metadata)
