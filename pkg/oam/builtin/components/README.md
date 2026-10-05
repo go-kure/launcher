@@ -179,6 +179,7 @@ reads it.
 | `cilium-egressgatewaypolicy` | CiliumEgressGatewayPolicy | Kind-named Cilium egress gateway policy: the whole `CiliumEgressGatewayPolicySpec` (`selectors`, `destinationCIDRs`, `excludedCIDRs`, `egressGateway`, `egressGateways`), strictly decoded; `selectors`, `destinationCIDRs`, `egressGateway` and a gateway's `nodeSelector` are required. The selectors are the author's. Cluster-scoped; no environment policy applies and no capability is required — see below. |
 | `cilium-localredirectpolicy` | CiliumLocalRedirectPolicy | Kind-named Cilium local redirect policy: the whole `CiliumLocalRedirectPolicySpec` (`redirectFrontend`, `redirectBackend`, `skipRedirectFromBackend`, `description`), strictly decoded; the frontend, the backend, its selector and its ports are required, and the frontend takes exactly one of `addressMatcher` and `serviceMatcher`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `cilium-nodeconfig` | CiliumNodeConfig | Kind-named Cilium per-node configuration: the whole `CiliumNodeConfigSpec` (`defaults`, `nodeSelector`, both required), strictly decoded. The keys and values of `defaults` are written as authored. Namespaced; no environment policy applies and no capability is required — see below. |
+| `cilium-clusterwidenetworkpolicy` | CiliumClusterwideNetworkPolicy | Kind-named Cilium cluster-wide network policy: `spec`, `specs` or both, each a Cilium rule, strictly decoded as the `cilium-networkpolicy` kind decodes them. A rule takes exactly one of `endpointSelector` and `nodeSelector`, and at least one of `ingress`, `ingressDeny`, `egress` and `egressDeny`. Cluster-scoped; no environment policy applies and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -329,7 +330,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cilium.CreateCiliumBGPPeerConfig` | cilium.io/v2 CiliumBGPPeerConfig (cluster-scoped) | kind | `cilium-bgppeerconfig` | strict decode of `CiliumBGPPeerConfigSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's rule on `timers` is checked where both of its fields are authored. `authSecretRef` names a Secret and holds no secret. No environment policy applies. |
 | `cilium.CreateCiliumCIDRGroup` | cilium.io/v2 CiliumCIDRGroup (cluster-scoped) | kind | `cilium-cidrgroup` | strict decode of `CiliumCIDRGroupSpec` | The object is named after the component unless `objectName` names it, and a Cilium network policy refers to it by that name. Its labels and annotations are the `labels` and `annotations` properties; a policy selects a group by its labels. No environment policy applies. |
 | `cilium.CreateCiliumClusterwideEnvoyConfig` | cilium.io/v2 CiliumClusterwideEnvoyConfig (cluster-scoped) | missing | - | - | - |
-| `cilium.CreateCiliumClusterwideNetworkPolicy` | cilium.io/v2 CiliumClusterwideNetworkPolicy (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumClusterwideNetworkPolicy` | cilium.io/v2 CiliumClusterwideNetworkPolicy (cluster-scoped) | kind | `cilium-clusterwidenetworkpolicy` | strict decode of `spec` and `specs` into the Cilium `Rule` | The decode and the unknown-key check of the `cilium-networkpolicy` kind (`builtin.UnknownCiliumKeyPath`). A rule selects endpoints or nodes, exactly one of the two. The fields a rule requires are read from the CRD of the linked module. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `cilium.CreateCiliumEgressGatewayPolicy` | cilium.io/v2 CiliumEgressGatewayPolicy (cluster-scoped) | kind | `cilium-egressgatewaypolicy` | strict decode of `CiliumEgressGatewayPolicySpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's rule on `egressIP` is a value rule and the API server's. No address or CIDR is held to the allowed registries. No environment policy applies. |
 | `cilium.CreateCiliumEndpoint` | cilium.io/v2 CiliumEndpoint | not authorable | - | - | Written by the Cilium agent. |
 | `cilium.CreateCiliumEnvoyConfig` | cilium.io/v2 CiliumEnvoyConfig | missing | - | - | - |
@@ -3741,6 +3742,106 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   pool and of the node configuration: the kinds emit `v2`. Whether what is selected or referred to
   exists (a Service, a node, a namespace, a pod, an interface). A pool's and
   a redirect policy's status is the operator's and is not written.
+- **cilium-clusterwidenetworkpolicy** (go-kure/launcher#790) is the kind-named
+  projection of a cluster-scoped cilium.io/v2 CiliumClusterwideNetworkPolicy.
+  The object holds what a CiliumNetworkPolicy holds: one rule under `spec`, a
+  list of rules under `specs`, or both, each a Cilium `api.Rule`. The
+  component's properties are those two fields, decoded as the
+  `cilium-networkpolicy` kind decodes them: strictly, under the null contract,
+  with an unknown key inside a selector, an `icmps` field or a rule label
+  refused by its path (see that entry). `TestCoreKindSchemas_CoverSpec` holds
+  the two keys to the linked `CiliumClusterwideNetworkPolicy` type. It emits
+  one object, named after the component unless `objectName` names it, with no
+  namespace, declared cluster-scoped, holding the authored rules and, as on
+  every kind component, the labels and annotations written under `labels` and
+  `annotations`. It differs from the namespaced kind in two things: its rules reach
+  every namespace of the cluster, and a rule selects endpoints or nodes, by
+  `endpointSelector` or by `nodeSelector`.
+
+  **Refused at build: what the CRD's schema refuses of the two fields, and
+  nothing wider.** Three rules of that schema, each one comparison of authored
+  fields:
+  - no rule at all, neither `spec` nor an entry in `specs` (the object's
+    expression rule `has(self.spec) || has(self.specs)`). An empty `specs` is
+    not emitted, so it holds none; beside a `spec` it is accepted;
+  - a rule that authors both `endpointSelector` and `nodeSelector`, or
+    neither: the schema takes exactly one. None is filled in.
+    `endpointSelector: {}` selects every endpoint of the cluster and
+    `nodeSelector: {}` every node, and each is carried as written; a null one
+    is an absent one;
+  - a rule with no entry in any of `ingress`, `ingressDeny`, `egress` and
+    `egressDeny`. A deny list counts as much as an allow list; a null or empty
+    list is not emitted and holds no entry.
+
+  A null entry of `specs` is refused by its path.
+
+  **Required.** Inside a rule the CRD requires 59 fields that the Cilium type
+  writes whether or not they were authored, so that the object would not show
+  the omission. Each is refused where its parent is authored, by its path
+  (`spec.ingress[0].toPorts[0].terminatingTLS.secret: required (…)`):
+  - the `key` and `operator` of a match expression, in every selector of a
+    rule (`endpointSelector`, `nodeSelector`, `fromEndpoints`, `toEndpoints`,
+    `fromNodes`, `toNodes`, a CIDR entry's `cidrGroupSelector`, a
+    `k8sServiceSelector`'s `selector`), under the deny lists too;
+  - a `k8sServiceSelector`'s `selector`, the `key` of a rule label and the
+    `type` of an `icmps` field;
+  - under an allow list only: an `authentication`'s `mode`; a port's
+    `listener` `name`, its `envoyConfig` and that configuration's `name`; the
+    `secret` of a port's `terminatingTLS` and `originatingTLS` and that
+    Secret's `name`; an HTTP header match's `name`, and the `name` of its
+    `secret` where one is authored.
+
+  Two more are optional to the API and required here: a listener's `priority`
+  and the `kind` of its `envoyConfig`. The type writes an unauthored one as
+  `0` and as the empty string, and the API refuses both (a priority is 1 to
+  100, a kind is `CiliumEnvoyConfig` or `CiliumClusterwideEnvoyConfig`), so a
+  listener that leaves one out cannot be emitted.
+  `TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD` holds the whole list
+  to the CRD of the linked module and to the rule type, under `spec` and
+  under `specs`, so a dependency bump that adds, drops or moves one fails
+  there. An `icmps` field without its `type` and a rule label without its
+  `key` are refused earlier, by Cilium's own decoding, with the decode error
+  (for the `type`, one that names a panic and not the field's position).
+
+  **Not checked.** These are the API server's to refuse, or Cilium's:
+  - the choices the schema makes deeper in a rule: a CIDR entry (`toCIDRSet`,
+    `fromCIDRSet`) holds exactly one of `cidr`, `cidrGroupRef` and
+    `cidrGroupSelector`; a DNS entry (`toFQDNs`, a port's `rules.dns`) exactly
+    one of `matchName` and `matchPattern`; a port's `rules` exactly one of
+    `http` and `dns`. `TestCiliumClusterwideNetworkPolicy_SchemaChoices` lists
+    every choice and expression rule of the linked CRD as checked or left,
+    and fails on one that is neither;
+  - every value rule: enumerations, patterns, ranges, lengths and formats (an
+    `authentication` mode, a port, a CIDR, an ICMP family), and an authored
+    empty value in a required field;
+  - what Cilium's own reader refuses of an object the API server has admitted
+    (which peers may be combined, an entity's name, a port's range). The
+    `cilium-networkpolicy` kind leaves these too;
+  - whether what a rule refers to exists: a CIDR group, a Secret, an Envoy
+    configuration, a Service.
+
+  **What the object carries that was not written.** An `icmps` field's
+  `family` is left out when it is not authored, and the API fills `IPv4`, the
+  one default the CRD declares in a rule. An authored `family: ""` is left
+  out as well and reads the same, to Cilium too. A rule label in its object
+  form without a `source` carries `source: ""`, which the type writes and the
+  API admits.
+
+  **Policy.** `ApplyPolicy` is a no-op and no capability is required, as for
+  the `cilium-networkpolicy` kind: the environment policy holds no rule for
+  the object, and its capability lists gate trait types.
+  - **Hosts are not checked.** A rule names hosts and networks: the names and
+    patterns of `toFQDNs` and of a port's DNS rules, an HTTP rule's `host`, a
+    port's `serverNames`, and every CIDR. None is an artifact source, and
+    none is held to the policy's allowed registries.
+  - **No literal secret is checked.** An HTTP header match's `value` is
+    written into the object as authored. A header match's `secret` and a TLS
+    context's `secret` refer to a Secret by name and namespace; the reference
+    is written as authored, and the Secret is not looked for in the document.
+
+  **Not covered.** The object's metadata beyond its name, its labels and its
+  annotations (`objectName`, `labels`, `annotations`), and its `status`, which
+  the Cilium agent writes.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -6426,6 +6527,7 @@ kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometh
 `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`),
 five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`,
 `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`),
+`cilium-clusterwidenetworkpolicy`,
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no

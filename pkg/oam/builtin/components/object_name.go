@@ -479,6 +479,13 @@ func (h *CiliumNodeConfigHandler) ComponentObject() (schema.GroupKind, oam.Objec
 	return ciliumBGPKind(ciliumv2.CNCKindDefinition), oam.ObjectScopeNamespaced
 }
 
+// ComponentObject declares the cilium-clusterwidenetworkpolicy kind's
+// CiliumClusterwideNetworkPolicy, which is cluster-scoped. It is another kind
+// than the CiliumNetworkPolicy the cilium-networkpolicy kind and trait claim.
+func (h *CiliumClusterwideNetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.CCNPKindDefinition), oam.ObjectScopeCluster
+}
+
 // ComponentObject declares the cnpg-cluster kind's Cluster.
 func (h *CnpgClusterHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return cnpgKind(cnpgv1.ClusterKind), oam.ObjectScopeNamespaced

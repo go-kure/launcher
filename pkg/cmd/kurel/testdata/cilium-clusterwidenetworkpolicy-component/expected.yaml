@@ -1,0 +1,45 @@
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: host-firewall
+  name: host-firewall
+spec:
+  description: Nodes of the edge role accept SSH from the bastion network only.
+  ingress:
+  - fromCIDRSet:
+    - cidr: 192.0.2.0/24
+    toPorts:
+    - ports:
+      - port: "22"
+        protocol: TCP
+  - icmps:
+    - fields:
+      - family: IPv4
+        type: 8
+  nodeSelector:
+    matchLabels:
+      node-role: edge
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: metadata
+  name: deny-cloud-metadata
+specs:
+- egressDeny:
+  - toCIDR:
+    - 169.254.169.254/32
+  endpointSelector: {}
+- egress:
+  - toCIDRSet:
+    - cidrGroupRef: partners
+  enableDefaultDeny:
+    egress: false
+  endpointSelector:
+    matchExpressions:
+    - key: io.kubernetes.pod.namespace
+      operator: NotIn
+      values:
+      - kube-system

@@ -935,6 +935,27 @@ its text:
     a free map of strings, written as authored and not checked.
   - A CIDR group is referred to by its name, which `objectName` sets, or selected by
     the labels written under its `labels`, as on every kind component.
+- **Shipped: the `cilium-clusterwidenetworkpolicy` kind**
+  (`cilium_clusterwidenetworkpolicy.go`), the cluster-scoped counterpart of the
+  `cilium-networkpolicy` kind: `spec`, `specs` or both, each a Cilium rule, with that
+  kind's decode and its refusal of an unknown key inside a selector. It declares its
+  object and takes `objectName`. **No capability is required and nothing gates it.**
+  - It refuses what the CRD's schema refuses of the two fields and is one comparison of
+    authored fields: an object with no rule, a rule that authors both or neither of
+    `endpointSelector` and `nodeSelector`, and a rule with no entry in any of its four
+    lists. The choices deeper in a rule (how a CIDR entry names its addresses, a DNS
+    entry's name or pattern, a port's layer 7 protocol) and every value rule are left to
+    the API server. A test lists every choice and expression rule of the linked CRD as
+    checked or left.
+  - The required list of a rule is read from the CRD and held to it by a test: 59
+    fields the Cilium type writes whether or not they were authored. Two optional
+    fields are required as well, a listener's `priority` and the `kind` of its Envoy
+    configuration, because the type writes an unauthored one as `0` and as the empty
+    string, and the API refuses both.
+  - **Hosts are not checked:** the names a rule holds (`toFQDNs`, DNS rules, an HTTP
+    `host`, server names) and its CIDRs are not artifact sources and are not held to
+    the allowed registries. **No literal secret is checked:** an HTTP header match's
+    `value` is written as authored, and a Secret a rule refers to is not looked for.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, which a kind component could not carry before
   the kinds took `labels` (above). Its inventory row stays `held` until the kind is
@@ -1140,7 +1161,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy` and `cilium-nodeconfig` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig` and `cilium-clusterwidenetworkpolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

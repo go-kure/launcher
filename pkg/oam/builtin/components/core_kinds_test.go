@@ -107,6 +107,14 @@ var coreKindSchemas = []struct {
 	{"cilium-egressgatewaypolicy", reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), &components.CiliumEgressGatewayPolicyHandler{}, nil},
 	{"cilium-localredirectpolicy", reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), &components.CiliumLocalRedirectPolicyHandler{}, nil},
 	{"cilium-nodeconfig", reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), &components.CiliumNodeConfigHandler{}, nil},
+	// A CiliumClusterwideNetworkPolicy has no spec type either: `spec` and
+	// `specs`, as the CiliumNetworkPolicy above.
+	{"cilium-clusterwidenetworkpolicy", reflect.TypeFor[ciliumv2.CiliumClusterwideNetworkPolicy](), &components.CiliumClusterwideNetworkPolicyHandler{}, map[string]string{
+		"kind":       "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
+		"apiVersion": "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
+		"metadata":   "launcher sets the object's name, as on every kind component",
+		"status":     "the Cilium agent writes it",
+	}},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no
