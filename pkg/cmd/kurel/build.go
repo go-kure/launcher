@@ -326,6 +326,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"servicecidr":             &components.ServiceCIDRHandler{},
 
 		"secret": &components.SecretHandler{},
+
+		"servicemonitor":   &components.ServiceMonitorHandler{},
+		"podmonitor":       &components.PodMonitorHandler{},
+		"prometheus-probe": &components.PrometheusProbeHandler{},
+		"prometheusrule":   &components.PrometheusRuleHandler{},
 	}
 }
 

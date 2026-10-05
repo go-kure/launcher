@@ -9,6 +9,7 @@ import (
 
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +18,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -81,6 +83,22 @@ var coreKindSchemas = []struct {
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
 	{"poddisruptionbudget", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), &components.PodDisruptionBudgetHandler{}, nil},
 	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
+	// The kinds of the Prometheus operator's API are held here too: each
+	// projects the top-level fields of its spec type the same way.
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
+	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, nil},
+	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
+	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
+}
+
+// coreKindHiddenFields names, per component, the Go fields of its type that no
+// property reaches because the type declares another field under the same json
+// name less deeply, each with what stands in its place. Every other field of a
+// kind's type must be reachable through the strict decode.
+var coreKindHiddenFields = map[string]map[string]string{
+	"prometheus-probe": {
+		"HTTPConfig.HTTPConfigWithoutTLS.Authorization": "ProbeSpec declares authorization itself, of the same type; the one its HTTP settings embed is hidden by it",
+	},
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole
@@ -107,6 +125,17 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 	if typ == reflect.TypeFor[intstr.IntOrString]() {
 		if want := []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}; prop.Type != "" || !slices.Equal(prop.Types, want) {
 			t.Errorf("schema key %q declares type %q and types %v, but the field is an int-or-string (want no type and types %v)", key, prop.Type, prop.Types, want)
+		}
+		if prop.Description == "" {
+			t.Errorf("schema key %q has no description", key)
+		}
+		return
+	}
+	// A quantity decodes from a number or a string too, and a number need not
+	// be whole.
+	if typ == reflect.TypeFor[resource.Quantity]() {
+		if want := []oam.PropertyType{oam.PropertyTypeNumber, oam.PropertyTypeString}; prop.Type != "" || !slices.Equal(prop.Types, want) {
+			t.Errorf("schema key %q declares type %q and types %v, but the field is a quantity (want no type and types %v)", key, prop.Type, prop.Types, want)
 		}
 		if prop.Description == "" {
 			t.Errorf("schema key %q has no description", key)
@@ -179,11 +208,30 @@ func TestCoreKindSchemas_CoverSpec(t *testing.T) {
 }
 
 // TestCoreKindSchemas_EveryFieldReachable is
-// TestCnpgClusterSchema_EveryFieldReachable for the core kinds.
+// TestCnpgClusterSchema_EveryFieldReachable for the core kinds. A field hidden
+// by another of the same json name is unreachable by the type's own design; it
+// passes only when coreKindHiddenFields names it with what stands in its
+// place.
 func TestCoreKindSchemas_EveryFieldReachable(t *testing.T) {
+	known := map[string]bool{}
 	for _, tt := range coreKindSchemas {
-		if got := builtin.UnreachableJSONFields(tt.typ); len(got) != 0 {
-			t.Errorf("%s fields unreachable through the strict decode: %v", tt.typ, got)
+		known[tt.component] = true
+		hidden := coreKindHiddenFields[tt.component]
+		got := builtin.UnreachableJSONFields(tt.typ)
+		for _, field := range got {
+			if strings.TrimSpace(hidden[field]) == "" {
+				t.Errorf("%s field %s is unreachable through the strict decode", tt.typ, field)
+			}
+		}
+		for field := range hidden {
+			if !slices.Contains(got, field) {
+				t.Errorf("%s: hidden field %s is stale: the strict decode reaches it, or the type has no such field", tt.component, field)
+			}
+		}
+	}
+	for component := range coreKindHiddenFields {
+		if !known[component] {
+			t.Errorf("hidden fields are listed for %q, which is no kind of coreKindSchemas", component)
 		}
 	}
 }

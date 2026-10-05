@@ -1,0 +1,47 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  labels:
+    launcher.gokure.dev/component: worker-metrics
+  name: worker-metrics
+  namespace: default
+spec:
+  bodySizeLimit: 16MiB
+  jobLabel: app.kubernetes.io/name
+  keepDroppedTargets: 0
+  namespaceSelector:
+    any: true
+  podMetricsEndpoints:
+  - filterRunning: false
+    honorLabels: true
+    interval: 30s
+    path: /metrics
+    port: metrics
+    relabelings:
+    - action: labelmap
+      regex: __meta_kubernetes_pod_label_(.+)
+  - basicAuth:
+      password:
+        key: password
+        name: scrape
+      username:
+        key: username
+        name: scrape
+    portNumber: 9090
+  podTargetLabels:
+  - version
+  selector:
+    matchLabels:
+      app: worker
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  labels:
+    launcher.gokure.dev/component: selector-only
+  name: selector-only
+  namespace: default
+spec:
+  namespaceSelector: {}
+  podMetricsEndpoints: null
+  selector: {}

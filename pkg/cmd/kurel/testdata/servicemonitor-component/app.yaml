@@ -1,0 +1,79 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web-metrics
+      type: servicemonitor
+      properties:
+        jobLabel: app.kubernetes.io/name
+        targetLabels:
+          - team
+        selector:
+          matchLabels:
+            app: web
+          matchExpressions:
+            - key: tier
+              operator: In
+              values:
+                - frontend
+        namespaceSelector:
+          matchNames:
+            - payments
+        endpoints:
+          - port: metrics
+            path: /metrics
+            scheme: https
+            interval: 30s
+            scrapeTimeout: 10s
+            honorLabels: false
+            tlsConfig:
+              serverName: metrics.example.com
+              ca:
+                secret:
+                  name: metrics-ca
+                  key: ca.crt
+            relabelings:
+              - sourceLabels:
+                  - __meta_kubernetes_pod_node_name
+                targetLabel: node
+            metricRelabelings:
+              - sourceLabels:
+                  - __name__
+                regex: go_.*
+                action: drop
+          - targetPort: 9090
+            authorization:
+              credentials:
+                name: scrape
+                key: token
+        sampleLimit: 0
+        scrapeProtocols:
+          - OpenMetricsText1.0.0
+          - PrometheusText0.0.4
+    - name: federated
+      type: servicemonitor
+      properties:
+        selector:
+          matchLabels:
+            app: federation
+        endpoints:
+          - port: web
+            oauth2:
+              clientId:
+                configMap:
+                  name: oauth
+                  key: client-id
+              clientSecret:
+                name: oauth
+                key: client-secret
+              tokenUrl: https://auth.example.com/token
+              scopes:
+                - metrics
+    - name: every-service
+      type: servicemonitor
+      properties:
+        selector: {}
+        endpoints: []

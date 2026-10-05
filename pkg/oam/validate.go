@@ -87,6 +87,11 @@ var validComponentTypes = map[string]bool{
 	"servicecidr":             true,
 
 	"secret": true,
+
+	"servicemonitor":   true,
+	"podmonitor":       true,
+	"prometheus-probe": true,
+	"prometheusrule":   true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

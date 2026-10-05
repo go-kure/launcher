@@ -200,6 +200,24 @@ func (h *ServiceCIDRHandler) ContractMetadata() oam.ContractMetadata {
 func (h *SecretHandler) ContractMetadata() oam.ContractMetadata { return contract(secretType) }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ServiceMonitorHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("servicemonitor")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *PodMonitorHandler) ContractMetadata() oam.ContractMetadata { return contract("podmonitor") }
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *PrometheusProbeHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("prometheus-probe")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *PrometheusRuleHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("prometheusrule")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

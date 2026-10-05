@@ -18,8 +18,11 @@ func policyFreeTypeOf[T any](k *policyFreeKind[T]) policyFreeType {
 	return policyFreeType{typ: reflect.TypeFor[T](), wholeObject: k.wholeObject}
 }
 
-// policyFreeTypes lists every policyFreeKind of the package. A kind added
-// without a row here is not held by the tests below.
+// policyFreeTypes lists every policyFreeKind of the package whose type
+// publishes its field comments (SwaggerDoc). A kind added without a row here
+// is not held by the tests below. The kinds of the Prometheus operator's API
+// publish none and are held by TestMonitoringKinds_NoDefaultedZeros instead,
+// from the markers of their source.
 var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(storageClassKind),
 	policyFreeTypeOf(volumeAttributesClassKind),

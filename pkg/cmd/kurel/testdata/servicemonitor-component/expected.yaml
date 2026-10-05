@@ -1,0 +1,91 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    launcher.gokure.dev/component: web-metrics
+  name: web-metrics
+  namespace: default
+spec:
+  endpoints:
+  - interval: 30s
+    metricRelabelings:
+    - action: drop
+      regex: go_.*
+      sourceLabels:
+      - __name__
+    path: /metrics
+    port: metrics
+    relabelings:
+    - sourceLabels:
+      - __meta_kubernetes_pod_node_name
+      targetLabel: node
+    scheme: https
+    scrapeTimeout: 10s
+    tlsConfig:
+      ca:
+        secret:
+          key: ca.crt
+          name: metrics-ca
+      cert: {}
+      serverName: metrics.example.com
+  - authorization:
+      credentials:
+        key: token
+        name: scrape
+    targetPort: 9090
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+    - payments
+  sampleLimit: 0
+  scrapeProtocols:
+  - OpenMetricsText1.0.0
+  - PrometheusText0.0.4
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: In
+      values:
+      - frontend
+    matchLabels:
+      app: web
+  targetLabels:
+  - team
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    launcher.gokure.dev/component: federated
+  name: federated
+  namespace: default
+spec:
+  endpoints:
+  - oauth2:
+      clientId:
+        configMap:
+          key: client-id
+          name: oauth
+      clientSecret:
+        key: client-secret
+        name: oauth
+      scopes:
+      - metrics
+      tokenUrl: https://auth.example.com/token
+    port: web
+  namespaceSelector: {}
+  selector:
+    matchLabels:
+      app: federation
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    launcher.gokure.dev/component: every-service
+  name: every-service
+  namespace: default
+spec:
+  endpoints: []
+  namespaceSelector: {}
+  selector: {}

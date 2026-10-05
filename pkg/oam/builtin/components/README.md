@@ -163,6 +163,10 @@ reads it.
 | `servicecidr` | ServiceCIDR | Kind-named ServiceCIDR: the whole `ServiceCIDRSpec` (`cidrs`, required, at least one), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `poddisruptionbudget` | PodDisruptionBudget | Kind-named PodDisruptionBudget: the whole `PodDisruptionBudgetSpec` (`minAvailable`, `maxUnavailable`, `selector`, `unhealthyPodEvictionPolicy`), strictly decoded; no field is required and the `selector` is the author's. No environment policy applies — see below. |
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
+| `servicemonitor` | ServiceMonitor | Kind-named Prometheus operator ServiceMonitor: the whole `ServiceMonitorSpec`, strictly decoded; `endpoints` and `selector` are required. The selector is the author's. No environment policy applies and no capability is required — see below. |
+| `podmonitor` | PodMonitor | Kind-named Prometheus operator PodMonitor: the whole `PodMonitorSpec`, strictly decoded; `selector` is required. The selector is the author's. No environment policy applies and no capability is required — see below. |
+| `prometheus-probe` | Probe | Kind-named Prometheus operator Probe: the whole `ProbeSpec`, strictly decoded; `prober.url` is required. The prober and the targets are the author's. No environment policy applies and no capability is required — see below. |
+| `prometheusrule` | PrometheusRule | Kind-named Prometheus operator PrometheusRule: the whole `PrometheusRuleSpec` (`groups`), strictly decoded; a group's `name` and a rule's `expr` are required. No environment policy applies and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -368,11 +372,11 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `metallb.CreateServiceBGPStatus` | metallb.io/v1beta1 ServiceBGPStatus | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateServiceL2Status` | metallb.io/v1beta1 ServiceL2Status | not authorable | - | - | Status MetalLB writes. |
 | `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | missing | - | - | - |
-| `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | missing | - | - | - |
-| `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | missing | - | - | - |
+| `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | kind | `podmonitor` | strict decode of `PodMonitorSpec` | `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
+| `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | kind | `prometheus-probe` | strict decode of `ProbeSpec` | `prober.url` must be written, and the three required fields of an `oauth2`. No environment policy applies, and no capability is required. The type name carries a prefix: a probe, in this package, is a container's. |
 | `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | missing | - | - | - |
-| `prometheus.CreatePrometheusRule` | monitoring.coreos.com/v1 PrometheusRule | missing | - | - | - |
-| `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | missing | - | - | - |
+| `prometheus.CreatePrometheusRule` | monitoring.coreos.com/v1 PrometheusRule | kind | `prometheusrule` | strict decode of `PrometheusRuleSpec` | A group's `name` and a rule's `expr` must be written. No environment policy applies, and no capability is required. |
+| `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | kind | `servicemonitor` | strict decode of `ServiceMonitorSpec` | `endpoints` and `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | missing | - | - | - |
 | `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | missing | - | - | - |
 | `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | trait | `volsync` | hand-written parser | - |
@@ -2655,13 +2659,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies; `servicecidr` and `poddisruptionbudget`, below, are built
-  on it too. A kind is a value of it naming the upstream type, an
-  optional check of required fields, and the base-library constructor; the
+  policy applies; `servicecidr`, `poddisruptionbudget` and the four kinds of
+  the Prometheus operator's API, below, are built on it too. A kind is a value
+  of it naming the upstream type, an optional check of required fields, an
+  optional list of required fields the type writes whether or not they were
+  authored, and the base-library constructor; the
   helper is the rest: the strict decode of the property map into the upstream
   type under the package's null contract, which refuses a `null` list element
   by its path (`decodeKindSpec`), the refusal of a key written in two
-  spellings (`refuseUncarriedSpecValues`), a config whose `ApplyPolicy` does
+  spellings (`refuseUncarriedSpecValues`), the refusal of a listed required
+  field that was not authored (`refuseUnauthoredRequired`, which reads the
+  authored properties, since the decoded value does not show the omission, and
+  follows a list to each of its items), a config whose `ApplyPolicy` does
   nothing, and a `Generate` that returns the constructor's object, under the
   object name the config carries, with a deep copy of what was decoded, so two
   builds of one config share nothing. The config type is unexported: a
@@ -2669,9 +2678,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   helper keeps no list of defaulted zeros, so it suits a type only when none
   of its omit-when-zero numbers or booleans has a non-zero API default;
   `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
-  type built on it and fails on one whose comment states such a default in a
-  form it recognises (`Defaults to 1`, `Default is true`). A default the
-  comment words otherwise, or does not state, is not found.
+  Kubernetes type built on it and fails on one whose comment states such a
+  default in a form it recognises (`Defaults to 1`, `Default is true`). A
+  default the comment words otherwise, or does not state, is not found. The
+  types of the Prometheus operator's API publish no field comment;
+  `TestMonitoringKinds_NoDefaultedZeros` reads the default markers of their
+  source instead.
 
   **What is authored.**
   - `ingressclass` and `csidriver` have a spec type, and the properties are
@@ -3057,6 +3069,150 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **Not covered.** The object's metadata, so its labels and annotations
     cannot be authored. Whether the target exists or can be scaled. The
     object's status is the controller's and is not written.
+- **servicemonitor**, **podmonitor**, **prometheus-probe**, **prometheusrule**
+  (go-kure/launcher#790) are the kind-named projections of four objects of the
+  Prometheus operator's `monitoring.coreos.com/v1` API: a ServiceMonitor, a
+  PodMonitor, a Probe and a PrometheusRule. Each is built on `policyFreeKind`
+  and emits that one object in the build namespace, named after the component
+  unless `objectName` names it; the handler adds no label, no annotation and no
+  default. Each declares its object as namespaced, so the object name is
+  claimed in the object's namespace. The Probe's type name carries a prefix
+  because a probe, in this package, is a container's.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `monitoring.coreos.com/v1`: where the
+  operator's CRDs are not installed the component builds, and the object is
+  refused at apply. Whoever may author a component may author these. The open
+  point "No capability gate on component types" on go-kure/launcher#790
+  carries it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (an endpoint, a relabeling rule, a rule of a group).
+  - `servicemonitor` (`ServiceMonitorSpec`): `endpoints`, `selector`,
+    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `targetLabels`,
+    `podTargetLabels`, `attachMetadata`, `bodySizeLimit`,
+    `serviceDiscoveryRole`, and the scrape settings below.
+  - `podmonitor` (`PodMonitorSpec`): `podMetricsEndpoints`, `selector`,
+    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `podTargetLabels`,
+    `attachMetadata`, `bodySizeLimit`, and the scrape settings below.
+  - `prometheus-probe` (`ProbeSpec`): `prober`, `targets`, `module`,
+    `jobName`, `interval`, `scrapeTimeout`, `metricRelabelings`, `params`,
+    the HTTP client settings the type embeds (`authorization`, `basicAuth`,
+    `oauth2`, `bearerTokenSecret`, `followRedirects`, `enableHttp2`,
+    `tlsConfig`), and the scrape settings below.
+  - `prometheusrule` (`PrometheusRuleSpec`): `groups`, each with its `name`,
+    `rules` and evaluation settings. A rule's `expr` is a string or a number
+    and is emitted as the one authored.
+  - The scrape settings the three scrape kinds share: `sampleLimit`,
+    `targetLimit`, `labelLimit`, `labelNameLengthLimit`,
+    `labelValueLengthLimit`, `keepDroppedTargets`, `scrapeProtocols`,
+    `fallbackScrapeProtocol`, `scrapeClass`, `scrapeNativeHistograms`,
+    `scrapeClassicHistograms`, `nativeHistogramBucketLimit`,
+    `nativeHistogramMinBucketFactor` and `convertClassicHistogramsToNHCB`.
+  - An authored `0` or `false` is kept where the API tells it from an unset
+    field (`sampleLimit: 0`, `filterRunning: false`, a group's `limit: 0`), and
+    left out where the type omits a zero that means the same
+    (`honorLabels: false`). A quantity written as a number is emitted in its
+    canonical string form (`nativeHistogramMinBucketFactor: 1.1` as `1100m`).
+    The API's two defaults are strings (a prober's `path`, `/probe`, and a
+    relabeling rule's `action`, `replace`): an authored empty string there is
+    omitted and defaulted. `TestMonitoringKinds_NoDefaultedZeros` holds the
+    types to having no number or boolean that is omitted when zero and
+    defaulted to something else, from the default markers of the linked
+    module's source.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, so that the object would not show the omission. It is
+  the rule every kind follows, not a wider one: sent as it was authored, the
+  document is one the API server refuses, and only the Go type's zero value
+  hides that. Each must be authored (`selector: required (…)`,
+  `endpoints[1].oauth2.tokenUrl: required (…)`):
+  - a `servicemonitor`'s `endpoints` and `selector`, and a `podmonitor`'s
+    `selector`. No default selector is filled: unauthored, the type would
+    write `selector: {}`, which selects every Service or pod of the selected
+    namespaces. `selector: {}` and `endpoints: []` are authored values and
+    build.
+  - the `clientId`, `clientSecret` and `tokenUrl` of an `oauth2`, on an
+    endpoint of either monitor and on a Probe;
+  - a rule group's `name` and a rule's `expr` (unauthored, the type would
+    write `expr: 0`).
+
+  **A Probe needs `prober.url` here, because the object always carries a
+  prober.** This is a limit of the Go type, not a rule of the API: the API
+  does not require `prober`, but the type writes one whether or not it was
+  authored, and the API server refuses a prober without a `url`. A Probe
+  without a prober cannot be emitted. An empty `url` is refused as an
+  unauthored one is.
+
+  `TestMonitoringKinds_RequiredMatchMarkers` holds these lists to the fields
+  the linked module's source marks required and the type writes unauthored,
+  so a dependency bump that adds, drops or moves one fails there. **Not
+  refused:**
+  - a required field the type omits when it is not authored (the `name` of a
+    Probe parameter): the object shows the omission, and the API server
+    refuses it;
+  - a required field of a Kubernetes type these specs embed: the `key` of a
+    Secret or ConfigMap key reference, the `key` and `operator` of a selector
+    expression. An omitted one is emitted empty;
+  - an authored empty string in a required field (a group's `name: ""`),
+    `prober.url` excepted. It is a value, and the API server's to refuse;
+  - every other value rule of the API (formats, enumerations, lengths, that a
+    rule is a recording or an alerting one), and the operator's own checks of
+    an object the API server has admitted: that a Probe has targets, that a
+    scrape timeout is no longer than its interval, that an endpoint or a
+    Probe authenticates one way. Whether a rule's expression is valid PromQL
+    is not checked either.
+
+  **What the type writes unauthored.** A `servicemonitor` or `podmonitor`
+  carries `namespaceSelector: {}`, which selects the object's own namespace.
+  A `podmonitor` without endpoints carries `podMetricsEndpoints: null`, which
+  the API server drops as it drops every null of a field that is not
+  nullable. A `prometheus-probe` carries `targets: {}`, and the operator
+  rejects a Probe with no target. A `tlsConfig` carries `ca: {}` and
+  `cert: {}` where they were not authored.
+
+  **The selector, the prober and the targets are the author's.** Launcher
+  points none at a component and looks for none in the document. To scrape a
+  workload component's pods, select their `app` label
+  (`matchLabels: {app: <component>}`, valued as "The `app` label" below
+  describes); to scrape a `service` component's
+  Service, select a label its object carries (the component label, see
+  "Component label and ownership" in the OAM model). A Secret or ConfigMap an
+  object refers to is read by the operator in the object's namespace.
+
+  **Selected by a Prometheus through the component label alone.** A
+  Prometheus picks these objects up through its label selectors
+  (`serviceMonitorSelector`, `podMonitorSelector`, `probeSelector`,
+  `ruleSelector`). The object's metadata is not authorable, so the one label
+  it carries is the component label, whose value is the component's: a
+  Prometheus that selects on a fixed label (`release: <name>`, say) does not
+  select these objects.
+  The open point on object metadata on go-kure/launcher#790 carries it.
+
+  **Policy.** No field of these specs is one an `oam.Policy` method speaks to,
+  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
+  same under every policy and under none.
+  - **Hosts are not checked.** A host these objects name is one Prometheus
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: `prober.url`, a `proxyUrl` (of an endpoint, a prober or an
+    `oauth2`), an `oauth2`'s `tokenUrl`, and the static targets of a Probe.
+  - **No field holds a literal secret by design, and none is checked.** A
+    credential is a reference to a key of a Secret: `authorization.credentials`,
+    `basicAuth`, `bearerTokenSecret`, an `oauth2`'s `clientSecret`, a
+    `tlsConfig`'s `keySecret`, the values of `proxyConnectHeader`. Free text
+    that could hold one is written to the object as authored, under a policy
+    that forbids explicit secrets too: `params`, an `oauth2`'s
+    `endpointParams`, and a `proxyUrl` with credentials in it.
+  - **File paths are not checked.** A `servicemonitor` endpoint may name a
+    file in the Prometheus container (`bearerTokenFile`, and `caFile`,
+    `certFile` and `keyFile` under `tlsConfig`).
+
+  **Not covered.** The object's metadata, so its labels and annotations
+  cannot be authored. Whether what is selected or referred to exists (a
+  Service, a pod, an Ingress, a named port, a Secret key), and whether a
+  Prometheus of the cluster selects the object. The object's status is the
+  operator's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5690,7 +5846,8 @@ name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `sta
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four
-`cnpg-*` kinds and the Flux kinds (`helmrelease`,
+kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometheus-probe`,
+`prometheusrule`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`
