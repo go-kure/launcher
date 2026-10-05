@@ -197,7 +197,7 @@ each a **separate** additive resource (the authored `networkpolicy` /
   carry no component-provenance label. Fail-closed: each source must carry a namespace + a
   non-empty matchLabels pod selector (namespace-wide sources are dropped), and a policy with no
   valid rule is not emitted. A component's endpoints are declared by its handler, or by
-  the `ComponentLoweringRule` claiming its type, via the optional `EndpointProvider` interface and read through `Transformer.ComponentEndpoints` — the
+  the `ComponentLoweringRule` claiming its type, via the optional `EndpointProvider` interface and read through `Transformer.ComponentEndpoints` (or `ComponentEndpointsNamed`, for a consumer that sets a `Naming` hook; see "Name roles and the `Naming` hook") — the
   producer half a downstream platform uses to learn the real selector (no hardcoding) and build
   its dependency graph. One policy is emitted **per distinct endpoint**: a single-endpoint
   component keeps the bare `{comp}-allow-endpoint-ingress` name, while a multi-endpoint component
@@ -434,7 +434,7 @@ the whole `name+suffix` is then shortened by the rule.
 | Limit | Constant | Generated names |
 |-------|----------|-----------------|
 | 63 | `ShortenLimitLabel` | The component label value, `ComponentLabelValue`. |
-| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (the `postgresql` pooler, a generated Helm source), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
+| 253 | `ShortenLimitSubdomain` | Object names: `NameAllocator.Name` and `NameOrAdopt` (a generated Helm source) and the default of `LoweringContext.ResolveName` (the `postgresql` pooler and databases), the `helm` values ConfigMap, a `helmtemplate` hook-group child layout (`<application>-<component>-<NN>-<phase>`; the `-<NN>-<phase>` suffix is kept whole), the claim a role component's `pvc` volume generates (`{comp}-{volume}`, each half hyphen-escaped), the synthesized NetworkPolicies (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`), the `scaler` HPA and PDB, the `networkpolicy` trait's policy, the `ingress` Ingress and `httproute` HTTPRoute (`{comp}-ingress`, `{comp}-httproute`, each with an optional `-{scope}`), the managed TLS Secret default (`{comp}-tls`), the `volsync` ReplicationSource (`{sourcePVC}-backup`) and its default repository Secret name, and the bundle of an ordered group (`<application>-<tier>`, `<application>-<NN>`; the suffix is kept whole). |
 | 53 | `ShortenLimitHelmRelease` | A Helm release name. The one exception to the rule: the result is what Flux helm-controller computes for a HelmRelease (the first 40 characters as cut, a `-`, 12 hex characters), so a release launcher renders itself is named as Flux would name it. |
 
 The allocator used to refuse a `<base>-<suffix>` over 253 characters; it now shortens `base`,
@@ -469,23 +469,54 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
 | `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
+| `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
+| `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
-all for a name the author set. `NameRequest` carries the Application's name (the lowered one
-where a `DocumentLoweringRule` renamed the document, as the defaults use it), the component
+all for a name the author set. `NameRequest` carries the Application's name, the component
 (empty for the bundle, a group and an external backend's policy), the role, the object's kind
 as `Kind` or `Kind.group` (empty for a role that names no object) and the default as launcher
 would use it: already shortened where launcher shortens a name (a group's bundle, the `hpa`,
 `pdb`, `networkpolicy` and `netpol-synth` objects), and as long as it is where it does not: a
 trait's sub-application default (`<component>-scaler` is 260 characters for a 253-character
 component name). The default is what tells apart several names of one component and role. Returning
-`false` keeps the default. Answers are not cached: a hook must give the same answer to the
-same request. A component's own application, whose name is the component's, and an
+`false` keeps the default. Answers are not cached, and one name is asked for more than once
+(in the transform, and again by `ComponentEndpointsNamed`, below): the hook must be a pure
+function of its request, the same answer for the same `NameRequest` whenever it is asked. A
+component's own application, whose name is the component's, and an
 application a component adds itself (the `helm` values ConfigMap's) are not roles, and the
 hook is not asked for them.
 
+`NameRequest.Application` is the document's name at the moment the name is made, which a later
+document rule may still change. Most names are made after lowering, and carry the lowered
+name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
+lowering rule makes (`pooler`, `database`) carries the name of the document the rule is
+lowering. A component, trait or policy rule runs only once the document's kind is final, so
+for those that is the lowered name too; a document rule that resolves a name of its own is
+asked with the name of the document it was given, which it or a later document rule may then
+change.
+
+A lowering rule resolves such a name with `LoweringContext.ResolveName(base, suffix, spec)`:
+the same order, the default being `<base>-<suffix>` as `Namer.Name` builds it. The hook is
+there only inside `Transform`. `LowerRaws`, and a rule driven directly on a `LoweringContext`
+built outside the engine, keep the defaults: the name is the author's or the default, and the
+hook is not asked. A consumer whose raw rule needs a consumer-chosen name writes it into the
+document it emits. Where `<base>-<suffix>` is no valid name (a suffix with a character no
+object name takes), an authored name is still used; without one the name is refused, and the
+hook, which has no default to be asked about, is not asked.
+
+`Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
+`postgresql` component selects pods by the Pooler's name, and there it is the authored
+`poolerName` or the default. A consumer that sets `Naming` calls
+`ComponentEndpointsNamed(application, comp, naming)` instead, which asks `naming` the same
+`NameRequest` the transform asks for that name, so one pure hook gives the selector the name
+the Pooler gets; an answer the transform would refuse is refused there with the same message.
+`application` is the document's name as the transform puts it in that request: its
+`metadata.name`, or the name it has after lowering where a document rule renames it.
+
 A name that is not the default (the author's or the hook's) must be a DNS-1123 subdomain of
-at most 253 characters, in every role, and is used as given or refused, never shortened. For
+at most 253 characters, and is used as given or refused, never shortened. The `pooler` role is
+narrower: a DNS-1035 label, which the Pooler's name must be since its Service carries it. For
 an object that is the rule of its kind. For `bundle`, `group` and `sub-application` it is
 launcher's own rule, on these grounds: a bundle's and a group's name is written as the name
 of a Flux Kustomization, all three become a directory segment in a written tree, and their
@@ -514,11 +545,20 @@ name for two of its objects is refused as naming it twice. A synthesized policy 
 by its component, or by its Service (`external backend Service "db"`): two external Services
 whose shortened default policy names meet are refused too.
 
+The names a lowering rule resolved are in it with the ones resolved after lowering. They are
+held until the document's namespace is known and claimed first, so a `pooler` and another
+resolved name of one kind, namespace and name are refused with both named, and two of one
+rule (two `databases` entries given one `objectName`) at once:
+
+```
+name collision: Database.postgresql.cnpg.io "db-orders" is named by component "db" (role "database", its default) and by component "db" (role "database", set by databases[1].objectName); give one of them another name
+```
+
 This knows only the names resolved this way: the roles above. An object a component
-generates, one a lowering rule names, and the object of a trait that is not in the table are
-not in it, so `CheckInDocumentCollisions` (below) is still what compares every generated
-object. The component and lowering-rule names join it in later changes of
-go-kure/launcher#787.
+generates, one a lowering rule names without a role (a generated Helm source), and the object
+of a trait that is not in the table are not in it, so `CheckInDocumentCollisions` (below) is
+still what compares every generated object. The component names and the remaining
+lowering-rule names join it in later changes of go-kure/launcher#787.
 
 A sub-application's name is resolved and validated but not kept apart: it is not unique. A
 `configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
@@ -711,6 +751,9 @@ Every rule receives the run's one shared allocator as `LoweringContext.Namer`, w
 engine never leaves nil at any position (raw documents included), so a rule derives every
 generated child name through `lctx.Namer.Name(base, suffix, origin)` with no nil-guard
 fallback. A nil `Namer` is a contract violation by whoever built the `LoweringContext`.
+A name that has a name role is resolved with `lctx.ResolveName(base, suffix, spec)` instead
+(see "Name roles and the `Naming` hook"), which reserves no component name: the rule
+reserves the one it emits a component under with `lctx.Namer.Reserve`.
 Code that drives a rule directly, outside the engine — a rule's own unit test in another
 module, a pre-pass, a golden-file or fixture harness — builds the `Namer` with
 `NewNameAllocator()` (the zero value is not usable) and shares that one allocator across

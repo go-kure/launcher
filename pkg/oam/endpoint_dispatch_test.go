@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -102,6 +103,76 @@ func TestComponentEndpoints_RuleDispatch(t *testing.T) {
 	}
 	if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "plain-rule"}); eps != nil || err != nil {
 		t.Errorf("rule non-provider: want (nil,nil), got (%v,%v)", eps, err)
+	}
+}
+
+// stubNamedEndpointRule is a ComponentLoweringRule whose endpoint selects pods
+// by a name it resolves under the pooler role.
+type stubNamedEndpointRule struct{ stubEndpointRule }
+
+func (r stubNamedEndpointRule) EndpointsNamed(c *Component, lctx LoweringContext) ([]netpol.Endpoint, error) {
+	name, err := lctx.ResolveName(c.Name, "pooler", NameSpec{Role: NameRolePooler, Kind: poolerKind})
+	if err != nil {
+		return nil, err
+	}
+	ep := validEndpoint()
+	ep.PodSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"pooler": name}}
+	return []netpol.Endpoint{ep}, nil
+}
+
+// TestComponentEndpoints_NamedProvider: a NamedEndpointProvider is called in
+// place of Endpoints by both accessors. ComponentEndpoints gives it no hook;
+// ComponentEndpointsNamed gives it the caller's, asked with the caller's
+// application and the component.
+func TestComponentEndpoints_NamedProvider(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	// Endpoints would answer the plain endpoint: it must not be the one called.
+	tr.RegisterComponentLowering(stubNamedEndpointRule{stubEndpointRule{typeName: "db", eps: []netpol.Endpoint{validEndpoint()}}})
+	comp := &Component{Name: "pg", Type: "db"}
+	selected := func(t *testing.T, eps []netpol.Endpoint, err error) string {
+		t.Helper()
+		if err != nil || len(eps) != 1 {
+			t.Fatalf("eps=%v err=%v, want one endpoint", eps, err)
+		}
+		return eps[0].PodSelector.MatchLabels["pooler"]
+	}
+
+	eps, err := tr.ComponentEndpoints(comp)
+	if got := selected(t, eps, err); got != "pg-pooler" {
+		t.Errorf("ComponentEndpoints selects %q, want the default", got)
+	}
+
+	var asked []NameRequest
+	hook := func(req NameRequest) (string, bool) {
+		asked = append(asked, req)
+		return "chosen", true
+	}
+	eps, err = tr.ComponentEndpointsNamed("shop", comp, hook)
+	if got := selected(t, eps, err); got != "chosen" {
+		t.Errorf("ComponentEndpointsNamed selects %q, want the hook's name", got)
+	}
+	want := NameRequest{Application: "shop", Component: "pg", Role: NameRolePooler, Kind: "Pooler.postgresql.cnpg.io", Default: "pg-pooler"}
+	if len(asked) != 1 || asked[0] != want {
+		t.Errorf("the hook was asked %+v, want once with %+v", asked, want)
+	}
+
+	eps, err = tr.ComponentEndpointsNamed("shop", comp, nil)
+	if got := selected(t, eps, err); got != "pg-pooler" {
+		t.Errorf("ComponentEndpointsNamed with no hook selects %q, want the default", got)
+	}
+
+	// A provider that is not named is called as before, whatever the hook.
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "web", eps: []netpol.Endpoint{validEndpoint()}})
+	eps, err = tr.ComponentEndpointsNamed("shop", &Component{Name: "x", Type: "web"}, hook)
+	if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != "pg" {
+		t.Errorf("plain provider under ComponentEndpointsNamed: eps=%v err=%v", eps, err)
+	}
+
+	// An answer the transform refuses is refused here, in the same words.
+	_, err = tr.ComponentEndpointsNamed("shop", comp, func(NameRequest) (string, bool) { return "No_Name", true })
+	const refusal = `the Naming hook returned "No_Name" for role "pooler" in place of "pg-pooler": not a valid DNS-1035 label: `
+	if err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Errorf("err = %v, want one containing %q", err, refusal)
 	}
 }
 

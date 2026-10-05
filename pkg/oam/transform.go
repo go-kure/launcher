@@ -71,15 +71,25 @@ type TransformContext struct {
 	// (go-kure/launcher#787). It is asked once for each name of a role in
 	// NameRoles that the author did not set: return a name and true to use it in
 	// place of NameRequest.Default, or false to keep the default. A returned name
-	// must be a DNS-1123 subdomain; it is used as returned or refused, never
-	// shortened. Two names that end up naming one object, or one bundle, fail the
+	// must be a DNS-1123 subdomain (a DNS-1035 label for the pooler role); it is
+	// used as returned or refused, never shortened. Two names that end up naming one object, or one bundle, fail the
 	// transform with both named. nil asks nothing: every name is the author's or
 	// the default. Non-authorable platform input.
+	//
+	// It must be a pure function of its request: the same answer for the same
+	// NameRequest, whenever and however often it is asked. One name is asked for
+	// more than once: in the transform, and again by ComponentEndpointsNamed,
+	// which builds a selector from the answer.
 	Naming func(NameRequest) (string, bool)
 	// names resolves and claims every name of this transform. Internal only: nil
 	// on a caller-constructed ctx; TransformWithPolicy sets it. A pointer, so
 	// every by-value ctx copy shares the one claim space.
 	names *nameResolver
+	// nameClaims is the transform's one name allocator: the lowering fixpoint
+	// allocates from it, and names then claims into it, so a name a lowering rule
+	// resolved and one resolved after lowering are held against each other.
+	// Internal only: nil on a caller-constructed ctx; TransformWithPolicy sets it.
+	nameClaims *NameAllocator
 	// consumedCapabilities accumulates keys traits actually resolved against
 	// Capabilities (go-kure/launcher#290) — populated by resolveCapability's call sites,
 	// and by LoweringContext.Capability for a key a lowering rule reads
@@ -524,7 +534,29 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 // EndpointProvider. It returns an error if a registered provider yields a malformed endpoint
 // (fail-fast: a broken handler surfaces early, not as a silent connectivity outage). Consumed
 // by a downstream platform to learn endpoint selectors when building its dependency graph.
+//
+// It consults no TransformContext.Naming hook: an endpoint whose selector carries a
+// generated name (the pooler endpoint of a postgresql component) carries the author's
+// name or the default. A consumer that sets Naming calls ComponentEndpointsNamed.
 func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, error) {
+	return t.componentEndpoints(comp, "", nil)
+}
+
+// ComponentEndpointsNamed is ComponentEndpoints for a consumer that sets
+// TransformContext.Naming: an endpoint whose selector carries a generated name carries
+// the name the transform gives the object, the author's, else the one naming returns,
+// else the default. naming is asked the NameRequest the transform asks for that name,
+// and an answer the transform refuses is refused here with the same message.
+//
+// application is the name of the document comp is authored in, as the transform puts
+// it in that request (NameRequest.Application): the document's metadata.name, or,
+// where a DocumentLoweringRule renames the document, the name it has after lowering.
+// A nil naming makes this ComponentEndpoints.
+func (t *Transformer) ComponentEndpointsNamed(application string, comp *Component, naming func(NameRequest) (string, bool)) ([]netpol.Endpoint, error) {
+	return t.componentEndpoints(comp, application, naming)
+}
+
+func (t *Transformer) componentEndpoints(comp *Component, application string, naming func(NameRequest) (string, bool)) ([]netpol.Endpoint, error) {
 	if comp == nil {
 		return nil, nil
 	}
@@ -534,11 +566,19 @@ func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, er
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 		provider = rule
 	}
-	ep, ok := provider.(EndpointProvider)
-	if !ok {
+	var eps []netpol.Endpoint
+	var err error
+	if named, ok := provider.(NamedEndpointProvider); ok {
+		// A fresh allocator per call: what a name is resolved to is asked here,
+		// nothing is claimed.
+		namer := NewNameAllocator()
+		namer.hook = naming
+		eps, err = named.EndpointsNamed(comp, LoweringContext{Component: comp, Namer: namer, application: application})
+	} else if ep, ok := provider.(EndpointProvider); ok {
+		eps, err = ep.Endpoints(comp)
+	} else {
 		return nil, nil
 	}
-	eps, err := ep.Endpoints(comp)
 	if err != nil {
 		return nil, err
 	}
@@ -659,6 +699,8 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// and none is registered anywhere on this branch); the length check below
 	// exists so a future misuse fails loudly here instead of silently dropping
 	// documents.
+	ctx.nameClaims = NewNameAllocator()
+	ctx.nameClaims.hook = ctx.Naming
 	docs, err := t.lower(app, ctx)
 	if err != nil {
 		return nil, nil, err
@@ -670,9 +712,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	app = docs[0]
 	// Created after lowering: a document rule may rename the document, and
-	// NameRequest.Application is the name the defaults are built from. No name is
-	// resolved before this point.
-	ctx.names = &nameResolver{hook: ctx.Naming, application: app.Metadata.Name, claims: NewNameAllocator()}
+	// NameRequest.Application is the name the defaults are built from. The only
+	// names resolved before this point are the ones lowering rules resolved
+	// (LoweringContext.ResolveName), each with the document's name as it stood.
+	ctx.names = &nameResolver{hook: ctx.Naming, application: app.Metadata.Name, claims: ctx.nameClaims}
 
 	namespace := ctx.Namespace
 	if namespace == "" {
@@ -680,6 +723,12 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	if namespace == "" {
 		namespace = "default"
+	}
+	// The names lowering rules resolved are claimed first, now that the namespace
+	// their objects land in is known: a name resolved from here on that names one
+	// of those objects is refused with both named.
+	if err := ctx.nameClaims.claimLowered(namespace); err != nil {
+		return nil, nil, &TransformError{Message: "generated name", Cause: err}
 	}
 
 	// Phase 1: create applications, apply Enforceable policy, read tier annotations.

@@ -71,8 +71,11 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	var dependents []string
 	poolerName := ""
 	if c.PoolerEnabled {
-		name, err := postgresqlChildName(lctx, comp.Name, "pooler", "pooler")
+		name, err := postgresqlPoolerName(lctx, comp)
 		if err != nil {
+			return oam.LoweringResult{}, errors.Wrapf(err, "pooler")
+		}
+		if err := postgresqlReserveMember(lctx, name, "pooler"); err != nil {
 			return oam.LoweringResult{}, err
 		}
 		props, err := specProperties(c.poolerSpec(comp.Name))
@@ -84,14 +87,22 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		poolerName = name
 	}
 	for i, db := range c.Databases {
-		var name string
-		if db.Name == "pooler" && poolerName != "" {
-			// A Database named like the Pooler is a different object of the
-			// same name, as postgresql emitted it: it joins the Pooler's
-			// same-name sibling group, which generates at the Pooler's position.
-			name = poolerName
-		} else {
-			if name, err = postgresqlChildName(lctx, comp.Name, db.Name, fmt.Sprintf("databases[%d] %q", i, db.Name)); err != nil {
+		what := fmt.Sprintf("databases[%d] %q", i, db.Name)
+		spec := oam.NameSpec{Role: oam.NameRoleDatabase, Kind: cnpgDatabaseKind}
+		if db.explicitObjectName {
+			spec.Property, spec.Authored = fmt.Sprintf("databases[%d].objectName", i), db.ObjectName
+		}
+		lctx.Component = comp
+		name, err := lctx.ResolveName(comp.Name, db.Name, spec)
+		if err != nil {
+			return oam.LoweringResult{}, errors.Wrapf(err, "%s", what)
+		}
+		// A Database named like the Pooler (by default the one named "pooler") is
+		// a different object of the same name, as postgresql emitted it: it joins
+		// the Pooler's same-name sibling group, which generates at the Pooler's
+		// position. The component name is the Pooler's, reserved already.
+		if name != poolerName {
+			if err := postgresqlReserveMember(lctx, name, what); err != nil {
 				return oam.LoweringResult{}, err
 			}
 			dependents = append(dependents, name)
@@ -197,26 +208,27 @@ func postgresqlMembersShareBundle(doc *oam.Application, comp *oam.Component, mem
 	return nil
 }
 
-// postgresqlChildName allocates the name of a component the rule emits beside
-// the Cluster, `<cluster>-<suffix>`, which is also the name of the object it
-// generates. The allocator refuses a name that is not a DNS-1123 subdomain (the
-// API server refuses it as an object name) and one another rule already
-// generated. A component of the document already named so is refused here, by
-// both names: the two components would otherwise share a name, which a
-// document cannot hold. what names the postgresql property the name came from.
-func postgresqlChildName(lctx oam.LoweringContext, cluster, suffix, what string) (string, error) {
-	name, err := lctx.Namer.Name(cluster, suffix, lctx.Origin)
-	if err != nil {
-		return "", errors.Wrapf(err, "%s", what)
+// postgresqlReserveMember reserves name as the name of a component the rule
+// emits beside the Cluster. The name is the resolved name of the object the
+// component generates (LoweringContext.ResolveName: the author's, the consumer
+// hook's, or the default `<cluster>-<suffix>`), already validated. The
+// allocator refuses one another rule already generated. A component of the
+// document already named so is refused here, by both names: the two components
+// would otherwise share a name, which a document cannot hold; that includes the
+// postgresql component itself, so a member is never named like its Cluster.
+// what names the postgresql property the name came from.
+func postgresqlReserveMember(lctx oam.LoweringContext, name, what string) error {
+	if err := lctx.Namer.Reserve(name, lctx.Origin); err != nil {
+		return errors.Wrapf(err, "%s", what)
 	}
 	if lctx.Document != nil {
 		for _, other := range lctx.Document.Spec.Components {
 			if other.Name == name {
-				return "", errors.Errorf("%s: generates component %q, which is already the name of component %q (type %q) in the document; rename one of them", what, name, other.Name, other.Type)
+				return errors.Errorf("%s: generates component %q, which is already the name of component %q (type %q) in the document; rename one of them", what, name, other.Name, other.Type)
 			}
 		}
 	}
-	return name, nil
+	return nil
 }
 
 // postgresqlMemberPolicies returns the policies that keep the members (the

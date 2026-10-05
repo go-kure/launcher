@@ -76,7 +76,7 @@ func hpaSpec(def string) NameSpec {
 }
 
 func TestNameRoles_ClosedSetInFixedOrder(t *testing.T) {
-	want := []NameRole{"bundle", "group", "sub-application", "netpol-synth", "hpa", "pdb", "rbac", "networkpolicy"}
+	want := []NameRole{"bundle", "group", "sub-application", "netpol-synth", "hpa", "pdb", "rbac", "networkpolicy", "pooler", "database"}
 	if got := NameRoles(); !slices.Equal(got, want) {
 		t.Fatalf("NameRoles() = %v, want %v", got, want)
 	}
@@ -382,7 +382,7 @@ func TestResolveName_RefusesAMalformedSpec(t *testing.T) {
 		spec NameSpec
 		want string
 	}{
-		{"an unknown role", NameSpec{Role: "service", Default: "web"}, `"service" is not a name role (the roles: bundle, group, sub-application, netpol-synth, hpa, pdb, rbac, networkpolicy)`},
+		{"an unknown role", NameSpec{Role: "service", Default: "web"}, `"service" is not a name role (the roles: bundle, group, sub-application, netpol-synth, hpa, pdb, rbac, networkpolicy, pooler, database)`},
 		{"an object role with no kind", NameSpec{Role: NameRoleHPA, Default: "web-hpa"}, `role "hpa" names an object, and its NameSpec has no Kind`},
 		{"a non-object role with a kind", NameSpec{Role: NameRoleSubApplication, Kind: hpaKind, Default: "web"}, `role "sub-application" names no object`},
 		{"no default", NameSpec{Role: NameRoleSubApplication}, `role "sub-application" has no default name`},

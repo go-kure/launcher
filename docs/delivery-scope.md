@@ -196,12 +196,14 @@ Decided in the ticket:
 
 - **Consumer knobs:** `ClusterID`, `Namespace`, `FluxNamespace`, `Domain`,
   `ComponentLabelKey`, and the `Naming` hook for the names of a closed set of roles
-  (go-kure/launcher#787, §3.2). No hook yet for a component's own object name, a
-  lowering-rule name or a source name: `LoweringContext.Namer` is a concrete
-  `*NameAllocator` the engine builds itself (`NewNameAllocator`, `pkg/oam/lowering.go`).
+  (go-kure/launcher#787, §3.2), which include the `postgresql` Pooler and Databases: a
+  lowering rule resolves such a name with `LoweringContext.ResolveName`, and
+  `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. No hook
+  yet for a component's own object name or a source name.
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
-  (`hpaName`, `pdbName`), the `rbac` objects (`name`) and the `networkpolicy` trait's
-  policy (`name`). Still none for: the `postgresql` pooler name (`<cluster>-pooler`),
+  (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
+  policy (`name`), and the `postgresql` Pooler and Databases (`poolerName`,
+  `databases[].objectName`). Still none for:
   generated Helm source names (`<document>-source-<digest>`), the values ConfigMap name
   (`helmValuesConfigMapName`, `pkg/oam/builtin/components/helm.go`), bundle and ordered-group
   names, synthesized NetworkPolicies (`<c>-allow-ingress-traffic` and others) and Helm
@@ -242,28 +244,42 @@ Decided in the ticket:
   the default.
   - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
     group's bundle, each sub-application a trait or a synthesized policy adds, each
-    synthesized NetworkPolicy, and the `scaler` HPA and PDB, the `rbac` objects and the
-    `networkpolicy` trait's policy. A trait handler resolves its names with
-    `(*Trait).ResolveName`.
+    synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects and the
+    `networkpolicy` trait's policy, and the `postgresql` Pooler and Databases. A trait
+    handler resolves its names with `(*Trait).ResolveName`, a lowering rule with
+    `LoweringContext.ResolveName` (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
-    a DNS-1123 subdomain, refused when invalid or too long. Only launcher's own defaults
-    go through the shortening rule (§3.3).
+    a DNS-1123 subdomain (a DNS-1035 label for the Pooler), refused when invalid or too
+    long. Only launcher's own defaults go through the shortening rule (§3.3).
+  - A lowering rule's request carries the name of the document the rule is lowering,
+    which a later document rule may still change. The hook is asked only inside
+    `Transform`: `LowerRaws` and a rule driven directly keep the defaults.
+  - `Transformer.ComponentEndpointsNamed` asks the hook the transform's request, so the
+    `postgresql` pooler selector follows a hook-given name; `ComponentEndpoints` asks no
+    hook. The hook must therefore be a pure function of its request.
   - A sub-application's name is no longer its object's: a hook that renames the
     sub-application of a `configmap`, `ingress`, `httproute` or `volsync` trait leaves
     the object's name alone.
 - **Shipped: the transform keeps the names of those roles apart.** Two that name one
-  object, or one bundle, fail the transform, naming both and where each came from. Every
-  other name is still compared only by `CheckInDocumentCollisions` over
-  `GenerateApplications`: a component's own objects, lowering-rule names, and the objects
-  of a trait outside the roles.
+  object, or one bundle, fail the transform, naming both and where each came from. The
+  names a lowering rule resolves are held in the same space as the ones resolved after
+  lowering. Every other name is still compared only by `CheckInDocumentCollisions` over
+  `GenerateApplications`: a component's own objects, the lowering-rule names without a
+  role, and the objects of a trait outside the roles.
+- **Shipped: `postgresql` `poolerName` and `databases[].objectName`**
+  (`PostgresqlRule`, `pkg/oam/builtin/components/postgresql_lowering.go`). The Pooler's
+  endpoint selector follows the chosen name. `poolerName` without `pooler.enabled: true`
+  is refused, and so is either name when it is already a component of the document.
 - **Target, author:** an override for each remaining name of §3.1, plus an object name
   separate from the component name. The latter allows a Service named like its StatefulSet
   as kind components (rule 4 permits different kinds to share a name).
 - **Target, consumer:** the hook reaches the remaining sites.
-  - The `Namer` (`NameAllocator.Name` and `NameOrAdopt`, `pkg/oam/lowering.go`) consults
-    it for lowering-rule names.
-  - The names not built by the Namer that have no role yet: a component's own object
-    name, the values ConfigMap and the hook-group children.
+  - The remaining lowering-rule names: the `helm` rule's source and values objects and
+    the `oci` rule's source. A name the `Namer` builds (`NameAllocator.Name` and
+    `NameOrAdopt`, `pkg/oam/lowering.go`) reaches the hook only where its rule calls
+    `LoweringContext.ResolveName`.
+  - The names with no role yet: a component's own object name and the hook-group
+    children.
 
 ### 3.3 Shipped (go-kure/launcher#792, go-kure/launcher#793): uniqueness and shortening
 
@@ -651,7 +667,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Open | go-kure/launcher#790 (Secret kind) |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac` and `networkpolicy` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller` and `podtemplate` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

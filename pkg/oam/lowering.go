@@ -282,6 +282,10 @@ type LoweringContext struct {
 	// detection. A nil Namer is a contract violation by whoever built the
 	// LoweringContext; code that drives a rule directly supplies NewNameAllocator().
 	Namer *NameAllocator
+	// application is the document name ResolveName asks the Naming hook with,
+	// where no Document carries it: set by ComponentEndpointsNamed, empty on a
+	// context the lowering engine builds.
+	application string
 }
 
 // Capability returns the ClusterProfile capability bound to key (post-EvaluateProfile)
@@ -336,6 +340,14 @@ type NameAllocator struct {
 	// (claimName, naming.go). It is separate from taken, which holds the names
 	// lowering rules reserve by namespace and name alone. Created on first claim.
 	resolved map[nameClaimKey]resolvedNameClaim
+	// hook is TransformContext.Naming on the allocator of a transform, nil on any
+	// other: LoweringContext.ResolveName asks it for a name a lowering rule
+	// generates.
+	hook func(NameRequest) (string, bool)
+	// lowered holds the object names lowering rules resolved, in the order they
+	// were resolved, until the transform claims them into resolved with the
+	// namespace lowering settled on (claimLowered, naming_lowering.go).
+	lowered []loweredName
 }
 
 // nameClaim records which origin claimed a generated name, and in which round, so
@@ -935,7 +947,12 @@ type loweringDoc struct {
 // later Transform, which runs this fixpoint over it with a full budget of its own
 // (go-kure/launcher#357).
 func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]loweringDoc, error) {
-	namer := NewNameAllocator()
+	// A transform hands in its own allocator, which carries the Naming hook and
+	// goes on to hold the names resolved after lowering.
+	namer := ctx.nameClaims
+	if namer == nil {
+		namer = NewNameAllocator()
+	}
 	var chain []LoweringStep
 	cur := seed
 	culprit := seed[0].origin // first document still expanding in the latest round

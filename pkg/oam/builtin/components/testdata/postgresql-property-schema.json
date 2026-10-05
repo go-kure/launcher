@@ -65,6 +65,10 @@
     "description": "PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters).",
     "additionalProperties": true
   },
+  "poolerName": {
+    "type": "string",
+    "description": "Name of the generated Pooler, a DNS-1035 label used as written (default: the component name followed by -pooler). Only with pooler.enabled: true."
+  },
   "postgresql": {
     "type": "object",
     "description": "PostgreSQL server settings, including the parameters map.",

@@ -144,9 +144,26 @@ func declineEveryName(requests *[]oam.NameRequest) func(oam.NameRequest) (string
 	}
 }
 
+// namingDB is a postgresql component with a pooler and a database: the names a
+// lowering rule resolves.
+const namingDB = `    - name: db
+      type: postgresql
+      properties:
+        pooler:
+          enabled: true
+        databases:
+          - name: orders
+            owner: app
+`
+
+const (
+	poolerKindName   = "Pooler.postgresql.cnpg.io"
+	databaseKindName = "Database.postgresql.cnpg.io"
+)
+
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
-	namingTransform(t, namingApp("", ""), namingContext(declineEveryName(&requests)))
+	namingTransform(t, namingApp("", namingDB), namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -154,11 +171,17 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		subApp  = oam.NameRoleSubApplication
 		synthNP = "web-allow-egress-traffic"
 	)
-	// Each name once, in the order the transform reaches it: the bundles, each
-	// trait's objects and then its sub-application, the synthesized policy last.
+	// Each name once, in the order the transform reaches it: the names the
+	// lowering rules make, the bundles, each trait's objects and then its
+	// sub-application, the synthesized policy last.
 	want := []oam.NameRequest{
+		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
+		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
-		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-infra"},
+		// db is placed in no tier and shares the first group with agent, so that
+		// group is numbered: a group carries a tier's name only when it is that
+		// tier and nothing else.
+		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-00"},
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-apps"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleHPA, Kind: "HorizontalPodAutoscaler.autoscaling", Default: "web-hpa"},
 		{Application: "shop", Component: "web", Role: oam.NameRolePDB, Kind: "PodDisruptionBudget.policy", Default: "web-pdb"},
@@ -342,6 +365,156 @@ func TestTwoTraitsOfOneType_RefusedByTransform(t *testing.T) {
 			err := transformErr(t, doc, oam.TransformContext{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// postgresqlComponent parses appYAML and returns its authored postgresql
+// component named db, as a consumer holds it when it asks for endpoints.
+func postgresqlComponent(t *testing.T, appYAML string) (*oam.Transformer, *oam.Component) {
+	t.Helper()
+	transformer := newBuiltinTransformer()
+	app, err := oam.ParseWithExtraTypes([]byte(appYAML), nil, transformer.LowerableTypes())
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	for i := range app.Spec.Components {
+		if app.Spec.Components[i].Name == "db" {
+			return transformer, &app.Spec.Components[i]
+		}
+	}
+	t.Fatal("the document has no component db")
+	return nil, nil
+}
+
+// poolerSelector returns the Pooler name the component's pooler endpoint selects.
+func poolerSelector(t *testing.T, eps []netpol.Endpoint, err error) string {
+	t.Helper()
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("endpoints = %v, %v; want the cluster's and the pooler's", eps, err)
+	}
+	return eps[1].PodSelector.MatchLabels["cnpg.io/poolerName"]
+}
+
+// The hook names the Pooler and the Database a postgresql component generates,
+// and ComponentEndpointsNamed asks it the request the transform asked, so the
+// pooler endpoint selects the Pooler under the name it got. ComponentEndpoints
+// asks no hook and selects the default.
+func TestNamingHook_PostgresqlNames(t *testing.T) {
+	doc := namingApp("", namingDB)
+	var asked []oam.NameRequest
+	hook := func(req oam.NameRequest) (string, bool) {
+		if req.Role == oam.NameRolePooler {
+			asked = append(asked, req)
+		}
+		return renameBy(map[string]string{"pooler db-pooler": "edge", "database db-orders": "orders.v2"})(req)
+	}
+
+	cluster, apps := namingTransform(t, doc, namingContext(hook))
+	got := generatedNames(cluster, apps)
+	for _, line := range []string{"edge: Pooler default/edge", "orders.v2: Database default/orders.v2"} {
+		if !slices.Contains(got, line) {
+			t.Errorf("missing %q in\n  %s", line, strings.Join(got, "\n  "))
+		}
+	}
+
+	transformer, comp := postgresqlComponent(t, doc)
+	eps, err := transformer.ComponentEndpointsNamed("shop", comp, hook)
+	if selected := poolerSelector(t, eps, err); selected != "edge" {
+		t.Errorf("ComponentEndpointsNamed selects cnpg.io/poolerName=%q, want the name the Pooler got", selected)
+	}
+	want := oam.NameRequest{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"}
+	if !slices.Equal(asked, []oam.NameRequest{want, want}) {
+		t.Errorf("the hook was asked for the Pooler\n  %+v\nwant the transform's request, and the same again for the endpoint:\n  %+v", asked, want)
+	}
+
+	eps, err = transformer.ComponentEndpoints(comp)
+	if selected := poolerSelector(t, eps, err); selected != "db-pooler" {
+		t.Errorf("ComponentEndpoints selects cnpg.io/poolerName=%q, want the default: it asks no hook", selected)
+	}
+}
+
+// An authored poolerName names the Pooler for every reader: the hook is not
+// asked, by the transform or for the endpoint.
+func TestNamingHook_NotAskedForAnAuthoredPoolerName(t *testing.T) {
+	doc := namingApp("", strings.Replace(namingDB, "        pooler:\n", "        poolerName: mine\n        pooler:\n", 1))
+	var requests []oam.NameRequest
+	hook := func(req oam.NameRequest) (string, bool) {
+		requests = append(requests, req)
+		return "theirs", req.Role == oam.NameRolePooler
+	}
+
+	cluster, apps := namingTransform(t, doc, namingContext(hook))
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "mine: Pooler default/mine") {
+		t.Errorf("the authored poolerName was not used:\n  %s", strings.Join(got, "\n  "))
+	}
+	transformer, comp := postgresqlComponent(t, doc)
+	eps, err := transformer.ComponentEndpointsNamed("shop", comp, hook)
+	if selected := poolerSelector(t, eps, err); selected != "mine" {
+		t.Errorf("ComponentEndpointsNamed selects cnpg.io/poolerName=%q, want the authored name", selected)
+	}
+	eps, err = transformer.ComponentEndpoints(comp)
+	if selected := poolerSelector(t, eps, err); selected != "mine" {
+		t.Errorf("ComponentEndpoints selects cnpg.io/poolerName=%q, want the authored name", selected)
+	}
+	for _, req := range requests {
+		if req.Role == oam.NameRolePooler {
+			t.Errorf("the hook was asked for the name poolerName sets: %+v", req)
+		}
+	}
+}
+
+func TestNamingHook_PostgresqlRefusals(t *testing.T) {
+	const twoDatabases = `          - name: billing
+            owner: app
+`
+	for _, tc := range []struct {
+		name  string
+		names map[string]string
+		want  string
+		// endpoint is set when ComponentEndpointsNamed refuses the answer too, in
+		// the same words.
+		endpoint bool
+	}{
+		{
+			name:     "a pooler answer that is no DNS-1035 label",
+			names:    map[string]string{"pooler db-pooler": "edge.v2"},
+			want:     `pooler: the Naming hook returned "edge.v2" for role "pooler" in place of "db-pooler": not a valid DNS-1035 label: `,
+			endpoint: true,
+		},
+		{
+			name:  "a database answer that is no subdomain",
+			names: map[string]string{"database db-orders": "Orders"},
+			want:  `databases[0] "orders": the Naming hook returned "Orders" for role "database" in place of "db-orders": not a valid DNS-1123 subdomain: `,
+		},
+		{
+			name:  "two databases named alike",
+			names: map[string]string{"database db-orders": "shared", "database db-billing": "shared"},
+			want: `databases[1] "billing": name collision: Database.postgresql.cnpg.io "shared" is named by ` +
+				`component "db" (role "database", returned by the Naming hook in place of "db-orders") and by ` +
+				`component "db" (role "database", returned by the Naming hook in place of "db-billing"); give one of them another name`,
+		},
+		{
+			name:  "the pooler named as another component",
+			names: map[string]string{"pooler db-pooler": "web"},
+			want:  `pooler: generates component "web", which is already the name of component "web" (type "webservice") in the document; rename one of them`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := namingApp("", namingDB+twoDatabases)
+			hook := renameBy(tc.names)
+			err := transformErr(t, doc, namingContext(hook))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+			if !tc.endpoint {
+				return
+			}
+			transformer, comp := postgresqlComponent(t, doc)
+			_, err = transformer.ComponentEndpointsNamed("shop", comp, hook)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ComponentEndpointsNamed: err = %v\nwant one containing %q", err, tc.want)
 			}
 		})
 	}
