@@ -2,6 +2,7 @@ package oam
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -568,6 +569,118 @@ func TestOwnedConfig_PlatformAnnotationsUnderAWrapper(t *testing.T) {
 				t.Fatalf("Generate = %v, want ErrReservedMetadataKey for the annotation %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// loopingWrapperAnswers is how often a loopingWrapper says what it wraps before
+// it answers nothing: well past the bound of the walk, and an end of its own for
+// a walk that has none.
+const loopingWrapperAnswers = 4 * platformAnnotationLayers
+
+// loopingWrapper says it wraps whatever next is: itself, or a wrapper that says
+// it wraps this one. It vouches for one pair. It counts how often it is asked
+// what it wraps (asked) and answers nothing past loopingWrapperAnswers, so a walk
+// with no bound of its own ends here too, and the count shows it had none.
+type loopingWrapper struct {
+	ownershipObjectsConfig
+	next     stack.ApplicationConfig
+	platform map[string]string
+	asked    int
+}
+
+func (w *loopingWrapper) WrappedApplicationConfig() stack.ApplicationConfig {
+	w.asked++
+	if w.asked > loopingWrapperAnswers {
+		return nil
+	}
+	return w.next
+}
+
+func (w *loopingWrapper) PlatformAnnotations() map[string]string { return w.platform }
+
+// TestOwnedConfig_PlatformAnnotationsUnderABrokenWrapper: a wrapper chain the
+// walk cannot follow to an end still generates what it generated before the walk
+// existed. A wrapper that says it wraps itself, or two that say they wrap each
+// other, are asked what they wrap as often as the bound allows
+// (platformAnnotationLayers) and no more; a wrapper that holds a typed nil ends
+// the walk like one that holds nothing. The pairs read up to there count: each
+// object carries one, under a reserved prefix.
+func TestOwnedConfig_PlatformAnnotationsUnderABrokenWrapper(t *testing.T) {
+	reserved := mustReserve(t, "platform.example/")
+	const issuer = "platform.example/issuer"
+	pair := map[string]string{issuer: "letsencrypt"}
+	objects := func() ownershipObjectsConfig {
+		return ownershipObjectsConfig{objects: []client.Object{
+			&networkingv1.Ingress{TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"}, ObjectMeta: metav1.ObjectMeta{Name: "i", Annotations: maps.Clone(pair)}},
+		}}
+	}
+	generate := func(inner stack.ApplicationConfig) error {
+		_, err := stack.NewApplication("web-ingress", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, reserved)).Generate()
+		return err
+	}
+
+	self := &loopingWrapper{ownershipObjectsConfig: objects(), platform: pair}
+	self.next = self
+	first := &loopingWrapper{ownershipObjectsConfig: objects(), platform: pair}
+	second := &loopingWrapper{next: first}
+	first.next = second
+
+	for name, chain := range map[string][]*loopingWrapper{
+		"a wrapper that says it wraps itself":        {self},
+		"two wrappers that say they wrap each other": {first, second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := generate(chain[0]); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			asked := 0
+			for _, w := range chain {
+				asked += w.asked
+			}
+			if asked != platformAnnotationLayers {
+				t.Fatalf("the walk asked %d times what a layer wraps, want %d (platformAnnotationLayers)", asked, platformAnnotationLayers)
+			}
+		})
+	}
+
+	for name, inner := range map[string]stack.ApplicationConfig{
+		"a wrapper that holds a typed nil that would vouch":     &loopingWrapper{ownershipObjectsConfig: objects(), platform: pair, next: (*platformConfig)(nil)},
+		"a wrapper that holds a typed nil that would wrap":      &loopingWrapper{ownershipObjectsConfig: objects(), platform: pair, next: (*vouchingWrapper)(nil)},
+		"a wrapper that holds a typed nil of the wrapper's own": &loopingWrapper{ownershipObjectsConfig: objects(), platform: pair, next: (*ownedConfig)(nil)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := generate(inner); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_PlatformAnnotationsLayerBound: the bound counts the layers of
+// every chain, a finite one included. The config that vouches is read as the last
+// layer the walk asks, and not one layer further down: there its pair is checked
+// as authored, like under a wrapper that does not say it wraps.
+func TestOwnedConfig_PlatformAnnotationsLayerBound(t *testing.T) {
+	reserved := mustReserve(t, "platform.example/")
+	const issuer = "platform.example/issuer"
+	generate := func(wrappers int) error {
+		pair := map[string]string{issuer: "letsencrypt"}
+		var cfg stack.ApplicationConfig = &platformConfig{ownershipObjectsConfig{objects: []client.Object{
+			&networkingv1.Ingress{TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"}, ObjectMeta: metav1.ObjectMeta{Name: "i", Annotations: maps.Clone(pair)}},
+		}}, pair}
+		for range wrappers {
+			cfg = &sayingWrapper{inner: cfg}
+		}
+		_, err := stack.NewApplication("web-ingress", "ns", wrapOwnedConfigReserving(cfg, "web", ownershipKey, reserved)).Generate()
+		return err
+	}
+
+	if err := generate(platformAnnotationLayers - 1); err != nil {
+		t.Fatalf("Generate with the vouching config as layer %d: %v", platformAnnotationLayers, err)
+	}
+	err := generate(platformAnnotationLayers)
+	if !errors.Is(err, ErrReservedMetadataKey) || !strings.Contains(err.Error(), `: annotation "`+issuer+`"`) {
+		t.Fatalf("Generate with the vouching config as layer %d = %v, want ErrReservedMetadataKey for the annotation %s", platformAnnotationLayers+1, err, issuer)
 	}
 }
 
