@@ -316,8 +316,11 @@ func TestPersistentVolumePolicy_UnreadableVersionIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatalf("a v1 PersistentVolume the policy allows: %v", err)
 		}
-		if _, typed := objs[0].(*corev1.PersistentVolume); !typed || len(objs) != 1 {
-			t.Errorf("generated %d objects, the first a %T; want the one *corev1.PersistentVolume", len(objs), objs[0])
+		if len(objs) != 1 {
+			t.Fatalf("generated %d objects, want the one *corev1.PersistentVolume", len(objs))
+		}
+		if _, typed := objs[0].(*corev1.PersistentVolume); !typed {
+			t.Errorf("generated a %T, want a *corev1.PersistentVolume", objs[0])
 		}
 	})
 }
