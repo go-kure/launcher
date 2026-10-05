@@ -40,7 +40,16 @@ func checkAuthoredObjectName(property, object, name string) error {
 // an empty authored string is refused before it gets here
 // (checkAuthoredObjectName), so "" never stands for one.
 func resolveObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (string, error) {
-	spec := oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, Default: def}
+	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, Default: def}, property, authored)
+}
+
+// resolveClusterObjectName is resolveObjectName for a cluster-scoped object,
+// which has no namespace (oam.NameSpec.ClusterScoped).
+func resolveClusterObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, property, authored, def string) (string, error) {
+	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, ClusterScoped: true, Default: def}, property, authored)
+}
+
+func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored string) (string, error) {
 	if authored != "" {
 		spec.Property, spec.Authored = property, authored
 	}

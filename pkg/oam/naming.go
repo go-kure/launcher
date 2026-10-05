@@ -148,9 +148,17 @@ type NameSpec struct {
 	// Kind is the named object's group and kind; zero for a role that names no
 	// object.
 	Kind schema.GroupKind
-	// Namespace is the namespace the object is generated in; empty for a
-	// cluster-scoped object and for a name that is no object.
+	// Namespace is the namespace the object is generated in; empty for a name
+	// that is no object, and for a cluster-scoped object, which says so with
+	// ClusterScoped.
 	Namespace string
+	// ClusterScoped says the object has no namespace (a ClusterRole, a
+	// Namespace). It is the one way to say so: the object is claimed with no
+	// namespace, and a spec that sets both it and Namespace is refused. A
+	// lowering rule sets it for such an object as a trait does:
+	// LoweringContext.ResolveName takes any other object to land in the
+	// document's namespace.
+	ClusterScoped bool
 	// Property names the property the author wrote Authored in ("hpaName"). It is
 	// empty when the author wrote none, and Authored is then not read: a present
 	// property holding the empty string is an authored name, and is refused.
@@ -456,6 +464,9 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 		}
 		return "", nameFromDefault, errors.Errorf("naming: role %q names no object, and its NameSpec has Kind %q", spec.Role, spec.Kind)
 	}
+	if err := clusterScopeProblem(spec); err != nil {
+		return "", nameFromDefault, err
+	}
 	if spec.Default == "" {
 		return "", nameFromDefault, errors.Errorf("naming: role %q has no default name", spec.Role)
 	}
@@ -490,12 +501,26 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 	}
 	key := nameClaimKey{class: class, objectIdentity: objectIdentity{name: name}}
 	if class == nameClassObject {
-		key.group, key.kind, key.namespace = spec.Kind.Group, spec.Kind.Kind, spec.Namespace
+		key.group, key.kind = spec.Kind.Group, spec.Kind.Kind
+		if !spec.ClusterScoped {
+			key.namespace = spec.Namespace
+		}
 	}
 	if err := r.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: spec.Property}); err != nil {
 		return "", source, err
 	}
 	return name, source, nil
+}
+
+// clusterScopeProblem refuses a NameSpec that says its object has no namespace
+// and names one all the same: a caller error, which read either way would claim
+// the name where the other reading does not look for it.
+func clusterScopeProblem(spec NameSpec) error {
+	if spec.ClusterScoped && spec.Namespace != "" {
+		return errors.Errorf("naming: the NameSpec for role %q is ClusterScoped and has Namespace %q; a cluster-scoped object has no namespace",
+			spec.Role, spec.Namespace)
+	}
+	return nil
 }
 
 // overrideNameProblem returns why name cannot be an authored or hook-given

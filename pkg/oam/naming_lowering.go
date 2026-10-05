@@ -12,9 +12,13 @@ type loweredName struct {
 	group, kind, name string
 	// namespace is the authored document's (Origin.Namespace), which is not the
 	// namespace the object lands in: it holds apart the names of two documents
-	// lowered with one allocator (LowerRaws).
+	// lowered with one allocator (LowerRaws). It is empty for a cluster-scoped
+	// object, which no namespace holds apart.
 	namespace string
-	claim     resolvedNameClaim
+	// clusterScoped is NameSpec.ClusterScoped: the object is claimed with no
+	// namespace.
+	clusterScoped bool
+	claim         resolvedNameClaim
 }
 
 // ResolveName returns the name of an object a lowering rule generates, in this
@@ -24,9 +28,12 @@ type loweredName struct {
 // the default is validated for spec.Role and used as written or refused, never
 // shortened. spec.Role must name an object and spec.Kind say which;
 // spec.Default and spec.Namespace are not read: the default is the one built
-// here, and the namespace is the document's. Where base and suffix build no
-// valid default, an authored name is still used; without one the call fails
-// with the default's problem, and the hook is not asked.
+// here, and the namespace is the document's. A cluster-scoped object (a
+// ClusterRole) has none: the rule says so with spec.ClusterScoped, and the name
+// is then held against every other of its kind, whatever namespace its document
+// has. Where base and suffix build no valid default, an authored name is still
+// used; without one the call fails with the default's problem, and the hook is
+// not asked.
 //
 // The hook is asked with the document's name as it stands when the rule runs
 // (NameRequest.Application) and the enclosing component's, empty at document
@@ -53,6 +60,11 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	class, syntax, known := classOfNameRole(spec.Role)
 	if known && class != nameClassObject {
 		return "", errors.Errorf("lowering: role %q names no object; a lowering rule resolves object names only", spec.Role)
+	}
+	// Before Namespace is set aside below: with ClusterScoped it is a caller
+	// error here as it is for a trait.
+	if err := clusterScopeProblem(spec); err != nil {
+		return "", err
 	}
 	def, err := generatedName(base, suffix)
 	if err != nil {
@@ -101,7 +113,11 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	}
 	lowered := loweredName{
 		group: spec.Kind.Group, kind: spec.Kind.Kind, name: name, namespace: l.Origin.Namespace,
-		claim: resolvedNameClaim{owner: owner, source: source, property: spec.Property},
+		clusterScoped: spec.ClusterScoped,
+		claim:         resolvedNameClaim{owner: owner, source: source, property: spec.Property},
+	}
+	if lowered.clusterScoped {
+		lowered.namespace = ""
 	}
 	if err := l.Namer.recordLowered(lowered); err != nil {
 		return "", err
@@ -112,7 +128,8 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 // recordLowered holds a name a lowering rule resolved until the transform
 // claims it. A second resolution of one kind and name for a document of the
 // same namespace is an error naming both. Every lowered name of one transform
-// lands in one namespace; LowerRaws lowers documents of several.
+// lands in one namespace; LowerRaws lowers documents of several. A
+// cluster-scoped name is one object whichever document it was resolved for.
 //
 // An equal owner is no exception, as it is none for Reserve: nothing a rule is
 // given tells two rule calls on one authored element apart, so the same owner
@@ -133,14 +150,17 @@ func (n *NameAllocator) recordLowered(lowered loweredName) error {
 }
 
 // claimLowered claims every name the lowering rules resolved, as objects of
-// namespace, in the order they were resolved. It runs once lowering has
-// settled and before any other name is resolved, so a name resolved later that
-// names the same object is refused with both named.
+// namespace (a cluster-scoped one of none), in the order they were resolved. It
+// runs once lowering has settled and before any other name is resolved, so a
+// name resolved later that names the same object is refused with both named.
 func (n *NameAllocator) claimLowered(namespace string) error {
 	for _, lowered := range n.lowered {
 		key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
 			group: lowered.group, kind: lowered.kind, namespace: namespace, name: lowered.name,
 		}}
+		if lowered.clusterScoped {
+			key.namespace = ""
+		}
 		if err := n.claimName(key, lowered.claim); err != nil {
 			return err
 		}
