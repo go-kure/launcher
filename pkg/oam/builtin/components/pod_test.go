@@ -380,6 +380,8 @@ func TestPodPolicy_RefusedOnEveryPath(t *testing.T) {
 			`resources memory limit "2Gi" exceeds enforced maximum "1Gi"`},
 		{"registry not allowed", "containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n", ptStrictPolicy(), ".",
 			`containers[0] "app": image "other.example/team/app:1.2.3" is not from an allowed registry`},
+		{"image volume from a registry not allowed", htPlainPod + ivVolume("other.example/team/ext:1.0.0"), ptStrictPolicy(), ": ",
+			`volume "ext" image.reference: image "other.example/team/ext:1.0.0" is not from an allowed registry`},
 		{"cpu over the maximum", htPlainPod + "    resources:\n      limits:\n        cpu: 4\n", ptStrictPolicy(), ".",
 			`containers[0] "app": cpu limit "4" exceeds enforced maximum "2"`},
 		{"forbidden capability", htPlainPod + "    securityContext:\n      capabilities:\n        add: [NET_ADMIN]\n", ptStrictPolicy(), ".",
@@ -417,6 +419,9 @@ func TestPodPolicy_AllowedOnEveryPath(t *testing.T) {
 		{"cpu at the maximum", htPlainPod + "    resources:\n      limits:\n        cpu: 2\n", ptStrictPolicy()},
 		{"hostPath volume where the policy allows it", htPlainPod + "volumes:\n  - name: host\n    hostPath:\n      path: /var/lib/data\n", hostPathAllowed},
 		{"any registry with no policy passed", "containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n", nil},
+		{"image volume from an allowed registry", htPlainPod + ivVolume("registry.example/team/ext:1.0.0"), ptStrictPolicy()},
+		{"image volume that names no reference", htPlainPod + "volumes:\n  - name: ext\n    image: {}\n", ptStrictPolicy()},
+		{"image volume from any registry with no policy passed", htPlainPod + ivVolume("other.example/team/ext:1.0.0"), nil},
 	}
 	for _, path := range podPolicyPaths {
 		for _, tc := range cases {

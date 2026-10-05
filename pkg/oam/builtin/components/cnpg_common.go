@@ -39,10 +39,13 @@ func requireCnpgClusterRef(name string) error {
 // enforcePodTemplatePolicy applies the environment policy gates the workload
 // kinds apply to their pod to an operator CR's raw pod template, which the
 // operator copies into the pods it creates: host namespaces, hostPath volumes,
-// the storage maximum on a generic ephemeral volume's claim, the pod-level
-// hostProcess switch, pod-level resources, and, for every init and regular
-// container, the registry allowlist on an authored image, the cpu and memory
-// maxima, and the privileged, hostProcess and capability checks. Ephemeral
+// the storage maximum on a generic ephemeral volume's claim, the registry
+// allowlist on an image volume's reference, the pod-level hostProcess switch,
+// pod-level resources, and, for every init and regular container, the registry
+// allowlist on an authored image, the cpu and memory maxima, and the
+// privileged, hostProcess and capability checks. Those are every field of a
+// pod spec that names an image the kubelet pulls, which
+// TestImageFields_HeldOrListed derives from the type. Ephemeral
 // containers are not policed here: a pod template cannot declare them, so the
 // caller refuses them outright. label prefixes each error with the template's
 // path; an empty label is a pod spec that is itself what the errors name (the
@@ -82,6 +85,19 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 			if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), where); err != nil {
 				return at(err)
 			}
+		}
+	}
+	// An image volume mounts an OCI image the kubelet pulls as it pulls a
+	// container's, so its reference is held to the registry allowlist as an
+	// authored container image is, and read the same way (registryHost). A
+	// volume that names no reference names no image, and nothing is checked
+	// for it.
+	for _, v := range ps.Volumes {
+		if v.Image == nil || v.Image.Reference == "" {
+			continue
+		}
+		if err := enforceAllowedRegistries(v.Image.Reference, p.AllowedRegistries()); err != nil {
+			return at(errors.Wrap(err, fmt.Sprintf("volume %q image.reference", v.Name)))
 		}
 	}
 	// The pod-level hostProcess and resources checks are enforcePodHostProcess

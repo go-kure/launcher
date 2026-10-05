@@ -774,6 +774,13 @@ its text:
   - All are held to environment policy by the check the rendered paths run on the same
     object (`enforcePodTemplatePolicy`, and the replica maximum on the two controllers),
     and fill no policy default.
+  - That check holds an image volume's `reference` (`volumes[].image`) to
+    `AllowedRegistries`, as it holds a container's image, on every path that produces a
+    pod spec: these four kinds, the `cnpg-pooler` template, and a workload template
+    delivery, `passthrough` or a `manifests` source carries. A test derives the image
+    fields of a pod spec from the linked `k8s.io/api` type (`TestImageFields_HeldOrListed`).
+    Breaking for a document, a chart or a source whose pod names an image volume from a
+    registry outside the list. Not covered: a custom resource those three paths carry.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`

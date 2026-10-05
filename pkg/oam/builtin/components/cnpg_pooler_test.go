@@ -326,6 +326,10 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 		{"hostPath volume",
 			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "h", "hostPath": map[string]any{"path": "/"}}}}),
 			&stubPolicy{}, `template.spec: volume "h": hostPath volumes are not allowed by environment policy`},
+		{"image volume from a disallowed registry",
+			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "ext", "image": map[string]any{"reference": "docker.io/library/ext:1"}}}}),
+			&stubPolicy{allowedRegistries: []string{"ghcr.io"}},
+			`template.spec: volume "ext" image.reference: image "docker.io/library/ext:1" is not from an allowed registry [ghcr.io]`},
 		{"ephemeral volume above the storage maximum",
 			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "scratch", "ephemeral": map[string]any{
 				"volumeClaimTemplate": map[string]any{"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Ti"}}}}}}}}),

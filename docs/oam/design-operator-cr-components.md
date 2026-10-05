@@ -162,7 +162,8 @@ the workload kinds apply to their image, on an authored `imageName`.
 `cnpg-pooler` polices what the `Pooler` runs: its pod template gets the gates
 the workload kinds apply to their pod (host namespaces, hostPath volumes,
 privilege, host-process, capabilities, the registry allowlist on each authored
-container image and the cpu and memory maxima), plus the storage maximum on a
+container image and on an image volume's reference, and the cpu and memory
+maxima), plus the storage maximum on a
 generic ephemeral volume's claim, as `cnpg-cluster` caps its ephemeral volume
 template, and an authored `pgbouncer.image` gets the registry allowlist. A
 template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
