@@ -6206,6 +6206,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `PostgresqlConfig` built directly rather than parsed. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
+  **Two object store paths are required** (go-kure/launcher#790):
+  `backup.destinationPath` where `backup.retentionPolicy` is set, and
+  `barmanObjectStore.destinationPath` of an `externalClusters` entry that has
+  a `barmanObjectStore` (`backup.destinationPath: required (…)`,
+  `externalClusters[0].barmanObjectStore.destinationPath: required (…)`). The
+  Cluster's CRD requires both, and the lowering used to write `""` where the
+  author wrote nothing, which the API server refuses. An authored empty path
+  is a value: it is written, and refusing it is left to the API server. These
+  are two of the strings `cnpg-cluster` refuses unauthored (below); the
+  lowering fills the parent of two more, `bootstrap.pg_basebackup.source` and
+  `replication.synchronous.method`, only from the string itself, and of the
+  other seven never. `TestPostgresqlRule_UnauthoredRequiredStrings` reads all
+  eleven in the lowered component. The refusal is made on the authored
+  properties, so a `PostgresqlConfig` built in Go is not held to it.
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
   hook" in `pkg/oam/README.md`): the author's property, else the consumer's
@@ -6361,7 +6375,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   API server refuse it. An authored empty one is a value: it is written, and
   refusing it is left to the API server. The refusal reads the authored
   properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
-  in Go is not held to it. The same test derives every field
+  in Go is not held to it. Nor is the component a `postgresql` component is
+  lowered to, whose properties are written from a typed spec, so that a
+  string left out there reaches the kind as an authored `""`: `postgresql`
+  refuses the two it could leave out itself, under the property its author
+  wrote (above). The same test
+  derives every field
   the type writes unauthored as a zero value the CRD's own rule refuses, and
   shows each answer with the validator; the twelfth of a Cluster is
   `instances`, which is not refused (below).

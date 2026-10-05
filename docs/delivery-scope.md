@@ -829,7 +829,12 @@ its text:
     refuses (23) and holds each to an answer shown with the CRD's validator
     (`TestKindComponents_NullRequired`): these twelve, six a kind already refused, and
     five a kind writes a default for. Breaking for a document that leaves one of the
-    twelve out; the API server refused its object.
+    twelve out; the API server refused its object. A `postgresql` component refuses
+    the two of them its lowering wrote empty for the author: `backup.destinationPath`
+    where `backup.retentionPolicy` is set, and the `barmanObjectStore.destinationPath`
+    of an `externalClusters` entry that has a `barmanObjectStore`
+    (`TestPostgresqlRule_UnauthoredRequiredStrings`). Breaking for a document that
+    leaves either out.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`
