@@ -10,8 +10,6 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/kubernetes/externalsecrets"
 	"github.com/go-kure/kure/pkg/stack"
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -641,49 +639,31 @@ func NewExternalSecretDecorator(inner stack.ApplicationConfig, secretName, mount
 	return wrapIfAugmenter(dec, inner)
 }
 
-// Generate calls the inner config's Generate and injects the Secret into any
-// Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod resource found.
+// Generate calls the inner config's Generate and injects the Secret into
+// every workload among its objects (workloadPodSpecs). A component that
+// generates none is refused, naming the properties that asked for the
+// injection: it would otherwise apply to nothing.
 func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Object, error) {
 	objects, err := d.Inner.Generate(app)
 	if err != nil {
 		return nil, err
 	}
 
-	injected := false
-	for _, objPtr := range objects {
-		var podSpec *corev1.PodSpec
-		switch w := (*objPtr).(type) {
-		case *appsv1.Deployment:
-			podSpec = &w.Spec.Template.Spec
-		case *appsv1.StatefulSet:
-			podSpec = &w.Spec.Template.Spec
-		case *appsv1.DaemonSet:
-			podSpec = &w.Spec.Template.Spec
-		case *batchv1.CronJob:
-			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
-		case *batchv1.Job:
-			podSpec = &w.Spec.Template.Spec
-		case *corev1.Pod:
-			podSpec = &w.Spec
-		case *appsv1.ReplicaSet:
-			podSpec = &w.Spec.Template.Spec
-		case *corev1.ReplicationController:
-			// The template is a pointer; one without it has no pod spec.
-			if w.Spec.Template == nil {
-				continue
-			}
-			podSpec = &w.Spec.Template.Spec
-		default:
-			continue
+	podSpecs := workloadPodSpecs(objects)
+	if len(podSpecs) == 0 {
+		var props []string
+		if d.EnvFrom {
+			props = append(props, "envFrom")
 		}
+		if d.MountPath != "" {
+			props = append(props, "mountPath")
+		}
+		return nil, noWorkloadError("external-secret", props, decoratedComponent(d.decoratorBase, app), "")
+	}
+	for _, podSpec := range podSpecs {
 		if err := d.injectInto(podSpec); err != nil {
 			return nil, err
 		}
-		injected = true
-	}
-
-	if !injected {
-		return nil, errors.New("external-secret envFrom/mountPath requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod component; no supported workload resource was found")
 	}
 	return objects, nil
 }

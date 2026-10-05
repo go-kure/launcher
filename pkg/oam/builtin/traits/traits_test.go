@@ -1508,8 +1508,8 @@ func TestConfigMapDecorator_UnsupportedComponent_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")
 	}
-	if !strings.Contains(err.Error(), "no supported workload resource was found") {
-		t.Errorf("unexpected error message: %v", err)
+	if want := noWorkloadMessage("configmap", "svc", "mountPath applies"); err.Error() != want {
+		t.Errorf("error:\n got %v\nwant %s", err, want)
 	}
 }
 

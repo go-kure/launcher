@@ -201,12 +201,11 @@ var podTemplateComponent = podTemplateKind{
 	},
 }
 
-// TestPodTemplateComponent_SecurityContextWritesNothing: the security-context
-// trait writes to the pod spec of the workloads it knows, and a PodTemplate is
-// not one of them. It applies without error and leaves the template as
-// authored: the trait skips a kind it does not know, which
-// go-kure/launcher#794 (item 14) tracks.
-func TestPodTemplateComponent_SecurityContextWritesNothing(t *testing.T) {
+// TestPodTemplateComponent_SecurityContextPSALevelAloneWritesNothing: the
+// security-context trait writes to the pod spec of a workload, and a
+// PodTemplate is stored, never run. With psaLevel alone the trait is accepted,
+// as a declaration, and leaves the template as authored.
+func TestPodTemplateComponent_SecurityContextPSALevelAloneWritesNothing(t *testing.T) {
 	k := podTemplateComponent
 	app := newPodTemplateApp(t, k, "batch")
 	if err := (&traits.SecurityContextHandler{}).Apply(
@@ -221,23 +220,41 @@ func TestPodTemplateComponent_SecurityContextWritesNothing(t *testing.T) {
 	}
 }
 
-// TestPodTemplateComponent_IsNoMountTarget: a podtemplate component is not one
-// of the workloads a configmap mount or an external-secret injection changes.
-// Both are refused, naming the kinds they do apply to.
-func TestPodTemplateComponent_IsNoMountTarget(t *testing.T) {
+// TestPodTemplateComponent_IsNoPodSpecTraitTarget: a podtemplate component is
+// not one of the workloads a pod-spec trait writes to. A security-context
+// property written to a pod spec, a configmap mount and an external-secret
+// injection are each refused on it, naming the component and what has nowhere
+// to go (go-kure/launcher#794, item 14).
+func TestPodTemplateComponent_IsNoPodSpecTraitTarget(t *testing.T) {
 	k := podTemplateComponent
-	const want = "requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod component"
-	for name, apply := range map[string]func(app *stack.Application) error{
-		"configmap mountPath": func(app *stack.Application) error {
-			return (&traits.ConfigMapHandler{}).Apply(&oam.Trait{Type: "configmap", Properties: map[string]any{
-				"name": "cfg", "mountPath": "/etc/cfg", "data": map[string]any{"k": "v"},
-			}}, app, newBundle())
+	for name, tc := range map[string]struct {
+		apply func(app *stack.Application) error
+		want  string
+	}{
+		"security-context runAsUser": {
+			apply: func(app *stack.Application) error {
+				return (&traits.SecurityContextHandler{}).Apply(&oam.Trait{Type: "security-context", Properties: map[string]any{
+					"psaLevel": "restricted", "runAsUser": 1000,
+				}}, app, newBundle())
+			},
+			want: noWorkloadMessage("security-context", "batch", "runAsUser applies") + psaLevelHint,
 		},
-		"external-secret envFrom": func(app *stack.Application) error {
-			return (&traits.ExternalSecretHandler{}).Apply(&oam.Trait{Type: "external-secret", Properties: map[string]any{
-				"secretName": "creds", "provider": "vault-backend", "envFrom": true,
-				"data": []any{map[string]any{"secretKey": "DB_PASSWORD"}},
-			}}, app, newBundle())
+		"configmap mountPath": {
+			apply: func(app *stack.Application) error {
+				return (&traits.ConfigMapHandler{}).Apply(&oam.Trait{Type: "configmap", Properties: map[string]any{
+					"name": "cfg", "mountPath": "/etc/cfg", "data": map[string]any{"k": "v"},
+				}}, app, newBundle())
+			},
+			want: noWorkloadMessage("configmap", "batch", "mountPath applies"),
+		},
+		"external-secret envFrom": {
+			apply: func(app *stack.Application) error {
+				return (&traits.ExternalSecretHandler{}).Apply(&oam.Trait{Type: "external-secret", Properties: map[string]any{
+					"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+					"data": []any{map[string]any{"secretKey": "DB_PASSWORD"}},
+				}}, app, newBundle())
+			},
+			want: noWorkloadMessage("external-secret", "batch", "envFrom applies"),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -245,12 +262,12 @@ func TestPodTemplateComponent_IsNoMountTarget(t *testing.T) {
 			if tmpl := generatedPodTemplate(t, k, app); len(tmpl.Spec.Containers) != 1 {
 				t.Fatalf("control: the undecorated template has %d containers, want 1", len(tmpl.Spec.Containers))
 			}
-			if err := apply(app); err != nil {
+			if err := tc.apply(app); err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
 			_, err := app.Config.Generate(app)
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("Generate err = %v, want one mentioning %q", err, want)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Generate err:\n got %v\nwant %s", err, tc.want)
 			}
 		})
 	}
