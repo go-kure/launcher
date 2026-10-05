@@ -57,20 +57,21 @@ func (c Component) ObjectMetadata() ObjectMetadata {
 // config set. A key the config set to another value is refused: the config's
 // own labels are the ones selectors are built from. The maps obj held are left
 // as they are and obj gets maps of its own, since a config may use one label
-// map for an object, its selector and its pod template.
+// map for an object, its selector and its pod template. A refusal leaves obj
+// as it was: both maps are checked before either is set.
 func (m ObjectMetadata) ApplyTo(obj client.Object) error {
+	labels, err := withAuthored(obj.GetLabels(), m.Labels, ObjectLabelsProperty)
+	if err != nil {
+		return err
+	}
+	annotations, err := withAuthored(obj.GetAnnotations(), m.Annotations, ObjectAnnotationsProperty)
+	if err != nil {
+		return err
+	}
 	if len(m.Labels) > 0 {
-		labels, err := withAuthored(obj.GetLabels(), m.Labels, ObjectLabelsProperty)
-		if err != nil {
-			return err
-		}
 		obj.SetLabels(labels)
 	}
 	if len(m.Annotations) > 0 {
-		annotations, err := withAuthored(obj.GetAnnotations(), m.Annotations, ObjectAnnotationsProperty)
-		if err != nil {
-			return err
-		}
 		obj.SetAnnotations(annotations)
 	}
 	return nil
