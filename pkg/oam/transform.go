@@ -752,9 +752,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		namespace = defaultNamespace
 	}
 	// The names lowering rules resolved are claimed first, now that the namespace
-	// their objects land in is known: a name resolved from here on that names one
-	// of those objects is refused with both named.
-	if err := ctx.nameClaims.claimLowered(namespace); err != nil {
+	// their objects land in is known (the Flux namespace for a Flux-scoped one,
+	// when there is one): a name resolved from here on that names one of those
+	// objects is refused with both named.
+	if err := ctx.nameClaims.claimLowered(namespace, ctx.FluxNamespace); err != nil {
 		return nil, nil, &TransformError{Message: "generated name", Cause: err}
 	}
 

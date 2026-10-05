@@ -24,7 +24,17 @@ type loweredName struct {
 	// clusterScoped is NameSpec.ClusterScoped: the object is claimed with no
 	// namespace.
 	clusterScoped bool
-	claim         resolvedNameClaim
+	// fluxScoped is NameSpec.FluxScoped: the object is claimed in the Flux
+	// namespace when the transform has one.
+	fluxScoped bool
+	claim      resolvedNameClaim
+}
+
+// sharedNameKey is what makes two unauthored ResolveSharedName calls ask for
+// the same name: the authored document, the object's kind and the default.
+type sharedNameKey struct {
+	namespace, document, documentKind string
+	group, kind, def                  string
 }
 
 // ResolveName returns the name of an object a lowering rule generates, in this
@@ -37,7 +47,10 @@ type loweredName struct {
 // built here, and the namespace is the document's. A cluster-scoped object (a
 // ClusterRole) has none: the rule says so with spec.ClusterScoped, and the name
 // is then held against every other of its kind, whatever namespace its document
-// has; a spec.Namespace beside it is refused, as it is for a trait. Where base
+// has; a spec.Namespace beside it is refused, as it is for a trait. An object
+// that lands in the Flux namespace when the transform has one (a Flux source,
+// a HelmRelease's values ConfigMap) says so with spec.FluxScoped, and is then
+// claimed there. Where base
 // and suffix build no valid default, an authored name is still
 // used; without one the call fails with the default's problem, and the hook is
 // not asked.
@@ -64,14 +77,92 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	if l.Namer == nil {
 		return "", errors.New("lowering: ResolveName needs a LoweringContext with a Namer")
 	}
+	lowered, err := l.lowerName(base, suffix, spec, l.Component == nil)
+	if err != nil {
+		return "", err
+	}
+	if err := l.Namer.recordLowered(lowered); err != nil {
+		return "", err
+	}
+	return lowered.name, nil
+}
+
+// ResolveSharedName is ResolveName for an object the elements of one document
+// share: one its content identity determines wholly, as NameAllocator.EmitOrAdopt
+// asks of it (a generated Flux source). identity is that content identity. The
+// name is claimed through EmitOrAdopt, under its three constraints on the
+// caller, and so is also reserved as a component name: the first claim returns
+// adopted=false and the caller emits the element under the name; a later one
+// for the same name and identity, from any element of the same authored
+// document, returns adopted=true, and the caller only references it. The same
+// name for another identity is EmitOrAdopt's collision error.
+//
+// Without an authored name (spec.Property empty) the object is the document's:
+// the Naming hook is asked with no component, whatever position the rule runs
+// at, and once. Every later call for the same kind and default in that document
+// takes the first one's answer without asking again, so every consumer of one
+// identity adopts the one object whatever the hook would have said the second
+// time. An authored name is the element's own, validated and used as ResolveName
+// uses one. It is not a second name for the unauthored object: an element that
+// names the object and one that does not get two objects, and two elements that
+// write the same name for the same identity share one.
+//
+// The name is recorded for the transform to claim only where the object is
+// emitted (adopted=false): an adopter names no second object.
+func (l LoweringContext) ResolveSharedName(base, suffix, identity string, spec NameSpec) (name string, adopted bool, err error) {
+	if l.Namer == nil {
+		return "", false, errors.New("lowering: ResolveSharedName needs a LoweringContext with a Namer")
+	}
+	authored := spec.Property != ""
+	var key sharedNameKey
+	var lowered loweredName
+	known := false
+	if !authored {
+		def, err := generatedName(base, suffix)
+		if err != nil {
+			return "", false, err
+		}
+		key = sharedNameKey{
+			namespace: l.Origin.Namespace, document: l.Origin.Document, documentKind: l.Origin.DocumentKind,
+			group: spec.Kind.Group, kind: spec.Kind.Kind, def: def,
+		}
+		lowered, known = l.Namer.shared[key]
+	}
+	if !known {
+		if lowered, err = l.lowerName(base, suffix, spec, !authored); err != nil {
+			return "", false, err
+		}
+	}
+	if adopted, err = l.Namer.EmitOrAdopt(lowered.name, identity, l.Origin); err != nil {
+		return "", false, err
+	}
+	if !adopted {
+		if err := l.Namer.recordLowered(lowered); err != nil {
+			return "", false, err
+		}
+	}
+	if !authored && !known {
+		if l.Namer.shared == nil {
+			l.Namer.shared = make(map[sharedNameKey]loweredName)
+		}
+		l.Namer.shared[key] = lowered
+	}
+	return lowered.name, adopted, nil
+}
+
+// lowerName resolves spec as ResolveName documents and returns the name with
+// what the transform needs to claim it; the caller records it (recordLowered).
+// documentOwned makes the document the name's owner, and the hook asked with no
+// component, also where the context has an enclosing component.
+func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentOwned bool) (loweredName, error) {
 	class, syntax, known := classOfNameRole(spec.Role)
 	if known && class != nameClassObject {
-		return "", errors.Errorf("lowering: role %q names no object; a lowering rule resolves object names only", spec.Role)
+		return loweredName{}, errors.Errorf("lowering: role %q names no object; a lowering rule resolves object names only", spec.Role)
 	}
 	// Before Namespace is set aside below: with ClusterScoped it is a caller
 	// error here as it is for a trait.
 	if err := clusterScopeProblem(spec); err != nil {
-		return "", err
+		return loweredName{}, err
 	}
 	def, err := generatedName(base, suffix)
 	if err != nil {
@@ -80,16 +171,19 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 		// it names the object all the same. The hook is not asked, having no
 		// default to be asked about.
 		if spec.Property == "" || !known {
-			return "", err
+			return loweredName{}, err
 		}
 		if problem := overrideNameProblem(spec.Authored, syntax); problem != "" {
-			return "", errors.Errorf("%s %q cannot be the name for role %q: %s; write a valid name", spec.Property, spec.Authored, spec.Role, problem)
+			return loweredName{}, errors.Errorf("%s %q cannot be the name for role %q: %s; write a valid name", spec.Property, spec.Authored, spec.Role, problem)
 		}
 		// Stands in for the default as what tells this name's owner from
 		// another of its component and role; it is never the name.
 		def = base + "-" + suffix
 	}
-	spec.Default, spec.Namespace = def, ""
+	// Where the object lands is the transform's to say (claimLowered): the
+	// resolver below is given neither.
+	fluxScoped := spec.FluxScoped
+	spec.Default, spec.Namespace, spec.FluxScoped = def, "", false
 
 	application := l.application
 	if application == "" {
@@ -102,7 +196,7 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	// the two share.
 	owner := nameOwner{role: spec.Role, def: def, lowered: true}
 	switch {
-	case l.Component == nil:
+	case documentOwned || l.Component == nil:
 		owner.document = application
 	case l.Origin.TraitType != "":
 		// A trait rule: the authored trait it lowers tells it from another rule
@@ -112,16 +206,17 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	default:
 		owner.component = l.Component.Name
 	}
-	// No claim space: the name is recorded below and claimed by the transform.
+	// No claim space: the name is recorded by the caller and claimed by the
+	// transform.
 	resolver := &nameResolver{hook: l.Namer.hook, application: application}
 	name, source, err := resolver.resolveFrom(owner, spec)
 	if err != nil {
-		return "", err
+		return loweredName{}, err
 	}
 	lowered := loweredName{
 		group: spec.Kind.Group, kind: spec.Kind.Kind, name: name, namespace: l.Origin.Namespace,
-		clusterScoped: spec.ClusterScoped,
-		claim:         resolvedNameClaim{owner: owner, source: source, property: spec.Property},
+		clusterScoped: spec.ClusterScoped, fluxScoped: fluxScoped,
+		claim: resolvedNameClaim{owner: owner, source: source, property: spec.Property},
 	}
 	switch {
 	case lowered.clusterScoped:
@@ -129,10 +224,7 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 	case lowered.namespace == "":
 		lowered.namespace = defaultNamespace
 	}
-	if err := l.Namer.recordLowered(lowered); err != nil {
-		return "", err
-	}
-	return name, nil
+	return lowered, nil
 }
 
 // recordLowered holds a name a lowering rule resolved until the transform
@@ -145,9 +237,16 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 // given tells two rule calls on one authored element apart, so the same owner
 // resolving the name again cannot be told from a second rule generating a
 // second object of that name.
+//
+// A Flux-scoped name and one that is not are not compared here: with a Flux
+// namespace they are two objects. Without one they are the same object, and
+// claimLowered refuses the pair.
 func (n *NameAllocator) recordLowered(lowered loweredName) error {
 	for _, prior := range n.lowered {
 		if prior.group != lowered.group || prior.kind != lowered.kind || prior.namespace != lowered.namespace || prior.name != lowered.name {
+			continue
+		}
+		if prior.fluxScoped != lowered.fluxScoped {
 			continue
 		}
 		// Printed without the namespace: the authored one is not where the object
@@ -160,16 +259,20 @@ func (n *NameAllocator) recordLowered(lowered loweredName) error {
 }
 
 // claimLowered claims every name the lowering rules resolved, as objects of
-// namespace (a cluster-scoped one of none), in the order they were resolved. It
+// namespace (a cluster-scoped one of none, a Flux-scoped one of fluxNamespace
+// when the transform has one), in the order they were resolved. It
 // runs once lowering has settled and before any other name is resolved, so a
 // name resolved later that names the same object is refused with both named.
-func (n *NameAllocator) claimLowered(namespace string) error {
+func (n *NameAllocator) claimLowered(namespace, fluxNamespace string) error {
 	for _, lowered := range n.lowered {
 		key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
 			group: lowered.group, kind: lowered.kind, namespace: namespace, name: lowered.name,
 		}}
-		if lowered.clusterScoped {
+		switch {
+		case lowered.clusterScoped:
 			key.namespace = ""
+		case lowered.fluxScoped && fluxNamespace != "":
+			key.namespace = fluxNamespace
 		}
 		if err := n.claimName(key, lowered.claim); err != nil {
 			return err

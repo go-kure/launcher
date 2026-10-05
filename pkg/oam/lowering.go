@@ -358,6 +358,11 @@ type NameAllocator struct {
 	// were resolved, until the transform claims them into resolved with the
 	// namespace lowering settled on (claimLowered, naming_lowering.go).
 	lowered []loweredName
+	// shared holds the name LoweringContext.ResolveSharedName resolved, without
+	// an authored one, for each object the elements of a document share: a later
+	// call for the same object takes it instead of asking the hook again.
+	// Created on first use.
+	shared map[sharedNameKey]loweredName
 }
 
 // nameClaim records which origin claimed a generated name, and in which round, so

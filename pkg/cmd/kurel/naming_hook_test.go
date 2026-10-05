@@ -163,7 +163,7 @@ const (
 
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
-	namingTransform(t, namingApp("", namingDB), namingContext(declineEveryName(&requests)))
+	namingTransform(t, namingApp("", namingDB+namingChart), namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -175,17 +175,24 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// lowering rules make, the object of each authored kind component, the
 	// bundles, each trait's objects and then its sub-application, the
 	// synthesized policy last. agent is the one authored kind component: the
-	// members the webservice and postgresql rules emit are named by their rule,
-	// and the hook is not asked for them.
+	// members the webservice, postgresql and helm rules emit are named by their
+	// rule, and the hook is not asked for them. The helm rule's generated source
+	// is the document's, so its request carries no component.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
+		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},
+		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesConfigMap, Kind: "ConfigMap", Default: chartConfigMapDefault},
+		{Application: "shop", Role: oam.NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: chartSourceDefault},
 		{Application: "shop", Component: "agent", Role: oam.NameRoleObject, Kind: "DaemonSet.apps", Default: "agent"},
 		{Application: "shop", Role: oam.NameRoleBundle, Default: "shop"},
-		// db is placed in no tier and shares the first group with agent, so that
-		// group is numbered: a group carries a tier's name only when it is that
-		// tier and nothing else.
+		// db and chart are placed in no tier and share the first group with agent,
+		// so that group is numbered: a group carries a tier's name only when it is
+		// that tier and nothing else.
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-00"},
+		// The sub-application of each trait the helm rule added, named as its object.
+		{Application: "shop", Component: "chart", Role: subApp, Default: chartConfigMapDefault},
+		{Application: "shop", Component: "chart", Role: subApp, Default: chartSecretDefault},
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-apps"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleHPA, Kind: "HorizontalPodAutoscaler.autoscaling", Default: "web-hpa"},
 		{Application: "shop", Component: "web", Role: oam.NameRolePDB, Kind: "PodDisruptionBudget.policy", Default: "web-pdb"},

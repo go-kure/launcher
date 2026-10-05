@@ -1,8 +1,6 @@
 package components
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"maps"
 	"strings"
@@ -33,9 +31,11 @@ const ociType = "oci"
 //
 // When two or more oci components of a document have the same source, the
 // source belongs to the application rather than to whichever component comes
-// first: it is emitted once, named <document>-source-<digest> and claimed
-// through NameAllocator.NameOrAdopt, as the helm rule's generated source is,
-// and each component lowers to its fluxcd-kustomization alone, referencing it
+// first: it is emitted once, named <document>-source-<digest> (or what the
+// Naming hook returns for it, role oam.NameRoleHelmSource, asked once for the
+// document) and claimed as the helm rule's generated source is
+// (generatedSourceName), and each component lowers to its
+// fluxcd-kustomization alone, referencing it
 // and ordered after it (Component.OrderAfter). That order makes it a generated
 // source, which pkg/oam keeps out of the ordered groups and applies with the
 // application bundle itself, so every consumer follows it wherever it is placed.
@@ -46,6 +46,15 @@ const ociType = "oci"
 // share a source; the helm one copies the chart layer instead of extracting
 // it. Sharing is decided among the oci components the document holds in the
 // round the rule runs in.
+//
+// source.name names the source (go-kure/launcher#787), and makes it the shared
+// form whatever the number of consumers: emitted once under that name, with
+// neither annotations nor traits, and each component that writes the name for
+// the same identity lowering to its fluxcd-kustomization alone. The name is the
+// component's own choice: a component that writes none does not share the
+// source of one that does, and is not counted among its consumers. The source a
+// component keeps to itself is named after the component, and neither
+// source.name's role nor the hook reaches it.
 //
 // LowerComponent first runs the oci parse (parseOCI, the former
 // OCIHandler.ToApplicationConfig sequence), so every input the handler refused
@@ -75,7 +84,8 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 			Required:    true,
 			Description: "OCIRepository source of the artifact to reconcile.",
 			Properties: map[string]oam.PropertySchema{
-				"url": {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
+				"url":  {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
+				"name": {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version and interval are the same."},
 			},
 		},
 		"version":         {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
@@ -109,6 +119,9 @@ var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
 type ociProperties struct {
 	url     string // oci:// artifact URL
 	version string // tag, or sha256:<digest>
+	// sourceName is the authored source.name, "" for none: absent, null or an
+	// empty string, as the helm component reads its own.
+	sourceName string
 
 	path            string
 	prune           bool
@@ -127,6 +140,7 @@ type ociProperties struct {
 //
 //	source:
 //	  url: oci://registry.example.com/org/artifact   # required, oci:// scheme
+//	  name: artifact-source                           # optional; names the OCIRepository
 //	version: 1.2.3                                    # required; tag, or sha256:<digest>
 //	path: ./                                          # optional, default "./"
 //	prune: true                                       # optional, default true
@@ -166,6 +180,9 @@ func parseOCI(props map[string]any) (*ociProperties, error) {
 	if !strings.HasPrefix(out.url, "oci://") {
 		// Not quoted: the url can carry a credential (userinfo, a query).
 		return nil, errors.New("oci: source.url must use the oci:// scheme")
+	}
+	if out.sourceName, _, err = parseStringField(src, "name", "oci: source.name"); err != nil {
+		return nil, err
 	}
 
 	version, present, err := parseStringField(props, "version", "oci: version")
@@ -285,7 +302,7 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	}
 	source := oam.Component{Type: "ocirepository", Properties: props.sourceProperties()}
 
-	if ociSourceConsumers(lctx.Document, identity) < 2 {
+	if props.sourceName == "" && ociSourceConsumers(lctx.Document, identity) < 2 {
 		// The component's own source: a same-name sibling group, the source
 		// first, as the former handler generated the two objects.
 		source.Name = comp.Name
@@ -299,11 +316,11 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		return oam.LoweringResult{Components: []oam.Component{source, kustomization}}, nil
 	}
 
-	sum := sha256.Sum256([]byte(identity))
-	digest := hex.EncodeToString(sum[:])[:helmSourceDigestLen]
-	name, adopted, err := lctx.Namer.NameOrAdopt(lctx.Origin.Document, "source-"+digest, identity, lctx.Origin)
+	// The source on its own: the one the author named, or the one the document's
+	// unnamed consumers of this identity share.
+	name, adopted, err := generatedSourceName(lctx, ociType, comp, "OCIRepository", identity, props.sourceName)
 	if err != nil {
-		return oam.LoweringResult{}, errors.Wrapf(err, "%s: naming the shared source", ociType)
+		return oam.LoweringResult{}, err
 	}
 	var result oam.LoweringResult
 	if !adopted {
@@ -311,7 +328,7 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		result.Components = append(result.Components, source)
 	}
 	kustomization.Properties = props.kustomizationProperties(name)
-	// The shared source is the application's (see OCIRule): ordered after it,
+	// Such a source is the application's (see OCIRule): ordered after it,
 	// whether this component generated or adopted it, the Kustomization makes
 	// it a generated source, held by the application bundle ahead of every group.
 	kustomization.OrderAfter(name)
@@ -340,8 +357,11 @@ func (p *ociProperties) sourceIdentity() (string, error) {
 	return "oci-artifact:" + string(b), nil
 }
 
-// ociSourceConsumers counts the oci components of doc whose source has the
-// given identity, the component being lowered included. A component that does
+// ociSourceConsumers counts the oci components of doc that name no source of
+// their own (source.name) and whose source has the
+// given identity, the component being lowered included. A component that
+// names its source keeps it apart, so it is no consumer of the shared one. A
+// component that does
 // not parse counts for nothing: its own lowering refuses it. A nil doc (a rule
 // driven directly, outside the engine) has only the component at hand.
 func ociSourceConsumers(doc *oam.Application, identity string) int {
@@ -355,7 +375,7 @@ func ociSourceConsumers(doc *oam.Application, identity string) int {
 			continue
 		}
 		props, err := parseOCI(c.Properties)
-		if err != nil {
+		if err != nil || props.sourceName != "" {
 			continue
 		}
 		if other, err := props.sourceIdentity(); err == nil && other == identity {

@@ -52,6 +52,20 @@ const (
 	// component or trait lowering rule emitted: the rule names its members. A
 	// component of a document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
+	// NameRoleHelmSource is a Flux source a lowering rule generates for the
+	// document as a whole: the helm rule's source for an inline `source`, and the
+	// oci rule's when components share one or one of them names it. Default:
+	// "<document>-source-<digest>". The components of a document with one source
+	// identity share the source, so the hook is asked once for it, with no
+	// component. The source an oci component keeps to itself is not asked for: it
+	// is named after the component.
+	NameRoleHelmSource NameRole = "helm-source"
+	// NameRoleValuesConfigMap is the ConfigMap the helm rule generates under
+	// valuesMode: configMap. Default: "<component>-values-<values hash>".
+	NameRoleValuesConfigMap NameRole = "values-configmap"
+	// NameRoleValuesSecret is the Secret the helm rule generates for
+	// secretValues. Default: "<component>-secret-values-<values hash>".
+	NameRoleValuesSecret NameRole = "values-secret"
 )
 
 // nameSyntax is the rule a name that is not the default is held to.
@@ -97,6 +111,9 @@ var nameRoles = []struct {
 	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleHelmSource, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleValuesConfigMap, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleValuesSecret, nameClassObject, nameSyntaxSubdomain},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
@@ -130,8 +147,9 @@ type NameRequest struct {
 	// rule was given, which the rule, or a later one, may still change.
 	Application string
 	// Component is the component the name belongs to. It is empty for a name the
-	// document as a whole owns: the bundle, a group, and the NetworkPolicy
-	// synthesized for an external backend Service.
+	// document as a whole owns: the bundle, a group, the NetworkPolicy
+	// synthesized for an external backend Service, and a generated source the
+	// document's components share (role "helm-source").
 	Component string
 	// Role is what the name names.
 	Role NameRole
@@ -167,6 +185,16 @@ type NameSpec struct {
 	// document's namespace. A trait's spec that sets neither is claimed with no
 	// namespace too.
 	ClusterScoped bool
+	// FluxScoped says the object lands in the Flux namespace when the transform
+	// has one (TransformContext.FluxNamespace), else in the document's: a Flux
+	// source, a HelmRelease, and the ConfigMap or Secret a HelmRelease reads its
+	// values from, which follows it there. Only a lowering rule sets it
+	// (LoweringContext.ResolveName, ResolveSharedName), which does not know the
+	// namespace yet: the name is claimed where the object lands, so an object of
+	// the same kind and name in the application namespace is not held against it.
+	// A trait names the namespace itself, and a trait's spec that sets this is
+	// refused, as is one that sets it beside ClusterScoped.
+	FluxScoped bool
 	// Property names the property the author wrote Authored in ("hpaName"). It is
 	// empty when the author wrote none, and Authored is then not read: a present
 	// property holding the empty string is an authored name, and is refused.
@@ -491,6 +519,10 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 	if err := clusterScopeProblem(spec); err != nil {
 		return "", nameFromDefault, err
 	}
+	// A lowering rule's spec has it set aside by now (LoweringContext.lowerName).
+	if spec.FluxScoped {
+		return "", nameFromDefault, errors.Errorf("naming: the NameSpec for role %q is FluxScoped, which only a lowering rule's is; name the namespace the object is generated in", spec.Role)
+	}
 	if spec.Default == "" {
 		return "", nameFromDefault, errors.Errorf("naming: role %q has no default name", spec.Role)
 	}
@@ -543,6 +575,10 @@ func clusterScopeProblem(spec NameSpec) error {
 	if spec.ClusterScoped && spec.Namespace != "" {
 		return errors.Errorf("naming: the NameSpec for role %q is ClusterScoped and has Namespace %q; a cluster-scoped object has no namespace",
 			spec.Role, spec.Namespace)
+	}
+	if spec.ClusterScoped && spec.FluxScoped {
+		return errors.Errorf("naming: the NameSpec for role %q is ClusterScoped and FluxScoped; a cluster-scoped object is in no namespace",
+			spec.Role)
 	}
 	return nil
 }

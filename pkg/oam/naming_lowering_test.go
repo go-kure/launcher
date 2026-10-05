@@ -582,7 +582,7 @@ func TestLoweringResolveName_ClusterScoped(t *testing.T) {
 			if _, err := h.lctx("db").ResolveName("db", "reader", NameSpec{Role: NameRoleRBAC, Kind: clusterRoleKind, ClusterScoped: true}); err != nil {
 				t.Fatalf("ResolveName: %v", err)
 			}
-			if err := h.namer.claimLowered("prod"); err != nil {
+			if err := h.namer.claimLowered("prod", ""); err != nil {
 				t.Fatalf("claimLowered: %v", err)
 			}
 			spec := NameSpec{Role: NameRoleRBAC, Kind: kind, ClusterScoped: clusterScoped, Default: "web", Property: "name", Authored: "db-reader"}
@@ -637,7 +637,7 @@ func TestClaimLowered_HeldAgainstNamesResolvedAfterLowering(t *testing.T) {
 		if _, err := h.lctx("db").ResolveName("db", "pooler", NameSpec{Role: NameRolePooler, Kind: poolerKind}); err != nil {
 			t.Fatalf("ResolveName: %v", err)
 		}
-		if err := h.namer.claimLowered("prod"); err != nil {
+		if err := h.namer.claimLowered("prod", ""); err != nil {
 			t.Fatalf("claimLowered: %v", err)
 		}
 		return &nameResolver{application: "shop", claims: h.namer}
@@ -669,6 +669,257 @@ func TestClaimLowered_HeldAgainstNamesResolvedAfterLowering(t *testing.T) {
 		owner, spec := later(databaseKind, "prod")
 		if _, err := setup(t).resolve(owner, spec); err != nil {
 			t.Fatalf("resolve: %v", err)
+		}
+	})
+}
+
+var helmRepositoryKind = schema.GroupKind{Group: "source.toolkit.fluxcd.io", Kind: "HelmRepository"}
+
+// sharedSource resolves the generated source of identity for component, as a
+// rule does it: the document's name and a digest suffix, with authored as the
+// component's own name for it ("" for none).
+func (h *loweringHarness) sharedSource(component, identity, authored string) (string, bool, error) {
+	spec := NameSpec{Role: NameRoleHelmSource, Kind: helmRepositoryKind, FluxScoped: true}
+	if authored != "" {
+		spec.Property, spec.Authored = "source.name", authored
+	}
+	return h.lctx(component).ResolveSharedName("shop", "source-0123456789", identity, spec)
+}
+
+// An unauthored shared name is the document's: the hook is asked once, with no
+// component, and every later consumer of the identity adopts the object under
+// the answer without the hook being asked again.
+func TestLoweringResolveSharedName_HookAskedOnceAndAdopted(t *testing.T) {
+	asked := NameRequest{Application: "shop", Role: NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: "shop-source-0123456789"}
+	for _, tt := range []struct {
+		name    string
+		answers map[string]string
+		want    string
+	}{
+		{"the hook's answer", map[string]string{"shop-source-0123456789": "charts"}, "charts"},
+		{"the hook declining", nil, "shop-source-0123456789"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newLoweringHarness(tt.answers)
+			first, adopted, err := h.sharedSource("a", "helm:https://charts.example.com", "")
+			if err != nil || adopted || first != tt.want {
+				t.Fatalf("first consumer = %q, adopted %v, %v; want %q emitted", first, adopted, err, tt.want)
+			}
+			// A hook that would answer otherwise the second time is not asked.
+			h.answers = map[string]string{"shop-source-0123456789": "other"}
+			second, adopted, err := h.sharedSource("b", "helm:https://charts.example.com", "")
+			if err != nil || !adopted || second != tt.want {
+				t.Fatalf("second consumer = %q, adopted %v, %v; want %q adopted", second, adopted, err, tt.want)
+			}
+			if !slices.Equal(h.asked, []NameRequest{asked}) {
+				t.Errorf("the hook was asked %+v, want once: %+v", h.asked, asked)
+			}
+			if len(h.namer.lowered) != 1 {
+				t.Errorf("%d names recorded for the transform to claim, want the one emitted object's", len(h.namer.lowered))
+			}
+		})
+	}
+}
+
+// An authored shared name is the component's own: the hook is not asked, a
+// component that names the object and one that does not get two objects, two
+// components writing one name for one identity share it, and one name for two
+// identities is EmitOrAdopt's collision.
+func TestLoweringResolveSharedName_Authored(t *testing.T) {
+	const identity = "helm:https://charts.example.com"
+
+	t.Run("one names it and one does not", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		named, adopted, err := h.sharedSource("a", identity, "charts")
+		if err != nil || adopted || named != "charts" {
+			t.Fatalf("the naming component = %q, adopted %v, %v; want charts emitted", named, adopted, err)
+		}
+		if len(h.asked) != 0 {
+			t.Errorf("the hook was asked for an authored name: %+v", h.asked)
+		}
+		unnamed, adopted, err := h.sharedSource("b", identity, "")
+		if err != nil || adopted || unnamed != "shop-source-0123456789" {
+			t.Fatalf("the other component = %q, adopted %v, %v; want the document's own source emitted", unnamed, adopted, err)
+		}
+		if len(h.namer.lowered) != 2 {
+			t.Errorf("%d names recorded, want two objects", len(h.namer.lowered))
+		}
+	})
+
+	t.Run("the same name for the same identity", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		if _, _, err := h.sharedSource("a", identity, "charts"); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		name, adopted, err := h.sharedSource("b", identity, "charts")
+		if err != nil || !adopted || name != "charts" {
+			t.Fatalf("second = %q, adopted %v, %v; want charts adopted", name, adopted, err)
+		}
+		if len(h.namer.lowered) != 1 {
+			t.Errorf("%d names recorded, want the one emitted object's", len(h.namer.lowered))
+		}
+	})
+
+	t.Run("the same name for two identities", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		if _, _, err := h.sharedSource("a", identity, "charts"); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		_, _, err := h.sharedSource("b", "helm:https://other.example.com", "charts")
+		if err == nil || !strings.Contains(err.Error(), `lowering: generated name "charts" collides`) || !strings.Contains(err.Error(), "emitted it for different content") {
+			t.Fatalf("err = %v, want the collision of one name for two identities", err)
+		}
+	})
+
+	t.Run("the hook's answer for two identities", func(t *testing.T) {
+		h := newLoweringHarness(map[string]string{"shop-source-0123456789": "charts", "shop-source-abcdef0123": "charts"})
+		if _, _, err := h.sharedSource("a", identity, ""); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		spec := NameSpec{Role: NameRoleHelmSource, Kind: helmRepositoryKind, FluxScoped: true}
+		_, _, err := h.lctx("b").ResolveSharedName("shop", "source-abcdef0123", "helm:https://other.example.com", spec)
+		if err == nil || !strings.Contains(err.Error(), `lowering: generated name "charts" collides`) {
+			t.Fatalf("err = %v, want the collision of one name for two identities", err)
+		}
+	})
+
+	t.Run("an authored name that is no object name", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		_, _, err := h.sharedSource("a", identity, "Charts")
+		if err == nil || !strings.Contains(err.Error(), `source.name "Charts" cannot be the name for role "helm-source"`) {
+			t.Fatalf("err = %v, want the authored name refused", err)
+		}
+		// Refused before it is claimed: the name is still free.
+		if name, adopted, err := h.sharedSource("b", identity, "charts"); err != nil || adopted || name != "charts" {
+			t.Fatalf("after the refusal = %q, adopted %v, %v", name, adopted, err)
+		}
+	})
+}
+
+func TestLoweringResolveSharedName_NeedsANamerAndAnIdentity(t *testing.T) {
+	spec := NameSpec{Role: NameRoleHelmSource, Kind: helmRepositoryKind}
+	if _, _, err := (LoweringContext{}).ResolveSharedName("shop", "source-0123456789", "id", spec); err == nil || !strings.Contains(err.Error(), "needs a LoweringContext with a Namer") {
+		t.Errorf("no Namer: err = %v", err)
+	}
+	h := newLoweringHarness(nil)
+	if _, _, err := h.lctx("a").ResolveSharedName("shop", "source-0123456789", "", spec); err == nil || !strings.Contains(err.Error(), "empty content identity") {
+		t.Errorf("no identity: err = %v", err)
+	}
+}
+
+// A Flux-scoped name (NameSpec.FluxScoped) is claimed in the Flux namespace
+// when the transform has one, and in the document's when it has none. Each
+// direction: an object of that kind and name in the application namespace is
+// another object, and one in the Flux namespace is the same.
+func TestClaimLowered_FluxScoped(t *testing.T) {
+	configMapKind := schema.GroupKind{Kind: "ConfigMap"}
+	// The transform's names after lowering: a Flux-scoped ConfigMap "web-values"
+	// claimed under fluxNamespace, then a trait's ConfigMap of that name in
+	// namespace.
+	later := func(t *testing.T, fluxNamespace, namespace string) error {
+		t.Helper()
+		h := newLoweringHarness(nil)
+		spec := NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: true}
+		if _, err := h.lctx("web").ResolveName("web", "values", spec); err != nil {
+			t.Fatalf("ResolveName: %v", err)
+		}
+		if err := h.namer.claimLowered("prod", fluxNamespace); err != nil {
+			t.Fatalf("claimLowered: %v", err)
+		}
+		trait := NameSpec{Role: NameRoleObject, Kind: configMapKind, Namespace: namespace, Default: "api-config", Property: "name", Authored: "web-values"}
+		owner := nameOwner{component: "api", role: trait.Role, trait: "configmap", authored: true, def: trait.Default}
+		_, err := (&nameResolver{application: "shop", claims: h.namer}).resolve(owner, trait)
+		return err
+	}
+
+	t.Run("with a Flux namespace, the application namespace is another object", func(t *testing.T) {
+		if err := later(t, "flux-system", "prod"); err != nil {
+			t.Fatalf("a same-named ConfigMap in the application namespace was refused: %v", err)
+		}
+	})
+	t.Run("with a Flux namespace, the Flux namespace is the same object", func(t *testing.T) {
+		err := later(t, "flux-system", "flux-system")
+		const want = `name collision: ConfigMap "flux-system/web-values" is named by ` +
+			`component "web" (role "values-configmap", its default) and by ` +
+			`component "api" traits[0] "configmap" (role "object", set by name); give one of them another name`
+		if err == nil || err.Error() != want {
+			t.Fatalf("err = %v\nwant %s", err, want)
+		}
+	})
+	t.Run("without a Flux namespace, the application namespace is the same object", func(t *testing.T) {
+		err := later(t, "", "prod")
+		if err == nil || !strings.Contains(err.Error(), `name collision: ConfigMap "prod/web-values" is named by`) {
+			t.Fatalf("err = %v, want the collision in the application namespace", err)
+		}
+	})
+
+	// Two lowered names of one kind and name, one Flux-scoped and one not, are
+	// two objects only where the transform has a Flux namespace.
+	pair := func(t *testing.T) *loweringHarness {
+		t.Helper()
+		h := newLoweringHarness(nil)
+		if _, err := h.lctx("web").ResolveName("web", "values", NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: true}); err != nil {
+			t.Fatalf("the Flux-scoped name: %v", err)
+		}
+		authored := NameSpec{Role: NameRoleObject, Kind: configMapKind, Property: "objectName", Authored: "web-values"}
+		if _, err := h.lctx("api").ResolveName("api", "config", authored); err != nil {
+			t.Fatalf("the same name, not Flux-scoped: %v", err)
+		}
+		return h
+	}
+	t.Run("a Flux-scoped and a plain lowered name, with a Flux namespace", func(t *testing.T) {
+		if err := pair(t).namer.claimLowered("prod", "flux-system"); err != nil {
+			t.Fatalf("claimLowered: %v", err)
+		}
+	})
+	t.Run("a Flux-scoped and a plain lowered name, without one", func(t *testing.T) {
+		err := pair(t).namer.claimLowered("prod", "")
+		if err == nil || !strings.Contains(err.Error(), `name collision: ConfigMap "prod/web-values" is named by`) {
+			t.Fatalf("err = %v, want the collision in the application namespace", err)
+		}
+	})
+	t.Run("two Flux-scoped lowered names", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		spec := NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: true, Property: "valuesConfigMapName", Authored: "shared"}
+		if _, err := h.lctx("web").ResolveName("web", "values", spec); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		_, err := h.lctx("api").ResolveName("api", "values", spec)
+		const want = `name collision: ConfigMap "shared" is named by ` +
+			`component "web" (role "values-configmap", set by valuesConfigMapName) and by ` +
+			`component "api" (role "values-configmap", set by valuesConfigMapName); give one of them another name`
+		if err == nil || err.Error() != want {
+			t.Fatalf("err = %v\nwant %s", err, want)
+		}
+	})
+}
+
+// FluxScoped is a lowering rule's to set: a trait names the namespace its
+// object is generated in, and a cluster-scoped object is in none.
+func TestFluxScoped_Refusals(t *testing.T) {
+	t.Run("on a trait's spec", func(t *testing.T) {
+		h := newNamingHarness(nil)
+		spec := hpaSpec("web-hpa")
+		spec.FluxScoped = true
+		_, err := h.trait("web", "scaler", 0).ResolveName(spec)
+		const want = `naming: the NameSpec for role "hpa" is FluxScoped, which only a lowering rule's is; name the namespace the object is generated in`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %s", err, want)
+		}
+		if len(h.asked) != 0 {
+			t.Error("the hook was asked about a refused spec")
+		}
+	})
+	t.Run("beside ClusterScoped", func(t *testing.T) {
+		h := newLoweringHarness(nil)
+		spec := NameSpec{Role: NameRoleRBAC, Kind: clusterRoleKind, ClusterScoped: true, FluxScoped: true}
+		_, err := h.lctx("db").ResolveName("db", "reader", spec)
+		const want = `naming: the NameSpec for role "rbac" is ClusterScoped and FluxScoped; a cluster-scoped object is in no namespace`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %s", err, want)
+		}
+		if len(h.asked) != 0 || len(h.namer.lowered) != 0 {
+			t.Errorf("the refused spec asked the hook %d times and recorded %d names, want neither", len(h.asked), len(h.namer.lowered))
 		}
 	})
 }

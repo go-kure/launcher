@@ -12,6 +12,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -72,25 +73,34 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 //     releaseName. No source is emitted: the chart is rendered at build time.
 //
 // A generated source is named <document>-source-<digest>, the digest taken over
-// the source's content identity (helmSourceIdentity), and claimed through
-// NameAllocator.NameOrAdopt: helm components of one document that share a
+// the source's content identity (helmSourceIdentity), and resolved through
+// LoweringContext.ResolveSharedName under the role oam.NameRoleHelmSource: helm
+// components of one document that share a
 // source identity (the URL, with the version for OCI and the ref for Git, or a
 // Bucket's location) share one source, and the second one only references it. Two documents never share or collide on a generated source,
 // because the document name is part of its name. The source uses its terminal's
 // own interval default, never the release interval, so the identity says
-// everything about its content.
+// everything about its content. The Naming hook is asked for that name once for
+// the document, with no component. source.name beside the inline source names
+// the generated source instead (go-kure/launcher#787): the name is the
+// component's own choice, so a component that writes it does not share the
+// source of one that does not, two components that write the same name for the
+// same identity share one, and the same name for two identities is refused.
+// The source is a component of the lowered document under its name, so it
+// cannot take the name of another component, its own consumer included.
 //
-// With source.name the release references an existing source, optionally in
-// source.namespace, and nothing else is emitted: a HelmRepository, GitRepository
-// or Bucket through chart.spec.sourceRef, with chart naming the chart (its path
-// in a GitRepository or Bucket artifact), or an OCIRepository or HelmChart
-// through chartRef.
+// With source.name alone the release references an existing source, optionally
+// in source.namespace, and nothing else is emitted: a HelmRepository,
+// GitRepository or Bucket through chart.spec.sourceRef, with chart naming the
+// chart (its path in a GitRepository or Bucket artifact), or an OCIRepository
+// or HelmChart through chartRef.
 //
 // The properties decode strictly: a key the schema does not declare, at any
 // depth of source, is refused. delivery: template refuses every key only a
-// HelmRelease reads (helmFluxOnlyKeys), a source reference, valuesMode:
-// configMap, and an OCI source without a version, each with a helm: message
-// naming what the author wrote rather than the terminal it would reach.
+// HelmRelease reads (helmFluxOnlyKeys), source.name (it generates no source and
+// reads none from the cluster), valuesMode: configMap, valuesConfigMapName and
+// valuesSecretName, and an OCI source without a version, each with a helm:
+// message naming what the author wrote rather than the terminal it would reach.
 // delivery: flux refuses scopeOverrides, which only a client-side render reads:
 // under delivery: template it is checked as the manifests component checks its
 // own (parseScopeOverrides) and forwarded to the helmtemplate
@@ -99,6 +109,15 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // configMap with non-empty values the rule moves the values into a configmap
 // trait on the helmrelease and prepends a valuesFrom entry for it
 // (helmValuesConfigMap).
+//
+// The values ConfigMap and the values Secret are named by the author
+// (valuesConfigMapName, valuesSecretName), else by the Naming hook (roles
+// oam.NameRoleValuesConfigMap and oam.NameRoleValuesSecret), else
+// <component>-values-<hash> and <component>-secret-values-<hash>
+// (go-kure/launcher#787). A name that is not the default is used as written,
+// with no hash. Either property is refused where it names nothing: under
+// delivery: template, valuesConfigMapName without valuesMode: configMap, and
+// either one when the tree it names the object of is empty.
 //
 // secretValues is the sensitive part of the values tree (go-kure/launcher#786)
 // and is never written into the HelmRelease or a ConfigMap. Under delivery: flux
@@ -134,12 +153,12 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"source": {
 			Type:        oam.PropertyTypeObject,
 			Required:    true,
-			Description: "Chart source: inline (a url, or a Bucket's endpoint and bucketName; the source is generated, and shared by helm components of the document with the same content identity), or a reference (name, kind, namespace) to an existing source CR.",
+			Description: "Chart source: inline (a url, or a Bucket's endpoint and bucketName; the source is generated, and shared by helm components of the document with the same content identity, and optionally named with name), or a reference (name, kind, namespace, and nothing inline) to an existing source CR.",
 			Properties: map[string]oam.PropertySchema{
-				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, an oci:// URL naming the chart, or with kind GitRepository an http:// or https:// Git repository URL. Mutually exclusive with name; not used with kind Bucket."),
-				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); a Git repository URL needs kind GitRepository set. Without url or name, kind Bucket generates a Bucket from endpoint and bucketName. With name it is required and may be any of the five."},
-				"name":      str("Name of an existing source CR to reference. Mutually exclusive with url; not supported under delivery: template."),
-				"namespace": str("Namespace of the referenced source CR. Only with name."),
+				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, an oci:// URL naming the chart, or with kind GitRepository an http:// or https:// Git repository URL. Not used with kind Bucket."),
+				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); a Git repository URL needs kind GitRepository set. Kind Bucket with endpoint and bucketName generates a Bucket. With name alone (a reference) it is required and may be any of the five."},
+				"name":      str("Alone: the name of an existing source CR to reference. Beside an inline source (url, or a Bucket's endpoint and bucketName): the name of the generated source, in place of <document>-source-<digest>, used as written; it must differ from every component name of the document, and components that write the same name share the source only when their source is the same. Not supported under delivery: template."),
+				"namespace": str("Namespace of the referenced source CR. Only with a reference: refused beside an inline source, whose generated source is created beside the HelmRelease."),
 				"ref": {
 					Type:        oam.PropertyTypeObject,
 					Description: "Git reference of an inline GitRepository source (its spec.ref): exactly one of branch, tag, semver, name, commit. Required with an inline kind GitRepository, and only valid there.",
@@ -158,15 +177,17 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 				"prefix":     str("Object prefix of an inline Bucket source, for server-side filtering. Only with an inline kind Bucket."),
 			},
 		},
-		"values":          object("Helm values tree. Must be representable as JSON."),
-		"secretValues":    object("Sensitive part of the Helm values tree, kept out of the HelmRelease and of any ConfigMap. Under delivery: flux it is emitted as a Secret (base64-encoded, not encrypted) by a secret trait on the HelmRelease, referenced by a valuesFrom entry placed after the values ConfigMap's and before the authored ones; under delivery: template it is merged over values for the render. A path set in both values and secretValues is refused, and so is a key named global below the top level. An environment policy may forbid it."),
-		"valuesMode":      {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves non-empty values into a ConfigMap emitted by a configmap trait on the HelmRelease, referenced by a valuesFrom entry placed before the authored ones. Unset means inline. configMap is refused under delivery: template."},
-		"interval":        str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
-		"releaseName":     str("Release name. Under delivery: flux, HelmRelease spec.releaseName. Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters. Under both it defaults to the component name, shortened as Flux shortens a name over 53 characters."),
-		"targetNamespace": str("HelmRelease spec.targetNamespace. Refused under delivery: template."),
-		"driftDetection":  object("HelmRelease spec.driftDetection. Refused under delivery: template."),
-		"install":         object("HelmRelease spec.install: Helm install options. Refused under delivery: template."),
-		"upgrade":         object("HelmRelease spec.upgrade: Helm upgrade options. Refused under delivery: template."),
+		"values":              object("Helm values tree. Must be representable as JSON."),
+		"secretValues":        object("Sensitive part of the Helm values tree, kept out of the HelmRelease and of any ConfigMap. Under delivery: flux it is emitted as a Secret (base64-encoded, not encrypted) by a secret trait on the HelmRelease, referenced by a valuesFrom entry placed after the values ConfigMap's and before the authored ones; under delivery: template it is merged over values for the render. A path set in both values and secretValues is refused, and so is a key named global below the top level. An environment policy may forbid it."),
+		"valuesMode":          {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves non-empty values into a ConfigMap emitted by a configmap trait on the HelmRelease, referenced by a valuesFrom entry placed before the authored ones. Unset means inline. configMap is refused under delivery: template."},
+		"valuesConfigMapName": str("Name of the ConfigMap valuesMode: configMap generates, in place of <component>-values-<hash>. It is used as written, with no hash: the name then stays the same when the values change. Refused without valuesMode: configMap, with empty values, and under delivery: template."),
+		"valuesSecretName":    str("Name of the Secret generated for secretValues, in place of <component>-secret-values-<hash>. It is used as written, with no hash: the name then stays the same when secretValues changes. Refused with empty secretValues and under delivery: template."),
+		"interval":            str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
+		"releaseName":         str("Release name. Under delivery: flux, HelmRelease spec.releaseName. Under delivery: template, the render's .Release.Name: a DNS-1123 subdomain of at most 53 characters. Under both it defaults to the component name, shortened as Flux shortens a name over 53 characters."),
+		"targetNamespace":     str("HelmRelease spec.targetNamespace. Refused under delivery: template."),
+		"driftDetection":      object("HelmRelease spec.driftDetection. Refused under delivery: template."),
+		"install":             object("HelmRelease spec.install: Helm install options. Refused under delivery: template."),
+		"upgrade":             object("HelmRelease spec.upgrade: Helm upgrade options. Refused under delivery: template."),
 		"valuesFrom": {Type: oam.PropertyTypeArray, Description: "HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values. Refused under delivery: template.", Items: &oam.PropertySchema{
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional).",
 		}},
@@ -182,12 +203,17 @@ type helmProperties struct {
 	Delivery   string      `json:"delivery"`
 	ValuesMode string      `json:"valuesMode"`
 	Source     *helmSource `json:"source"`
+	// The authored names of the values ConfigMap and the values Secret; nil when
+	// absent or null. A present empty string is an authored name, and refused.
+	ValuesConfigMapName *string `json:"valuesConfigMapName"`
+	ValuesSecretName    *string `json:"valuesSecretName"`
 }
 
 // helmSource is an inline source or a reference to an existing source CR
 // (name, kind, optional namespace). Inline, it is a URL with an optional kind
 // (and with kind GitRepository a ref), or with kind Bucket an endpoint and
-// bucketName (plus provider, region, prefix) and no URL.
+// bucketName (plus provider, region, prefix) and no URL; a name beside either
+// names the generated source.
 type helmSource struct {
 	URL        string      `json:"url"`
 	Kind       string      `json:"kind"`
@@ -216,9 +242,16 @@ func (r *helmGitRef) fields() [][2]string {
 	return [][2]string{{"branch", r.Branch}, {"tag", r.Tag}, {"semver", r.SemVer}, {"name", r.Name}, {"commit", r.Commit}}
 }
 
-// inlineBucket reports whether s generates a Bucket: kind Bucket without a
-// reference name.
-func (s *helmSource) inlineBucket() bool { return s.Kind == "Bucket" && s.Name == "" }
+// inlineBucket reports whether s is read as an inline Bucket: kind Bucket that
+// is no plain reference. A reference has a name and locates nothing itself; a
+// url is counted as locating, so that it is refused as an inline Bucket's.
+func (s *helmSource) inlineBucket() bool {
+	return s.Kind == "Bucket" && (s.Name == "" || s.URL != "" || s.Endpoint != "" || s.BucketName != "")
+}
+
+// inline reports whether s generates a source: it has a url, or is an inline
+// Bucket. Otherwise it is a reference to an existing source, by name.
+func (s *helmSource) inline() bool { return s.URL != "" || s.inlineBucket() }
 
 // LowerComponent decodes comp as a helm component and emits its terminal
 // components (see HelmRule).
@@ -238,9 +271,9 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 }
 
 // decodeHelm decodes props strictly and checks what holds for every delivery:
-// a source with exactly one of url and name (an inline Bucket has neither, but
-// an endpoint and bucketName), each source key only in the form that reads it,
-// and a known valuesMode. The
+// a source that is inline (a url, or an inline Bucket's endpoint and
+// bucketName) or a reference (a name alone), each source key only in the form
+// that reads it, and a known valuesMode. The
 // passthrough keys come back in their own map under their declared spelling,
 // without nulls (absent), and with them scopeOverrides, which each delivery
 // takes out of the map before anything is forwarded (lowerHelmFlux refuses it,
@@ -311,8 +344,6 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, map[string
 	}
 	s := props.Source
 	switch {
-	case s.URL != "" && s.Name != "":
-		return fail(errors.Errorf("%s: source.url and source.name are mutually exclusive", helmType))
 	case s.inlineBucket():
 		if s.URL != "" {
 			return fail(errors.Errorf("%s: source.kind Bucket takes source.endpoint and source.bucketName, not source.url", helmType))
@@ -329,8 +360,11 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, map[string
 	case s.URL == "" && s.Name == "":
 		return fail(errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType))
 	}
-	if s.Name == "" && s.Namespace != "" {
-		return fail(errors.Errorf("%s: source.namespace is only valid with source.name", helmType))
+	// A reference alone has a namespace to name. Beside an inline source,
+	// source.name names the generated source, which is created beside the
+	// HelmRelease whatever the author writes here.
+	if s.inline() && s.Namespace != "" {
+		return fail(errors.Errorf("%s: source.namespace is only valid with a reference to an existing source (source.name and no inline source); a generated source is created beside the HelmRelease", helmType))
 	}
 	if !s.inlineBucket() {
 		for _, f := range [][2]string{{"endpoint", s.Endpoint}, {"bucketName", s.BucketName}, {"provider", s.Provider}, {"region", s.Region}, {"prefix", s.Prefix}} {
@@ -381,36 +415,17 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	if _, ok := passthrough[scopeOverridesKey]; ok {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: flux does not support %s (only a client-side render reads it)", helmType, scopeOverridesKey)
 	}
+	if props.ValuesConfigMapName != nil && props.ValuesMode != "configMap" {
+		return oam.LoweringResult{}, errors.Errorf("%s: valuesConfigMapName: names the values ConfigMap, and valuesMode is not configMap, so none is generated; remove it, or set valuesMode: configMap", helmType)
+	}
+	// The names this rule resolves are the component's, also where a caller
+	// built the context without it.
+	lctx.Component = comp
 	release := maps.Clone(passthrough)
-	traits := comp.Traits
-	// The generated valuesFrom entries, in merge order: the values ConfigMap,
-	// then the values Secret. Both go ahead of the authored entries.
-	var generated []any
-	secretTrait, secretEntry, err := helmSecretValuesTrait(comp.Name, release["values"], secretValues)
-	if err != nil {
-		return oam.LoweringResult{}, err
-	}
-	if props.ValuesMode == "configMap" {
-		trait, entry, err := helmValuesConfigMap(comp.Name, release)
-		if err != nil {
-			return oam.LoweringResult{}, err
-		}
-		if trait != nil {
-			traits = append(slices.Clone(traits), *trait)
-			generated = append(generated, entry)
-		}
-	}
-	if secretTrait != nil {
-		traits = append(slices.Clone(traits), *secretTrait)
-		generated = append(generated, secretEntry)
-	}
-	if err := helmPrependValuesFrom(release, generated); err != nil {
-		return oam.LoweringResult{}, err
-	}
 
 	kind := src.Kind
 	switch {
-	case src.Name != "":
+	case !src.inline():
 		switch kind {
 		case "":
 			return oam.LoweringResult{}, errors.Errorf("%s: source.kind is required when source.name is set", helmType)
@@ -455,6 +470,41 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		}
 	}
 
+	// The generated valuesFrom entries, in merge order: the values ConfigMap,
+	// then the values Secret. Both go ahead of the authored entries. Each of the
+	// two names is resolved last, once nothing of its tree is left to refuse.
+	traits := comp.Traits
+	var generated []any
+	secretTrait, secretEntry, err := helmSecretValuesTrait(release["values"], secretValues,
+		helmValuesNamer(lctx, comp, oam.NameRoleValuesSecret, "Secret", "secret-values", "valuesSecretName", props.ValuesSecretName))
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
+	if secretTrait == nil && props.ValuesSecretName != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: valuesSecretName: names the values Secret, and %s is empty, so none is generated; remove it, or set %s", helmType, helmSecretValuesKey, helmSecretValuesKey)
+	}
+	if props.ValuesMode == "configMap" {
+		trait, entry, err := helmValuesConfigMap(release,
+			helmValuesNamer(lctx, comp, oam.NameRoleValuesConfigMap, "ConfigMap", "values", "valuesConfigMapName", props.ValuesConfigMapName))
+		if err != nil {
+			return oam.LoweringResult{}, err
+		}
+		if trait == nil && props.ValuesConfigMapName != nil {
+			return oam.LoweringResult{}, errors.Errorf("%s: valuesConfigMapName: names the values ConfigMap, and values is empty, so none is generated; remove it, or set values", helmType)
+		}
+		if trait != nil {
+			traits = append(slices.Clone(traits), *trait)
+			generated = append(generated, entry)
+		}
+	}
+	if secretTrait != nil {
+		traits = append(slices.Clone(traits), *secretTrait)
+		generated = append(generated, secretEntry)
+	}
+	if err := helmPrependValuesFrom(release, generated); err != nil {
+		return oam.LoweringResult{}, err
+	}
+
 	// Every refusal is above: the source name is claimed only for a component
 	// that lowers.
 	var result oam.LoweringResult
@@ -462,8 +512,8 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	if src.Namespace != "" {
 		ref["namespace"] = src.Namespace
 	}
-	if src.Name == "" {
-		source, adopted, err := helmGeneratedSource(lctx, kind, src, props.Version)
+	if src.inline() {
+		source, adopted, err := helmGeneratedSource(lctx, comp, kind, src, props.Version)
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
@@ -498,7 +548,7 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	// The release is applied after the source this rule generated for it, its
 	// own or the one another helm component of the document already emitted. A
 	// source the author wrote is the author's to order.
-	if src.Name == "" {
+	if src.inline() {
 		helmRelease.OrderAfter(ref["name"].(string))
 	}
 	result.Components = append(result.Components, helmRelease)
@@ -515,10 +565,32 @@ const helmValuesKey = "values.json"
 // ConfigMap's name carries.
 const helmValuesHashLen = 10
 
+// helmValuesNamer returns what names one values object of comp from the hex
+// digest of its content: the authored name (property, nil for none), else the
+// Naming hook's under role, else "<component>-<prefix>-<first 10 digest
+// digits>", shortened by the one shortening rule when it would exceed 253
+// characters (LoweringContext.ResolveName). Only the component name is cut,
+// and the digest of the whole name takes the place of what is cut: a plain
+// truncation would give two components whose long names share a prefix the
+// same object, one clobbering the other's values. The suffix survives, so the
+// default always carries the values hash.
+//
+// kind is the object's, a core one. The object follows the HelmRelease to a
+// Flux namespace, so its name is claimed there (NameSpec.FluxScoped).
+func helmValuesNamer(lctx oam.LoweringContext, comp *oam.Component, role oam.NameRole, kind, prefix, property string, authored *string) func(digest string) (string, error) {
+	return func(digest string) (string, error) {
+		spec := oam.NameSpec{Role: role, Kind: schema.GroupKind{Kind: kind}, FluxScoped: true}
+		if authored != nil {
+			spec.Property, spec.Authored = property, *authored
+		}
+		return lctx.ResolveName(comp.Name, prefix+"-"+digest[:helmValuesHashLen], spec)
+	}
+}
+
 // helmValuesConfigMap implements valuesMode: configMap on release, the
 // helmrelease properties lowerHelmFlux builds. It removes values and, when
 // they are non-empty, returns the configmap trait that emits a ConfigMap named
-// helmValuesConfigMapName, for the helmrelease to carry, and the valuesFrom
+// by name (helmValuesNamer), for the helmrelease to carry, and the valuesFrom
 // entry naming it. lowerHelmFlux puts the entry ahead of the authored ones
 // (helmPrependValuesFrom), so an authored entry still wins on a shared key, as
 // Flux merges valuesFrom in order. Absent or empty values return a nil trait
@@ -532,11 +604,16 @@ const helmValuesHashLen = 10
 // string, so the kind's string-only data typing never refuses them.
 //
 // The values are serialized once. Those exact bytes are stored in the
-// ConfigMap and hashed into its name, so the name changes whenever the
-// content does: the HelmRelease's spec changes with it, which makes Flux
-// reconcile a values-only edit, and two components with identical values
-// carry the same hash.
-func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, map[string]any, error) {
+// ConfigMap and hashed into its default name, so that name changes whenever
+// the content does: the HelmRelease's spec changes with it, which makes Flux
+// reconcile a values-only edit at once, and two components with identical
+// values carry the same hash. A name from the author or the Naming hook
+// carries no hash and does not change with the content: the HelmRelease's
+// spec then stays as it was, and Flux picks the new values up at the release's
+// next reconciliation (its interval), or at once where the ConfigMap is
+// labelled for helm-controller's watch (reconcile.fluxcd.io/watch: Enabled),
+// which this rule does not set.
+func helmValuesConfigMap(release map[string]any, name func(digest string) (string, error)) (*oam.Trait, map[string]any, error) {
 	raw, ok := release["values"]
 	delete(release, "values")
 	if !ok {
@@ -558,7 +635,10 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, map[s
 		return nil, nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
 	}
 	sum := sha256.Sum256(data)
-	cmName := helmValuesConfigMapName(name, hex.EncodeToString(sum[:]))
+	cmName, err := name(hex.EncodeToString(sum[:]))
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "%s: naming the values ConfigMap", helmType)
+	}
 
 	entry := map[string]any{"kind": "ConfigMap", "name": cmName, "valuesKey": helmValuesKey}
 	return &oam.Trait{
@@ -610,19 +690,6 @@ func helmPrependValuesFrom(release map[string]any, generated []any) error {
 // helmPrependValuesFrom's strict decode of a typed list.
 type helmValuesFromSpec struct {
 	ValuesFrom []helmv2.ValuesReference `json:"valuesFrom"`
-}
-
-// helmValuesConfigMapName names the values ConfigMap of component name whose
-// serialized values have the hex digest valuesDigest: name with the suffix
-// "-values-<first 10 digest digits>", shortened by the one shortening rule
-// (oam.ShortenNameWithSuffix) when it would exceed 253 characters. Only name is
-// cut, and the digest of the whole name takes the place of what is cut: a plain
-// truncation would give two components whose long names share a prefix the
-// same ConfigMap, one clobbering the other's values. The suffix survives, so
-// the name always carries the values hash and is always a legal DNS-1123
-// subdomain.
-func helmValuesConfigMapName(name, valuesDigest string) string {
-	return oam.ShortenNameWithSuffix(name, "-values-"+valuesDigest[:helmValuesHashLen], oam.ShortenLimitSubdomain)
 }
 
 // plainSourceURL reports whether raw is exactly an http:// or https:// URL made
@@ -709,19 +776,19 @@ func helmChartTemplateKind(kind string) bool {
 	return false
 }
 
-// helmGeneratedSource names and builds the source component for an inline
-// source. adopted reports that another helm component of the document already
-// emitted it: the caller then references it by name without emitting it again.
-func helmGeneratedSource(lctx oam.LoweringContext, kind string, src *helmSource, version string) (oam.Component, bool, error) {
+// helmGeneratedSource names and builds the source component for the inline
+// source of comp. adopted reports that another helm component of the document
+// already emitted it: the caller then references it by name without emitting
+// it again. The name is source.name when the author wrote one, else the
+// document's shared one (see HelmRule).
+func helmGeneratedSource(lctx oam.LoweringContext, comp *oam.Component, kind string, src *helmSource, version string) (oam.Component, bool, error) {
 	identity, err := helmGeneratedSourceIdentity(kind, src, version)
 	if err != nil {
 		return oam.Component{}, false, err
 	}
-	sum := sha256.Sum256([]byte(identity))
-	digest := hex.EncodeToString(sum[:])[:helmSourceDigestLen]
-	name, adopted, err := lctx.Namer.NameOrAdopt(lctx.Origin.Document, "source-"+digest, identity, lctx.Origin)
+	name, adopted, err := generatedSourceName(lctx, helmType, comp, kind, identity, src.Name)
 	if err != nil {
-		return oam.Component{}, false, errors.Wrapf(err, "%s: naming the generated source", helmType)
+		return oam.Component{}, false, err
 	}
 	source := oam.Component{Name: name}
 	url := src.URL
@@ -760,6 +827,72 @@ func helmGeneratedSource(lctx oam.LoweringContext, kind string, src *helmSource,
 		}
 	}
 	return source, adopted, nil
+}
+
+// generatedSourceName names the Flux source of kind a rule generates for comp
+// (owner is the rule's component type, for its messages), and claims it for
+// identity, the source's content identity
+// (LoweringContext.ResolveSharedName, role oam.NameRoleHelmSource). authored
+// is the component's own name for it, "" for none: the source is then the
+// document's, named <document>-source-<digest of identity> unless the Naming
+// hook says otherwise, and shared by every component of the same identity that
+// names none either. adopted reports that the source already exists.
+//
+// The source is a component of the lowered document under this name, and
+// lands beside its consumer (NameSpec.FluxScoped). It cannot take comp's own
+// name: the two would be one same-name sibling group, and the consumer ordered
+// after itself. Nor can it take the name of another component the document
+// holds when the rule runs, which the engine would refuse as a duplicate
+// component name without saying where the second one comes from. A component
+// another rule emits in the same round is still the engine's to refuse.
+func generatedSourceName(lctx oam.LoweringContext, owner string, comp *oam.Component, kind, identity, authored string) (name string, adopted bool, err error) {
+	spec := oam.NameSpec{Role: oam.NameRoleHelmSource, Kind: fluxSourceKind(kind), FluxScoped: true}
+	if authored != "" {
+		spec.Property, spec.Authored = "source.name", authored
+	}
+	// The name is then the default or the Naming hook's answer, and the rule is
+	// not told which.
+	const unauthoredRemedy = `rename that component, name the source with source.name, or have the Naming hook return another name for role "` + string(oam.NameRoleHelmSource) + `"`
+	ownName := func(name string) error {
+		if name != comp.Name {
+			return nil
+		}
+		if authored != "" {
+			return errors.Errorf("%s: source.name %q is the component's own name; the generated source is a component of the document too, so give it another name", owner, name)
+		}
+		return errors.Errorf("%s: the generated source would be named %q, the component's own name; the generated source is a component of the document too, so %s", owner, name, unauthoredRemedy)
+	}
+	// Before the name is claimed, where the author wrote it.
+	if authored != "" {
+		if err := ownName(authored); err != nil {
+			return "", false, err
+		}
+	}
+	sum := sha256.Sum256([]byte(identity))
+	digest := hex.EncodeToString(sum[:])[:helmSourceDigestLen]
+	lctx.Component = comp
+	name, adopted, err = lctx.ResolveSharedName(lctx.Origin.Document, "source-"+digest, identity, spec)
+	if err != nil {
+		return "", false, errors.Wrapf(err, "%s: naming the generated source", owner)
+	}
+	if err := ownName(name); err != nil {
+		return "", false, err
+	}
+	// An adopted source may already be in the document, emitted in an earlier
+	// round; a new one must not meet a component there.
+	if !adopted && lctx.Document != nil {
+		for i := range lctx.Document.Spec.Components {
+			other := &lctx.Document.Spec.Components[i]
+			if other.Name != name {
+				continue
+			}
+			if authored != "" {
+				return "", false, errors.Errorf("%s: source.name %q is the name of a %s component of the document; the generated source is a component of the document too, so give it another name", owner, name, other.Type)
+			}
+			return "", false, errors.Errorf("%s: the generated source would be named %q, the name of a %s component of the document; the generated source is a component of the document too, so %s", owner, name, other.Type, unauthoredRemedy)
+		}
+	}
+	return name, adopted, nil
 }
 
 // helmSourceIdentity is a generated source's content identity: every input
@@ -808,7 +941,19 @@ func helmGeneratedSourceIdentity(kind string, src *helmSource, version string) (
 func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, secretValues map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
 	if src.Name != "" {
-		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template requires an inline source URL; source.name is not supported", helmType)
+		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template requires an inline source URL; source.name is not supported (the chart is rendered at build time: no source is generated, and none is read from the cluster)", helmType)
+	}
+	for _, name := range []struct {
+		property string
+		authored *string
+		object   string
+	}{
+		{"valuesConfigMapName", props.ValuesConfigMapName, "ConfigMap"},
+		{"valuesSecretName", props.ValuesSecretName, "Secret"},
+	} {
+		if name.authored != nil {
+			return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support %s (values are baked into the client-side render at build time, so no values %s is generated)", helmType, name.property, name.object)
+		}
 	}
 	if src.Kind == "GitRepository" || src.Kind == "Bucket" {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support source.kind %s (a client-side render fetches the chart from a HelmRepository or OCIRepository only)", helmType, src.Kind)
