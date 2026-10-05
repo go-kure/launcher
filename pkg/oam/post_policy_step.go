@@ -13,8 +13,12 @@ import (
 // what the policy decided: lowering runs before the policy, so the rule cannot
 // write such a value itself.
 //
-// A step may change config in place. An error fails the transform, naming the
-// component.
+// A step may change config in place. The transform does not apply the policy
+// again after a step. A kind may hold its own config to the policy once more
+// when it generates, as passthrough does, but no kind has to: holding what the
+// step writes to the policy is the rule author's responsibility, as it is for
+// the objects a registered handler writes. An error fails the transform,
+// naming the component.
 type PostPolicyStep func(config stack.ApplicationConfig) error
 
 // AfterPolicy attaches step to c: the transform runs it after the environment

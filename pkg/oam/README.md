@@ -1571,7 +1571,10 @@ component's handler built, in the order attached, right after
 transform, naming the component. A step that holds the config to the policy refuses as
 `ApplyPolicy` does: an error that holds a `PolicyRefusal` fails the transform as the
 component's `ViolationError` with the refusal's class, any other error as a
-`TransformError` (go-kure/launcher#849). A step is part of the component value: it survives
+`TransformError` (go-kure/launcher#849). The transform does not apply the policy again
+after a step. A kind may hold its own config to the policy once more when it generates,
+as `passthrough` does, but no kind has to: holding what the step writes to the policy is
+the rule author's responsibility. A step is part of the component value: it survives
 copies and later lowering rounds, including a trait rule rewriting the component's
 traits, but not serialization, and a document cannot author one. A
 `ComponentLoweringRule` that lowers a component carrying a step carries it over only
