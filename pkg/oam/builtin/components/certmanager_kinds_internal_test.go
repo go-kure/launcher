@@ -146,17 +146,27 @@ func crdRefusesZero(s apiextensionsv1.JSONSchemaProps, typ reflect.Type) string 
 // empty, or the kind would emit an object the API server refuses for a field
 // the author never wrote.
 //
-// Only the fields of cert-manager's own types are derived. A field of a
-// Kubernetes or Gateway API type these specs embed (the terms of an affinity,
-// the name of a parent reference) is not, and no kind refuses its omission.
+// Every such field of cert-manager's own types is derived. Of a Kubernetes or
+// Gateway API type these specs embed, only a field the CRD refuses as the type
+// writes it unauthored is: one written null, which the API server drops before
+// it validates (the terms of a required node affinity), and one whose empty
+// value the schema's own rules refuse (the name of a parent reference).
+// TestKindComponents_NullRequired shows those refusals with the CRDs'
+// validator. The other required fields of such a type are written empty, and
+// the CRDs accept them so (the key and operator of a selector requirement):
+// no kind refuses their omission.
 func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 	for _, kind := range certManagerKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := crdSpecProperties(t, certManagerCRD(t, kind.crd))
-			listed, empty := map[string]bool{}, map[string]bool{}
+			listed, empty, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), certManagerModulePath+"/") {
+					prop, ok := props[f.path]
+					if ok && required[f.path] && f.writtenUnauthored() && (f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "") {
+						listed[f.path], embedded[f.path] = true, true
+					}
 					return
 				}
 				fields++
@@ -185,8 +195,8 @@ func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 			if fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
-			t.Logf("walked %d fields of cert-manager's types; required and written unauthored: %v; written empty unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(empty)))
+			t.Logf("walked %d fields of cert-manager's types; required and written unauthored: %v; of them, of an embedded type: %v; written empty unauthored: %v",
+				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(embedded)), slices.Sorted(maps.Keys(empty)))
 			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
 				t.Errorf("required list = %v\nthe CRD requires %v", got, want)
 			}

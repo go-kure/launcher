@@ -68,9 +68,25 @@ func issuerSchema(kind string) map[string]oam.PropertySchema {
 // the author left out holds nothing to refuse, and of one that is authored the
 // API requires these. TestCertManagerKinds_RequiredMatchCRD holds the list to
 // the CRDs.
+//
+// Three of them are fields of a Kubernetes or Gateway API type that an ACME
+// HTTP01 solver embeds, each of which the CRDs refuse as the type writes it
+// unauthored: the terms of a required node affinity of a solver pod, written
+// null, which the API server drops before it validates, and the name of a
+// parent reference, written empty, which is below its minimum length.
+// TestKindComponents_NullRequired shows each refusal on the linked CRDs.
 var issuerRequired = func() map[string]string {
-	const dns01 = "acme.solvers[].dns01."
+	const (
+		dns01  = "acme.solvers[].dns01."
+		http01 = "acme.solvers[].http01."
+		terms  = ".podTemplate.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms"
+	)
 	return requiredFields(
+		map[string]string{
+			http01 + "gatewayHTTPRoute.parentRefs[].name": "the name of the Gateway the route attaches to",
+			http01 + "gatewayHTTPRoute" + terms:           "the node selector terms, of which a node must match one",
+			http01 + "ingress" + terms:                    "the node selector terms, of which a node must match one",
+		},
 		map[string]string{
 			"acme.server":                       "the URL of the ACME server's directory endpoint",
 			"acme.externalAccountBinding.keyID": "the ID of the CA key the external account is bound to",
