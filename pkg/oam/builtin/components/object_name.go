@@ -206,6 +206,10 @@ func certManagerKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: certv1.SchemeGroupVersion.Group, Kind: kind}
 }
 
+func gatewayAPIKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: kind}
+}
+
 func fluxSourceKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: sourcev1.GroupVersion.Group, Kind: kind}
 }
@@ -484,6 +488,32 @@ func (h *CiliumNodeConfigHandler) ComponentObject() (schema.GroupKind, oam.Objec
 // than the CiliumNetworkPolicy the cilium-networkpolicy kind and trait claim.
 func (h *CiliumClusterwideNetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return ciliumKind(ciliumv2.CCNPKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the gatewayclass kind's GatewayClass, which is
+// cluster-scoped.
+func (h *GatewayClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("GatewayClass"), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the gateway kind's Gateway.
+func (h *GatewayHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("Gateway"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the listenerset kind's ListenerSet.
+func (h *ListenerSetHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("ListenerSet"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the referencegrant kind's ReferenceGrant.
+func (h *ReferenceGrantHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("ReferenceGrant"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the backendtlspolicy kind's BackendTLSPolicy.
+func (h *BackendTLSPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("BackendTLSPolicy"), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

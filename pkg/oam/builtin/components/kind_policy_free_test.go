@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -33,11 +34,12 @@ import (
 // environment policy applies, built on one shared helper (policyFreeKind): the
 // cluster-scoped classes, the CSIDriver, the ServiceCIDR, the
 // PodDisruptionBudget, the four kinds of the Prometheus operator's API, the
-// four of Cilium's BGP control plane and five more of Cilium's API (a CIDR
+// four of Cilium's BGP control plane, five more of Cilium's API (a CIDR
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
-// policy and a node configuration). The three kinds of cert-manager's API are
-// held here too: the policy reaches one part of each (held), and everything
-// else of them is the helper's.
+// policy and a node configuration) and the five kinds of the Gateway API's
+// infrastructure objects. The three kinds of cert-manager's API are held here
+// too: the policy reaches one part of each (held), and everything else of them
+// is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -551,6 +553,41 @@ var policyFreeKinds = []policyFreeKind{
 			},
 		},
 	},
+	{
+		component: "gatewayclass", handler: &components.GatewayClassHandler{},
+		gvk:     gatewayGVK("GatewayClass"),
+		typ:     reflect.TypeFor[gatewayv1.GatewayClassSpec](),
+		minimal: map[string]any{"controllerName": "example.net/gateway-controller"},
+		full:    gatewayClassFull(),
+	},
+	{
+		component: "gateway", handler: &components.GatewayHandler{},
+		gvk: gatewayGVK("Gateway"),
+		typ: reflect.TypeFor[gatewayv1.GatewaySpec](), namespaced: true,
+		minimal: gatewayMinimal(),
+		full:    gatewayFull(),
+	},
+	{
+		component: "listenerset", handler: &components.ListenerSetHandler{},
+		gvk: gatewayGVK("ListenerSet"),
+		typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), namespaced: true,
+		minimal: listenerSetWith(gatewayListener()),
+		full:    listenerSetFull(),
+	},
+	{
+		component: "referencegrant", handler: &components.ReferenceGrantHandler{},
+		gvk: gatewayGVK("ReferenceGrant"),
+		typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), namespaced: true,
+		minimal: referenceGrantMinimal(),
+		full:    referenceGrantFull(),
+	},
+	{
+		component: "backendtlspolicy", handler: &components.BackendTLSPolicyHandler{},
+		gvk: gatewayGVK("BackendTLSPolicy"),
+		typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), namespaced: true,
+		minimal: backendTLSPolicyMinimal(),
+		full:    backendTLSPolicyFull(),
+	},
 }
 
 // egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
@@ -971,6 +1008,28 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		"cilium-nodeconfig": {
 			".Spec.Defaults", ".Spec.NodeSelector", ".Spec.NodeSelector.MatchLabels", ".Spec.NodeSelector.MatchExpressions",
 			".Spec.NodeSelector.MatchExpressions[0].Values",
+		},
+		"gatewayclass": {".Spec.ParametersRef", ".Spec.ParametersRef.Namespace", ".Spec.Description"},
+		"gateway": {
+			".Spec.Listeners", ".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS", ".Spec.Listeners[1].TLS.Mode",
+			".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.CertificateRefs[1].Namespace",
+			".Spec.Listeners[1].TLS.Options", ".Spec.Listeners[1].AllowedRoutes",
+			".Spec.Listeners[1].AllowedRoutes.Namespaces.Selector.MatchLabels", ".Spec.Listeners[1].AllowedRoutes.Kinds",
+			".Spec.Addresses", ".Spec.Addresses[0].Type", ".Spec.Infrastructure", ".Spec.Infrastructure.Labels",
+			".Spec.Infrastructure.Annotations", ".Spec.Infrastructure.ParametersRef",
+			".Spec.AllowedListeners.Namespaces.Selector.MatchLabels", ".Spec.TLS", ".Spec.TLS.Backend.ClientCertificateRef",
+			".Spec.TLS.Frontend.Default.Validation", ".Spec.TLS.Frontend.Default.Validation.CACertificateRefs",
+			".Spec.TLS.Frontend.PerPort", ".Spec.TLS.Frontend.PerPort[0].TLS.Validation.CACertificateRefs[0].Namespace",
+		},
+		"listenerset": {
+			".Spec.ParentRef.Group", ".Spec.ParentRef.Kind", ".Spec.ParentRef.Namespace", ".Spec.Listeners",
+			".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.Options",
+			".Spec.Listeners[1].AllowedRoutes.Namespaces.Selector", ".Spec.Listeners[1].AllowedRoutes.Kinds[1].Group",
+		},
+		"referencegrant": {".Spec.From", ".Spec.To", ".Spec.To[1].Name"},
+		"backendtlspolicy": {
+			".Spec.TargetRefs", ".Spec.TargetRefs[1].SectionName", ".Spec.Validation.CACertificateRefs",
+			".Spec.Validation.SubjectAltNames", ".Spec.Options",
 		},
 	}
 	type copyCase struct {
@@ -1557,6 +1616,105 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"defaults a list", map[string]any{"defaults": []any{"enable-hubble=false"}, "nodeSelector": map[string]any{}}, notA},
 			{"selector sub-key", map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{"matchNames": []any{"node-a"}}}, notA},
 			{"two spellings", map[string]any{"defaults": map[string]any{}, "Defaults": map[string]any{}, "nodeSelector": map[string]any{}}, "sets the same field as"},
+		},
+		"gatewayclass": {
+			{"no properties", nil, "controllerName: required"},
+			{"null controller", map[string]any{"controllerName": nil}, "controllerName: required"},
+			{"parameters without a group", map[string]any{"controllerName": "example.net/c", "parametersRef": map[string]any{"kind": "ConfigMap", "name": "config"}}, "parametersRef.group: required"},
+			{"parameters without a kind", map[string]any{"controllerName": "example.net/c", "parametersRef": map[string]any{"group": "", "name": "config"}}, "parametersRef.kind: required"},
+			{"parameters without a name", map[string]any{"controllerName": "example.net/c", "parametersRef": map[string]any{"group": "", "kind": "ConfigMap"}}, "parametersRef.name: required"},
+			{"unknown key", map[string]any{"controllerName": "example.net/c", "controller": "c"}, notA + "gateway.networking.k8s.io/v1 GatewayClassSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"controllerName": "example.net/c"}}, notA},
+			{"parameters sub-key", map[string]any{"controllerName": "example.net/c", "parametersRef": map[string]any{"group": "", "kind": "ConfigMap", "name": "config", "key": "k"}}, notA},
+			{"description a number", map[string]any{"controllerName": "example.net/c", "description": 1}, notA},
+			{"two spellings", map[string]any{"controllerName": "example.net/c", "ControllerName": "example.net/d"}, "sets the same field as"},
+		},
+		"gateway": {
+			{"no properties", nil, ": required"},
+			{"no class", map[string]any{"listeners": []any{gatewayListener()}}, "gatewayClassName: required"},
+			{"no listeners", map[string]any{"gatewayClassName": "public"}, "listeners: required"},
+			{"null listeners", map[string]any{"gatewayClassName": "public", "listeners": nil}, "listeners: required"},
+			{"listener without a name", gatewayWith(map[string]any{"port": 80, "protocol": "HTTP"}), "listeners[0].name: required"},
+			{"a later listener without a port", gatewayWith(gatewayListener(), map[string]any{"name": "https", "protocol": "HTTPS"}), "listeners[1].port: required"},
+			{"listener without a protocol", gatewayWith(map[string]any{"name": "http", "port": 80}), "listeners[0].protocol: required"},
+			{"certificate reference without a name", gatewayWith(gatewayListenerWith("tls", map[string]any{"certificateRefs": []any{map[string]any{"kind": "Secret"}}})), "listeners[0].tls.certificateRefs[0].name: required"},
+			{"allowed route kind without a kind", gatewayWith(gatewayListenerWith("allowedRoutes", map[string]any{"kinds": []any{map[string]any{"kind": "HTTPRoute"}, map[string]any{"group": "gateway.networking.k8s.io"}}})), "listeners[0].allowedRoutes.kinds[1].kind: required"},
+			{"parameters without a group", withProperty(gatewayMinimal(), "infrastructure", map[string]any{"parametersRef": map[string]any{"kind": "ConfigMap", "name": "config"}}), "infrastructure.parametersRef.group: required"},
+			{"client certificate without a name", gatewayTLS(map[string]any{"backend": map[string]any{"clientCertificateRef": map[string]any{"kind": "Secret"}}}), "tls.backend.clientCertificateRef.name: required"},
+			{"frontend without a default", gatewayTLS(map[string]any{"frontend": map[string]any{"perPort": []any{}}}), "tls.frontend.default: required"},
+			{"validation without CA certificates", gatewayTLS(map[string]any{"frontend": map[string]any{"default": map[string]any{"validation": map[string]any{"mode": "AllowValidOnly"}}}}), "tls.frontend.default.validation.caCertificateRefs: required"},
+			{"CA reference without a kind", gatewayTLS(map[string]any{"frontend": map[string]any{"default": map[string]any{"validation": map[string]any{"caCertificateRefs": []any{map[string]any{"group": "", "name": "client-ca"}}}}}}), "tls.frontend.default.validation.caCertificateRefs[0].kind: required"},
+			{"port configuration without a port", gatewayTLS(map[string]any{"frontend": map[string]any{"default": map[string]any{}, "perPort": []any{map[string]any{"tls": map[string]any{}}}}}), "tls.frontend.perPort[0].port: required"},
+			{"port configuration without its tls", gatewayTLS(map[string]any{"frontend": map[string]any{"default": map[string]any{}, "perPort": []any{map[string]any{"port": 8443}}}}), "tls.frontend.perPort[0].tls: required"},
+			{"a port's CA reference without a name", gatewayTLS(map[string]any{"frontend": map[string]any{"default": map[string]any{}, "perPort": []any{map[string]any{"port": 8443, "tls": map[string]any{"validation": map[string]any{"caCertificateRefs": []any{map[string]any{"group": "", "kind": "ConfigMap"}}}}}}}}), "tls.frontend.perPort[0].tls.validation.caCertificateRefs[0].name: required"},
+			{"unknown key", withProperty(gatewayMinimal(), "class", "public"), notA + "gateway.networking.k8s.io/v1 GatewaySpec"},
+			{"the object's spec", map[string]any{"spec": gatewayMinimal()}, notA},
+			{"listener sub-key", gatewayWith(gatewayListenerWith("targetPort", 8080)), notA},
+			{"port a string", gatewayWith(gatewayListenerWith("port", "http")), notA},
+			{"listeners a map", map[string]any{"gatewayClassName": "public", "listeners": gatewayListener()}, notA},
+			{"null listener", gatewayWith(gatewayListener(), nil), "listeners[1]"},
+			{"two spellings", withProperty(gatewayMinimal(), "GatewayClassName", "other"), "sets the same field as"},
+		},
+		"listenerset": {
+			{"no properties", nil, ": required"},
+			{"no parent", map[string]any{"listeners": []any{gatewayListener()}}, "parentRef: required"},
+			{"null parent", map[string]any{"parentRef": nil, "listeners": []any{gatewayListener()}}, "parentRef: required"},
+			{"parent without a name", map[string]any{"parentRef": map[string]any{"kind": "Gateway"}, "listeners": []any{gatewayListener()}}, "parentRef.name: required"},
+			{"no listeners", map[string]any{"parentRef": map[string]any{"name": "public"}}, "listeners: required"},
+			{"null listeners", map[string]any{"parentRef": map[string]any{"name": "public"}, "listeners": nil}, "listeners: required"},
+			{"empty listeners", listenerSetWith(), "listeners: required"},
+			// The type omits a listener's name, port and protocol where they
+			// are not authored and where they are authored empty, so the kind
+			// refuses both: the API server would refuse the object either way.
+			{"empty listener", listenerSetWith(map[string]any{}), "listeners[0].name: required"},
+			{"listener without a name", listenerSetWith(map[string]any{"port": 80, "protocol": "HTTP"}), "listeners[0].name: required"},
+			{"listener with an empty name", listenerSetWith(gatewayListenerWith("name", "")), "listeners[0].name: required"},
+			{"listener with a null name", listenerSetWith(gatewayListenerWith("name", nil)), "listeners[0].name: required"},
+			{"a later listener without a port", listenerSetWith(gatewayListener(), map[string]any{"name": "https", "protocol": "HTTPS"}), "listeners[1].port: required"},
+			{"listener with a port of 0", listenerSetWith(gatewayListenerWith("port", 0)), "listeners[0].port: required"},
+			{"listener without a protocol", listenerSetWith(map[string]any{"name": "http", "port": 80}), "listeners[0].protocol: required"},
+			{"a later listener with an empty protocol", listenerSetWith(gatewayListener(), gatewayListener(), map[string]any{"name": "tls", "port": 8443, "protocol": ""}), "listeners[2].protocol: required"},
+			{"certificate reference without a name", listenerSetWith(gatewayListenerWith("tls", map[string]any{"certificateRefs": []any{map[string]any{"name": "a"}, map[string]any{"namespace": "certs"}}})), "listeners[0].tls.certificateRefs[1].name: required"},
+			{"allowed route kind without a kind", listenerSetWith(gatewayListenerWith("allowedRoutes", map[string]any{"kinds": []any{map[string]any{}}})), "listeners[0].allowedRoutes.kinds[0].kind: required"},
+			{"unknown key", withProperty(listenerSetWith(gatewayListener()), "gateway", "public"), notA + "gateway.networking.k8s.io/v1 ListenerSetSpec"},
+			{"the object's spec", map[string]any{"spec": listenerSetWith(gatewayListener())}, notA},
+			{"parent sub-key", map[string]any{"parentRef": map[string]any{"name": "public", "sectionName": "http"}, "listeners": []any{gatewayListener()}}, notA},
+			{"port a string", listenerSetWith(gatewayListenerWith("port", "http")), notA},
+			{"null listener", listenerSetWith(gatewayListener(), nil), "listeners[1]"},
+			{"two spellings", withProperty(listenerSetWith(gatewayListener()), "ParentRef", map[string]any{"name": "other"}), "sets the same field as"},
+		},
+		"referencegrant": {
+			{"no properties", nil, ": required"},
+			{"no sources", map[string]any{"to": []any{map[string]any{"group": "", "kind": "Service"}}}, "from: required"},
+			{"no targets", map[string]any{"from": []any{referenceGrantFrom()}}, "to: required"},
+			{"null targets", map[string]any{"from": []any{referenceGrantFrom()}, "to": nil}, "to: required"},
+			{"source without a group", referenceGrantWith(map[string]any{"kind": "HTTPRoute", "namespace": "shop"}, map[string]any{"group": "", "kind": "Service"}), "from[0].group: required"},
+			{"source without a kind", referenceGrantWith(map[string]any{"group": "gateway.networking.k8s.io", "namespace": "shop"}, map[string]any{"group": "", "kind": "Service"}), "from[0].kind: required"},
+			{"source without a namespace", referenceGrantWith(map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute"}, map[string]any{"group": "", "kind": "Service"}), "from[0].namespace: required"},
+			{"target without a group", referenceGrantWith(referenceGrantFrom(), map[string]any{"kind": "Service"}), "to[0].group: required"},
+			{"a later target without a kind", referenceGrantWith(referenceGrantFrom(), map[string]any{"group": "", "kind": "Service"}, map[string]any{"group": "", "name": "tls"}), "to[1].kind: required"},
+			{"unknown key", withProperty(referenceGrantMinimal(), "namespace", "shop"), notA + "gateway.networking.k8s.io/v1 ReferenceGrantSpec"},
+			{"the object's spec", map[string]any{"spec": referenceGrantMinimal()}, notA},
+			{"target sub-key", referenceGrantWith(referenceGrantFrom(), map[string]any{"group": "", "kind": "Service", "namespace": "shop"}), notA},
+			{"sources a map", map[string]any{"from": referenceGrantFrom(), "to": []any{map[string]any{"group": "", "kind": "Service"}}}, notA},
+			{"null target", referenceGrantWith(referenceGrantFrom(), map[string]any{"group": "", "kind": "Service"}, nil), "to[1]"},
+			{"two spellings", withProperty(referenceGrantMinimal(), "From", []any{referenceGrantFrom()}), "sets the same field as"},
+		},
+		"backendtlspolicy": {
+			{"no properties", nil, ": required"},
+			{"no validation", map[string]any{"targetRefs": []any{backendTLSTarget()}}, "validation: required"},
+			{"validation without a hostname", backendTLSPolicyWith(map[string]any{"wellKnownCACertificates": "System"}), "validation.hostname: required"},
+			{"no targets", map[string]any{"validation": backendTLSValidation("wellKnownCACertificates", "System")}, "targetRefs: required"},
+			{"empty targets", map[string]any{"targetRefs": []any{}, "validation": backendTLSValidation("wellKnownCACertificates", "System")}, "targetRefs: required"},
+			{"target without a name", map[string]any{"targetRefs": []any{backendTLSTarget(), map[string]any{"group": "", "kind": "Service"}}, "validation": backendTLSValidation("wellKnownCACertificates", "System")}, "targetRefs[1].name: required"},
+			{"CA reference without a kind", backendTLSPolicyWith(backendTLSValidation("caCertificateRefs", []any{map[string]any{"group": "", "name": "internal-ca"}})), "validation.caCertificateRefs[0].kind: required"},
+			{"subject alternative name without a type", backendTLSPolicyWith(backendTLSValidation("subjectAltNames", []any{map[string]any{"hostname": "payments.example.com"}})), "validation.subjectAltNames[0].type: required"},
+			{"unknown key", withProperty(backendTLSPolicyMinimal(), "targetRef", backendTLSTarget()), notA + "gateway.networking.k8s.io/v1 BackendTLSPolicySpec"},
+			{"the object's spec", map[string]any{"spec": backendTLSPolicyMinimal()}, notA},
+			{"validation sub-key", backendTLSPolicyWith(backendTLSValidation("caCertificate", "-----BEGIN CERTIFICATE-----")), notA},
+			{"option not a string", withProperty(backendTLSPolicyMinimal(), "options", map[string]any{"example.com/min-version": 1.3}), notA},
+			{"null target", map[string]any{"targetRefs": []any{backendTLSTarget(), nil}, "validation": backendTLSValidation("wellKnownCACertificates", "System")}, "targetRefs[1]"},
+			{"two spellings", withProperty(backendTLSPolicyMinimal(), "Validation", map[string]any{"hostname": "other.example.com"}), "sets the same field as"},
 		},
 	}
 	for _, kind := range policyFreeKinds {

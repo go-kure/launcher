@@ -1,0 +1,40 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: payments
+  name: payments
+  namespace: default
+spec:
+  options:
+    example.com/min-version: "1.3"
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: payments
+    sectionName: https
+  validation:
+    caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: internal-ca
+    hostname: payments.internal.example.com
+    subjectAltNames:
+    - type: URI
+      uri: spiffe://example.com/payments
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: upstream
+  name: upstream-public-ca
+  namespace: default
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: upstream
+  validation:
+    hostname: api.example.org
+    wellKnownCACertificates: System

@@ -1,0 +1,23 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: public
+  name: public
+spec:
+  controllerName: example.net/gateway-controller
+  description: Internet-facing gateways
+  parametersRef:
+    group: example.net
+    kind: GatewayConfig
+    name: public
+    namespace: gateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: internal
+  name: internal-gateways
+spec:
+  controllerName: example.net/gateway-controller

@@ -1,0 +1,65 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  labels:
+    launcher.gokure.dev/component: public
+  name: public
+  namespace: default
+spec:
+  addresses:
+  - value: 192.0.2.10
+  allowedListeners:
+    namespaces:
+      from: Same
+  gatewayClassName: public
+  infrastructure:
+    labels:
+      team: edge
+    parametersRef:
+      group: ""
+      kind: ConfigMap
+      name: gateway-config
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+  - allowedRoutes:
+      kinds:
+      - kind: HTTPRoute
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            gateway: public
+    hostname: '*.example.com'
+    name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      certificateRefs:
+      - name: wildcard-tls
+  tls:
+    frontend:
+      default: {}
+      perPort:
+      - port: 443
+        tls:
+          validation:
+            caCertificateRefs:
+            - group: ""
+              kind: ConfigMap
+              name: client-ca
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  labels:
+    launcher.gokure.dev/component: internal
+  name: internal-gateway
+  namespace: default
+spec:
+  gatewayClassName: internal-gateways
+  listeners:
+  - name: http
+    port: 8080
+    protocol: HTTP

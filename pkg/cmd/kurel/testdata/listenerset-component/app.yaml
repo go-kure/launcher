@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: shop
+      type: listenerset
+      properties:
+        parentRef:
+          name: public
+          namespace: edge
+        listeners:
+          - name: shop-https
+            port: 443
+            protocol: HTTPS
+            hostname: shop.example.com
+            tls:
+              certificateRefs:
+                - name: shop-tls
+          - name: shop-http
+            port: 80
+            protocol: HTTP
+            hostname: shop.example.com
+    - name: metrics
+      type: listenerset
+      properties:
+        objectName: metrics-listeners
+        parentRef:
+          name: internal-gateway
+        listeners:
+          - name: metrics
+            port: 9090
+            protocol: HTTP

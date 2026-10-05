@@ -1,0 +1,62 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: public
+      type: gateway
+      properties:
+        gatewayClassName: public
+        listeners:
+          - name: http
+            port: 80
+            protocol: HTTP
+          - name: https
+            port: 443
+            protocol: HTTPS
+            hostname: "*.example.com"
+            tls:
+              certificateRefs:
+                - name: wildcard-tls
+            allowedRoutes:
+              namespaces:
+                from: Selector
+                selector:
+                  matchLabels:
+                    gateway: public
+              kinds:
+                - kind: HTTPRoute
+        addresses:
+          - value: 192.0.2.10
+        infrastructure:
+          labels:
+            team: edge
+          parametersRef:
+            group: ""
+            kind: ConfigMap
+            name: gateway-config
+        allowedListeners:
+          namespaces:
+            from: Same
+        tls:
+          frontend:
+            default: {}
+            perPort:
+              - port: 443
+                tls:
+                  validation:
+                    caCertificateRefs:
+                      - group: ""
+                        kind: ConfigMap
+                        name: client-ca
+    - name: internal
+      type: gateway
+      properties:
+        objectName: internal-gateway
+        gatewayClassName: internal-gateways
+        listeners:
+          - name: http
+            port: 8080
+            protocol: HTTP

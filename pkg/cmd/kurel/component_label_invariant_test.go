@@ -387,6 +387,23 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
 		"ingress": []any{map[string]any{"fromEndpoints": []any{
 			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
+	// The five kinds of the Gateway API's infrastructure objects emit identity
+	// and the authored fields too, with no `app` label and no pods: a
+	// GatewayClass cluster-scoped, the other four namespaced. None checks a
+	// name rule of its own.
+	"gatewayclass": {props: map[string]any{"controllerName": "example.net/gateway-controller"}},
+	"gateway": {props: map[string]any{
+		"gatewayClassName": "public",
+		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
+	"listenerset": {props: map[string]any{
+		"parentRef": map[string]any{"name": "public"},
+		"listeners": []any{map[string]any{"name": "http", "port": 8080, "protocol": "HTTP"}}}},
+	"referencegrant": {props: map[string]any{
+		"from": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "shop"}},
+		"to":   []any{map[string]any{"group": "", "kind": "Service"}}}},
+	"backendtlspolicy": {props: map[string]any{
+		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
+		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

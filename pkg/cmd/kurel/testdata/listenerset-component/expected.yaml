@@ -1,0 +1,38 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  labels:
+    launcher.gokure.dev/component: shop
+  name: shop
+  namespace: default
+spec:
+  listeners:
+  - hostname: shop.example.com
+    name: shop-https
+    port: 443
+    protocol: HTTPS
+    tls:
+      certificateRefs:
+      - name: shop-tls
+  - hostname: shop.example.com
+    name: shop-http
+    port: 80
+    protocol: HTTP
+  parentRef:
+    name: public
+    namespace: edge
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  labels:
+    launcher.gokure.dev/component: metrics
+  name: metrics-listeners
+  namespace: default
+spec:
+  listeners:
+  - name: metrics
+    port: 9090
+    protocol: HTTP
+  parentRef:
+    name: internal-gateway

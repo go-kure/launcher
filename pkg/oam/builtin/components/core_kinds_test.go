@@ -115,6 +115,12 @@ var coreKindSchemas = []struct {
 		"metadata":   "launcher sets the object's name, as on every kind component",
 		"status":     "the Cilium agent writes it",
 	}},
+	// And the Gateway API's infrastructure kinds.
+	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
+	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
+	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
+	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
+	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no

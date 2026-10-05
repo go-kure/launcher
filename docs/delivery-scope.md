@@ -968,6 +968,43 @@ its text:
     `host`, server names) and its CIDRs are not artifact sources and are not held to
     the allowed registries. **No literal secret is checked:** an HTTP header match's
     `value` is written as authored, and a Secret a rule refers to is not looked for.
+- **Shipped: five kinds of the Gateway API's `gateway.networking.k8s.io/v1`
+  infrastructure objects,** `gatewayclass`, `gateway`, `listenerset`, `referencegrant`
+  and `backendtlspolicy` (`gatewayclass.go`, `gateway.go`, `listenerset.go`,
+  `referencegrant.go`, `backendtlspolicy.go`, with what they share in
+  `gateway_common.go`), each the strict projection of its spec type, declaring its object
+  and taking `objectName`. A GatewayClass is cluster-scoped, the other four namespaced.
+  All five are built on `policyFreeKind`, unchanged: no environment policy applies, no
+  default is filled and no `Policy` method is added.
+  - **No capability is required and nothing gates them,** a GatewayClass and a
+    ReferenceGrant (which lets another namespace refer into the build namespace)
+    included: on a cluster without the Gateway API's CRDs the component builds and the
+    object is refused at apply. The `gateway` kind is not the Gateway a capability names
+    for the `httproute` trait.
+  - Required fields follow the rule of the Prometheus operator's kinds: a field the API
+    requires that the Go type writes whether or not it was authored must be authored. A
+    test holds each list to the CRDs the linked module ships (4 paths for a gatewayclass,
+    22 for a gateway, 4 for a listenerset, 7 for a referencegrant, 9 for a
+    backendtlspolicy), read in the experimental channel's CRDs, which hold every field
+    the Go types do, and held to agree with the standard channel's.
+  - **A field the API requires and the type omits when it is not authored is refused by
+    the kind itself,** as `servicecidr` refuses a missing `cidrs`, absent or authored
+    empty: a `listenerset` with no `listeners`, a `backendtlspolicy` with no
+    `targetRefs`, and **a ListenerSet listener without its `name`, `port` or
+    `protocol`,** which a Gateway's listener must author too. The same test derives
+    that set from the CRDs, at every depth, and holds each member to the kind's refusal
+    or to a stated reason the decoded value cannot show the omission; there are five,
+    all refused.
+  - `defaultScope` on a Gateway is an experimental-channel field, the only one of the
+    five specs; a test holds that.
+  - **No host these objects name is held to the allowed registries** (a listener's
+    hostname, a requested address, the hostname and subject alternative names a
+    BackendTLSPolicy validates): none is an artifact source. **No field holds a literal
+    secret and none is checked:** a certificate is a reference, and the free maps a
+    controller defines (`tls.options`, `options`) are written as authored.
+  - The pods a controller starts for a Gateway are not sized by the object, so the
+    policy's maxima have nothing to hold. Labels and annotations are the `labels` and
+    `annotations` properties, as on every kind component.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, which a kind component could not carry before
   the kinds took `labels` (above). Its inventory row stays `held` until the kind is
@@ -1009,7 +1046,7 @@ its text:
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Missing kinds:** the inventory's `missing` rows (Pod, Gateway among
+- **Missing kinds:** the inventory's `missing` rows (Pod, GRPCRoute among
   them), and its `trait` rows, the
   kinds reachable only as traits today (ExternalSecret, Role and RoleBinding,
   ReplicationSource).
@@ -1173,7 +1210,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig` and `cilium-clusterwidenetworkpolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

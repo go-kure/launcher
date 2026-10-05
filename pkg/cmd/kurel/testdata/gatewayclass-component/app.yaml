@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: public
+      type: gatewayclass
+      properties:
+        controllerName: example.net/gateway-controller
+        description: Internet-facing gateways
+        parametersRef:
+          group: example.net
+          kind: GatewayConfig
+          name: public
+          namespace: gateway-system
+    - name: internal
+      type: gatewayclass
+      properties:
+        objectName: internal-gateways
+        controllerName: example.net/gateway-controller
