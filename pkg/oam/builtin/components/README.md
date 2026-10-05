@@ -4308,7 +4308,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   build cannot read has to be authored in the one it can (`batch/v1`, `apps/v1`).
 
   Not checked: an object of a kind not named above; a custom resource, the pods its controller
-  creates and the replica count it sets; a `Secret`, which no check here reads. A nil
+  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
+  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
   to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
@@ -4418,7 +4419,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   it can (`batch/v1`, `apps/v1`).
 
   Not checked: an object of a kind not named above; a custom resource, the pods its controller
-  creates and the replica count it sets; a `Secret`, which no check here reads. A nil
+  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
+  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
   policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
   to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
 
