@@ -719,11 +719,11 @@ be closed at build time.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, and a kind component's metadata is not authorable,
   so the kind could not do what it is authored for. Its inventory row is `held`, with
-  that reason, until the open point below is decided.
+  that reason, until the kinds take authored labels (the point below).
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
-- **Open point, not decided: object metadata on kind components.** No kind component
-  lets its object's labels or annotations be authored. Three concrete cases need them:
+- **Decided, not yet shipped: object metadata on kind components.** No kind component
+  lets its object's labels or annotations be authored yet. Three concrete cases need them:
   - the `kubernetes.io/service-name` label of an EndpointSlice, without which the slice
     belongs to no Service;
   - the default-class annotation of a StorageClass or an IngressClass
@@ -732,8 +732,9 @@ be closed at build time.
   - the Pod Security Admission labels of a Namespace
     (`pod-security.kubernetes.io/enforce` and its siblings).
 
-  Whether labels and annotations become authorable on kind components is a decision of
-  its own on the ticket.
+  go-kure/launcher#790 decides it: every kind component is to take optional `labels`
+  and `annotations`, on the object's own metadata only. That is a change of its own
+  and is not in the tree yet.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
