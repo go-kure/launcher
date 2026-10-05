@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 var (
@@ -314,6 +318,48 @@ func TestTransform_LoweredNameHeldAgainstALaterOne(t *testing.T) {
 	// (hpaSpec), so in another namespace the two are two objects.
 	if _, _, err := tr.TransformWithPolicy(app(), TransformContext{Namespace: "prod"}); err != nil {
 		t.Fatalf("the rule's object in prod and the trait's in default: %v", err)
+	}
+}
+
+// synthNamingRule lowers a "probe" component to an "a" component, after
+// resolving for itself the name of the egress NetworkPolicy the transform
+// synthesizes for that component, under the role and default synthesis uses.
+type synthNamingRule struct{}
+
+func (synthNamingRule) ComponentType() string { return "probe" }
+
+func (synthNamingRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	kind := schema.GroupKind{Group: "networking.k8s.io", Kind: "NetworkPolicy"}
+	if _, err := lctx.ResolveName(comp.Name, "allow-egress-traffic", NameSpec{Role: NameRoleNetpolSynth, Kind: kind}); err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "a", Properties: map[string]any{}}}}, nil
+}
+
+// A name a lowering rule resolved is never the same claim as one resolved after
+// lowering, also where component, role and default are the same: the rule's
+// object and the synthesized one are two, and are refused with both named.
+func TestTransform_LoweredNameIsNotALaterOwners(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0)}, nil)
+	tr.RegisterComponentLowering(synthNamingRule{})
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "shop"},
+		Spec:       ApplicationSpec{Components: []Component{{Name: "web", Type: "probe", Properties: map[string]any{}}}},
+	}
+	ctx := TransformContext{EgressPeers: map[string][]netpol.EgressPeer{"web": {{
+		Namespace:   "data",
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+		Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+	}}}}
+
+	_, _, err := tr.TransformWithPolicy(app, ctx)
+	const want = `name collision: NetworkPolicy.networking.k8s.io "default/web-allow-egress-traffic" is named by ` +
+		`component "web" in a lowering rule (role "netpol-synth", its default) and by ` +
+		`component "web" (role "netpol-synth", its default); give one of them another name`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v\nwant one containing %s", err, want)
 	}
 }
 
