@@ -450,6 +450,35 @@ func (h *CiliumBGPPeerConfigHandler) ComponentObject() (schema.GroupKind, oam.Ob
 	return ciliumBGPKind(ciliumv2.BGPPCKindDefinition), oam.ObjectScopeCluster
 }
 
+// ComponentObject declares the cilium-cidrgroup kind's CiliumCIDRGroup, which
+// is cluster-scoped.
+func (h *CiliumCIDRGroupHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.CCGKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-loadbalancerippool kind's
+// CiliumLoadBalancerIPPool, which is cluster-scoped.
+func (h *CiliumLoadBalancerIPPoolHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.PoolKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-egressgatewaypolicy kind's
+// CiliumEgressGatewayPolicy, which is cluster-scoped.
+func (h *CiliumEgressGatewayPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.CEGPKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-localredirectpolicy kind's
+// CiliumLocalRedirectPolicy.
+func (h *CiliumLocalRedirectPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.CLRPKindDefinition), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the cilium-nodeconfig kind's CiliumNodeConfig.
+func (h *CiliumNodeConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.CNCKindDefinition), oam.ObjectScopeNamespaced
+}
+
 // ComponentObject declares the cnpg-cluster kind's Cluster.
 func (h *CnpgClusterHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return cnpgKind(cnpgv1.ClusterKind), oam.ObjectScopeNamespaced

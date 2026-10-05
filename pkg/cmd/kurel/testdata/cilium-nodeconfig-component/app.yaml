@@ -1,0 +1,26 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: edge
+      type: cilium-nodeconfig
+      properties:
+        defaults:
+          bpf-map-dynamic-size-ratio: "0.005"
+          enable-hubble: "false"
+        nodeSelector:
+          matchLabels:
+            node-role: edge
+          matchExpressions:
+            - key: rack
+              operator: In
+              values: [a, b]
+    - name: all
+      type: cilium-nodeconfig
+      properties:
+        objectName: every-node
+        defaults: {}
+        nodeSelector: {}

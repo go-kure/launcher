@@ -1,0 +1,18 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: partners
+      type: cilium-cidrgroup
+      properties:
+        externalCIDRs:
+          - 192.0.2.0/24
+          - 2001:db8::/32
+    - name: none
+      type: cilium-cidrgroup
+      properties:
+        objectName: no-peers
+        externalCIDRs: []

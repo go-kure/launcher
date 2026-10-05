@@ -101,6 +101,12 @@ var validComponentTypes = map[string]bool{
 	"cilium-bgpclusterconfig":      true,
 	"cilium-bgpnodeconfigoverride": true,
 	"cilium-bgppeerconfig":         true,
+
+	"cilium-cidrgroup":           true,
+	"cilium-loadbalancerippool":  true,
+	"cilium-egressgatewaypolicy": true,
+	"cilium-localredirectpolicy": true,
+	"cilium-nodeconfig":          true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

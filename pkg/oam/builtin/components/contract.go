@@ -253,6 +253,31 @@ func (h *CiliumBGPPeerConfigHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumCIDRGroupHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-cidrgroup")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumLoadBalancerIPPoolHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-loadbalancerippool")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumEgressGatewayPolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-egressgatewaypolicy")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumLocalRedirectPolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-localredirectpolicy")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumNodeConfigHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-nodeconfig")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

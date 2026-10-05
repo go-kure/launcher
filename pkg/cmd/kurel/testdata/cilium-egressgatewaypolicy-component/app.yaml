@@ -1,0 +1,50 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: payments-egress
+      type: cilium-egressgatewaypolicy
+      properties:
+        selectors:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: payments
+            podSelector:
+              matchLabels:
+                app: web
+          - nodeSelector:
+              matchExpressions:
+                - key: rack
+                  operator: In
+                  values: [a, b]
+        destinationCIDRs:
+          - 192.0.2.0/24
+          - 2001:db8::/32
+        excludedCIDRs:
+          - 192.0.2.128/25
+        egressGateway:
+          nodeSelector:
+            matchLabels:
+              egress: "true"
+          interface: eth1
+        egressGateways:
+          - nodeSelector:
+              matchLabels:
+                egress: a
+            egressIP: 198.51.100.7
+          - nodeSelector: {}
+    - name: least
+      type: cilium-egressgatewaypolicy
+      properties:
+        objectName: every-pod
+        selectors:
+          - podSelector: {}
+        destinationCIDRs:
+          - 0.0.0.0/0
+        egressGateway:
+          nodeSelector:
+            matchLabels:
+              egress: "true"

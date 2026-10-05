@@ -356,6 +356,31 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"cilium-bgpnodeconfigoverride": {props: map[string]any{"bgpInstances": []any{
 		map[string]any{"name": "instance-65000", "routerID": "192.0.2.1"}}}},
 	"cilium-bgppeerconfig": {props: map[string]any{"ebgpMultihop": 2}},
+	// So do five more kinds of Cilium's API: identity and the authored spec.
+	// A selector in one is the author's label query over Services, nodes,
+	// namespaces or pods of the cluster, not a pod selector of this document,
+	// so the rows select on `role`: the invariant reads every `app` value as
+	// this component's own. None checks a name rule of its own.
+	"cilium-cidrgroup":          {props: map[string]any{"externalCIDRs": []any{"192.0.2.0/24"}}},
+	"cilium-loadbalancerippool": {props: map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}}}},
+	"cilium-egressgatewaypolicy": {props: map[string]any{
+		"selectors":        []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"role": "web"}}}},
+		"destinationCIDRs": []any{"192.0.2.0/24"},
+		"egressGateway":    map[string]any{"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "true"}}},
+	}},
+	"cilium-localredirectpolicy": {props: map[string]any{
+		"redirectFrontend": map[string]any{"addressMatcher": map[string]any{
+			"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
+		}},
+		"redirectBackend": map[string]any{
+			"localEndpointSelector": map[string]any{"matchLabels": map[string]any{"role": "metadata-proxy"}},
+			"toPorts":               []any{map[string]any{"port": "8080", "protocol": "TCP"}},
+		},
+	}},
+	"cilium-nodeconfig": {props: map[string]any{
+		"defaults":     map[string]any{"enable-hubble": "false"},
+		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
+	}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

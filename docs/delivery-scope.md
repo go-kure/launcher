@@ -908,6 +908,33 @@ its text:
   - A peer configuration selects its advertisements by label: those are written under
     the advertisement's `labels`, as on every kind component. An override takes effect
     on the CiliumBGPNodeConfig of the same name, which `objectName` sets.
+- **Shipped: five more kinds of Cilium's API, `cilium.io/v2`,** `cilium-cidrgroup`,
+  `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`
+  and `cilium-nodeconfig` (`cilium_cidrgroup.go`, `cilium_loadbalancerippool.go`,
+  `cilium_egressgatewaypolicy.go`, `cilium_localredirectpolicy.go`,
+  `cilium_nodeconfig.go`), each the strict projection of its spec type, built on
+  `policyFreeKind`, declaring its object and taking `objectName`. The first three are
+  cluster-scoped; the redirect policy and the node configuration are namespaced.
+  - **No capability is required and nothing gates them,** as for the BGP kinds.
+  - The required lists are read from the CRDs of the linked module and held to them by
+    a test, with the helper the BGP kinds use for a selector's match expressions.
+  - A redirect frontend takes exactly one of `addressMatcher` and `serviceMatcher`: the
+    CRD's schema says so, it is one comparison of authored fields, and the kind refuses
+    neither and both.
+  - The CRDs carry five expression rules and none is checked. That an `egressIP` is an
+    IP address (twice) is one field's value rule. The three on a redirect policy refuse
+    a change of the stored object, which a build does not have. A test fails on a rule
+    of the linked CRDs that is not listed as left.
+  - Three defaults of the CRDs sit on fields the Go type omits when empty (`disabled`,
+    `skipRedirectFromBackend`, `egressGateways`). Each default is that empty value, so
+    an authored `false` or `[]` is left out and filled back the same; a test holds the
+    defaults to that.
+  - **No address or CIDR these objects hold is held to the allowed registries:** none
+    is an artifact source, and no field names a host. **No field is checked for a
+    literal secret:** none refers to a Secret, and a node configuration's `defaults` is
+    a free map of strings, written as authored and not checked.
+  - A CIDR group is referred to by its name, which `objectName` sets, or selected by
+    the labels written under its `labels`, as on every kind component.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, which a kind component could not carry before
   the kinds took `labels` (above). Its inventory row stays `held` until the kind is
@@ -1113,7 +1140,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride` and `cilium-bgppeerconfig` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy` and `cilium-nodeconfig` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

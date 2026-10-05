@@ -1,0 +1,19 @@
+apiVersion: cilium.io/v2
+kind: CiliumCIDRGroup
+metadata:
+  labels:
+    launcher.gokure.dev/component: partners
+  name: partners
+spec:
+  externalCIDRs:
+  - 192.0.2.0/24
+  - 2001:db8::/32
+---
+apiVersion: cilium.io/v2
+kind: CiliumCIDRGroup
+metadata:
+  labels:
+    launcher.gokure.dev/component: none
+  name: no-peers
+spec:
+  externalCIDRs: []
