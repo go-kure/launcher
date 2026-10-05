@@ -13,8 +13,9 @@ import (
 )
 
 // clusterRoleRule lowers a "cluster-reader" component to a deployment, after
-// resolving the name of a ClusterRole it generates for it: a cluster-scoped
-// object, which the rule says with NameSpec.ClusterScoped.
+// resolving the name of a ClusterRole for it: a cluster-scoped object, which
+// the rule says with NameSpec.ClusterScoped. The fixture claims the name only
+// and emits no ClusterRole.
 type clusterRoleRule struct{}
 
 func (clusterRoleRule) ComponentType() string { return "cluster-reader" }
@@ -34,8 +35,8 @@ func (clusterRoleRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCont
 }
 
 // A lowering rule and the rbac trait say "no namespace" the same way
-// (go-kure/launcher#787), so a ClusterRole a rule names and one the trait
-// generates under the same name meet in the one claim space and are refused
+// (go-kure/launcher#787), so the name a rule claims for a ClusterRole and the
+// one the trait claims for its own meet in the one claim space and are refused
 // with both named, in whatever namespace the document is transformed. Lowering
 // runs before any trait is applied, so the rule's name is always the first of
 // the two; the order of the components changes nothing.
@@ -87,7 +88,7 @@ func TestRBAC_ClusterRoleAgainstALoweredOne(t *testing.T) {
 		})
 	}
 
-	// The control: under another name the two are two objects.
+	// The control: under another name the two claims do not meet.
 	if err := transform("default", agent, web("web-reader")); err != nil {
 		t.Fatalf("a ClusterRole of another name: %v", err)
 	}

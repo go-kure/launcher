@@ -153,11 +153,12 @@ type NameSpec struct {
 	// ClusterScoped.
 	Namespace string
 	// ClusterScoped says the object has no namespace (a ClusterRole, a
-	// Namespace). It is the one way to say so: the object is claimed with no
-	// namespace, and a spec that sets both it and Namespace is refused. A
-	// lowering rule sets it for such an object as a trait does:
+	// Namespace): it is claimed with no namespace, and a spec that sets both
+	// this and Namespace is refused. A lowering rule sets it for such an object
+	// as a trait does, and has no other way to say so:
 	// LoweringContext.ResolveName takes any other object to land in the
-	// document's namespace.
+	// document's namespace. A trait's spec that sets neither is claimed with no
+	// namespace too, as an object of a document transformed without one is.
 	ClusterScoped bool
 	// Property names the property the author wrote Authored in ("hpaName"). It is
 	// empty when the author wrote none, and Authored is then not read: a present

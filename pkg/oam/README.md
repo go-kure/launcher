@@ -475,14 +475,16 @@ object and the later one are two. Under `LowerRaws`, which lowers several
 documents with one allocator, two documents may resolve one kind and name only where their
 `metadata.namespace` differs.
 
-A rule takes its object to land in the document's namespace, and reads no
-`NameSpec.Namespace`. A cluster-scoped object (a ClusterRole) has no namespace, and the rule
-says so with `NameSpec.ClusterScoped`. Its name is then one object whatever the document's
-namespace is: it is refused against a trait's cluster-scoped object of the same kind and name
-(the `rbac` trait's ClusterRole with `clusterWide`), and under `LowerRaws` against the same
-kind and name resolved for a document of another namespace. `ClusterScoped` is the one way to
-say an object has no namespace, for a rule and a trait handler alike: a `NameSpec` that sets
-both it and `Namespace` is refused.
+A rule takes its object to land in the document's namespace: `NameSpec.Namespace` chooses
+none for it. A cluster-scoped object (a ClusterRole) has no namespace, and the rule says so
+with `NameSpec.ClusterScoped`. Its name is then one object whatever the document's namespace
+is: it is refused against a trait's cluster-scoped object of the same kind and name (the
+`rbac` trait's ClusterRole with `clusterWide`), and under `LowerRaws` against the same kind
+and name resolved for a document of another namespace. A rule and a trait handler say it the
+same way, and a `NameSpec` that sets both `ClusterScoped` and `Namespace` is refused for
+either. For a rule the field is the only way: without it the document's namespace applies. A
+trait handler's spec that sets neither is still claimed with no namespace, as an object of a
+document transformed without one is.
 
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
