@@ -354,6 +354,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"listenerset":      &components.ListenerSetHandler{},
 		"referencegrant":   &components.ReferenceGrantHandler{},
 		"backendtlspolicy": &components.BackendTLSPolicyHandler{},
+
+		"endpointslice": &components.EndpointSliceHandler{},
 	}
 }
 

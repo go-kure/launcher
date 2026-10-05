@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: legacy-db
+      type: service
+      properties:
+        objectName: db
+        ports:
+          - name: postgres
+            port: 5432
+    - name: legacy-db-endpoints
+      type: endpointslice
+      properties:
+        labels:
+          kubernetes.io/service-name: db
+        addressType: IPv4
+        endpoints:
+          - addresses: [192.0.2.10]
+            conditions:
+              ready: false
+            zone: eu-west-1a
+          - addresses: [192.0.2.11]
+        ports:
+          - name: postgres
+            protocol: TCP
+            port: 5432
+    - name: unbound
+      type: endpointslice
+      properties:
+        addressType: FQDN

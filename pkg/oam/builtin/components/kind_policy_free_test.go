@@ -15,6 +15,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -36,10 +37,11 @@ import (
 // PodDisruptionBudget, the four kinds of the Prometheus operator's API, the
 // four of Cilium's BGP control plane, five more of Cilium's API (a CIDR
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
-// policy and a node configuration) and the five kinds of the Gateway API's
-// infrastructure objects. The three kinds of cert-manager's API are held here
-// too: the policy reaches one part of each (held), and everything else of them
-// is the helper's.
+// policy and a node configuration), the five kinds of the Gateway API's
+// infrastructure objects, and the EndpointSlice, the first of them that is a
+// whole object in a namespace. The three kinds of cert-manager's API are held
+// here too: the policy reaches one part of each (held), and everything else of
+// them is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -588,6 +590,42 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: backendTLSPolicyMinimal(),
 		full:    backendTLSPolicyFull(),
 	},
+	{
+		component: "endpointslice", handler: &components.EndpointSliceHandler{},
+		gvk: discoveryv1.SchemeGroupVersion.WithKind("EndpointSlice"),
+		typ: reflect.TypeFor[discoveryv1.EndpointSlice](), wholeObject: true, namespaced: true,
+		// The API requires the address type alone: a slice may hold no endpoint
+		// and no port.
+		minimal: map[string]any{"addressType": "IPv4"},
+		full: map[string]any{
+			"addressType": "IPv4",
+			"endpoints": []any{
+				map[string]any{
+					"addresses":  []any{"192.0.2.10"},
+					"conditions": map[string]any{"ready": false, "serving": true, "terminating": false},
+					"hostname":   "web-0",
+					"targetRef":  map[string]any{"kind": "Pod", "namespace": "apps", "name": "web-0"},
+					"nodeName":   "node-a", "zone": "eu-west-1a",
+					"hints": map[string]any{
+						"forZones": []any{map[string]any{"name": "eu-west-1a"}},
+						"forNodes": []any{map[string]any{"name": "node-a"}},
+					},
+					"deprecatedTopology": map[string]any{"topology.kubernetes.io/region": "eu-west-1"},
+				},
+				map[string]any{"addresses": []any{"192.0.2.11", "192.0.2.12"}},
+			},
+			"ports": []any{
+				map[string]any{"name": "http", "protocol": "TCP", "port": 8080, "appProtocol": "kubernetes.io/h2c"},
+				// A slice not derived from a Service may leave a port's number out.
+				map[string]any{"name": "metrics"},
+			},
+		},
+	},
+}
+
+// endpointSlice is an IPv4 endpointslice of the given endpoints.
+func endpointSlice(endpoints ...any) map[string]any {
+	return map[string]any{"addressType": "IPv4", "endpoints": endpoints}
 }
 
 // egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
@@ -1030,6 +1068,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		"backendtlspolicy": {
 			".Spec.TargetRefs", ".Spec.TargetRefs[1].SectionName", ".Spec.Validation.CACertificateRefs",
 			".Spec.Validation.SubjectAltNames", ".Spec.Options",
+		},
+		"endpointslice": {
+			".Endpoints", ".Endpoints[0].Addresses", ".Endpoints[0].Conditions.Ready", ".Endpoints[0].Conditions.Terminating",
+			".Endpoints[0].Hostname", ".Endpoints[0].TargetRef", ".Endpoints[0].DeprecatedTopology", ".Endpoints[0].NodeName",
+			".Endpoints[0].Zone", ".Endpoints[0].Hints", ".Endpoints[0].Hints.ForZones", ".Endpoints[0].Hints.ForNodes",
+			".Endpoints[1].Addresses", ".Ports", ".Ports[0].Name", ".Ports[0].Protocol", ".Ports[0].Port", ".Ports[0].AppProtocol",
 		},
 	}
 	type copyCase struct {
@@ -1738,6 +1782,21 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null target", map[string]any{"targetRefs": []any{backendTLSTarget(), nil}, "validation": backendTLSValidation("wellKnownCACertificates", "System")}, "targetRefs[1]"},
 			{"two spellings", withProperty(backendTLSPolicyMinimal(), "Validation", map[string]any{"hostname": "other.example.com"}), "sets the same field as"},
 		},
+		"endpointslice": {
+			{"no properties", nil, "addressType: required"},
+			{"null addressType", map[string]any{"addressType": nil, "endpoints": []any{}}, "addressType: required"},
+			{"endpoint without addresses", endpointSlice(map[string]any{"hostname": "web-0"}), "endpoints[0].addresses: required"},
+			{"a later endpoint's null addresses", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}}, map[string]any{"addresses": nil}), "endpoints[1].addresses: required"},
+			{"zone hint without a name", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}, "hints": map[string]any{"forZones": []any{map[string]any{}}}}), "endpoints[0].hints.forZones[0].name: required"},
+			{"node hint without a name", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}, "hints": map[string]any{"forNodes": []any{map[string]any{"name": "node-a"}, map[string]any{}}}}), "endpoints[0].hints.forNodes[1].name: required"},
+			{"unknown key", map[string]any{"addressType": "IPv4", "spec": map[string]any{}}, notA + "discovery.k8s.io/v1 EndpointSlice"},
+			// An endpoint's readiness sits under its conditions.
+			{"endpoint sub-key", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}, "ready": true}), notA},
+			{"addresses a string", endpointSlice(map[string]any{"addresses": "192.0.2.10"}), notA},
+			{"port a name", map[string]any{"addressType": "IPv4", "ports": []any{map[string]any{"port": "http"}}}, notA},
+			{"null endpoint", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}}, nil), "endpoints[1]"},
+			{"two spellings", map[string]any{"addressType": "IPv4", "AddressType": "IPv6"}, "sets the same field as"},
+		},
 	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
@@ -2097,6 +2156,51 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		"defaults": map[string]any{"no-such-option": "true"}, "nodeSelector": map[string]any{},
 	}); err != nil {
 		t.Errorf("a configuration key Cilium does not know: %v, want it accepted", err)
+	}
+
+	slice := build("endpointslice", full["endpointslice"]).(*discoveryv1.EndpointSlice)
+	if slice.AddressType != discoveryv1.AddressTypeIPv4 {
+		t.Errorf("addressType = %q, want IPv4", slice.AddressType)
+	}
+	// An authored false is kept where the API reads an unset condition as true.
+	if c := slice.Endpoints[0].Conditions; c.Ready == nil || *c.Ready || c.Serving == nil || !*c.Serving || c.Terminating == nil || *c.Terminating {
+		t.Errorf("conditions = %+v, want the authored ready false, serving true and terminating false", c)
+	}
+	if !slices.Equal(slice.Endpoints[1].Addresses, []string{"192.0.2.11", "192.0.2.12"}) {
+		t.Errorf("addresses = %v, want them in authored order", slice.Endpoints[1].Addresses)
+	}
+	if p := slice.Ports[0]; p.Port == nil || *p.Port != 8080 || p.Protocol == nil || *p.Protocol != corev1.ProtocolTCP {
+		t.Errorf("port = %+v, want the authored 8080 over TCP", p)
+	}
+	// The API requires neither list. The type always encodes both, so a slice
+	// that authors none carries endpoints: null and ports: null, and an
+	// endpoint that authors no condition carries conditions: {}.
+	bareSlice := policyFreeJSON(t, build("endpointslice", map[string]any{"addressType": "FQDN"}))
+	for _, list := range []string{"endpoints", "ports"} {
+		if got, ok := bareSlice[list]; !ok || got != nil {
+			t.Errorf("%s = %v (present: %v), want null on a slice that authors none", list, got, ok)
+		}
+	}
+	// An authored empty list is written as one.
+	emptied := policyFreeJSON(t, build("endpointslice", map[string]any{"addressType": "IPv4", "endpoints": []any{}, "ports": []any{}}))
+	if got, want := fmt.Sprint(emptied["endpoints"], emptied["ports"]), "[] []"; got != want {
+		t.Errorf("endpoints and ports = %s, want %s: the authored empty lists", got, want)
+	}
+	unconditioned := policyFreeJSON(t, build("endpointslice", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}})))
+	if got, want := fmt.Sprint(unconditioned["endpoints"]), "[map[addresses:[192.0.2.10] conditions:map[]]]"; got != want {
+		t.Errorf("endpoints = %s, want %s", got, want)
+	}
+	// The form of a value is the API server's to judge: an address that is not
+	// of the slice's type builds, and so does a required field authored empty.
+	if err := coreKindErr(kinds["endpointslice"].handler, "endpointslice", "fast", map[string]any{
+		"addressType": "IPv6", "endpoints": []any{map[string]any{"addresses": []any{"db.example.com"}}},
+	}); err != nil {
+		t.Errorf("an address that is not of the slice's type: %v, want it accepted", err)
+	}
+	if err := coreKindErr(kinds["endpointslice"].handler, "endpointslice", "fast", map[string]any{
+		"addressType": "", "endpoints": []any{map[string]any{"addresses": []any{}}},
+	}); err != nil {
+		t.Errorf("an empty address type and an empty address list: %v, want them accepted", err)
 	}
 }
 

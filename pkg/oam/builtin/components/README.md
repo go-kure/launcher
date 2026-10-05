@@ -185,6 +185,7 @@ reads it.
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
 | `referencegrant` | ReferenceGrant | Kind-named Gateway API ReferenceGrant: the whole `ReferenceGrantSpec`, strictly decoded; `from` and `to` are required, with the group, kind and namespace of a source and the group and kind of a target. No capability is required and no environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
+| `endpointslice` | EndpointSlice | Kind-named EndpointSlice: the object's own fields (`addressType`, required; `endpoints`; `ports`), strictly decoded; an endpoint's `addresses` are required. It belongs to a Service through the `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow a Service's `objectName`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -272,7 +273,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
-| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, which a kind component now authors under `labels`, as a literal that does not follow the Service's `objectName`. The kind itself is not in the tree yet (go-kure/launcher#790). |
+| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | kind | `endpointslice` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | A slice belongs to a Service only through its `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow the Service's `objectName`. `addressType` and an endpoint's `addresses` must be written. The addresses and FQDNs of its endpoints are not artifact sources. No environment policy applies. |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
@@ -2840,7 +2841,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies; `servicecidr`, `poddisruptionbudget`, the four kinds of
+  policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
   the Prometheus operator's API, the four of Cilium's BGP control plane and
   the five kinds of the Gateway API's infrastructure objects, below, are built
   on it too. The three kinds
@@ -3252,6 +3253,61 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **Labels and annotations** are the `labels` and `annotations` properties.
   - **Not covered.** Whether the selector matches any pod. The object's
     status is the disruption controller's and is not written.
+- **endpointslice** (go-kure/launcher#790) is the kind-named projection of a
+  `discovery.k8s.io/v1` EndpointSlice, built on `policyFreeKind`. It emits
+  that one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** an EndpointSlice has no spec, so the properties are the
+    object's own top-level fields, decoded strictly at every depth:
+    `addressType`, `endpoints` and `ports`. The object's `kind`, `apiVersion`
+    and `metadata` are launcher's and are refused under any spelling. An
+    authored `false` is kept (`conditions: {ready: false}`), and an
+    endpoint's `deprecatedTopology` is written as authored, though the type
+    documents that the v1 API ignores a write to it.
+  - **Its Service is a label, and the label is the author's literal.** A
+    slice belongs to a Service only through its `kubernetes.io/service-name`
+    label, authored under `labels`. Launcher derives the label from nothing
+    and points it at no component: it does not follow a `service` component's
+    `objectName`, so write the name the Service object takes. A slice without
+    the label builds and belongs to no Service. A `service` component of a
+    type other than `ExternalName` always carries a selector (the kind
+    refuses an empty one, and an `ExternalName` Service has no endpoints),
+    so a Service whose endpoints are all written by hand comes from
+    elsewhere: a `manifests` component, or outside the document.
+  - **Required** are the fields the API's source marks required and the Go
+    type writes whether or not they were authored, so that the built object
+    would not show the omission: `addressType` (`addressType: required …`),
+    an endpoint's `addresses` (`endpoints[0].addresses: required …`), and the
+    `name` of an entry of an endpoint's `hints.forZones` or `hints.forNodes`.
+    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives the list from the
+    `+required` and `+optional` markers of the linked `k8s.io/api` module and
+    fails on a dependency bump that changes it. The API marks no field of the
+    kind required that the type leaves out when unauthored; the same test
+    fails if one appears. The check is one of presence: an authored empty
+    value (`addressType: ""`, `addresses: []`) builds and is the API
+    server's to refuse.
+  - **Emitted empty.** The type writes three fields the API does not require
+    whether or not they were authored. A slice that authors no `endpoints` or
+    no `ports` carries `endpoints: null` or `ports: null`, an authored empty
+    list is written as `[]`, and an endpoint that authors no condition
+    carries `conditions: {}`. A port that authors no `protocol` or no `name`
+    is written without it, and the API server fills `TCP` and the empty
+    name.
+  - **Not artifact sources.** The addresses of an endpoint, FQDNs included,
+    are where traffic goes, not an artifact source, and none is held to the
+    policy's allowed registries.
+  - **Policy.** No field of the object is one an `oam.Policy` method speaks
+    to, so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Every rule on the form of a value is left to the API
+    server: that an address is of the slice's `addressType`, the limits the
+    type documents on how many endpoints, addresses, ports and hints a slice
+    holds, and the names of ports. The type documents `addressType` as
+    immutable. Launcher does not compare a build with the cluster, so a
+    changed one builds here and is refused at apply. Whether a Service of
+    the labelled name exists is not checked.
 - **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
   projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
   one object in the build namespace, named after the component unless
@@ -7345,7 +7401,7 @@ kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometh
 `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`),
 five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`,
 `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`),
-`cilium-clusterwidenetworkpolicy`,
+`cilium-clusterwidenetworkpolicy`, `endpointslice`,
 the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`),
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

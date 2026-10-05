@@ -169,6 +169,11 @@ The kind components of the Gateway API's infrastructure objects,
 `<type>-component` fixture each: a GatewayClass with no namespace, and a
 Gateway, a ListenerSet, a ReferenceGrant and a BackendTLSPolicy in the build
 namespace. No capability is required of the cluster profile to build them.
+The `endpointslice` kind component (go-kure/launcher#790) is registered the
+same way, with an `endpointslice-component` fixture: a Service named by
+`objectName`, an EndpointSlice in the build namespace whose authored
+`kubernetes.io/service-name` label holds that name as a literal, and a slice
+that authors only its address type.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

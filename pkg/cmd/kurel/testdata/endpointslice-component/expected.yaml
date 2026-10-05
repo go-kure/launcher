@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: legacy-db
+    launcher.gokure.dev/component: legacy-db
+  name: db
+  namespace: default
+spec:
+  ports:
+  - name: postgres
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: legacy-db
+  type: ClusterIP
+---
+addressType: IPv4
+apiVersion: discovery.k8s.io/v1
+endpoints:
+- addresses:
+  - 192.0.2.10
+  conditions:
+    ready: false
+  zone: eu-west-1a
+- addresses:
+  - 192.0.2.11
+  conditions: {}
+kind: EndpointSlice
+metadata:
+  labels:
+    kubernetes.io/service-name: db
+    launcher.gokure.dev/component: legacy-db-endpoints
+  name: legacy-db-endpoints
+  namespace: default
+ports:
+- name: postgres
+  port: 5432
+  protocol: TCP
+---
+addressType: FQDN
+apiVersion: discovery.k8s.io/v1
+endpoints: null
+kind: EndpointSlice
+metadata:
+  labels:
+    launcher.gokure.dev/component: unbound
+  name: unbound
+  namespace: default
+ports: null
