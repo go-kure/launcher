@@ -473,14 +473,13 @@ func TestPassthrough_UndeclaredFieldOutsideAWorkloadIsEmitted(t *testing.T) {
 	htWantViolation(t, err, `object HorizontalPodAutoscaler "demo/thing"`, "spec.maxReplicas: replicas 9 exceeds enforced maximum 3")
 }
 
-// TestPassthrough_LargeIntegerIsEmittedAsAuthoredAndWrittenRounded: the
-// component emits a large integer as it was authored, under a policy and under
-// none: the object is the authored map, and the decode the policy check reads
-// never replaces it. The digits are lost one step later, in every component
-// alike: kure's manifest writer reads each object's numbers as floats, so an
-// integer above 2^53 is written rounded. The README states that limit; a
-// writer that keeps the digits fails here, and the README sentence goes.
-func TestPassthrough_LargeIntegerIsEmittedAsAuthoredAndWrittenRounded(t *testing.T) {
+// TestPassthrough_LargeIntegerIsEmittedAndWrittenAsAuthored: the component
+// emits a large integer as it was authored, under a policy and under none: the
+// object is the authored map, and the decode the policy check reads never
+// replaces it. kure's manifest writer then writes an integer the object holds
+// as one with its own digits, above 2^53 and above the int64 range alike
+// (go-kure/kure#1006); it wrote both rounded before.
+func TestPassthrough_LargeIntegerIsEmittedAndWrittenAsAuthored(t *testing.T) {
 	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n" +
 		"  at53: 9007199254740992\n  over53: 9007199254740993\n  over63: 9223372036854775808\n"
 	for name, policy := range map[string]oam.Policy{"strict policy": ptStrictPolicy(), "no policy": nil} {
@@ -502,9 +501,9 @@ func TestPassthrough_LargeIntegerIsEmittedAsAuthoredAndWrittenRounded(t *testing
 		if err != nil {
 			t.Fatalf("%s: encoding: %v", name, err)
 		}
-		for _, want := range []string{"at53: 9007199254740992\n", "over53: 9007199254740992\n", "over63: 9223372036854776000\n"} {
+		for _, want := range []string{"at53: 9007199254740992\n", "over53: 9007199254740993\n", "over63: 9223372036854775808\n"} {
 			if !strings.Contains(string(out), want) {
-				t.Errorf("%s: written object lacks %q, the value as the writer rounds it:\n%s", name, want, out)
+				t.Errorf("%s: written object lacks %q, the value as authored:\n%s", name, want, out)
 			}
 		}
 	}

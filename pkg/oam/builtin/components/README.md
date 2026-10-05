@@ -4093,11 +4093,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping key that is not
     a string (`1:`) becomes its string form, and an unquoted timestamp stays the string the chart
     wrote; in an unstructured object an integer an int64 cannot hold becomes a float;
-  - a large integer does not survive the write. Kure's manifest writer reads the numbers of
-    every object as floats, so an integer above 2^53 (`9007199254740992`) is written rounded:
-    `9007199254740993` as `9007199254740992`, `9223372036854775807` as `9223372036854776000`.
-    That holds for every object launcher writes, typed or unstructured, whichever component
-    emitted it; a value that large has to be a string in a field that takes one;
+  - a large integer survives the write where the object holds it as an integer. Since
+    go-kure/kure#1006 kure's manifest writer writes an integer field of a typed object, and an
+    integer in an unstructured one, with its own digits: `9007199254740993` and
+    `9223372036854775807` are written as rendered (they were written `9007199254740992` and
+    `9223372036854776000`). That holds for every object launcher writes, whichever component
+    emitted it. A number the object holds as a float is written as that float, with the
+    shortest digits that read back as it, and an integer an int64 cannot hold is such a float
+    in an unstructured object (the item above): `9223372036854775808` is written
+    `9223372036854776000`, and `18446744073709551615` as `1.8446744073709552e+19`. A value
+    that large has to be a string in a field that takes one;
   - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}` and a
     mapping without `apiVersion` and `kind` are build errors — in a document
     of a dropped hook as well, since the render is decoded before hooks are grouped;
@@ -4252,7 +4257,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   ordering for GitOps reconciliation, not Helm's own per-operation execution order (kure
   `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child regardless of placement, but
   kure's layout integrator only translates it into `spec.dependsOn` on a per-child Flux
-  Kustomization CR under `FluxIntegratedPerLayout` placement (kure `pkg/stack/layout/manifest.go`'s
+  Kustomization CR under `FluxIntegratedPerLayout` placement, where it writes each entry as the
+  name of the Kustomization of the sibling the entry names (kure `pkg/stack/layout/manifest.go`'s
   `DependsOn` field doc); under coarser placement modes the children's resources are aggregated
   instead, and reconciliation ordering between hook groups is not separately enforced. When it
   partitions, `AugmentLayout` also sets the component layout's `ApplicationFileMode` to
@@ -4265,8 +4271,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   file, `<component dir>/<child>.yaml`, instead of a sub-directory, and the component's
   `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout integrator keeps
   every child a directory with its own Flux Kustomization, whatever the default. That
-  Kustomization is named after the child, and kure refuses a name over 63 characters there, while
-  the child's name is held to 253: a known limit, with no consumer override yet (`pkg/oam/README.md`,
+  Kustomization's default name is the bundle's Kustomization name, a hyphen and the child's name,
+  and kure refuses a name over 63 characters there, while the child's name is held to 253: a
+  known limit, since launcher sets no override on the child yet (`pkg/oam/README.md`,
   "Pipeline"). A single-group
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
@@ -4280,7 +4287,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   built directly, outside a transform, has none unless the caller sets the field, and its
   children are then named `<layout name>-NN-<phase-slug>`. **Breaking output change**: every
   hook-group child name, and so its directory and the Flux Kustomization a consumer derives
-  from it, gains the leading `<application>-`. A name over 253 characters is shortened by the
+  from it, gains the leading `<application>-`. Since go-kure/kure#973 the default name of the
+  Kustomization kure generates for the child under `FluxIntegratedPerLayout` also begins with
+  the bundle's Kustomization name, so for an application that is its own bundle the
+  application name leads it twice (`shop-shop-db-01-main`). A name over 253 characters is shortened by the
   one shortening rule (`oam.ShortenNameWithSuffix`, which `helm` uses for its values ConfigMap
   name): the `-NN-<phase-slug>` suffix is kept whole and `<application>-<component>` becomes
   its own beginning plus 10 hex digits of its sha256 (8 before go-kure/launcher#793), so two
@@ -5187,8 +5197,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The object is authored as a map and the check reads Go types, so an object whose group,
   version and kind kure's scheme registers is decoded as that kind **for the check only**.
   What is emitted stays the authored map, so a field the Go type does not declare is
-  emitted with it, and a large integer is emitted as authored (the writer's rounding above
-  2^53, under `helmtemplate`'s *Rendered objects*, applies to it as to any object). The check
+  emitted with it, and a large integer is emitted as authored, which kure's manifest writer
+  writes with its own digits (`helmtemplate`'s *Rendered objects*). The check
   cannot read such a field, so a workload or a claim that sets one is refused, as template
   delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
   component is built and again by `Generate`, under any policy and with none
@@ -5279,10 +5289,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   panics on is a build error naming the document, as it is there (`manifest source: parse
   manifests: document 1 (CiliumNetworkPolicy "demo/p"): the decoder panicked on the
   document instead of refusing it …`).
-  An integer above 2^53 (`9007199254740992`) is written rounded, here as everywhere
-  (`9007199254740993` as `9007199254740992`): kure's manifest writer reads the numbers of
-  every object, typed or unstructured, as floats. In an unstructured object an integer an
-  int64 cannot hold is a float from the decode on.
+  An integer the object holds as one is written with its own digits, here as everywhere
+  (`9007199254740993` as `9007199254740993`; `helmtemplate`'s *Rendered objects*). In an
+  unstructured object an integer an int64 cannot hold is a float from the decode on, and is
+  written as that float.
 
   **Policy.** Every object a `manifests` or `crd` source yields is checked against the
   environment policy with the check template delivery (`helmtemplate`) and `passthrough`

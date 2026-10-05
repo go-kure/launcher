@@ -17,7 +17,7 @@ require (
 	github.com/fluxcd/pkg/apis/kustomize v1.21.0
 	github.com/fluxcd/pkg/apis/meta v1.32.0
 	github.com/fluxcd/source-controller/api v1.9.5
-	github.com/go-kure/kure v0.2.0-beta.15.0.20261005031541-144a533dbcf3
+	github.com/go-kure/kure v0.2.0-beta.15.0.20261005101450-d3a45fad7a9a
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/spf13/cobra v1.10.2
