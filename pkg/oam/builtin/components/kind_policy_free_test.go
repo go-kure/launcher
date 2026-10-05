@@ -1341,6 +1341,11 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"oauth2 without a client", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("clientId")), "oauth2.clientId: required"},
 			{"oauth2 without a secret", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("clientSecret")), "oauth2.clientSecret: required"},
 			{"oauth2 without a token URL", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("tokenUrl")), "oauth2.tokenUrl: required"},
+			// The type leaves a parameter's name out when it is empty.
+			{"parameter without a name", withProperty(probeProperties(), "params", []any{map[string]any{"values": []any{"http_2xx"}}}), "params[0].name: required"},
+			{"parameter with an empty name", withProperty(probeProperties(), "params", []any{map[string]any{"name": ""}}), "params[0].name: required"},
+			{"parameter with a null name", withProperty(probeProperties(), "params", []any{map[string]any{"name": nil}}), "params[0].name: required"},
+			{"a later parameter without a name", withProperty(probeProperties(), "params", []any{map[string]any{"name": "module"}, map[string]any{}}), "params[1].name: required"},
 			{"unknown key", withProperty(probeProperties(), "selector", map[string]any{}), notA + "monitoring.coreos.com/v1 ProbeSpec"},
 			{"the object's spec", map[string]any{"spec": probeProperties()}, notA},
 			{"prober sub-key", map[string]any{"prober": map[string]any{"url": "blackbox:9115", "address": "blackbox:9115"}}, notA},
@@ -1377,6 +1382,12 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"output format without a type", certificateWith("additionalOutputFormats", []any{map[string]any{"type": "DER"}, map[string]any{}}), "additionalOutputFormats[1].type: required"},
 			{"keystore without create", certificateWith("keystores", map[string]any{"jks": map[string]any{"passwordSecretRef": map[string]any{"name": "keystore"}}}), "keystores.jks.create: required"},
 			{"keystore reference without a name", certificateWith("keystores", map[string]any{"pkcs12": map[string]any{"create": true, "passwordSecretRef": map[string]any{"key": "password"}}}), "keystores.pkcs12.passwordSecretRef.name: required"},
+			// The type leaves either field of a renewal window out when it is empty.
+			{"renewal window without a cron expression", certificateWith("renewal", renewalWindows(map[string]any{"windowDuration": "2h"})), "renewal.windows[0].cron: required"},
+			{"renewal window with an empty cron expression", certificateWith("renewal", renewalWindows(map[string]any{"cron": "", "windowDuration": "2h"})), "renewal.windows[0].cron: required"},
+			{"renewal window without a duration", certificateWith("renewal", renewalWindows(map[string]any{"cron": "0 2 * * *"})), "renewal.windows[0].windowDuration: required"},
+			{"renewal window with a null duration", certificateWith("renewal", renewalWindows(map[string]any{"cron": "0 2 * * *", "windowDuration": nil})), "renewal.windows[0].windowDuration: required"},
+			{"a later renewal window, empty", certificateWith("renewal", renewalWindows(map[string]any{"cron": "0 2 * * *", "windowDuration": "2h"}, map[string]any{})), "renewal.windows[1].windowDuration: required"},
 			{"unknown key", certificateWith("issuer", "ca"), notA + "cert-manager.io/v1 CertificateSpec"},
 			{"the object's spec", map[string]any{"spec": certificateMinimal()}, notA},
 			{"private key sub-key", certificateWith("privateKey", map[string]any{"bits": 2048}), notA},
@@ -1412,6 +1423,14 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 				"advertisementType": "PodCIDR", "selector": map[string]any{"matchLabels": map[string]any{"pool": "blue"}},
 			}), `advertisements[0].selector: not allowed with advertisementType "PodCIDR"`},
 			{"an empty selector on a PodCIDR entry", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR", "selector": map[string]any{}}), `advertisements[0].selector: not allowed with advertisementType "PodCIDR"`},
+			// The type leaves an interface's name and a service's addresses
+			// out when they are empty, an empty list included.
+			{"interface without a name", bgpAdvertisements(map[string]any{"advertisementType": "Interface", "interface": map[string]any{}}), "advertisements[0].interface.name: required"},
+			{"interface with an empty name", bgpAdvertisements(map[string]any{"advertisementType": "Interface", "interface": map[string]any{"name": ""}}), "advertisements[0].interface.name: required"},
+			{"service without addresses", bgpAdvertisements(map[string]any{"advertisementType": "Service", "service": map[string]any{"aggregationLengthIPv4": 24}}), "advertisements[0].service.addresses: required"},
+			{"service with no address", bgpAdvertisements(map[string]any{"advertisementType": "Service", "service": map[string]any{"addresses": []any{}}}), "advertisements[0].service.addresses: required"},
+			{"service with null addresses", bgpAdvertisements(map[string]any{"advertisementType": "Service", "service": map[string]any{"addresses": nil}}), "advertisements[0].service.addresses: required"},
+			{"a later service without addresses", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR"}, map[string]any{"advertisementType": "Service", "service": map[string]any{}}), "advertisements[1].service.addresses: required"},
 			{"unknown key", withProperty(bgpAdvertisements(), "advertisement", []any{}), notA + "cilium.io/v2 CiliumBGPAdvertisementSpec"},
 			{"the object's spec", map[string]any{"spec": bgpAdvertisements()}, notA},
 			{"entry sub-key", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR", "type": "PodCIDR"}), notA},
@@ -1926,16 +1945,8 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	if want := []ciliumv2.BGPServiceAddressType{ciliumv2.BGPLoadBalancerIPAddr, ciliumv2.BGPClusterIPAddr}; service == nil || !slices.Equal(service.Addresses, want) {
 		t.Errorf("service = %+v, want the addresses %v in authored order", service, want)
 	}
-	// The API requires a Service entry's addresses and an Interface entry's
-	// name. The type omits each when it is not authored, so the kind refuses
-	// neither: the object shows the block without it, and the API server
-	// refuses that.
-	blocks := policyFreeJSON(t, build("cilium-bgpadvertisement", bgpAdvertisements(
-		map[string]any{"advertisementType": "Service", "service": map[string]any{}},
-		map[string]any{"advertisementType": "Interface", "interface": map[string]any{}},
-	)))["spec"].(map[string]any)
-	if got, want := fmt.Sprint(blocks), "map[advertisements:[map[advertisementType:Service service:map[]] map[advertisementType:Interface interface:map[]]]]"; got != want {
-		t.Errorf("spec = %s, want %s", got, want)
+	if got := advert.Spec.Advertisements[3].Interface; got == nil || got.Name != "lo" {
+		t.Errorf("interface = %+v, want the authored name lo", got)
 	}
 
 	cluster := build("cilium-bgpclusterconfig", full["cilium-bgpclusterconfig"]).(*ciliumv2.CiliumBGPClusterConfig)

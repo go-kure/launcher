@@ -35,9 +35,10 @@ type ciliumBGPRule struct {
 // the CRD each emits an object of, the spec type it decodes into and its
 // required list.
 //
-// omitted names the fields the CRD requires that the list does not hold,
-// because the type leaves each out when it is not authored: the object shows
-// the omission and the API server refuses it. checked names the CRD's
+// refused names the fields the CRD requires that the list does not hold,
+// because the type leaves each out when it is not authored: the kind's
+// validate refuses the entry without one, which
+// TestKindComponents_OmittedRequiredAndWrittenDefaults shows. checked names the CRD's
 // expression rules the kind's validate holds, by the path of the value they
 // are declared on and their text, each with a case that breaks it. A rule in
 // neither checked nor left fails TestCiliumBGPKinds_ExpressionRules.
@@ -47,7 +48,7 @@ var ciliumBGPKinds = []struct {
 	crd       string
 	typ       reflect.Type
 	required  map[string]string
-	omitted   []string
+	refused   []string
 	checked   map[string]ciliumBGPRule
 	left      map[string]string
 }{
@@ -55,7 +56,7 @@ var ciliumBGPKinds = []struct {
 		component: "cilium-bgpadvertisement", handler: &CiliumBGPAdvertisementHandler{},
 		crd: "ciliumbgpadvertisements.yaml", typ: reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
 		required: ciliumBGPAdvertisementKind.required,
-		omitted:  []string{"advertisements[].interface.name", "advertisements[].service.addresses"},
+		refused:  []string{"advertisements[].interface.name", "advertisements[].service.addresses"},
 		checked: map[string]ciliumBGPRule{
 			"spec.advertisements[]: self.advertisementType != 'Service' || has(self.service)": {
 				ciliumBGPAdvertisement(map[string]any{"advertisementType": "Service"}),
@@ -201,7 +202,7 @@ func TestCiliumBGPKinds_EmitTheServedVersion(t *testing.T) {
 // and the spec type, the fields of each kind that the API requires and the
 // type would write unauthored, and holds the kind's required list to them. The
 // fields the API requires and the type leaves out unauthored are held to the
-// row's omitted list. A dependency bump that adds, drops or moves one fails
+// row's refused list. A dependency bump that adds, drops or moves one fails
 // here, naming it.
 //
 // The selector these specs embed is Cilium's own type and its fields are in
@@ -249,7 +250,7 @@ func TestCiliumBGPKinds_RequiredMatchCRD(t *testing.T) {
 					t.Errorf("required field %s says nothing of itself", path)
 				}
 			}
-			if want := slices.Sorted(slices.Values(kind.omitted)); !slices.Equal(omitted, want) {
+			if want := slices.Sorted(slices.Values(kind.refused)); !slices.Equal(omitted, want) {
 				t.Errorf("required by the CRD and left out unauthored by the type = %v, the row says %v", omitted, want)
 			}
 		})

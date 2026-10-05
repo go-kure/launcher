@@ -2547,6 +2547,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     when the two differ. It holds the list to the documented defaults, not to
     the API server's defaulting code.
 
+  **Marked required upstream and not checked:** the `action` of a container
+  restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
+  and the `signerName` and `keyType` of a pod certificate source of a
+  projected volume. The Go type leaves each out when it is empty, so the Pod
+  would show the omission, and launcher does not refuse it: the built-in types
+  ship markers and no schema, so no linked module shows that the API server
+  refuses a Pod without one, and both fields are behind a feature gate of the
+  cluster. `TestKindComponents_OmittedRequiredAndWrittenDefaults` lists the
+  four with that reason.
+
   **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
   Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
   storage maximum on a generic ephemeral volume's claim, the pod-level cpu and
@@ -2620,6 +2630,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     ReplicaSet's pod template, whose pods are replaced for as long as the
     controller exists; a `pod` or a Job may set it.
 
+  The two restart-rule fields and the two pod-certificate fields that are
+  marked required upstream are not checked under `template.spec` either, for
+  the reason the `pod` kind gives: no linked module shows that the API server
+  refuses the omission.
+
   **Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
   one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
   maximum 3`), and the pod template to the check the `pod` kind runs
@@ -2649,7 +2664,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the component in the build namespace, with the authored spec. What the
   `replicaset` kind states holds here — the `app` label on the pod template
   and the refusal of an authored one with another value, the three traits, the
-  refusals under `template.spec` (`activeDeadlineSeconds` included), the
+  refusals under `template.spec` (`activeDeadlineSeconds` included), the two
+  restart-rule fields and the two pod-certificate fields that are marked
+  required upstream and are not checked, because no linked module shows that
+  the API server refuses the omission, the
   replica maximum and the pod-template policy check, no policy default, the
   known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
   `labels` and `annotations` for the object's own metadata — with these
@@ -2693,7 +2711,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   …`; the image rule; a probe timing written as `0`).
   `template.spec.activeDeadlineSeconds` is allowed, unlike on a
   `replicaset` or `replicationcontroller`: the API server accepts it on a
-  PodTemplate. The API's other value rules are left to the API server.
+  PodTemplate. The two restart-rule fields and the two pod-certificate fields
+  that are marked required upstream are not checked, for the reason the `pod`
+  kind gives: no linked module shows that the API server refuses the
+  omission. The API's other value rules are left to the API server.
 
   **Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
   runs (`enforcePodTemplatePolicy`), naming a field by its path in the
@@ -3253,6 +3274,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a rule group's `name` and a rule's `expr` (unauthored, the type would
     write `expr: 0`).
 
+  **A required field the type leaves out when it is empty is refused too:**
+  the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
+  or empty. The object would show the omission and the API server refuse it.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives these fields
+  for every kind that decodes its properties into an upstream type, from the
+  CRD the linked module ships or, where it ships none, from the markers of
+  its source. It holds each to a refusal, shown on a document, or to a stated
+  reason. The same test derives the fields the API defaults and the type
+  writes unauthored, where the default would never apply, and holds each to
+  one of three answers: refused, filled by the kind with the API's default,
+  or harmless with the reason.
+
   **A Probe needs `prober.url` here, because the object always carries a
   prober.** This is a limit of the Go type, not a rule of the API: the API
   does not require `prober`, but the type writes one whether or not it was
@@ -3264,14 +3297,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the linked module's source marks required and the type writes unauthored,
   so a dependency bump that adds, drops or moves one fails there. **Not
   refused:**
-  - a required field the type omits when it is not authored (the `name` of a
-    Probe parameter): the object shows the omission, and the API server
-    refuses it;
   - a required field of a Kubernetes type these specs embed: the `key` of a
     Secret or ConfigMap key reference, the `key` and `operator` of a selector
     expression. An omitted one is emitted empty;
   - an authored empty string in a required field (a group's `name: ""`),
-    `prober.url` excepted. It is a value, and the API server's to refuse;
+    `prober.url` and a parameter's `name` excepted. It is a value, and the
+    API server's to refuse;
   - every other value rule of the API (formats, enumerations, lengths, that a
     rule is a recording or an alerting one), and the operator's own checks of
     an object the API server has admitted: that a Probe has targets, that a
@@ -3392,6 +3423,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     webhook solver's `groupName` and `solverName`).
   - Of a reference to a Secret or a ServiceAccount that is authored, on either
     kind: its `name`. Unauthored, the type would write `name: ""`.
+  - Of a renewal window of a `certificate` that is authored
+    (`renewal.windows[]`): its `cron` and its `windowDuration`
+    (`renewal.windows[0].cron: required (…)`). The type leaves either out when
+    it is empty, so the object would show the omission and the API server
+    refuse it; an empty `cron` is refused as an unauthored one is.
+    `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two
+    from the CRD and shows the refusals.
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
@@ -3401,8 +3439,6 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   types that a CRD requires and the type writes unauthored is listed, and
   nothing else is. A dependency bump that adds, drops or moves one fails
   there. **Not refused:**
-  - a required field the type omits when it is not authored: the object shows
-    the omission, and the API server refuses it;
   - a required field of a Kubernetes or Gateway API type these specs embed,
     on an issuer and a clusterissuer: the terms of a solver pod's affinity
     (`podTemplate.spec.affinity`), and the `name` of a parent reference
@@ -3581,6 +3617,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   linked module's `v2` CRD requires and the type writes unauthored, so a
   dependency bump that adds, drops or moves one fails there.
 
+  **Two required fields the type leaves out when they are empty are refused
+  too,** on an advertisement: the `name` of an `interface`
+  (`advertisements[0].interface.name: required (…)`) and the `addresses` of a
+  `service`, an authored `addresses: []` included
+  (`advertisements[0].service.addresses: required (…)`). The object would show
+  the omission (`service: {}`) and the API server refuse it. The same test
+  holds the two to the CRD, and
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` shows the refusals.
+
   **The CRDs' expression rules.** A rule is checked where it is one
   comparison of authored fields and the refusal can name both; every rule the
   four CRDs declare is classified in `TestCiliumBGPKinds_ExpressionRules`,
@@ -3602,11 +3647,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     compares it with the default it fills for the other (a keepalive of 30, a
     hold time of 90, in the linked CRD), and that default is the installed
     CRD's to say: `keepAliveTimeSeconds: 100` alone builds here;
-  - a required field the type omits when it is not authored: the `addresses`
-    of a `service` and the `name` of an `interface`. The object shows the
-    omission (`service: {}`);
   - an authored empty value in a required field (`bgpInstances: []`, an
-    instance's `name: ""`). It is a value;
+    instance's `name: ""`). It is a value. The two fields above are the
+    exception: the type leaves an empty one out;
   - every other value rule of the API: the enumerations
     (`advertisementType`, `afi`, `safi`, a service address type, a well-known
     community), the ranges of an ASN, a port, a timer, an aggregation length
@@ -6158,6 +6201,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0`
   or `monitoring.enablePodMonitor: false`, is accepted: it is omitted too,
   and the field's absence means the same value.
+  Two fields the Cluster CRD requires, which the Go type leaves out when they
+  are empty, are refused when unauthored or empty: the `signerName` and the
+  `keyType` of a pod certificate source of the projected volume template
+  (`projectedVolumeTemplate.sources[0].podCertificate.signerName: required
+  (…)`). The object would show the omission and the API server refuse it.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
+  the CRD and shows the refusals. It also holds the two fields the CRD
+  defaults and the type writes unauthored to a reason they are harmless:
+  `instances`, of which the kind always writes a count (the authored one, the
+  policy's default, or the CRD's own `1`), and
+  `backup.volumeSnapshot.onlineConfiguration`, written `{}` under an authored
+  `volumeSnapshot`. The CRD's default for the object is `waitForArchive: true`
+  and `immediateCheckpoint: false`; in a `{}` it fills `waitForArchive` with
+  the field's own default `true`, and an absent `immediateCheckpoint` is
+  `false`.
   A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
   a quantity `cpu: 0`) is emitted as authored. An authored
   empty string is not refused — `storage.size: ""` keeps its meaning above —
@@ -6251,7 +6309,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   copies the template into a Deployment, whose pod template cannot carry the
   first two and whose pods get the last two from the default Priority and
   RuntimeClass admission controllers, which refuse an authored value that
-  differs from theirs. The instance count is deliberately not policed:
+  differs from theirs. Four fields the Pooler CRD requires under
+  `template.spec`, which the pod spec's type leaves out when they are empty,
+  are refused when unauthored or empty: the `action` of a restart rule of a
+  container or an init container and the `operator` of its exit codes
+  (`template.spec.containers[0].restartPolicyRules[0].action: required (…)`),
+  and the `signerName` and `keyType` of a pod certificate source of a
+  projected volume
+  (`template.spec.volumes[0].projected.sources[0].podCertificate.signerName:
+  required (…)`). The object would show the omission and the API server
+  refuse it; the CRD of the linked module settles that, which is what the
+  built-in pod kinds lack.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
+  from the CRD and shows the refusals. The instance count is deliberately not policed:
   `postgresql`, which lowers its pooler onto this kind, never applied a
   policy to the pooler's count, so a maximum here would refuse a document
   that built before.

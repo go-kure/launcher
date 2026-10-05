@@ -108,15 +108,22 @@ func (h *PrometheusProbeHandler) PropertySchema() map[string]oam.PropertySchema 
 // write empty, and of `prober` its `url`. `prober` itself is optional to the
 // API, but the type always writes it, so a Probe launcher emits holds one and
 // the API server refuses it without a url: a Probe without a prober is not one
-// launcher can emit. The API's value rules, and the operator's own checks of
-// an object it has admitted (that it has targets, that its timeout is no
-// longer than its interval, that it authenticates one way), are left to them.
+// launcher can emit. It also requires the `name` of a `params` entry, which the
+// type leaves out when it is empty, so that the object would show the
+// omission. The API's value rules, and the operator's own checks of an object
+// it has admitted (that it has targets, that its timeout is no longer than its
+// interval, that it authenticates one way), are left to them.
 var prometheusProbeKind = &policyFreeKind[monitoringv1.ProbeSpec]{
 	upstream: "monitoring.coreos.com/v1 ProbeSpec",
 	required: oauth2Required("oauth2"),
 	validate: func(spec *monitoringv1.ProbeSpec) error {
 		if spec.ProberSpec.URL == "" {
 			return errors.New("prober.url: required (the address of the prober, as address:port; the object always holds a prober, and the API server refuses one without a url)")
+		}
+		for i, param := range spec.Params {
+			if param.Name == "" {
+				return errors.Errorf("params[%d].name: required (the name of the query parameter)", i)
+			}
 		}
 		return nil
 	},

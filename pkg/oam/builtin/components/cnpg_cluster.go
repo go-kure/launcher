@@ -242,6 +242,9 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if !explicitInstances {
 		spec.Instances = cnpgClusterDefaultInstances
 	}
+	if err := refuseOmittedClusterFields(spec); err != nil {
+		return nil, err
+	}
 	// Checked here, on the spec as decoded, because it is final for every
 	// authored value: ApplyPolicy only fills values the document left unset.
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgClusterDefaultedZeroFields)); err != nil {
@@ -257,6 +260,17 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 		explicitInstances:   explicitInstances,
 		explicitStorageSize: authoredStorageRequest(props) || decodedStorageRequest(&spec.StorageConfiguration),
 	}, nil
+}
+
+// refuseOmittedClusterFields refuses a ClusterSpec that leaves out a field the
+// Cluster CRD requires and the Go type omits when it is empty, so that the
+// object would show the omission and the API server refuse it: the signer name
+// and the key type of a pod certificate source of projectedVolumeTemplate.
+func refuseOmittedClusterFields(spec *cnpgv1.ClusterSpec) error {
+	if spec.ProjectedVolumeTemplate == nil {
+		return nil
+	}
+	return refuseOmittedPodCertificateFields("projectedVolumeTemplate.sources", spec.ProjectedVolumeTemplate.Sources)
 }
 
 // cnpgClusterDefaultedZeroFields lists the ClusterSpec fields on which an
@@ -774,6 +788,9 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	}
 	if c.Spec.Instances > math.MaxInt32 {
 		return nil, errors.Errorf("instances: must be <= %d, got %d", math.MaxInt32, c.Spec.Instances)
+	}
+	if err := refuseOmittedClusterFields(&c.Spec); err != nil {
+		return nil, err
 	}
 	// Storage sizes are checked here, on the effective requests, so an
 	// authored size and a policy default are refused alike.
