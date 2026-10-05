@@ -107,9 +107,10 @@ registered in both `builtinTraitHandlers()` and `pkg/oam`'s trait allowlist;
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
 components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
-`pod`, `replicaset`, `replicationcontroller` and `podtemplate`
+`pod`, `replicaset`, `replicationcontroller`, `podtemplate` and `ingress`
 (go-kure/launcher#790) are registered the same way; the `<type>-component`
-fixtures build each. The `pod` kind emits the authored spec and the `app`
+fixtures build each. The `ingress` kind emits the authored Ingress and, unlike
+the `ingress` trait, no NetworkPolicy allow rule. The `pod` kind emits the authored spec and the `app`
 label, the `replicaset` and `replicationcontroller` kinds the authored spec
 with the `app` label on the pod template, and the `podtemplate` kind the
 authored template with no `app` label; none of them is one of the five pod

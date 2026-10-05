@@ -314,6 +314,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"runtimeclass":          &components.RuntimeClassHandler{},
 		"ingressclass":          &components.IngressClassHandler{},
 		"csidriver":             &components.CSIDriverHandler{},
+
+		"ingress": &components.IngressHandler{},
 	}
 }
 

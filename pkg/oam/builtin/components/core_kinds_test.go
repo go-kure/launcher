@@ -62,6 +62,7 @@ var coreKindSchemas = []struct {
 	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},
 	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
 	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
+	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole

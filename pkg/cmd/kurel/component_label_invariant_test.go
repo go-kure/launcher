@@ -286,6 +286,10 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"runtimeclass":          {props: map[string]any{"handler": "runc"}},
 	"ingressclass":          {props: map[string]any{"controller": "example.com/ingress-controller"}},
 	"csidriver":             {props: map[string]any{"attachRequired": false}},
+	// An Ingress name is a DNS-1123 subdomain. The object is authored: it runs
+	// no pods and selects none, and its backend is a Service by name.
+	"ingress": {props: map[string]any{"defaultBackend": map[string]any{
+		"service": map[string]any{"name": "web", "port": map[string]any{"number": 80}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
