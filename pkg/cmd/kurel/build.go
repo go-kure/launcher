@@ -340,6 +340,12 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"cilium-bgpclusterconfig":      &components.CiliumBGPClusterConfigHandler{},
 		"cilium-bgpnodeconfigoverride": &components.CiliumBGPNodeConfigOverrideHandler{},
 		"cilium-bgppeerconfig":         &components.CiliumBGPPeerConfigHandler{},
+
+		"cilium-cidrgroup":           &components.CiliumCIDRGroupHandler{},
+		"cilium-loadbalancerippool":  &components.CiliumLoadBalancerIPPoolHandler{},
+		"cilium-egressgatewaypolicy": &components.CiliumEgressGatewayPolicyHandler{},
+		"cilium-localredirectpolicy": &components.CiliumLocalRedirectPolicyHandler{},
+		"cilium-nodeconfig":          &components.CiliumNodeConfigHandler{},
 	}
 }
 

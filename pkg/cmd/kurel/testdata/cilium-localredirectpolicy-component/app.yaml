@@ -1,0 +1,46 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: metadata
+      type: cilium-localredirectpolicy
+      properties:
+        redirectFrontend:
+          addressMatcher:
+            ip: 169.254.169.254
+            toPorts:
+              - port: "80"
+                protocol: TCP
+                name: http
+              - port: "443"
+                protocol: TCP
+                name: https
+        redirectBackend:
+          localEndpointSelector:
+            matchLabels:
+              app: metadata-proxy
+          toPorts:
+            - port: "8080"
+              protocol: TCP
+              name: http
+            - port: "8443"
+              protocol: TCP
+              name: https
+        skipRedirectFromBackend: true
+        description: Metadata requests go to the proxy of the node.
+    - name: dns
+      type: cilium-localredirectpolicy
+      properties:
+        objectName: node-local-dns
+        redirectFrontend:
+          serviceMatcher:
+            serviceName: kube-dns
+            namespace: default
+        redirectBackend:
+          localEndpointSelector: {}
+          toPorts:
+            - port: "53"
+              protocol: UDP

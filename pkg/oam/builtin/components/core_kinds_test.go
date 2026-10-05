@@ -101,6 +101,12 @@ var coreKindSchemas = []struct {
 	{"cilium-bgpclusterconfig", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), &components.CiliumBGPClusterConfigHandler{}, nil},
 	{"cilium-bgpnodeconfigoverride", reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), &components.CiliumBGPNodeConfigOverrideHandler{}, nil},
 	{"cilium-bgppeerconfig", reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), &components.CiliumBGPPeerConfigHandler{}, nil},
+	// And five more kinds of Cilium's API, each the projection of its spec type.
+	{"cilium-cidrgroup", reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](), &components.CiliumCIDRGroupHandler{}, nil},
+	{"cilium-loadbalancerippool", reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), &components.CiliumLoadBalancerIPPoolHandler{}, nil},
+	{"cilium-egressgatewaypolicy", reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), &components.CiliumEgressGatewayPolicyHandler{}, nil},
+	{"cilium-localredirectpolicy", reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), &components.CiliumLocalRedirectPolicyHandler{}, nil},
+	{"cilium-nodeconfig", reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), &components.CiliumNodeConfigHandler{}, nil},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no

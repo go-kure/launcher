@@ -1,0 +1,32 @@
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  labels:
+    launcher.gokure.dev/component: blue
+  name: blue
+spec:
+  allowFirstLastIPs: "No"
+  blocks:
+  - cidr: 192.0.2.0/24
+  - start: 198.51.100.10
+    stop: 198.51.100.20
+  disabled: true
+  serviceSelector:
+    matchExpressions:
+    - key: tier
+      operator: In
+      values:
+      - frontend
+      - edge
+    matchLabels:
+      pool: blue
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  labels:
+    launcher.gokure.dev/component: everything
+  name: default-pool
+spec:
+  blocks:
+  - cidr: 203.0.113.0/24

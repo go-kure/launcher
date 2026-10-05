@@ -32,8 +32,10 @@ import (
 // The kind components of go-kure/launcher#790 to which no dimension of the
 // environment policy applies, built on one shared helper (policyFreeKind): the
 // cluster-scoped classes, the CSIDriver, the ServiceCIDR, the
-// PodDisruptionBudget, the four kinds of the Prometheus operator's API and the
-// four of Cilium's BGP control plane. The three kinds of cert-manager's API are
+// PodDisruptionBudget, the four kinds of the Prometheus operator's API, the
+// four of Cilium's BGP control plane and five more of Cilium's API (a CIDR
+// group, a load balancer IP pool, an egress gateway policy, a local redirect
+// policy and a node configuration). The three kinds of cert-manager's API are
 // held here too: the policy reaches one part of each (held), and everything
 // else of them is the helper's.
 
@@ -453,6 +455,149 @@ var policyFreeKinds = []policyFreeKind{
 			},
 		},
 	},
+	{
+		component: "cilium-cidrgroup", handler: &components.CiliumCIDRGroupHandler{},
+		gvk: ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.CCGKindDefinition),
+		typ: reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](),
+		// The API requires the list; an empty one is an authored value.
+		minimal: map[string]any{"externalCIDRs": []any{}},
+		full:    map[string]any{"externalCIDRs": []any{"192.0.2.0/24", "2001:db8::/32"}},
+	},
+	{
+		component: "cilium-loadbalancerippool", handler: &components.CiliumLoadBalancerIPPoolHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.PoolKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](),
+		minimal: map[string]any{},
+		full: map[string]any{
+			"serviceSelector": map[string]any{
+				"matchLabels":      map[string]any{"pool": "blue"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"frontend", "edge"}}},
+			},
+			"allowFirstLastIPs": "No",
+			"blocks": []any{
+				map[string]any{"cidr": "192.0.2.0/24"},
+				map[string]any{"start": "198.51.100.10", "stop": "198.51.100.20"},
+			},
+			// The type omits a false, which is also the API's default.
+			"disabled": true,
+		},
+	},
+	{
+		component: "cilium-egressgatewaypolicy", handler: &components.CiliumEgressGatewayPolicyHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.CEGPKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](),
+		minimal: egressGatewayPolicy(),
+		full: map[string]any{
+			"selectors": []any{
+				map[string]any{
+					"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "payments"}},
+					"podSelector":       map[string]any{"matchLabels": map[string]any{"app": "web"}},
+				},
+				map[string]any{"nodeSelector": map[string]any{"matchExpressions": []any{
+					map[string]any{"key": "rack", "operator": "In", "values": []any{"a", "b"}},
+				}}},
+			},
+			"destinationCIDRs": []any{"192.0.2.0/24", "2001:db8::/32"},
+			"excludedCIDRs":    []any{"192.0.2.128/25"},
+			"egressGateway": map[string]any{
+				"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "true"}}, "interface": "eth1",
+			},
+			"egressGateways": []any{
+				map[string]any{"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "a"}}, "egressIP": "198.51.100.7"},
+				map[string]any{"nodeSelector": map[string]any{}},
+			},
+		},
+	},
+	{
+		component: "cilium-localredirectpolicy", handler: &components.CiliumLocalRedirectPolicyHandler{},
+		gvk: ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.CLRPKindDefinition),
+		typ: reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), namespaced: true,
+		minimal: redirectPolicy(redirectAddress(), redirectBackend()),
+		full: map[string]any{
+			"redirectFrontend": map[string]any{"addressMatcher": map[string]any{
+				"ip": "169.254.169.254",
+				"toPorts": []any{
+					map[string]any{"port": "80", "protocol": "TCP", "name": "http"},
+					map[string]any{"port": "443", "protocol": "TCP", "name": "https"},
+				},
+			}},
+			"redirectBackend": map[string]any{
+				"localEndpointSelector": map[string]any{
+					"matchLabels":      map[string]any{"app": "metadata-proxy"},
+					"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"node", "edge"}}},
+				},
+				"toPorts": []any{
+					map[string]any{"port": "8080", "protocol": "TCP", "name": "http"},
+					map[string]any{"port": "8443", "protocol": "TCP", "name": "https"},
+				},
+			},
+			// The type omits a false, which is also the API's default.
+			"skipRedirectFromBackend": true,
+			"description":             "Metadata requests go to the proxy of the node.",
+		},
+	},
+	{
+		component: "cilium-nodeconfig", handler: &components.CiliumNodeConfigHandler{},
+		gvk: ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.CNCKindDefinition),
+		typ: reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), namespaced: true,
+		// The API requires both; an empty map and an empty selector are
+		// authored values.
+		minimal: map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{}},
+		full: map[string]any{
+			"defaults": map[string]any{"bpf-map-dynamic-size-ratio": "0.005", "enable-hubble": "false"},
+			"nodeSelector": map[string]any{
+				"matchLabels":      map[string]any{"node-role": "edge"},
+				"matchExpressions": []any{map[string]any{"key": "rack", "operator": "In", "values": []any{"a", "b"}}},
+			},
+		},
+	},
+}
+
+// egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
+// the three fields the API requires, the lists empty, and the gateway's node
+// selector, empty too.
+func egressGatewayPolicy() map[string]any {
+	return map[string]any{
+		"selectors": []any{}, "destinationCIDRs": []any{},
+		"egressGateway": map[string]any{"nodeSelector": map[string]any{}},
+	}
+}
+
+// redirectPolicy is the properties of a cilium-localredirectpolicy with the
+// frontend and the backend.
+func redirectPolicy(frontend, backend any) map[string]any {
+	return map[string]any{"redirectFrontend": frontend, "redirectBackend": backend}
+}
+
+// redirectAddress is a redirect frontend that matches an address and a port.
+func redirectAddress() map[string]any {
+	return map[string]any{"addressMatcher": map[string]any{
+		"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
+	}}
+}
+
+// redirectService is a redirect frontend that matches a Service, with the
+// ports where any are given.
+func redirectService(ports ...any) map[string]any {
+	service := map[string]any{"serviceName": "kube-dns", "namespace": "kube-system"}
+	if len(ports) > 0 {
+		service["toPorts"] = ports
+	}
+	return map[string]any{"serviceMatcher": service}
+}
+
+// redirectBackend is a redirect backend: every pod of the node, and the ports
+// given or, with none, one.
+func redirectBackend(ports ...any) map[string]any {
+	if len(ports) == 0 {
+		ports = []any{map[string]any{"port": "8080", "protocol": "TCP"}}
+	}
+	return map[string]any{"localEndpointSelector": map[string]any{}, "toPorts": ports}
+}
+
+// ciliumExpression is a label selector with one match expression.
+func ciliumExpression(expression map[string]any) map[string]any {
+	return map[string]any{"matchExpressions": []any{expression}}
 }
 
 // bgpInstances is the properties of a cilium-bgpclusterconfig or a
@@ -806,6 +951,26 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.GracefulRestart.RestartTimeSeconds", ".Spec.EBGPMultihop", ".Spec.Families",
 			".Spec.Families[0].Advertisements", ".Spec.Families[0].Advertisements.MatchLabels",
 			".Spec.Families[1].Advertisements.MatchExpressions[0].Values",
+		},
+		"cilium-cidrgroup": {".Spec.ExternalCIDRs"},
+		"cilium-loadbalancerippool": {
+			".Spec.ServiceSelector", ".Spec.ServiceSelector.MatchLabels", ".Spec.ServiceSelector.MatchExpressions",
+			".Spec.ServiceSelector.MatchExpressions[0].Values", ".Spec.Blocks",
+		},
+		"cilium-egressgatewaypolicy": {
+			".Spec.Selectors", ".Spec.Selectors[0].NamespaceSelector", ".Spec.Selectors[0].PodSelector.MatchLabels",
+			".Spec.Selectors[1].NodeSelector.MatchExpressions[0].Values", ".Spec.DestinationCIDRs", ".Spec.ExcludedCIDRs",
+			".Spec.EgressGateway", ".Spec.EgressGateway.NodeSelector", ".Spec.EgressGateway.NodeSelector.MatchLabels",
+			".Spec.EgressGateways", ".Spec.EgressGateways[0].NodeSelector", ".Spec.EgressGateways[1].NodeSelector",
+		},
+		"cilium-localredirectpolicy": {
+			".Spec.RedirectFrontend.AddressMatcher", ".Spec.RedirectFrontend.AddressMatcher.ToPorts",
+			".Spec.RedirectBackend.LocalEndpointSelector.MatchLabels",
+			".Spec.RedirectBackend.LocalEndpointSelector.MatchExpressions[0].Values", ".Spec.RedirectBackend.ToPorts",
+		},
+		"cilium-nodeconfig": {
+			".Spec.Defaults", ".Spec.NodeSelector", ".Spec.NodeSelector.MatchLabels", ".Spec.NodeSelector.MatchExpressions",
+			".Spec.NodeSelector.MatchExpressions[0].Values",
 		},
 	}
 	type copyCase struct {
@@ -1265,6 +1430,134 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null family", map[string]any{"families": []any{map[string]any{"afi": "ipv4", "safi": "unicast"}, nil}}, "families[1]"},
 			{"two spellings", map[string]any{"ebgpMultihop": 2, "EBGPMultihop": 3}, "sets the same field as"},
 		},
+		"cilium-cidrgroup": {
+			{"no properties", nil, "externalCIDRs: required"},
+			{"null externalCIDRs", map[string]any{"externalCIDRs": nil}, "externalCIDRs: required"},
+			{"unknown key", map[string]any{"externalCIDRs": []any{}, "cidrs": []any{}}, notA + "cilium.io/v2 CiliumCIDRGroupSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"externalCIDRs": []any{}}}, notA},
+			{"externalCIDRs a string", map[string]any{"externalCIDRs": "192.0.2.0/24"}, notA},
+			{"a CIDR a number", map[string]any{"externalCIDRs": []any{10}}, notA},
+			{"null CIDR", map[string]any{"externalCIDRs": []any{"192.0.2.0/24", nil}}, "externalCIDRs[1]"},
+			{"two spellings", map[string]any{"externalCIDRs": []any{}, "ExternalCIDRs": []any{}}, "sets the same field as"},
+		},
+		"cilium-loadbalancerippool": {
+			{"expression without a key", map[string]any{"serviceSelector": ciliumExpression(map[string]any{"operator": "Exists"})}, "serviceSelector.matchExpressions[0].key: required"},
+			{"a later expression without an operator", map[string]any{"serviceSelector": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "pool", "operator": "Exists"}, map[string]any{"key": "pool"},
+			}}}, "serviceSelector.matchExpressions[1].operator: required"},
+			{"unknown key", map[string]any{"cidrs": []any{}}, notA + "cilium.io/v2 CiliumLoadBalancerIPPoolSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"disabled": true}}, notA},
+			// The pool's status is the operator's, and no field of the spec.
+			{"the object's status", map[string]any{"status": map[string]any{"conditions": []any{}}}, notA},
+			{"block sub-key", map[string]any{"blocks": []any{map[string]any{"range": "192.0.2.0/24"}}}, notA},
+			{"blocks a map", map[string]any{"blocks": map[string]any{"cidr": "192.0.2.0/24"}}, notA},
+			{"disabled a string", map[string]any{"disabled": "true"}, notA},
+			{"null block", map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}, nil}}, "blocks[1]"},
+			{"two spellings", map[string]any{"disabled": true, "Disabled": false}, "sets the same field as"},
+		},
+		"cilium-egressgatewaypolicy": {
+			{"no properties", nil, "destinationCIDRs: required"},
+			{"no gateway", map[string]any{"selectors": []any{}, "destinationCIDRs": []any{}}, "egressGateway: required"},
+			{"null gateway", withProperty(egressGatewayPolicy(), "egressGateway", nil), "egressGateway: required"},
+			{"null selectors", withProperty(egressGatewayPolicy(), "selectors", nil), "selectors: required"},
+			// The API requires the gateway also where a list names the gateways.
+			{"gateways without the gateway", map[string]any{
+				"selectors": []any{}, "destinationCIDRs": []any{}, "egressGateways": []any{map[string]any{"nodeSelector": map[string]any{}}},
+			}, "egressGateway: required"},
+			{"gateway without a node selector", withProperty(egressGatewayPolicy(), "egressGateway", map[string]any{"interface": "eth1"}), "egressGateway.nodeSelector: required"},
+			{"gateway with a null node selector", withProperty(egressGatewayPolicy(), "egressGateway", map[string]any{"nodeSelector": nil}), "egressGateway.nodeSelector: required"},
+			{"a later listed gateway without a node selector", withProperty(egressGatewayPolicy(), "egressGateways", []any{
+				map[string]any{"nodeSelector": map[string]any{}}, map[string]any{"egressIP": "198.51.100.7"},
+			}), "egressGateways[1].nodeSelector: required"},
+			{"gateway expression without a key", withProperty(egressGatewayPolicy(), "egressGateway", map[string]any{
+				"nodeSelector": ciliumExpression(map[string]any{"operator": "Exists"}),
+			}), "egressGateway.nodeSelector.matchExpressions[0].key: required"},
+			{"listed gateway expression without an operator", withProperty(egressGatewayPolicy(), "egressGateways", []any{map[string]any{
+				"nodeSelector": ciliumExpression(map[string]any{"key": "rack"}),
+			}}), "egressGateways[0].nodeSelector.matchExpressions[0].operator: required"},
+			{"namespace expression without an operator", withProperty(egressGatewayPolicy(), "selectors", []any{map[string]any{
+				"namespaceSelector": ciliumExpression(map[string]any{"key": "team"}),
+			}}), "selectors[0].namespaceSelector.matchExpressions[0].operator: required"},
+			{"pod expression without a key", withProperty(egressGatewayPolicy(), "selectors", []any{map[string]any{
+				"podSelector": ciliumExpression(map[string]any{"operator": "Exists"}),
+			}}), "selectors[0].podSelector.matchExpressions[0].key: required"},
+			{"node expression in a later rule without a key", withProperty(egressGatewayPolicy(), "selectors", []any{map[string]any{}, map[string]any{
+				"nodeSelector": ciliumExpression(map[string]any{"operator": "Exists"}),
+			}}), "selectors[1].nodeSelector.matchExpressions[0].key: required"},
+			{"unknown key", withProperty(egressGatewayPolicy(), "gateway", map[string]any{}), notA + "cilium.io/v2 CiliumEgressGatewayPolicySpec"},
+			{"the object's spec", map[string]any{"spec": egressGatewayPolicy()}, notA},
+			{"gateway sub-key", withProperty(egressGatewayPolicy(), "egressGateway", map[string]any{"nodeSelector": map[string]any{}, "ip": "198.51.100.7"}), notA},
+			{"rule sub-key", withProperty(egressGatewayPolicy(), "selectors", []any{map[string]any{"selector": map[string]any{}}}), notA},
+			{"destinationCIDRs a string", withProperty(egressGatewayPolicy(), "destinationCIDRs", "192.0.2.0/24"), notA},
+			{"egressGateways a map", withProperty(egressGatewayPolicy(), "egressGateways", map[string]any{"nodeSelector": map[string]any{}}), notA},
+			{"null rule", withProperty(egressGatewayPolicy(), "selectors", []any{map[string]any{}, nil}), "selectors[1]"},
+			{"two spellings", withProperty(egressGatewayPolicy(), "Selectors", []any{}), "sets the same field as"},
+		},
+		"cilium-localredirectpolicy": {
+			{"no properties", nil, "redirectBackend: required"},
+			{"no frontend", map[string]any{"redirectBackend": redirectBackend()}, "redirectFrontend: required"},
+			{"null frontend", redirectPolicy(nil, redirectBackend()), "redirectFrontend: required"},
+			{"null backend", redirectPolicy(redirectAddress(), nil), "redirectBackend: required"},
+			{"backend without a selector", redirectPolicy(redirectAddress(), map[string]any{
+				"toPorts": []any{map[string]any{"port": "8080", "protocol": "TCP"}},
+			}), "redirectBackend.localEndpointSelector: required"},
+			{"backend without ports", redirectPolicy(redirectAddress(), map[string]any{"localEndpointSelector": map[string]any{}}), "redirectBackend.toPorts: required"},
+			{"backend port without a port", redirectPolicy(redirectAddress(), redirectBackend(map[string]any{"protocol": "TCP"})), "redirectBackend.toPorts[0].port: required"},
+			{"a later backend port without a protocol", redirectPolicy(redirectAddress(), redirectBackend(
+				map[string]any{"port": "8080", "protocol": "TCP", "name": "http"}, map[string]any{"port": "8443", "name": "https"},
+			)), "redirectBackend.toPorts[1].protocol: required"},
+			{"backend expression without a key", redirectPolicy(redirectAddress(), map[string]any{
+				"localEndpointSelector": ciliumExpression(map[string]any{"operator": "Exists"}),
+				"toPorts":               []any{map[string]any{"port": "8080", "protocol": "TCP"}},
+			}), "redirectBackend.localEndpointSelector.matchExpressions[0].key: required"},
+			{"backend expression without an operator", redirectPolicy(redirectAddress(), map[string]any{
+				"localEndpointSelector": ciliumExpression(map[string]any{"key": "app"}),
+				"toPorts":               []any{map[string]any{"port": "8080", "protocol": "TCP"}},
+			}), "redirectBackend.localEndpointSelector.matchExpressions[0].operator: required"},
+			{"address without an ip", redirectPolicy(map[string]any{"addressMatcher": map[string]any{
+				"toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
+			}}, redirectBackend()), "redirectFrontend.addressMatcher.ip: required"},
+			{"address without ports", redirectPolicy(map[string]any{"addressMatcher": map[string]any{"ip": "169.254.169.254"}}, redirectBackend()), "redirectFrontend.addressMatcher.toPorts: required"},
+			{"address port without a protocol", redirectPolicy(map[string]any{"addressMatcher": map[string]any{
+				"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80"}},
+			}}, redirectBackend()), "redirectFrontend.addressMatcher.toPorts[0].protocol: required"},
+			{"service without a name", redirectPolicy(map[string]any{"serviceMatcher": map[string]any{"namespace": "kube-system"}}, redirectBackend()), "redirectFrontend.serviceMatcher.serviceName: required"},
+			{"service without a namespace", redirectPolicy(map[string]any{"serviceMatcher": map[string]any{"serviceName": "kube-dns"}}, redirectBackend()), "redirectFrontend.serviceMatcher.namespace: required"},
+			{"service port without a port", redirectPolicy(redirectService(map[string]any{"protocol": "UDP"}), redirectBackend()), "redirectFrontend.serviceMatcher.toPorts[0].port: required"},
+			// The one-of the CRD's schema declares on the frontend.
+			{"frontend with no matcher", redirectPolicy(map[string]any{}, redirectBackend()), "redirectFrontend: one of addressMatcher and serviceMatcher is required"},
+			{"frontend with a null matcher", redirectPolicy(map[string]any{"addressMatcher": nil}, redirectBackend()), "redirectFrontend: one of addressMatcher and serviceMatcher is required"},
+			{"frontend with both matchers", redirectPolicy(map[string]any{
+				"addressMatcher": redirectAddress()["addressMatcher"], "serviceMatcher": redirectService()["serviceMatcher"],
+			}, redirectBackend()), "redirectFrontend: addressMatcher and serviceMatcher are both set; the API takes exactly one"},
+			{"unknown key", withProperty(redirectPolicy(redirectAddress(), redirectBackend()), "frontend", map[string]any{}), notA + "cilium.io/v2 CiliumLocalRedirectPolicySpec"},
+			{"the object's spec", map[string]any{"spec": redirectPolicy(redirectAddress(), redirectBackend())}, notA},
+			// The policy's status is the agent's, and no field of the spec.
+			{"the object's status", withProperty(redirectPolicy(redirectAddress(), redirectBackend()), "status", map[string]any{"ok": true}), notA},
+			{"matcher sub-key", redirectPolicy(map[string]any{"addressMatcher": map[string]any{
+				"ip": "169.254.169.254", "port": "80", "toPorts": []any{},
+			}}, redirectBackend()), notA},
+			// A port is a string in this API.
+			{"port a number", redirectPolicy(redirectAddress(), redirectBackend(map[string]any{"port": 8080, "protocol": "TCP"})), notA},
+			{"skipRedirectFromBackend a string", withProperty(redirectPolicy(redirectAddress(), redirectBackend()), "skipRedirectFromBackend", "true"), notA},
+			{"null port", redirectPolicy(redirectAddress(), redirectBackend(map[string]any{"port": "8080", "protocol": "TCP"}, nil)), "redirectBackend.toPorts[1]"},
+			{"two spellings", withProperty(withProperty(redirectPolicy(redirectAddress(), redirectBackend()), "description", "a"), "Description", "b"), "sets the same field as"},
+		},
+		"cilium-nodeconfig": {
+			{"no properties", nil, "defaults: required"},
+			{"null defaults", map[string]any{"defaults": nil, "nodeSelector": map[string]any{}}, "defaults: required"},
+			{"no selector", map[string]any{"defaults": map[string]any{}}, "nodeSelector: required"},
+			{"null selector", map[string]any{"defaults": map[string]any{}, "nodeSelector": nil}, "nodeSelector: required"},
+			{"expression without a key", map[string]any{"defaults": map[string]any{}, "nodeSelector": ciliumExpression(map[string]any{"operator": "Exists"})}, "nodeSelector.matchExpressions[0].key: required"},
+			{"expression without an operator", map[string]any{"defaults": map[string]any{}, "nodeSelector": ciliumExpression(map[string]any{"key": "rack"})}, "nodeSelector.matchExpressions[0].operator: required"},
+			{"unknown key", map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{}, "selector": map[string]any{}}, notA + "cilium.io/v2 CiliumNodeConfigSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{}}}, notA},
+			// Every value of the configuration is a string.
+			{"a default a number", map[string]any{"defaults": map[string]any{"mtu": 1450}, "nodeSelector": map[string]any{}}, notA},
+			{"defaults a list", map[string]any{"defaults": []any{"enable-hubble=false"}, "nodeSelector": map[string]any{}}, notA},
+			{"selector sub-key", map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{"matchNames": []any{"node-a"}}}, notA},
+			{"two spellings", map[string]any{"defaults": map[string]any{}, "Defaults": map[string]any{}, "nodeSelector": map[string]any{}}, "sets the same field as"},
+		},
 	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
@@ -1539,6 +1832,99 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		if err := coreKindErr(kinds["cilium-bgppeerconfig"].handler, "cilium-bgppeerconfig", "fast", map[string]any{"timers": timers}); err != nil {
 			t.Errorf("timers %s: %v, want it accepted", name, err)
 		}
+	}
+
+	// spec is the encoded spec of the object a component builds.
+	spec := func(component string, props map[string]any) string {
+		return fmt.Sprint(policyFreeJSON(t, build(component, props))["spec"])
+	}
+
+	cidrs := build("cilium-cidrgroup", full["cilium-cidrgroup"]).(*ciliumv2.CiliumCIDRGroup)
+	if got := cidrs.Spec.ExternalCIDRs; len(got) != 2 || got[0] != "192.0.2.0/24" || got[1] != "2001:db8::/32" {
+		t.Errorf("externalCIDRs = %v, want the two authored ones in order", got)
+	}
+	// An authored empty list is written as one, not as a null.
+	if got, want := spec("cilium-cidrgroup", map[string]any{"externalCIDRs": []any{}}), "map[externalCIDRs:[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+
+	pool := build("cilium-loadbalancerippool", full["cilium-loadbalancerippool"]).(*ciliumv2.CiliumLoadBalancerIPPool)
+	if blocks := pool.Spec.Blocks; pool.Spec.AllowFirstLastIPs != ciliumv2.AllowFirstLastIPNo || !pool.Spec.Disabled ||
+		len(blocks) != 2 || blocks[0].Cidr != "192.0.2.0/24" || blocks[1].Start != "198.51.100.10" || blocks[1].Stop != "198.51.100.20" {
+		t.Errorf("spec = %+v, want the authored No, disabled and the two blocks in order", pool.Spec)
+	}
+	// A pool that authors nothing carries nothing, and an authored
+	// `disabled: false`, the API's default, is left out as an unauthored one is.
+	for name, props := range map[string]map[string]any{"nothing": {}, "disabled false": {"disabled": false}} {
+		if got, want := spec("cilium-loadbalancerippool", props), "map[]"; got != want {
+			t.Errorf("a pool that authors %s: spec = %s, want %s", name, got, want)
+		}
+	}
+	// An authored empty selector is every Service, as an unauthored one is;
+	// the object says which was written.
+	if every := build("cilium-loadbalancerippool", map[string]any{"serviceSelector": map[string]any{}}).(*ciliumv2.CiliumLoadBalancerIPPool); every.Spec.ServiceSelector == nil {
+		t.Error("serviceSelector = nil, want the authored empty selector")
+	}
+
+	egress := build("cilium-egressgatewaypolicy", full["cilium-egressgatewaypolicy"]).(*ciliumv2.CiliumEgressGatewayPolicy)
+	if got := egress.Spec.Selectors; len(got) != 2 || got[0].PodSelector == nil || got[0].NamespaceSelector == nil || got[0].NodeSelector != nil || got[1].NodeSelector == nil {
+		t.Errorf("selectors = %+v, want the two authored rules in order, each with the selectors it authors", got)
+	}
+	if got := egress.Spec.EgressGateway; got == nil || got.NodeSelector == nil || got.Interface != "eth1" || got.EgressIP != "" {
+		t.Errorf("egressGateway = %+v, want the authored node selector and interface", got)
+	}
+	if got := egress.Spec.EgressGateways; len(got) != 2 || got[0].EgressIP != "198.51.100.7" || got[1].NodeSelector == nil {
+		t.Errorf("egressGateways = %+v, want the two authored ones in order, the second with its empty node selector", got)
+	}
+	// The least the kind takes is written as authored: the empty lists as
+	// lists and the empty node selector as one. The gateway list the API
+	// defaults to an empty one is left out.
+	if got, want := spec("cilium-egressgatewaypolicy", egressGatewayPolicy()), "map[destinationCIDRs:[] egressGateway:map[nodeSelector:map[]] selectors:[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// The form of an address is the API server's to refuse: the CRD's rule on
+	// egressIP is not checked here.
+	if err := coreKindErr(kinds["cilium-egressgatewaypolicy"].handler, "cilium-egressgatewaypolicy", "fast", withProperty(egressGatewayPolicy(), "egressGateway", map[string]any{
+		"nodeSelector": map[string]any{}, "egressIP": "not-an-address",
+	})); err != nil {
+		t.Errorf("an egressIP that is no address: %v, want it accepted", err)
+	}
+
+	redirect := build("cilium-localredirectpolicy", full["cilium-localredirectpolicy"]).(*ciliumv2.CiliumLocalRedirectPolicy)
+	address := redirect.Spec.RedirectFrontend.AddressMatcher
+	if address == nil || address.IP != "169.254.169.254" || len(address.ToPorts) != 2 || address.ToPorts[0].Port != "80" || address.ToPorts[1].Name != "https" {
+		t.Errorf("addressMatcher = %+v, want the authored address and its two ports in order", address)
+	}
+	if backend := redirect.Spec.RedirectBackend; len(backend.ToPorts) != 2 || backend.ToPorts[0].Protocol != "TCP" || backend.ToPorts[1].Port != "8443" || !redirect.Spec.SkipRedirectFromBackend {
+		t.Errorf("spec = %+v, want the two authored backend ports in order and skipRedirectFromBackend", redirect.Spec)
+	}
+	// A frontend may match a Service instead, with no port: every port of the
+	// Service. The backend's empty selector is written as one, and an authored
+	// `skipRedirectFromBackend: false`, the API's default, is left out.
+	byService := withProperty(redirectPolicy(redirectService(), redirectBackend()), "skipRedirectFromBackend", false)
+	if got, want := spec("cilium-localredirectpolicy", byService), "map[redirectBackend:map[localEndpointSelector:map[] toPorts:[map[port:8080 protocol:TCP]]] redirectFrontend:map[serviceMatcher:map[namespace:kube-system serviceName:kube-dns]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// The Service's namespace is the author's: Cilium holds it to the policy's
+	// own, launcher does not.
+	if err := coreKindErr(kinds["cilium-localredirectpolicy"].handler, "cilium-localredirectpolicy", "fast", redirectPolicy(redirectService(), redirectBackend())); err != nil {
+		t.Errorf("a Service in another namespace than the build's: %v, want it accepted", err)
+	}
+
+	node := build("cilium-nodeconfig", full["cilium-nodeconfig"]).(*ciliumv2.CiliumNodeConfig)
+	if want := map[string]string{"bpf-map-dynamic-size-ratio": "0.005", "enable-hubble": "false"}; !maps.Equal(node.Spec.Defaults, want) {
+		t.Errorf("defaults = %v, want the authored %v", node.Spec.Defaults, want)
+	}
+	// The least the kind takes is written as authored: an empty map of
+	// defaults and an empty selector, which is every node.
+	if got, want := spec("cilium-nodeconfig", map[string]any{"defaults": map[string]any{}, "nodeSelector": map[string]any{}}), "map[defaults:map[] nodeSelector:map[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// A key of the configuration is not read: one Cilium does not know builds.
+	if err := coreKindErr(kinds["cilium-nodeconfig"].handler, "cilium-nodeconfig", "fast", map[string]any{
+		"defaults": map[string]any{"no-such-option": "true"}, "nodeSelector": map[string]any{},
+	}); err != nil {
+		t.Errorf("a configuration key Cilium does not know: %v, want it accepted", err)
 	}
 }
 
