@@ -547,6 +547,21 @@ func (k nullRequiredKind) showRefused(t *testing.T, crd crdValidation, row nullR
 		}
 	}
 
+	// An authored empty string is a value too: the kind builds it, and the
+	// refusal of it is left to the API server.
+	if row.writesEmpty {
+		empty := row.properties(t)
+		parent, name = fieldAt(t, empty, row.at)
+		parent[name] = ""
+		object, err := k.object(empty)
+		if err != nil {
+			t.Fatalf("with an authored empty string: %v", err)
+		}
+		if refused, want := crd.refusals(object), "spec."+row.at+" in body "; len(refused) != 1 || !strings.HasPrefix(refused[0], want) {
+			t.Errorf("with an authored empty string, the CRD refuses %v, want one refusal of spec.%s", refused, row.at)
+		}
+	}
+
 	spec := k.encoded(t, row.properties(t))
 	parent, name = fieldAt(t, spec, row.at)
 	written, held := parent[name]
