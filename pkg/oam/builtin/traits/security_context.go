@@ -3,8 +3,6 @@ package traits
 import (
 	"math"
 
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -157,27 +155,64 @@ func validateSecurityContextSpec(spec securityContextSpec) error {
 }
 
 // securityContextConfig wraps an ApplicationConfig and sets PSA-appropriate
-// SecurityContext fields on all PodSpec-bearing resources at Generate time.
+// SecurityContext fields on every workload it generates, at Generate time.
 type securityContextConfig struct {
 	decoratorBase
 	spec securityContextSpec
 }
 
 // Generate delegates to the inner config and then applies the security context
-// overrides to all PodSpec-bearing resources.
+// overrides to every workload among its objects (workloadPodSpecs).
+//
+// A component that generates no workload is refused when the trait carries a
+// property that is written to a pod spec: it would otherwise build and apply
+// to nothing (go-kure/launcher#794, item 14). psaLevel alone is accepted
+// there. It declares the level the component requires, which a reader of the
+// document can act on for pods the build never sees (a chart Helm installs in
+// the cluster, a custom resource a controller turns into pods); the build
+// writes no security context for it.
 func (c *securityContextConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	objects, err := c.Inner.Generate(app)
 	if err != nil {
 		return nil, err
 	}
-	for _, objPtr := range objects {
-		if podSpec := extractPodSpecSC(*objPtr); podSpec != nil {
-			if err := c.spec.applyToPodSpec(podSpec); err != nil {
-				return nil, err
-			}
+	podSpecs := workloadPodSpecs(objects)
+	if len(podSpecs) == 0 {
+		if props := c.spec.podSpecProperties(); len(props) > 0 {
+			return nil, noWorkloadError("security-context", props, decoratedComponent(c.decoratorBase, app),
+				"psaLevel alone is accepted on such a component, as a declaration of the level it requires")
+		}
+	}
+	for _, podSpec := range podSpecs {
+		if err := c.spec.applyToPodSpec(podSpec); err != nil {
+			return nil, err
 		}
 	}
 	return objects, nil
+}
+
+// podSpecProperties names the properties the trait carries that are written to
+// a pod spec, in the schema's order. psaLevel is not one: with none of these
+// the trait still states the level, and on a workload it writes that level's
+// profile.
+func (s *securityContextSpec) podSpecProperties() []string {
+	var props []string
+	for _, f := range []struct {
+		set  bool
+		name string
+	}{
+		{s.RunAsNonRoot != nil, "runAsNonRoot"},
+		{s.AllowPrivilegeEscalation != nil, "allowPrivilegeEscalation"},
+		{s.ReadOnlyRootFilesystem != nil, "readOnlyRootFilesystem"},
+		{s.RunAsUser != nil, "runAsUser"},
+		{s.RunAsGroup != nil, "runAsGroup"},
+		{s.FsGroup != nil, "fsGroup"},
+	} {
+		if f.set {
+			props = append(props, f.name)
+		}
+	}
+	return props
 }
 
 // applyToPodSpec sets SecurityContext fields on the pod and all containers
@@ -331,34 +366,6 @@ func (s *securityContextSpec) buildContainerSecurityContext(windows bool) *corev
 			sc.ReadOnlyRootFilesystem = s.ReadOnlyRootFilesystem
 		}
 		return sc
-	}
-}
-
-// extractPodSpecSC returns the PodSpec from a PodSpec-bearing resource, or nil.
-func extractPodSpecSC(obj client.Object) *corev1.PodSpec {
-	switch o := obj.(type) {
-	case *appsv1.Deployment:
-		return &o.Spec.Template.Spec
-	case *appsv1.StatefulSet:
-		return &o.Spec.Template.Spec
-	case *appsv1.DaemonSet:
-		return &o.Spec.Template.Spec
-	case *batchv1.Job:
-		return &o.Spec.Template.Spec
-	case *batchv1.CronJob:
-		return &o.Spec.JobTemplate.Spec.Template.Spec
-	case *corev1.Pod:
-		return &o.Spec
-	case *appsv1.ReplicaSet:
-		return &o.Spec.Template.Spec
-	case *corev1.ReplicationController:
-		// The template is a pointer; one without it has no pod spec to write.
-		if o.Spec.Template == nil {
-			return nil
-		}
-		return &o.Spec.Template.Spec
-	default:
-		return nil
 	}
 }
 

@@ -2296,10 +2296,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   carried as written), the config reports no ServiceAccount
   (`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
   component name), and it is not a trait target: a `configmap` trait's
-  `mountPath` and an `external-secret` trait's `envFrom`/`mountPath` are
-  refused on it, naming the kinds they apply to, and `security-context`
-  writes nothing to it (that trait skips a kind it does not know, which
-  go-kure/launcher#794, item 14, tracks). The transform still sets the
+  `mountPath`, an `external-secret` trait's `envFrom`/`mountPath` and a
+  `security-context` trait's pod-spec properties (`runAsUser` and the five
+  others) are refused on it, naming the component and the kinds they apply
+  to. `security-context` with `psaLevel` alone is accepted, as a declaration
+  of the level, and writes nothing to the template
+  (go-kure/launcher#794, item 14; `pkg/oam/builtin/traits/README.md`,
+  "Pod-spec traits on a component without a workload"). The transform still sets the
   component label on the object and its template, as on every object a
   component owns (go-kure/launcher#788).
 

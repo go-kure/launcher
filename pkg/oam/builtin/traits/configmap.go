@@ -4,8 +4,6 @@ import (
 	"maps"
 
 	"github.com/go-kure/kure/pkg/stack"
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -136,41 +134,20 @@ func NewConfigMapDecorator(inner stack.ApplicationConfig, configMapName, mountPa
 	return wrapIfAugmenter(dec, inner)
 }
 
-// Generate calls the inner config's Generate and mounts the ConfigMap into any
-// Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod resource found.
+// Generate calls the inner config's Generate and mounts the ConfigMap into
+// every workload among its objects (workloadPodSpecs). A component that
+// generates none is refused: the mount would otherwise apply to nothing.
 func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object, error) {
 	objects, err := d.Inner.Generate(app)
 	if err != nil {
 		return nil, err
 	}
 
-	mounted := false
-	for _, objPtr := range objects {
-		var podSpec *corev1.PodSpec
-		switch w := (*objPtr).(type) {
-		case *appsv1.Deployment:
-			podSpec = &w.Spec.Template.Spec
-		case *appsv1.StatefulSet:
-			podSpec = &w.Spec.Template.Spec
-		case *appsv1.DaemonSet:
-			podSpec = &w.Spec.Template.Spec
-		case *batchv1.CronJob:
-			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
-		case *batchv1.Job:
-			podSpec = &w.Spec.Template.Spec
-		case *corev1.Pod:
-			podSpec = &w.Spec
-		case *appsv1.ReplicaSet:
-			podSpec = &w.Spec.Template.Spec
-		case *corev1.ReplicationController:
-			// The template is a pointer; one without it has no pod spec.
-			if w.Spec.Template == nil {
-				continue
-			}
-			podSpec = &w.Spec.Template.Spec
-		default:
-			continue
-		}
+	podSpecs := workloadPodSpecs(objects)
+	if len(podSpecs) == 0 {
+		return nil, noWorkloadError("configmap", []string{"mountPath"}, decoratedComponent(d.decoratorBase, app), "")
+	}
+	for _, podSpec := range podSpecs {
 		if err := checkVolumeCollision(podSpec, d.ConfigMapName,
 			"configmap mountPath", "rename the configmap via the 'name' property"); err != nil {
 			return nil, err
@@ -191,11 +168,6 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
 				corev1.VolumeMount{Name: d.ConfigMapName, MountPath: d.MountPath})
 		}
-		mounted = true
-	}
-
-	if !mounted {
-		return nil, errors.New("configmap mountPath requires a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod component; no supported workload resource was found")
 	}
 
 	return objects, nil

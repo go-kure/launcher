@@ -596,7 +596,8 @@ be closed at build time.
   - A ReplicaSet's `selector` is required; a ReplicationController's is a plain label
     map and optional.
   - `podtemplate` projects a PodTemplate's one field, `template`. A PodTemplate is
-    stored, not run: no `app` label, no ServiceAccount reported, and not a trait target.
+    stored, not run: no `app` label, no ServiceAccount reported, and not a trait target
+    (§7, item 14).
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: `tolerations`, `topologySpreadConstraints`;
   - `daemonset`: `affinity`, `topologySpreadConstraints`;
@@ -697,6 +698,20 @@ and the disposition of every item. The four this document started from:
   the rule refuses the property by name, since Helm creates the objects in the cluster and
   nothing in the build could apply a stated scope. Not breaking: a `helm` document that
   set the property was refused before, as an unknown key under either delivery.
+- **A pod-spec trait on a component without a workload (item 14): shipped.**
+  `security-context`, a `configmap` mount and an `external-secret` injection read one
+  list of workloads (`workloadPodSpec`, `pkg/oam/builtin/traits/workload_target.go`): a
+  typed Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job,
+  CronJob or Pod. On a component that generates none (a `service`, a `helmrelease`, a
+  `podtemplate`, any `passthrough` object) all three are refused in one message form,
+  naming the trait, the component and the properties that nothing would apply. The
+  exception is `security-context` with `psaLevel` alone: it is accepted and writes
+  nothing, since the level is a declaration a reader of the document can act on for pods
+  the build never sees. A component that generates a workload next to other objects is
+  not refused; the trait applies to the workloads. Breaking for a document that set one
+  of the six pod-spec properties of `security-context` on such a component: it built,
+  with the property applied to nothing, and is refused now. The two mount refusals
+  existed already and changed wording only.
 
 Item 5 was decided as "document" and needed no text: tiers are declared, never
 derived, since go-kure/launcher#783 (§2.2).
@@ -726,5 +741,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` and on `helm` under `delivery: template` (item 11); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` and on `helm` under `delivery: template` (item 11), the refusal of a pod-spec trait on a component without a workload (item 14); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |

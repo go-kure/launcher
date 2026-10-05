@@ -66,7 +66,7 @@ preflight reject every valid use of the trait.
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`, `name` (optional). The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. The objects are named after the component unless `name` is authored: the one `name` names the Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding, and is the `roleRef.name` of both bindings (go-kure/launcher#787; see Conventions). It names neither the subject nor the `app` label, which stay the component's. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
 | `secret` | Secret | A Secret the document carries (go-kure/launcher#786). `name` (required, a DNS-1123 subdomain), `stringData` (string values only), `data` (base64; a key may not also appear in `stringData`), `type`, `immutable`. No mount and no `envFrom`: a workload reads it by name. Every entry is emitted under `data`, never `stringData`. Not encrypted, and refusable by policy — see "The secret trait" below. |
-| `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. Applies to the pod spec of a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
+| `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. Applies to the pod spec of a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod. On a component that generates none of these, `psaLevel` alone is accepted as a declaration and any other property is refused (see [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)). On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
 ### Storage
 | `type` | Produces | Key properties |
@@ -77,7 +77,7 @@ preflight reject every valid use of the trait.
 ### Configuration & scaling
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod; any other component fails generation), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
+| `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod; a component that generates none of them is refused at generation, see [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
 | `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment (a `pod` component, for one: the trait is Deployment-only); a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
@@ -181,7 +181,10 @@ not the app — chooses the implementation:
   to. Set `envFrom: true` and/or `mountPath: <path>` to inject it into the component's workload
   (Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod): `envFrom` wholesale-injects the Secret into
   the first container via `envFrom[].secretRef`, and `mountPath` mounts it as a volume on the
-  first container at that path. Both may be set together. `envFrom` cannot be combined with the
+  first container at that path. Both may be set together. On a component that generates no such
+  workload either is refused at generation (see
+  [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)).
+  `envFrom` cannot be combined with the
   top-level `remoteRef` shorthand: the shorthand derives its single `data[]` entry's `secretKey`
   from `secretName`, which is a Secret *name*, not a valid environment variable name — author
   explicit `data[]` entries with their own `secretKey` values instead. When `envFrom` is set,
@@ -594,6 +597,52 @@ rule attaches a post-policy step to the component it emits
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the interfaces, and `examples/` for runnable applications.
+
+## Pod-spec traits on a component without a workload
+
+Three traits write to a pod spec: `security-context`, a `configmap` with a
+`mountPath`, and an `external-secret` with `envFrom` or a `mountPath`. All three
+read one list of workloads (`workloadPodSpec`, `workload_target.go`): a
+Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job,
+CronJob or Pod, as a typed object. That is one a launcher kind builds, a
+`manifests` source yields or a `helmtemplate` chart renders.
+
+A component may generate none of these: a `service`, a `helmrelease` (Helm
+creates the pods in the cluster), a custom resource a controller turns into
+pods, a `podtemplate` (stored, never run), a ReplicationController without a
+`template`, and every `passthrough` object. A Deployment passed through is one
+of them too: `passthrough` emits its object as written, unstructured, and no
+trait looks into it.
+
+On such a component (go-kure/launcher#794, item 14):
+
+- A `configmap` trait's `mountPath` and an `external-secret` trait's `envFrom`
+  and `mountPath` are refused at generation.
+- `security-context` is refused when it carries any of `runAsNonRoot`,
+  `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`,
+  `runAsGroup` or `fsGroup`: each is a write to a pod spec, and there is none.
+- `security-context` with `psaLevel` alone is accepted and writes nothing.
+  `psaLevel` on such a component is a declaration only: the build writes no
+  security context for it, and whoever applies admission labels reads the level
+  from the document.
+
+The refusal names the trait, the component and the properties that nothing
+would apply, for example:
+
+```
+security-context: component "api" generates no workload the trait can act on, so runAsUser and fsGroup apply to nothing; the trait writes to the pod spec of a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob or Pod that a launcher kind builds, a manifests source yields or a helmtemplate chart renders, and an object passed through as raw, unstructured output (passthrough) is not inspected; psaLevel alone is accepted on such a component, as a declaration of the level it requires
+```
+
+A component that generates a workload next to other objects (a `manifests`
+source holding a Deployment and a Service, a chart) is not refused. Each trait
+applies to every workload it reads and leaves the component's other objects as
+they are, an object it does not read included.
+
+**Pre-GA tightening** (go-kure/launcher#794, item 14): a document that set one
+of the six pod-spec properties of `security-context` on a component without a
+workload used to build, with the property applied to nothing, and is now
+refused. `psaLevel` alone builds as before. The two mount refusals existed
+already; only their wording changed.
 
 ## The security-context trait on a Windows pod
 

@@ -713,15 +713,16 @@ func TestExternalSecret_MountPath_VolumeNameCollision_Errors(t *testing.T) {
 	}
 }
 
-// unsupported component (passthrough): error naming the supported kinds.
+// A component that generates no workload: refused, naming the component, the
+// properties with nowhere to go and the kinds the trait does write to.
 func TestExternalSecret_UnsupportedComponent_ReturnsError(t *testing.T) {
 	dec := traits.NewExternalSecretDecorator(&stubUnsupportedConfig{}, "my-secret", "/etc/secret", true)
 	_, err := dec.Generate(newApp("svc", "default"))
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")
 	}
-	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or Pod") {
-		t.Errorf("unexpected error message: %v", err)
+	if want := noWorkloadMessage("external-secret", "svc", "envFrom and mountPath apply"); err.Error() != want {
+		t.Errorf("error:\n got %v\nwant %s", err, want)
 	}
 }
 
