@@ -963,7 +963,7 @@ func TestOwnedConfig_Generate(t *testing.T) {
 
 // TestOwnedConfig_Layout: the wrapper is a layout augmenter, and an intent
 // augmenter, exactly when its config is one (kure's walker reads both by
-// presence), and labels what the augmenter adds.
+// presence), and labels what the augmenter adds, and only that.
 func TestOwnedConfig_Layout(t *testing.T) {
 	plain := wrapOwnedConfig(&ownershipObjectsConfig{}, "web", ownershipKey)
 	if _, ok := plain.(layout.LayoutAugmenter); ok {
@@ -985,12 +985,14 @@ func TestOwnedConfig_Layout(t *testing.T) {
 		if got := wrapped.(LayoutAugmentationCoverage).GenerateCoversAugmentLayout(); got != covers {
 			t.Errorf("GenerateCoversAugmentLayout = %v, want the inner %v", got, covers)
 		}
+		// What is on the layout before the augmenter runs is left as it is: the
+		// walker puts there what Generate returned, labelled then.
 		l := &layout.ManifestLayout{Resources: []client.Object{&corev1.ConfigMap{}}}
 		if err := aug.AugmentLayout(l); err != nil {
 			t.Fatalf("AugmentLayout: %v", err)
 		}
-		if got := l.Resources[0].GetLabels()[ownershipKey]; got != "web" {
-			t.Errorf("layout resource label = %q, want web", got)
+		if labels := l.Resources[0].GetLabels(); len(labels) != 0 {
+			t.Errorf("labels of a resource that was on the layout = %v, want it left as it was", labels)
 		}
 		added := l.Children[0].Resources[0].(*appsv1.Deployment)
 		if added.Labels[ownershipKey] != "web" || added.Spec.Template.Labels[ownershipKey] != "web" {

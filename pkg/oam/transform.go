@@ -101,7 +101,8 @@ type TransformContext struct {
 	// an Ingress (the `ingress` trait's platform-reserved platformAnnotations,
 	// which the `expose` trait fills), with the value it set. What is
 	// added after generation is not read: the labels and annotations of a bundle,
-	// and what a delivery workflow or the cluster adds. Neither is what a Flux
+	// what a config the consumer wraps around an application's after the transform
+	// adds, and what a delivery workflow or the cluster adds. Neither is what a Flux
 	// object hands on to the objects it applies, nor what a chart that Flux
 	// installs renders in the cluster.
 	ReservedMetadataKeys []string

@@ -430,6 +430,91 @@ func TestOwnedConfig_ReservedKeyInAnAugmentedLayout(t *testing.T) {
 	}
 }
 
+// movingAugmenter moves the resources on its layout into a child layout, as a
+// rendered chart's hook groups are, and adds none.
+type movingAugmenter struct{ ownershipObjectsConfig }
+
+func (c *movingAugmenter) AugmentLayout(l *layout.ManifestLayout) error {
+	l.Children = append(l.Children, &layout.ManifestLayout{Name: "hook", Resources: l.Resources})
+	l.Resources = nil
+	return nil
+}
+
+// TestOwnedConfig_AugmentLayoutReadsOnlyWhatTheAugmenterAdded: what is on the
+// layout before the wrapped augmenter runs is neither checked nor labelled,
+// where it lies and wherever the augmenter moves it. The walker puts there what
+// the application's outermost config returned, so a key under a reserved prefix
+// on it is one a config around the wrapper added (go-kure/launcher#790). An
+// unstructured object with a label that is no string, which the component label
+// cannot be written beside, is such a config's own too.
+func TestOwnedConfig_AugmentLayoutReadsOnlyWhatTheAugmenterAdded(t *testing.T) {
+	reserved := mustReserve(t, reservedForTest...)
+	there := func() []client.Object {
+		return []client.Object{
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "labelled", Labels: map[string]string{"platform.example/owner": "platform"}}},
+			&unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "v1", "kind": "ConfigMap",
+				"metadata": map[string]any{"name": "odd", "labels": map[string]any{"n": int64(1)}},
+			}},
+		}
+	}
+	layouts := map[string]func() *layout.ManifestLayout{
+		"on the layout": func() *layout.ManifestLayout { return &layout.ManifestLayout{Resources: there()} },
+		"on a layout below it": func() *layout.ManifestLayout {
+			return &layout.ManifestLayout{Children: []*layout.ManifestLayout{{Name: "below", Resources: there()}}}
+		},
+	}
+	augmenters := map[string]func() stack.ApplicationConfig{
+		"an augmenter that adds an object": func() stack.ApplicationConfig {
+			return &reservedAugmenter{added: &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "hook"}}}
+		},
+		"an augmenter that moves what is there": func() stack.ApplicationConfig { return &movingAugmenter{} },
+	}
+	var all func(l *layout.ManifestLayout) []client.Object
+	all = func(l *layout.ManifestLayout) []client.Object {
+		objs := append([]client.Object(nil), l.Resources...)
+		for _, c := range l.Children {
+			objs = append(objs, all(c)...)
+		}
+		return objs
+	}
+	// With no reserved key only the label is at stake, which the odd object
+	// would be refused for. With no component either, the wrapper has nothing
+	// to check or to label and hands AugmentLayout on: those rows are controls,
+	// which held when every resource on the layout was read.
+	lists := map[string]*reservedMetadataKeys{"keys reserved": reserved, "none reserved": nil}
+	for where, newLayout := range layouts {
+		for which, newAugmenter := range augmenters {
+			for _, component := range []string{"web", ""} {
+				for list, reserved := range lists {
+					t.Run(where+"/"+which+"/component "+component+"/"+list, func(t *testing.T) {
+						l := newLayout()
+						aug := wrapOwnedConfigReserving(newAugmenter(), component, ownershipKey, reserved).(layout.LayoutAugmenter)
+						if err := aug.AugmentLayout(l); err != nil {
+							t.Fatalf("AugmentLayout = %v, want what was on the layout left unread", err)
+						}
+						seen := map[string]bool{}
+						for _, obj := range all(l) {
+							seen[obj.GetName()] = true
+							_, stamped := obj.GetLabels()[ownershipKey]
+							if u, ok := obj.(*unstructured.Unstructured); ok {
+								_, stamped = u.Object["metadata"].(map[string]any)["labels"].(map[string]any)[ownershipKey]
+							}
+							// Only the object the augmenter added, for a component.
+							if want := obj.GetName() == "hook" && component != ""; stamped != want {
+								t.Errorf("%s: component label present = %v, want %v", obj.GetName(), stamped, want)
+							}
+						}
+						if !seen["labelled"] || !seen["odd"] {
+							t.Errorf("objects on the layout = %v, want the two that were there", seen)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 // platformConfig is a config that vouches for annotations as the platform's.
 type platformConfig struct {
 	ownershipObjectsConfig

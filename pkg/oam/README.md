@@ -394,7 +394,10 @@ goes on:
 - the pod template of a `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet`,
   `ReplicationController` or `PodTemplate`, and the job template's pod template of a
   `CronJob`, typed or unstructured;
-- the same places in a layout the config augments (`layout.LayoutAugmenter`);
+- the same places on every object the config adds to a layout it augments
+  (`layout.LayoutAugmenter`): the objects that were not on the layout, or on a layout below
+  it, before the config's `AugmentLayout` ran. What was on the layout already is left as it
+  is: the layout walker puts there what the application generated, which carries the label;
 - nothing an application without an owner generates.
 
 It is added **only where the key is absent**. An authored object or pod template that already
@@ -520,9 +523,10 @@ transform and its output are then as without the field.
 **Where it is refused.** At generation, not in `Transform`: the check sits in the ownership
 wrapper ([Component label and ownership](#component-label-and-ownership)), so it reads each
 object as its config generated it, in `GenerateApplications` (or `Generate` on an
-application) and in a layout the config augments (`layout.LayoutAugmenter`). The error wraps
-`ErrReservedMetadataKey` and names the component, the object, the key and the entry that
-reserves it:
+application), and each object the config adds to a layout it augments
+(`layout.LayoutAugmenter`): one that was not on the layout, or on a layout below it, before
+the config's `AugmentLayout` ran. The error wraps `ErrReservedMetadataKey` and names the
+component, the object, the key and the entry that reserves it:
 
 ```text
 component "web": Ingress "web-ingress": annotation "platform.example/zone" may not be set: the prefix "platform.example/" is reserved (TransformContext.ReservedMetadataKeys): oam: metadata key is reserved
@@ -577,6 +581,15 @@ object named, and is not read as holding no key.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.
+- What a config that a caller wraps around an application's config after `Transform` adds: a
+  key on an object the application generated, or an object of its own. The check reads below
+  the ownership wrapper, never above it, so a consumer can label the objects under a prefix
+  it reserved, on a component that augments its layout as on any other.
+- On a layout the config augments, what was there before its `AugmentLayout` ran. The layout
+  walker puts there what the application generated, checked at generation. Two cases follow:
+  an object already on the layout that the config's `AugmentLayout` edits in place is not read
+  again (no built-in component edits one), and a caller that calls `AugmentLayout` itself on
+  a layout holding objects that never came from `Generate` gets them unchecked.
 
 **Library changes** (go-kure/launcher#790): a new exported field,
 `TransformContext.ReservedMetadataKeys`, the sentinel `ErrReservedMetadataKey`, and the
