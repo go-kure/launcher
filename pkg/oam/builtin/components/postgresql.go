@@ -400,6 +400,14 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				*f.dst = v
 			}
 		}
+		// A retention policy is what makes the lowering build the Cluster's
+		// backup.barmanObjectStore, whose destinationPath the CRD requires and
+		// bounds. Left out, the Cluster would carry "" there, a value the author
+		// did not write and the API server refuses. An authored empty one is a
+		// value, and refusing it is left to the API server.
+		if _, authored := authoredValue(backup, "destinationPath"); !authored && config.BackupRetentionPolicy != "" {
+			return nil, errors.New("backup.destinationPath: required (the object store path backups and WAL are written to)")
+		}
 	}
 
 	monitoring, present, err := parseObjectField(props, "monitoring", "monitoring")
@@ -541,6 +549,11 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		if bos, present, err := parseObjectField(ecMap, "barmanObjectStore", label+".barmanObjectStore"); err != nil {
 			return nil, err
 		} else if present {
+			// As for backup.destinationPath above: an authored barmanObjectStore
+			// is lowered whole, and without the path the Cluster would carry "".
+			if _, authored := authoredValue(bos, "destinationPath"); !authored {
+				return nil, errors.Errorf("%s.barmanObjectStore.destinationPath: required (the object store path the cluster's backups and WAL are read from)", label)
+			}
 			ext.BarmanObjectStore = bos
 		}
 		if cp, present, err := parseObjectField(ecMap, "connectionParameters", label+".connectionParameters"); err != nil {
