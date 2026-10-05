@@ -297,13 +297,28 @@ func TestPersistentVolumePolicy_UnreadableVersionIsRefused(t *testing.T) {
 		_, err := mfTransform("manifests", mfInline(doc), ptStrictPolicy())
 		htWantViolation(t, err, append(want, "manifest source: object PersistentVolume")...)
 	})
-	// The parser unpacks a list of an unregistered kind into untyped objects,
-	// so a v1 PersistentVolume inside one cannot be read either.
+	// An item of a list of an unregistered kind is a document of its own, so the
+	// version the item states decides: one the build does not know cannot be
+	// read there either, and a v1 PersistentVolume is its Go type, held to the
+	// check and built when the check allows it.
 	t.Run("manifests, inside a list of an unregistered kind", func(t *testing.T) {
-		list := "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
-			"  - apiVersion: v1\n    kind: PersistentVolume\n    metadata:\n      name: thing\n    spec:\n" + htIndent(pvNFS, "      ")
-		_, err := mfTransform("manifests", mfInline(list), ptStrictPolicy())
-		htWantViolation(t, err, `manifest source: object PersistentVolume "thing"`, `apiVersion "v1"`, "cannot be checked against environment policy")
+		inList := func(apiVersion, spec string) string {
+			return "apiVersion: example.io/v1\nkind: ThingList\nitems:\n" +
+				"  - apiVersion: " + apiVersion + "\n    kind: PersistentVolume\n    metadata:\n      name: thing\n    spec:\n" + htIndent(spec, "      ")
+		}
+		_, err := mfTransform("manifests", mfInline(inList("v1beta1", pvNFS)), ptStrictPolicy())
+		htWantViolation(t, err, append(want, `manifest source: object PersistentVolume "thing"`)...)
+
+		_, err = mfTransform("manifests", mfInline(inList("v1", pvHostPath)), ptStrictPolicy())
+		htWantViolation(t, err, `manifest source: object PersistentVolume "thing"`, "hostPath: hostPath volumes are not allowed by environment policy")
+
+		objs, err := mfTransform("manifests", mfInline(inList("v1", pvNFS)), ptStrictPolicy())
+		if err != nil {
+			t.Fatalf("a v1 PersistentVolume the policy allows: %v", err)
+		}
+		if _, typed := objs[0].(*corev1.PersistentVolume); !typed || len(objs) != 1 {
+			t.Errorf("generated %d objects, the first a %T; want the one *corev1.PersistentVolume", len(objs), objs[0])
+		}
 	})
 }
 

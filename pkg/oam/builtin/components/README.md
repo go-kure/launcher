@@ -1960,7 +1960,8 @@ a class, which a consumer reads from `oam.ViolationError.Class` instead of match
   without a policy and are checked at the policy step (`ephemeralContainers` and the image
   rule on an object written elsewhere, an undeclared field on a workload or a claim a chart
   renders), a policy default or maximum that does not parse, and a chart that does not
-  render.
+  render or whose render does not decode (an `items` array on a kind that is no list, for
+  one).
 - **A redirect of a `manifests` `url` source to a host outside the allowed registries** is a
   fetch failure, with the error a fetch failure has and no `oam.ViolationError`; that error
   holds the `oam.PolicyRefusal` of class `oam.RefusalRegistry`, which `errors.As` reaches.
@@ -4675,6 +4676,34 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   an item (see "Rendered objects"): it built before, with a wrong output, the list's hook
   lost and its items emitted as ordinary resources.
 
+  **Breaking** (go-kure/launcher#790, with the kure version that reads a list in one place,
+  go-kure/kure#1014), for template delivery, `manifests` and `crd` alike. Built before,
+  refused now:
+
+  | Document | Before | Now |
+  |---|---|---|
+  | A list (a `v1` `List`, a typed list, a list of an unregistered kind) with a label or an annotation on its own metadata | Built: the items emitted, the list's metadata dropped. Template delivery refused only `helm.sh/hook` there, and still does, with its own text | `List has metadata of its own that its items cannot keep: annotations …; labels …` |
+  | `Kind` or `apiversion` beside the exact key, on a document or on an item of a list | Built, with two exceptions: emitted as written, the extra key kept. A workload or a claim was refused already, by *Undeclared fields* (`undeclared field Kind`), and so was an item of a typed list whose `Kind` or `apiversion` states another value than the list holds, by the parser (`the item states …, the list holds …`). Both are refused now with the other text | `the key "Kind" equals "kind" only after case folding; write it "kind" or remove it` |
+  | `Items` on a `v1` `List` | Built, to no object at all | The same text, for `"Items"` |
+  | `Items` on a list of an unregistered kind | Built: the list emitted as one object | The same text |
+  | A `null` item in a list of an unregistered kind | Built: an otherwise empty object emitted, with the list's `apiVersion` and its kind without `List` | `item 0 of WidgetList: the item is null, not an object` |
+  | An item of a registered kind, in a list of an unregistered kind, that does not decode as its type (`data: 1` on a ConfigMap) | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable, and it is refused now for the decode | The item's decode error, naming its position |
+  | In a JSON document, an item of a registered kind, in a list of an unregistered kind, that states `apiVersion` or `kind` and then `null` for it, where the stated value is not the one its list gives it | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable | `item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the decode that checks its fields reads the document as example.com/v1 Deployment, so its fields cannot be checked; …` (*Undeclared fields*, below) |
+  | An object of an unregistered kind that does not end in `List`, with a top-level `items` array | Built: the entries emitted in its place, each unstructured | `… an `items` array on an object of a kind that is no list (example.com/v1 Widget) is read as a list by what applies the output …` |
+
+  Not refusals, and a change of output all the same: an item of a registered kind in a list of
+  an unregistered kind is read as its Go type, as in a `v1` `List`, where it was emitted as
+  written. It is emitted from that type, *Undeclared fields* applies to it, and the policy
+  check reads it: a workload, a claim or a PersistentVolume there was refused as unreadable
+  and is now checked, and builds when the policy allows it. A list inside such a list was
+  left whole, and refused by the policy check; it is opened in turn.
+
+  Texts that changed: a `null` item of a `v1` `List` was `nil runtime object provided` and is
+  `the item is null, not an object`; `… is nested more than 8 lists deep` now holds for a
+  list of an unregistered kind too; the policy check's refusal of an object with a top-level
+  `items` array no longer says the object `sits inside a list of an unregistered kind`, and
+  no decode returns such an object any more (*Limits*, below).
+
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
   `Generate` returns every rendered object flat, in hook-execution order —
@@ -4710,12 +4739,42 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}` and a
     mapping without `apiVersion` and `kind` are build errors — in a document
     of a dropped hook as well, since the render is decoded before hooks are grouped;
-  - a list document is replaced by its items, in the list's order. Each item of a `v1` `List`
-    is decoded as a document of its own (typed when its kind is registered, a list among them
-    flattened in turn, to the depth kure's parser bounds), and each item of a typed list (`DeploymentList`) as
-    the kind the list holds; an item that does not decode is a build error naming its
-    position. A list of a kind the scheme does not register is flattened one level, each item
-    unstructured;
+  - a list document is replaced by its items, in the list's order. What a list is, is kure's
+    parser's to say, in one place since go-kure/kure#1014: a list kind the scheme registers
+    (a `v1` `List`, a typed list such as `DeploymentList`), and a kind the scheme does not
+    register whose name ends in `List` and that states `items`. Each item of a typed list is
+    decoded as the kind the list holds. Each item of a `v1` `List` and of a list of an
+    unregistered kind is decoded as a document of its own: typed when its kind is registered,
+    unstructured otherwise, and a list among them is replaced by its items in turn, to the
+    eight levels the parser bounds. An item of a list of an unregistered kind that leaves
+    `apiVersion` or `kind` out is read with the list's `apiVersion` and the list's kind
+    without `List`. An item that does not decode, or is `null`, is a build error naming its
+    position (`item 0 of WidgetList: the item is null, not an object`). A list is never
+    emitted, so what it states on its own metadata would be lost: a label or an annotation
+    there is the parser's error (`List has metadata of its own that its items cannot keep:
+    annotations helm.sh/resource-policy`). A kind the scheme does not register that ends in
+    `List` and states no `items` is one object; a registered list kind that states none is a
+    list without items, and yields no object;
+  - `apiVersion`, `kind` and, on a list, `items` are read under those exact keys, and a key
+    that equals one of them only after case folding (`Kind`, `apiversion`, `Items`) is the
+    parser's error, on a document and on an item of a list (`the key "Kind" equals "kind" only
+    after case folding; write it "kind" or remove it`): the readers of a document downstream
+    do not agree on which of two such keys stands;
+  - an object of a kind the scheme does not register and that does not end in `List`, with a
+    top-level `items` array (`{kind: Widget, items: [...]}`), is a build error, with a policy
+    or with none, at the top of the render and as an item of a list (`Widget "w": an `items`
+    array on an object of a kind that is no list (example.com/v1 Widget) is read as a list by
+    what applies the output, which would apply its entries in the object's place; write the
+    entries as documents of their own, or give the object a kind ending in List`). The parser
+    reads such a document as one object. What applies the output tells a list by that array
+    and not by the kind, so the entries would reach the cluster without any check here having
+    read them. It is the envelope `passthrough` refuses (**Lists**, under `passthrough`), and
+    the one refused on a registered kind that declares no `items` (*Undeclared fields*,
+    below). An `items` that is no array, or one below the top level, is the object's own
+    content. The refusal is no refusal by the policy and carries no class. Under template
+    delivery it is still the component's `oam.ViolationError`, as every render that does not
+    decode is, since the chart is rendered at the transform's policy step; a `manifests`
+    source reports it as its parse error, without one;
   - a document the decoder of its kind panics on is a build error, not a crash. The API type
     of a registered kind may decode itself and not handle what was written: Cilium's ICMP
     field dereferences the `type` an `icmps` field of a `CiliumNetworkPolicy` or a
@@ -4740,12 +4799,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`holdTime: [1]`) is a build error. One that sets an undeclared field is still emitted as
     rendered (*Undeclared fields*, below);
   - a list document where a `helm.sh/hook` annotation is involved is a build error naming the
-    list: the annotation on the list's own metadata, or on one of its items (for a `v1` `List`,
-    at every depth the parser flattens). Helm reads a hook on the rendered document's own
+    list: the annotation on the list's own metadata, or on one of its items (for a `v1` `List`
+    and a list of an unregistered kind, whose items are documents of their own, at every
+    depth the parser opens). Helm reads a hook on the rendered document's own
     metadata and nowhere else, and the parser reads only a list's items. So the items of a hook
     list would be emitted as ordinary resources, and an item's own annotation, which Helm does
-    not read, would group it as a hook or drop it. A list without the annotation builds; an
-    object that is not a list keeps its hook.
+    not read, would group it as a hook or drop it. The check reads a list as the parser does,
+    with one addition: Helm reads `metadata` under any case of the key and the parser reads
+    the exact key, so a hook on a list under `Metadata` is refused here. A list without the
+    annotation, and without any other label or annotation of its own, builds; an object that
+    is not a list keeps its hook.
 
   A decode failure is reported as `decoding rendered manifests: …`. `Generate` returns a fresh
   copy of the decoded objects on every call, as `manifests` does, so a trait that decorates a
@@ -4809,13 +4872,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     top-level `items` array on a kind that declares none, since written out the object is a
     list to whatever applies it, and its items would be applied in its place.
 
-  A list of a registered kind (a `v1` `List`, a typed list) is replaced by its items, so the
-  rule is each item's: an item is refused or kept as a document of its own is, the error
-  naming its position (`decoding rendered manifests: item 1 of List: Deployment "demo/web":
-  undeclared field …`). A kept item of a typed list that left `apiVersion` and `kind` out is
-  written with the ones the list holds. The list's own fields are not read: the list is
-  never emitted. A document whose items cannot be matched to the objects the parser made of
-  them is refused, not passed with an item unread.
+  A list (a `v1` `List`, a typed list, a list of an unregistered kind) is replaced by its
+  items, so the rule is each item's: an item is refused or kept as a document of its own is,
+  the error naming its position (`decoding rendered manifests: item 1 of List: Deployment
+  "demo/web": undeclared field …`; `item 0 of WidgetList: item 0 of List: …` for a list in a
+  list). A kept item that left `apiVersion` and `kind` out is written with the ones its list
+  gives it: the kind a typed list holds, and for a list of an unregistered kind the list's
+  `apiVersion` and its kind without `List`. The list's other fields are not read: the list
+  is never emitted. A document whose items cannot be matched to the objects the parser made
+  of them is refused, not passed with an item unread.
 
   A key written twice is not an undeclared field and is read as before (the last value
   stands). One case of it is refused, whatever the kind: a JSON document that writes so
@@ -4823,6 +4888,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   full without naming an undeclared field. Whether such a document also sets one cannot
   be told. (A document whose undeclared field is recorded before the record fills is
   treated as any other: refused as a workload or a claim, kept as another kind.)
+
+  Another is an item of a list of an unregistered kind, in a JSON document, that states
+  `apiVersion` or `kind` and then `null` for it. The parser reads the last statement, takes
+  the `null` for the key left out and gives the item its list's; the strict decode keeps the
+  string the `null` follows. Where that string is what the list gives too, the two agree
+  and nothing changes. Where it is not, the strict decode checks the fields of another kind
+  than the one emitted, and an item the parser made a Go type of is refused, with or without
+  an undeclared field
+  (`item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the
+  decode that checks its fields reads the document as example.com/v1 Deployment, so its
+  fields cannot be checked; a second apiVersion or kind that is null is the known cause,
+  state each once`). The parser refuses the same in an item of a typed list itself.
 
   Whether a cluster accepts a kept field its own version does not know is not verified
   here; the object reaches it as the chart wrote it.
@@ -4842,14 +4919,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   leaves (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`; a test
   walks those types and fails when one starts to.
 
-  Limits. The items of a `v1` `List` or of a typed list are checked as documents of their own
-  are.
+  Limits. The items of a list, whatever its kind, are checked as documents of their own are,
+  a list among them opened in turn.
   A workload, claim or PersistentVolume in an API version kure's scheme
   does not register
-  (`batch/v1beta1`, `apps/v1beta2`), or one inside an unregistered list kind, cannot be read and
-  is refused rather than passed unchecked; so is a list left inside such a list, whose items the
-  parser does not unpack. A list is told there by a top-level `items` array, so a custom resource
-  that names a field `items` is refused in that position too. Not checked: an object of a dropped hook (never emitted); the pods a
+  (`batch/v1beta1`, `apps/v1beta2`) cannot be read and
+  is refused rather than passed unchecked, inside a list as outside one. The decode returns no object with a
+  top-level `items` array (*Rendered objects*, above), so the check meets none; one that reaches it
+  another way is refused as unreadable. Not checked: an object of a dropped hook (never emitted); the pods a
   custom resource's controller creates, and the replica count a custom resource sets; the host of the chart archive a Helm repository's index
   points at, and any redirect, which kure's renderer follows. That one is a decided limit
   (go-kure/launcher#794, item 6): the allowlist is checked on the chart's source URL before
@@ -5857,7 +5934,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   be read, …: the decoder panicked on CiliumNetworkPolicy "demo/p": …`, the parse error kure
   gives such an object since go-kure/kure#1009). A MetalLB `BGPPeer` at `metallb.io/v1beta2`
   is a registered kind since go-kure/kure#1007, so one that does not decode as that kind
-  (`holdTime: [1]`) is refused here too; it was emitted unread. Every build
+  (`holdTime: [1]`) is refused here too; it was emitted unread. Since go-kure/kure#1014 an
+  object of a registered kind that states `Kind` or `apiversion` beside the exact key is
+  refused here as well, with the parser's text for the cause (`the key "Kind" equals "kind"
+  only after case folding; …`). **Breaking**: the `Kind` case was read as its Go type and
+  checked, and so was the `apiversion` case where that key states a version the kind is
+  registered in (`apiversion: v1` beside `apiVersion: v1`); with another version there it
+  was unreadable before, for another cause. Every build
   decodes the object, since the transform applies `NoopPolicy` when no policy is passed;
   only a config no policy was applied to, one a Go caller builds
   outside the transform, emits the object undecoded, as authored.
@@ -5968,15 +6051,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   again, on what it emits.
 
   What cannot be read is refused, not passed: a workload, claim or PersistentVolume in
-  an API version kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`); a
-  workload, claim or PersistentVolume inside a list of an unregistered kind, which the parser unpacks into untyped objects;
-  and a list left inside such a list, whose items the parser does not unpack. A list is
-  told there by a top-level `items` array, so a custom resource that names a field
-  `items` is refused in that position too. An object of another kind inside a list of an
-  unregistered kind still builds. A `v1` `List` and a typed list (`DeploymentList`) are
-  replaced by their items, each decoded and checked as a document of its own is, for a
-  field its type does not declare too (`manifest source: parse manifests: item 0 of List:
-  Deployment "demo/web": undeclared field …`).
+  an API version kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`),
+  inside a list as outside one. A list is replaced by its items, each decoded and checked
+  as a document of its own is, for a field its type does not declare too (`manifest
+  source: parse manifests: item 0 of List: Deployment "demo/web": undeclared field …`):
+  a `v1` `List`, a typed list (`DeploymentList`) and, since go-kure/kure#1014, a list of
+  a kind the scheme does not register (a kind ending in `List` that states `items`),
+  whose items of a registered kind are their Go types and are checked for real, a list
+  among them opened in turn. The list handling is the one `helmtemplate`'s *Rendered
+  objects* describes, with the same errors under `manifest source: parse manifests: …`:
+  a label or an annotation on a list's own metadata, a `Kind`, `apiversion` or `Items`
+  key, a `null` item, and an object of a kind that is no list with a top-level `items`
+  array, which is refused with a policy or with none and is no policy violation.
+  **Breaking** (go-kure/launcher#790): the table under `helmtemplate` lists what built
+  before and is refused now.
 
   **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
   reached the output unchecked. A document that relied on that no longer builds when its
