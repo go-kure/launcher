@@ -28,7 +28,7 @@ var rawSchedulingByKind = map[string][]string{
 	"deployment":  {"affinity", "tolerations", "topologySpreadConstraints"},
 	"statefulset": {"tolerations", "topologySpreadConstraints"},
 	"daemonset":   {"affinity", "tolerations", "topologySpreadConstraints"},
-	"job":         {},
+	"job":         {"affinity", "tolerations", "topologySpreadConstraints"},
 	"cronjob":     {},
 }
 

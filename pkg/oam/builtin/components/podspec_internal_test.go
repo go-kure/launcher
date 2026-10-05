@@ -104,7 +104,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 20, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 17, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 21, jobSpecPropertyKeys, true},
-		{"job", (&JobHandler{}).PropertySchema(), 15, jobSpecPropertyKeys, true},
+		{"job", (&JobHandler{}).PropertySchema(), 18, jobSpecPropertyKeys, true},
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
 		// own-key increase and not the collision this guard exists to catch —

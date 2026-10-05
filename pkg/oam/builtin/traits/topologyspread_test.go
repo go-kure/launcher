@@ -605,6 +605,7 @@ func TestTopologySpread_OtherWorkloadKindsAreRefused(t *testing.T) {
 	}{
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}},
 		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/api:v1"}},
+		{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/api:v1"}},
 	} {
 		for name, extra := range map[string]map[string]any{
 			"no constraints":       nil,
