@@ -177,6 +177,7 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	cfg := &HelmReleaseConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Spec:       *spec,
 	}
@@ -195,6 +196,9 @@ type HelmReleaseConfig struct {
 	// ObjectName names the HelmRelease (oam.Component.ObjectName). Empty for
 	// Name. It does not move the release name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the HelmRelease
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The HelmRelease lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -366,6 +370,5 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 		hr.Spec.TargetNamespace = c.Namespace
 	}
 
-	obj := client.Object(hr)
-	return []*client.Object{&obj}, nil
+	return kindObject(hr, c.Metadata)
 }

@@ -76,7 +76,7 @@ func (h *NetworkPolicyHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &NetworkPolicyConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}, nil
+	return &NetworkPolicyConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil
 }
 
 // NetworkPolicyConfig implements stack.ApplicationConfig for networkpolicy
@@ -86,8 +86,11 @@ type NetworkPolicyConfig struct {
 	// ObjectName names the NetworkPolicy (oam.Component.ObjectName); empty when
 	// it is the component's name.
 	ObjectName string
-	Namespace  string
-	Spec       networkingv1.NetworkPolicySpec
+	// Metadata is the labels and annotations authored for the NetworkPolicy
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      networkingv1.NetworkPolicySpec
 }
 
 // ApplyPolicy is a no-op: the environment policy holds no rule for a
@@ -103,6 +106,5 @@ func (c *NetworkPolicyConfig) ApplyPolicy(oam.Policy) error {
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	np := kubernetes.CreateNetworkPolicy(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&np.Spec)
-	obj := client.Object(np)
-	return []*client.Object{&obj}, nil
+	return kindObject(np, c.Metadata)
 }

@@ -200,17 +200,17 @@ func (t *Transformer) validateAuthoredComponent(comp *Component) error {
 }
 
 // validateAuthoredComponentAgainst is validateAuthoredAgainst for a terminal
-// component handler: a kind component's schema is checked with `objectName`
-// folded in, which the engine reads off the component before the handler sees
-// it (withObjectNameProperty). A handler that declares no schema accepts
-// anything, `objectName` included; the transform still refuses it there on a
-// type that takes none.
+// component handler: a kind component's schema is checked with `objectName`,
+// `labels` and `annotations` folded in, which the engine reads off the
+// component before the handler sees them (withObjectProperties). A handler that
+// declares no schema accepts anything, `objectName` included; the transform
+// still refuses it there on a type that takes none.
 func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string]any, path string) error {
 	p, ok := handler.(PropertySchemaProvider)
 	if !ok {
 		return nil
 	}
-	return validateAuthoredProperties(withObjectNameProperty(handler, p.PropertySchema()), props, path)
+	return validateAuthoredProperties(withObjectProperties(handler, p.PropertySchema()), props, path)
 }
 
 // unsupportedFieldHinter is implemented by a component handler that adds a

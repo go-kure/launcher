@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
@@ -157,8 +158,12 @@ func checkFluxDurations[S any](component string, spec *S, fields []fluxDurationF
 // no h (fluxduration.SourceTimeout). So a timeout of an hour or more goes out
 // as an unstructured copy of obj whose spec.timeout is in minutes, 90m0s for
 // 1h30m (go-kure/launcher#619). Every other source is emitted as the typed
-// object, as before.
-func emitFluxSource(component string, obj client.Object, timeout *metav1.Duration) ([]*client.Object, error) {
+// object, as before. meta is the labels and annotations authored for the
+// source (kindObject); they are set before the copy, which so carries them.
+func emitFluxSource(component string, obj client.Object, timeout *metav1.Duration, meta oam.ObjectMetadata) ([]*client.Object, error) {
+	if err := meta.ApplyTo(obj); err != nil {
+		return nil, err
+	}
 	if timeout != nil {
 		if text := fluxduration.SourceTimeout.Format(timeout.Duration); text != timeout.Duration.String() {
 			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)

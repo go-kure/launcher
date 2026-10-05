@@ -123,7 +123,7 @@ func (h *PersistentVolumeHandler) ToApplicationConfig(component *oam.Component, 
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &PersistentVolumeConfig{Name: component.Name, ObjectName: componentObjectName(component), Spec: *spec}, nil
+	return &PersistentVolumeConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Spec: *spec}, nil
 }
 
 // PersistentVolumeConfig implements stack.ApplicationConfig for
@@ -134,7 +134,10 @@ type PersistentVolumeConfig struct {
 	// ObjectName names the PersistentVolume (oam.Component.ObjectName). Empty
 	// for the application's name.
 	ObjectName string
-	Spec       corev1.PersistentVolumeSpec
+	// Metadata is the labels and annotations authored for the PersistentVolume
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
+	Spec     corev1.PersistentVolumeSpec
 }
 
 // ApplyPolicy holds the volume to the environment policy
@@ -153,6 +156,5 @@ func (c *PersistentVolumeConfig) ApplyPolicy(p oam.Policy) error {
 func (c *PersistentVolumeConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	pv := kubernetes.CreatePersistentVolume(kindObjectName(c.ObjectName, app.Name))
 	c.Spec.DeepCopyInto(&pv.Spec)
-	obj := client.Object(pv)
-	return []*client.Object{&obj}, nil
+	return kindObject(pv, c.Metadata)
 }

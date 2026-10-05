@@ -121,6 +121,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	config := &CronjobConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 	}
 
@@ -341,7 +342,11 @@ type CronjobConfig struct {
 	Name string
 	// ObjectName names the CronJob (oam.Component.ObjectName); its labels and
 	// main container keep Name. Empty for the application's name.
-	ObjectName                 string
+	ObjectName string
+	// Metadata is the labels and annotations authored for the CronJob
+	// (oam.Component.ObjectMetadata). They go on the CronJob's own metadata:
+	// its pod template keeps the labels of the kind.
+	Metadata                   oam.ObjectMetadata
 	Namespace                  string
 	Image                      string
 	Schedule                   string
@@ -464,8 +469,7 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	if err != nil {
 		return nil, err
 	}
-	obj := client.Object(cronjob)
-	return []*client.Object{&obj}, nil
+	return kindObject(cronjob, c.Metadata)
 }
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {

@@ -96,6 +96,7 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	config := &DeploymentConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 	}
 
@@ -271,14 +272,18 @@ type DeploymentConfig struct {
 	// ObjectName names the Deployment (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Image      string
-	Replicas   int32
-	Env        []corev1.EnvVar
-	EnvFrom    []corev1.EnvFromSource
-	Resources  ResourceRequirements
-	Command    []string
-	Args       []string
+	// Metadata is the labels and annotations authored for the Deployment
+	// (oam.Component.ObjectMetadata). They go on the Deployment's own
+	// metadata: its pod template keeps the labels of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Image     string
+	Replicas  int32
+	Env       []corev1.EnvVar
+	EnvFrom   []corev1.EnvFromSource
+	Resources ResourceRequirements
+	Command   []string
+	Args      []string
 	// Ports are the main container's declared ports (parseContainerPorts).
 	Ports           []corev1.ContainerPort
 	Probes          ProbeConfig
@@ -412,8 +417,7 @@ func (c *DeploymentConfig) Generate(app *stack.Application) ([]*client.Object, e
 	if err != nil {
 		return nil, err
 	}
-	depObj := client.Object(deployment)
-	return []*client.Object{&depObj}, nil
+	return kindObject(deployment, c.Metadata)
 }
 
 func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {

@@ -63,7 +63,7 @@ func (h *OCIRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := checkAuthoredFluxDurations("ocirepository", component.Properties, ociRepositoryDurations); err != nil {
 		return nil, err
 	}
-	cfg := &OCIRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &OCIRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -79,6 +79,9 @@ type OCIRepositoryConfig struct {
 	// ObjectName names the OCIRepository (oam.Component.ObjectName). Empty for
 	// Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the OCIRepository
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The OCIRepository lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -121,5 +124,5 @@ func (c *OCIRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&repo.Spec.Interval)
-	return emitFluxSource("ocirepository", repo, repo.Spec.Timeout)
+	return emitFluxSource("ocirepository", repo, repo.Spec.Timeout, c.Metadata)
 }

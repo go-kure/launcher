@@ -86,7 +86,10 @@ type PersistentVolumeClaimConfig struct {
 	// ObjectName names the PersistentVolumeClaim (oam.Component.ObjectName);
 	// its labels keep Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
+	// Metadata is the labels and annotations authored for the
+	// PersistentVolumeClaim (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
 	// Claim carries the claim's fields; its Name is unused, since Generate
 	// names the claim by ObjectName or after the Application. Claim.Size is "" until a policy
 	// default fills an unauthored size.
@@ -102,7 +105,11 @@ func (c *PersistentVolumeClaimConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates the PersistentVolumeClaim, named and labelled after the
 // Application.
 func (c *PersistentVolumeClaimConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return GenerateClaim(c.Claim, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	objs, err := GenerateClaim(c.Claim, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	if err != nil {
+		return nil, err
+	}
+	return kindObject(*objs[0], c.Metadata)
 }
 
 // parsePersistentVolumeClaim reads a persistentvolumeclaim component's
@@ -112,7 +119,7 @@ func parsePersistentVolumeClaim(component *oam.Component) (*PersistentVolumeClai
 	if err != nil {
 		return nil, err
 	}
-	return &PersistentVolumeClaimConfig{Name: component.Name, ObjectName: componentObjectName(component), Claim: claim}, nil
+	return &PersistentVolumeClaimConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Claim: claim}, nil
 }
 
 // The three functions below are the kind's whole claim path: parse, policy,

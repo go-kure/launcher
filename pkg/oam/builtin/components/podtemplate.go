@@ -63,7 +63,7 @@ func (h *PodTemplateHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUncarriedSpecValues(props, authored, podTemplateDefaultedZeros()); err != nil {
 		return nil, err
 	}
-	cfg := &PodTemplateConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Template: authored.Template}
+	cfg := &PodTemplateConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Template: authored.Template}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -80,8 +80,12 @@ type PodTemplateConfig struct {
 	// ObjectName names the PodTemplate (oam.Component.ObjectName). Empty for
 	// the application's name.
 	ObjectName string
-	Namespace  string
-	Template   corev1.PodTemplateSpec
+	// Metadata is the labels and annotations authored for the PodTemplate
+	// (oam.Component.ObjectMetadata). They go on the PodTemplate's own
+	// metadata: its pod template keeps the labels of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Template  corev1.PodTemplateSpec
 }
 
 // validate refuses a template the PodTemplate cannot be emitted from: what a
@@ -115,6 +119,5 @@ func (c *PodTemplateConfig) Generate(app *stack.Application) ([]*client.Object, 
 	}
 	pt := kubernetes.CreatePodTemplate(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Template.DeepCopyInto(&pt.Template)
-	obj := client.Object(pt)
-	return []*client.Object{&obj}, nil
+	return kindObject(pt, c.Metadata)
 }

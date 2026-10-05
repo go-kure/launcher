@@ -72,7 +72,7 @@ func (h *IngressHandler) ToApplicationConfig(component *oam.Component, namespace
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &IngressConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}, nil
+	return &IngressConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil
 }
 
 // IngressConfig implements stack.ApplicationConfig for ingress components.
@@ -86,8 +86,11 @@ type IngressConfig struct {
 	// ObjectName names the Ingress (oam.Component.ObjectName); empty when it is
 	// the component's name.
 	ObjectName string
-	Namespace  string
-	Spec       networkingv1.IngressSpec
+	// Metadata is the labels and annotations authored for the Ingress
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      networkingv1.IngressSpec
 }
 
 // ApplyPolicy is a no-op: the environment policy holds no rule for an Ingress.
@@ -103,6 +106,5 @@ func (c *IngressConfig) ApplyPolicy(oam.Policy) error {
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	ing := kubernetes.CreateIngress(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&ing.Spec)
-	obj := client.Object(ing)
-	return []*client.Object{&obj}, nil
+	return kindObject(ing, c.Metadata)
 }

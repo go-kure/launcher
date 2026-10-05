@@ -56,6 +56,7 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	config := &DaemonsetConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 	}
 
@@ -188,7 +189,11 @@ type DaemonsetConfig struct {
 	Name string
 	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
-	ObjectName      string
+	ObjectName string
+	// Metadata is the labels and annotations authored for the DaemonSet
+	// (oam.Component.ObjectMetadata). They go on the DaemonSet's own
+	// metadata: its pod template keeps the labels of the kind.
+	Metadata        oam.ObjectMetadata
 	Namespace       string
 	Image           string
 	Ports           []corev1.ContainerPort // the main container's ports; no Service
@@ -299,8 +304,7 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 	if err != nil {
 		return nil, err
 	}
-	dsObj := client.Object(ds)
-	return []*client.Object{&dsObj}, nil
+	return kindObject(ds, c.Metadata)
 }
 
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {

@@ -53,7 +53,7 @@ func (h *NamespaceHandler) ToApplicationConfig(component *oam.Component, _ strin
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	cfg := &NamespaceConfig{Name: component.Name, ObjectName: componentObjectName(component), Spec: *spec}
+	cfg := &NamespaceConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Spec: *spec}
 	if err := validateNamespaceObjectName(component.ObjectName(), cfg.Name); err != nil {
 		return nil, err
 	}
@@ -67,7 +67,10 @@ type NamespaceConfig struct {
 	// ObjectName names the Namespace (oam.Component.ObjectName). Empty for the
 	// application's name.
 	ObjectName string
-	Spec       corev1.NamespaceSpec
+	// Metadata is the labels and annotations authored for the Namespace
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
+	Spec     corev1.NamespaceSpec
 }
 
 // validateNamespaceObjectName is validateNamespaceName for the name the
@@ -111,6 +114,5 @@ func (c *NamespaceConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 	ns := kubernetes.CreateNamespace(name)
 	c.Spec.DeepCopyInto(&ns.Spec)
-	obj := client.Object(ns)
-	return []*client.Object{&obj}, nil
+	return kindObject(ns, c.Metadata)
 }

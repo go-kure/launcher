@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -33,7 +34,10 @@ import (
 // takes `objectName` and the name role "object" (oam.ComponentObjectProvider,
 // go-kure/launcher#787). A handler declares here the kind and scope of that
 // object; the engine resolves the name and the handler's config carries it
-// (kindObjectName).
+// (kindObjectName). With the object it takes `labels` and `annotations` for
+// that object's own metadata (go-kure/launcher#790): the engine reads and
+// checks them, and the handler's config carries them to the object
+// (kindObject).
 //
 // A type that is not here generates no single object named after the
 // component: `manifests`, `passthrough`, `crd` and `helmtemplate` emit what
@@ -59,6 +63,19 @@ func kindObjectName(objectName, fallback string) string {
 		return objectName
 	}
 	return fallback
+}
+
+// kindObject returns what a kind component's Generate returns: obj, its one
+// object, with the labels and annotations authored for it on its own metadata
+// (go-kure/launcher#790). meta is what the config carries from
+// oam.Component.ObjectMetadata, set in ToApplicationConfig; the zero value
+// leaves obj as it is. Nothing but the object's own metadata takes them: a pod
+// template obj holds keeps the labels its kind gave it.
+func kindObject(obj client.Object, meta oam.ObjectMetadata) ([]*client.Object, error) {
+	if err := meta.ApplyTo(obj); err != nil {
+		return nil, err
+	}
+	return []*client.Object{&obj}, nil
 }
 
 // objectNameField names, in a refusal of a kind's own name rule, where an

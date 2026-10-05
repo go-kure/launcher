@@ -71,6 +71,7 @@ func (h *SecretHandler) ToApplicationConfig(component *oam.Component, namespace 
 	return &SecretComponentConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Secret:     secret,
 	}, nil
@@ -83,7 +84,10 @@ type SecretComponentConfig struct {
 	// ObjectName names the Secret (oam.Component.ObjectName); its labels keep
 	// Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
+	// Metadata is the labels and annotations authored for the Secret
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
 	// Secret carries the entries, type and immutable as ParseSecretProperties
 	// parses them.
 	Secret SecretConfig
@@ -102,7 +106,11 @@ func (c *SecretComponentConfig) ApplyPolicy(policy oam.Policy) error {
 
 // Generate creates the Secret.
 func (c *SecretComponentConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return GenerateSecret(c.Secret, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	objs, err := GenerateSecret(c.Secret, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	if err != nil {
+		return nil, err
+	}
+	return kindObject(*objs[0], c.Metadata)
 }
 
 var _ oam.Enforceable = (*SecretComponentConfig)(nil)

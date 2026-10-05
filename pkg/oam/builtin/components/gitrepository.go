@@ -70,7 +70,7 @@ func (h *GitRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := checkAuthoredFluxDurations("gitrepository", component.Properties, gitRepositoryDurations); err != nil {
 		return nil, err
 	}
-	cfg := &GitRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &GitRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -86,6 +86,9 @@ type GitRepositoryConfig struct {
 	// ObjectName names the GitRepository (oam.Component.ObjectName). Empty for
 	// Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the GitRepository
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The GitRepository lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -126,5 +129,5 @@ func (c *GitRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&repo.Spec.Interval)
-	return emitFluxSource("gitrepository", repo, repo.Spec.Timeout)
+	return emitFluxSource("gitrepository", repo, repo.Spec.Timeout, c.Metadata)
 }

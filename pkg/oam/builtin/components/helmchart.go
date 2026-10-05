@@ -97,7 +97,7 @@ func (h *HelmChartHandler) ToApplicationConfig(component *oam.Component, namespa
 	if err := checkAuthoredFluxDurations("helmchart", component.Properties, helmChartDurations); err != nil {
 		return nil, err
 	}
-	cfg := &HelmChartConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &HelmChartConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -128,6 +128,9 @@ type HelmChartConfig struct {
 	// ObjectName names the HelmChart (oam.Component.ObjectName). Empty for
 	// Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the HelmChart
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The HelmChart lands here unless
 	// a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -177,5 +180,5 @@ func (c *HelmChartConfig) Generate(_ *stack.Application) ([]*client.Object, erro
 	// A deep copy, so no render shares a pointer or slice with the config.
 	hc.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&hc.Spec.Interval)
-	return emitFluxSource("helmchart", hc, nil)
+	return emitFluxSource("helmchart", hc, nil, c.Metadata)
 }

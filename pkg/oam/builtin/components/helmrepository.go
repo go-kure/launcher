@@ -61,7 +61,7 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 	if err := checkAuthoredFluxDurations("helmrepository", component.Properties, helmRepositoryDurations); err != nil {
 		return nil, err
 	}
-	cfg := &HelmRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &HelmRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -77,6 +77,9 @@ type HelmRepositoryConfig struct {
 	// ObjectName names the HelmRepository (oam.Component.ObjectName). Empty
 	// for Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the HelmRepository
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The HelmRepository lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -134,5 +137,5 @@ func (c *HelmRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object,
 	if !c.isOCI() {
 		defaultFluxSourceInterval(&repo.Spec.Interval)
 	}
-	return emitFluxSource("helmrepository", repo, repo.Spec.Timeout)
+	return emitFluxSource("helmrepository", repo, repo.Spec.Timeout, c.Metadata)
 }

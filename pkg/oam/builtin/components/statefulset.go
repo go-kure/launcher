@@ -112,6 +112,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	config := &StatefulsetConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 	}
 
@@ -287,7 +288,11 @@ type StatefulsetConfig struct {
 	// ObjectName names the StatefulSet (oam.Component.ObjectName), and with it
 	// the pods and volume claims the controller names after it; its labels,
 	// selector and main container keep Name. Empty for the application's name.
-	ObjectName           string
+	ObjectName string
+	// Metadata is the labels and annotations authored for the StatefulSet
+	// (oam.Component.ObjectMetadata). They go on the StatefulSet's own
+	// metadata: its pod template keeps the labels of the kind.
+	Metadata             oam.ObjectMetadata
 	Namespace            string
 	Image                string
 	Replicas             int32
@@ -414,8 +419,7 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if err != nil {
 		return nil, err
 	}
-	stsObj := client.Object(sts)
-	return []*client.Object{&stsObj}, nil
+	return kindObject(sts, c.Metadata)
 }
 
 // claimTemplateMountsAndDevices splits the claim templates into the main

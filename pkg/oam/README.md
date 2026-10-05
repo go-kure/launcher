@@ -955,6 +955,57 @@ are named by its controller after the StatefulSet, so they follow `objectName`. 
 name unless it is authored, so renaming the HelmRelease object leaves the release, and the
 names its chart derives from it, where they were.
 
+### `labels` and `annotations`: the metadata of a kind component's object
+
+A kind component takes two more properties the engine reads, `labels` and `annotations`, each
+a map of strings (go-kure/launcher#790). They go on the metadata of the component's one object
+and nowhere else:
+
+```yaml
+- name: fast
+  type: storageclass
+  properties:
+    provisioner: csi.example.com
+    labels:
+      tier: fast
+    annotations:
+      storageclass.kubernetes.io/is-default-class: "true"
+```
+
+The pod template of a workload kind is not labelled or annotated by them, and no selector
+launcher writes reads an authored label. The component label and the reserved keys apply as
+on every generated object ("Component label and ownership", "Reserved metadata keys").
+
+The engine refuses, as a `TransformError` naming the component, the property and the key:
+
+- a value that is no map and an entry that is no string; a null value or entry is an absent
+  one, as at every property;
+- a label key or value, or an annotation key, the API server refuses (the apimachinery
+  rules), and annotations whose keys and values hold more than 262144 bytes together;
+- the `app` label with another value than `ComponentLabelValue` of the component's name,
+  which the kinds that set `app` select by;
+- the component label key (`ComponentLabelKey`, or the key derived from `Domain`) with
+  another value than the one launcher gives the component. The ownership wrapper keeps a
+  component label an object already carries, so another value would take the object out of
+  the selectors generated for its component.
+
+A key in `ReservedMetadataKeys` is refused where every reserved key is, when the object is
+generated. A label that names another object is the author's literal: it does not follow that
+object's `objectName` or the `Naming` hook, and there is no typed reference.
+
+As with `objectName`, the engine reads the properties and the handler does not. For a type
+whose handler declares its object (`ComponentObjectProvider`) the engine adds both to the
+type's schema, checks them, removes them from the properties before any of the handler's code
+runs, and hands the handler the result as `Component.ObjectMetadata()`. They are read on a
+member a lowering rule emitted too, where `objectName` is refused: a member's labels are its
+rule's to write, and nothing is claimed for a label. **A handler that declares its object
+must put them on it**: nothing else carries them there once the properties are removed. A
+built-in handler's config holds the value and its `Generate` calls
+`ObjectMetadata.ApplyTo(obj)`, which adds the authored keys beside the ones the config set, in
+maps of the object's own, and refuses a key the config set to another value. A type that
+declares no object refuses the two properties if its schema does not declare them, and keeps
+them, unread by the engine, if it declares them or declares no schema.
+
 ## Parsing
 
 | Function | Purpose |

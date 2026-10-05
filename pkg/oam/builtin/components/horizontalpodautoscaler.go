@@ -74,7 +74,7 @@ func (h *HorizontalPodAutoscalerHandler) ToApplicationConfig(component *oam.Comp
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	cfg := &HorizontalPodAutoscalerConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &HorizontalPodAutoscalerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -89,8 +89,11 @@ type HorizontalPodAutoscalerConfig struct {
 	// ObjectName names the HorizontalPodAutoscaler (oam.Component.ObjectName).
 	// Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       autoscalingv2.HorizontalPodAutoscalerSpec
+	// Metadata is the labels and annotations authored for the
+	// HorizontalPodAutoscaler (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      autoscalingv2.HorizontalPodAutoscalerSpec
 }
 
 // validate refuses a spec without a top-level field the API server refuses an
@@ -131,6 +134,5 @@ func (c *HorizontalPodAutoscalerConfig) Generate(app *stack.Application) ([]*cli
 	}
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&hpa.Spec)
-	obj := client.Object(hpa)
-	return []*client.Object{&obj}, nil
+	return kindObject(hpa, c.Metadata)
 }

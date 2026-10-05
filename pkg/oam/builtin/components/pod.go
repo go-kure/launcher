@@ -193,7 +193,7 @@ func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err := refuseUncarriedSpecValues(props, spec, podSpecDefaultedZeros("")); err != nil {
 		return nil, err
 	}
-	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := validateAuthoredPodSpec("", &cfg.Spec); err != nil {
 		return nil, err
 	}
@@ -207,8 +207,11 @@ type PodConfig struct {
 	// ObjectName names the Pod (oam.Component.ObjectName); its labels keep
 	// Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       corev1.PodSpec
+	// Metadata is the labels and annotations authored for the Pod
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      corev1.PodSpec
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the account the pod
@@ -248,6 +251,5 @@ func (c *PodConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	pod := kubernetes.CreatePod(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	pod.Labels = appLabels(app.Name)
 	c.Spec.DeepCopyInto(&pod.Spec)
-	obj := client.Object(pod)
-	return []*client.Object{&obj}, nil
+	return kindObject(pod, c.Metadata)
 }

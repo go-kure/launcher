@@ -251,6 +251,7 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	return &CnpgClusterConfig{
 		Name:                component.Name,
 		ObjectName:          componentObjectName(component),
+		Metadata:            component.ObjectMetadata(),
 		Namespace:           namespace,
 		Spec:                *spec,
 		explicitInstances:   explicitInstances,
@@ -502,8 +503,12 @@ type CnpgClusterConfig struct {
 	// ObjectName names the Cluster (oam.Component.ObjectName). Empty for the
 	// application's name.
 	ObjectName string
-	Namespace  string
-	Spec       cnpgv1.ClusterSpec
+	// Metadata is the labels and annotations authored for the Cluster
+	// (oam.Component.ObjectMetadata). They go on the Cluster's own metadata:
+	// what the operator hands on to the pods is spec.inheritedMetadata.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      cnpgv1.ClusterSpec
 
 	explicitInstances   bool
 	explicitStorageSize bool
@@ -789,6 +794,5 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	}
 	cluster := kurecnpg.CreateCluster(name, app.Namespace)
 	c.Spec.DeepCopyInto(&cluster.Spec)
-	obj := client.Object(cluster)
-	return []*client.Object{&obj}, nil
+	return kindObject(cluster, c.Metadata)
 }

@@ -170,7 +170,7 @@ func (h *CnpgDatabaseHandler) ToApplicationConfig(component *oam.Component, name
 	if err := refuseEmptyAlwaysEncodedDefaults(props); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgDatabaseConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &CnpgDatabaseConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -184,8 +184,11 @@ type CnpgDatabaseConfig struct {
 	// ObjectName names the Database object (oam.Component.ObjectName); the
 	// PostgreSQL database is Spec.Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       cnpgv1.DatabaseSpec
+	// Metadata is the labels and annotations authored for the Database object
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      cnpgv1.DatabaseSpec
 }
 
 // validate refuses a spec the Database CRD would refuse, or the operator could
@@ -223,6 +226,5 @@ func (c *CnpgDatabaseConfig) Generate(app *stack.Application) ([]*client.Object,
 	database := kurecnpg.CreateDatabase(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&database.Spec)
 	fillAlwaysEncodedDefaults(&database.Spec)
-	obj := client.Object(database)
-	return []*client.Object{&obj}, nil
+	return kindObject(database, c.Metadata)
 }

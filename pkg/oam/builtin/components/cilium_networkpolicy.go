@@ -87,7 +87,7 @@ func (h *CiliumNetworkPolicyHandler) ToApplicationConfig(component *oam.Componen
 		return nil, err
 	}
 	cfg := &CiliumNetworkPolicyConfig{
-		Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace,
+		Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace,
 		Spec: authored.Spec, Specs: authored.Specs,
 	}
 	if err := cfg.validate(); err != nil {
@@ -104,9 +104,12 @@ type CiliumNetworkPolicyConfig struct {
 	// ObjectName names the CiliumNetworkPolicy (oam.Component.ObjectName);
 	// empty when it is the component's name.
 	ObjectName string
-	Namespace  string
-	Spec       *ciliumapi.Rule
-	Specs      ciliumapi.Rules
+	// Metadata is the labels and annotations authored for the
+	// CiliumNetworkPolicy (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      *ciliumapi.Rule
+	Specs     ciliumapi.Rules
 }
 
 // validate refuses a policy Cilium rejects: one with no rule at all, and a rule
@@ -188,6 +191,5 @@ func (c *CiliumNetworkPolicyConfig) Generate(app *stack.Application) ([]*client.
 	for _, rule := range c.Specs {
 		kurecilium.AddCiliumNetworkPolicySpec(cnp, rule.DeepCopy())
 	}
-	obj := client.Object(cnp)
-	return []*client.Object{&obj}, nil
+	return kindObject(cnp, c.Metadata)
 }

@@ -74,7 +74,7 @@ func (h *HTTPRouteHandler) ToApplicationConfig(component *oam.Component, namespa
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
 		return nil, err
 	}
-	return &HTTPRouteConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}, nil
+	return &HTTPRouteConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil
 }
 
 // HTTPRouteConfig implements stack.ApplicationConfig for httproute components.
@@ -88,8 +88,11 @@ type HTTPRouteConfig struct {
 	// ObjectName names the HTTPRoute (oam.Component.ObjectName); empty when it
 	// is the component's name.
 	ObjectName string
-	Namespace  string
-	Spec       gatewayv1.HTTPRouteSpec
+	// Metadata is the labels and annotations authored for the HTTPRoute
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      gatewayv1.HTTPRouteSpec
 }
 
 // ApplyPolicy is a no-op: the environment policy holds no rule for an
@@ -105,6 +108,5 @@ func (c *HTTPRouteConfig) ApplyPolicy(oam.Policy) error {
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	route := kubernetes.CreateHTTPRoute(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&route.Spec)
-	obj := client.Object(route)
-	return []*client.Object{&obj}, nil
+	return kindObject(route, c.Metadata)
 }

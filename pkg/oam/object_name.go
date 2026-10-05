@@ -52,22 +52,10 @@ type ComponentObjectProvider interface {
 }
 
 // objectNameSchema is the declaration of ObjectNameProperty the engine adds to
-// the schema of every type that takes it.
+// the schema of every type that takes it (withObjectProperties).
 var objectNameSchema = PropertySchema{
 	Type:        PropertyTypeString,
 	Description: "The name of the object this component generates, in place of the component name. It names the object alone: labels, selectors and the names traits generate keep the component name. A reference another component writes to this object names it by this name.",
-}
-
-// withObjectNameProperty returns schema plus ObjectNameProperty when handler
-// takes it (ComponentObjectProvider). schema is never mutated.
-func withObjectNameProperty(handler any, schema map[string]PropertySchema) map[string]PropertySchema {
-	if _, takes := handler.(ComponentObjectProvider); !takes {
-		return schema
-	}
-	out := make(map[string]PropertySchema, len(schema)+1)
-	maps.Copy(out, schema)
-	out[ObjectNameProperty] = objectNameSchema
-	return out
 }
 
 // ObjectName returns the name of the object a kind component generates: the
