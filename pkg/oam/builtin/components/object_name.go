@@ -10,6 +10,7 @@ import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
@@ -177,6 +178,10 @@ func networkingKind(kind string) schema.GroupKind {
 
 func cnpgKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: cnpgv1.SchemeGroupVersion.Group, Kind: kind}
+}
+
+func monitoringKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: monitoringv1.SchemeGroupVersion.Group, Kind: kind}
 }
 
 func fluxSourceKind(kind string) schema.GroupKind {
@@ -361,6 +366,26 @@ func (h *PodDisruptionBudgetHandler) ComponentObject() (schema.GroupKind, oam.Ob
 // cluster-scoped.
 func (h *ServiceCIDRHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: networkingv1.GroupName, Kind: "ServiceCIDR"}, oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the servicemonitor kind's ServiceMonitor.
+func (h *ServiceMonitorHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return monitoringKind(monitoringv1.ServiceMonitorsKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the podmonitor kind's PodMonitor.
+func (h *PodMonitorHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return monitoringKind(monitoringv1.PodMonitorsKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the prometheus-probe kind's Probe.
+func (h *PrometheusProbeHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return monitoringKind(monitoringv1.ProbesKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the prometheusrule kind's PrometheusRule.
+func (h *PrometheusRuleHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return monitoringKind(monitoringv1.PrometheusRuleKind), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

@@ -1,0 +1,57 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  labels:
+    launcher.gokure.dev/component: websites
+  name: websites
+  namespace: default
+spec:
+  interval: 60s
+  jobName: blackbox
+  metricRelabelings:
+  - action: labeldrop
+    regex: pod
+  module: http_2xx
+  prober:
+    path: /probe
+    scheme: http
+    url: blackbox-exporter.monitoring.svc:9115
+  scrapeTimeout: 30s
+  targets:
+    staticConfig:
+      labels:
+        environment: production
+      static:
+      - https://example.com
+      - https://example.org
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  labels:
+    launcher.gokure.dev/component: ingresses
+  name: ingresses
+  namespace: default
+spec:
+  followRedirects: false
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    ingress:
+      namespaceSelector:
+        any: true
+      selector:
+        matchLabels:
+          probe: "true"
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  labels:
+    launcher.gokure.dev/component: prober-only
+  name: prober-only
+  namespace: default
+spec:
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets: {}

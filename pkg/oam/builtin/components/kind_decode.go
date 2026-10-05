@@ -182,6 +182,61 @@ func foldedDuplicateIn(authored any, path string) error {
 	return nil
 }
 
+// refuseUnauthoredRequired refuses a field of required the author left out. It
+// is for a field the API requires that the upstream type encodes whether or
+// not it was authored: a struct that is no pointer, or a list or a scalar
+// without omitempty. The object would hold an empty one the author did not
+// write, and where the API server accepts that value (an empty selector
+// selects everything, 0 is an expression) nothing refuses the omission any
+// more. The decoded value cannot tell an authored empty one from none, so
+// authored is read: the stripped property tree decodeKindSpec returns, in
+// which a field authored as null is absent.
+//
+// required maps a json path, with [] for a list element, to what the refusal
+// says of the field. A path is followed through what was authored, and under a
+// parent the author left out it holds nothing to refuse, so every field before
+// the last must be one the type omits when unset. Keys match
+// case-insensitively, as the decode's do. Paths are read in sorted order and a
+// list in its own, so the field reported is the same on every build.
+func refuseUnauthoredRequired(authored map[string]any, required map[string]string) error {
+	for _, path := range slices.Sorted(maps.Keys(required)) {
+		if at := unauthoredAt(authored, strings.Split(path, "."), ""); at != "" {
+			return errors.Errorf("%s: required (%s)", at, required[path])
+		}
+	}
+	return nil
+}
+
+// unauthoredAt returns where under node, an authored value at the path at, the
+// field the segments name is missing: "" when it is authored wherever its
+// parent is, or when node holds no parent of it.
+func unauthoredAt(node any, segments []string, at string) string {
+	fields, ok := node.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if at != "" {
+		at += "."
+	}
+	name, list := strings.CutSuffix(segments[0], "[]")
+	key, present := encodedKey(fields, name)
+	switch {
+	case !present && len(segments) == 1:
+		return at + name
+	case !present || len(segments) == 1:
+		return ""
+	case !list:
+		return unauthoredAt(fields[key], segments[1:], at+key)
+	}
+	items, _ := fields[key].([]any)
+	for i, item := range items {
+		if missing := unauthoredAt(item, segments[1:], fmt.Sprintf("%s%s[%d]", at, key, i)); missing != "" {
+			return missing
+		}
+	}
+	return ""
+}
+
 // lookupFolded returns the value of m's key that matches field
 // case-insensitively: the parent segments of field are json names from the
 // encoding, but its leaf is the authored key, with nothing in the encoding to

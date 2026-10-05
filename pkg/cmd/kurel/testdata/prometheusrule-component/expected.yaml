@@ -1,0 +1,38 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    launcher.gokure.dev/component: availability
+  name: availability
+  namespace: default
+spec:
+  groups:
+  - interval: 1m
+    labels:
+      team: payments
+    name: availability
+    rules:
+    - expr: sum by (job) (up)
+      record: job:up:sum
+    - alert: TargetDown
+      annotations:
+        summary: No target of {{ $labels.job }} is up.
+      expr: job:up:sum == 0
+      for: 5m
+      keep_firing_for: 10m
+      labels:
+        severity: page
+  - limit: 0
+    name: constants
+    rules:
+    - expr: 0
+      record: zero
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    launcher.gokure.dev/component: no-groups
+  name: no-groups
+  namespace: default
+spec: {}

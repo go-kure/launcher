@@ -951,7 +951,8 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`,
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`,
-`poddisruptionbudget` and `horizontalpodautoscaler`
+`poddisruptionbudget`, `horizontalpodautoscaler`, `servicemonitor`, `podmonitor`,
+`prometheus-probe` and `prometheusrule`
 (go-kure/launcher#790) are on this list. `ingress`, `httproute`, `networkpolicy` and
 `cilium-networkpolicy` are also trait types: the two lists are separate, and a component
 of such a type is the authored object, not the trait.

@@ -320,6 +320,22 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// A Secret name is a DNS-1123 subdomain, and the kind labels its Secret as
 	// the configmap kind labels its ConfigMap.
 	"secret": {props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true},
+	// The four Prometheus operator kinds emit identity and the authored fields
+	// too, namespaced, with no `app` label and no pods. A monitor's selector is
+	// the author's label query over Services or Pods, not a pod selector of
+	// this document. None checks a name rule of its own.
+	"servicemonitor": {props: map[string]any{
+		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
+		"endpoints": []any{map[string]any{"port": "metrics"}}}},
+	"podmonitor": {props: map[string]any{
+		"selector":            map[string]any{"matchLabels": map[string]any{"team": "payments"}},
+		"podMetricsEndpoints": []any{map[string]any{"port": "metrics"}}}},
+	"prometheus-probe": {props: map[string]any{
+		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
+		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},
+	"prometheusrule": {props: map[string]any{"groups": []any{map[string]any{
+		"name":  "availability",
+		"rules": []any{map[string]any{"alert": "TargetDown", "expr": "up == 0"}}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

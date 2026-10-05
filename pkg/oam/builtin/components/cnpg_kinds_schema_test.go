@@ -34,20 +34,24 @@ var cnpgKindSchemas = []struct {
 // embedded struct that carries no json name (PersistentVolumeSpec's volume
 // source), whose fields encoding/json promotes to the embedding object. An
 // embedded struct that does carry a json name (PodTemplate's metadata) is one
-// field under that name, as encoding/json reads it. Two fields under one name,
-// which encoding/json resolves by depth, fail the test rather than being
-// resolved here; so does any other embedding.
+// field under that name, as encoding/json reads it. Of two fields under one
+// name the one embedded less deeply hides the other, as encoding/json resolves
+// it (ProbeSpec's own authorization over the one its HTTP settings embed); two
+// at one depth fail the test rather than being resolved here, and so does any
+// other embedding.
 func specJSONFields(t *testing.T, typ reflect.Type) map[string]reflect.Type {
 	t.Helper()
 	fields := make(map[string]reflect.Type, typ.NumField())
-	collectSpecJSONFields(t, typ, fields)
+	collectSpecJSONFields(t, typ, 0, fields, map[string]int{})
 	if len(fields) == 0 {
 		t.Fatalf("found no json fields on %s; the reflection walk is broken", typ)
 	}
 	return fields
 }
 
-func collectSpecJSONFields(t *testing.T, typ reflect.Type, fields map[string]reflect.Type) {
+// collectSpecJSONFields adds the json fields of typ, embedded depth levels
+// deep, to fields; depths holds the depth each name was found at.
+func collectSpecJSONFields(t *testing.T, typ reflect.Type, depth int, fields map[string]reflect.Type, depths map[string]int) {
 	t.Helper()
 	for i := range typ.NumField() {
 		f := typ.Field(i)
@@ -56,7 +60,7 @@ func collectSpecJSONFields(t *testing.T, typ reflect.Type, fields map[string]ref
 			if f.Type.Kind() != reflect.Struct || !f.IsExported() {
 				t.Fatalf("%s embeds %s other than as an exported struct; walk it before trusting this coverage test", typ, f.Name)
 			}
-			collectSpecJSONFields(t, f.Type, fields)
+			collectSpecJSONFields(t, f.Type, depth+1, fields, depths)
 			continue
 		}
 		if !f.IsExported() || name == "-" {
@@ -65,10 +69,15 @@ func collectSpecJSONFields(t *testing.T, typ reflect.Type, fields map[string]ref
 		if name == "" {
 			name = f.Name
 		}
-		if _, dup := fields[name]; dup {
-			t.Fatalf("%s reaches two fields named %q; resolve the promotion before trusting this coverage test", typ, name)
+		if at, dup := depths[name]; dup {
+			switch {
+			case at == depth:
+				t.Fatalf("%s reaches two fields named %q at one depth; resolve the promotion before trusting this coverage test", typ, name)
+			case at < depth:
+				continue
+			}
 		}
-		fields[name] = f.Type
+		fields[name], depths[name] = f.Type, depth
 	}
 }
 

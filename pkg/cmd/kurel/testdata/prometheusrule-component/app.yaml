@@ -1,0 +1,33 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: availability
+      type: prometheusrule
+      properties:
+        groups:
+          - name: availability
+            interval: 1m
+            labels:
+              team: payments
+            rules:
+              - record: job:up:sum
+                expr: sum by (job) (up)
+              - alert: TargetDown
+                expr: job:up:sum == 0
+                for: 5m
+                keep_firing_for: 10m
+                labels:
+                  severity: page
+                annotations:
+                  summary: No target of {{ $labels.job }} is up.
+          - name: constants
+            limit: 0
+            rules:
+              - record: zero
+                expr: 0
+    - name: no-groups
+      type: prometheusrule

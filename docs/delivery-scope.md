@@ -666,7 +666,8 @@ be closed at build time.
   - One shared helper builds them (`policyFreeKind`, `kind_policy_free.go`): the strict
     decode, a config with nothing to enforce, and a `Generate` that returns the
     base-library constructor's object with a copy of what was decoded. A kind built on it
-    is a type, an optional required-field check and a constructor.
+    is a type, an optional required-field check, an optional list of required fields the
+    type writes unauthored, and a constructor.
   - Each declares its object as cluster-scoped and takes `objectName` (§3.2): the config
     carries the resolved name, `Generate` names the object with it, and the name is
     claimed in no namespace.
@@ -751,6 +752,35 @@ be closed at build time.
     an autoscaler a chart renders or a `passthrough` component holds.
   - The `scaler` trait's objects and these kinds are claimed as the same kinds, so one
     name given to both in one namespace is a name collision.
+- **Shipped: four kinds of the Prometheus operator's `monitoring.coreos.com/v1` API,**
+  `servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule`
+  (`servicemonitor.go`, `podmonitor.go`, `prometheus_probe.go`, `prometheusrule.go`,
+  with what they share in `monitoring_common.go`), each the strict projection of its
+  spec type, built on `policyFreeKind`, namespaced, declaring its object and taking
+  `objectName`. The Probe's type name carries a prefix: a probe, in the components
+  package, is a container's.
+  - **No capability is required and nothing gates them:** on a cluster without the
+    operator's CRDs the component builds and the object is refused at apply.
+  - A field the API requires that the Go type writes whether or not it was authored must
+    be authored, since the object would not show the omission: a monitor's `selector`
+    (unauthored, the type writes `{}`, which selects everything), a ServiceMonitor's
+    `endpoints`, the three required fields of an `oauth2`, a rule group's `name` and a
+    rule's `expr`. It is the rule every kind follows, not a wider one: sent as authored,
+    the document is one the API server refuses, and only the Go type's zero value hides
+    that. `policyFreeKind` gained a list of such fields for this
+    (`refuseUnauthoredRequired`), and a test holds each kind's list to the required
+    markers of the linked module's source. A required field of a Kubernetes type these
+    specs embed (the `key` of a Secret key reference) is not checked.
+  - A Probe needs `prober.url` here because the object always carries a prober: a limit
+    of the Go type, which writes one whether or not it was authored, not a rule of the
+    API, which does not require `prober` and refuses one without a `url`.
+  - The selector, the prober and the targets are the author's. **No host these objects
+    name is held to the allowed registries** (a prober, a proxy, an OAuth2 token
+    endpoint, a static probe target): none is an artifact source. **No field is checked
+    for a literal secret:** a credential is a reference to a Secret key, and free text
+    that could hold one (`params`, `endpointParams`, a proxy URL) is written as authored.
+  - Metadata is not authorable, as on every kind component, so the labels a Prometheus
+    selects monitors and rules by cannot be written (see the open point below).
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, and a kind component's metadata is not authorable,
   so the kind could not do what it is authored for. Its inventory row is `held`, with
@@ -758,14 +788,18 @@ be closed at build time.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Decided, not yet shipped: object metadata on kind components.** No kind component
-  lets its object's labels or annotations be authored yet. Three concrete cases need them:
+  lets its object's labels or annotations be authored yet. Four concrete cases need them:
   - the `kubernetes.io/service-name` label of an EndpointSlice, without which the slice
     belongs to no Service;
   - the default-class annotation of a StorageClass or an IngressClass
     (`storageclass.kubernetes.io/is-default-class`,
     `ingressclass.kubernetes.io/is-default-class`);
   - the Pod Security Admission labels of a Namespace
-    (`pod-security.kubernetes.io/enforce` and its siblings).
+    (`pod-security.kubernetes.io/enforce` and its siblings);
+  - the labels a Prometheus selects a ServiceMonitor, a PodMonitor, a Probe or a
+    PrometheusRule by (`serviceMonitorSelector`, `ruleSelector` and their siblings): the
+    one label such an object carries is the component label, so a Prometheus that
+    selects on a fixed label does not pick it up.
 
   go-kure/launcher#790 decides it: every kind component is to take optional `labels`
   and `annotations`, on the object's own metadata only. That is a change of its own
@@ -804,8 +838,8 @@ be closed at build time.
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Missing kinds:** the inventory's `missing` rows (Pod, ServiceMonitor,
-  Gateway among them), and its `trait` rows, the
+- **Missing kinds:** the inventory's `missing` rows (Pod, Gateway among
+  them), and its `trait` rows, the
   kinds reachable only as traits today (Certificate, ExternalSecret, Role and RoleBinding,
   ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
@@ -967,7 +1001,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler` and `secret` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

@@ -1,0 +1,41 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: worker-metrics
+      type: podmonitor
+      properties:
+        jobLabel: app.kubernetes.io/name
+        podTargetLabels:
+          - version
+        selector:
+          matchLabels:
+            app: worker
+        namespaceSelector:
+          any: true
+        podMetricsEndpoints:
+          - port: metrics
+            path: /metrics
+            interval: 30s
+            honorLabels: true
+            filterRunning: false
+            relabelings:
+              - action: labelmap
+                regex: __meta_kubernetes_pod_label_(.+)
+          - portNumber: 9090
+            basicAuth:
+              username:
+                name: scrape
+                key: username
+              password:
+                name: scrape
+                key: password
+        keepDroppedTargets: 0
+        bodySizeLimit: 16MiB
+    - name: selector-only
+      type: podmonitor
+      properties:
+        selector: {}

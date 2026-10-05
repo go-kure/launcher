@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
@@ -28,8 +29,8 @@ import (
 
 // The kind components of go-kure/launcher#790 to which no dimension of the
 // environment policy applies, built on one shared helper (policyFreeKind): the
-// cluster-scoped classes, the CSIDriver, the ServiceCIDR and the
-// PodDisruptionBudget.
+// cluster-scoped classes, the CSIDriver, the ServiceCIDR, the
+// PodDisruptionBudget and the four kinds of the Prometheus operator's API.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -175,6 +176,211 @@ var policyFreeKinds = []policyFreeKind{
 			"unhealthyPodEvictionPolicy": "AlwaysAllow",
 		},
 	},
+	{
+		component: "servicemonitor", handler: &components.ServiceMonitorHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("ServiceMonitor"),
+		typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), namespaced: true,
+		// The API requires both; an empty list and an empty selector are
+		// authored values.
+		minimal: map[string]any{"endpoints": []any{}, "selector": map[string]any{}},
+		// The operator lets an endpoint authenticate one way; the kind leaves
+		// that to it. The two endpoints take one way each, oauth2 and
+		// authorization; basicAuth and bearerTokenSecret are authored on the
+		// rows of the other kinds.
+		full: monitoringScrapeFull(map[string]any{
+			"jobLabel":        "app.kubernetes.io/name",
+			"targetLabels":    []any{"team"},
+			"podTargetLabels": []any{"version"},
+			"endpoints": []any{
+				map[string]any{
+					"port": "metrics", "path": "/metrics", "scheme": "https", "interval": "30s", "scrapeTimeout": "10s",
+					"honorLabels": false, "honorTimestamps": false,
+					"params":            map[string]any{"format": []any{"prometheus"}},
+					"relabelings":       []any{map[string]any{"sourceLabels": []any{"__meta_kubernetes_pod_node_name"}, "targetLabel": "node"}},
+					"metricRelabelings": []any{map[string]any{"sourceLabels": []any{"__name__"}, "regex": "go_.*", "action": "drop"}},
+					"oauth2":            monitoringOAuth2(),
+					"tlsConfig": map[string]any{
+						"serverName": "metrics.example.com", "insecureSkipVerify": false,
+						"ca": map[string]any{"secret": map[string]any{"name": "metrics-ca", "key": "ca.crt"}},
+					},
+					"proxyUrl": "http://proxy.example.com:3128",
+				},
+				map[string]any{
+					"targetPort":    9090,
+					"authorization": map[string]any{"credentials": map[string]any{"name": "scrape", "key": "token"}},
+				},
+			},
+			"selector": map[string]any{
+				"matchLabels":      map[string]any{"app": "web"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"frontend", "edge"}}},
+			},
+			"selectorMechanism":    "RoleSelector",
+			"namespaceSelector":    map[string]any{"matchNames": []any{"payments", "billing"}},
+			"attachMetadata":       map[string]any{"node": false},
+			"bodySizeLimit":        "512MB",
+			"serviceDiscoveryRole": "EndpointSlice",
+		}),
+	},
+	{
+		component: "podmonitor", handler: &components.PodMonitorHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("PodMonitor"),
+		typ: reflect.TypeFor[monitoringv1.PodMonitorSpec](), namespaced: true,
+		minimal: map[string]any{"selector": map[string]any{}},
+		full: monitoringScrapeFull(map[string]any{
+			"jobLabel":        "app.kubernetes.io/name",
+			"podTargetLabels": []any{"version"},
+			"podMetricsEndpoints": []any{
+				map[string]any{
+					"port": "metrics", "path": "/metrics", "scheme": "http", "interval": "30s",
+					"honorLabels": true, "filterRunning": false,
+					"relabelings": []any{map[string]any{"action": "labelmap", "regex": "__meta_kubernetes_pod_label_(.+)"}},
+					"basicAuth": map[string]any{
+						"username": map[string]any{"name": "scrape", "key": "username"},
+						"password": map[string]any{"name": "scrape", "key": "password"},
+					},
+				},
+				map[string]any{"portNumber": 9090, "oauth2": monitoringOAuth2(), "enableHttp2": false},
+			},
+			"selector": map[string]any{
+				"matchLabels":      map[string]any{"app": "web"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "Exists"}},
+			},
+			"selectorMechanism": "RelabelConfig",
+			"namespaceSelector": map[string]any{"any": true},
+			"attachMetadata":    map[string]any{"node": true},
+			"bodySizeLimit":     "16MiB",
+		}),
+	},
+	{
+		component: "prometheus-probe", handler: &components.PrometheusProbeHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("Probe"),
+		typ: reflect.TypeFor[monitoringv1.ProbeSpec](), namespaced: true,
+		// The type always writes a prober, and the API refuses one with no url.
+		minimal: probeProperties(),
+		// The operator lets a Probe authenticate one way and reads one kind of
+		// target; the kind leaves both to it, and the fixture sets every field.
+		full: monitoringScrapeFull(map[string]any{
+			"jobName": "blackbox",
+			"prober": map[string]any{
+				"url": "blackbox-exporter.monitoring.svc:9115", "scheme": "http", "path": "/probe",
+				"proxyUrl": "http://proxy.example.com:3128", "noProxy": "cluster.local", "proxyFromEnvironment": false,
+			},
+			"module": "http_2xx",
+			"targets": map[string]any{
+				"staticConfig": map[string]any{
+					"static":            []any{"https://example.com", "https://example.org"},
+					"labels":            map[string]any{"environment": "production"},
+					"relabelingConfigs": []any{map[string]any{"sourceLabels": []any{"__address__"}, "targetLabel": "target"}},
+				},
+				"ingress": map[string]any{
+					"selector":          map[string]any{"matchLabels": map[string]any{"probe": "true"}},
+					"namespaceSelector": map[string]any{"any": true},
+				},
+			},
+			"interval":          "60s",
+			"scrapeTimeout":     "30s",
+			"metricRelabelings": []any{map[string]any{"action": "labeldrop", "regex": "pod"}},
+			"authorization":     map[string]any{"type": "Bearer", "credentials": map[string]any{"name": "probe", "key": "token"}},
+			"params":            []any{map[string]any{"name": "debug", "values": []any{"true"}}},
+			"basicAuth": map[string]any{
+				"username": map[string]any{"name": "probe", "key": "username"},
+				"password": map[string]any{"name": "probe", "key": "password"},
+			},
+			"oauth2":            monitoringOAuth2(),
+			"bearerTokenSecret": map[string]any{"name": "probe", "key": "token"},
+			"followRedirects":   false,
+			"enableHttp2":       false,
+			"tlsConfig":         map[string]any{"insecureSkipVerify": true, "minVersion": "TLS12"},
+		}),
+	},
+	{
+		component: "prometheusrule", handler: &components.PrometheusRuleHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("PrometheusRule"),
+		typ: reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), namespaced: true,
+		minimal: map[string]any{},
+		full: map[string]any{"groups": []any{
+			map[string]any{
+				"name": "availability", "interval": "1m", "query_offset": "30s", "limit": 0,
+				"labels": map[string]any{"team": "payments"}, "partial_response_strategy": "warn",
+				"rules": []any{
+					map[string]any{"record": "job:up:sum", "expr": "sum by (job) (up)", "labels": map[string]any{"tier": "frontend"}},
+					map[string]any{
+						"alert": "TargetDown", "expr": "job:up:sum == 0", "for": "5m", "keep_firing_for": "10m",
+						"labels":      map[string]any{"severity": "page"},
+						"annotations": map[string]any{"summary": "No target of {{ $labels.job }} is up."},
+					},
+					// An expression may be a bare number.
+					map[string]any{"record": "zero", "expr": 0},
+				},
+			},
+			map[string]any{"name": "empty"},
+		}},
+	},
+}
+
+// monitoringOAuth2 is an OAuth2 block of the Prometheus operator's API with
+// the three fields it requires and one it does not.
+func monitoringOAuth2() map[string]any {
+	return map[string]any{
+		"clientId":     map[string]any{"configMap": map[string]any{"name": "oauth", "key": "client-id"}},
+		"clientSecret": map[string]any{"name": "oauth", "key": "client-secret"},
+		"tokenUrl":     "https://auth.example.com/token",
+		"scopes":       []any{"metrics"},
+	}
+}
+
+// monitoringOAuth2Without is monitoringOAuth2 less one field.
+func monitoringOAuth2Without(field string) map[string]any {
+	block := monitoringOAuth2()
+	delete(block, field)
+	return block
+}
+
+// monitorWith is the properties of a ServiceMonitor or a PodMonitor with the
+// selector the API requires and the endpoints, under the name the kind gives
+// their list. With no endpoint the list is authored empty.
+func monitorWith(list string, endpoints ...any) map[string]any {
+	return map[string]any{"selector": map[string]any{}, list: append([]any{}, endpoints...)}
+}
+
+// probeProperties is the least a prometheus-probe may author.
+func probeProperties() map[string]any {
+	return map[string]any{"prober": map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"}}
+}
+
+// ruleGroups is the properties of a prometheusrule with the groups.
+func ruleGroups(groups ...any) map[string]any {
+	return map[string]any{"groups": append([]any{}, groups...)}
+}
+
+// withProperty is props with one more property.
+func withProperty(props map[string]any, name string, value any) map[string]any {
+	props[name] = value
+	return props
+}
+
+// monitoringScrapeFull is own with a value of every property the three scrape
+// kinds of the Prometheus operator's API share. The limits take an authored 0,
+// which the type keeps apart from an unset one.
+func monitoringScrapeFull(own map[string]any) map[string]any {
+	full := map[string]any{
+		"sampleLimit":                    0,
+		"targetLimit":                    100,
+		"scrapeProtocols":                []any{"OpenMetricsText1.0.0", "PrometheusText0.0.4"},
+		"fallbackScrapeProtocol":         "PrometheusText0.0.4",
+		"labelLimit":                     64,
+		"labelNameLengthLimit":           128,
+		"labelValueLengthLimit":          1024,
+		"scrapeNativeHistograms":         false,
+		"scrapeClassicHistograms":        true,
+		"nativeHistogramBucketLimit":     160,
+		"nativeHistogramMinBucketFactor": 1.1,
+		"convertClassicHistogramsToNHCB": false,
+		"keepDroppedTargets":             0,
+		"scrapeClass":                    "tenant",
+	}
+	maps.Copy(full, own)
+	return full
 }
 
 // policyFreeJSON is obj as the JSON tree it encodes to, numbers kept exact.
@@ -371,6 +577,29 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
 			".Spec.Selector.MatchExpressions", ".Spec.Selector.MatchExpressions[0].Values", ".Spec.UnhealthyPodEvictionPolicy",
 		},
+		"servicemonitor": {
+			".Spec.Endpoints", ".Spec.Endpoints[0].Params", ".Spec.Endpoints[0].RelabelConfigs",
+			".Spec.Endpoints[0].HTTPConfigWithProxyAndTLSFiles.HTTPConfigWithTLSFiles.HTTPConfigWithoutTLS.OAuth2",
+			".Spec.Endpoints[1].TargetPort", ".Spec.Selector.MatchLabels", ".Spec.NamespaceSelector.MatchNames",
+			".Spec.SampleLimit", ".Spec.ScrapeProtocols", ".Spec.NativeHistogramConfig.NativeHistogramMinBucketFactor",
+			".Spec.AttachMetadata",
+		},
+		"podmonitor": {
+			".Spec.PodMetricsEndpoints", ".Spec.PodMetricsEndpoints[0].Port", ".Spec.PodMetricsEndpoints[0].RelabelConfigs",
+			".Spec.PodMetricsEndpoints[0].HTTPConfigWithProxy.HTTPConfig.HTTPConfigWithoutTLS.BasicAuth",
+			".Spec.Selector.MatchLabels", ".Spec.Selector.MatchExpressions", ".Spec.KeepDroppedTargets", ".Spec.BodySizeLimit",
+		},
+		"prometheus-probe": {
+			".Spec.ProberSpec.Scheme", ".Spec.ProberSpec.ProxyConfig.ProxyURL", ".Spec.Targets.StaticConfig",
+			".Spec.Targets.StaticConfig.Targets", ".Spec.Targets.StaticConfig.Labels", ".Spec.Targets.Ingress",
+			".Spec.Targets.Ingress.Selector.MatchLabels", ".Spec.MetricRelabelConfigs", ".Spec.Authorization",
+			".Spec.Authorization.Credentials", ".Spec.Params", ".Spec.Params[0].Values",
+			".Spec.HTTPConfig.HTTPConfigWithoutTLS.OAuth2", ".Spec.HTTPConfig.TLSConfig",
+		},
+		"prometheusrule": {
+			".Spec.Groups", ".Spec.Groups[0].Labels", ".Spec.Groups[0].Interval", ".Spec.Groups[0].Limit",
+			".Spec.Groups[0].Rules", ".Spec.Groups[0].Rules[1].For", ".Spec.Groups[0].Rules[1].Annotations",
+		},
 	}
 	type copyCase struct {
 		name      string
@@ -515,8 +744,9 @@ func TestPolicyFreeKinds_ObjectIdentityIsNotAuthorable(t *testing.T) {
 }
 
 // TestPolicyFreeKinds_Refusals: the properties are the fields of the type and
-// nothing else, at any depth, and a top-level field the API requires must be
-// authored.
+// nothing else, at any depth, and a field the API requires must be authored:
+// a top-level one, and on the Prometheus operator's kinds a nested one the
+// type would write unauthored.
 func TestPolicyFreeKinds_Refusals(t *testing.T) {
 	const notA = "properties do not decode into a "
 	cases := map[string][]struct {
@@ -602,6 +832,74 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"selector a string", map[string]any{"selector": "app=web"}, notA},
 			{"null expression", map[string]any{"selector": map[string]any{"matchExpressions": []any{nil}}}, "selector.matchExpressions[0]"},
 			{"two spellings", map[string]any{"minAvailable": 1, "MinAvailable": 2}, "sets the same field as"},
+		},
+		"servicemonitor": {
+			{"no properties", nil, "endpoints: required"},
+			{"no endpoints", map[string]any{"selector": map[string]any{}}, "endpoints: required"},
+			{"null endpoints", map[string]any{"selector": map[string]any{}, "endpoints": nil}, "endpoints: required"},
+			{"no selector", map[string]any{"endpoints": []any{}}, "selector: required"},
+			{"null selector", map[string]any{"endpoints": []any{}, "selector": nil}, "selector: required"},
+			{"oauth2 without a client", monitorWith("endpoints", map[string]any{"oauth2": monitoringOAuth2Without("clientId")}), "endpoints[0].oauth2.clientId: required"},
+			{"oauth2 without a secret", monitorWith("endpoints", map[string]any{"oauth2": monitoringOAuth2Without("clientSecret")}), "endpoints[0].oauth2.clientSecret: required"},
+			{"oauth2 without a token URL", monitorWith("endpoints", map[string]any{"port": "web"}, map[string]any{"oauth2": monitoringOAuth2Without("tokenUrl")}), "endpoints[1].oauth2.tokenUrl: required"},
+			{"an empty oauth2", monitorWith("endpoints", map[string]any{"oauth2": map[string]any{}}), "endpoints[0].oauth2.clientId: required"},
+			{"unknown key", withProperty(monitorWith("endpoints"), "podMetricsEndpoints", []any{}), notA + "monitoring.coreos.com/v1 ServiceMonitorSpec"},
+			{"the object's spec", map[string]any{"spec": monitorWith("endpoints")}, notA},
+			{"endpoint sub-key", monitorWith("endpoints", map[string]any{"portName": "web"}), notA},
+			{"selector a string", map[string]any{"endpoints": []any{}, "selector": "app=web"}, notA},
+			{"limit a string", withProperty(monitorWith("endpoints"), "sampleLimit", "many"), notA},
+			{"bad quantity", withProperty(monitorWith("endpoints"), "nativeHistogramMinBucketFactor", "lots"), notA},
+			{"null endpoint", map[string]any{"selector": map[string]any{}, "endpoints": []any{nil}}, "endpoints[0]"},
+			{"two spellings", withProperty(monitorWith("endpoints"), "Selector", map[string]any{"matchLabels": map[string]any{"app": "web"}}), "sets the same field as"},
+		},
+		"podmonitor": {
+			{"no properties", nil, "selector: required"},
+			{"null selector", map[string]any{"selector": nil}, "selector: required"},
+			{"endpoints alone", map[string]any{"podMetricsEndpoints": []any{map[string]any{"port": "web"}}}, "selector: required"},
+			{"oauth2 without a client", monitorWith("podMetricsEndpoints", map[string]any{"oauth2": monitoringOAuth2Without("clientId")}), "podMetricsEndpoints[0].oauth2.clientId: required"},
+			{"oauth2 without a secret", monitorWith("podMetricsEndpoints", map[string]any{"oauth2": monitoringOAuth2Without("clientSecret")}), "podMetricsEndpoints[0].oauth2.clientSecret: required"},
+			{"oauth2 without a token URL", monitorWith("podMetricsEndpoints", map[string]any{"oauth2": monitoringOAuth2Without("tokenUrl")}), "podMetricsEndpoints[0].oauth2.tokenUrl: required"},
+			{"unknown key", withProperty(monitorWith("podMetricsEndpoints"), "targetLabels", []any{"team"}), notA + "monitoring.coreos.com/v1 PodMonitorSpec"},
+			{"the object's spec", map[string]any{"spec": monitorWith("podMetricsEndpoints")}, notA},
+			// A ServiceMonitor's endpoint reads a token from a file; a pod's does not.
+			{"endpoint sub-key", monitorWith("podMetricsEndpoints", map[string]any{"bearerTokenFile": "/var/run/token"}), notA},
+			{"port number a string", monitorWith("podMetricsEndpoints", map[string]any{"portNumber": "9090"}), notA},
+			{"null endpoint", map[string]any{"selector": map[string]any{}, "podMetricsEndpoints": []any{map[string]any{"port": "web"}, nil}}, "podMetricsEndpoints[1]"},
+			{"two spellings", withProperty(monitorWith("podMetricsEndpoints"), "Selector", map[string]any{}), "sets the same field as"},
+		},
+		"prometheus-probe": {
+			{"no properties", nil, "prober.url: required"},
+			{"null prober", map[string]any{"prober": nil}, "prober.url: required"},
+			{"prober without a url", map[string]any{"prober": map[string]any{"scheme": "https"}}, "prober.url: required"},
+			{"empty url", map[string]any{"prober": map[string]any{"url": ""}}, "prober.url: required"},
+			{"targets alone", map[string]any{"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}, "prober.url: required"},
+			{"oauth2 without a client", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("clientId")), "oauth2.clientId: required"},
+			{"oauth2 without a secret", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("clientSecret")), "oauth2.clientSecret: required"},
+			{"oauth2 without a token URL", withProperty(probeProperties(), "oauth2", monitoringOAuth2Without("tokenUrl")), "oauth2.tokenUrl: required"},
+			{"unknown key", withProperty(probeProperties(), "selector", map[string]any{}), notA + "monitoring.coreos.com/v1 ProbeSpec"},
+			{"the object's spec", map[string]any{"spec": probeProperties()}, notA},
+			{"prober sub-key", map[string]any{"prober": map[string]any{"url": "blackbox:9115", "address": "blackbox:9115"}}, notA},
+			// A ServiceMonitor's endpoint takes its parameters as a map; a Probe takes a list.
+			{"params a map", withProperty(probeProperties(), "params", map[string]any{"module": []any{"http_2xx"}}), notA},
+			{"interval a number", withProperty(probeProperties(), "interval", 30), notA},
+			{"null target", withProperty(probeProperties(), "targets", map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com", nil}}}), "targets.staticConfig.static[1]"},
+			{"two spellings", withProperty(probeProperties(), "Prober", map[string]any{"url": "other:9115"}), "sets the same field as"},
+		},
+		"prometheusrule": {
+			{"group without a name", ruleGroups(map[string]any{"interval": "1m"}), "groups[0].name: required"},
+			{"a later group without a name", ruleGroups(map[string]any{"name": "a"}, map[string]any{"rules": []any{}}), "groups[1].name: required"},
+			{"rule without an expression", ruleGroups(map[string]any{"name": "a", "rules": []any{map[string]any{"alert": "Down"}}}), "groups[0].rules[0].expr: required"},
+			{"null expression", ruleGroups(map[string]any{"name": "a", "rules": []any{
+				map[string]any{"record": "r", "expr": "up"}, map[string]any{"alert": "Down", "expr": nil},
+			}}), "groups[0].rules[1].expr: required"},
+			{"unknown key", map[string]any{"rules": []any{}}, notA + "monitoring.coreos.com/v1 PrometheusRuleSpec"},
+			{"the object's spec", map[string]any{"spec": ruleGroups(map[string]any{"name": "a"})}, notA},
+			{"group sub-key", ruleGroups(map[string]any{"name": "a", "queryOffset": "30s"}), notA},
+			{"rule sub-key", ruleGroups(map[string]any{"name": "a", "rules": []any{map[string]any{"expr": "up", "severity": "page"}}}), notA},
+			{"groups a map", map[string]any{"groups": map[string]any{"name": "a"}}, notA},
+			{"expression a boolean", ruleGroups(map[string]any{"name": "a", "rules": []any{map[string]any{"expr": true}}}), notA},
+			{"null group", map[string]any{"groups": []any{map[string]any{"name": "a"}, nil}}, "groups[1]"},
+			{"two spellings", map[string]any{"groups": []any{}, "Groups": []any{}}, "sets the same field as"},
 		},
 	}
 	for _, kind := range policyFreeKinds {
@@ -700,6 +998,100 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	}
 	if none := build("poddisruptionbudget", map[string]any{}).(*policyv1.PodDisruptionBudget); none.Spec.Selector != nil {
 		t.Errorf("selector = %+v, want none on a budget that authors none", none.Spec.Selector)
+	}
+
+	// The limits are pointers: an authored 0 (no limit) stays apart from an
+	// unset one. A bucket factor written as a number takes its canonical form.
+	sm := build("servicemonitor", full["servicemonitor"]).(*monitoringv1.ServiceMonitor)
+	if got := sm.Spec.SampleLimit; got == nil || *got != 0 {
+		t.Errorf("sampleLimit = %v, want the authored 0", got)
+	}
+	if got := sm.Spec.KeepDroppedTargets; got == nil || *got != 0 {
+		t.Errorf("keepDroppedTargets = %v, want the authored 0", got)
+	}
+	if got := sm.Spec.ScrapeNativeHistograms; got == nil || *got {
+		t.Errorf("scrapeNativeHistograms = %v, want the authored false", got)
+	}
+	if got := sm.Spec.NativeHistogramMinBucketFactor; got == nil || got.String() != "1100m" {
+		t.Errorf("nativeHistogramMinBucketFactor = %v, want 1100m", got)
+	}
+	if len(sm.Spec.Endpoints) != 2 || sm.Spec.Endpoints[0].Port != "metrics" || sm.Spec.Endpoints[1].TargetPort == nil || *sm.Spec.Endpoints[1].TargetPort != intstr.FromInt32(9090) {
+		t.Errorf("endpoints = %+v, want the two authored ones in order, the second by target port 9090", sm.Spec.Endpoints)
+	}
+	if first := sm.Spec.Endpoints[0]; first.HonorTimestamps == nil || *first.HonorTimestamps || first.HonorLabels {
+		t.Errorf("honorTimestamps = %v, honorLabels = %v; want the authored false of each", first.HonorTimestamps, first.HonorLabels)
+	}
+	if got := sm.Spec.NamespaceSelector.MatchNames; !slices.Equal(got, []string{"payments", "billing"}) {
+		t.Errorf("namespaceSelector.matchNames = %v, want them in authored order", got)
+	}
+	// The API requires the list and the selector; authored empty they are in
+	// the object as written. No namespace selector was authored, and the type
+	// writes an empty one, which selects the object's own namespace.
+	least := policyFreeJSON(t, build("servicemonitor", monitorWith("endpoints")))["spec"].(map[string]any)
+	if got, want := fmt.Sprint(least), "map[endpoints:[] namespaceSelector:map[] selector:map[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+
+	pm := build("podmonitor", full["podmonitor"]).(*monitoringv1.PodMonitor)
+	if got := pm.Spec.PodMetricsEndpoints; len(got) != 2 || got[0].Port == nil || *got[0].Port != "metrics" || got[1].PortNumber == nil || *got[1].PortNumber != 9090 {
+		t.Errorf("podMetricsEndpoints = %+v, want the two authored ones in order", got)
+	}
+	if got := pm.Spec.PodMetricsEndpoints[0].FilterRunning; got == nil || *got {
+		t.Errorf("filterRunning = %v, want the authored false", got)
+	}
+	if !pm.Spec.NamespaceSelector.Any {
+		t.Error("namespaceSelector.any = false, want the authored true")
+	}
+	// The API does not require a pod monitor's endpoints. The type always
+	// writes the list, so a monitor that authors none carries a null one.
+	bare := policyFreeJSON(t, build("podmonitor", map[string]any{"selector": map[string]any{}}))["spec"].(map[string]any)
+	if got, ok := bare["podMetricsEndpoints"]; !ok || got != nil {
+		t.Errorf("podMetricsEndpoints = %v (present: %v), want null on a monitor that authors none", got, ok)
+	}
+
+	probe := build("prometheus-probe", full["prometheus-probe"]).(*monitoringv1.Probe)
+	if probe.Spec.ProberSpec.URL != "blackbox-exporter.monitoring.svc:9115" || probe.Spec.ProberSpec.Path != "/probe" {
+		t.Errorf("prober = %+v, want the authored url and path", probe.Spec.ProberSpec)
+	}
+	if static := probe.Spec.Targets.StaticConfig; static == nil || !slices.Equal(static.Targets, []string{"https://example.com", "https://example.org"}) {
+		t.Errorf("targets.staticConfig = %+v, want the two authored targets in order", static)
+	}
+	if got := probe.Spec.FollowRedirects; got == nil || *got {
+		t.Errorf("followRedirects = %v, want the authored false", got)
+	}
+	// The probe's own authorization is the one the object holds; the one its
+	// HTTP settings embed is not reachable and stays unset.
+	if got := probe.Spec.Authorization; got == nil || got.Type != "Bearer" || got.Credentials == nil || got.Credentials.Key != "token" {
+		t.Errorf("authorization = %+v, want the authored one", got)
+	}
+	// A probe always holds a prober and targets; with only the url authored
+	// the targets are empty, which the operator reads as no target.
+	lone := policyFreeJSON(t, build("prometheus-probe", probeProperties()))["spec"].(map[string]any)
+	if got, want := fmt.Sprint(lone), "map[prober:map[url:blackbox-exporter.monitoring.svc:9115] targets:map[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+
+	rule := build("prometheusrule", full["prometheusrule"]).(*monitoringv1.PrometheusRule)
+	if len(rule.Spec.Groups) != 2 || rule.Spec.Groups[0].Name != "availability" || rule.Spec.Groups[1].Name != "empty" {
+		t.Fatalf("groups = %+v, want the two authored ones in order", rule.Spec.Groups)
+	}
+	group := rule.Spec.Groups[0]
+	if got := group.Limit; got == nil || *got != 0 {
+		t.Errorf("limit = %v, want the authored 0", got)
+	}
+	if len(group.Rules) != 3 || group.Rules[0].Record != "job:up:sum" || group.Rules[1].Alert != "TargetDown" {
+		t.Fatalf("rules = %+v, want the three authored ones in order", group.Rules)
+	}
+	// An expression is a string or a number, and stays what was authored.
+	if got := group.Rules[1].Expr; got != intstr.FromString("job:up:sum == 0") {
+		t.Errorf("expr = %v, want the authored string", got)
+	}
+	if got := group.Rules[2].Expr; got != intstr.FromInt32(0) {
+		t.Errorf("expr = %v, want the authored number 0", got)
+	}
+	// No group is required: a rule object may hold none.
+	if none := build("prometheusrule", map[string]any{}).(*monitoringv1.PrometheusRule); none.Spec.Groups != nil {
+		t.Errorf("groups = %+v, want none on a rule that authors none", none.Spec.Groups)
 	}
 }
 

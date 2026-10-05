@@ -1,0 +1,46 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: websites
+      type: prometheus-probe
+      properties:
+        jobName: blackbox
+        prober:
+          url: blackbox-exporter.monitoring.svc:9115
+          scheme: http
+          path: /probe
+        module: http_2xx
+        interval: 60s
+        scrapeTimeout: 30s
+        targets:
+          staticConfig:
+            static:
+              - https://example.com
+              - https://example.org
+            labels:
+              environment: production
+        metricRelabelings:
+          - action: labeldrop
+            regex: pod
+    - name: ingresses
+      type: prometheus-probe
+      properties:
+        prober:
+          url: blackbox-exporter.monitoring.svc:9115
+        targets:
+          ingress:
+            selector:
+              matchLabels:
+                probe: "true"
+            namespaceSelector:
+              any: true
+        followRedirects: false
+    - name: prober-only
+      type: prometheus-probe
+      properties:
+        prober:
+          url: blackbox-exporter.monitoring.svc:9115

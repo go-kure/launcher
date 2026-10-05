@@ -133,6 +133,11 @@ component unless `objectName` names it, with no namespace. The kind components
 (go-kure/launcher#790) are registered the same way, with a `<type>-component`
 fixture each: a ServiceCIDR with no namespace, and a PodDisruptionBudget and a
 HorizontalPodAutoscaler in the build namespace, each holding what was authored.
+The kind components of the Prometheus operator's API, `servicemonitor`,
+`podmonitor`, `prometheus-probe` and `prometheusrule` (go-kure/launcher#790),
+are registered the same way, with a `<type>-component` fixture each: a
+ServiceMonitor, a PodMonitor, a Probe and a PrometheusRule in the build
+namespace. No capability is required of the cluster profile to build them.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
