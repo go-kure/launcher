@@ -20,7 +20,7 @@ var fileKeyRefKinds = []struct {
 	{"worker", workerViaRule{}, nil, true},
 	{"deployment", &components.DeploymentHandler{}, nil, true},
 	{"statefulset", &components.StatefulsetHandler{}, nil, true},
-	{"daemonset", &components.DaemonsetHandler{}, nil, false},
+	{"daemonset", &components.DaemonsetHandler{}, nil, true},
 	{"job", &components.JobHandler{}, nil, false},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}, false},
 }

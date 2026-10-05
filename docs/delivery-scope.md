@@ -600,8 +600,11 @@ be closed at build time.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
-  - `daemonset`: `affinity`, `topologySpreadConstraints`;
-  - `job`, `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`;
+  - `daemonset`: no scheduling field is left; the raw `affinity`, `tolerations`,
+    `topologySpreadConstraints` and `sidecars` are read;
+  - `job`, `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`, and
+    `sidecars` (a plain sidecar keeps the Job's pod from completing; it needs the
+    restartable init container below);
   - all workloads: the container fields `restartPolicy` and `restartPolicyRules` (a
     restartable init container, which the package does not model) and the pod field
     `evictionResponders`. `imagePullPolicy`, `terminationMessagePath`,

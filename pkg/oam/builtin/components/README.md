@@ -84,7 +84,7 @@ reads it.
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
 | `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
-| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`. Emits no Service (go-kure/launcher#690). |
+| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`, the raw `affinity` and `topologySpreadConstraints`, and takes `sidecars`. Emits no Service (go-kure/launcher#690). |
 | `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
@@ -961,7 +961,7 @@ protocol were taken unchecked, and a non-list `ports`, an unknown key, a
 non-string name or a non-string protocol, which then read as `TCP`, was
 dropped). A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, the `ports` list of
-statefulset and deployment) and every
+statefulset, daemonset and deployment) and every
 sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
@@ -1442,7 +1442,7 @@ published (go-kure/launcher#790):
 |---|---|---|---|
 | `deployment` | raw | yes | yes |
 | `statefulset` | the four-key shorthand (see "Common config"), not the raw shape | yes | yes |
-| `daemonset` | no | yes | no |
+| `daemonset` | raw | yes | yes |
 | `job`, `cronjob` | no | no | no |
 
 - A key a kind does not publish is refused by the authored-property check, not
@@ -1457,8 +1457,14 @@ published (go-kure/launcher#790):
   any taint, a control-plane node's included; a platform that reserves nodes
   by taint has to enforce that at admission.
 - The `topology-spread` trait stays Deployment-only. It is refused on a
-  `statefulset`, with or without authored constraints (`component "<name>"
-  generates no Deployment the trait can act on`).
+  `statefulset` and on a `daemonset`, with or without authored constraints
+  (`component "<name>" generates no Deployment the trait can act on`).
+- On a `daemonset` the three keys reach the DaemonSet's pod template as
+  authored. The DaemonSet controller creates one pod for each node the
+  template's node affinity, node selector and tolerations admit, and pins the
+  pod to that node; a pod affinity term or a `DoNotSchedule` spread constraint
+  the node cannot satisfy leaves that pod pending instead of placing it
+  elsewhere. Nothing here checks for that.
 
 | property | type | notes | compat |
 |---|---|---|---|
@@ -1796,10 +1802,10 @@ each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
 helper (`enforce.go`). All seven kind components enforce their
-`initContainers`; only `webservice`, `worker`, `deployment`, and
-`statefulset` have a
-`sidecars` schema key at all (`cronjob`/`daemonset`/`job` have no sidecars support,
-per "Per-type highlights" below) so only those four enforce a sidecars
+`initContainers`; only `webservice`, `worker`, `deployment`, `statefulset`
+and, since go-kure/launcher#790, `daemonset` have a
+`sidecars` schema key at all (`cronjob`/`job` have no sidecars support,
+per "Per-type highlights" below) so only those five enforce a sidecars
 loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
@@ -2453,8 +2459,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   additive); `ports` declares the main container's ports (see "Main container
   ports"). It emits no Service (go-kure/launcher#690): author a `service`
   component selecting `app: <component>` to expose the pods, and put routing
-  traits on it. No
-  `sidecars` schema key (init containers only).
+  traits on it. Since go-kure/launcher#790 it also publishes the raw `affinity`
+  and `topologySpreadConstraints` (see "Raw scheduling properties") and
+  `sidecars`, read, checked and enforced exactly as on `statefulset`: the same
+  closed entry, the same pod-wide port-name check against the main container's
+  `ports`, and the same `ApplyPolicy` loop. A sidecar here runs on every node
+  the DaemonSet schedules to.
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
   fields; `template` is the pod projection above and `selector` is
@@ -2542,7 +2552,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   regex-matched). `restartPolicy` (default `OnFailure`),
   `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. `ports` declares
   container ports, and emits no Service (see "Main container ports"). No
-  `sidecars` schema key (init containers only).
+  `sidecars` schema key (init containers only): a plain sidecar keeps running
+  after the main container exits, so the Job's pod would never complete. The
+  container that fits is the restartable init container, which this package
+  does not model (see "Container fields").
   CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
   own default is `Allow`, but this is only ever written when authored —
   `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
@@ -2582,7 +2595,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and pod-level surface above. No `port` and no Service; `ports` declares
   container ports (see "Main container ports"), and only then may a probe or
   hook name a port; no `sidecars` schema key (init containers only), matching
-  `cronjob`.
+  `cronjob` and for the reason given there.
   It emits a `Job` and nothing else (go-kure/launcher#702).
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its

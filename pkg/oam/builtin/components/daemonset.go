@@ -39,6 +39,11 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"tolerations":     schemaTolerations(),
 		"volumes":         schemaVolumes(),
 		"initContainers":  schemaInitContainers(),
+		"sidecars":        schemaSidecars(),
+		// The other two raw scheduling shapes scheduling.go projects, beside
+		// `tolerations` above.
+		"affinity":                  schemaRawAffinity(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -123,6 +128,16 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Tolerations = tolerations
+	affinity, err := parseRawAffinity(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Affinity = affinity
+	tscs, err := parseTopologySpreadConstraints(props)
+	if err != nil {
+		return nil, err
+	}
+	config.TopologySpreadConstraints = tscs
 	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
@@ -137,10 +152,18 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.InitContainers = initContainers
-	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
+	sidecars, err := parseSidecars(props)
+	if err != nil {
 		return nil, err
 	}
-	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, nil); err != nil {
+	config.Sidecars = sidecars
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+		return nil, err
+	}
+	if err := checkPodPortNames(config.Ports, sidecars); err != nil {
+		return nil, err
+	}
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
 		return nil, err
 	}
 
@@ -183,6 +206,14 @@ type DaemonsetConfig struct {
 	VolumeDevices   []corev1.VolumeDevice
 	InitContainers  []InitContainerConfig
 	PVCs            []PVCConfig
+	// Sidecars run beside the main container on every node the DaemonSet
+	// schedules to (see parseSidecars).
+	Sidecars []SidecarContainerConfig
+	// Affinity and TopologySpreadConstraints are, with Tolerations above, the
+	// raw corev1 scheduling shapes (see scheduling.go), carried as the API
+	// types because nothing is inferred from them.
+	Affinity                  *corev1.Affinity
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
 	PodSpec PodSpecConfig
 	// DaemonSetSpec holds the DaemonSetSpec-level properties that are neither
@@ -247,6 +278,12 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
+	for i, sc := range c.Sidecars {
+		if err := enforceExtraContainer("sidecars", i, sc.Name, sc.Image,
+			sc.Resources, sc.SecurityContext, p); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -299,6 +336,10 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		InitContainers: c.InitContainers,
 		Volumes:        c.Volumes,
 		Tolerations:    c.Tolerations,
+
+		Sidecars:                  c.Sidecars,
+		Affinity:                  c.Affinity,
+		TopologySpreadConstraints: c.TopologySpreadConstraints,
 	})
 	if err != nil {
 		return nil, err

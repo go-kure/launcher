@@ -138,6 +138,9 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 		{"deployment ports list", "deployment", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "grpc", "containerPort": 9000},
 		}}, "grpc"},
+		{"daemonset ports list", "daemonset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
+			map[string]any{"name": "metrics", "containerPort": 9100},
+		}}, "metrics"},
 	}
 	kinds := sidecarKindProps()
 	for _, tc := range cases {
