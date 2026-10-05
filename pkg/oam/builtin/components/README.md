@@ -3297,17 +3297,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   there. **Not refused:**
   - a required field the type omits when it is not authored: the object shows
     the omission, and the API server refuses it;
-  - a required field of a Kubernetes or Gateway API type these specs embed
-    (the terms of a solver pod's affinity, the name of a parent reference).
-    An omitted one is emitted empty;
+  - a required field of a Kubernetes or Gateway API type these specs embed,
+    on an issuer and a clusterissuer: the terms of a solver pod's affinity
+    (`podTemplate.spec.affinity`), and the `name` of a parent reference
+    (`http01.gatewayHTTPRoute.parentRefs[].name`). An omitted one is emitted
+    empty: a parent reference then carries `name: ""`, which the CRD refuses
+    for its minimum length of 1;
   - every other value rule of the CRDs (enumerations, lengths, minima, and
     the one rule the CRDs write as an expression: that a `venafi` issuer
     names exactly one of `tpp`, `cloud` and `ngts`);
   - **the rules of cert-manager's validating webhook,** which refuses more
     than the CRDs do: an issuer that configures no issuer type, or more than
-    one; a keystore with both or neither of `password` and
-    `passwordSecretRef`; a certificate that names no subject and no
-    alternative name; `subject` or `commonName` beside `literalSubject`.
+    one; a keystore with a `password` beside a `passwordSecretRef` that
+    names a Secret, or with neither (the empty reference the type writes
+    beside an authored `password` is not one); a certificate that names no
+    subject and no alternative name; `subject` or `commonName` beside
+    `literalSubject`.
     Launcher repeats none of them, so an `issuer` with no property builds,
     and is refused at apply where the webhook runs.
 
@@ -3336,7 +3341,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     pair that reaches the pod is not the authored one. A solver pod template
     has no other field the `pod` kind's refusals speak to: it names no image
     (the solver's image is a flag of the cert-manager controller), no
-    container security context, no volume and no host namespace.
+    container security context, no volume and no host namespace. Its
+    pod-level `securityContext`, `serviceAccountName`, `priorityClassName`
+    and `imagePullSecrets` are the author's and are held to nothing, as are
+    its `nodeSelector`, `affinity` and `tolerations`, as they are on a pod
+    kind: the one field of a pod-level security context the policy holds
+    there, `windowsOptions.hostProcess`, is not a field of this one.
   - **A certificate's keystore password in the object is refused under a
     policy that forbids explicit secrets.** `keystores.jks.password` and
     `keystores.pkcs12.password` hold the password itself, and the object is
