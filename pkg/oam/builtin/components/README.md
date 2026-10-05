@@ -155,6 +155,7 @@ reads it.
 | `runtimeclass` | RuntimeClass | Kind-named RuntimeClass: `handler` (required), `overhead`, `scheduling`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, required, and `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
+| `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -250,7 +251,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | trait | `httproute` | hand-written parser | `expose` lowers onto it. |
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
-| `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
+| `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | kind | `ingress` | strict decode of `IngressSpec` | The `ingress` trait, which `expose` lowers onto, builds its own Ingress with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis and is held to the platform's hostname constraint and the policy's capability lists. |
 | `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. `controller` must be written. No environment policy applies. |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
@@ -2683,6 +2684,51 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `Cluster` as its default. Author `scope` to emit a value.
   - Whether a referenced object exists: the `runtimeclass` a pod names, the
     `storageclass` a claim names, the parameters object of an `ingressclass`.
+- **ingress** (go-kure/launcher#790) is the kind-named projection of a
+  networking.k8s.io/v1 Ingress, on the recipe of `resourcequota` above: one
+  schema key per json field of `networkingv1.IngressSpec` (`ingressClassName`,
+  `defaultBackend`, `tls`, `rules`), the property map decoded strictly into
+  that type under the null contract, two spellings of one field refused, and
+  `TestCoreKindSchemas_CoverSpec` holding the schema to the linked type. It
+  emits one Ingress named after the component in the build namespace, with the
+  authored spec and nothing else. No field is required by the decode and none
+  is filled: an Ingress with neither a `defaultBackend` nor a rule, a path
+  without a `pathType` and the API's other value rules are left to the API
+  server. A null list element (`rules: [null]`, a null path or TLS entry) is
+  refused by its path.
+
+  **It is an authored object, not the `ingress` trait**, although the two
+  share the type name. The trait attaches to a component and routes to that
+  component's Service; this kind is a component of its own, and a backend is a
+  Service reference carried as written. Three things the trait has do not
+  reach it:
+  - **No NetworkPolicy allow rule.** The NetworkPolicy synthesis opens a
+    backend's port to the ingress controller from what a routing trait reports
+    (the traffic sources capability rendering gives it, and the component it
+    targets). This kind reports neither, so the synthesis reads nothing from
+    it and allows nothing for it, whatever Service it names. An author who
+    wants the allow rule puts the `expose` or `ingress` trait on the backend
+    component, or authors the NetworkPolicy (the `networkpolicy` trait or
+    kind).
+  - **No hostname constraint.** The platform's `allowedHostnameWildcard`, which
+    the trait holds every hostname to, is a trait rendering input. A host
+    authored here is not checked against it.
+  - **No environment policy.** `ApplyPolicy` is a no-op: the policy has no rule
+    for an Ingress, and its capability lists (`AllowedCapabilities`,
+    `ForbiddenCapabilities`, `RequiredCapabilities`) gate trait types, so a
+    policy that forbids the `ingress` trait does not refuse an `ingress`
+    component. `passthrough`, `manifests` and template delivery emit an Ingress
+    under the same terms. A consumer that restricts routing restricts the
+    component types it registers.
+
+  **The name** is the component's, or its `objectName` ("The object name"
+  below). An `ingress` trait names its own Ingress (`<component>-ingress`, or
+  its `name`); a component and a trait whose Ingress would carry one name are
+  refused, with both named.
+
+  **Not covered:** the Ingress's own metadata, so its labels and annotations
+  (a controller's `nginx.ingress.kubernetes.io/…` annotations among them)
+  cannot be authored, and its `status`, which the controller writes.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5302,7 +5348,7 @@ See "Component label and ownership" in the
 Every kind component takes `objectName`, which names its one object in place of the component
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`ingress`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

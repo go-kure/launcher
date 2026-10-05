@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  labels:
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  defaultBackend:
+    service:
+      name: fallback
+      port:
+        number: 8080
+  ingressClassName: nginx
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: api
+            port:
+              name: http
+        path: /api
+        pathType: Prefix
+      - backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - app.example.com
+    secretName: app-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  labels:
+    launcher.gokure.dev/component: default-only
+  name: default-only
+  namespace: default
+spec:
+  defaultBackend:
+    service:
+      name: frontend
+      port:
+        number: 80

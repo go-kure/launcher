@@ -167,6 +167,10 @@ func storageKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: storagev1.GroupName, Kind: kind}
 }
 
+func networkingKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: networkingv1.GroupName, Kind: kind}
+}
+
 func cnpgKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: cnpgv1.SchemeGroupVersion.Group, Kind: kind}
 }
@@ -224,6 +228,12 @@ func (h *PodTemplateHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // ComponentObject declares the service kind's Service.
 func (h *ServiceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return coreKind("Service"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the ingress kind's Ingress. The `ingress` trait
+// claims its own Ingress under the same kind, so the two are held apart.
+func (h *IngressHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return networkingKind("Ingress"), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the configmap kind's ConfigMap.

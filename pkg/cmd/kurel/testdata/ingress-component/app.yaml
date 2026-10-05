@@ -1,0 +1,46 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: ingress
+      properties:
+        ingressClassName: nginx
+        defaultBackend:
+          service:
+            name: fallback
+            port:
+              number: 8080
+        tls:
+          - hosts:
+              - app.example.com
+            secretName: app-tls
+        rules:
+          - host: app.example.com
+            http:
+              paths:
+                - path: /api
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: api
+                      port:
+                        name: http
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend
+                      port:
+                        number: 80
+    - name: default-only
+      type: ingress
+      properties:
+        defaultBackend:
+          service:
+            name: frontend
+            port:
+              number: 80

@@ -1044,7 +1044,9 @@ The Ingress, the HTTPRoute and the CiliumNetworkPolicy have no name role: the tr
 object itself (`name`, else the default; the `cilium-networkpolicy` `name` is required), and
 the hook is not asked. The name is claimed all the same (`(*Trait).ClaimObjectName`), so
 `Transform` refuses a second owner of that object with both named: two `ingress` traits under
-one name, on one component or two. The name itself is what it was before it was claimed.
+one name, on one component or two, or a trait and the kind component of the same kind whose
+object carries the trait's name (an `ingress` trait and an `ingress` component). The name
+itself is what it was before it was claimed.
 
 Every other authored name in the
 table below is checked as a name, not against the other objects of the document:
