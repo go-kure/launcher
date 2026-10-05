@@ -3338,7 +3338,7 @@ var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationS
 
 // parseTolerations is SHARED: daemonset (daemonset.go), deployment
 // (deployment.go) and, since go-kure/launcher#790, statefulset (statefulset.go)
-// are its callers, and schemaTolerations has the same ones. Every rejection
+// and job (job.go) are its callers, and schemaTolerations has the same ones. Every rejection
 // below therefore lands on all of them, so completing the
 // projection for go-kure/launcher#412 narrowed what daemonset accepts as well —
 // deliberately, and not additively. What each rule costs daemonset, and why none

@@ -99,7 +99,7 @@ reads it.
 | `replicationcontroller` | ReplicationController | Kind-named bare ReplicationController: the whole `ReplicationControllerSpec`, strictly decoded; `template` is required, `selector` (a plain label map) optional. The pod template and `replicas` are held as the `replicaset` kind's are, `activeDeadlineSeconds` refused included, and the template gains the `app` label — see below. |
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
-| `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
+| `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
@@ -1443,7 +1443,8 @@ published (go-kure/launcher#790):
 | `deployment` | raw | yes | yes |
 | `statefulset` | the four-key shorthand (see "Common config"), not the raw shape | yes | yes |
 | `daemonset` | raw | yes | yes |
-| `job`, `cronjob` | no | no | no |
+| `job` | raw | yes | yes |
+| `cronjob` | no | no | no |
 
 - A key a kind does not publish is refused by the authored-property check, not
   dropped; so is the raw `affinity` shape on a kind that publishes the
@@ -1457,8 +1458,9 @@ published (go-kure/launcher#790):
   any taint, a control-plane node's included; a platform that reserves nodes
   by taint has to enforce that at admission.
 - The `topology-spread` trait stays Deployment-only. It is refused on a
-  `statefulset` and on a `daemonset`, with or without authored constraints
-  (`component "<name>" generates no Deployment the trait can act on`).
+  `statefulset`, a `daemonset` and a `job`, with or without authored
+  constraints (`component "<name>" generates no Deployment the trait can act
+  on`).
 - On a `daemonset` the three keys reach the DaemonSet's pod template as
   authored. The DaemonSet controller creates one pod for each node the
   template's node affinity, node selector and tolerations admit, and pins the
@@ -1479,7 +1481,7 @@ not have them, so they are additive outright. `tolerations` is not: `deployment`
 reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
 `daemonset` has always used, and those two kinds were its only callers then, so
 completing the projection changed `daemonset` too. (A kind that gained
-`tolerations` later, `statefulset` in go-kure/launcher#790, had no earlier
+`tolerations` later, `statefulset` and `job` in go-kure/launcher#790, had no earlier
 behaviour to change: for it the property is additive.) Stating that plainly, per
 rule, because "additive" on its own would be false:
 
@@ -2595,7 +2597,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and pod-level surface above. No `port` and no Service; `ports` declares
   container ports (see "Main container ports"), and only then may a probe or
   hook name a port; no `sidecars` schema key (init containers only), matching
-  `cronjob` and for the reason given there.
+  `cronjob` and for the reason given there. Since go-kure/launcher#790 it
+  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
+  (see "Raw scheduling properties"), written onto the Job's pod template.
   It emits a `Job` and nothing else (go-kure/launcher#702).
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
