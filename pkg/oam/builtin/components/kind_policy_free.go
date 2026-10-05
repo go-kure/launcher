@@ -80,12 +80,13 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 			return nil, err
 		}
 	}
-	return &policyFreeKindConfig[T]{kind: k, objectName: componentObjectName(component), decoded: decoded}, nil
+	return &policyFreeKindConfig[T]{kind: k, objectName: componentObjectName(component), metadata: component.ObjectMetadata(), decoded: decoded}, nil
 }
 
 // objectIdentityKeys are the json keys of an object that are launcher's to
 // set, on every kind component: its type, and the metadata that holds its name
-// and namespace.
+// and namespace. The labels and annotations of that metadata are authored as
+// the `labels` and `annotations` properties, which the engine reads.
 var objectIdentityKeys = []string{"apiVersion", "kind", "metadata"}
 
 // refuseObjectIdentityKeys refuses a property that names one of
@@ -96,7 +97,8 @@ var objectIdentityKeys = []string{"apiVersion", "kind", "metadata"}
 func refuseObjectIdentityKeys(props map[string]any) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		if slices.ContainsFunc(objectIdentityKeys, func(id string) bool { return strings.EqualFold(id, key) }) {
-			return errors.Errorf("%s: not authorable: launcher sets the object's kind, apiVersion and metadata (its name is the component's, or the one %s gives it)", key, oam.ObjectNameProperty)
+			return errors.Errorf("%s: not authorable: launcher sets the object's kind, apiVersion and metadata (its name is the component's, or the one %s gives it; its labels and annotations are the %s and %s properties)",
+				key, oam.ObjectNameProperty, oam.ObjectLabelsProperty, oam.ObjectAnnotationsProperty)
 		}
 	}
 	return nil
@@ -111,7 +113,10 @@ type policyFreeKindConfig[T any] struct {
 	// objectName names the object (oam.Component.ObjectName). Empty for the
 	// application's name.
 	objectName string
-	decoded    *T
+	// metadata is the labels and annotations authored for the object
+	// (oam.Component.ObjectMetadata).
+	metadata oam.ObjectMetadata
+	decoded  *T
 }
 
 // ApplyPolicy is a no-op, for any policy: see the top of this file.
@@ -120,9 +125,8 @@ func (c *policyFreeKindConfig[T]) ApplyPolicy(oam.Policy) error {
 }
 
 // Generate emits the kind's one object, under the object name the config
-// carries, else named after the application. The handler adds no label and no
-// annotation.
+// carries, else named after the application. Its labels and annotations are the
+// authored ones: the handler adds none of its own.
 func (c *policyFreeKindConfig[T]) Generate(app *stack.Application) ([]*client.Object, error) {
-	obj := c.kind.build(kindObjectName(c.objectName, app.Name), app.Namespace, c.decoded)
-	return []*client.Object{&obj}, nil
+	return kindObject(c.kind.build(kindObjectName(c.objectName, app.Name), app.Namespace, c.decoded), c.metadata)
 }

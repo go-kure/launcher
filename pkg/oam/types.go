@@ -96,6 +96,11 @@ type Component struct {
 	// component. Unexported, so a document can neither author nor carry one: the
 	// author writes the `objectName` property.
 	objectName string
+	// objectMetadata is the labels and annotations the engine read off a kind
+	// component's `labels` and `annotations` properties (withObjectMetadata,
+	// object_metadata.go), none before that and on every other component.
+	// Unexported, as objectName is.
+	objectMetadata ObjectMetadata
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

@@ -145,6 +145,7 @@ func (h *FluxcdKustomizationHandler) ToApplicationConfig(component *oam.Componen
 	cfg := &FluxcdKustomizationConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Spec:       *spec,
 	}
@@ -163,6 +164,9 @@ type FluxcdKustomizationConfig struct {
 	// ObjectName names the Kustomization (oam.Component.ObjectName). Empty for
 	// Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the Kustomization
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The Kustomization lands here
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -230,6 +234,5 @@ func (c *FluxcdKustomizationConfig) Generate(_ *stack.Application) ([]*client.Ob
 	// Kustomization's targetNamespace overrides the namespace of every object
 	// it applies (go-kure/launcher#622).
 
-	obj := client.Object(kz)
-	return []*client.Object{&obj}, nil
+	return kindObject(kz, c.Metadata)
 }

@@ -61,7 +61,7 @@ func (h *CnpgObjectStoreHandler) ToApplicationConfig(component *oam.Component, n
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgObjectStoreDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgObjectStoreConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &CnpgObjectStoreConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -76,8 +76,11 @@ type CnpgObjectStoreConfig struct {
 	// ObjectName names the ObjectStore (oam.Component.ObjectName). Empty for
 	// the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       barmanv1.ObjectStoreSpec
+	// Metadata is the labels and annotations authored for the ObjectStore
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      barmanv1.ObjectStoreSpec
 }
 
 // validate refuses a spec the ObjectStore CRD would refuse for a reason the
@@ -121,6 +124,5 @@ func (c *CnpgObjectStoreConfig) Generate(app *stack.Application) ([]*client.Obje
 	}
 	store := kurecnpg.CreateObjectStore(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&store.Spec)
-	obj := client.Object(store)
-	return []*client.Object{&obj}, nil
+	return kindObject(store, c.Metadata)
 }

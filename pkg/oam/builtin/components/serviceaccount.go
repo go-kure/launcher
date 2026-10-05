@@ -67,7 +67,10 @@ type ServiceAccountConfig struct {
 	// ObjectName names the ServiceAccount (oam.Component.ObjectName); its
 	// labels keep the application's name. Empty for Name.
 	ObjectName string
-	Namespace  string
+	// Metadata is the labels and annotations authored for the ServiceAccount
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
 	// AutomountToken is the authored automountServiceAccountToken, nil when
 	// unauthored.
 	AutomountToken   *bool
@@ -104,14 +107,13 @@ func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Objec
 	for _, s := range c.ImagePullSecrets {
 		kubernetes.AddServiceAccountImagePullSecret(sa, s)
 	}
-	obj := client.Object(sa)
-	return []*client.Object{&obj}, nil
+	return kindObject(sa, c.Metadata)
 }
 
 // parseServiceAccount reads a serviceaccount component's properties.
 func parseServiceAccount(component *oam.Component) (*ServiceAccountConfig, error) {
 	props := component.Properties
-	c := &ServiceAccountConfig{Name: component.Name, ObjectName: componentObjectName(component)}
+	c := &ServiceAccountConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata()}
 
 	automount, err := parseBoolField(props, "automountServiceAccountToken", "automountServiceAccountToken")
 	if err != nil {

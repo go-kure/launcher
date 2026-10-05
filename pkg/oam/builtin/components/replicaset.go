@@ -58,7 +58,7 @@ func (h *ReplicaSetHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
 		return nil, err
 	}
-	cfg := &ReplicaSetConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &ReplicaSetConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
@@ -72,8 +72,12 @@ type ReplicaSetConfig struct {
 	// ObjectName names the ReplicaSet (oam.Component.ObjectName); its labels
 	// keep Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       appsv1.ReplicaSetSpec
+	// Metadata is the labels and annotations authored for the ReplicaSet
+	// (oam.Component.ObjectMetadata). They go on the ReplicaSet's own
+	// metadata: its pod template keeps the labels of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      appsv1.ReplicaSetSpec
 }
 
 // validate refuses a spec the ReplicaSet cannot be emitted from and returns
@@ -142,6 +146,5 @@ func (c *ReplicaSetConfig) Generate(app *stack.Application) ([]*client.Object, e
 	rs := kubernetes.CreateReplicaSet(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&rs.Spec)
 	rs.Spec.Template.Labels = labelled
-	obj := client.Object(rs)
-	return []*client.Object{&obj}, nil
+	return kindObject(rs, c.Metadata)
 }

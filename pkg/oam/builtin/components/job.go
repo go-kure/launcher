@@ -98,6 +98,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	config := &JobConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
+		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 	}
 
@@ -268,7 +269,11 @@ type JobConfig struct {
 	Name string
 	// ObjectName names the Job (oam.Component.ObjectName); its labels and main
 	// container keep Name. Empty for the application's name.
-	ObjectName    string
+	ObjectName string
+	// Metadata is the labels and annotations authored for the Job
+	// (oam.Component.ObjectMetadata). They go on the Job's own metadata: its
+	// pod template keeps the labels of the kind.
+	Metadata      oam.ObjectMetadata
 	Namespace     string
 	Image         string
 	RestartPolicy corev1.RestartPolicy
@@ -384,8 +389,7 @@ func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	obj := client.Object(job)
-	return []*client.Object{&obj}, nil
+	return kindObject(job, c.Metadata)
 }
 
 func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {

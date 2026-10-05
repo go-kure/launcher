@@ -1387,7 +1387,7 @@ func (t *Transformer) validateEmittedComponent(comp *Component) error {
 //     for the transform to resolve.
 //
 // Both are checked against the handler's schema with the property folded in
-// (withObjectNameProperty), so an explicit null is none on a member too, and is
+// (withObjectProperties), so an explicit null is none on a member too, and is
 // dropped as at any other optional key, where the handler's own schema would
 // call the key unsupported.
 func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) error {
@@ -1398,7 +1398,7 @@ func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) e
 				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
 			}
 			if p, declares := h.(PropertySchemaProvider); declares {
-				return validateEmittedAgainst(withObjectNameProperty(h, p.PropertySchema()), &comp.Properties, path)
+				return validateEmittedAgainst(withObjectProperties(h, p.PropertySchema()), &comp.Properties, path)
 			}
 		}
 		return validateEmittedProperties(h, &comp.Properties, path)

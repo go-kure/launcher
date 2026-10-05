@@ -73,6 +73,9 @@ type ConfigMapConfig struct {
 	// ObjectName names the ConfigMap (oam.Component.ObjectName); its labels
 	// keep Name. Empty for the application's name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the ConfigMap
+	// (oam.Component.ObjectMetadata). The configmap trait leaves it empty.
+	Metadata   oam.ObjectMetadata
 	Namespace  string
 	Data       map[string]string
 	BinaryData map[string][]byte
@@ -82,7 +85,11 @@ type ConfigMapConfig struct {
 
 // Generate creates the ConfigMap.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	return GenerateConfigMap(*c, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	objs, err := GenerateConfigMap(*c, kindObjectName(c.ObjectName, app.Name), app.Namespace, appLabels(app.Name))
+	if err != nil {
+		return nil, err
+	}
+	return kindObject(*objs[0], c.Metadata)
 }
 
 // parseConfigMap reads a configmap component's properties.
@@ -93,6 +100,7 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	}
 	c.Name = component.Name
 	c.ObjectName = componentObjectName(component)
+	c.Metadata = component.ObjectMetadata()
 	return &c, nil
 }
 

@@ -163,8 +163,11 @@ type ServiceConfig struct {
 	// ObjectName names the Service (oam.Component.ObjectName); its labels and
 	// default selector keep Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Type       corev1.ServiceType
+	// Metadata is the labels and annotations authored for the Service
+	// (oam.Component.ObjectMetadata).
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Type      corev1.ServiceType
 	// ClusterIP is "" (a virtual IP is allocated) or "None" (headless).
 	ClusterIP string
 	// Selector is the pod selector: authored, or app: <component name>.
@@ -312,8 +315,7 @@ func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, erro
 		kubernetes.AddServicePort(svc, *p.DeepCopy())
 	}
 	c.Spec.apply(&svc.Spec)
-	obj := client.Object(svc)
-	return []*client.Object{&obj}, nil
+	return kindObject(svc, c.Metadata)
 }
 
 func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr.IntOrString {
@@ -374,7 +376,7 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 		return nil, err
 	}
 	props := component.Properties
-	c := &ServiceConfig{Name: component.Name, ObjectName: componentObjectName(component), Type: corev1.ServiceTypeClusterIP}
+	c := &ServiceConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Type: corev1.ServiceTypeClusterIP}
 
 	if t, present, err := parseStringField(props, "type", "type"); err != nil {
 		return nil, err

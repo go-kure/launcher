@@ -57,7 +57,7 @@ func (h *ReplicationControllerHandler) ToApplicationConfig(component *oam.Compon
 	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
 		return nil, err
 	}
-	cfg := &ReplicationControllerConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &ReplicationControllerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
@@ -72,8 +72,13 @@ type ReplicationControllerConfig struct {
 	// ObjectName names the ReplicationController (oam.Component.ObjectName);
 	// its labels keep Name. Empty for the application's name.
 	ObjectName string
-	Namespace  string
-	Spec       corev1.ReplicationControllerSpec
+	// Metadata is the labels and annotations authored for the
+	// ReplicationController (oam.Component.ObjectMetadata). They go on the
+	// ReplicationController's own metadata: its pod template keeps the labels
+	// of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      corev1.ReplicationControllerSpec
 }
 
 // validate refuses a spec the ReplicationController cannot be emitted from and
@@ -143,6 +148,5 @@ func (c *ReplicationControllerConfig) Generate(app *stack.Application) ([]*clien
 	rc := kubernetes.CreateReplicationController(kindObjectName(c.ObjectName, app.Name), app.Namespace)
 	c.Spec.DeepCopyInto(&rc.Spec)
 	rc.Spec.Template.Labels = labelled
-	obj := client.Object(rc)
-	return []*client.Object{&obj}, nil
+	return kindObject(rc, c.Metadata)
 }

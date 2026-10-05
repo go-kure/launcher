@@ -304,11 +304,11 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 		Traits:     make(map[string]map[string]PropertySchema),
 		Policies:   make(map[string]map[string]PropertySchema),
 	}
-	// A kind component's schema is published with `objectName`, which the engine
-	// reads off it (ComponentObjectProvider).
+	// A kind component's schema is published with `objectName`, `labels` and
+	// `annotations`, which the engine reads off it (ComponentObjectProvider).
 	for name, h := range t.componentHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
-			set.Components[name] = withObjectNameProperty(h, p.PropertySchema())
+			set.Components[name] = withObjectProperties(h, p.PropertySchema())
 		}
 	}
 	for name, h := range t.traitHandlers {
@@ -605,6 +605,13 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 		if err != nil {
 			return nil, errors.Wrapf(err, "component %q", comp.Name)
 		}
+		// Its `labels` and `annotations` are read off it too, so the handler is
+		// handed the properties it is handed in the transform. There is no
+		// component label key here to hold the labels to.
+		named, err = withObjectMetadata(named, handler, "")
+		if err != nil {
+			return nil, errors.Wrapf(err, "component %q", comp.Name)
+		}
 		comp = &named
 	}
 	var eps []netpol.Endpoint
@@ -851,10 +858,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	for _, e := range entries {
 		componentMap[e.component.Name] = e
 	}
-	labelKey := ctx.ComponentLabelKey
-	if labelKey == "" {
-		labelKey = ComponentLabelKeyForDomain(ctx.Domain)
-	}
+	labelKey := ctx.componentLabelKey()
 	if err := synthesizeNetworkPolicies(cluster, componentMap, labelKey); err != nil {
 		return nil, nil, err
 	}
@@ -889,6 +893,16 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 
 	return cluster, policyResult, nil
+}
+
+// componentLabelKey returns the key of the component label: ComponentLabelKey,
+// else the one derived from Domain, which the transform has normalized by the
+// time it reads this.
+func (ctx TransformContext) componentLabelKey() string {
+	if ctx.ComponentLabelKey != "" {
+		return ctx.ComponentLabelKey
+	}
+	return ComponentLabelKeyForDomain(ctx.Domain)
 }
 
 // createApplications converts OAM components to stack applications, applies
@@ -930,6 +944,12 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}
 		component = named
+		// The same for the object's labels and annotations (go-kure/launcher#790).
+		labelled, err := withObjectMetadata(component, handler, ctx.componentLabelKey())
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+		component = labelled
 
 		// After D3, which checks only what was authored: the capability defaults a
 		// ComponentCapabilityDefaults handler names fill the keys left unauthored.

@@ -142,7 +142,7 @@ reads it.
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `secret` | Secret | Kind-named Secret: `stringData`, `data`, `type`, `immutable`. Every entry is emitted under `data`, base64-encoded and not encrypted. Refused under an environment policy that forbids explicit secrets. A workload reads it through a `secret` volume, `envFrom` or a `secretKeyRef` — see below. |
-| `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are not authorable — see below. |
+| `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are the `labels` property — see below. |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
@@ -245,7 +245,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
-| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are not authorable. No environment policy applies. |
+| `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
 | `kubernetes.CreateCSIStorageCapacity` | storage.k8s.io/v1 CSIStorageCapacity | not authorable | - | - | Written by a CSI driver's provisioner. |
 | `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | trait | `rbac` | hand-written parser | - |
@@ -257,7 +257,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
-| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, and a kind component's metadata is not authorable. Held until kind components take authored labels, which go-kure/launcher#790 has decided and which is not in the tree yet. |
+| `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | held | - | - | A slice belongs to a Service only through its `kubernetes.io/service-name` label, which a kind component now authors under `labels`, as a literal that does not follow the Service's `objectName`. The kind itself is not in the tree yet (go-kure/launcher#790). |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
@@ -268,7 +268,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | kind | `horizontalpodautoscaler` | strict decode of `HorizontalPodAutoscalerSpec` | `scaleTargetRef` and `maxReplicas` must be written. `maxReplicas` is held to the environment policy's replica maximum. The `scaler` trait emits one for its workload too, through its own parser. |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | kind | `ingress` | strict decode of `IngressSpec` | The `ingress` trait, which `expose` lowers onto, builds its own Ingress with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis and is held to the platform's hostname constraint and the policy's capability lists. |
-| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. `controller` must be written. No environment policy applies. |
+| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties, the default-class annotation (`ingressclass.kubernetes.io/is-default-class`) included. `controller` must be written. No environment policy applies. |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
@@ -276,7 +276,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
+| `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels and annotations are the `labels` and `annotations` properties. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | kind | `networkpolicy` | strict decode of `NetworkPolicySpec` | No type under `NetworkPolicySpec` unmarshals itself except `intstr.IntOrString` (a port), a scalar with no nested key to drop. The `networkpolicy` trait builds its own NetworkPolicy with a hand-written parser and scopes it to its component's pods; the kind selects what the author wrote. The transform's NetworkPolicy synthesis in `pkg/oam` emits NetworkPolicies of its own and reads neither. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
@@ -284,7 +284,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
 | `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | kind | `poddisruptionbudget` | strict decode of `PodDisruptionBudgetSpec` | No field is required. No environment policy applies. The `scaler` trait emits one for its workload too (`enablePDB`), through its own parser. |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
-| `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. An unauthored `value` is emitted as `0`. No environment policy applies. |
+| `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. An unauthored `value` is emitted as `0`. No environment policy applies. |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
 | `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
@@ -292,13 +292,13 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
 | `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
 | `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
-| `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. No environment policy applies. |
+| `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `kubernetes.CreateSecret` | v1 Secret | kind | `secret` | hand-written parser | The `secret` trait builds through the same path. The `helm` component's `secretValues` synthesizes the trait. Refused under a policy that forbids explicit secrets, on either path. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
-| `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. At least one of `cidrs` must be written. No environment policy applies. |
+| `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. At least one of `cidrs` must be written. No environment policy applies. |
 | `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
-| `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
+| `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties, the default-class annotation (`storageclass.kubernetes.io/is-default-class`) included. No environment policy applies. |
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
 | `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | missing | - | - | - |
 | `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | missing | - | - | - |
@@ -306,7 +306,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
-| `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
+| `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
 | `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | kind | `certificate` | strict decode of `CertificateSpec` | `secretName` and `issuerRef` with its `name` must be written. A keystore password in the object is refused under a policy that forbids explicit secrets. No capability is required. The `certificate` trait builds a Certificate for a workload through the same constructor, from a hand-written parser. |
 | `certmanager.CreateCertificateRequest` | cert-manager.io/v1 CertificateRequest | not authorable | - | - | A one-shot request cert-manager creates for a Certificate. |
 | `certmanager.CreateChallenge` | acme.cert-manager.io/v1 Challenge | not authorable | - | - | Created by cert-manager's ACME issuer. |
@@ -2393,23 +2393,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   schema to the linked type by reflection. Each emits its object, named after
   the component,
   with the authored spec and nothing else: the handler adds no annotation and
-  no label, not an `app` label either. The transform then sets the component
+  no label of its own, not an `app` label either. The transform then sets the component
   label on the object, as on every object a component owns
   (go-kure/launcher#788). None
   runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
   component, they are in no tier unless a tier annotation or placement policy
   places them.
-  The properties are the spec fields only. **Not covered:** the object's
-  metadata, so its labels and annotations cannot be authored.
+  The properties are the spec fields, and `labels` and `annotations` for the
+  object's metadata ("The object's labels and annotations" below).
   - `namespace` publishes `finalizers`, the one field of
     `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
     no namespace, whatever namespace the application is built for. The
     component name is the Namespace's name, which the API holds to a DNS-1123
     label (at most 63 characters, no dot), narrower than a component name;
-    any other name is refused, naming it. Since its labels cannot be authored,
-    a Namespace that needs the Pod Security Admission labels
-    (`pod-security.kubernetes.io/enforce` and its siblings) cannot be written
-    with this component.
+    any other name is refused, naming it. A Namespace that needs the Pod
+    Security Admission labels (`pod-security.kubernetes.io/enforce` and its
+    siblings) writes them under `labels`.
   - `limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
     and emits the LimitRange in the build namespace. `limits` is required: the
     Go type cannot omit it, so an unauthored one (absent or `null`) would be
@@ -2436,7 +2435,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
   type, two spellings of one field refused, and one object named after the
   component, with the authored spec; the handler adds no label and no
-  annotation, and the transform sets the component label. The spec
+  annotation of its own, and the transform sets the component label. The spec
   embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
   `hostPath`, …) is a top-level property, as it is a top-level field of the
   object's spec. A PersistentVolume is cluster-scoped: the object carries no
@@ -2444,8 +2443,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `capacity`, `accessModes` and exactly one source; those and the other value
   rules are left to the API server, so a component with no properties builds a
   volume the server refuses. A quantity written as a number is emitted in its
-  canonical string form. **Not covered:** the object's metadata, so its labels
-  and annotations cannot be authored.
+  canonical string form. The object's labels and annotations are the `labels`
+  and `annotations` properties.
 
   **Policy.** Unlike the three kinds above, a PersistentVolume is held to the
   environment policy (`enforcePersistentVolumePolicy`):
@@ -2551,9 +2550,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The config implements `oam.ServiceAccountNamer`: the account is the authored
   `serviceAccountName`, or the deprecated `serviceAccount` where that one is
   unset, as the API server reads the two; with neither, the namespace's
-  `default` account. **Not covered:** the object's metadata, so the Pod's
-  labels and annotations cannot be authored; it carries the `app` label and
-  the component label only.
+  `default` account. The Pod carries the `app` label and the component label,
+  and what `labels` and `annotations` author beside them.
 - **replicaset** (go-kure/launcher#790) is the kind-named projection of an
   apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
   `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
@@ -2624,9 +2622,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   untagged or `:latest` image.
 
   The config implements `oam.ServiceAccountNamer`, reading the template's
-  `serviceAccountName` as the `pod` kind reads its own. **Not covered:** the
-  ReplicaSet's own metadata, so its labels and annotations cannot be authored;
-  the template's metadata is carried as authored.
+  `serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
+  labels and annotations are the `labels` and `annotations` properties; the
+  template's metadata is carried as authored and takes neither.
 - **replicationcontroller** (go-kure/launcher#790) is the kind-named
   projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
   one schema key per json field of `corev1.ReplicationControllerSpec`
@@ -2638,7 +2636,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   refusals under `template.spec` (`activeDeadlineSeconds` included), the
   replica maximum and the pod-template policy check, no policy default, the
   known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
-  the object's own metadata not being authorable — with these differences:
+  `labels` and `annotations` for the object's own metadata — with these
+  differences:
   - `selector` is a plain map of label to value, not a label selector: a
     `matchLabels` or `matchExpressions` key is refused as not a
     ReplicationControllerSpec field.
@@ -2690,9 +2689,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Known difference:** template delivery (`helmtemplate`), `passthrough` and
   `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
   emit; the API server decides there. They do refuse ephemeral containers and
-  an untagged or `:latest` image. **Not covered:** the PodTemplate's own
-  metadata, so its labels and annotations cannot be authored; the template's
-  metadata is carried as authored.
+  an untagged or `:latest` image. The PodTemplate's own labels and annotations
+  are the `labels` and `annotations` properties; the template's metadata is
+  carried as authored and takes neither.
 - **storageclass**, **volumeattributesclass**, **priorityclass**,
   **runtimeclass**, **ingressclass**, **csidriver** (go-kure/launcher#790) are
   the kind-named projections of six cluster-scoped objects: a
@@ -2701,8 +2700,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `networking.k8s.io/v1` IngressClass. Each emits that one object, named after
   the component unless `objectName` names it, with no namespace, holding
   exactly what was authored: the handler adds no label, no annotation and no
-  default, and the transform sets the component label, as on every object a
-  component owns (go-kure/launcher#788).
+  default of its own, and the transform sets the component label, as on every
+  object a component owns (go-kure/launcher#788).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
@@ -2750,7 +2749,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     object type, and the object's own `kind`, `apiVersion` and `metadata` are
     refused by name under any spelling the decoder would match (`metadata:
     not authorable: launcher sets the object's kind, apiVersion and metadata
-    (its name is the component's, or the one objectName gives it)`).
+    (its name is the component's, or the one objectName gives it; its labels
+    and annotations are the labels and annotations properties)`).
     `storageclass`: `provisioner`,
     `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
     `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
@@ -2802,12 +2802,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   author to create one of these objects does not register its handler; the
   transform then refuses the component (`no handler for component type …`).
 
+  **Labels and annotations** are the `labels` and `annotations` properties,
+  on all six. That includes the annotations that mark a default class
+  (`storageclass.kubernetes.io/is-default-class`,
+  `ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
+  IngressClass writes its annotation there. Whether a second default exists
+  is the cluster's to decide.
+
   **Not covered.**
-  - The object's own metadata, so its labels and annotations cannot be
-    authored. That includes the annotations that mark a default class
-    (`storageclass.kubernetes.io/is-default-class`,
-    `ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
-    IngressClass is not expressible through these kinds.
   - An `ingressclass` whose `parameters` leaves `scope` out is emitted with
     `scope: null`: the API type always encodes the field, and documents
     `Cluster` as its default. Author `scope` to emit a value.
@@ -2855,9 +2857,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   its `name`); a component and a trait whose Ingress would carry one name are
   refused, with both named.
 
-  **Not covered:** the Ingress's own metadata, so its labels and annotations
-  (a controller's `nginx.ingress.kubernetes.io/…` annotations among them)
-  cannot be authored, and its `status`, which the controller writes.
+  **Labels and annotations** are the `labels` and `annotations` properties, a
+  controller's `nginx.ingress.kubernetes.io/…` annotations among them.
+  **Not covered:** its `status`, which the controller writes.
 - **httproute** (go-kure/launcher#790) is the kind-named projection of a
   gateway.networking.k8s.io/v1 HTTPRoute, on the same recipe as `ingress`: one
   schema key per json field of `gatewayv1.HTTPRouteSpec`, those of the
@@ -2898,8 +2900,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component and a trait whose HTTPRoute would carry one name are refused, with
   both named.
 
-  **Not covered:** the HTTPRoute's own metadata, so its labels and annotations
-  cannot be authored, and its `status`, which the Gateway controller writes.
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **Not covered:** its `status`, which the Gateway controller writes.
 - **networkpolicy** (go-kure/launcher#790) is the kind-named projection of a
   networking.k8s.io/v1 NetworkPolicy, on the same recipe as `ingress`: one
   schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
@@ -2947,8 +2949,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   additive beside it. **The name** is the component's, or its `objectName`; a
   component whose policy would carry the name of a `networkpolicy` trait's
   (`<component>-allow`, or its `name`) or of a synthesized one is refused, with
-  both named. **Not covered:** the NetworkPolicy's own metadata, so its
-  labels and annotations cannot be authored.
+  both named. The NetworkPolicy's own labels and annotations are the `labels`
+  and `annotations` properties.
 - **cilium-networkpolicy** (go-kure/launcher#790) is the kind-named projection
   of a cilium.io/v2 CiliumNetworkPolicy. The object has no spec type of its
   own: it holds one rule under `spec`, a list of rules under `specs`, or both,
@@ -3014,9 +3016,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   not refuse a `cilium-networkpolicy` component. `passthrough`, `manifests`
   and template delivery emit a CiliumNetworkPolicy under the same terms. A
   consumer that restricts network policy restricts the component types it
-  registers. **Not covered:** the object's own metadata, so its labels and
-  annotations cannot be authored, and its `status`, which the Cilium agent
-  writes.
+  registers. The object's own labels and annotations are the top-level
+  `labels` and `annotations` properties; a `labels` under `spec` or a `specs`
+  entry is the rule's own field. **Not covered:** its `status`, which the
+  Cilium agent writes.
 - **servicecidr** (go-kure/launcher#790) is the kind-named projection of a
   cluster-scoped `networking.k8s.io/v1` ServiceCIDR: a range the API server
   assigns Service cluster IPs from, beside the one it was started with. It is
@@ -3030,8 +3033,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     without one. Every other value rule is left to the API server: that a
     block is a valid CIDR, that there are at most two, and that two are of
     different IP families.
-  - **Not covered.** The object's metadata, so its labels and annotations
-    cannot be authored. The API server refuses a change to a block once the
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** The API server refuses a change to a block once the
     object exists; a ServiceCIDR of one block may only gain a second.
     Launcher does not compare a build with the cluster, so a changed block
     builds here and is refused at apply. The object's status is the API
@@ -3040,8 +3043,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of a `policy/v1` PodDisruptionBudget, built on `policyFreeKind`. It emits
   that one object in the build namespace, named after the component unless
   `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default. The handler declares its object as
-  namespaced, so the object name is claimed in the object's namespace.
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
   - **Authored:** the four fields of `PodDisruptionBudgetSpec`, decoded
     strictly: `minAvailable` and `maxUnavailable` (each a count or a
     percentage string such as `"50%"`), `selector` (a label selector) and
@@ -3066,15 +3069,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     does not own).
   - **Policy.** No field of the spec is one an `oam.Policy` method speaks to,
     so `ApplyPolicy` enforces nothing and fills nothing.
-  - **Not covered.** The object's metadata, so its labels and annotations
-    cannot be authored. Whether the selector matches any pod. The object's
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Whether the selector matches any pod. The object's
     status is the disruption controller's and is not written.
 - **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
   projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
   one object in the build namespace, named after the component unless
   `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default. The handler declares its object as
-  namespaced, so the object name is claimed in the object's namespace.
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
   - **Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
     strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
     `metrics` and `behavior`. An unknown key is refused wherever it sits (a
@@ -3117,8 +3120,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     The two name their objects apart (`<component>-hpa` for the trait), and
     two that are given one name in one namespace are refused as a name
     collision.
-  - **Not covered.** The object's metadata, so its labels and annotations
-    cannot be authored. Whether the target exists or can be scaled. The
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Whether the target exists or can be scaled. The
     object's status is the controller's and is not written.
 - **servicemonitor**, **podmonitor**, **prometheus-probe**, **prometheusrule**
   (go-kure/launcher#790) are the kind-named projections of four objects of the
@@ -3126,7 +3129,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   PodMonitor, a Probe and a PrometheusRule. Each is built on `policyFreeKind`
   and emits that one object in the build namespace, named after the component
   unless `objectName` names it; the handler adds no label, no annotation and no
-  default. Each declares its object as namespaced, so the object name is
+  default of its own. Each declares its object as namespaced, so the object name is
   claimed in the object's namespace. The Probe's type name carries a prefix
   because a probe, in this package, is a container's.
 
@@ -3232,14 +3235,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   "Component label and ownership" in the OAM model). A Secret or ConfigMap an
   object refers to is read by the operator in the object's namespace.
 
-  **Selected by a Prometheus through the component label alone.** A
-  Prometheus picks these objects up through its label selectors
+  **Selected by a Prometheus through the object's labels.** A Prometheus
+  picks these objects up through its label selectors
   (`serviceMonitorSelector`, `podMonitorSelector`, `probeSelector`,
-  `ruleSelector`). The object's metadata is not authorable, so the one label
-  it carries is the component label, whose value is the component's: a
-  Prometheus that selects on a fixed label (`release: <name>`, say) does not
-  select these objects.
-  The open point on object metadata on go-kure/launcher#790 carries it.
+  `ruleSelector`). The handler writes no label, so the object carries the
+  component label, whose value is the component's, and what `labels` authors:
+  for a Prometheus that selects on a fixed label (`release: <name>`, say),
+  write that label there.
 
   **Policy.** No field of these specs is one an `oam.Policy` method speaks to,
   so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
@@ -3259,8 +3261,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     file in the Prometheus container (`bearerTokenFile`, and `caFile`,
     `certFile` and `keyFile` under `tlsConfig`).
 
-  **Not covered.** The object's metadata, so its labels and annotations
-  cannot be authored. Whether what is selected or referred to exists (a
+  **Not covered.** Whether what is selected or referred to exists (a
   Service, a pod, an Ingress, a named port, a Secret key), and whether a
   Prometheus of the cluster selects the object. The object's status is the
   operator's and is not written.
@@ -6139,6 +6140,55 @@ What a config tells a trait or the transform about its object follows the object
 consequences are the kind's own: a `statefulset`'s pods and claims take the StatefulSet's
 name, so they follow `objectName`; a `helmrelease`'s `spec.releaseName` default stays the
 component name, so the release does not.
+
+### The object's labels and annotations (`labels`, `annotations`)
+
+Every kind component, the same types that take `objectName`, takes two optional properties,
+`labels` and `annotations`, each a map of strings (go-kure/launcher#790). They go on the
+metadata of the component's one object and nowhere else. On a workload kind the pod template
+keeps the labels of the kind, its `app` label and what `template.metadata` authors, and no
+selector reads an authored label. `helmtemplate`, `manifests`, `crd` and `passthrough`
+generate no single object named after the component and refuse both.
+
+```yaml
+- name: web
+  type: deployment
+  properties:
+    image: ghcr.io/example/web:1.0.0
+    labels:
+      team: payments
+    annotations:
+      example.com/owner: "payments@example.com"
+```
+
+Refused, naming the component, the property and the key:
+
+- a value that is no map, and an entry that is no string (quote a number or a boolean); a
+  null value or entry is an absent one;
+- a key or value the API server refuses: a label key or value that is no valid label, an
+  annotation key that is no valid annotation key, annotations whose keys and values hold more
+  than 262144 bytes together;
+- the `app` label with another value than the component's (its name, or the hashed form of a
+  name over 63 characters), which is what the kinds that set `app` select by;
+- the component label key with another value than the component's (see "Component label and
+  ownership" above);
+- a key the kind already sets on its object with another value;
+- a key the consumer reserved for itself (`ReservedMetadataKeys`), as on every generated
+  object.
+
+A label that names another object is the author's literal: it does not follow that object's
+`objectName` or the `Naming` hook's answer for it. An object that belongs to another through
+a label (an EndpointSlice's `kubernetes.io/service-name`) is written with the name the other
+object takes.
+
+As `objectName`, the two are in no handler's `PropertySchema`: the engine adds them to the
+schema of every type whose handler declares its object, reads and checks them, removes them
+from the properties and hands `ToApplicationConfig` the result as
+`Component.ObjectMetadata()`. A handler's config carries it as `Metadata` and `Generate` puts
+it on the object through `kindObject`, the one helper every kind returns its object through
+(the Flux sources through `emitFluxSource`, which does the same before it writes a long
+`spec.timeout`). `TestObjectMetadata_EveryKindComponentTakesIt` holds every registered kind
+to the two properties, so a kind added later cannot ship without them.
 
 ### Every spec field is this package's to write
 

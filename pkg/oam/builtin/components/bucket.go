@@ -66,7 +66,7 @@ func (h *BucketHandler) ToApplicationConfig(component *oam.Component, namespace 
 	if err := checkAuthoredFluxDurations("bucket", component.Properties, bucketDurations); err != nil {
 		return nil, err
 	}
-	cfg := &BucketConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &BucketConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -80,6 +80,9 @@ type BucketConfig struct {
 	Name string
 	// ObjectName names the Bucket (oam.Component.ObjectName). Empty for Name.
 	ObjectName string
+	// Metadata is the labels and annotations authored for the Bucket
+	// (oam.Component.ObjectMetadata).
+	Metadata oam.ObjectMetadata
 	// Namespace is the application namespace. The Bucket lands here unless a
 	// Flux namespace is set (SetFluxNamespace).
 	Namespace string
@@ -168,5 +171,5 @@ func (c *BucketConfig) Generate(_ *stack.Application) ([]*client.Object, error) 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	b.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&b.Spec.Interval)
-	return emitFluxSource("bucket", b, b.Spec.Timeout)
+	return emitFluxSource("bucket", b, b.Spec.Timeout, c.Metadata)
 }

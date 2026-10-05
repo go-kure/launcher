@@ -107,7 +107,7 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Namespace: namespace, Spec: *spec}
+	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(name); err != nil {
 		return nil, err
 	}
@@ -121,8 +121,12 @@ type CnpgPoolerConfig struct {
 	// ObjectName names the Pooler (oam.Component.ObjectName). Empty for the
 	// application's name.
 	ObjectName string
-	Namespace  string
-	Spec       cnpgv1.PoolerSpec
+	// Metadata is the labels and annotations authored for the Pooler
+	// (oam.Component.ObjectMetadata). They go on the Pooler's own metadata:
+	// its pod template is the authored spec.template.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      cnpgv1.PoolerSpec
 }
 
 // validate refuses a spec the Pooler CRD or CloudNativePG's webhook would
@@ -218,6 +222,5 @@ func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, e
 	if t := pooler.Spec.Template; t != nil && t.Spec.Containers == nil {
 		t.Spec.Containers = []corev1.Container{}
 	}
-	obj := client.Object(pooler)
-	return []*client.Object{&obj}, nil
+	return kindObject(pooler, c.Metadata)
 }

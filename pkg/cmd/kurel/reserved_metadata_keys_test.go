@@ -24,6 +24,27 @@ var reservedKeyCarriers = map[string]struct {
 	object    string
 	what      string
 }{
+	"a kind component's label": {
+		component: `    - name: carrier
+      type: configmap
+      properties:
+        data:
+          k: v
+        labels:
+          %[1]s: a
+`,
+		object: `ConfigMap "carrier"`, what: "label",
+	},
+	"a kind component's annotation, on a kind that writes none": {
+		component: `    - name: carrier
+      type: storageclass
+      properties:
+        provisioner: csi.example.com
+        annotations:
+          %[1]s: a
+`,
+		object: `StorageClass "carrier"`, what: "annotation",
+	},
 	"a passthrough object's label": {
 		component: `    - name: carrier
       type: passthrough

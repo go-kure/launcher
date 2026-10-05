@@ -649,9 +649,31 @@ its text:
     controller adds.
   - Breaking for a document: an `expose` trait's authored annotation that contradicts a
     value the trait writes is refused where the trait's value used to win silently.
-  - It lands before the kind components take `labels` and `annotations`, so authored
-    metadata on a kind never exists without it. That part is still open: until then a kind
-    component's metadata stays not authorable, as the kinds below say.
+  - It landed before the kind components took `labels` and `annotations` (below), so
+    authored metadata on a kind never existed without it.
+- **Shipped: object metadata on kind components.** Every kind component takes two optional
+  properties, `labels` and `annotations`, each a map of strings
+  (`pkg/oam/builtin/components/README.md` "The object's labels and annotations";
+  `object_metadata.go` in `pkg/oam`).
+  - They go on the object's own metadata and nowhere else. The pod template of a workload
+    kind is unchanged, and no selector reads an authored label.
+  - Refused, naming component, property and key: a key or value the API server refuses,
+    the `app` label with another value than the component's, the component label key with
+    another value than the component's, a key the kind already sets with another value,
+    and a key the consumer reserved (the rule above).
+  - The engine reads the two properties, as it reads `objectName`: no handler declares
+    them, and a handler finds them on the component (`Component.ObjectMetadata`). One
+    test holds every registered kind to them
+    (`TestObjectMetadata_EveryKindComponentTakesIt`), so a later kind cannot ship without.
+  - A label that names another object is the author's literal and does not follow that
+    object's `objectName` or the `Naming` hook. There is no typed reference.
+  - It answers four cases: the Pod Security Admission labels of a Namespace, the
+    default-class annotation of a StorageClass or an IngressClass, the labels a
+    Prometheus selects a ServiceMonitor, a PodMonitor, a Probe or a PrometheusRule by,
+    and the `kubernetes.io/service-name` label of an EndpointSlice, whose kind is the
+    next to add.
+  - Breaking: nothing for a document that built before. A type that declared a property
+    named `labels` or `annotations` of its own keeps it only if it declares no object.
 - **Shipped: the kind inventory.** `pkg/oam/builtin/components/README.md` "Kind
   inventory" has one row per constructor the base library generates, with a status
   (`kind`, `component`, `trait`, `missing`, `held`, `not authorable`), the component or
@@ -667,10 +689,10 @@ its text:
     map is decoded strictly into that type (`decodeKindSpec`, `kind_decode.go`), as the
     CloudNativePG kinds are. A test holds each schema to the type by reflection
     (`TestCoreKindSchemas_CoverSpec`).
-  - Each emits one object named after the component, with the authored spec. Its
-    metadata is not authorable, so a Namespace that needs the Pod Security Admission
-    labels cannot be written with `namespace`. The only label is the component label of
-    go-kure/launcher#788 (§3.4).
+  - Each emits one object named after the component, with the authored spec. The handler
+    writes no label: the object carries the component label of go-kure/launcher#788
+    (§3.4) and what `labels` authors, the Pod Security Admission labels of a Namespace
+    among them.
   - `namespace` and `persistentvolume` are cluster-scoped. A `namespace` component's name
     must be a DNS-1123 label.
   - `persistentvolume` is held to environment policy on every path that produces one
@@ -720,8 +742,8 @@ its text:
     (`provisioner`, `handler`, `driverName`, an IngressClass's `controller`, and at least
     one of a VolumeAttributesClass's `parameters`). A PriorityClass `value` is not one:
     unauthored, it is emitted as `0`. Other value rules are left to the API server.
-  - Metadata is not authorable, as on every kind component, so a default StorageClass or
-    IngressClass (an annotation) cannot be written with these kinds.
+  - A default StorageClass or IngressClass writes its default-class annotation under
+    `annotations`, as every kind component does.
   - A CSIDriver's name is not held to the 63 characters the API documents for it: the
     API server does not hold the object to that limit, and refuses a PersistentVolume
     that names a longer driver. The kind refuses what the API server refuses of the
@@ -821,8 +843,8 @@ its text:
     endpoint, a static probe target): none is an artifact source. **No field is checked
     for a literal secret:** a credential is a reference to a Secret key, and free text
     that could hold one (`params`, `endpointParams`, a proxy URL) is written as authored.
-  - Metadata is not authorable, as on every kind component, so the labels a Prometheus
-    selects monitors and rules by cannot be written (see the open point below).
+  - The labels a Prometheus selects monitors and rules by are written under `labels`,
+    as on every kind component.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -856,31 +878,16 @@ its text:
     is an artifact source. **No field of an issuer is checked for a literal secret:** a
     credential is a reference to a Secret, and the free JSON of a webhook solver's
     `config` is written as authored.
-  - A duration is carried in Go's spelling (`2160h` as `2160h0m0s`). Metadata is not
-    authorable, as on every kind component.
+  - A duration is carried in Go's spelling (`2160h` as `2160h0m0s`). Labels and
+    annotations are the `labels` and `annotations` properties, as on every kind
+    component.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
-  `kubernetes.io/service-name` label, and a kind component's metadata is not authorable,
-  so the kind could not do what it is authored for. Its inventory row is `held`, with
-  that reason, until the kinds take authored labels (the point below).
+  `kubernetes.io/service-name` label, which a kind component could not carry before
+  the kinds took `labels` (above). Its inventory row stays `held` until the kind is
+  added; the label will be the author's literal, which does not follow the Service's
+  `objectName`.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
-- **Decided, not yet shipped: object metadata on kind components.** No kind component
-  lets its object's labels or annotations be authored yet. Four concrete cases need them:
-  - the `kubernetes.io/service-name` label of an EndpointSlice, without which the slice
-    belongs to no Service;
-  - the default-class annotation of a StorageClass or an IngressClass
-    (`storageclass.kubernetes.io/is-default-class`,
-    `ingressclass.kubernetes.io/is-default-class`);
-  - the Pod Security Admission labels of a Namespace
-    (`pod-security.kubernetes.io/enforce` and its siblings);
-  - the labels a Prometheus selects a ServiceMonitor, a PodMonitor, a Probe or a
-    PrometheusRule by (`serviceMonitorSelector`, `ruleSelector` and their siblings): the
-    one label such an object carries is the component label, so a Prometheus that
-    selects on a fixed label does not pick it up.
-
-  go-kure/launcher#790 decides it: every kind component is to take optional `labels`
-  and `annotations`, on the object's own metadata only. That is a change of its own
-  and is not in the tree yet.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
@@ -1079,7 +1086,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer` and `certificate` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer` and `certificate` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
