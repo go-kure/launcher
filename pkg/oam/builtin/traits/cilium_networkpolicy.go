@@ -49,6 +49,7 @@ func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Applicat
 		return err
 	}
 
+	// `name` is a required property, so the claimed name is always the authored one.
 	if err := claimOwnObjectName(trait, ciliumNetworkPolicyKind, app.Namespace, config.Name, config.Name); err != nil {
 		return err
 	}
