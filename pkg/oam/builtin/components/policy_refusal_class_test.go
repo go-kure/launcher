@@ -401,6 +401,28 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			})
 		}
 	}
+	// A credential written into a store, and the data of its fake provider, are
+	// explicit secrets on both kinds a SecretStore's spec builds.
+	for _, kind := range secretStores {
+		cases = append(cases,
+			componentCase{
+				name: kind.component + ", credential in the object", class: oam.RefusalExplicitSecret, typ: kind.component, handler: kind.handler,
+				props: props(storeProvider("delinea", map[string]any{
+					"tenant":       "acme",
+					"clientId":     map[string]any{"value": "client-0000"},
+					"clientSecret": map[string]any{"value": esSentinel},
+				})),
+				policy: rcNoSecrets,
+			},
+			componentCase{
+				name: kind.component + ", fake provider data", class: oam.RefusalExplicitSecret, typ: kind.component, handler: kind.handler,
+				props: props(storeProvider("fake", map[string]any{
+					"data": []any{map[string]any{"key": "prod/app", "value": esSentinel}},
+				})),
+				policy: rcNoSecrets,
+			},
+		)
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := tc.policy

@@ -40,6 +40,11 @@ type policyFreeKind[T any] struct {
 	// they were authored, so that the decoded value does not show the omission
 	// (refuseUnauthoredRequired). Nil for a kind with none.
 	required map[string]string
+	// defaultedZeros lists the fields of T on which an authored 0 or false
+	// cannot be carried (refuseUncarriedSpecValues). The zero value lists
+	// none: it is the value of every kind whose type has no such field, which
+	// the tests named at config hold.
+	defaultedZeros defaultedZeroFields
 	// build returns the object: the base library's identity-only constructor
 	// for the name (and the namespace, unless the kind is cluster-scoped) and
 	// a deep copy of decoded. name is the one the object takes: the
@@ -53,12 +58,14 @@ type policyFreeKind[T any] struct {
 // contract and the strict decode every spec-projecting kind uses
 // (decodeKindSpec), and refuses two spellings of one field
 // (refuseUncarriedSpecValues) and a required field the type would write
-// unauthored (refuseUnauthoredRequired). No field of a policy-free kind may be
-// one on which an authored 0 or false cannot be carried:
-// TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's field
-// comments to that, as far as they state a default in a form it recognises,
-// and TestMonitoringKinds_NoDefaultedZeros the types that publish none, by
-// the default markers of their source.
+// unauthored (refuseUnauthoredRequired). A field on which an authored 0 or
+// false cannot be carried must be in the kind's defaultedZeros, which refuses
+// that value: TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's
+// field comments to having none, as far as they state a default in a form it
+// recognises, and TestMonitoringKinds_NoDefaultedZeros and
+// TestExternalSecretsKinds_DefaultedZeros the types that publish none, by the
+// default markers of their source; the last holds a kind's list to those
+// markers in both directions.
 func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationConfig, error) {
 	if k.wholeObject {
 		if err := refuseObjectIdentityKeys(component.Properties); err != nil {
@@ -69,7 +76,7 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(authored, decoded, defaultedZeroFields{}); err != nil {
+	if err := refuseUncarriedSpecValues(authored, decoded, k.defaultedZeros); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(authored, k.required); err != nil {

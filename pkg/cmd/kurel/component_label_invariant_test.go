@@ -404,6 +404,25 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"backendtlspolicy": {props: map[string]any{
 		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
 		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
+	// The four external-secrets kinds emit identity and the authored fields
+	// too, with no `app` label and no pods: a SecretStore and an ExternalSecret
+	// namespaced, the two cluster kinds cluster-scoped. A selector in one is the
+	// author's label query over namespaces, not a pod selector of this document.
+	// None checks a name rule of its own.
+	"secretstore": {props: map[string]any{"provider": map[string]any{
+		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
+	"clustersecretstore": {props: map[string]any{"provider": map[string]any{
+		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
+	"externalsecret": {props: map[string]any{
+		"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
+		"data": []any{map[string]any{
+			"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}},
+	"clusterexternalsecret": {props: map[string]any{
+		"namespaceSelectors": []any{map[string]any{"matchLabels": map[string]any{"team": "payments"}}},
+		"externalSecretSpec": map[string]any{
+			"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
+			"data": []any{map[string]any{
+				"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

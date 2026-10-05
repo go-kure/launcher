@@ -1,0 +1,43 @@
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: vault-cluster-store
+  name: vault-cluster-store
+spec:
+  conditions:
+  - namespaceSelector:
+      matchLabels:
+        secrets: enabled
+  - namespaces:
+    - payments
+  provider:
+    vault:
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: external-secrets
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+      path: secret
+      server: https://vault.example.com:8200
+      tls: {}
+      version: v2
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: aws
+  name: aws-parameters
+spec:
+  provider:
+    aws:
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+      region: eu-west-1
+      service: ParameterStore

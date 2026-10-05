@@ -185,6 +185,10 @@ reads it.
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
 | `referencegrant` | ReferenceGrant | Kind-named Gateway API ReferenceGrant: the whole `ReferenceGrantSpec`, strictly decoded; `from` and `to` are required, with the group, kind and namespace of a source and the group and kind of a target. No capability is required and no environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
+| `secretstore` | SecretStore | Kind-named External Secrets Operator SecretStore: the whole `SecretStoreSpec` (`provider`, `controller`, `retrySettings`, `refreshInterval`, `conditions`), strictly decoded; `provider` with exactly one provider is required, and of that provider what the API requires. A credential written into the object is refused under an environment policy that forbids explicit secrets. No capability is required — see below. |
+| `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the same `SecretStoreSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
+| `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. No environment policy applies and no capability is required. Beside the `external-secret` trait — see below. |
+| `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires. Cluster-scoped; no environment policy applies and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -357,10 +361,10 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cnpg.CreatePublication` | postgresql.cnpg.io/v1 Publication | missing | - | - | - |
 | `cnpg.CreateScheduledBackup` | postgresql.cnpg.io/v1 ScheduledBackup | missing | - | - | - |
 | `cnpg.CreateSubscription` | postgresql.cnpg.io/v1 Subscription | missing | - | - | - |
-| `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | missing | - | - | - |
-| `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | missing | - | - | - |
-| `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | trait | `external-secret` | hand-written parser | - |
-| `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | missing | - | - | - |
+| `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | kind | `clusterexternalsecret` | strict decode of `ClusterExternalSecretSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties; those of the ExternalSecrets it creates are `externalSecretMetadata`. `externalSecretSpec` must be written, with what an `externalsecret` requires. No environment policy applies. |
+| `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | kind | `clustersecretstore` | strict decode of `SecretStoreSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `provider` must be written with exactly one provider; of that provider, the fields the API requires that the type would write empty, and the four it would default. A credential written as a `value`, and the data of the `fake` provider, are refused under a policy that forbids explicit secrets. No capability is required. |
+| `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. No environment policy applies and no capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
+| `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | missing | - | - | - |
 | `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | missing | - | - | - |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
@@ -1958,8 +1962,9 @@ a class, which a consumer reads from `oam.ViolationError.Class` instead of match
   HorizontalPodAutoscaler's `maxReplicas` and `cnpg-cluster`'s `instances`.
 - **Secret material in the document is `oam.RefusalExplicitSecret`:** a `secret`
   component, a Secret that `passthrough` or a `manifests` source carries, `helmtemplate`'s
-  `secretValues`, and a `certificate`'s keystore password (`keystores.jks.password`,
-  `keystores.pkcs12.password`).
+  `secretValues`, a `certificate`'s keystore password (`keystores.jks.password`,
+  `keystores.pkcs12.password`), and in a `secretstore` or a `clustersecretstore` a
+  credential written as a `value` and the data of the `fake` provider.
 - **A source host is `oam.RefusalRegistry`,** as an image's registry is: the `url` of a
   `manifests` or `crd` source, a `helmtemplate` chart source, the Flux source kinds, an
   `oci://` url that does not name its registry, and a `bucket` endpoint on Amazon S3.
@@ -4135,6 +4140,254 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a Secret, a ConfigMap, a Service and its port), and whether a controller of
   the cluster implements the class. The object's status is the controller's
   and is not written.
+- **secretstore**, **clustersecretstore**, **externalsecret**,
+  **clusterexternalsecret** (go-kure/launcher#790) are the kind-named
+  projections of four objects of the External Secrets Operator, in its
+  `external-secrets.io/v1` API: a SecretStore, a ClusterSecretStore, an
+  ExternalSecret and a ClusterExternalSecret. Each emits that one object,
+  named after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default. A `secretstore` and an `externalsecret`
+  are built in the build namespace. **A `clustersecretstore` and a
+  `clusterexternalsecret` are cluster-scoped**: the object carries no
+  namespace, whatever namespace the application is built for, and its name is
+  claimed cluster-wide. Nothing else is emitted: no Secret, ServiceAccount or
+  generator a store or an external secret names, no store an external secret
+  reads from, and not the ExternalSecrets a ClusterExternalSecret has the
+  operator create. The two stores are built on `policyHeldKind`, the two
+  external-secret kinds on `policyFreeKind`.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster runs the operator: where the CRDs are not
+  installed the component builds, and the object is refused at apply. The
+  cluster's `external-secret` capability is the trait's, and these kinds do
+  not read it. Whoever may author a component may author these, a store that
+  every namespace reads from and an external secret created in every selected
+  namespace included. The open point "No capability gate on component types"
+  on go-kure/launcher#790 carries it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (a provider, an authentication method, a `data` entry, a template).
+  - `secretstore` and `clustersecretstore` (`SecretStoreSpec`, which the two
+    objects share): `provider`, with one provider under its key (`aws`,
+    `vault`, `kubernetes`, `webhook` and the others the API lists),
+    `controller`, `retrySettings` (`maxRetries`, `retryInterval`),
+    `refreshInterval` and `conditions` (`namespaceSelector`, `namespaces`,
+    `namespaceRegexes`). The operator reads `conditions` on a
+    ClusterSecretStore only; a `secretstore` that authors them carries them.
+  - `externalsecret` (`ExternalSecretSpec`): `secretStoreRef` (`name`,
+    `kind`), `target` (`name`, `creationPolicy`, `deletionPolicy`,
+    `immutable`, `template`, `manifest`), `refreshPolicy`, `refreshInterval`,
+    `syncWindows` (`kind`, `windows`), `data` (each a `secretKey`, a
+    `remoteRef` and a `sourceRef`) and `dataFrom` (each an `extract`, a
+    `find`, a `rewrite` and a `sourceRef`).
+  - `clusterexternalsecret` (`ClusterExternalSecretSpec`):
+    `externalSecretSpec` (the fields of an `externalsecret`),
+    `externalSecretName`, `externalSecretMetadata` (`labels`, `annotations`),
+    `namespaceSelector`, `namespaceSelectors`, `namespaces` and `refreshTime`.
+  - A duration is written in the form the API type gives it:
+    `refreshInterval: 1h` is emitted as `1h0m0s`, and so are a sync window's
+    `duration` and a `clusterexternalsecret`'s `refreshTime`.
+  - **No default is filled.** The API's defaults (an external secret's
+    `refreshInterval`, a target's `creationPolicy` and `deletionPolicy`, the
+    `kind` of a `secretStoreRef`) are the API server's to fill where the field
+    was not authored.
+  - **An authored `0` or `false` is kept, with three exceptions on a store,
+    which are refused.** The type omits a zero in
+    `provider.beyondtrust.server.decrypt`,
+    `provider.infisical.secretsScope.expandSecretReferences` and
+    `provider.onepasswordSDK.cache.maxSize`, and the API defaults each to
+    another value (`true`, `true`, `100`), so the authored value would be
+    replaced: `provider.infisical.secretsScope.expandSecretReferences: false
+    cannot be carried by the external-secrets API types (the field is omitted
+    when zero, so the API server would apply its default true)`.
+    `TestExternalSecretsKinds_DefaultedZeros` holds that list to the default
+    markers of the linked module's source in both directions: no other number
+    or boolean of the four specs is of that shape.
+
+  **Required** follows the rule of the Prometheus operator's kinds above: a
+  field the API requires that the Go type writes whether or not it was
+  authored. Each must be authored; an authored empty value is a value, and the
+  API server's to refuse. A required field under a parent the author left out
+  is not asked for: the list follows what was authored.
+  - **A store's `provider`, and inside the provider that is authored
+    everything the API requires of it.** The list is not written by hand: it
+    is generated from the types of the linked module
+    (`zz_generated_externalsecrets_required.go`), 251 paths at this pin, over
+    every provider the API has. `provider.vault.server`,
+    `provider.aws.region`, `provider.aws.service`, `provider.webhook.url` and
+    `provider.kubernetes.auth.serviceAccount.name` are five of them. The
+    refusal names the path and says which of two things it is: `provider.vault.server:
+    required (the external-secrets API requires this field)`, and for the
+    `name` of a reference `provider.vault.caProvider.name: required (the
+    external-secrets API requires the name of what this refers to)`.
+  - **Four fields of a store the API would default, and the type always
+    writes.** A default is applied to an absent field, and the object carries
+    an empty one: the API's enumeration refuses an empty `version`, and an
+    empty mount path or a cache lifetime of zero is not what the default
+    would have been. So each must be written where its provider is authored:
+    `provider.vault.version` and `provider.openBao.version` (the API's
+    default is `v2`), `provider.vault.auth.cert.path` (`cert`) and
+    `provider.onepasswordSDK.cache.ttl` (`5m`). **A Vault store therefore
+    writes its `version`**: `provider.vault.version: required (the object
+    always carries this field, so the external-secrets API's default v2 never
+    applies: write the value)`. The four are generated into the same file, in
+    a list of their own.
+  - An `externalsecret` has no required top-level field. Of what is authored:
+    a `data` entry's `secretKey`, `remoteRef` and its `key`; the `key` of an
+    `extract`; the `source` and `target` of a `rewrite`'s `regexp` and the
+    `template` of its `transform`; the `kind` and `name` of a `generatorRef`;
+    of `syncWindows` its `kind` and `windows`, and a window's `schedule` and
+    `duration`; of a `target.manifest` its `apiVersion` and `kind`; of a
+    ConfigMap or Secret a template is read from
+    (`target.template.templateFrom[]`) its `name`, its `items` and an item's
+    `key`. 23 paths.
+  - A `clusterexternalsecret`: `externalSecretSpec`, and under it everything
+    an `externalsecret` requires. 24 paths.
+
+  `TestExternalSecretsKinds_RequiredMatchSource` holds the three lists to the
+  source of the linked module, which ships no CRD: the markers its CRDs are
+  generated from are read from the Go files. A field counts as required where
+  its json tag has no `omitempty` and it carries no optional marker, and as
+  written unauthored where the Go type encodes it when it is unset.
+  `TestExternalSecretsKinds_StoreRequiredIsGenerated` fails where the
+  generated file and that derivation differ, in either direction and for
+  either list, and names the path; a dependency bump that adds, drops or moves
+  one fails there. Regenerate with `UPDATE_EXTERNALSECRETS_REQUIRED=1 go test
+  ./pkg/oam/builtin/components/ -run
+  TestExternalSecretsKinds_StoreRequiredIsGenerated`. No field of the four
+  specs is required and omitted by the type when unauthored at this pin; the
+  same test fails on the first one a bump brings.
+
+  **The API's count and expression rules.** Every rule the source declares on
+  a type these specs reach is classified in `TestExternalSecretsKinds_Rules`,
+  which fails on one that is added or reworded. **Checked:**
+  - a store configures exactly one provider (`provider: configures no
+    provider; the API takes exactly one`; `provider: configures 2 providers
+    (aws, vault); the API takes exactly one`). A provider key written as
+    `null` configures nothing, as on the API server;
+  - a generator is not named as the source of one key of `data`. The API
+    takes exactly one of `storeRef` and `generatorRef` in that `sourceRef`,
+    and the type writes `storeRef` whether or not it was authored
+    (`data[0].sourceRef.generatorRef: cannot be carried: the API takes
+    exactly one of storeRef and generatorRef here, and the object always
+    carries a storeRef; read from a generator with
+    dataFrom[].sourceRef.generatorRef`). A source of `dataFrom` takes a
+    generator. On a `clusterexternalsecret` both paths are under
+    `externalSecretSpec`.
+
+  **Not checked**, and the API server's to refuse:
+  - the count rule on ten other types, each "exactly one of these fields": a
+    `rewrite`, the `sourceRef` of a `dataFrom` entry, and eight blocks of
+    single providers (an authentication method, a reference, how a Yandex
+    provider fetches an entry). The minimum of one on a `data` entry's
+    `sourceRef` is met by the `storeRef` the object always carries;
+  - the thirteen rules written as expressions, each on one provider: Barbican
+    (four), Pulumi (two), Secret Server (two), AWS, `crd`, Doppler, GitHub and
+    Nebius;
+  - every other value rule of the API: enumerations, patterns, lengths and
+    minima;
+  - **the rules of the operator's validating webhook,** which refuses more
+    than the CRDs do: an external secret with neither `data` nor `dataFrom`,
+    two `data` entries with one `secretKey`, a `deletionPolicy` its
+    `creationPolicy` does not allow, a template of a bootstrap-token Secret
+    or of a service-account-token Secret that names its service account, a
+    `dataFrom` entry that sets none or several of its sources; a store whose
+    `namespaceRegexes` do not compile, whose `refreshInterval` is no
+    duration, or whose provider refuses its own configuration. Launcher
+    repeats none of them, so
+    an `externalsecret` with no property builds, and is refused at apply where
+    the webhook runs.
+
+  **What the type writes unauthored.** An empty block, `{}`, where the type
+  holds one by value and the API does not require it: an external secret's
+  `secretStoreRef` and `target`, a `clusterexternalsecret`'s
+  `externalSecretMetadata`, an AWS provider's `auth` and a Vault provider's
+  `tls`, among others. The API accepts each.
+  `TestExternalSecretsKinds_WrittenUnauthored` pins those five.
+
+  **Policy.**
+  - **A credential written into a store is refused under a policy that
+    forbids explicit secrets.** A few providers take a credential as a
+    `value` beside the `secretRef` that names a Secret holding it, and the
+    object is in the build's output: `provider.delinea.clientSecret.value:
+    holds the credential in the object, and the environment policy forbids
+    explicit secrets; name the key of a Secret created out of band in
+    provider.delinea.clientSecret.secretRef instead`. The message quotes
+    nothing of the value. Refused: `provider.beyondtrust.auth.apiKey`,
+    `.auth.certificateKey` and `.auth.clientSecret`,
+    `provider.delinea.clientSecret`, `provider.scaleway.secretKey`,
+    `provider.secretserver.password` and `.token`. A policy that allows
+    explicit secrets, one that does not answer the question and no policy
+    build it.
+  - **The same union holds an identifier on seven other fields, which are not
+    refused:** `provider.barbican.auth.applicationCredentialID` and
+    `.auth.username`, `provider.beyondtrust.auth.certificate` and
+    `.auth.clientId`, `provider.delinea.clientId`,
+    `provider.scaleway.accessKey` and `provider.secretserver.username`.
+    `TestExternalSecretsKinds_InlineValues` finds every string `value` beside
+    a `secretRef` in the linked module (14 at this pin) and fails on one that
+    is in neither list.
+  - **The data of the `fake` provider is refused under the same policy.**
+    `provider.fake.data` is nothing but the values the store serves, and the
+    provider has no reference to a Secret. The API also requires the field,
+    and the two refusals come in this order: a `fake` provider with no `data`
+    is refused as a required field, under every policy and under none; one
+    with entries is refused as an explicit secret under a policy that forbids
+    them; `data: []` passes both. `TestSecretStoreKinds_FakeData` pins the
+    order.
+  - **Text in which a reference and a literal look alike is not checked,** on
+    any of the four and under any policy: a header or the body of a `webhook`
+    provider's request, a header of a `vault` provider, the user part of a
+    provider's URL, and the template of the Secret an external secret writes
+    (`target.template.data`, a `templateFrom` literal, the template's
+    metadata). A secret written there is in the build's output.
+  - **No field of an external secret is a credential, and none is checked.**
+    An `externalsecret` and a `clusterexternalsecret` name what is read and
+    where it is written; `ApplyPolicy` enforces nothing and fills nothing on
+    either, and each builds the same under every policy and under none.
+  - **Hosts are not checked.** A host these objects name is one the operator
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: the server, URL, host or endpoint of every provider
+    (`provider.vault.server`, `provider.webhook.url`,
+    `provider.kubernetes.server.url`, `provider.azurekv.vaultUrl`,
+    `provider.conjur.url`, `provider.onepassword.connectHost` and the others).
+  - A nil policy checks nothing.
+
+  **The store of an external secret is the author's.** `secretStoreRef` names
+  a store by `name` and `kind`; launcher points it at no component, fills
+  none from the cluster's capability and does not look for the store in the
+  document. To have a `secretstore` or `clustersecretstore` component serve
+  an `externalsecret` component, name its object: the component name, or its
+  `objectName`. The API reads a `secretStoreRef` without a `kind` as a
+  SecretStore of the ExternalSecret's namespace. The Secret `target` names is
+  the operator's to create, and the component emits none.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  The object also carries the component label, whose value is the component's
+  (see "Component label and ownership" in the OAM model). The labels of the
+  ExternalSecrets a ClusterExternalSecret creates are its
+  `externalSecretMetadata`, and those of the Secret an external secret writes
+  its `target.template.metadata`: the operator applies both, and launcher adds
+  nothing to either.
+
+  **Beside the `external-secret` trait.** The trait derives an ExternalSecret
+  for the workload it is attached to, from a few properties and a store it
+  names itself or takes from the cluster's `external-secret` capability, names
+  it after its `secretName`, and mounts or injects the Secret into the
+  workload. The `externalsecret` kind is the authored object, for what the
+  trait does not express: the whole spec, and an ExternalSecret that belongs
+  to no workload. The two type names differ (`external-secret`,
+  `externalsecret`). The two objects are one kind: a trait's and a
+  component's given one name in one namespace are refused (`generated-object
+  collision: ExternalSecret.external-secrets.io "default/app-credentials" is
+  generated by both …`).
+
+  **Not covered.** The operator's other APIs: its generators and its
+  PushSecret. Whether what is referred to exists (a store, a Secret and its
+  key, a ServiceAccount, a ConfigMap, a generator, a namespace), and whether
+  the operator can reach what a store names. The objects' status is the
+  operator's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -7026,6 +7279,8 @@ five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`
 `cilium-clusterwidenetworkpolicy`,
 the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`),
+the four kinds of the External Secrets Operator's API (`secretstore`,
+`clustersecretstore`, `externalsecret`, `clusterexternalsecret`),
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no

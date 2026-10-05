@@ -65,11 +65,40 @@ func monitoringFieldMarkers(t *testing.T) map[string]fieldMarkers {
 // its type's name.
 func packageFieldMarkers(t *testing.T, dir string) map[string]fieldMarkers {
 	t.Helper()
+	out := map[string]fieldMarkers{}
+	sourceStructs(t, dir, func(typ *ast.TypeSpec, _ *ast.CommentGroup, st *ast.StructType) {
+		for _, field := range st.Fields.List {
+			markers := markersOf(field.Doc)
+			for _, fieldName := range sourceFieldNames(field) {
+				out[typ.Name.Name+"."+fieldName] = markers
+			}
+		}
+	})
+	return out
+}
+
+// sourceFieldNames returns the Go names one field declaration declares: its
+// identifiers, or the name of its type where it is embedded.
+func sourceFieldNames(field *ast.Field) []string {
+	names := make([]string, 0, len(field.Names))
+	for _, ident := range field.Names {
+		names = append(names, ident.Name)
+	}
+	if len(names) == 0 {
+		names = append(names, embeddedTypeName(field.Type))
+	}
+	return names
+}
+
+// sourceStructs parses the Go files of the package in dir, its tests left out,
+// and visits every struct type they declare, with the comment of its
+// declaration.
+func sourceStructs(t *testing.T, dir string, visit func(typ *ast.TypeSpec, doc *ast.CommentGroup, st *ast.StructType)) {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read the package in %s: %v", dir, err)
 	}
-	out := map[string]fieldMarkers{}
 	fset := token.NewFileSet()
 	for _, entry := range entries {
 		name := entry.Name()
@@ -91,23 +120,14 @@ func packageFieldMarkers(t *testing.T, dir string) map[string]fieldMarkers {
 				if !ok {
 					continue
 				}
-				for _, field := range st.Fields.List {
-					markers := markersOf(field.Doc)
-					names := make([]string, 0, len(field.Names))
-					for _, ident := range field.Names {
-						names = append(names, ident.Name)
-					}
-					if len(names) == 0 {
-						names = append(names, embeddedTypeName(field.Type))
-					}
-					for _, fieldName := range names {
-						out[typ.Name.Name+"."+fieldName] = markers
-					}
+				doc := typ.Doc
+				if doc == nil {
+					doc = gen.Doc
 				}
+				visit(typ, doc, st)
 			}
 		}
 	}
-	return out
 }
 
 // markersOf reads the markers of one field comment.

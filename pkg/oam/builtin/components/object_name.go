@@ -8,6 +8,7 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -208,6 +209,10 @@ func certManagerKind(kind string) schema.GroupKind {
 
 func gatewayAPIKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: kind}
+}
+
+func externalSecretsKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: esv1.Group, Kind: kind}
 }
 
 func fluxSourceKind(kind string) schema.GroupKind {
@@ -514,6 +519,28 @@ func (h *ReferenceGrantHandler) ComponentObject() (schema.GroupKind, oam.ObjectS
 // ComponentObject declares the backendtlspolicy kind's BackendTLSPolicy.
 func (h *BackendTLSPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return gatewayAPIKind("BackendTLSPolicy"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the secretstore kind's SecretStore.
+func (h *SecretStoreHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return externalSecretsKind(esv1.SecretStoreKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the clustersecretstore kind's ClusterSecretStore,
+// which is cluster-scoped.
+func (h *ClusterSecretStoreHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return externalSecretsKind(esv1.ClusterSecretStoreKind), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the externalsecret kind's ExternalSecret.
+func (h *ExternalSecretHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return externalSecretsKind(esv1.ExtSecretKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the clusterexternalsecret kind's
+// ClusterExternalSecret, which is cluster-scoped.
+func (h *ClusterExternalSecretHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return externalSecretsKind(esv1.ClusterExtSecretKind), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

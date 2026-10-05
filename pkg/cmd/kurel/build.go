@@ -354,6 +354,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"listenerset":      &components.ListenerSetHandler{},
 		"referencegrant":   &components.ReferenceGrantHandler{},
 		"backendtlspolicy": &components.BackendTLSPolicyHandler{},
+
+		"secretstore":           &components.SecretStoreHandler{},
+		"clustersecretstore":    &components.ClusterSecretStoreHandler{},
+		"externalsecret":        &components.ExternalSecretHandler{},
+		"clusterexternalsecret": &components.ClusterExternalSecretHandler{},
 	}
 }
 

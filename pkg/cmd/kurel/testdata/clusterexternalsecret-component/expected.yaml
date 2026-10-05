@@ -1,0 +1,46 @@
+apiVersion: external-secrets.io/v1
+kind: ClusterExternalSecret
+metadata:
+  labels:
+    launcher.gokure.dev/component: team-credentials
+  name: team-credentials
+spec:
+  externalSecretMetadata:
+    labels:
+      team: payments
+  externalSecretName: team-credentials
+  externalSecretSpec:
+    data:
+    - remoteRef:
+        key: prod/team
+        property: token
+      secretKey: TOKEN
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: vault-cluster-store
+    target:
+      name: team-credentials
+  namespaceSelectors:
+  - matchLabels:
+      team: payments
+  refreshTime: 1m0s
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterExternalSecret
+metadata:
+  labels:
+    launcher.gokure.dev/component: ca
+  name: shared-ca
+spec:
+  externalSecretMetadata: {}
+  externalSecretSpec:
+    dataFrom:
+    - extract:
+        key: shared/ca
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: vault-cluster-store
+    target: {}
+  namespaces:
+  - payments
+  - billing

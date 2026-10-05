@@ -1076,6 +1076,41 @@ its text:
   - The pods a controller starts for a Gateway are not sized by the object, so the
     policy's maxima have nothing to hold. Labels and annotations are the `labels` and
     `annotations` properties, as on every kind component.
+- **Shipped: the four kinds of the External Secrets Operator, `external-secrets.io/v1`,**
+  `secretstore`, `clustersecretstore`, `externalsecret` and `clusterexternalsecret`
+  (`secretstore.go`, `clustersecretstore.go`, `externalsecret.go`,
+  `clusterexternalsecret.go`, with what they share in `externalsecrets_common.go`), each
+  the strict projection of its spec type, declaring its object and taking `objectName`.
+  The two cluster kinds are cluster-scoped. The stores are built on `policyHeldKind`,
+  the two external-secret kinds on `policyFreeKind`.
+  - **No capability is required and nothing gates them:** on a cluster without the
+    operator's CRDs the component builds and the object is refused at apply. The
+    cluster's `external-secret` capability is the trait's; the kinds do not read it,
+    and an `externalsecret` names its own store.
+  - The required lists follow the rule above, read from the Go source of the linked
+    module, which ships no CRD. **A store's list is generated** (251 paths over every
+    provider at this pin, in `zz_generated_externalsecrets_required.go`), and a test
+    fails where the file and the derivation differ. Four more fields of a store are
+    ones the API would default and the type always writes, so the default never
+    applies and the value must be written: **a Vault store writes its `version`.**
+  - An authored `false` or `0` the type would omit and the API would replace with
+    another default is refused, on three fields of single providers.
+  - Of the API's count and expression rules two are checked: a store configures exactly
+    one provider, and a `data` entry's `sourceRef` names no generator (the object
+    always carries its `storeRef`; `dataFrom` takes a generator). The others, and what
+    the operator's validating webhook adds (an external secret with neither `data` nor
+    `dataFrom`, among others), are left to the API server. A test fails on a rule of
+    the linked source that is neither listed as checked nor as left.
+  - **A credential written into a store is refused under an environment policy that
+    forbids explicit secrets:** the `value` of seven credential fields that also take a
+    reference to a Secret, and the data of the `fake` provider. An identifier in the
+    same shape of field is not. **Not checked, under any policy:** a webhook's headers
+    and body, a Vault provider's headers, the user part of a URL and the template of
+    the Secret an external secret writes, where a reference and a literal look alike.
+    **No host these objects name is held to the allowed registries** (a provider's
+    server, URL or endpoint): none is an artifact source.
+  - A trait's ExternalSecret and an `externalsecret` component's are one kind: given
+    one name in one namespace they are refused as a collision.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
   `kubernetes.io/service-name` label, which a kind component could not carry before
   the kinds took `labels` (above). Its inventory row stays `held` until the kind is
@@ -1281,7 +1316,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`) | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `secretstore`, `clustersecretstore`, `externalsecret` and `clusterexternalsecret` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

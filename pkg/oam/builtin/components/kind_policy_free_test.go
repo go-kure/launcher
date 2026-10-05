@@ -12,6 +12,7 @@ import (
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -36,10 +37,11 @@ import (
 // PodDisruptionBudget, the four kinds of the Prometheus operator's API, the
 // four of Cilium's BGP control plane, five more of Cilium's API (a CIDR
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
-// policy and a node configuration) and the five kinds of the Gateway API's
-// infrastructure objects. The three kinds of cert-manager's API are held here
-// too: the policy reaches one part of each (held), and everything else of them
-// is the helper's.
+// policy and a node configuration), the five kinds of the Gateway API's
+// infrastructure objects and the two external-secret kinds of the External
+// Secrets Operator's API. The three kinds of cert-manager's API and that
+// operator's two stores are held here too: the policy reaches one part of
+// each (held), and everything else of them is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -588,6 +590,35 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: backendTLSPolicyMinimal(),
 		full:    backendTLSPolicyFull(),
 	},
+	{
+		component: "secretstore", handler: &components.SecretStoreHandler{},
+		gvk: esv1.SchemeGroupVersion.WithKind(esv1.SecretStoreKind),
+		typ: reflect.TypeFor[esv1.SecretStoreSpec](), namespaced: true, held: true,
+		minimal: secretStoreMinimal(),
+		full:    secretStoreFull(),
+	},
+	{
+		component: "clustersecretstore", handler: &components.ClusterSecretStoreHandler{},
+		gvk: esv1.SchemeGroupVersion.WithKind(esv1.ClusterSecretStoreKind),
+		typ: reflect.TypeFor[esv1.SecretStoreSpec](), held: true,
+		minimal: secretStoreMinimal(),
+		full:    secretStoreFull(),
+	},
+	{
+		component: "externalsecret", handler: &components.ExternalSecretHandler{},
+		gvk: esv1.SchemeGroupVersion.WithKind(esv1.ExtSecretKind),
+		typ: reflect.TypeFor[esv1.ExternalSecretSpec](), namespaced: true,
+		// The API requires no field of an ExternalSecret's spec.
+		minimal: map[string]any{},
+		full:    externalSecretFull(),
+	},
+	{
+		component: "clusterexternalsecret", handler: &components.ClusterExternalSecretHandler{},
+		gvk:     esv1.SchemeGroupVersion.WithKind(esv1.ClusterExtSecretKind),
+		typ:     reflect.TypeFor[esv1.ClusterExternalSecretSpec](),
+		minimal: clusterExternalSecretOf(map[string]any{}),
+		full:    clusterExternalSecretFull(),
+	},
 }
 
 // egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
@@ -917,6 +948,27 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		".Spec.IssuerConfig.Vault.Auth.Kubernetes.ServiceAccountRef.TokenAudiences",
 		".Spec.IssuerConfig.SelfSigned", ".Spec.IssuerConfig.Venafi.TPP.CABundleSecretRef",
 	}
+	// A SecretStore and a ClusterSecretStore hold one spec type, and an
+	// ExternalSecret's spec is the one a ClusterExternalSecret holds under its
+	// own.
+	storeReaches := []string{
+		".Spec.Provider", ".Spec.Provider.Vault", ".Spec.Provider.Vault.Path", ".Spec.Provider.Vault.Auth",
+		".Spec.Provider.Vault.Auth.Kubernetes.ServiceAccountRef", ".Spec.Provider.Vault.Auth.Kubernetes.ServiceAccountRef.Audiences",
+		".Spec.Provider.Vault.CAProvider", ".Spec.Provider.Vault.Headers", ".Spec.RetrySettings", ".Spec.RetrySettings.MaxRetries",
+		".Spec.RefreshInterval", ".Spec.Conditions", ".Spec.Conditions[0].NamespaceSelector.MatchLabels", ".Spec.Conditions[0].Namespaces",
+	}
+	externalSecretReaches := func(at string) []string {
+		var out []string
+		for _, path := range []string{
+			".Target.Template", ".Target.Template.Metadata.Labels", ".Target.Template.Data", ".Target.Template.TemplateFrom",
+			".Target.Template.TemplateFrom[0].ConfigMap.Items", ".RefreshInterval", ".SyncWindows", ".SyncWindows.Windows",
+			".Data", ".Data[1].SourceRef", ".DataFrom", ".DataFrom[0].Extract", ".DataFrom[1].Find.Name", ".DataFrom[1].Find.Tags",
+			".DataFrom[1].Rewrite", ".DataFrom[1].Rewrite[0].Regexp", ".DataFrom[2].SourceRef.GeneratorRef",
+		} {
+			out = append(out, at+path)
+		}
+		return out
+	}
 	reaches := map[string][]string{
 		"storageclass":          {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
 		"volumeattributesclass": {".Parameters"},
@@ -1031,6 +1083,13 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.TargetRefs", ".Spec.TargetRefs[1].SectionName", ".Spec.Validation.CACertificateRefs",
 			".Spec.Validation.SubjectAltNames", ".Spec.Options",
 		},
+		"secretstore":        storeReaches,
+		"clustersecretstore": storeReaches,
+		"externalsecret":     externalSecretReaches(".Spec"),
+		"clusterexternalsecret": append(externalSecretReaches(".Spec.ExternalSecretSpec"),
+			".Spec.ExternalSecretMetadata.Labels", ".Spec.NamespaceSelector", ".Spec.NamespaceSelectors",
+			".Spec.NamespaceSelectors[1].MatchExpressions[0].Values", ".Spec.Namespaces", ".Spec.RefreshInterval",
+		),
 	}
 	type copyCase struct {
 		name      string
@@ -1736,6 +1795,25 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"two spellings", withProperty(backendTLSPolicyMinimal(), "Validation", map[string]any{"hostname": "other.example.com"}), "sets the same field as"},
 		},
 	}
+	// The External Secrets Operator's kinds keep their cases beside their
+	// fixtures.
+	for _, kind := range secretStores {
+		for _, tc := range secretStoreRefusals(notA) {
+			cases[kind.component] = append(cases[kind.component], refusal(tc))
+		}
+	}
+	for _, kind := range externalSecrets {
+		for _, tc := range externalSecretRefusals(notA, kind.upstream, kind.at) {
+			cases[kind.component] = append(cases[kind.component], refusal(tc))
+		}
+	}
+	cases["clusterexternalsecret"] = append(cases["clusterexternalsecret"],
+		refusal{"no properties", nil, "externalSecretSpec: required"},
+		refusal{"null spec", map[string]any{"externalSecretSpec": nil}, "externalSecretSpec: required"},
+		refusal{"a name alone", map[string]any{"externalSecretName": "web-credentials"}, "externalSecretSpec: required"},
+		refusal{"refresh time a number", withProperty(clusterExternalSecretOf(map[string]any{}), "refreshTime", 60), notA},
+		refusal{"null namespace", withProperty(clusterExternalSecretOf(map[string]any{}), "namespaces", []any{"shop", nil}), "namespaces[1]"},
+	)
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
 			t.Errorf("%s has no refusal cases", kind.component)

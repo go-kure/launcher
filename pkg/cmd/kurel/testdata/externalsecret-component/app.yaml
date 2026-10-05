@@ -1,0 +1,40 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: app-credentials
+      type: externalsecret
+      properties:
+        secretStoreRef:
+          name: vault-cluster-store
+          kind: ClusterSecretStore
+        refreshInterval: 1h
+        target:
+          name: app-credentials
+          creationPolicy: Owner
+          template:
+            type: Opaque
+            metadata:
+              labels:
+                team: payments
+        data:
+          - secretKey: PASSWORD
+            remoteRef:
+              key: prod/app
+              property: password
+        dataFrom:
+          - extract:
+              key: prod/app-extra
+    - name: bundle
+      type: externalsecret
+      properties:
+        objectName: tls-bundle
+        secretStoreRef:
+          name: vault
+        dataFrom:
+          - find:
+              name:
+                regexp: ^tls-
