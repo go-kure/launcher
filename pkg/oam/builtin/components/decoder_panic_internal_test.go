@@ -5,7 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	kureio "github.com/go-kure/kure/pkg/io"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
@@ -30,25 +32,22 @@ const (
 
 var ciliumPolicyKinds = []string{"CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"}
 
-// wantDecoderPanicError fails unless err is the error a recovered decoder panic
-// is turned into and holds each of wants.
-func wantDecoderPanicError(t *testing.T, err error, wants ...string) {
+// wantDecoderPanicReported fails unless err is the parser's report of a decoder
+// panic (go-kure/kure#1009) and holds each of wants.
+func wantDecoderPanicReported(t *testing.T, err error, wants ...string) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("got no error, want the decoder's panic reported as one")
 	}
-	if !errors.Is(err, errDecoderPanicked) {
-		t.Fatalf("error is not errDecoderPanicked: %v", err)
-	}
-	for _, want := range append(wants, "nil pointer dereference") {
+	for _, want := range append(wants, "the decoder panicked on", "nil pointer dereference") {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not hold %q: %v", want, err)
 		}
 	}
 }
 
-// TestDecodeManifestDocuments_DecoderPanicIsAnError: a document kure's parser
-// panics on is a build error that names the document by its position, kind and
+// TestDecodeManifestDocuments_DecoderPanicIsAnError: a document the decoder of
+// its kind panics on is a build error that names the object by its kind and
 // name, for both Cilium kinds, and the same document with the field written
 // decodes.
 func TestDecodeManifestDocuments_DecoderPanicIsAnError(t *testing.T) {
@@ -56,7 +55,7 @@ func TestDecodeManifestDocuments_DecoderPanicIsAnError(t *testing.T) {
 		for name, field := range map[string]string{"absent": icmpTypeAbsent, "null": icmpTypeNull} {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				_, err := decodeManifestDocuments([]byte(panickingPolicy(kind, field)))
-				wantDecoderPanicError(t, err, `document 1 (`+kind+` "demo/p")`)
+				wantDecoderPanicReported(t, err, kind+` "demo/p"`)
 			})
 		}
 		t.Run(kind+"/control", func(t *testing.T) {
@@ -71,52 +70,54 @@ func TestDecodeManifestDocuments_DecoderPanicIsAnError(t *testing.T) {
 	}
 }
 
-// TestDecodeManifestDocuments_DecoderPanicNamesTheDocument: the document is
-// named by its place among the documents that are not empty, and a list by its
-// kind, which has no name.
-func TestDecodeManifestDocuments_DecoderPanicNamesTheDocument(t *testing.T) {
+// TestDecodeManifestDocuments_DecoderPanicNamesTheObject: the error names the
+// object wherever it sits in the input, and an item of a list by its position
+// in the list as well.
+func TestDecodeManifestDocuments_DecoderPanicNamesTheObject(t *testing.T) {
 	configMap := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n"
 	policy := panickingPolicy("CiliumNetworkPolicy", icmpTypeAbsent)
 	item := "  - " + strings.ReplaceAll(strings.TrimSuffix(policy, "\n"), "\n", "\n    ") + "\n"
-	cases := map[string]struct{ raw, want string }{
-		"second document":             {configMap + "---\n" + policy, `document 2 (CiliumNetworkPolicy "demo/p")`},
-		"empty documents not counted": {"---\n# nothing\n---\n" + configMap + "---\n---\n" + policy, `document 2 (CiliumNetworkPolicy "demo/p")`},
-		"item of a List":              {"apiVersion: v1\nkind: List\nitems:\n" + item, "document 1 (List)"},
-		"item of a typed list":        {"apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicyList\nitems:\n" + item, "document 1 (CiliumNetworkPolicyList)"},
+	const object = `CiliumNetworkPolicy "demo/p"`
+	cases := map[string]struct {
+		raw   string
+		wants []string
+	}{
+		"second document":      {configMap + "---\n" + policy, []string{object}},
+		"item of a List":       {"apiVersion: v1\nkind: List\nitems:\n" + item, []string{"item 0 of List", object}},
+		"item of a typed list": {"apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicyList\nitems:\n" + item, []string{"item 0 of CiliumNetworkPolicyList", object}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := decodeManifestDocuments([]byte(tc.raw))
-			wantDecoderPanicError(t, err, tc.want)
+			wantDecoderPanicReported(t, err, tc.wants...)
 		})
 	}
 }
 
-// TestDecodeManifestDocuments_OrdinaryErrorBeforeADecoderPanic: a document that
-// does not decode, ahead of one the parser panics on, is reported with its own
-// error. The parse of the whole input, which gathers every error, would panic
-// on the later document; its turn comes once the first decodes.
-func TestDecodeManifestDocuments_OrdinaryErrorBeforeADecoderPanic(t *testing.T) {
+// TestDecodeManifestDocuments_DecoderPanicBesideOtherErrors: a document the
+// decoder panics on is one bad document among the others. The error holds every
+// document's own, in the order of the input, whichever comes first.
+func TestDecodeManifestDocuments_DecoderPanicBesideOtherErrors(t *testing.T) {
 	bad := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: d\nspec:\n  replicas: many\n"
-	_, err := decodeManifestDocuments([]byte(bad + "---\n" + panickingPolicy("CiliumNetworkPolicy", icmpTypeAbsent)))
-	if err == nil {
-		t.Fatal("got no error")
-	}
-	if errors.Is(err, errDecoderPanicked) {
-		t.Fatalf("the first document's own error is lost to the later document's panic: %v", err)
-	}
-	if !strings.Contains(err.Error(), "replicas") {
-		t.Errorf("error does not name the first document's field: %v", err)
+	policy := panickingPolicy("CiliumNetworkPolicy", icmpTypeAbsent)
+	for name, raw := range map[string]string{
+		"a document that does not decode first": bad + "---\n" + policy,
+		"the panicking document first":          policy + "---\n" + bad,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeManifestDocuments([]byte(raw))
+			wantDecoderPanicReported(t, err, "replicas", `CiliumNetworkPolicy "demo/p"`)
+		})
 	}
 }
 
 // TestDecodeManifestDocuments_FailureAheadOfMalformedYAML: input that stops being
-// YAML after its first documents is read in order. A document ahead of that
-// point that the parser panics on is the error, named as it is alone; one that
-// does not decode, ahead of both, is reported with its own error; and input
-// whose only fault is the YAML keeps the parser's error for it.
+// YAML after its first documents is an error that holds the errors of the
+// documents ahead of that point beside the YAML error; input whose only fault is
+// the YAML keeps the parser's error for it.
 func TestDecodeManifestDocuments_FailureAheadOfMalformedYAML(t *testing.T) {
 	const malformed = "---\nkey: [unclosed\n"
+	const yamlError = "error converting YAML to JSON"
 	bad := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: d\nspec:\n  replicas: many\n"
 	configMap := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n"
 	policy := panickingPolicy("CiliumNetworkPolicy", icmpTypeAbsent)
@@ -128,29 +129,65 @@ func TestDecodeManifestDocuments_FailureAheadOfMalformedYAML(t *testing.T) {
 
 	t.Run("a panicking document", func(t *testing.T) {
 		_, err := decodeManifestDocuments([]byte(configMap + "---\n" + policy + malformed))
-		wantDecoderPanicError(t, err, `document 2 (CiliumNetworkPolicy "demo/p")`)
+		wantDecoderPanicReported(t, err, `CiliumNetworkPolicy "demo/p"`, yamlError)
 	})
 	t.Run("a document that does not decode, then a panicking one", func(t *testing.T) {
 		_, err := decodeManifestDocuments([]byte(bad + "---\n" + policy + malformed))
-		if err == nil {
-			t.Fatal("got no error")
-		}
-		if errors.Is(err, errDecoderPanicked) {
-			t.Fatalf("the first document's own error is lost to the later document's panic: %v", err)
-		}
-		if !strings.Contains(err.Error(), "replicas") {
-			t.Errorf("error does not name the first document's field: %v", err)
-		}
+		wantDecoderPanicReported(t, err, "replicas", `CiliumNetworkPolicy "demo/p"`, yamlError)
 	})
 	t.Run("malformed YAML alone", func(t *testing.T) {
 		raw := []byte(configMap + malformed)
 		_, err := decodeManifestDocuments(raw)
-		_, want := parseManifests(raw, manifestParseOptions)
+		_, want := kureio.ParseYAMLWithOptions(raw, manifestParseOptions)
 		if err == nil || want == nil {
 			t.Fatalf("decodeManifestDocuments: %v, the parser: %v; want an error from both", err, want)
 		}
-		if errors.Is(err, errDecoderPanicked) || err.Error() != want.Error() {
+		if err.Error() != want.Error() {
 			t.Errorf("error = %v, want the parser's own for the input: %v", err, want)
+		}
+	})
+}
+
+// TestDecodeManifestDocuments_MalformedJSONIsAnError: malformed JSON that the
+// decoder cannot read past is a build error. The parser returned the decoder's
+// error for it on every further call and never the end of the input, so the
+// decode did not return (go-kure/kure#1012): alone, after one JSON document,
+// and after two, from where the decoder reads JSON only. Malformed JSON behind
+// a separator line was an error before and is one still.
+func TestDecodeManifestDocuments_MalformedJSONIsAnError(t *testing.T) {
+	const configMap = `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"c"}}` + "\n"
+	for name, raw := range map[string]string{
+		"alone":                    "{]",
+		"after one JSON document":  configMap + "{]",
+		"after two JSON documents": configMap + configMap + "{]",
+		"behind a separator line":  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n---\n{]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() {
+				_, err := decodeManifestDocuments([]byte(raw))
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("got no error, want the malformed JSON reported")
+				}
+				if !strings.Contains(err.Error(), "failed to decode document") {
+					t.Errorf("error is not the parser's for a document it cannot decode: %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				// A parse that reads on gathers one more error on every turn. It
+				// would grow for as long as the other tests run, so the test
+				// binary ends here.
+				panic("decodeManifestDocuments did not return on " + name)
+			}
+		})
+	}
+	t.Run("manifests component", func(t *testing.T) {
+		_, err := generateManifests(t, "demo", configMap+"{]")
+		if err == nil || !strings.Contains(err.Error(), "manifest source: parse manifests: ") {
+			t.Fatalf("error = %v, want the manifest source's parse error", err)
 		}
 	})
 }
@@ -163,20 +200,21 @@ func TestDecodeManifestDocuments_FailureAheadOfMalformedYAML(t *testing.T) {
 func TestRenderedAndAuthoredManifests_DecoderPanicIsAnError(t *testing.T) {
 	for _, kind := range ciliumPolicyKinds {
 		doc := panickingPolicy(kind, icmpTypeAbsent)
-		source := "manifest source: parse manifests: document 1 (" + kind + ` "demo/p")`
+		const source = "manifest source: parse manifests: "
+		object := kind + ` "demo/p"`
 		t.Run(kind+"/rendered chart", func(t *testing.T) {
 			_, err := decodeChartManifests([]byte(doc))
-			wantDecoderPanicError(t, err, "decoding rendered manifests: document 1 ("+kind+` "demo/p")`)
+			wantDecoderPanicReported(t, err, "decoding rendered manifests: ", object)
 		})
 		t.Run(kind+"/manifests component", func(t *testing.T) {
 			_, err := generateManifests(t, "demo", doc)
-			wantDecoderPanicError(t, err, source)
+			wantDecoderPanicReported(t, err, source, object)
 		})
 		t.Run(kind+"/crd component", func(t *testing.T) {
 			_, err := (&CRDHandler{}).ToApplicationConfig(&oam.Component{
 				Name: "c", Type: "crd", Properties: map[string]any{"inline": doc},
 			}, "demo")
-			wantDecoderPanicError(t, err, source)
+			wantDecoderPanicReported(t, err, source, object)
 		})
 		t.Run(kind+"/url source", func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -184,7 +222,7 @@ func TestRenderedAndAuthoredManifests_DecoderPanicIsAnError(t *testing.T) {
 			}))
 			defer srv.Close()
 			_, err := (&manifestSource{url: srv.URL}).resolve()
-			wantDecoderPanicError(t, err, source)
+			wantDecoderPanicReported(t, err, source, object)
 		})
 	}
 }
@@ -200,13 +238,16 @@ func TestPolicyObject_DecoderPanicIsAnError(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := policyObject(&unstructured.Unstructured{Object: object})
-			wantDecoderPanicError(t, err, "the object cannot be read")
+			wantDecoderPanicReported(t, err, "the object cannot be read", kind+` "demo/p"`)
 		})
 	}
 }
 
-// TestUndeclaredFields_DecoderPanicIsAnError: the strict decode over the same
-// scheme runs the same decoders, and reports the panic the same way.
+// TestUndeclaredFields_DecoderPanicIsAnError: the strict decode runs the same
+// decoders over the same scheme, called by launcher itself, and does not crash
+// on such a document either: the panic comes back as errDecoderPanicked. Every
+// reader parses a document first, so a build shows the parser's error for it;
+// this is the strict decode asked directly.
 func TestUndeclaredFields_DecoderPanicIsAnError(t *testing.T) {
 	for _, kind := range ciliumPolicyKinds {
 		t.Run(kind, func(t *testing.T) {
@@ -215,26 +256,11 @@ func TestUndeclaredFields_DecoderPanicIsAnError(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = undeclaredFields(doc)
-			wantDecoderPanicError(t, err)
-		})
-	}
-}
-
-// TestDocumentRef: a document is named by its position, with the kind and name
-// it states when it states them.
-func TestDocumentRef(t *testing.T) {
-	cases := map[string]struct{ doc, want string }{
-		"namespaced":     {`{"kind":"ConfigMap","metadata":{"name":"c","namespace":"demo"}}`, `document 3 (ConfigMap "demo/c")`},
-		"cluster-scoped": {`{"kind":"Namespace","metadata":{"name":"n"}}`, `document 3 (Namespace "n")`},
-		"no name":        {`{"kind":"List","items":[]}`, "document 3 (List)"},
-		"no kind":        {`{"metadata":{"name":"c"}}`, "document 3"},
-		"not an object":  {`[1]`, "document 3"},
-		"name no string": {`{"kind":"ConfigMap","metadata":{"name":7}}`, "document 3 (ConfigMap)"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := documentRef(2, []byte(tc.doc)); got != tc.want {
-				t.Errorf("documentRef = %q, want %q", got, tc.want)
+			if !errors.Is(err, errDecoderPanicked) {
+				t.Fatalf("error is not errDecoderPanicked: %v", err)
+			}
+			if !strings.Contains(err.Error(), "nil pointer dereference") {
+				t.Errorf("error does not hold the panic's value: %v", err)
 			}
 		})
 	}

@@ -367,7 +367,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
 | `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | missing | - | - | - |
 | `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | missing | - | - | - |
-| `metallb.CreateBGPPeer` | metallb.io/v1beta1 BGPPeer | missing | - | - | - |
+| `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | missing | - | - | - |
 | `metallb.CreateCommunity` | metallb.io/v1beta1 Community | missing | - | - | - |
 | `metallb.CreateConfigurationState` | metallb.io/v1beta1 ConfigurationState | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | missing | - | - | - |
@@ -4512,14 +4512,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a document the decoder of its kind panics on is a build error, not a crash. The API type
     of a registered kind may decode itself and not handle what was written: Cilium's ICMP
     field dereferences the `type` an `icmps` field of a `CiliumNetworkPolicy` or a
-    `CiliumClusterwideNetworkPolicy` left out. The error names the document by its position
-    among the documents that are not empty, its kind and its name, and holds the panic
-    (`decoding rendered manifests: document 2 (CiliumNetworkPolicy "demo/p"): the decoder
-    panicked on the document instead of refusing it …: runtime error: invalid memory address
-    or nil pointer dereference`); it does not name the field. The first such document ends
-    the decode, and a document ahead of it that does not decode is reported first, alone.
-    The same order holds when the input stops being YAML further down: such a document
-    ahead of that point is reported, not the YAML error after it;
+    `CiliumClusterwideNetworkPolicy` left out. Since go-kure/kure#1009 kure's parser reports
+    the panic itself, as that document's parse error. The error names the object by its kind
+    and its name and holds the panic (`decoding rendered manifests: parse error in Kubernetes
+    object: failed to decode object: the decoder panicked on CiliumNetworkPolicy "demo/p":
+    runtime error: invalid memory address or nil pointer dereference`); it names neither the
+    field nor the document's position, and an item of a list by its position in the list
+    (`item 0 of List`). Such a document is one bad document among the others: the error holds
+    every document's own, and the YAML error of input that stops being YAML further down.
+    Before that change launcher caught the panic itself, named the document by its position
+    (`document 2 (CiliumNetworkPolicy "demo/p")`) and reported that document alone;
+  - malformed JSON the decoder cannot read past is a build error: `{]`, alone or after JSON
+    documents. What follows it in the input is not read. Before go-kure/kure#1012 kure's
+    parser did not return on such input, and neither did the build;
+  - which kinds are registered is kure's to say. Since go-kure/kure#1007 a MetalLB `BGPPeer`
+    at `metallb.io/v1beta2`, the version MetalLB stores, is one, beside `v1beta1`.
+    **Breaking** for a chart or a manifest source that holds such a document, which was
+    emitted as rendered: it is now emitted as its Go type, so `spec.passwordSecret: {}` is
+    written where the document left the field out, and a field of the wrong type
+    (`holdTime: [1]`) is a build error. One that sets an undeclared field is still emitted as
+    rendered (*Undeclared fields*, below);
   - a list document where a `helm.sh/hook` annotation is involved is a build error naming the
     list: the annotation on the list's own metadata, or on one of its items (for a `v1` `List`,
     at every depth the parser flattens). Helm reads a hook on the rendered document's own
@@ -5633,7 +5645,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   So is an object the decoder of its kind panics on, which crashed the build before: a
   `CiliumNetworkPolicy` or `CiliumClusterwideNetworkPolicy` whose `icmps` field leaves its
   `type` out, for one (`passthrough: object CiliumNetworkPolicy "demo/p": the object cannot
-  be read, …: the decoder panicked on the document instead of refusing it …`). Every build
+  be read, …: the decoder panicked on CiliumNetworkPolicy "demo/p": …`, the parse error kure
+  gives such an object since go-kure/kure#1009). A MetalLB `BGPPeer` at `metallb.io/v1beta2`
+  is a registered kind since go-kure/kure#1007, so one that does not decode as that kind
+  (`holdTime: [1]`) is refused here too; it was emitted unread. Every build
   decodes the object, since the transform applies `NoopPolicy` when no policy is passed;
   only a config no policy was applied to, one a Go caller builds
   outside the transform, emits the object undecoded, as authored.
@@ -5696,9 +5711,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   claim no longer builds, and the output of other kinds gains the fields that had been
   dropped. The same known limit applies (a key inside a type that unmarshals itself, a
   CRD's `items` schema for one, is still dropped). A document the decoder of its kind
-  panics on is a build error naming the document, as it is there (`manifest source: parse
-  manifests: document 1 (CiliumNetworkPolicy "demo/p"): the decoder panicked on the
-  document instead of refusing it …`).
+  panics on is a build error naming the object, as it is there (`manifest source: parse
+  manifests: parse error in Kubernetes object: failed to decode object: the decoder
+  panicked on CiliumNetworkPolicy "demo/p": …`), and so is malformed JSON the decoder
+  cannot read past, on which the build did not return before go-kure/kure#1012. A MetalLB
+  `BGPPeer` at `metallb.io/v1beta2` is a registered kind since go-kure/kure#1007 and is
+  read as one, with what that changes (`helmtemplate`'s *Rendered objects*).
   An integer the object holds as one is written with its own digits, here as everywhere
   (`9007199254740993` as `9007199254740993`; `helmtemplate`'s *Rendered objects*). In an
   unstructured object an integer an int64 cannot hold is a float from the decode on, and is
