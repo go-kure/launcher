@@ -1,0 +1,51 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  labels:
+    launcher.gokure.dev/component: web-budget
+  name: web-budget
+  namespace: default
+spec:
+  maxUnavailable: 25%
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: In
+      values:
+      - frontend
+    matchLabels:
+      app: web
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  labels:
+    launcher.gokure.dev/component: quorum
+  name: quorum
+  namespace: default
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: quorum
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  labels:
+    launcher.gokure.dev/component: no-eviction
+  name: no-eviction
+  namespace: default
+spec:
+  maxUnavailable: 0
+  selector: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  labels:
+    launcher.gokure.dev/component: minimal
+  name: minimal
+  namespace: default
+spec: {}

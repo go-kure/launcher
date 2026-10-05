@@ -482,6 +482,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"csidriver", "ingressclass", "priorityclass", "runtimeclass", "storageclass",
 		"volumeattributesclass",
 		"cilium-networkpolicy", "httproute", "ingress", "networkpolicy",
+		"horizontalpodautoscaler", "poddisruptionbudget", "servicecidr",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

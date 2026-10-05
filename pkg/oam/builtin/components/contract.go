@@ -182,6 +182,21 @@ func (h *CiliumNetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *HorizontalPodAutoscalerHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("horizontalpodautoscaler")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *PodDisruptionBudgetHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("poddisruptionbudget")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ServiceCIDRHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("servicecidr")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

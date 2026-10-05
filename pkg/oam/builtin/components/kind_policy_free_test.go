@@ -14,10 +14,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -26,21 +28,44 @@ import (
 
 // The kind components of go-kure/launcher#790 to which no dimension of the
 // environment policy applies, built on one shared helper (policyFreeKind): the
-// cluster-scoped classes and the CSIDriver.
+// cluster-scoped classes, the CSIDriver, the ServiceCIDR and the
+// PodDisruptionBudget.
 
-// policyFreeKinds lists them. typ is the type the properties decode into: the
-// object itself for a kind with no spec type (wholeObject), its spec type
-// otherwise. minimal is the least a component may author, full a value of
-// every top-level field.
-var policyFreeKinds = []struct {
+// policyFreeKind is one of them. typ is the type the properties decode into:
+// the object itself for a kind with no spec type (wholeObject), its spec type
+// otherwise. namespaced says the object lands in the build namespace; the
+// others are cluster-scoped. minimal is the least a component may author, full
+// a value of every top-level field.
+type policyFreeKind struct {
 	component   string
 	handler     oam.ComponentHandler
 	gvk         schema.GroupVersionKind
 	typ         reflect.Type
 	wholeObject bool
+	namespaced  bool
 	minimal     map[string]any
 	full        map[string]any
-}{
+}
+
+// namespace is the namespace the kind's object carries when it is built for
+// the given one: that namespace, or none on a cluster-scoped object.
+func (k policyFreeKind) namespace(build string) string {
+	if k.namespaced {
+		return build
+	}
+	return ""
+}
+
+// scope is the scope the kind's handler declares for its object.
+func (k policyFreeKind) scope() oam.ObjectScope {
+	if k.namespaced {
+		return oam.ObjectScopeNamespaced
+	}
+	return oam.ObjectScopeCluster
+}
+
+// policyFreeKinds lists them.
+var policyFreeKinds = []policyFreeKind{
 	{
 		component: "storageclass", handler: &components.StorageClassHandler{},
 		gvk: storagev1.SchemeGroupVersion.WithKind("StorageClass"),
@@ -126,6 +151,30 @@ var policyFreeKinds = []struct {
 			"preventPodSchedulingIfMissing":      false,
 		},
 	},
+	{
+		component: "servicecidr", handler: &components.ServiceCIDRHandler{},
+		gvk:     networkingv1.SchemeGroupVersion.WithKind("ServiceCIDR"),
+		typ:     reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
+		minimal: map[string]any{"cidrs": []any{"10.96.0.0/16"}},
+		full:    map[string]any{"cidrs": []any{"10.96.0.0/16", "fd00:10:96::/112"}},
+	},
+	{
+		component: "poddisruptionbudget", handler: &components.PodDisruptionBudgetHandler{},
+		gvk: policyv1.SchemeGroupVersion.WithKind("PodDisruptionBudget"),
+		typ: reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), namespaced: true,
+		minimal: map[string]any{},
+		// The API allows minAvailable or maxUnavailable, not both; the kind
+		// leaves that to the API server, and the fixture sets every field.
+		full: map[string]any{
+			"minAvailable":   0,
+			"maxUnavailable": "25%",
+			"selector": map[string]any{
+				"matchLabels":      map[string]any{"app": "web"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"frontend", "edge"}}},
+			},
+			"unhealthyPodEvictionPolicy": "AlwaysAllow",
+		},
+	},
 }
 
 // policyFreeJSON is obj as the JSON tree it encodes to, numbers kept exact.
@@ -192,11 +241,12 @@ func TestPolicyFreeKinds_FullCoversEveryField(t *testing.T) {
 }
 
 // TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields: the object is the
-// kind's, cluster-scoped and named after the component, and beside that
-// identity it holds exactly what was authored: nothing with the least a
-// component may author, every field with the full fixture. A null field is an
-// unauthored one. The comparison is on the encoded object, so a field the
-// build dropped or added shows, whichever it is.
+// kind's, named after the component and in the build namespace or, for a
+// cluster-scoped kind, in none, and beside that identity it holds exactly what
+// was authored: nothing with the least a component may author, every field
+// with the full fixture. A null field is an unauthored one. The comparison is
+// on the encoded object, so a field the build dropped or added shows,
+// whichever it is.
 func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		withNulls := map[string]any{}
@@ -223,8 +273,8 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 				if got := obj.GetObjectKind().GroupVersionKind(); got != kind.gvk {
 					t.Errorf("GVK = %s, want %s", got, kind.gvk)
 				}
-				if obj.GetNamespace() != "" {
-					t.Errorf("namespace = %q, want none on a cluster-scoped object", obj.GetNamespace())
+				if want := kind.namespace(coreKindNamespace); obj.GetNamespace() != want {
+					t.Errorf("namespace = %q, want %q: the build namespace, or none on a cluster-scoped object", obj.GetNamespace(), want)
 				}
 				// The whole input, null entries included.
 				if after, err := json.Marshal(props); err != nil || !bytes.Equal(after, before) {
@@ -245,9 +295,21 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 				}
 				apiVersion, kindName := kind.gvk.ToAPIVersionAndKind()
 				want["apiVersion"], want["kind"] = apiVersion, kindName
-				want["metadata"] = map[string]any{"name": "fast"}
+				metadata := map[string]any{"name": "fast"}
+				if kind.namespaced {
+					metadata["namespace"] = coreKindNamespace
+				}
+				want["metadata"] = metadata
 
 				got := policyFreeJSON(t, obj)
+				// A type with a status always encodes one. It is the system's
+				// to write, so the object's must be unset.
+				if status := reflect.ValueOf(obj).Elem().FieldByName("Status"); status.IsValid() {
+					if !status.IsZero() {
+						t.Errorf("status = %+v, want none: no component authors a status", status.Interface())
+					}
+					delete(got, "status")
+				}
 				// Older apimachinery encodes an unset creation time as null.
 				if meta, ok := got["metadata"].(map[string]any); ok && meta["creationTimestamp"] == nil {
 					delete(meta, "creationTimestamp")
@@ -304,6 +366,11 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		"runtimeclass":          {".Overhead", ".Overhead.PodFixed", ".Scheduling.NodeSelector", ".Scheduling.Tolerations"},
 		"ingressclass":          {".Spec.Parameters", ".Spec.Parameters.APIGroup"},
 		"csidriver":             {".Spec.AttachRequired", ".Spec.VolumeLifecycleModes", ".Spec.TokenRequests"},
+		"servicecidr":           {".Spec.CIDRs"},
+		"poddisruptionbudget": {
+			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
+			".Spec.Selector.MatchExpressions", ".Spec.Selector.MatchExpressions[0].Values", ".Spec.UnhealthyPodEvictionPolicy",
+		},
 	}
 	type copyCase struct {
 		name      string
@@ -514,6 +581,28 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null mode", map[string]any{"volumeLifecycleModes": []any{"Persistent", nil}}, "volumeLifecycleModes[1]"},
 			{"two spellings", map[string]any{"fsGroupPolicy": "File", "FSGroupPolicy": "None"}, "sets the same field as"},
 		},
+		"servicecidr": {
+			{"no properties", nil, "cidrs: required"},
+			{"null cidrs", map[string]any{"cidrs": nil}, "cidrs: required"},
+			{"empty cidrs", map[string]any{"cidrs": []any{}}, "cidrs: required"},
+			{"unknown key", map[string]any{"cidrs": []any{"10.96.0.0/16"}, "cidr": "10.96.0.0/16"}, notA + "networking.k8s.io/v1 ServiceCIDRSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"cidrs": []any{"10.96.0.0/16"}}}, notA},
+			{"cidrs a string", map[string]any{"cidrs": "10.96.0.0/16"}, notA},
+			{"a block not a string", map[string]any{"cidrs": []any{10}}, notA},
+			{"null block", map[string]any{"cidrs": []any{"10.96.0.0/16", nil}}, "cidrs[1]"},
+			{"two spellings", map[string]any{"cidrs": []any{"10.96.0.0/16"}, "CIDRs": []any{"10.97.0.0/16"}}, "sets the same field as"},
+		},
+		"poddisruptionbudget": {
+			{"unknown key", map[string]any{"minAvailable": 1, "minReady": 1}, notA + "policy/v1 PodDisruptionBudgetSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"minAvailable": 1}}, notA},
+			{"minAvailable a fraction", map[string]any{"minAvailable": 1.5}, notA},
+			{"minAvailable a boolean", map[string]any{"minAvailable": true}, notA},
+			{"maxUnavailable a map", map[string]any{"maxUnavailable": map[string]any{"percent": 25}}, notA},
+			{"selector sub-key", map[string]any{"selector": map[string]any{"labels": map[string]any{"app": "web"}}}, notA},
+			{"selector a string", map[string]any{"selector": "app=web"}, notA},
+			{"null expression", map[string]any{"selector": map[string]any{"matchExpressions": []any{nil}}}, "selector.matchExpressions[0]"},
+			{"two spellings", map[string]any{"minAvailable": 1, "MinAvailable": 2}, "sets the same field as"},
+		},
 	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
@@ -586,12 +675,38 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	if !reflect.DeepEqual(driver.Spec.TokenRequests, wantTokens) {
 		t.Errorf("tokenRequests = %+v, want %+v", driver.Spec.TokenRequests, wantTokens)
 	}
+
+	cidr := build("servicecidr", full["servicecidr"]).(*networkingv1.ServiceCIDR)
+	if !slices.Equal(cidr.Spec.CIDRs, []string{"10.96.0.0/16", "fd00:10:96::/112"}) {
+		t.Errorf("cidrs = %v, want them in authored order", cidr.Spec.CIDRs)
+	}
+
+	// A count stays a number and a percentage a string; an authored 0 is kept.
+	pdb := build("poddisruptionbudget", full["poddisruptionbudget"]).(*policyv1.PodDisruptionBudget)
+	if got := pdb.Spec.MinAvailable; got == nil || *got != intstr.FromInt32(0) {
+		t.Errorf("minAvailable = %v, want the authored count 0", got)
+	}
+	if got := pdb.Spec.MaxUnavailable; got == nil || *got != intstr.FromString("25%") {
+		t.Errorf("maxUnavailable = %v, want the authored 25%%", got)
+	}
+	if got := pdb.Spec.UnhealthyPodEvictionPolicy; got == nil || *got != policyv1.AlwaysAllow {
+		t.Errorf("unhealthyPodEvictionPolicy = %v, want AlwaysAllow", got)
+	}
+	// An authored empty selector selects every pod of the namespace, an
+	// unauthored one none: the two stay apart.
+	every := build("poddisruptionbudget", map[string]any{"selector": map[string]any{}}).(*policyv1.PodDisruptionBudget)
+	if every.Spec.Selector == nil {
+		t.Error("selector = nil, want the authored empty selector")
+	}
+	if none := build("poddisruptionbudget", map[string]any{}).(*policyv1.PodDisruptionBudget); none.Spec.Selector != nil {
+		t.Errorf("selector = %+v, want none on a budget that authors none", none.Spec.Selector)
+	}
 }
 
 // TestPolicyFreeKinds_ThroughTheTransform: under the strictest policy the
 // tests have, under the transform's default one and under none passed, each
-// kind builds its one cluster-scoped object, and the transform sets the
-// component label on it and nothing else.
+// kind builds its one object, in the build namespace or cluster-scoped, and
+// the transform sets the component label on it and nothing else.
 func TestPolicyFreeKinds_ThroughTheTransform(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		for name, policy := range map[string]oam.Policy{"strict policy": ptStrictPolicy(), "no policy passed": nil} {
@@ -607,8 +722,8 @@ func TestPolicyFreeKinds_ThroughTheTransform(t *testing.T) {
 				if got := obj.GetObjectKind().GroupVersionKind(); got != kind.gvk {
 					t.Errorf("GVK = %s, want %s", got, kind.gvk)
 				}
-				if obj.GetName() != "web" || obj.GetNamespace() != "" {
-					t.Errorf("identity = %q/%q, want the cluster-scoped web", obj.GetNamespace(), obj.GetName())
+				if want := kind.namespace("demo"); obj.GetName() != "web" || obj.GetNamespace() != want {
+					t.Errorf("identity = %q/%q, want %q/web", obj.GetNamespace(), obj.GetName(), want)
 				}
 				wantLabels := map[string]string{oam.ComponentLabelKeyForDomain(""): "web"}
 				if !reflect.DeepEqual(obj.GetLabels(), wantLabels) || len(obj.GetAnnotations()) != 0 {
@@ -620,8 +735,9 @@ func TestPolicyFreeKinds_ThroughTheTransform(t *testing.T) {
 }
 
 // TestPolicyFreeKinds_DeclareTheirObject: each handler declares the object it
-// emits, by group and kind, as cluster-scoped, so the type takes `objectName`
-// and the engine claims the name in no namespace.
+// emits, by group and kind, with its scope, so the type takes `objectName`
+// and the engine claims the name in the object's namespace, or in none for a
+// cluster-scoped one.
 func TestPolicyFreeKinds_DeclareTheirObject(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		t.Run(kind.component, func(t *testing.T) {
@@ -630,9 +746,9 @@ func TestPolicyFreeKinds_DeclareTheirObject(t *testing.T) {
 				t.Fatalf("%T declares no object (oam.ComponentObjectProvider)", kind.handler)
 			}
 			got, scope := provider.ComponentObject()
-			if got != kind.gvk.GroupKind() || scope != oam.ObjectScopeCluster {
-				t.Errorf("ComponentObject() = %s, scope %d; want %s, cluster scope (%d)",
-					got, scope, kind.gvk.GroupKind(), oam.ObjectScopeCluster)
+			if got != kind.gvk.GroupKind() || scope != kind.scope() {
+				t.Errorf("ComponentObject() = %s, scope %d; want %s, scope %d",
+					got, scope, kind.gvk.GroupKind(), kind.scope())
 			}
 		})
 	}
@@ -667,9 +783,10 @@ func policyFreeTransform(typ string, h oam.ComponentHandler, naming func(oam.Nam
 // TestPolicyFreeKinds_ObjectName: through the transform, the author's
 // `objectName` names the object, and without one the Naming hook's answer for
 // role "object" does; the author's wins over the hook's. It names the object
-// and nothing else: the object has no namespace, its component label keeps the
-// component's name, and but for its name it is the object the same properties
-// build under the component name. The hook is asked for the declared kind.
+// and nothing else: the object keeps its namespace (the build's, or none on a
+// cluster-scoped one), its component label keeps the component's name, and but
+// for its name it is the object the same properties build under the component
+// name. The hook is asked for the declared kind.
 func TestPolicyFreeKinds_ObjectName(t *testing.T) {
 	const component, authored = "web", "renamed.example.com"
 	for _, kind := range policyFreeKinds {
@@ -714,8 +831,8 @@ func TestPolicyFreeKinds_ObjectName(t *testing.T) {
 				}
 				asked = nil
 				obj := build(t, tc.objectName, tc.naming)
-				if obj.GetName() != tc.want || obj.GetNamespace() != "" {
-					t.Errorf("identity = %q/%q, want the cluster-scoped %q", obj.GetNamespace(), obj.GetName(), tc.want)
+				if want := kind.namespace("demo"); obj.GetName() != tc.want || obj.GetNamespace() != want {
+					t.Errorf("identity = %q/%q, want %q/%q", obj.GetNamespace(), obj.GetName(), want, tc.want)
 				}
 				wantLabels := map[string]string{oam.ComponentLabelKeyForDomain(""): component}
 				if !reflect.DeepEqual(obj.GetLabels(), wantLabels) {
@@ -744,10 +861,10 @@ func TestPolicyFreeKinds_ObjectName(t *testing.T) {
 	}
 }
 
-// TestPolicyFreeKinds_ObjectNameIsClaimedClusterWide: two components of one
-// kind given one object name are refused, and the refusal names the object
-// with no namespace before its name, as it does for a cluster-scoped object.
-func TestPolicyFreeKinds_ObjectNameIsClaimedClusterWide(t *testing.T) {
+// TestPolicyFreeKinds_ObjectNameIsClaimedInItsScope: two components of one
+// kind given one object name are refused, and the refusal names the object by
+// its namespace and name, or by its name alone for a cluster-scoped object.
+func TestPolicyFreeKinds_ObjectNameIsClaimedInItsScope(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			named := func(name string) oam.Component {
@@ -756,7 +873,11 @@ func TestPolicyFreeKinds_ObjectNameIsClaimedClusterWide(t *testing.T) {
 				return oam.Component{Name: name, Properties: props}
 			}
 			_, err := policyFreeTransform(kind.component, kind.handler, nil, named("a"), named("b"))
-			want := fmt.Sprintf("name collision: %s %q is named by component %q", kind.gvk.GroupKind(), "shared", "a")
+			claimed := "shared"
+			if kind.namespaced {
+				claimed = "demo/shared"
+			}
+			want := fmt.Sprintf("name collision: %s %q is named by component %q", kind.gvk.GroupKind(), claimed, "a")
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error = %v, want it to contain %q", err, want)
 			}

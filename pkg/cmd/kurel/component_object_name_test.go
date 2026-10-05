@@ -233,6 +233,59 @@ func TestObjectName_TwoKindsShareAName(t *testing.T) {
 	}
 }
 
+// TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace: the `scaler`
+// trait's HorizontalPodAutoscaler and PodDisruptionBudget are claimed as the
+// kinds the `horizontalpodautoscaler` and `poddisruptionbudget` components
+// declare, so one name given to both in one namespace is refused. The default
+// names (`<component>-hpa`, `<component>-pdb`) keep the two apart, which the
+// last case builds.
+func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
+	web := componentLabelFixtures["webservice"]
+	scaler := map[string]any{"minReplicas": 2, "maxReplicas": 3, "enablePDB": true}
+	cases := []struct {
+		name, typ, objectName string
+		trait                 map[string]any
+		want                  string
+	}{
+		{name: "autoscaler", typ: "horizontalpodautoscaler", objectName: "shared",
+			trait: map[string]any{"hpaName": "shared"},
+			want:  `name collision: HorizontalPodAutoscaler.autoscaling "default/shared"`},
+		{name: "budget", typ: "poddisruptionbudget", objectName: "shared",
+			trait: map[string]any{"pdbName": "shared"},
+			want:  `name collision: PodDisruptionBudget.policy "default/shared"`},
+		{name: "autoscaler named like the trait's default", typ: "horizontalpodautoscaler", objectName: "web-hpa",
+			want: `name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa"`},
+		{name: "default names", typ: "horizontalpodautoscaler"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			traitProps := maps.Clone(scaler)
+			maps.Copy(traitProps, tc.trait)
+			app := labelInvariantApp("web", "webservice", web.props, "scaler", traitProps)
+			spec := app["spec"].(map[string]any)
+			kind := objectNameApp("scaling", tc.typ, componentLabelFixtures[tc.typ].props, tc.objectName)
+			spec["components"] = append(spec["components"].([]any), kind["spec"].(map[string]any)["components"].([]any)...)
+			docs, err := renderLabelInvariantErr(t, app)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("kurel build failed: %v", err)
+				}
+				got := docsOfKind(docs, "HorizontalPodAutoscaler", "autoscaling")
+				if want := []string{"scaling", "web-hpa"}; !slices.Equal(got, want) {
+					t.Errorf("the HorizontalPodAutoscaler objects are %v, want %v", got, want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("a %s component and a scaler trait built with one object name; want the collision refused", tc.typ)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refused with %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestObjectName_RefusedWhereNoObjectIsDeclared: a component type that declares
 // no object refuses `objectName`, naming the property.
 func TestObjectName_RefusedWhereNoObjectIsDeclared(t *testing.T) {

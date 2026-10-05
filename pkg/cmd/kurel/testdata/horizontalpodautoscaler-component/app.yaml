@@ -1,0 +1,60 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web-scaling
+      type: horizontalpodautoscaler
+      properties:
+        scaleTargetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: web
+        minReplicas: 2
+        maxReplicas: 10
+        metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+          - type: Pods
+            pods:
+              metric:
+                name: requests-per-second
+              target:
+                type: AverageValue
+                averageValue: 100
+          - type: External
+            external:
+              metric:
+                name: queue-depth
+                selector:
+                  matchLabels:
+                    queue: orders
+              target:
+                type: Value
+                value: 500m
+        behavior:
+          scaleDown:
+            stabilizationWindowSeconds: 0
+            selectPolicy: Min
+            policies:
+              - type: Percent
+                value: 10
+                periodSeconds: 60
+          scaleUp:
+            policies:
+              - type: Pods
+                value: 4
+                periodSeconds: 30
+    - name: minimal
+      type: horizontalpodautoscaler
+      properties:
+        scaleTargetRef:
+          kind: StatefulSet
+          name: db
+        maxReplicas: 3

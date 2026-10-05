@@ -1,0 +1,19 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: extra-services
+      type: servicecidr
+      properties:
+        cidrs:
+          - 10.112.0.0/16
+          - fd00:10:112::/112
+    - name: single-family
+      type: servicecidr
+      properties:
+        objectName: services-v4
+        cidrs:
+          - 10.113.0.0/20

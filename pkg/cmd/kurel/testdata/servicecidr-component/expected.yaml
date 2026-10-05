@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: ServiceCIDR
+metadata:
+  labels:
+    launcher.gokure.dev/component: extra-services
+  name: extra-services
+spec:
+  cidrs:
+  - 10.112.0.0/16
+  - fd00:10:112::/112
+---
+apiVersion: networking.k8s.io/v1
+kind: ServiceCIDR
+metadata:
+  labels:
+    launcher.gokure.dev/component: single-family
+  name: services-v4
+spec:
+  cidrs:
+  - 10.113.0.0/20

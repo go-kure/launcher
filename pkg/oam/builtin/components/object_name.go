@@ -11,9 +11,11 @@ import (
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/validate/content"
@@ -332,6 +334,23 @@ func (h *RuntimeClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectSco
 // cluster-scoped.
 func (h *IngressClassHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: networkingv1.GroupName, Kind: "IngressClass"}, oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the horizontalpodautoscaler kind's
+// HorizontalPodAutoscaler.
+func (h *HorizontalPodAutoscalerHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: autoscalingv2.GroupName, Kind: "HorizontalPodAutoscaler"}, oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the poddisruptionbudget kind's PodDisruptionBudget.
+func (h *PodDisruptionBudgetHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: policyv1.GroupName, Kind: "PodDisruptionBudget"}, oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the servicecidr kind's ServiceCIDR, which is
+// cluster-scoped.
+func (h *ServiceCIDRHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: networkingv1.GroupName, Kind: "ServiceCIDR"}, oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

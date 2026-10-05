@@ -320,6 +320,10 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"networkpolicy": &components.NetworkPolicyHandler{},
 
 		"cilium-networkpolicy": &components.CiliumNetworkPolicyHandler{},
+
+		"horizontalpodautoscaler": &components.HorizontalPodAutoscalerHandler{},
+		"poddisruptionbudget":     &components.PodDisruptionBudgetHandler{},
+		"servicecidr":             &components.ServiceCIDRHandler{},
 	}
 }
 

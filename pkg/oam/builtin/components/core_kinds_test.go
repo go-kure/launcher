@@ -10,11 +10,14 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -75,6 +78,9 @@ var coreKindSchemas = []struct {
 		"metadata":   "launcher sets the object's name and namespace, as on every kind component",
 		"status":     "the Cilium agent writes it",
 	}},
+	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
+	{"poddisruptionbudget", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), &components.PodDisruptionBudgetHandler{}, nil},
+	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole
@@ -95,6 +101,21 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 	t.Helper()
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
+	}
+	// An int-or-string decodes from a number or a string, so its schema is the
+	// union of the two and declares no single type.
+	if typ == reflect.TypeFor[intstr.IntOrString]() {
+		if want := []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}; prop.Type != "" || !slices.Equal(prop.Types, want) {
+			t.Errorf("schema key %q declares type %q and types %v, but the field is an int-or-string (want no type and types %v)", key, prop.Type, prop.Types, want)
+		}
+		if prop.Description == "" {
+			t.Errorf("schema key %q has no description", key)
+		}
+		return
+	}
+	if len(prop.Types) != 0 {
+		t.Errorf("schema key %q declares the union %v, but the field is %s, which decodes from one type", key, prop.Types, typ)
+		return
 	}
 	if want := schemaTypeForGo(typ); prop.Type != want {
 		t.Errorf("schema key %q declares type %q, but the field is %s (want %q)", key, prop.Type, typ, want)
