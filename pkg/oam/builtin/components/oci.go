@@ -54,9 +54,20 @@ const ociType = "oci"
 // component's own choice: a component that writes none does not share the
 // source of one that does, and is not counted among its consumers (a name
 // equal to the shared unnamed source's own names that source: one name for one
-// identity is one source). The source a
-// component keeps to itself is named after the component, and neither
-// source.name's role nor the hook reaches it.
+// identity is one source).
+//
+// The two objects that carry the component's name can each be named apart from
+// it (go-kure/launcher#787), through LoweringContext.ResolveMemberName: the
+// author's property, else the Naming hook's answer, else the component name.
+// The Kustomization, in both forms: kustomizationName, role
+// oam.NameRoleOCIKustomization. The source the component keeps to itself:
+// source.objectName, role oam.NameRoleOCISource. Each names the object alone;
+// the members keep the component's name, and with it the sibling group and its
+// place. The Kustomization's sourceRef names the source by the name its object
+// takes. source.objectName renames the kept source and keeps it with the
+// component: a component that writes it keeps its own source whatever other
+// component has the same identity, and is no consumer of a shared one. It is
+// refused beside source.name, which asks for the other form.
 //
 // LowerComponent first runs the oci parse (parseOCI, the former
 // OCIHandler.ToApplicationConfig sequence), so every input the handler refused
@@ -86,16 +97,18 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 			Required:    true,
 			Description: "OCIRepository source of the artifact to reconcile.",
 			Properties: map[string]oam.PropertySchema{
-				"url":  {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
-				"name": {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version and interval are the same."},
+				"url":        {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
+				"name":       {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version and interval are the same. Not with objectName."},
+				"objectName": {Type: oam.PropertyTypeString, Description: "Name of the OCIRepository this component keeps to itself, in place of the component name, used as written. Unlike name, it leaves the source with the component: the source is deployed with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits. A component that writes it keeps its own source, also when another component has the same url, version and interval. Not with name."},
 			},
 		},
-		"version":         {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
-		"path":            {Type: oam.PropertyTypeString, Default: "./", Description: "Path within the artifact that the Kustomization reconciles."},
-		"prune":           {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
-		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
-		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Set the Kustomization's spec.targetNamespace, which sets or overrides the namespace of every namespaced object in the artifact, Flux custom resources included. No default: unset, each object keeps the namespace the artifact's own kustomize build gives it. Author it when namespaced objects are still without a namespace after that build (the artifact sets none, in the objects or in a kustomization.yaml namespace), since they otherwise fail at apply with \"namespace not specified\". Unlike helmrelease under a Flux namespace, this does not default to the application namespace, because a default would override every object's own namespace."},
-		"wait":            {Type: oam.PropertyTypeBoolean, Description: "Set the Kustomization's spec.wait: Flux waits for every resource it applies to become ready before reporting the Kustomization ready. Unset or false emits nothing. Cannot be combined with a non-empty healthChecks, which kustomize-controller ignores when wait is true."},
+		"kustomizationName": {Type: oam.PropertyTypeString, Description: "Name of the generated Kustomization, in place of the component name, used as written. It names the object alone: the component keeps its name everywhere else."},
+		"version":           {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
+		"path":              {Type: oam.PropertyTypeString, Default: "./", Description: "Path within the artifact that the Kustomization reconciles."},
+		"prune":             {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
+		"interval":          {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
+		"targetNamespace":   {Type: oam.PropertyTypeString, Description: "Set the Kustomization's spec.targetNamespace, which sets or overrides the namespace of every namespaced object in the artifact, Flux custom resources included. No default: unset, each object keeps the namespace the artifact's own kustomize build gives it. Author it when namespaced objects are still without a namespace after that build (the artifact sets none, in the objects or in a kustomization.yaml namespace), since they otherwise fail at apply with \"namespace not specified\". Unlike helmrelease under a Flux namespace, this does not default to the application namespace, because a default would override every object's own namespace."},
+		"wait":              {Type: oam.PropertyTypeBoolean, Description: "Set the Kustomization's spec.wait: Flux waits for every resource it applies to become ready before reporting the Kustomization ready. Unset or false emits nothing. Cannot be combined with a non-empty healthChecks, which kustomize-controller ignores when wait is true."},
 		"healthChecks": {
 			Type:        oam.PropertyTypeArray,
 			Description: "Objects listed, in authored order, in the Kustomization's spec.healthChecks: Flux reports the Kustomization ready only once these are ready. The component delivers an opaque artifact, so the list is authored, never derived. An empty list emits nothing. Cannot be combined with wait: true.",
@@ -124,6 +137,15 @@ type ociProperties struct {
 	// sourceName is the authored source.name, "" for none: absent, null or an
 	// empty string, as the helm component reads its own.
 	sourceName string
+	// sourceObjectName is the authored source.objectName, read only when
+	// sourceObjectNamed: the name of the source the component keeps to itself.
+	// An explicit "" is an authored name, and is refused where it is resolved.
+	sourceObjectName  string
+	sourceObjectNamed bool
+	// kustomizationName is the authored kustomizationName, read only when
+	// kustomizationNamed, as sourceObjectName is.
+	kustomizationName  string
+	kustomizationNamed bool
 
 	path            string
 	prune           bool
@@ -142,7 +164,9 @@ type ociProperties struct {
 //
 //	source:
 //	  url: oci://registry.example.com/org/artifact   # required, oci:// scheme
-//	  name: artifact-source                           # optional; names the OCIRepository
+//	  name: artifact-source                           # optional; names the OCIRepository, generated on its own
+//	  objectName: artifact                            # optional, not with name; names the OCIRepository the component keeps
+//	kustomizationName: artifact-delivery              # optional; names the Kustomization
 //	version: 1.2.3                                    # required; tag, or sha256:<digest>
 //	path: ./                                          # optional, default "./"
 //	prune: true                                       # optional, default true
@@ -184,6 +208,15 @@ func parseOCI(props map[string]any) (*ociProperties, error) {
 		return nil, errors.New("oci: source.url must use the oci:// scheme")
 	}
 	if out.sourceName, _, err = parseStringField(src, "name", "oci: source.name"); err != nil {
+		return nil, err
+	}
+	if out.sourceObjectName, out.sourceObjectNamed, err = parseRawStringField(src, "objectName", "oci: source.objectName"); err != nil {
+		return nil, err
+	}
+	if out.sourceObjectNamed && out.sourceName != "" {
+		return nil, errors.New("oci: source.objectName and source.name are both set, and each names the OCIRepository in another way: write source.objectName to rename the source the component keeps to itself, which stays with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits; write source.name for a source generated on its own, which components that write the same name share")
+	}
+	if out.kustomizationName, out.kustomizationNamed, err = parseRawStringField(props, "kustomizationName", "oci: kustomizationName"); err != nil {
 		return nil, err
 	}
 
@@ -303,8 +336,11 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		Annotations: maps.Clone(comp.Annotations),
 	}
 	source := oam.Component{Type: "ocirepository", Properties: props.sourceProperties()}
+	// The names below are the component's own, whatever context the rule was
+	// handed.
+	lctx.Component = comp
 
-	if props.sourceName == "" && ociSourceConsumers(lctx.Document, identity) < 2 {
+	if props.sourceObjectNamed || (props.sourceName == "" && ociSourceConsumers(lctx.Document, identity) < 2) {
 		// The component's own source: a same-name sibling group, the source
 		// first, as the former handler generated the two objects.
 		source.Name = comp.Name
@@ -314,7 +350,18 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 				source.Traits = append(source.Traits, t)
 			}
 		}
-		kustomization.Properties = props.kustomizationProperties(source.Name)
+		spec := memberNameSpec(&OCIRepositoryHandler{}, oam.NameRoleOCISource)
+		if props.sourceObjectNamed {
+			spec.Property, spec.Authored = "source.objectName", props.sourceObjectName
+		}
+		if err := lctx.ResolveMemberName(&source, spec); err != nil {
+			return oam.LoweringResult{}, errors.Wrapf(err, "%s: naming the source", ociType)
+		}
+		// The reference follows the object's name, not the member's.
+		kustomization.Properties = props.kustomizationProperties(source.ObjectName())
+		if err := props.nameKustomization(lctx, &kustomization); err != nil {
+			return oam.LoweringResult{}, err
+		}
 		return oam.LoweringResult{Components: []oam.Component{source, kustomization}}, nil
 	}
 
@@ -330,12 +377,44 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		result.Components = append(result.Components, source)
 	}
 	kustomization.Properties = props.kustomizationProperties(name)
+	if err := props.nameKustomization(lctx, &kustomization); err != nil {
+		return oam.LoweringResult{}, err
+	}
 	// Such a source is the application's (see OCIRule): ordered after it,
 	// whether this component generated or adopted it, the Kustomization makes
 	// it a generated source, held by the application bundle ahead of every group.
 	kustomization.OrderAfter(name)
 	result.Components = append(result.Components, kustomization)
 	return result, nil
+}
+
+// memberNameSpec is the NameSpec a rule resolves the object of a member with
+// (oam.LoweringContext.ResolveMemberName): role, and the kind and scope the
+// member's own handler declares for that object, so the name is claimed as the
+// object the handler generates.
+func memberNameSpec(handler oam.ComponentObjectProvider, role oam.NameRole) oam.NameSpec {
+	kind, scope := handler.ComponentObject()
+	return oam.NameSpec{
+		Role:          role,
+		Kind:          kind,
+		ClusterScoped: scope == oam.ObjectScopeCluster,
+		FluxScoped:    scope == oam.ObjectScopeFlux,
+	}
+}
+
+// nameKustomization resolves the name of the component's Kustomization
+// (kustomizationName, else the Naming hook under role
+// oam.NameRoleOCIKustomization, else the component name) and sets it on the
+// fluxcd-kustomization member.
+func (p *ociProperties) nameKustomization(lctx oam.LoweringContext, kustomization *oam.Component) error {
+	spec := memberNameSpec(&FluxcdKustomizationHandler{}, oam.NameRoleOCIKustomization)
+	if p.kustomizationNamed {
+		spec.Property, spec.Authored = "kustomizationName", p.kustomizationName
+	}
+	if err := lctx.ResolveMemberName(kustomization, spec); err != nil {
+		return errors.Wrapf(err, "%s: naming the Kustomization", ociType)
+	}
+	return nil
 }
 
 // sourceIdentity is the content identity of the component's source: every
@@ -360,7 +439,7 @@ func (p *ociProperties) sourceIdentity() (string, error) {
 }
 
 // ociSourceConsumers counts the oci components of doc that name no source of
-// their own (source.name) and whose source has the
+// their own (source.name, source.objectName) and whose source has the
 // given identity, the component being lowered included. A component that
 // names its source keeps it apart, so it is no consumer of the shared one. A
 // component that does
@@ -377,7 +456,7 @@ func ociSourceConsumers(doc *oam.Application, identity string) int {
 			continue
 		}
 		props, err := parseOCI(c.Properties)
-		if err != nil || props.sourceName != "" {
+		if err != nil || props.sourceName != "" || props.sourceObjectNamed {
 			continue
 		}
 		if other, err := props.sourceIdentity(); err == nil && other == identity {

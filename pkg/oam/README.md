@@ -664,9 +664,11 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
 | `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
-| `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component generates for itself alone, which carries the component's name. | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
+| `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component keeps to itself, which is the component's own (`oci-source`). | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
 | `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
 | `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
+| `oci-kustomization` | The Flux Kustomization an `oci` component generates, whether the component keeps its source or shares one. | The component's name. | `kustomizationName` | unless `kustomizationName` is set |
+| `oci-source` | The OCIRepository an `oci` component keeps to itself: the one no other `oci` component of the document shares and no `source.name` names. | The component's name. | `source.objectName` | unless `source.objectName` is set; not for a shared source or one `source.name` names (`helm-source`) |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
@@ -723,7 +725,8 @@ default.
 `NameRequest.Application` is the document's name at the moment the name is made, which a later
 document rule may still change. Most names are made after lowering, and carry the lowered
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
-lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`)
+lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
+`oci-kustomization`, `oci-source`)
 carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
@@ -737,6 +740,19 @@ hook is not asked. A consumer whose raw rule needs a consumer-chosen name writes
 document it emits. Where `<base>-<suffix>` is no valid name (a suffix with a character no
 object name takes), an authored name is still used; without one the name is refused, and the
 hook, which has no default to be asked about, is not asked.
+
+`LoweringContext.ResolveMemberName(member, spec)` names the one object of a kind component
+the rule is about to emit under the component's name, where the rule lets the author and the
+hook choose that name (the Kustomization and the kept OCIRepository of an `oci` component).
+The order is the same, the default being the member's component name, used as written. The
+name is resolved, recorded for the transform to claim and set on the member in the one call,
+and a rule has no other way to give a member's object a name of its own, so no such name
+goes unclaimed. The member keeps its component name, and with it its sibling group, its
+place in the layout, its labels and what `OrderAfter` orders. A reference the rule writes to
+that object (a `sourceRef`) it writes from `member.ObjectName()` after the call. `spec.Kind`
+and the scope are the ones the member's handler declares (`ComponentObject`); a name set on a
+member whose type declares no object is refused by the transform. On a context with no
+`Namer` an authored name is validated and set, the hook is not asked and nothing is claimed.
 
 `LoweringContext.ResolveSharedName(base, suffix, identity, spec)` is `ResolveName` for an
 object the components of one document share: one its content identity determines wholly, as
@@ -840,8 +856,8 @@ name collision: Database.postgresql.cnpg.io "db-orders" is named by component "d
 ```
 
 This knows only the names resolved this way: the roles above. An object of a component that
-is not a kind component, one a lowering rule names without a role (the source an `oci`
-component generates for itself alone), and the object of a trait that is not in the table (an
+is not a kind component, one a lowering rule names without a role (the Deployment and the
+Service a `webservice` component is lowered to), and the object of a trait that is not in the table (an
 authored `configmap` trait's ConfigMap, an authored `secret` trait's Secret) are not in it, so
 `CheckInDocumentCollisions` (below) is still what compares every generated object: a
 `configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
@@ -933,7 +949,9 @@ name collision: Pooler.postgresql.cnpg.io "default/db-pooler" is named by compon
 `objectName` and the `object` request apply only to a component no rule emitted. On a member
 a component or trait lowering rule emitted the property is refused and the hook is not asked:
 a rule that wants a member's name choosable resolves it itself at lowering time, under its
-own role (`pooler`, `database`). What a document rule or a raw document rule returns is
+own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`),
+`LoweringContext.ResolveMemberName` for the object of a member it emits under the
+component's name (`oci-kustomization`, `oci-source`). What a document rule or a raw document rule returns is
 authored input, the components it built as much as the ones it forwarded: the property and
 the request apply there, so a document rule that wants to fix a kind component's object name
 writes `objectName` itself.
@@ -948,6 +966,9 @@ component's object carries the object name:
   names the renamed Service resolves to the component, and one that names the component's
   name names a Service the document does not own, an external one;
 - the `rbac` trait's subject on a `serviceaccount` component;
+- the `sourceRef` of an `oci` component's Kustomization, where the component keeps its
+  source: it names the OCIRepository by the name that object takes (`source.objectName`, or
+  the hook's answer for `oci-source`);
 - the pod selector of a `cnpg-cluster` or `cnpg-pooler` endpoint (`cnpg.io/cluster`,
   `cnpg.io/poolerName`), which `ComponentEndpoints` reads with the authored name and
   `ComponentEndpointsNamed` with the hook's as well. A `cnpg-pooler` is refused its cluster's

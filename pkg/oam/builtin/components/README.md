@@ -5299,7 +5299,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
-  OCIRepository, see below), `version` (tag or `sha256:…`), `path`,
+  OCIRepository, see below), `source.objectName` (a name for the OCIRepository
+  the component keeps to itself, see below), `kustomizationName` (a name for
+  the Kustomization, see below), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
 
   **Lowering (go-kure/launcher#784).** `oci` is a role-named component: `OCIRule`
@@ -5311,7 +5313,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   below first, with their `oci:` messages; everything past them is the
   terminals' own.
   - *A component alone on its artifact* lowers to a same-name group: both
-    objects are named after the component and deploy as one unit, the
+    objects are named after the component (unless `kustomizationName` or
+    `source.objectName` names them, below) and deploy as one unit, the
     OCIRepository first. This is the pair of objects `oci` has always emitted,
     byte for byte. Annotations go to both members, so a tier annotation, a
     `placement` policy or a `dependency` rule naming the component acts on the
@@ -5351,8 +5354,36 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     source.name "base" is the component's own name; the generated source is a
     component of the document too, so give it another name`). One name for two
     identities is refused as a collision. `source.name: ""` reads as absent.
-    The source a component keeps to itself, with no `source.name`, is named
-    after the component: neither a role nor the hook reaches that name.
+  - *`kustomizationName` and `source.objectName` name the two objects that
+    carry the component's name* (go-kure/launcher#787): the Kustomization, in
+    both forms, and the source a component keeps to itself. Each is the
+    author's property, else the consumer's `Naming` hook's answer (roles
+    `oci-kustomization` and `oci-source`, asked with the component), else the
+    component name, so a document that sets neither and a hook that declines
+    give the same output as before. A name that is not the default is used as
+    written: a DNS-1123 subdomain of at most 253 characters, refused otherwise
+    and never shortened. It names the object alone. Both members keep the
+    component's name, so the pair stays one unit: a tier annotation, a
+    `placement` policy or a `dependency` rule naming the component still acts
+    on both, and the traits go where they went. The Kustomization's `sourceRef`
+    names the kept source by the name that object takes. Every one of these
+    names is claimed, the default included, so an authored `ocirepository` or
+    `fluxcd-kustomization` component whose `objectName` is the same name is
+    refused in the transform with both named:
+
+    ```
+    name collision: OCIRepository.source.toolkit.fluxcd.io "default/manifests" is named by component "manifests" (role "oci-source", its default) and by component "repo" (role "object", set by properties.objectName); give one of them another name
+    ```
+
+    `source.objectName` and `source.name` both name the OCIRepository, in two
+    ways, and are refused together. Write `source.objectName` to rename the
+    source the component keeps to itself: it stays with the Kustomization and
+    carries the component's annotations and its `prune-protection` and
+    `force-replace` traits. Write `source.name` for a source generated on its
+    own, which components that write the same name share. A component that
+    writes `source.objectName` keeps its own source whatever other component
+    has the same identity, and is not counted among the consumers of a shared
+    one.
   - *The source identity* is the `url`, the `version` and the effective
     `interval`. Unset, `0s`, `60m` and `1h` are one interval. Components
     whose intervals differ do not share: each keeps a source of its own,
