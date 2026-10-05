@@ -45,6 +45,20 @@ func (o objectIdentity) String() string {
 	return fmt.Sprintf("%s %q", kind, qualifiedName(o.namespace, o.name))
 }
 
+// keyedObjects returns the objects a comparison of generated objects keys for obj:
+// the ones Flux applies (appliedObjects), a list envelope standing for its members.
+// An object with no kind is returned as it is, items or not, so that it is refused
+// as any object with no kind and not read past. Only obj itself is looked at: what
+// it stands for is appliedObjects' to say. There a List's member with no kind that
+// holds items of its own is one of the remaining envelopes: it is read by them, one
+// level, and never keyed. Any other member with no kind is returned and refused.
+func keyedObjects(obj client.Object) []client.Object {
+	if obj.GetObjectKind().GroupVersionKind().Kind == "" {
+		return []client.Object{obj}
+	}
+	return appliedObjects(obj)
+}
+
 // CheckCrossDocumentCollisions reports every generated object that more than one
 // authored document produces (D2). Transform runs each document with its own
 // NameAllocator, so a name an in-transform rule generates is never compared across
@@ -58,7 +72,12 @@ func (o objectIdentity) String() string {
 // Objects are keyed by API group, kind, namespace and name, as generated: an
 // object's namespace is read from the object, never defaulted from its document,
 // so a namespaced object must carry its namespace and a cluster-scoped one none.
-// An object with no kind cannot be keyed and is an error; a nil entry, or a nil
+// They are read as Flux applies them (keyedObjects): a list envelope stands for
+// its members, so a member another document also generates collides, and the
+// envelope itself is no object.
+// A generated object with no kind cannot be keyed and is an error, whatever it
+// holds; so is a member with none, unless it is a List's member that holds items
+// of its own and is read by them, one level (keyedObjects). A nil entry, or a nil
 // object inside one, is skipped. An object repeated within one document is not
 // reported here: CheckInDocumentCollisions compares one document's applications.
 // Each colliding object is reported once, naming every document that generates
@@ -81,20 +100,21 @@ func CheckCrossDocumentCollisions(docs []GeneratedDocument) error {
 			if p == nil || isNullValue(*p) {
 				continue
 			}
-			obj := *p
-			gvk := obj.GetObjectKind().GroupVersionKind()
-			if gvk.Kind == "" {
-				return errors.Errorf("generated-object collision check: %s: object %q has no kind; set its apiVersion and kind so it can be compared",
-					doc, qualifiedName(obj.GetNamespace(), obj.GetName()))
-			}
-			id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
-			gen := generators[id]
-			if len(gen) > 0 && gen[len(gen)-1] == i {
-				continue
-			}
-			generators[id] = append(gen, i)
-			if len(gen) == 1 {
-				colliding = append(colliding, id)
+			for _, obj := range keyedObjects(*p) {
+				gvk := obj.GetObjectKind().GroupVersionKind()
+				if gvk.Kind == "" {
+					return errors.Errorf("generated-object collision check: %s: object %q has no kind; set its apiVersion and kind so it can be compared",
+						doc, qualifiedName(obj.GetNamespace(), obj.GetName()))
+				}
+				id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+				gen := generators[id]
+				if len(gen) > 0 && gen[len(gen)-1] == i {
+					continue
+				}
+				generators[id] = append(gen, i)
+				if len(gen) == 1 {
+					colliding = append(colliding, id)
+				}
 			}
 		}
 	}

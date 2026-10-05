@@ -177,10 +177,15 @@ func withMissing(m, bundleValues map[string]string) map[string]string {
 // own per-application generation of one document.
 //
 // Objects are keyed as CheckCrossDocumentCollisions keys them: API group, kind,
-// namespace as generated, and name. An object with no kind cannot be keyed and is
-// an error; a nil entry, or a nil object inside one, is skipped. An object one
-// application generates twice is not reported here. Each colliding object is
-// reported once, naming every application that generates it, in input order.
+// namespace as generated, and name. They are read as Flux applies them
+// (keyedObjects): a list envelope stands for its members, so a member another
+// application also generates collides, and the envelope itself is no object. A
+// generated object with no kind cannot be keyed and is an error, whatever it
+// holds; so is a member with none, unless it is a List's member that holds items
+// of its own and is read by them, one level (keyedObjects). A nil entry, or a nil
+// object inside one, is skipped. An object one application generates twice is not
+// reported here. Each colliding object is reported once, naming every application
+// that generates it, in input order.
 func CheckInDocumentCollisions(apps []GeneratedApplication) error {
 	generators := map[objectIdentity][]int{}
 	var colliding []objectIdentity
@@ -189,20 +194,21 @@ func CheckInDocumentCollisions(apps []GeneratedApplication) error {
 			if p == nil || isNullValue(*p) {
 				continue
 			}
-			obj := *p
-			gvk := obj.GetObjectKind().GroupVersionKind()
-			if gvk.Kind == "" {
-				return errors.Errorf("generated-object collision check: %s: object %q has no kind; set its apiVersion and kind so it can be compared",
-					app, qualifiedName(obj.GetNamespace(), obj.GetName()))
-			}
-			id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
-			gen := generators[id]
-			if len(gen) > 0 && gen[len(gen)-1] == i {
-				continue
-			}
-			generators[id] = append(gen, i)
-			if len(gen) == 1 {
-				colliding = append(colliding, id)
+			for _, obj := range keyedObjects(*p) {
+				gvk := obj.GetObjectKind().GroupVersionKind()
+				if gvk.Kind == "" {
+					return errors.Errorf("generated-object collision check: %s: object %q has no kind; set its apiVersion and kind so it can be compared",
+						app, qualifiedName(obj.GetNamespace(), obj.GetName()))
+				}
+				id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+				gen := generators[id]
+				if len(gen) > 0 && gen[len(gen)-1] == i {
+					continue
+				}
+				generators[id] = append(gen, i)
+				if len(gen) == 1 {
+					colliding = append(colliding, id)
+				}
 			}
 		}
 	}

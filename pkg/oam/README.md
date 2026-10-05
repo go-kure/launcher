@@ -204,9 +204,27 @@ kure reads the resources a layout holds as kustomize builds them, a List standin
 items, by one rule in its pre-write checks and in its Flux integration (go-kure/kure#1017).
 Launcher's own decode paths put no List into a layout (kure's parser replaces a list document
 by its items, and `passthrough` refuses a list); a Go caller's own `ApplicationConfig` that
-returns one has it read by that rule. `CheckInDocumentCollisions` and
-`CheckCrossDocumentCollisions` compare such a List as the one object it is, not its items: an
-item another application or document also generates is not reported.
+returns one has it read by that rule. Launcher reads such a List by one rule of its own,
+wherever it reads generated objects: as Flux applies it. A kind ending in `List` whose `items`
+is an array stands for its items, recursively, as Kustomize's build expands it; any remaining
+object whose `items` is an array stands for its items, one level, as Flux does. That one rule
+decides what `CheckInDocumentCollisions`, `CheckCrossDocumentCollisions` and a sibling group's
+comparison of its members key, as it decides what the forced-volume warning, the component
+label and the reserved metadata keys read. So an item another application, document or member
+also generates is a collision, reported by the item's own kind and name; and the envelope is
+no object, so two Lists with different items, or none, do not collide. An object with no kind
+cannot be keyed. A generated object with none is refused by the three comparisons before it
+is read, as before, whatever it holds. An item with none is refused too, with the one
+exception the rule itself makes: an item of a `List` that has no kind and holds an `items`
+array of its own is one of the remaining objects, so it is read by its items, one level, as
+Flux reads it and as the three scans do, and the objects inside it are still compared. Past
+that one level, and inside an envelope whose kind does not end in `List`, an item with no
+kind is refused, `items` or not. Kustomize's build itself fails on a List item with no kind
+(`missing kind in object`).
+
+**Breaking output change** for a Go caller whose own `ApplicationConfig` or handler returns a
+List: the three comparisons keyed the List as the one object it is. An item generated twice
+passed, and two unnamed Lists were refused as one object whatever they held.
 
 An application can carry a delivery intent, `stack.Application.Delivery`: what it asks of the
 engine that delivers its objects, stated without naming the engine. The `prune-protection` and

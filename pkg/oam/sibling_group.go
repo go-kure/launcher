@@ -225,8 +225,13 @@ type siblingGroupConfig struct {
 // Two members generating the same Kubernetes object (API group, kind, namespace
 // and name) is refused: the group would deploy one object twice with two contents
 // — for example two members that each generate a Service named after the
-// group. An object without a kind cannot be
-// compared and is refused, as CheckCrossDocumentCollisions refuses one.
+// group. The objects compared are the ones Flux applies (keyedObjects): a list
+// envelope stands for its members, as in CheckInDocumentCollisions, which sees a
+// group as one application and so never compares member with member. The
+// envelope is returned as generated, where it stood. An object without a kind
+// cannot be compared and is refused, as CheckCrossDocumentCollisions refuses
+// one: a generated object whatever it holds, and a member of a list unless it is
+// a List's member that holds items of its own and is read by them, one level.
 func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, error) {
 	var heads, tails []*client.Object
 	owner := make(map[objectIdentity]string)
@@ -243,18 +248,19 @@ func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, err
 			if split == len(out) {
 				split = j + 1
 			}
-			obj := *p
-			gvk := obj.GetObjectKind().GroupVersionKind()
-			if gvk.Kind == "" {
-				return nil, errors.Errorf("sibling group %q: member %q generates object %q with no kind; set its apiVersion and kind so the group can compare its members' objects",
-					m.Name, g.types[i], qualifiedName(obj.GetNamespace(), obj.GetName()))
+			for _, obj := range keyedObjects(*p) {
+				gvk := obj.GetObjectKind().GroupVersionKind()
+				if gvk.Kind == "" {
+					return nil, errors.Errorf("sibling group %q: member %q generates object %q with no kind; set its apiVersion and kind so the group can compare its members' objects",
+						m.Name, g.types[i], qualifiedName(obj.GetNamespace(), obj.GetName()))
+				}
+				id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+				if prev, dup := owner[id]; dup && prev != g.types[i] {
+					return nil, errors.Errorf("sibling group %q: members %q and %q both generate %s; exactly one member may",
+						m.Name, prev, g.types[i], id)
+				}
+				owner[id] = g.types[i]
 			}
-			id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
-			if prev, dup := owner[id]; dup && prev != g.types[i] {
-				return nil, errors.Errorf("sibling group %q: members %q and %q both generate %s; exactly one member may",
-					m.Name, prev, g.types[i], id)
-			}
-			owner[id] = g.types[i]
 		}
 		heads = append(heads, out[:split]...)
 		tails = append(tails, out[split:]...)
