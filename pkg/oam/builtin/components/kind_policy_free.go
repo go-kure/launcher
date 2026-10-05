@@ -46,9 +46,10 @@ type policyFreeKind[T any] struct {
 // config decodes a component into the kind's config, under the package's null
 // contract and the strict decode every spec-projecting kind uses
 // (decodeKindSpec), and refuses two spellings of one field
-// (refuseUncarriedSpecValues). No field of a policy-free kind is one on which
-// an authored 0 or false cannot be carried: TestPolicyFreeKinds_NoDefaultedZeros
-// holds each decoded type to that.
+// (refuseUncarriedSpecValues). No field of a policy-free kind may be one on
+// which an authored 0 or false cannot be carried:
+// TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's field
+// comments to that, as far as they state a default in a form it recognises.
 func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationConfig, error) {
 	if k.wholeObject {
 		if err := refuseObjectIdentityKeys(component.Properties); err != nil {

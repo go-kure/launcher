@@ -668,7 +668,7 @@ be closed at build time.
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
 - **Missing kinds:** the inventory's `missing` rows (Secret, Pod, ServiceMonitor,
-  StorageClass, Gateway among them), and its `trait` rows, the
+  Gateway among them), and its `trait` rows, the
   kinds reachable only as traits today (Ingress, HTTPRoute, Certificate, ExternalSecret,
   HPA, PDB, NetworkPolicy, CiliumNetworkPolicy, Role and RoleBinding, ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
