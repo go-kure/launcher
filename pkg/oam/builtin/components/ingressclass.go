@@ -14,9 +14,10 @@ import (
 //
 // Its properties are exactly the top-level fields of
 // networkingv1.IngressClassSpec, under their json names, decoded strictly
-// (decodeKindSpec). It emits the IngressClass, named after the component, and
-// nothing else. An IngressClass is cluster-scoped: the object carries no
-// namespace, whatever namespace the application is built for.
+// (decodeKindSpec). It emits the IngressClass, named after the component unless
+// `objectName` names it, and nothing else. An IngressClass is cluster-scoped:
+// the object carries no namespace, whatever namespace the application is built
+// for.
 // TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
 // upstream json tags.
 type IngressClassHandler struct{}

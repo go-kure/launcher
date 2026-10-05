@@ -624,6 +624,9 @@ be closed at build time.
     decode, a config with nothing to enforce, and a `Generate` that returns the
     base-library constructor's object with a copy of what was decoded. A kind built on it
     is a type, an optional required-field check and a constructor.
+  - Each declares its object as cluster-scoped and takes `objectName` (§3.2): the config
+    carries the resolved name, `Generate` names the object with it, and the name is
+    claimed in no namespace.
   - `ingressclass` and `csidriver` project their spec type. The four classes have no
     spec type: the properties are the object's fields beside its identity, and `kind`,
     `apiVersion` and `metadata` are refused by name.
