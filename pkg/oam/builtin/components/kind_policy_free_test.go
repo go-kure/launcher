@@ -97,8 +97,9 @@ var policyFreeKinds = []struct {
 	},
 	{
 		component: "ingressclass", handler: &components.IngressClassHandler{},
-		gvk: networkingv1.SchemeGroupVersion.WithKind("IngressClass"),
-		typ: reflect.TypeFor[networkingv1.IngressClassSpec](),
+		gvk:     networkingv1.SchemeGroupVersion.WithKind("IngressClass"),
+		typ:     reflect.TypeFor[networkingv1.IngressClassSpec](),
+		minimal: map[string]any{"controller": "k8s.io/ingress-nginx"},
 		full: map[string]any{
 			"controller": "k8s.io/ingress-nginx",
 			"parameters": map[string]any{
@@ -495,10 +496,14 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"two spellings", map[string]any{"handler": "runc", "Handler": "kata"}, "sets the same field as"},
 		},
 		"ingressclass": {
+			{"no properties", nil, "controller: required"},
+			{"null controller", map[string]any{"controller": nil}, "controller: required"},
+			{"empty controller", map[string]any{"controller": ""}, "controller: required"},
+			{"parameters alone", map[string]any{"parameters": map[string]any{"kind": "K", "name": "n"}}, "controller: required"},
 			{"unknown key", map[string]any{"controllerName": "k8s.io/ingress-nginx"}, notA + "networking.k8s.io/v1 IngressClassSpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"controller": "c"}}, notA},
-			{"parameters sub-key", map[string]any{"parameters": map[string]any{"kind": "K", "name": "n", "group": "g"}}, notA},
-			{"parameters a string", map[string]any{"parameters": "external"}, notA},
+			{"parameters sub-key", map[string]any{"controller": "c", "parameters": map[string]any{"kind": "K", "name": "n", "group": "g"}}, notA},
+			{"parameters a string", map[string]any{"controller": "c", "parameters": "external"}, notA},
 			{"two spellings", map[string]any{"controller": "a", "Controller": "b"}, "sets the same field as"},
 		},
 		"csidriver": {

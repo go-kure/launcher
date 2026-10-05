@@ -102,7 +102,7 @@ reads it.
 | `volumeattributesclass` | VolumeAttributesClass | Kind-named VolumeAttributesClass: `driverName` and `parameters` (both required, `parameters` with at least one entry), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `priorityclass` | PriorityClass | Kind-named PriorityClass: `value` (`0` when unauthored), `globalDefault`, `description`, `preemptionPolicy`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `runtimeclass` | RuntimeClass | Kind-named RuntimeClass: `handler` (required), `overhead`, `scheduling`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
-| `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
+| `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, required, and `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
@@ -200,7 +200,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | trait | `scaler` | hand-written parser | - |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
 | `kubernetes.CreateIngress` | networking.k8s.io/v1 Ingress | trait | `ingress` | hand-written parser | `expose` lowers onto it. |
-| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. No environment policy applies. |
+| `kubernetes.CreateIngressClass` | networking.k8s.io/v1 IngressClass (cluster-scoped) | kind | `ingressclass` | strict decode of `IngressClassSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are not authorable. The default-class annotation included. `controller` must be written. No environment policy applies. |
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
@@ -2566,7 +2566,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `volumeLifecycleModes`, `storageCapacity`, `fsGroupPolicy`,
     `tokenRequests`, `requiresRepublish`, `seLinuxMount`,
     `nodeAllocatableUpdatePeriodSeconds`, `serviceAccountTokenInSecrets`,
-    `preventPodSchedulingIfMissing`). Neither requires a property.
+    `preventPodSchedulingIfMissing`). A `csidriver` requires no property; an
+    `ingressclass` requires `controller` (see **Required** below).
   - The four classes have none: their fields sit on the object, beside its
     identity. The properties are those fields, decoded strictly into the
     object type, and the object's own `kind`, `apiVersion` and `metadata` are
@@ -2579,13 +2580,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
     `description`, `preemptionPolicy`. `runtimeclass`: `handler`, `overhead`,
     `scheduling`.
-  - **Required** is a top-level field the API documents as required:
-    `provisioner` (`storageclass`), `handler` (`runtimeclass`) and
-    `driverName` (`volumeattributesclass`) must be a non-empty string
-    (`provisioner: required …`), and a `volumeattributesclass` must carry
-    at least one of `parameters` (`parameters: required …`). The API does
-    not require a PriorityClass `value`: the type always encodes one, so a
-    `priorityclass` that authors none is emitted with `value: 0`. Every
+  - **Required** is a top-level field the API server refuses an object
+    without: `provisioner` (`storageclass`), `handler` (`runtimeclass`),
+    `driverName` (`volumeattributesclass`) and `controller` (`ingressclass`)
+    must be a non-empty string (`provisioner: required …`), and a
+    `volumeattributesclass` must carry at least one of `parameters`
+    (`parameters: required …`). The upstream type marks `controller`
+    optional; the API server's validation requires it all the same. The API
+    does not require a PriorityClass `value`: the type always encodes one, so
+    a `priorityclass` that authors none is emitted with `value: 0`. Every
     other value rule (which reclaim policies exist, a required field of a
     nested object, the names a cluster-scoped object may carry) is left to
     the API server.
@@ -2594,7 +2597,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     field (`allowVolumeExpansion: false`, `attachRequired: false`,
     `value: 0`). Where the API type omits a zero, the field is left out of
     the object, which the API reads as the same value: `globalDefault: false`
-    and an empty `description` or `controller`.
+    and an empty `description`.
 
   **The object's name** is the component's unless `objectName`, or the
   `Naming` hook under role `object`, names it otherwise (see "The object name"
