@@ -6220,7 +6220,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a quantity `cpu: 0`) is emitted as authored. An authored
   empty string is not refused — `storage.size: ""` keeps its meaning above —
   so an empty string on a defaulted field such as `primaryUpdateStrategy` is
-  still omitted.
+  still omitted. The two pod-certificate fields above are the exception: an
+  empty `signerName` or `keyType` is refused as an unauthored one is.
   `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
   onto this kind, so it is the same code), in this order:
   the instance-count default when `instances` is not authored (an authored
