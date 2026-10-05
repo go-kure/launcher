@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	appsv1 "k8s.io/api/apps/v1"
@@ -215,6 +216,19 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 		},
 		"a Cluster's inherited annotation": {
 			cnpgCluster("postgresql.cnpg.io/v1", "Cluster", map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}),
+			[]string{`Cluster "db"`, `spec.inheritedMetadata annotation "example.org/tenant"`, exact},
+		},
+		// A typed Cluster that states no kind is told by its Go type.
+		"a typed Cluster's inherited label, no kind stated": {
+			&cnpgv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "db"}, Spec: cnpgv1.ClusterSpec{
+				InheritedMetadata: &cnpgv1.EmbeddedObjectMetadata{Labels: map[string]string{"platform.example/zone": "a"}},
+			}},
+			[]string{`Cluster "db"`, `spec.inheritedMetadata label "platform.example/zone"`, prefix},
+		},
+		"a typed Cluster's inherited annotation, no kind stated": {
+			&cnpgv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "db"}, Spec: cnpgv1.ClusterSpec{
+				InheritedMetadata: &cnpgv1.EmbeddedObjectMetadata{Annotations: map[string]string{"example.org/tenant": "a"}},
+			}},
 			[]string{`Cluster "db"`, `spec.inheritedMetadata annotation "example.org/tenant"`, exact},
 		},
 		"a List member's label": {

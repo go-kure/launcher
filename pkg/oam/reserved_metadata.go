@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -276,13 +277,16 @@ func nestedObject(m map[string]any, path ...string) (map[string]any, bool, error
 }
 
 // statedOrTypedKind returns obj's API group and kind: the ones it states, else,
-// for a typed object of a kind with a pod template that states none, its Go
-// type's, as stampComponentLabel tells those kinds.
+// for a typed object that states none and is of a kind the check reads more
+// than the metadata of (a pod template, a Cluster's inheritedMetadata), its Go
+// type's, as stampComponentLabel tells the pod template kinds.
 func statedOrTypedKind(obj client.Object) (group, kind string) {
 	if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
 		return gvk.Group, gvk.Kind
 	}
 	switch obj.(type) {
+	case *cnpgv1.Cluster:
+		return cnpgGroup, cnpgClusterKind
 	case *appsv1.Deployment:
 		return appsv1.GroupName, "Deployment"
 	case *appsv1.StatefulSet:
