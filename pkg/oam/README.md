@@ -962,8 +962,11 @@ fields leave empty:
 - `Kind` is zero for a name that is no object's: a bundle's, or a hook-group name prefix (the
   members' `Role` says which);
 - `Namespace` is empty for a cluster-scoped object and for a name that is no object's, and
-  also for two names lowering rules resolved for one object: those are refused while lowering,
-  before the namespace the object lands in is settled, and the text prints none either;
+  also for two names lowering rules resolved for one object that are refused while lowering,
+  before the namespace the object lands in is settled: the text prints none either. One pair
+  of lowered names is refused only once it is settled, and carries it: a `FluxScoped` name
+  and one that is not, where both land in one namespace (the transform has no Flux
+  namespace, or its Flux namespace is the one the document's objects land in);
 - `Component` is empty for a name the document as a whole owns (the bundle, a group, a
   shared source, the policy synthesized for an external backend Service), which
   `Description` then says;

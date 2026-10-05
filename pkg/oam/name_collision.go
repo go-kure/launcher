@@ -27,9 +27,13 @@ type NameCollisionError struct {
 	// "group") or a hook-group name prefix (their Role is "hook-group").
 	Kind schema.GroupKind
 	// Namespace is the object's namespace as the text prints it. It is empty for
-	// a cluster-scoped object, for a name that is no object's, and for two names
-	// of one lowering rule or of two, which are refused while lowering, before
-	// the namespace the object lands in is settled.
+	// a cluster-scoped object and for a name that is no object's. It is also
+	// empty for two names of one lowering rule or of two that are refused while
+	// lowering, before the namespace the object lands in is settled. One pair of
+	// lowered names is refused only once it is settled, and carries it: a
+	// NameSpec.FluxScoped name and one that is not, where both land in one
+	// namespace (the transform has no Flux namespace, or its Flux namespace is
+	// the one the document's objects land in).
 	Namespace string
 	// Name is the name the two members share.
 	Name string
