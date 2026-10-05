@@ -169,6 +169,9 @@ func (h *CSIDriverHandler) ContractMetadata() oam.ContractMetadata { return cont
 func (h *IngressHandler) ContractMetadata() oam.ContractMetadata { return contract("ingress") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *HTTPRouteHandler) ContractMetadata() oam.ContractMetadata { return contract("httproute") }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

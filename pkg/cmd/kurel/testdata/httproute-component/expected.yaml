@@ -1,0 +1,50 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  hostnames:
+  - app.example.com
+  parentRefs:
+  - name: public
+    namespace: gateways
+    sectionName: https
+  rules:
+  - backendRefs:
+    - name: api
+      port: 8080
+    matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    timeouts:
+      request: 10s
+  - backendRefs:
+    - name: frontend
+      port: 80
+      weight: 9
+    - name: frontend-canary
+      port: 80
+      weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: redirect
+  name: redirect
+  namespace: default
+spec:
+  parentRefs:
+  - name: public
+    namespace: gateways
+    sectionName: http
+  rules:
+  - filters:
+    - requestRedirect:
+        scheme: https
+        statusCode: 301
+      type: RequestRedirect

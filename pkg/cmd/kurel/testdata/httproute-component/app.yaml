@@ -1,0 +1,46 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: httproute
+      properties:
+        parentRefs:
+          - name: public
+            namespace: gateways
+            sectionName: https
+        hostnames:
+          - app.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /api
+            backendRefs:
+              - name: api
+                port: 8080
+            timeouts:
+              request: 10s
+          - backendRefs:
+              - name: frontend
+                port: 80
+                weight: 9
+              - name: frontend-canary
+                port: 80
+                weight: 1
+    - name: redirect
+      type: httproute
+      properties:
+        parentRefs:
+          - name: public
+            namespace: gateways
+            sectionName: http
+        rules:
+          - filters:
+              - type: RequestRedirect
+                requestRedirect:
+                  scheme: https
+                  statusCode: 301

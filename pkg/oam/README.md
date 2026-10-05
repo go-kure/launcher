@@ -801,9 +801,10 @@ is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
 The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
 `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`,
-`volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver` and
-`ingress` (go-kure/launcher#790) are on this list. `ingress` is also a trait type: the two
-lists are separate, and a component of that type is the authored object, not the trait.
+`volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
+`ingress` and `httproute` (go-kure/launcher#790) are on this list. `ingress` and
+`httproute` are also trait types: the two lists are separate, and a component of such a
+type is the authored object, not the trait.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
