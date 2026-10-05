@@ -248,6 +248,67 @@ func TestNameCollision_NoObject(t *testing.T) {
 	})
 }
 
+// The error names what was named as the claim key prints it, for every class of
+// name and every role that is claimed. Error rebuilds the key from the exported
+// fields (a role tells a bundle from a hook-group name prefix), so a change to
+// the key's text, or a role given another class, shows here and not in a text
+// that drifted.
+func TestNameCollision_TextNamesTheClaimKey(t *testing.T) {
+	shapes := map[nameClass][]struct {
+		name     string
+		identity objectIdentity
+	}{
+		nameClassObject: {
+			{"a namespaced object", objectIdentity{group: "apps", kind: "Deployment", namespace: "shop", name: "web"}},
+			{"a namespaced object of the core group", objectIdentity{kind: "ConfigMap", namespace: "shop", name: "web"}},
+			{"a cluster-scoped object", objectIdentity{group: "rbac.authorization.k8s.io", kind: "ClusterRole", name: "web"}},
+			{"an object named while lowering, without a namespace", objectIdentity{group: "apps", kind: "Deployment", name: "web"}},
+		},
+		nameClassBundle:          {{"a bundle", objectIdentity{name: "web"}}},
+		nameClassHookGroupPrefix: {{"a hook-group name prefix", objectIdentity{name: "web"}}},
+	}
+	claimed := 0
+	for _, r := range nameRoles {
+		if r.class == nameClassSubApplication {
+			// Not claimed, so never a collision (resolveFrom).
+			continue
+		}
+		if len(shapes[r.class]) == 0 {
+			t.Fatalf("role %q has a class this test has no name for", r.role)
+		}
+		for _, shape := range shapes[r.class] {
+			claimed++
+			t.Run(string(r.role)+"/"+shape.name, func(t *testing.T) {
+				key := nameClaimKey{class: r.class, objectIdentity: shape.identity}
+				first := resolvedNameClaim{owner: nameOwner{component: "a", role: r.role, def: "web"}}
+				second := resolvedNameClaim{owner: nameOwner{component: "b", role: r.role, def: "web"}}
+
+				var got *NameCollisionError
+				if err := nameCollision(key, first, second); !errors.As(err, &got) {
+					t.Fatalf("err = %v\nwant a name collision", err)
+				}
+				want := "name collision: " + key.String() + " is named by " + got.First.Description +
+					" and by " + got.Second.Description + "; give one of them another name"
+				if got.Error() != want {
+					t.Errorf("err = %v\nwant  %s", got, want)
+				}
+
+				if err := nameCollision(key, second, second); !errors.As(err, &got) {
+					t.Fatalf("err = %v\nwant a name collision", err)
+				}
+				want = "name collision: " + key.String() + " is named twice by " + got.First.Description +
+					"; give one of them another name"
+				if got.Error() != want {
+					t.Errorf("err = %v\nwant  %s", got, want)
+				}
+			})
+		}
+	}
+	if claimed == 0 {
+		t.Fatal("no role was checked")
+	}
+}
+
 // Only a name collision answers to ErrNameCollision: another refusal of a name
 // does not, and neither does a refusal of the name allocator.
 func TestNameCollision_OtherRefusalsAreNotOne(t *testing.T) {
