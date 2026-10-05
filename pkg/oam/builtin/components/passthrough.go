@@ -7,6 +7,7 @@ import (
 
 	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/kubernetes"
+	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
@@ -22,7 +23,7 @@ import (
 //
 //	type: passthrough
 //	properties:
-//	  clusterScoped: false   # optional, default false
+//	  clusterScoped: false   # optional; unset, the object's kind decides
 //	  object:                # the Kubernetes object, emitted verbatim
 //	    apiVersion: ...
 //	    kind: ...
@@ -42,10 +43,12 @@ func (h *PassthroughHandler) CanHandle(componentType string) bool {
 
 // PropertySchema declares the passthrough component's properties. `object` is the
 // escape-hatch body emitted verbatim, so it is an open object (additionalProperties).
+// `clusterScoped` declares no default: left unset it is not read as false, the
+// object's kind decides (PassthroughConfig.resolveClusterScoped).
 func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "The single Kubernetes object emitted verbatim (apiVersion, kind, metadata, and any body fields); a list is rejected."},
-		"clusterScoped": {Type: oam.PropertyTypeBoolean, Default: false, Description: "Whether the emitted object is cluster-scoped, suppressing namespace stamping."},
+		"clusterScoped": {Type: oam.PropertyTypeBoolean, Description: "Whether the emitted object is cluster-scoped, so that it gets no namespace. Unset, the object's kind decides where its scope is known, and the object is treated as namespaced otherwise. Refused when it contradicts a kind whose scope the Kubernetes API defines."},
 	}
 }
 
@@ -60,7 +63,8 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	}
 
 	clusterScoped := false
-	if raw, ok := authoredValue(props, "clusterScoped"); ok {
+	raw, scopeAuthored := authoredValue(props, "clusterScoped")
+	if scopeAuthored {
 		b, isBool := raw.(bool)
 		if !isBool {
 			return nil, errors.Errorf("passthrough component %q: 'clusterScoped' must be a bool", component.Name)
@@ -82,14 +86,8 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	}
 
 	if rawMeta, ok := object["metadata"]; ok {
-		meta, ok := rawMeta.(map[string]any)
-		if !ok {
+		if _, ok := rawMeta.(map[string]any); !ok {
 			return nil, errors.Errorf("passthrough component %q: object.metadata must be a map", component.Name)
-		}
-		if clusterScoped {
-			if ns, ok := meta["namespace"].(string); ok && ns != "" {
-				return nil, errors.Errorf("passthrough component %q: object.metadata.namespace must not be set when clusterScoped is true", component.Name)
-			}
 		}
 	}
 
@@ -97,6 +95,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		componentName: component.Name,
 		Namespace:     namespace,
 		ClusterScoped: clusterScoped,
+		scopeAuthored: scopeAuthored,
 		// Frozen here, not aliased, so a caller mutating the map it passed in
 		// cannot change what was validated. Generate still copies again per call —
 		// it stamps metadata and may run more than once, and that copy protects
@@ -110,8 +109,9 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		Object: deepCopyMap(object),
 	}
 	// Build the emitted object once here, so that what emitted refuses on its
-	// own account (a workload that sets a field its API type does not declare)
-	// fails the component now and not at generation.
+	// own account (a clusterScoped that contradicts the object's kind, a
+	// namespace on a cluster-scoped object, a workload that sets a field its
+	// API type does not declare) fails the component now and not at generation.
 	if _, err := cfg.emitted(); err != nil {
 		return nil, err
 	}
@@ -238,10 +238,17 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 // PassthroughConfig implements stack.ApplicationConfig for passthrough components.
 // It emits the declared object verbatim, defaulting metadata.name to the component
 // name and (for namespaced objects) metadata.namespace to the build namespace.
+//
+// ClusterScoped is the authored clusterScoped property. It is one input to the
+// object's scope, not the scope itself (resolveClusterScoped): false means the
+// property was not authored unless scopeAuthored says an explicit false was,
+// which only ToApplicationConfig can record. A config built as a struct literal
+// therefore states true or nothing.
 type PassthroughConfig struct {
 	componentName string
 	Namespace     string
 	ClusterScoped bool
+	scopeAuthored bool
 	Object        map[string]any
 
 	// policy is the environment policy ApplyPolicy was given, kept so that
@@ -389,6 +396,12 @@ func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 		return nil, err
 	}
 
+	u := &unstructured.Unstructured{Object: obj}
+	clusterScoped, because, err := c.resolveClusterScoped(u)
+	if err != nil {
+		return nil, err
+	}
+
 	meta, _ := obj["metadata"].(map[string]any)
 	if meta == nil {
 		meta = map[string]any{}
@@ -397,21 +410,63 @@ func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 	if name, ok := meta["name"].(string); !ok || name == "" {
 		meta["name"] = c.componentName
 	}
-	if !c.ClusterScoped {
-		if ns, ok := meta["namespace"].(string); !ok || ns == "" {
-			meta["namespace"] = c.Namespace
-		}
+	ns, authoredNamespace := meta["namespace"].(string)
+	authoredNamespace = authoredNamespace && ns != ""
+	switch {
+	case clusterScoped && authoredNamespace:
+		return nil, errors.Errorf("passthrough component %q: object.metadata.namespace must not be set (%q): %s; the Kubernetes API rejects a namespace on a cluster-scoped object", c.componentName, ns, because)
+	case !clusterScoped && !authoredNamespace:
+		meta["namespace"] = c.Namespace
 	}
 
 	// A workload or a claim that sets a field its API type does not declare is
 	// refused, policy or none: the policy check reads that type, so it cannot
 	// see the field, and the manifests component and template delivery refuse
 	// the same object (undeclared_fields.go).
-	u := &unstructured.Unstructured{Object: obj}
 	if err := refuseUndeclaredWorkloadFields(u); err != nil {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 	return u, nil
+}
+
+// resolveClusterScoped reports whether the object passthrough emits is
+// cluster-scoped, and the reason in words a refusal can quote. It follows the
+// precedence the manifests component gives a scopeOverrides entry
+// (resolveObjectScope), with clusterScoped in the entry's place:
+//
+//   - A kind whose scope the Kubernetes API itself governs (isAPIGovernedScope:
+//     a built-in kind, a CustomResourceDefinition) has the scope kure's table
+//     gives it. A clusterScoped that says otherwise is refused. manifests
+//     ignores such an override, since its list may name kinds the source does
+//     not hold; here the property is a statement about the one object, so a
+//     wrong one is an error in the document and not a spare entry.
+//   - For any other kind an authored clusterScoped decides, true or false: the
+//     author knows the CustomResourceDefinition the cluster serves, and the
+//     table only what the module pinned at build time declared.
+//   - Not authored, the table decides for a kind kure registers. A kind it does
+//     not know is treated as namespaced, the default this component always had:
+//     failing closed, as manifests does on an unknown scope, would refuse every
+//     custom resource that relies on it.
+//
+// No CustomResourceDefinition is consulted (the crdScopes of manifest.Scope):
+// the component holds one object.
+func (c *PassthroughConfig) resolveClusterScoped(u *unstructured.Unstructured) (clusterScoped bool, because string, err error) {
+	kind := u.GetAPIVersion() + " " + u.GetKind()
+	table := manifest.Scope(u, nil)
+	if isAPIGovernedScope(u) {
+		cluster := table == manifest.ScopeCluster
+		switch {
+		case c.ClusterScoped && !cluster:
+			return false, "", errors.Errorf("passthrough component %q: clusterScoped is true, but the Kubernetes API defines %s as namespaced; remove clusterScoped", c.componentName, kind)
+		case c.scopeAuthored && !c.ClusterScoped && cluster:
+			return false, "", errors.Errorf("passthrough component %q: clusterScoped is false, but the Kubernetes API defines %s as cluster-scoped; remove clusterScoped", c.componentName, kind)
+		}
+		return cluster, "the Kubernetes API defines " + kind + " as cluster-scoped", nil
+	}
+	if c.ClusterScoped || c.scopeAuthored {
+		return c.ClusterScoped, "clusterScoped is true", nil
+	}
+	return table == manifest.ScopeCluster, kind + " is registered as cluster-scoped (set clusterScoped: false if the cluster serves it namespaced)", nil
 }
 
 // deepCopyMap returns a deep copy of a decoded YAML/JSON map: nested maps and

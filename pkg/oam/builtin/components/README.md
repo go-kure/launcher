@@ -115,7 +115,7 @@ reads it.
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; its scope follows its kind where that is known and `clusterScoped` otherwise; a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 
@@ -4338,12 +4338,57 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **`object` must be a single object; a list is rejected.** `Generate` emits the map
   verbatim as one resource and fills in metadata it finds missing: `metadata.name`
   defaults to the component name when it is absent, empty, **or not a string**, and
-  `metadata.namespace` likewise — so an inline *non-empty string* namespace survives
-  untouched, while a non-string one is replaced rather than emitted. `clusterScoped:
-  true` suppresses the namespace default entirely, and rejects an inline namespace —
-  that rejection is also keyed on a non-empty string, so under `clusterScoped` a
-  non-string `namespace` is neither rejected nor defaulted and reaches the output as
-  authored. A list would therefore arrive downstream as one *named*
+  on a namespaced object `metadata.namespace` likewise — so an inline *non-empty
+  string* namespace survives untouched, while a non-string one is replaced rather
+  than emitted.
+
+  **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
+  resolved with the precedence `manifests` gives a `scopeOverrides` entry (below),
+  with `clusterScoped` in the entry's place (`resolveClusterScoped`,
+  `passthrough.go`):
+
+  - **A kind whose scope the Kubernetes API governs** (a built-in kind, a
+    `CustomResourceDefinition`; `isAPIGovernedScope`): kure's scope table decides. A
+    `PriorityClass`, a `ClusterRole` or a `Namespace` gets no namespace without the
+    property. A `clusterScoped` that contradicts the table is refused: `true` on a
+    namespaced built-in, an explicit `false` on a cluster-scoped one (`passthrough
+    component "batch-low": clusterScoped is false, but the Kubernetes API defines
+    scheduling.k8s.io/v1 PriorityClass as cluster-scoped; remove clusterScoped`).
+    **This is the one difference from `manifests`**, which ignores a `scopeOverrides`
+    entry for such a kind: its list may name kinds the source does not hold, while
+    `clusterScoped` is a statement about the one object, so a wrong one is an error
+    in the document and not a spare entry.
+  - **Any other kind:** an authored `clusterScoped` decides, `true` or `false`, also
+    against the table. A custom resource kure registers as cluster-scoped that the
+    target cluster serves namespaced takes `clusterScoped: false`.
+  - **Not authored** (absent or `null`): the table decides for a kind kure registers,
+    so a cert-manager `ClusterIssuer` gets no namespace. A kind nothing knows is
+    treated as namespaced, the default this component always had. `manifests` fails
+    closed on an unknown scope; `passthrough` does not, since every custom resource
+    passed through without the property relies on that default.
+
+  No `CustomResourceDefinition` is consulted: the component holds one object. A
+  cluster-scoped object, however it was resolved, gets no namespace default, and an
+  inline namespace on it is refused with the reason named (`passthrough component
+  "ca": object.metadata.namespace must not be set ("other"): cert-manager.io/v1
+  ClusterIssuer is registered as cluster-scoped (set clusterScoped: false if the
+  cluster serves it namespaced); the Kubernetes API rejects a namespace on a
+  cluster-scoped object`). That rejection is keyed on a non-empty string, so a
+  non-string `namespace` on a cluster-scoped object is neither rejected nor
+  defaulted and reaches the output as authored. The resolution runs in `Generate`
+  too, on the object about to be emitted, so a `PassthroughConfig` built directly is
+  held to it; its `ClusterScoped` field states `true` or nothing, since an explicit
+  `false` exists only for an authored property.
+
+  **Breaking** (pre-GA): an object of a cluster-scoped kind the table knows loses the
+  application namespace it was stamped with when `clusterScoped` was not set;
+  `clusterScoped: true` on a built-in namespaced kind and `clusterScoped: false` on a
+  built-in cluster-scoped kind stop building; and an inline namespace on a
+  cluster-scoped kind the table knows is refused without the property too, where it
+  was emitted as authored.
+
+  **Lists.** `Generate` emits the map as one resource, so a list would arrive
+  downstream as one *named*
   envelope whose `items` never see per-object label mutation, namespace stamping or
   ownership checks — while Flux unwraps it at apply time into N objects that
   do reach the cluster. One envelope bypasses every per-object rule at once, which is why
