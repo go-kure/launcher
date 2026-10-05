@@ -1,0 +1,41 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: vault-cluster-store
+      type: clustersecretstore
+      properties:
+        provider:
+          vault:
+            server: https://vault.example.com:8200
+            path: secret
+            version: v2
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: external-secrets
+                serviceAccountRef:
+                  name: external-secrets
+                  namespace: external-secrets
+        conditions:
+          - namespaceSelector:
+              matchLabels:
+                secrets: enabled
+          - namespaces:
+              - payments
+    - name: aws
+      type: clustersecretstore
+      properties:
+        objectName: aws-parameters
+        provider:
+          aws:
+            service: ParameterStore
+            region: eu-west-1
+            auth:
+              jwt:
+                serviceAccountRef:
+                  name: external-secrets
+                  namespace: external-secrets

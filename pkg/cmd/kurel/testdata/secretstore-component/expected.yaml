@@ -1,0 +1,37 @@
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: vault
+  name: vault
+  namespace: default
+spec:
+  provider:
+    vault:
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: app
+          serviceAccountRef:
+            name: vault-auth
+      path: secret
+      server: https://vault.example.com:8200
+      tls: {}
+      version: v2
+  retrySettings:
+    maxRetries: 5
+    retryInterval: 10s
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: aws
+  name: aws-secrets
+  namespace: default
+spec:
+  provider:
+    aws:
+      auth: {}
+      region: eu-west-1
+      service: SecretsManager

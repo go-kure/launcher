@@ -184,6 +184,14 @@ namespace. No capability is required to build them, and no environment
 policy restricts what they grant.
 `TestObjectName_CollidesWithAGeneratedName` holds that a component of one of
 the four and an `rbac` trait that names the same object are refused.
+The kind components of the External Secrets Operator's API, `secretstore`,
+`clustersecretstore`, `externalsecret` and `clusterexternalsecret`
+(go-kure/launcher#790), are registered the same way, with a
+`<type>-component` fixture each: a SecretStore and an ExternalSecret in the
+build namespace, and a ClusterSecretStore and a ClusterExternalSecret with no
+namespace. No capability is required of the cluster profile to build them
+either, and they do not read its `external-secret` capability, which gives
+the `external-secret` trait its store.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

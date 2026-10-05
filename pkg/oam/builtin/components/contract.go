@@ -331,6 +331,26 @@ func (h *ClusterRoleBindingHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *SecretStoreHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("secretstore")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ClusterSecretStoreHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("clustersecretstore")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ExternalSecretHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("externalsecret")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ClusterExternalSecretHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("clusterexternalsecret")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
