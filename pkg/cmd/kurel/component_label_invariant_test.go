@@ -344,6 +344,18 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"certificate": {props: map[string]any{
 		"secretName": "web-tls", "dnsNames": []any{"web.example.com"},
 		"issuerRef": map[string]any{"name": "selfsigned", "kind": "ClusterIssuer"}}},
+	// The four kinds of Cilium's BGP control plane emit identity and the
+	// authored fields too, cluster-scoped, with no `app` label and no pods. A
+	// selector in one is the author's label query over nodes, pools, Services
+	// or advertisements, not a pod selector of this document. None checks a
+	// name rule of its own.
+	"cilium-bgpadvertisement": {props: map[string]any{"advertisements": []any{
+		map[string]any{"advertisementType": "PodCIDR"}}}},
+	"cilium-bgpclusterconfig": {props: map[string]any{"bgpInstances": []any{
+		map[string]any{"name": "instance-65000", "localASN": 65000}}}},
+	"cilium-bgpnodeconfigoverride": {props: map[string]any{"bgpInstances": []any{
+		map[string]any{"name": "instance-65000", "routerID": "192.0.2.1"}}}},
+	"cilium-bgppeerconfig": {props: map[string]any{"ebgpMultihop": 2}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

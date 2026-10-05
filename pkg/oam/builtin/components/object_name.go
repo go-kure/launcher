@@ -426,6 +426,30 @@ func (h *CertificateHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 	return certManagerKind(certv1.CertificateKind), oam.ObjectScopeNamespaced
 }
 
+// ComponentObject declares the cilium-bgpadvertisement kind's
+// CiliumBGPAdvertisement, which is cluster-scoped.
+func (h *CiliumBGPAdvertisementHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.BGPAKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-bgpclusterconfig kind's
+// CiliumBGPClusterConfig, which is cluster-scoped.
+func (h *CiliumBGPClusterConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.BGPCCKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-bgpnodeconfigoverride kind's
+// CiliumBGPNodeConfigOverride, which is cluster-scoped.
+func (h *CiliumBGPNodeConfigOverrideHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.BGPNCOKindDefinition), oam.ObjectScopeCluster
+}
+
+// ComponentObject declares the cilium-bgppeerconfig kind's
+// CiliumBGPPeerConfig, which is cluster-scoped.
+func (h *CiliumBGPPeerConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return ciliumBGPKind(ciliumv2.BGPPCKindDefinition), oam.ObjectScopeCluster
+}
+
 // ComponentObject declares the cnpg-cluster kind's Cluster.
 func (h *CnpgClusterHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return cnpgKind(cnpgv1.ClusterKind), oam.ObjectScopeNamespaced

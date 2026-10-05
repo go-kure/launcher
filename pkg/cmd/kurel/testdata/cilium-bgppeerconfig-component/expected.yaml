@@ -1,0 +1,35 @@
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  labels:
+    launcher.gokure.dev/component: tor
+  name: tor
+spec:
+  authSecretRef: bgp-tor
+  ebgpMultihop: 2
+  families:
+  - advertisements:
+      matchLabels:
+        launcher.gokure.dev/component: routes
+    afi: ipv4
+    safi: unicast
+  - afi: ipv6
+    safi: unicast
+  gracefulRestart:
+    enabled: true
+    restartTimeSeconds: 60
+  timers:
+    connectRetryTimeSeconds: 30
+    holdTimeSeconds: 9
+    keepAliveTimeSeconds: 3
+  transport:
+    peerPort: 1790
+    sourceInterface: lo
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  labels:
+    launcher.gokure.dev/component: defaults
+  name: api-defaults
+spec: {}

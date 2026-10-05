@@ -486,6 +486,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"secret",
 		"podmonitor", "prometheus-probe", "prometheusrule", "servicemonitor",
 		"certificate", "clusterissuer", "issuer",
+		"cilium-bgpadvertisement", "cilium-bgpclusterconfig", "cilium-bgpnodeconfigoverride",
+		"cilium-bgppeerconfig",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

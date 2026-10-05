@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: worker-1-bgp
+      type: cilium-bgpnodeconfigoverride
+      properties:
+        objectName: worker-1
+        bgpInstances:
+          - name: instance-65000
+            routerID: 192.0.2.11
+            localPort: 1790
+            localASN: 65011
+            peers:
+              - name: tor-1
+                localAddress: 192.0.2.11
+                localPort: 1791
+    - name: worker-2
+      type: cilium-bgpnodeconfigoverride
+      properties:
+        bgpInstances:
+          - name: instance-65000

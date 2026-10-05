@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,9 +32,10 @@ import (
 // The kind components of go-kure/launcher#790 to which no dimension of the
 // environment policy applies, built on one shared helper (policyFreeKind): the
 // cluster-scoped classes, the CSIDriver, the ServiceCIDR, the
-// PodDisruptionBudget and the four kinds of the Prometheus operator's API. The
-// three kinds of cert-manager's API are held here too: the policy reaches one
-// part of each (held), and everything else of them is the helper's.
+// PodDisruptionBudget, the four kinds of the Prometheus operator's API and the
+// four of Cilium's BGP control plane. The three kinds of cert-manager's API are
+// held here too: the policy reaches one part of each (held), and everything
+// else of them is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -357,6 +359,118 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: certificateMinimal(),
 		full:    certificateFull(),
 	},
+	{
+		component: "cilium-bgpadvertisement", handler: &components.CiliumBGPAdvertisementHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.BGPAKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
+		minimal: map[string]any{"advertisements": []any{}},
+		// One entry of each type, each with what the API requires of its type
+		// and nothing it refuses with it.
+		full: map[string]any{"advertisements": []any{
+			map[string]any{"advertisementType": "PodCIDR", "attributes": map[string]any{
+				"communities": map[string]any{
+					"standard": []any{"65000:100"}, "wellKnown": []any{"no-export"}, "large": []any{"65000:100:50"},
+				},
+				"localPreference": 200,
+			}},
+			map[string]any{
+				"advertisementType": "CiliumPodIPPool",
+				"selector":          map[string]any{"matchLabels": map[string]any{"pool": "blue"}},
+			},
+			map[string]any{
+				"advertisementType": "Service",
+				"service": map[string]any{
+					"addresses": []any{"LoadBalancerIP", "ClusterIP"}, "aggregationLengthIPv4": 0, "aggregationLengthIPv6": 64,
+				},
+				"selector": map[string]any{"matchExpressions": []any{
+					map[string]any{"key": "bgp", "operator": "In", "values": []any{"blue", "green"}},
+				}},
+			},
+			map[string]any{"advertisementType": "Interface", "interface": map[string]any{"name": "lo"}},
+		}},
+	},
+	{
+		component: "cilium-bgpclusterconfig", handler: &components.CiliumBGPClusterConfigHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.BGPCCKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](),
+		minimal: bgpInstances(map[string]any{"name": "instance-65000"}),
+		full: map[string]any{
+			"nodeSelector": map[string]any{
+				"matchLabels":      map[string]any{"bgp": "enabled"},
+				"matchExpressions": []any{map[string]any{"key": "rack", "operator": "In", "values": []any{"a", "b"}}},
+			},
+			"bgpInstances": []any{
+				map[string]any{
+					"name": "instance-65000", "localASN": 65000, "localPort": 179,
+					"peers": []any{
+						// peerASN 0 accepts any ASN the peer opens with.
+						map[string]any{"name": "tor-1", "peerAddress": "192.0.2.1", "peerASN": 0, "peerConfigRef": map[string]any{"name": "tor"}},
+						map[string]any{"name": "gateway", "peerASN": 65001, "autoDiscovery": map[string]any{
+							"mode": "DefaultGateway", "defaultGateway": map[string]any{"addressFamily": "ipv4"},
+						}},
+					},
+				},
+				map[string]any{"name": "instance-65010"},
+			},
+		},
+	},
+	{
+		component: "cilium-bgpnodeconfigoverride", handler: &components.CiliumBGPNodeConfigOverrideHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.BGPNCOKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](),
+		minimal: bgpInstances(map[string]any{"name": "instance-65000"}),
+		full: bgpInstances(
+			map[string]any{
+				"name": "instance-65000", "routerID": "192.0.2.10", "localPort": 1790, "localASN": 65000,
+				"peers": []any{
+					map[string]any{"name": "tor-1", "localAddress": "192.0.2.10", "localPort": 1791},
+					map[string]any{"name": "gateway"},
+				},
+			},
+			map[string]any{"name": "instance-65010"},
+		),
+	},
+	{
+		component: "cilium-bgppeerconfig", handler: &components.CiliumBGPPeerConfigHandler{},
+		gvk:     ciliumv2.SchemeGroupVersion.WithKind(ciliumv2.BGPPCKindDefinition),
+		typ:     reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](),
+		minimal: map[string]any{},
+		full: map[string]any{
+			"transport":     map[string]any{"peerPort": 1790, "sourceInterface": "lo"},
+			"timers":        map[string]any{"connectRetryTimeSeconds": 30, "holdTimeSeconds": 9, "keepAliveTimeSeconds": 3},
+			"authSecretRef": "bgp-auth",
+			// The API requires `enabled` and fills no default: false is authored.
+			"gracefulRestart": map[string]any{"enabled": false, "restartTimeSeconds": 60},
+			"ebgpMultihop":    4,
+			"families": []any{
+				map[string]any{"afi": "ipv4", "safi": "unicast", "advertisements": map[string]any{
+					"matchLabels": map[string]any{"launcher.gokure.dev/component": "pod-cidrs"},
+				}},
+				map[string]any{"afi": "ipv6", "safi": "unicast", "advertisements": map[string]any{
+					"matchExpressions": []any{map[string]any{"key": "advertise", "operator": "In", "values": []any{"bgp"}}},
+				}},
+				map[string]any{"afi": "ipv4", "safi": "multicast"},
+			},
+		},
+	},
+}
+
+// bgpInstances is the properties of a cilium-bgpclusterconfig or a
+// cilium-bgpnodeconfigoverride with the instances.
+func bgpInstances(instances ...any) map[string]any {
+	return map[string]any{"bgpInstances": append([]any{}, instances...)}
+}
+
+// bgpAdvertisements is the properties of a cilium-bgpadvertisement with the
+// entries.
+func bgpAdvertisements(entries ...any) map[string]any {
+	return map[string]any{"advertisements": append([]any{}, entries...)}
+}
+
+// bgpPeers is the properties of a cilium-bgpclusterconfig or a
+// cilium-bgpnodeconfigoverride with one instance and its peers.
+func bgpPeers(peers ...any) map[string]any {
+	return bgpInstances(map[string]any{"name": "instance-65000", "peers": append([]any{}, peers...)})
 }
 
 // monitoringOAuth2 is an OAuth2 block of the Prometheus operator's API with
@@ -665,6 +779,33 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Keystores.JKS.Alias", ".Spec.Keystores.PKCS12", ".Spec.Usages", ".Spec.PrivateKey",
 			".Spec.EncodeUsagesInRequest", ".Spec.RevisionHistoryLimit", ".Spec.AdditionalOutputFormats",
 			".Spec.NameConstraints", ".Spec.NameConstraints.Permitted.DNSDomains",
+		},
+		"cilium-bgpadvertisement": {
+			".Spec.Advertisements", ".Spec.Advertisements[0].Attributes", ".Spec.Advertisements[0].Attributes.Communities",
+			".Spec.Advertisements[0].Attributes.Communities.Standard", ".Spec.Advertisements[0].Attributes.LocalPreference",
+			".Spec.Advertisements[1].Selector", ".Spec.Advertisements[1].Selector.MatchLabels",
+			".Spec.Advertisements[2].Service", ".Spec.Advertisements[2].Service.Addresses",
+			".Spec.Advertisements[2].Service.AggregationLengthIPv4",
+			".Spec.Advertisements[2].Selector.MatchExpressions[0].Values", ".Spec.Advertisements[3].Interface",
+		},
+		"cilium-bgpclusterconfig": {
+			".Spec.NodeSelector", ".Spec.NodeSelector.MatchLabels", ".Spec.NodeSelector.MatchExpressions[0].Values",
+			".Spec.BGPInstances", ".Spec.BGPInstances[0].LocalASN", ".Spec.BGPInstances[0].LocalPort",
+			".Spec.BGPInstances[0].Peers", ".Spec.BGPInstances[0].Peers[0].PeerAddress",
+			".Spec.BGPInstances[0].Peers[0].PeerASN", ".Spec.BGPInstances[0].Peers[0].PeerConfigRef",
+			".Spec.BGPInstances[0].Peers[1].AutoDiscovery", ".Spec.BGPInstances[0].Peers[1].AutoDiscovery.DefaultGateway",
+		},
+		"cilium-bgpnodeconfigoverride": {
+			".Spec.BGPInstances", ".Spec.BGPInstances[0].RouterID", ".Spec.BGPInstances[0].LocalPort",
+			".Spec.BGPInstances[0].LocalASN", ".Spec.BGPInstances[0].Peers",
+			".Spec.BGPInstances[0].Peers[0].LocalAddress", ".Spec.BGPInstances[0].Peers[0].LocalPort",
+		},
+		"cilium-bgppeerconfig": {
+			".Spec.Transport", ".Spec.Transport.PeerPort", ".Spec.Transport.SourceInterface", ".Spec.Timers",
+			".Spec.Timers.HoldTimeSeconds", ".Spec.AuthSecretRef", ".Spec.GracefulRestart",
+			".Spec.GracefulRestart.RestartTimeSeconds", ".Spec.EBGPMultihop", ".Spec.Families",
+			".Spec.Families[0].Advertisements", ".Spec.Families[0].Advertisements.MatchLabels",
+			".Spec.Families[1].Advertisements.MatchExpressions[0].Values",
 		},
 	}
 	type copyCase struct {
@@ -1022,6 +1163,108 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null dns name", certificateWith("dnsNames", []any{"shop.example.com", nil}), "dnsNames[1]"},
 			{"two spellings", certificateWith("SecretName", "other-tls"), "sets the same field as"},
 		},
+		"cilium-bgpadvertisement": {
+			{"no properties", nil, "advertisements: required"},
+			{"null advertisements", map[string]any{"advertisements": nil}, "advertisements: required"},
+			{"entry without a type", bgpAdvertisements(map[string]any{"attributes": map[string]any{"localPreference": 100}}), "advertisements[0].advertisementType: required"},
+			{"a later entry without a type", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR"}, map[string]any{}), "advertisements[1].advertisementType: required"},
+			{"expression without a key", bgpAdvertisements(map[string]any{"advertisementType": "CiliumPodIPPool", "selector": map[string]any{
+				"matchExpressions": []any{map[string]any{"operator": "Exists"}},
+			}}), "advertisements[0].selector.matchExpressions[0].key: required"},
+			{"expression without an operator", bgpAdvertisements(map[string]any{"advertisementType": "CiliumPodIPPool", "selector": map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "pool", "operator": "Exists"}, map[string]any{"key": "pool"}},
+			}}), "advertisements[0].selector.matchExpressions[1].operator: required"},
+			// The CRD's five expression rules.
+			{"Service without a service", bgpAdvertisements(map[string]any{"advertisementType": "Service"}), `advertisements[0].service: required with advertisementType "Service"`},
+			{"Service with a null service", bgpAdvertisements(map[string]any{"advertisementType": "Service", "service": nil}), `advertisements[0].service: required with advertisementType "Service"`},
+			{"service on a pool entry", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR"}, map[string]any{
+				"advertisementType": "CiliumPodIPPool", "service": map[string]any{"addresses": []any{"ClusterIP"}},
+			}), `advertisements[1].service: not allowed with advertisementType "CiliumPodIPPool", only with "Service"`},
+			{"Interface without an interface", bgpAdvertisements(map[string]any{"advertisementType": "Interface"}), `advertisements[0].interface: required with advertisementType "Interface"`},
+			{"interface on a Service entry", bgpAdvertisements(map[string]any{
+				"advertisementType": "Service", "service": map[string]any{"addresses": []any{"ClusterIP"}}, "interface": map[string]any{"name": "lo"},
+			}), `advertisements[0].interface: not allowed with advertisementType "Service", only with "Interface"`},
+			{"selector on a PodCIDR entry", bgpAdvertisements(map[string]any{
+				"advertisementType": "PodCIDR", "selector": map[string]any{"matchLabels": map[string]any{"pool": "blue"}},
+			}), `advertisements[0].selector: not allowed with advertisementType "PodCIDR"`},
+			{"an empty selector on a PodCIDR entry", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR", "selector": map[string]any{}}), `advertisements[0].selector: not allowed with advertisementType "PodCIDR"`},
+			{"unknown key", withProperty(bgpAdvertisements(), "advertisement", []any{}), notA + "cilium.io/v2 CiliumBGPAdvertisementSpec"},
+			{"the object's spec", map[string]any{"spec": bgpAdvertisements()}, notA},
+			{"entry sub-key", bgpAdvertisements(map[string]any{"advertisementType": "PodCIDR", "type": "PodCIDR"}), notA},
+			{"advertisements a map", map[string]any{"advertisements": map[string]any{"advertisementType": "PodCIDR"}}, notA},
+			{"aggregation a string", bgpAdvertisements(map[string]any{"advertisementType": "Service", "service": map[string]any{"aggregationLengthIPv4": "24"}}), notA},
+			{"null entry", map[string]any{"advertisements": []any{map[string]any{"advertisementType": "PodCIDR"}, nil}}, "advertisements[1]"},
+			{"two spellings", withProperty(bgpAdvertisements(), "Advertisements", []any{}), "sets the same field as"},
+		},
+		"cilium-bgpclusterconfig": {
+			{"no properties", nil, "bgpInstances: required"},
+			{"null bgpInstances", map[string]any{"bgpInstances": nil}, "bgpInstances: required"},
+			{"a selector alone", map[string]any{"nodeSelector": map[string]any{}}, "bgpInstances: required"},
+			{"instance without a name", bgpInstances(map[string]any{"localASN": 65000}), "bgpInstances[0].name: required"},
+			{"a later instance without a name", bgpInstances(map[string]any{"name": "a"}, map[string]any{"peers": []any{}}), "bgpInstances[1].name: required"},
+			{"peer without a name", bgpPeers(map[string]any{"peerAddress": "192.0.2.1"}), "bgpInstances[0].peers[0].name: required"},
+			{"discovery without a mode", bgpPeers(map[string]any{"name": "gateway", "autoDiscovery": map[string]any{
+				"defaultGateway": map[string]any{"addressFamily": "ipv4"},
+			}}), "bgpInstances[0].peers[0].autoDiscovery.mode: required"},
+			{"default gateway without a family", bgpPeers(map[string]any{"name": "tor-1"}, map[string]any{"name": "gateway", "autoDiscovery": map[string]any{
+				"mode": "DefaultGateway", "defaultGateway": map[string]any{},
+			}}), "bgpInstances[0].peers[1].autoDiscovery.defaultGateway.addressFamily: required"},
+			{"peer config reference without a name", bgpPeers(map[string]any{"name": "tor-1", "peerConfigRef": map[string]any{}}), "bgpInstances[0].peers[0].peerConfigRef.name: required"},
+			{"node expression without a key", withProperty(bgpPeers(), "nodeSelector", map[string]any{
+				"matchExpressions": []any{map[string]any{"operator": "Exists"}},
+			}), "nodeSelector.matchExpressions[0].key: required"},
+			{"node expression without an operator", withProperty(bgpPeers(), "nodeSelector", map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "rack"}},
+			}), "nodeSelector.matchExpressions[0].operator: required"},
+			{"unknown key", withProperty(bgpPeers(), "instances", []any{}), notA + "cilium.io/v2 CiliumBGPClusterConfigSpec"},
+			{"the object's spec", map[string]any{"spec": bgpPeers()}, notA},
+			{"instance sub-key", bgpInstances(map[string]any{"name": "a", "asn": 65000}), notA},
+			{"peer sub-key", bgpPeers(map[string]any{"name": "tor-1", "address": "192.0.2.1"}), notA},
+			{"localASN a string", bgpInstances(map[string]any{"name": "a", "localASN": "65000"}), notA},
+			{"peer config reference a string", bgpPeers(map[string]any{"name": "tor-1", "peerConfigRef": "tor"}), notA},
+			{"null instance", map[string]any{"bgpInstances": []any{map[string]any{"name": "a"}, nil}}, "bgpInstances[1]"},
+			{"two spellings", withProperty(bgpPeers(), "BGPInstances", []any{}), "sets the same field as"},
+		},
+		"cilium-bgpnodeconfigoverride": {
+			{"no properties", nil, "bgpInstances: required"},
+			{"null bgpInstances", map[string]any{"bgpInstances": nil}, "bgpInstances: required"},
+			{"instance without a name", bgpInstances(map[string]any{"routerID": "192.0.2.10"}), "bgpInstances[0].name: required"},
+			{"peer without a name", bgpPeers(map[string]any{"name": "tor-1"}, map[string]any{"localAddress": "192.0.2.10"}), "bgpInstances[0].peers[1].name: required"},
+			// A cluster config selects its nodes; an override has no selector.
+			{"unknown key", withProperty(bgpPeers(), "nodeSelector", map[string]any{}), notA + "cilium.io/v2 CiliumBGPNodeConfigOverrideSpec"},
+			{"the object's spec", map[string]any{"spec": bgpPeers()}, notA},
+			{"instance sub-key", bgpInstances(map[string]any{"name": "a", "router": "192.0.2.10"}), notA},
+			// A cluster config's peer has the peer's address; an override's has the local one.
+			{"peer sub-key", bgpPeers(map[string]any{"name": "tor-1", "peerAddress": "192.0.2.1"}), notA},
+			{"localPort a string", bgpInstances(map[string]any{"name": "a", "localPort": "179"}), notA},
+			{"null peer", bgpPeers(map[string]any{"name": "tor-1"}, nil), "bgpInstances[0].peers[1]"},
+			{"two spellings", withProperty(bgpPeers(), "BGPInstances", []any{}), "sets the same field as"},
+		},
+		"cilium-bgppeerconfig": {
+			{"family without an afi", map[string]any{"families": []any{map[string]any{"safi": "unicast"}}}, "families[0].afi: required"},
+			{"a later family without a safi", map[string]any{"families": []any{
+				map[string]any{"afi": "ipv4", "safi": "unicast"}, map[string]any{"afi": "ipv6"},
+			}}, "families[1].safi: required"},
+			{"family expression without a key", map[string]any{"families": []any{map[string]any{"afi": "ipv4", "safi": "unicast", "advertisements": map[string]any{
+				"matchExpressions": []any{map[string]any{"operator": "Exists"}},
+			}}}}, "families[0].advertisements.matchExpressions[0].key: required"},
+			{"family expression without an operator", map[string]any{"families": []any{map[string]any{"afi": "ipv4", "safi": "unicast", "advertisements": map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "advertise"}},
+			}}}}, "families[0].advertisements.matchExpressions[0].operator: required"},
+			{"graceful restart without enabled", map[string]any{"gracefulRestart": map[string]any{"restartTimeSeconds": 60}}, "gracefulRestart.enabled: required"},
+			{"an empty graceful restart", map[string]any{"gracefulRestart": map[string]any{}}, "gracefulRestart.enabled: required"},
+			{"null enabled", map[string]any{"gracefulRestart": map[string]any{"enabled": nil}}, "gracefulRestart.enabled: required"},
+			// The CRD's expression rule, with both of its fields authored.
+			{"keepalive over hold", map[string]any{"timers": map[string]any{"keepAliveTimeSeconds": 90, "holdTimeSeconds": 30}}, "timers.keepAliveTimeSeconds: 90 is larger than timers.holdTimeSeconds (30)"},
+			{"unknown key", map[string]any{"peerPort": 179}, notA + "cilium.io/v2 CiliumBGPPeerConfigSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"ebgpMultihop": 2}}, notA},
+			{"timers sub-key", map[string]any{"timers": map[string]any{"holdTime": 90}}, notA},
+			{"ebgpMultihop a string", map[string]any{"ebgpMultihop": "2"}, notA},
+			// The reference is a Secret's name, not an object.
+			{"authSecretRef a map", map[string]any{"authSecretRef": map[string]any{"name": "bgp-auth"}}, notA},
+			{"null family", map[string]any{"families": []any{map[string]any{"afi": "ipv4", "safi": "unicast"}, nil}}, "families[1]"},
+			{"two spellings", map[string]any{"ebgpMultihop": 2, "EBGPMultihop": 3}, "sets the same field as"},
+		},
 	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
@@ -1213,6 +1456,89 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	// No group is required: a rule object may hold none.
 	if none := build("prometheusrule", map[string]any{}).(*monitoringv1.PrometheusRule); none.Spec.Groups != nil {
 		t.Errorf("groups = %+v, want none on a rule that authors none", none.Spec.Groups)
+	}
+
+	advert := build("cilium-bgpadvertisement", full["cilium-bgpadvertisement"]).(*ciliumv2.CiliumBGPAdvertisement)
+	var types []ciliumv2.BGPAdvertisementType
+	for _, entry := range advert.Spec.Advertisements {
+		types = append(types, entry.AdvertisementType)
+	}
+	if want := []ciliumv2.BGPAdvertisementType{
+		ciliumv2.BGPPodCIDRAdvert, ciliumv2.BGPCiliumPodIPPoolAdvert, ciliumv2.BGPServiceAdvert, ciliumv2.BGPInterfaceAdvert,
+	}; !slices.Equal(types, want) {
+		t.Fatalf("advertisement types = %v, want %v in authored order", types, want)
+	}
+	service := advert.Spec.Advertisements[2].Service
+	if service == nil || service.AggregationLengthIPv4 == nil || *service.AggregationLengthIPv4 != 0 {
+		t.Errorf("service = %+v, want the authored aggregationLengthIPv4 0", service)
+	}
+	if want := []ciliumv2.BGPServiceAddressType{ciliumv2.BGPLoadBalancerIPAddr, ciliumv2.BGPClusterIPAddr}; service == nil || !slices.Equal(service.Addresses, want) {
+		t.Errorf("service = %+v, want the addresses %v in authored order", service, want)
+	}
+	// The API requires a Service entry's addresses and an Interface entry's
+	// name. The type omits each when it is not authored, so the kind refuses
+	// neither: the object shows the block without it, and the API server
+	// refuses that.
+	blocks := policyFreeJSON(t, build("cilium-bgpadvertisement", bgpAdvertisements(
+		map[string]any{"advertisementType": "Service", "service": map[string]any{}},
+		map[string]any{"advertisementType": "Interface", "interface": map[string]any{}},
+	)))["spec"].(map[string]any)
+	if got, want := fmt.Sprint(blocks), "map[advertisements:[map[advertisementType:Service service:map[]] map[advertisementType:Interface interface:map[]]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+
+	cluster := build("cilium-bgpclusterconfig", full["cilium-bgpclusterconfig"]).(*ciliumv2.CiliumBGPClusterConfig)
+	if len(cluster.Spec.BGPInstances) != 2 || len(cluster.Spec.BGPInstances[0].Peers) != 2 {
+		t.Fatalf("bgpInstances = %+v, want the two authored ones, the first with its two peers", cluster.Spec.BGPInstances)
+	}
+	// An authored peerASN 0 accepts any ASN and is kept; so is an unauthored
+	// one, which the API fills with that 0.
+	peers := cluster.Spec.BGPInstances[0].Peers
+	if got := peers[0].PeerASN; got == nil || *got != 0 {
+		t.Errorf("peerASN = %v, want the authored 0", got)
+	}
+	if unset := build("cilium-bgpclusterconfig", bgpPeers(map[string]any{"name": "tor-1"})).(*ciliumv2.CiliumBGPClusterConfig); unset.Spec.BGPInstances[0].Peers[0].PeerASN != nil {
+		t.Errorf("peerASN = %v, want none on a peer that authors none", unset.Spec.BGPInstances[0].Peers[0].PeerASN)
+	}
+	if got := peers[1].AutoDiscovery; got == nil || got.Mode != ciliumv2.BGPDefaultGatewayMode || got.DefaultGateway == nil || got.DefaultGateway.AddressFamily != "ipv4" {
+		t.Errorf("autoDiscovery = %+v, want the authored default gateway discovery over ipv4", got)
+	}
+	// An authored empty node selector is every node, as an unauthored one is;
+	// the object says which was written.
+	if every := build("cilium-bgpclusterconfig", withProperty(bgpPeers(), "nodeSelector", map[string]any{})).(*ciliumv2.CiliumBGPClusterConfig); every.Spec.NodeSelector == nil {
+		t.Error("nodeSelector = nil, want the authored empty selector")
+	}
+
+	override := build("cilium-bgpnodeconfigoverride", full["cilium-bgpnodeconfigoverride"]).(*ciliumv2.CiliumBGPNodeConfigOverride)
+	instance := override.Spec.BGPInstances[0]
+	if instance.RouterID == nil || *instance.RouterID != "192.0.2.10" || len(instance.Peers) != 2 || instance.Peers[0].Name != "tor-1" || instance.Peers[1].Name != "gateway" {
+		t.Errorf("instance = %+v, want the authored router ID and the two peers in order", instance)
+	}
+
+	peer := build("cilium-bgppeerconfig", full["cilium-bgppeerconfig"]).(*ciliumv2.CiliumBGPPeerConfig)
+	if got := peer.Spec.GracefulRestart; got == nil || got.Enabled || got.RestartTimeSeconds == nil || *got.RestartTimeSeconds != 60 {
+		t.Errorf("gracefulRestart = %+v, want the authored enabled false and 60 seconds", got)
+	}
+	if got := peer.Spec.AuthSecretRef; got == nil || *got != "bgp-auth" {
+		t.Errorf("authSecretRef = %v, want the authored Secret name", got)
+	}
+	// A peer config that authors nothing carries nothing: every default is the
+	// API's to fill.
+	if none := build("cilium-bgppeerconfig", map[string]any{}).(*ciliumv2.CiliumBGPPeerConfig); !reflect.DeepEqual(none.Spec, ciliumv2.CiliumBGPPeerConfigSpec{}) {
+		t.Errorf("spec = %+v, want none of it set on a peer config that authors nothing", none.Spec)
+	}
+	// The timers rule is checked with both fields authored, and equal times
+	// pass it. With one authored the other is the default the installed CRD
+	// fills, and the comparison is the API server's: 100 alone is over the
+	// default hold time of the linked CRD and is not refused here.
+	for name, timers := range map[string]map[string]any{
+		"equal":           {"keepAliveTimeSeconds": 30, "holdTimeSeconds": 30},
+		"keepalive alone": {"keepAliveTimeSeconds": 100},
+		"hold alone":      {"holdTimeSeconds": 3},
+	} {
+		if err := coreKindErr(kinds["cilium-bgppeerconfig"].handler, "cilium-bgppeerconfig", "fast", map[string]any{"timers": timers}); err != nil {
+			t.Errorf("timers %s: %v, want it accepted", name, err)
+		}
 	}
 }
 

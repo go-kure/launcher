@@ -96,6 +96,11 @@ var coreKindSchemas = []struct {
 	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
 	{"clusterissuer", reflect.TypeFor[certv1.IssuerSpec](), &components.ClusterIssuerHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
+	// So are the kinds of Cilium's BGP control plane.
+	{"cilium-bgpadvertisement", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](), &components.CiliumBGPAdvertisementHandler{}, nil},
+	{"cilium-bgpclusterconfig", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), &components.CiliumBGPClusterConfigHandler{}, nil},
+	{"cilium-bgpnodeconfigoverride", reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), &components.CiliumBGPNodeConfigOverrideHandler{}, nil},
+	{"cilium-bgppeerconfig", reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), &components.CiliumBGPPeerConfigHandler{}, nil},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no

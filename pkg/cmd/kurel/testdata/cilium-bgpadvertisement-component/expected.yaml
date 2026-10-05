@@ -1,0 +1,43 @@
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  labels:
+    launcher.gokure.dev/component: routes
+  name: routes
+spec:
+  advertisements:
+  - advertisementType: PodCIDR
+    attributes:
+      communities:
+        standard:
+        - 65000:100
+      localPreference: 200
+  - advertisementType: CiliumPodIPPool
+    selector:
+      matchLabels:
+        pool: public
+  - advertisementType: Service
+    selector:
+      matchExpressions:
+      - key: bgp
+        operator: In
+        values:
+        - announce
+    service:
+      addresses:
+      - LoadBalancerIP
+      - ClusterIP
+      aggregationLengthIPv4: 24
+  - advertisementType: Interface
+    interface:
+      name: lo
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  labels:
+    launcher.gokure.dev/component: pod-cidr-only
+  name: pod-cidrs
+spec:
+  advertisements:
+  - advertisementType: PodCIDR

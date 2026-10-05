@@ -1,0 +1,37 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: rack-a
+      type: cilium-bgpclusterconfig
+      properties:
+        nodeSelector:
+          matchLabels:
+            rack: a
+        bgpInstances:
+          - name: instance-65000
+            localASN: 65000
+            localPort: 179
+            peers:
+              - name: tor-1
+                peerAddress: 192.0.2.1
+                peerASN: 65010
+                peerConfigRef:
+                  name: tor
+              - name: gateway
+                peerASN: 0
+                autoDiscovery:
+                  mode: DefaultGateway
+                  defaultGateway:
+                    addressFamily: ipv4
+                peerConfigRef:
+                  name: tor
+    - name: every-node
+      type: cilium-bgpclusterconfig
+      properties:
+        objectName: cluster-wide
+        bgpInstances:
+          - name: instance-65001

@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: tor
+      type: cilium-bgppeerconfig
+      properties:
+        transport:
+          peerPort: 1790
+          sourceInterface: lo
+        timers:
+          connectRetryTimeSeconds: 30
+          holdTimeSeconds: 9
+          keepAliveTimeSeconds: 3
+        authSecretRef: bgp-tor
+        gracefulRestart:
+          enabled: true
+          restartTimeSeconds: 60
+        ebgpMultihop: 2
+        families:
+          - afi: ipv4
+            safi: unicast
+            advertisements:
+              matchLabels:
+                launcher.gokure.dev/component: routes
+          - afi: ipv6
+            safi: unicast
+    - name: defaults
+      type: cilium-bgppeerconfig
+      properties:
+        objectName: api-defaults
