@@ -100,6 +100,25 @@ func isOwned(owned []string, key string) bool {
 // which the decoder drops. Keys are visited in sorted order at each level, the
 // order DecodeStrictJSON's marshalled input has.
 func UnknownJSONFieldPath[T any](src map[string]any, owned ...string) string {
+	return UnknownJSONFieldPathIn[T](src, nil, owned...)
+}
+
+// SelfDecodedShapes maps a type that decodes itself (UnmarshalJSON) to its
+// shape: the plain type its decoding reads the value into, whose fields are the
+// keys it keeps. encoding/json does not check keys inside such a type, so
+// DecodeStrictJSON drops an unknown one there; a caller that knows the shape
+// checks it with UnknownJSONFieldPathIn. A shape does not decode itself.
+type SelfDecodedShapes map[reflect.Type]reflect.Type
+
+// UnknownJSONFieldPathIn is UnknownJSONFieldPath that also looks inside a value
+// whose type decodes itself, for the types shapes names: such a value is walked
+// as its shape, so a key the shape does not declare is reported by its path
+// like any other. A type that decodes itself and is not in shapes is not looked
+// into, as in UnknownJSONFieldPath.
+//
+// Called after DecodeStrictJSON[T] accepted the same src, it returns the path
+// of a key that decode dropped inside one of those types, or "".
+func UnknownJSONFieldPathIn[T any](src map[string]any, shapes SelfDecodedShapes, owned ...string) string {
 	rest := make(map[string]any, len(src))
 	for k, v := range src {
 		if !isOwned(owned, k) {
@@ -116,13 +135,13 @@ func UnknownJSONFieldPath[T any](src map[string]any, owned ...string) string {
 	if err := dec.Decode(&value); err != nil {
 		return ""
 	}
-	return unknownJSONFieldPath(reflect.TypeFor[T](), value)
+	return unknownJSONFieldPath(reflect.TypeFor[T](), value, shapes)
 }
 
-// unknownJSONFieldPath is UnknownJSONFieldPath for one decoded JSON value and
+// unknownJSONFieldPath is UnknownJSONFieldPathIn for one decoded JSON value and
 // the type it decodes into. A panic from reflection over an unusual type (a
 // field behind an unexported embedded pointer) counts as nothing found.
-func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
+func unknownJSONFieldPath(t reflect.Type, value any, shapes SelfDecodedShapes) (path string) {
 	defer func() {
 		if recover() != nil {
 			path = ""
@@ -137,7 +156,11 @@ func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
 		return found
 	}
 	if pt.Implements(reflect.TypeFor[json.Unmarshaler]()) || pt.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) || named("UnmarshalJSONFrom") {
-		return ""
+		shape, ok := shapes[t]
+		if !ok || shape == t {
+			return ""
+		}
+		return unknownJSONFieldPath(shape, value, shapes)
 	}
 	join := func(head, rest string) string {
 		if strings.HasPrefix(rest, "[") {
@@ -161,14 +184,14 @@ func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
 					return k
 				}
 				if ft, ok := jsonFieldType(t, fields, k); ok {
-					if sub := unknownJSONFieldPath(ft, v[k]); sub != "" {
+					if sub := unknownJSONFieldPath(ft, v[k], shapes); sub != "" {
 						return join(k, sub)
 					}
 				}
 			}
 		} else if t.Kind() == reflect.Map {
 			for _, k := range keys {
-				if sub := unknownJSONFieldPath(t.Elem(), v[k]); sub != "" {
+				if sub := unknownJSONFieldPath(t.Elem(), v[k], shapes); sub != "" {
 					return join(k, sub)
 				}
 			}
@@ -182,7 +205,7 @@ func unknownJSONFieldPath(t reflect.Type, value any) (path string) {
 			v = v[:t.Len()]
 		}
 		for i, item := range v {
-			if sub := unknownJSONFieldPath(t.Elem(), item); sub != "" {
+			if sub := unknownJSONFieldPath(t.Elem(), item, shapes); sub != "" {
 				return join("["+strconv.Itoa(i)+"]", sub)
 			}
 		}
@@ -459,11 +482,16 @@ func validTagName(s string) bool {
 }
 
 // decodesKey reports whether a strict encoding/json decode into t accepts key and can
-// set its field. A panic (a tagged unexported embedded pointer) counts as unreachable.
+// set its field. reflect panics when the decoder sets a tagged unexported embedded
+// pointer, and that counts as unreachable. Any other panic is the decoder of the field's
+// own type, which the key has reached, failing on the null the probe writes (a
+// value-typed field whose UnmarshalJSON dereferences what a null leaves unset): the key
+// is one the type declares.
 func decodesKey(t reflect.Type, key string) (ok bool) {
 	defer func() {
-		if recover() != nil {
-			ok = false
+		if r := recover(); r != nil {
+			s, _ := r.(string)
+			ok = !strings.Contains(s, "using value obtained using unexported field")
 		}
 	}()
 	data, _ := json.Marshal(map[string]any{key: nil})

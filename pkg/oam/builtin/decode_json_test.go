@@ -190,6 +190,106 @@ func TestUnknownJSONFieldPath(t *testing.T) {
 	}
 }
 
+// shapedSelector decodes itself the way a selector type does: into its own
+// fields, dropping any other key.
+type shapedSelector struct {
+	Match map[string]string `json:"match,omitempty"`
+	Inner *shapedInner      `json:"inner,omitempty"`
+}
+
+func (s *shapedSelector) UnmarshalJSON(b []byte) error {
+	var shape shapedSelectorShape
+	if err := json.Unmarshal(b, &shape); err != nil {
+		return err
+	}
+	s.Match, s.Inner = shape.Match, shape.Inner
+	return nil
+}
+
+type shapedSelectorShape struct {
+	Match map[string]string `json:"match,omitempty"`
+	Inner *shapedInner      `json:"inner,omitempty"`
+}
+
+// shapedInner decodes itself too and has no shape in the test's map.
+type shapedInner struct {
+	Name string `json:"name"`
+}
+
+func (s *shapedInner) UnmarshalJSON(b []byte) error {
+	var shape struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(b, &shape); err != nil {
+		return err
+	}
+	s.Name = shape.Name
+	return nil
+}
+
+type shapedTarget struct {
+	Selector  shapedSelector            `json:"selector"`
+	Selectors []shapedSelector          `json:"selectors"`
+	ByName    map[string]shapedSelector `json:"byName"`
+	Pointer   *shapedSelector           `json:"pointer"`
+}
+
+// TestUnknownJSONFieldPathIn: a value whose type decodes itself is walked as
+// the shape given for that type, at every position that holds one, and the
+// strict decode accepts each of those documents. Without a shape for the type
+// the value is not looked into.
+func TestUnknownJSONFieldPathIn(t *testing.T) {
+	shapes := builtin.SelfDecodedShapes{
+		reflect.TypeFor[shapedSelector](): reflect.TypeFor[shapedSelectorShape](),
+	}
+	typo := map[string]any{"mtach": map[string]any{"a": "b"}}
+	valid := map[string]any{"match": map[string]any{"a": "b"}}
+	cases := []struct {
+		name string
+		src  map[string]any
+		want string
+	}{
+		{"valid", map[string]any{"selector": valid, "selectors": []any{valid}, "pointer": valid}, ""},
+		{"empty selector", map[string]any{"selector": map[string]any{}}, ""},
+		{"field", map[string]any{"selector": typo}, "selector.mtach"},
+		{"list element", map[string]any{"selectors": []any{valid, typo}}, "selectors[1].mtach"},
+		{"map value", map[string]any{"byName": map[string]any{"a": valid, "b": typo}}, "byName.b.mtach"},
+		{"through a pointer", map[string]any{"pointer": typo}, "pointer.mtach"},
+		{"null-valued key", map[string]any{"selector": map[string]any{"mtach": nil}}, "selector.mtach"},
+		{"a self-decoding type inside the shape, with no shape of its own", map[string]any{"selector": map[string]any{"inner": map[string]any{"name": "n", "x": 1}}}, ""},
+		{"wrong shape is not an unknown key", map[string]any{"selector": "x"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := builtin.UnknownJSONFieldPathIn[shapedTarget](tc.src, shapes); got != tc.want {
+				t.Errorf("UnknownJSONFieldPathIn = %q, want %q", got, tc.want)
+			}
+			if got := builtin.UnknownJSONFieldPath[shapedTarget](tc.src); got != "" {
+				t.Errorf("UnknownJSONFieldPath = %q, want nothing without the shapes", got)
+			}
+			if tc.want == "" {
+				return
+			}
+			// The reason the walk exists: the strict decode accepts the document.
+			if _, _, err := builtin.DecodeStrictJSON[shapedTarget](tc.src); err != nil {
+				t.Errorf("DecodeStrictJSON refused the document itself: %v", err)
+			}
+		})
+	}
+	t.Run("a type given as its own shape is not looked into", func(t *testing.T) {
+		self := builtin.SelfDecodedShapes{reflect.TypeFor[shapedSelector](): reflect.TypeFor[shapedSelector]()}
+		if got := builtin.UnknownJSONFieldPathIn[shapedTarget](map[string]any{"selector": typo}, self); got != "" {
+			t.Errorf("UnknownJSONFieldPathIn = %q, want nothing", got)
+		}
+	})
+	t.Run("an owned key is not unknown", func(t *testing.T) {
+		src := map[string]any{"mode": "x", "selector": typo}
+		if got := builtin.UnknownJSONFieldPathIn[shapedTarget](src, shapes, "Mode"); got != "selector.mtach" {
+			t.Errorf("UnknownJSONFieldPathIn = %q, want selector.mtach", got)
+		}
+	})
+}
+
 type (
 	SelLeaf struct {
 		Name string `json:"name"`

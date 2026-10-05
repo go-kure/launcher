@@ -169,20 +169,75 @@ func hasLabel(matchLabels map[string]string, key, value string) bool {
 	return false
 }
 
-// TestCiliumNetworkPolicyConfig_Generate_EndpointSelectorGapIsKnown pins the
-// documented limitation of the strict decode: encoding/json does not propagate
-// DisallowUnknownFields into a type with a custom UnmarshalJSON, and
-// api.EndpointSelector has one. Unknown keys nested there are therefore still
-// dropped silently. If Cilium ever drops that custom unmarshaler this test
-// starts failing, which is the signal to widen the guard.
-func TestCiliumNetworkPolicyConfig_Generate_EndpointSelectorGapIsKnown(t *testing.T) {
-	cfg := &traits.CiliumNetworkPolicyConfig{
-		Name:             "selector-gap",
-		EndpointSelector: map[string]any{"matchLabels": map[string]any{"app": "frontend"}, "bogusKey": "ignored"},
-		Egress:           []any{map[string]any{"toEndpoints": []any{map[string]any{}}}},
+// TestCiliumNetworkPolicyConfig_Generate_RefusesUnknownSelectorKey: an unknown
+// key inside a value Cilium decodes itself is refused by its path. The strict
+// decode cannot refuse it (encoding/json does not carry DisallowUnknownFields
+// into a type with its own UnmarshalJSON), and a selector whose only key was
+// misspelt would build as the empty one, which matches every endpoint.
+func TestCiliumNetworkPolicyConfig_Generate_RefusesUnknownSelectorKey(t *testing.T) {
+	selector := map[string]any{"matchLabels": map[string]any{"app": "frontend"}}
+	typo := map[string]any{"matchLabel": map[string]any{"app": "backend"}}
+	cases := []struct {
+		name     string
+		selector map[string]any
+		ingress  any
+		egress   any
+		want     string
+	}{
+		{name: "endpointSelector", selector: map[string]any{"matchLabel": map[string]any{"app": "frontend"}}, egress: []any{map[string]any{"toEndpoints": []any{map[string]any{}}}}, want: "endpointSelector.matchLabel"},
+		{name: "endpointSelector beside a valid key", selector: map[string]any{"matchLabels": map[string]any{"app": "frontend"}, "bogusKey": "x"}, egress: []any{map[string]any{"toEndpoints": []any{map[string]any{}}}}, want: "endpointSelector.bogusKey"},
+		{name: "null-valued key", selector: map[string]any{"matchLabel": nil}, egress: []any{map[string]any{"toEndpoints": []any{map[string]any{}}}}, want: "endpointSelector.matchLabel"},
+		{name: "fromEndpoints", selector: selector, ingress: []any{map[string]any{"fromEndpoints": []any{selector, typo}}}, want: "ingress[0].fromEndpoints[1].matchLabel"},
+		{name: "toEndpoints", selector: selector, egress: []any{map[string]any{"toEndpoints": []any{typo}}}, want: "egress[0].toEndpoints[0].matchLabel"},
+		{name: "fromNodes", selector: selector, ingress: []any{map[string]any{"fromNodes": []any{typo}}}, want: "ingress[0].fromNodes[0].matchLabel"},
+		{name: "toNodes", selector: selector, egress: []any{map[string]any{"toNodes": []any{typo}}}, want: "egress[0].toNodes[0].matchLabel"},
+		{name: "cidrGroupSelector", selector: selector, egress: []any{map[string]any{"toCIDRSet": []any{map[string]any{"cidrGroupSelector": typo}}}}, want: "egress[0].toCIDRSet[0].cidrGroupSelector.matchLabel"},
+		{name: "matchExpressions element", selector: selector, egress: []any{map[string]any{"toEndpoints": []any{map[string]any{"matchExpressions": []any{map[string]any{"key": "app", "operator": "Exists", "value": "x"}}}}}}, want: "egress[0].toEndpoints[0].matchExpressions[0].value"},
+		{name: "icmps field", selector: selector, egress: []any{map[string]any{"icmps": []any{map[string]any{"fields": []any{map[string]any{"family": "IPv4", "type": 8, "code": 0}}}}}}, want: "egress[0].icmps[0].fields[0].code"},
 	}
-	if _, err := cfg.Generate(stack.NewApplication("myapp", "production", nil)); err != nil {
-		t.Skipf("endpointSelector is now strictly decoded (%v) — remove this test and the "+
-			"limitation note in toAPIRule", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &traits.CiliumNetworkPolicyConfig{Name: "p", EndpointSelector: tc.selector, Ingress: tc.ingress, Egress: tc.egress}
+			_, err := cfg.Generate(stack.NewApplication("myapp", "production", nil))
+			if err == nil {
+				t.Fatalf("Generate succeeded, want unknown field %q refused", tc.want)
+			}
+			if want := `unknown field "` + tc.want + `"`; !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want it to contain %s", err, want)
+			}
+		})
+	}
+}
+
+// TestCiliumNetworkPolicyConfig_Generate_KeepsValidSelectors is the control for
+// the refusal above: every key a selector and an ICMP field declare builds.
+func TestCiliumNetworkPolicyConfig_Generate_KeepsValidSelectors(t *testing.T) {
+	selector := map[string]any{
+		"matchLabels":      map[string]any{"app": "frontend"},
+		"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}},
+	}
+	cfg := &traits.CiliumNetworkPolicyConfig{
+		Name:             "p",
+		EndpointSelector: selector,
+		Ingress:          []any{map[string]any{"fromEndpoints": []any{selector, map[string]any{}}}},
+		Egress: []any{
+			map[string]any{"toEndpoints": []any{selector}},
+			map[string]any{"toCIDRSet": []any{map[string]any{"cidrGroupSelector": selector}}},
+			map[string]any{"icmps": []any{map[string]any{"fields": []any{map[string]any{"family": "IPv4", "type": 8}, map[string]any{"type": "EchoRequest"}}}}},
+		},
+	}
+	objs, err := cfg.Generate(stack.NewApplication("myapp", "production", nil))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cnp, ok := (*objs[0]).(*ciliumv2.CiliumNetworkPolicy)
+	if !ok || cnp.Spec == nil {
+		t.Fatalf("object = %T, want a CiliumNetworkPolicy with a spec", *objs[0])
+	}
+	if got := cnp.Spec.EndpointSelector.LabelSelector; got == nil || len(got.MatchExpressions) != 1 || !hasLabel(got.MatchLabels, "app", "frontend") {
+		t.Errorf("endpointSelector = %+v, want the authored labels and expression", got)
+	}
+	if len(cnp.Spec.Egress) != 3 || len(cnp.Spec.Egress[2].ICMPs) != 1 || len(cnp.Spec.Egress[2].ICMPs[0].Fields) != 2 {
+		t.Errorf("egress = %+v, want three rules, the last with two ICMP fields", cnp.Spec.Egress)
 	}
 }

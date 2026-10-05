@@ -807,10 +807,23 @@ Practical consequence: a package pinned to rule shapes from an older Cilium rele
 fail to build after a Cilium major bump rather than quietly losing its L7 constraints.
 Rewrite the affected rules to the shapes the new API supports.
 
-**Known gap.** `encoding/json` does not propagate `DisallowUnknownFields` into types that
-define their own `UnmarshalJSON`. In this API those are `EndpointSelector` and `ICMPField`,
-so unknown keys nested inside `endpointSelector` or `icmps` are still dropped silently. The
-`toPorts.rules.*` shapes that motivated the guard are covered.
+**Selectors are checked too.** `encoding/json` does not propagate `DisallowUnknownFields`
+into a type that defines its own `UnmarshalJSON`, and Cilium's `EndpointSelector` is one: it
+drops a key it does not know. A selector whose only key is misspelt (`matchLabel` for
+`matchLabels`) would then build as the empty selector, which matches every endpoint of the
+namespace. The trait therefore refuses an unknown key inside a selector by its path, for
+example `unknown field "ingress[0].fromEndpoints[1].matchLabel"`, at every position of the
+three properties the trait takes (`endpointSelector`, `ingress`, `egress`) that holds one:
+`endpointSelector`, `fromEndpoints`, `toEndpoints`, `fromNodes`, `toNodes` and a CIDR
+entry's `cidrGroupSelector`. The same check covers the one other such type those properties
+reach, an ICMP field (`icmps[].fields[]`, which declares `family` and `type`). The
+positions are found from the Cilium types by `builtin.UnknownCiliumKeyPath`, which knows
+every type under a Cilium rule that decodes itself, a rule label and the deny rules
+included; the trait takes neither. A test fails when a Cilium bump adds such a type and it
+is not checked.
+
+**Breaking**: a `cilium-networkpolicy` trait whose selector holds an unknown key built
+before, with a selector wider than written, and is now refused.
 
 ### Null or empty `endpointSelector` / `egress` / `ingress`
 

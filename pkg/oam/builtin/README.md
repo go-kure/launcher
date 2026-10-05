@@ -17,7 +17,14 @@ fields) are split off and returned to the caller, and the rest is JSON-decoded i
 rather than a dropped field; a number in an interface-typed field stays an exact `json.Number`.
 It decodes only: no defaulting, no semantic checks. It shares one limitation with
 `encoding/json`: unknown keys nested inside a type that has its own `UnmarshalJSON` are still
-dropped. Its unknown-key error is `encoding/json`'s, which names the key without where it sits;
+dropped. A caller that knows what such a type reads its value into closes that for the type:
+`UnknownJSONFieldPathIn[T](props, shapes, owned...)` walks a value of a type named in `shapes`
+as its shape (a plain type with the keys the type keeps) and returns the path of a key the
+shape does not declare. `UnknownCiliumKeyPath[T](props)` is that walk with the shapes of the
+types under a Cilium policy rule that decode themselves (the endpoint selector, an ICMP field
+and a rule label), so a misspelt `matchLabels` is refused at every selector position instead
+of building as the selector that matches every endpoint; tests hold each shape to its type
+and fail when a Cilium bump adds such a type. Its unknown-key error is `encoding/json`'s, which names the key without where it sits;
 `UnknownJSONFieldPath[T](props, owned...)` returns the path of the first such key from the
 property root (`sourceRef.tag`, `patches[0].target.kinds`), or `""` when it finds none, for a
 caller whose type declares the same key in several places (go-kure/launcher#784; used by
@@ -34,7 +41,8 @@ too, as is every such field of a type with its own (or a promoted) `MarshalJSON`
 that the jsonv2-backed `encoding/json` (`GOEXPERIMENT=jsonv2`) also calls. A handler that
 decodes an external spec type asserts that list is empty, against an explicit exclusion list, so
 an upstream field added under a name launcher already owns fails the test instead of silently
-becoming unreachable. The `cilium-networkpolicy` trait decodes its raw rules this way.
+becoming unreachable. The `cilium-networkpolicy` trait decodes its raw rules this way and then
+runs `UnknownCiliumKeyPath` on them.
 
 `VolSyncRendering` and `PVCRendering` carry platform-supplied storage-class defaults
 (`storageClassName`, plus `volumeSnapshotClassName` for volsync) that a ClusterProfile capability
