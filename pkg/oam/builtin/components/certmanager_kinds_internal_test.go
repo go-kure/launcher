@@ -13,6 +13,7 @@ import (
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -152,10 +153,15 @@ func crdRefusesZero(s apiextensionsv1.JSONSchemaProps, typ reflect.Type) string 
 // it validates (the terms of a required node affinity), and one whose empty
 // value the schema's own rules refuse (the name of a parent reference).
 // TestKindComponents_NullRequired shows those refusals with the CRDs'
-// validator. The other required fields of such a type are written empty, and
-// the CRDs accept them so (the key and operator of a selector requirement):
-// no kind refuses their omission.
+// validator. One pair more is derived, as a field of cert-manager's own types
+// is: the key and the operator of a label selector's match expression, which
+// the CRDs require and the type writes empty.
+// TestLabelSelectorKinds_CoverEverySelector shows, path by path, what the API
+// server answers for them. The other required fields of an embedded type are
+// written empty, and no kind refuses their omission (the key and operator of a
+// node selector requirement, the topology key of an affinity term).
 func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	for _, kind := range certManagerKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := crdSpecProperties(t, certManagerCRD(t, kind.crd), "v1")
@@ -164,7 +170,7 @@ func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), certManagerModulePath+"/") {
 					prop, ok := props[f.path]
-					if ok && required[f.path] && f.writtenUnauthored() && (f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "") {
+					if ok && required[f.path] && f.writtenUnauthored() && (f.owner == expression || f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "") {
 						listed[f.path], embedded[f.path] = true, true
 					}
 					return

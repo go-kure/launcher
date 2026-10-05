@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -117,9 +118,14 @@ func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONS
 // channel is then refused the same omissions.
 //
 // Only the fields of the Gateway API's own types are derived. A field of a
-// Kubernetes type these specs embed (the expressions of a label selector) is
-// not, and no kind refuses its omission.
+// Kubernetes type these specs embed is not, but for one pair: the key and the
+// operator of a label selector's match expression, which the CRDs require and
+// the type writes empty. They are derived as a field of the Gateway API's own
+// types is, and TestLabelSelectorKinds_CoverEverySelector shows, path by path
+// and in both channels, what the API server answers for them. A label selector
+// is the one Kubernetes type these specs embed.
 func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	for _, kind := range gatewayAPIKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := schemaProperties(gatewayAPICRDSpec(t, "experimental", kind.crd))
@@ -145,10 +151,13 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 				}
 			}
 
-			listed, empty, omitted := map[string]bool{}, map[string]bool{}, map[string]bool{}
+			listed, empty, omitted, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), gatewayAPIModulePath+"/") {
+					if f.owner == expression && required[f.path] && f.writtenUnauthored() {
+						listed[f.path], embedded[f.path] = true, true
+					}
 					return
 				}
 				fields++
@@ -192,8 +201,8 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 			if fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
-			t.Logf("walked %d fields of the Gateway API's types; required and written unauthored: %v; required and omitted unauthored: %v; written empty unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(omitted)), slices.Sorted(maps.Keys(empty)))
+			t.Logf("walked %d fields of the Gateway API's types; required and written unauthored: %v; of them, of an embedded type: %v; required and omitted unauthored: %v; written empty unauthored: %v",
+				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(embedded)), slices.Sorted(maps.Keys(omitted)), slices.Sorted(maps.Keys(empty)))
 			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
 				t.Errorf("required list = %v\nthe CRD requires %v", got, want)
 			}

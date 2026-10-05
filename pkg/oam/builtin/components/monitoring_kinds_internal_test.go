@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // monitoringModulePath is the module whose Go source the tests below read: the
@@ -220,15 +221,6 @@ func (f kindField) omitemptyScalar() bool {
 	}
 }
 
-// walkMonitoringFields is walkKindFields for a type of the Prometheus
-// operator's API: a field is required where its source marks it so.
-func walkMonitoringFields(typ reflect.Type, all map[string]fieldMarkers, visit func(kindField)) {
-	walkKindFields(typ, func(f kindField) bool {
-		m, _ := f.markers(all)
-		return m.required
-	}, visit)
-}
-
 // walkKindFields visits every field the encoding of typ reaches, as
 // encoding/json reads it: exported fields by json name, embedded structs
 // promoted, pointers, lists and maps descended, types with their own JSON or
@@ -301,36 +293,44 @@ func walkKindFields(typ reflect.Type, required func(kindField) bool, visit func(
 // description to read a default from: no field these kinds decode may be a
 // number or a boolean that is omitted when zero and that the CRD defaults to
 // something else, since policyFreeKind.config carries no defaulted-zero list.
-// The default is the field's kubebuilder marker, read from the linked module's
-// source. A field of that shape on a type whose source is not read fails too.
+// The default is the field's default marker, read from the source of the
+// linked modules (markerAPISource): the Prometheus operator's, and those of
+// the Kubernetes types its specs embed. A field of that shape on a type whose
+// source is not read fails too.
 //
 // The API's two defaults at v0.94.1 are strings (a prober's path, a relabeling
 // rule's action). An authored empty string there is omitted and defaulted, as
 // on every kind: only an authored 0 or false is held to be carried.
 func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
-	all := monitoringFieldMarkers(t)
+	src := markerAPISource(t)
 	// Vacuity guards: the markers are read, and in both spellings of the
 	// default marker.
-	if m := all["ProberSpec.Path"]; m.def != "/probe" {
-		t.Fatalf("ProberSpec.Path has the default %q (read: %v), want /probe; the source is not being read", m.def, m.hasDefault)
-	}
-	if m := all["RelabelConfig.Action"]; m.def != "replace" {
-		t.Fatalf("RelabelConfig.Action has the default %q (read: %v), want replace; the source is not being read", m.def, m.hasDefault)
+	for _, guard := range []struct {
+		typ         reflect.Type
+		field, want string
+	}{
+		{reflect.TypeFor[monitoringv1.ProberSpec](), "Path", "/probe"},
+		{reflect.TypeFor[monitoringv1.RelabelConfig](), "Action", "replace"},
+	} {
+		field, _ := guard.typ.FieldByName(guard.field)
+		if def, read := src.def(kindField{owner: guard.typ, field: field}); def != guard.want {
+			t.Fatalf("%s.%s has the default %q (read: %v), want %s; the source is not being read", guard.typ.Name(), guard.field, def, read, guard.want)
+		}
 	}
 	walked := map[string]bool{}
 	for _, kind := range monitoringKinds {
-		walkMonitoringFields(kind.typ, all, func(f kindField) {
+		walkKindFields(kind.typ, src.required, func(f kindField) {
 			if !f.omitemptyScalar() {
 				return
 			}
 			at := kind.typ.Name() + ": " + f.path
 			walked[at] = true
-			m, read := f.markers(all)
+			def, defaulted := src.def(f)
 			switch {
-			case !read:
+			case !src.known(f):
 				t.Errorf("%s (%s.%s) is omitted when zero, and its default cannot be read: the source of its type is not", at, f.owner, f.field.Name)
-			case m.hasDefault && !crdDefaultIsZero(m.def):
-				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs a defaulted-zero list, which policyFreeKind does not carry", at, m.def)
+			case defaulted && !crdDefaultIsZero(def):
+				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs a defaulted-zero list, which policyFreeKind does not carry", at, def)
 			}
 		})
 	}
@@ -346,42 +346,64 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 	}
 }
 
-// TestMonitoringKinds_RequiredMatchMarkers derives, from the linked module's
-// source, the fields of each kind that the API requires and the type would
-// write unauthored, and holds the kind's required list to them. Such a field
-// is marked +required and is encoded when nothing was decoded into it. One
-// under a parent that is itself written unauthored and not required cannot be
-// in the list, which follows what was authored; the kind's validate refuses
-// it, and the row names it. A dependency bump that adds, drops or moves one
-// fails here, naming it.
+// monitoringEmbeddedNotRefused names the fields of a Kubernetes type the
+// monitoring specs embed that the generator's rule requires, that the type
+// writes unauthored, and whose omission no kind refuses, each with the reason.
+// The key is the declaring type and the Go field.
+var monitoringEmbeddedNotRefused = map[string]string{
+	"v1.SecretKeySelector.Key":    "the key of a Secret key reference: no kind refuses the omission of a key reference's key (README, \"Not refused\")",
+	"v1.ConfigMapKeySelector.Key": "the key of a ConfigMap key reference: as a Secret key reference's",
+}
+
+// TestMonitoringKinds_RequiredMatchMarkers derives, from the source of the
+// linked modules (markerAPISource), the fields of each kind that the API
+// requires and the type would write unauthored, and holds the kind's required
+// list to them. One under a parent that is itself written unauthored and not
+// required cannot be in the list, which follows what was authored; the kind's
+// validate refuses it, and the row names it. A dependency bump that adds,
+// drops or moves one fails here, naming it.
 //
-// Only the monitoring package's source is read. A field of a Kubernetes type
-// these specs embed (the key of a Secret key selector, the key and operator of
-// a label selector requirement) is not derived, and no kind refuses its
-// omission.
+// A field of the monitoring package is required where it is marked +required,
+// and every one the type writes unauthored must carry that marker or
+// +optional. A field of a Kubernetes type these specs embed is required by the
+// rule the schema generators apply to that type's source: no optional marker,
+// and a json tag that does not omit it when empty. Of those, the key and the
+// operator of a label selector's match expression are in the lists; every
+// other is named in monitoringEmbeddedNotRefused with its reason, and one that
+// is neither fails.
 func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 	all := monitoringFieldMarkers(t)
+	src := markerAPISource(t)
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
+	notRefused := map[string]bool{}
 	for _, kind := range monitoringKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			listed, validated := map[string]bool{}, map[string]bool{}
 			fields := 0
-			walkMonitoringFields(kind.typ, all, func(f kindField) {
-				m, read := f.markers(all)
-				if f.owner.PkgPath() != kind.typ.PkgPath() {
-					return
+			walkKindFields(kind.typ, src.required, func(f kindField) {
+				own := f.owner.PkgPath() == kind.typ.PkgPath()
+				if own {
+					fields++
 				}
-				fields++
-				if !read {
-					t.Errorf("%s (%s.%s) has no field in the module's source; the markers are keyed wrongly", f.path, f.owner, f.field.Name)
+				if !src.known(f) {
+					t.Errorf("%s (%s.%s) has no field in the source of the linked modules; the markers are keyed wrongly, or the module is not read", f.path, f.owner, f.field.Name)
 					return
 				}
 				if !f.writtenUnauthored() {
 					return
 				}
-				if !m.required && !m.optional {
+				if m, _ := f.markers(all); own && !m.required && !m.optional {
 					t.Errorf("%s (%s.%s) is written unauthored and is marked neither required nor optional; classify it", f.path, f.owner, f.field.Name)
 				}
-				if !m.required {
+				if !src.required(f) {
+					return
+				}
+				if !own && f.owner != expression {
+					name := f.owner.String() + "." + f.field.Name
+					if strings.TrimSpace(monitoringEmbeddedNotRefused[name]) == "" {
+						t.Errorf("%s (%s) is required by the generator's rule and written unauthored; the kind refuses its omission, or monitoringEmbeddedNotRefused says why not", f.path, name)
+					}
+					notRefused[name] = true
 					return
 				}
 				switch {
@@ -410,6 +432,11 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 				t.Errorf("fields left to validate = %v\nthe source marks %v", got, want)
 			}
 		})
+	}
+	for name := range monitoringEmbeddedNotRefused {
+		if !notRefused[name] {
+			t.Errorf("monitoringEmbeddedNotRefused names %s, which no kind's walk reaches as required and written unauthored", name)
+		}
 	}
 }
 

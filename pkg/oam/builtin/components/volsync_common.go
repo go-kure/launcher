@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -197,12 +199,16 @@ func replicationDestinationMovers(spec *volsyncv1alpha1.ReplicationDestinationSp
 // volsyncMoverRequired is the required list of the movers named, each of
 // which shares MoverConfig: of a volume mounted into the mover that is
 // authored, the API requires where it is mounted and what is mounted, and the
-// Go type writes both whether or not they were authored.
+// Go type writes both whether or not they were authored. So it does the key
+// and the operator of a match expression in the label selectors of the mover's
+// pod affinity and anti-affinity (labelSelectorRequired), which
+// TestLabelSelectorKinds_CoverEverySelector holds to the CRDs, path by path.
 func volsyncMoverRequired(movers ...string) map[string]string {
 	out := make(map[string]string, 2*len(movers))
 	for _, mover := range movers {
 		out[mover+".moverVolumes[].mountPath"] = "the path under /mnt the volume is mounted at in the mover pod"
 		out[mover+".moverVolumes[].volumeSource"] = "what is mounted: a secret, an nfs export or a persistentVolumeClaim"
+		maps.Copy(out, labelSelectorRequired(affinityLabelSelectors(mover+".moverAffinity")...))
 	}
 	return out
 }

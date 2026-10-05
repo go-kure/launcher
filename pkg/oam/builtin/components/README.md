@@ -408,7 +408,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | kind | `servicemonitor` | strict decode of `ServiceMonitorSpec` | `endpoints` and `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | missing | - | - | - |
 | `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | kind | `replicationdestination` | strict decode of `ReplicationDestinationSpec` | As `replicationsource`, without a Syncthing mover. Its labels and annotations are the `labels` and `annotations` properties. |
-| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, and of a Syncthing peer its `address`, `ID` and `introducer`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
+| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, of a Syncthing peer its `address`, `ID` and `introducer`, and of a match expression in a label selector of a mover's `moverAffinity` its `key` and `operator`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
 
 ## Adding a kind component: where its lines go
 
@@ -3639,7 +3639,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - the `clientId`, `clientSecret` and `tokenUrl` of an `oauth2`, on an
     endpoint of either monitor and on a Probe;
   - a rule group's `name` and a rule's `expr` (unauthored, the type would
-    write `expr: 0`).
+    write `expr: 0`);
+  - the `key` and `operator` of a match expression, in a monitor's `selector`
+    and in a Probe's `targets.ingress.selector`
+    (`selector.matchExpressions[0].operator: required (…)`). The selector is
+    a Kubernetes type, which carries no `+required` marker: the same test
+    derives the two fields from that type's source by the schema generators'
+    rule, that a field with no optional marker whose json tag keeps it when
+    empty is required. Presence only: the operator's value and its `values`
+    are left to the API server (see "A label selector's match expressions").
 
   **A required field the type leaves out when it is empty is refused too:**
   the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
@@ -3668,12 +3676,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   unauthored one is.
 
   `TestMonitoringKinds_RequiredMatchMarkers` holds these lists to the fields
-  the linked module's source marks required and the type writes unauthored,
-  so a dependency bump that adds, drops or moves one fails there. **Not
-  refused:**
-  - a required field of a Kubernetes type these specs embed: the `key` of a
-    Secret or ConfigMap key reference, the `key` and `operator` of a selector
-    expression. An omitted one is emitted empty;
+  the source marks required and the type writes unauthored, the linked
+  module's and that of a match expression's type, so a dependency bump
+  that adds, drops or moves one fails there. **Not refused:**
+  - another required field of a Kubernetes type these specs embed: the `key`
+    of a Secret or ConfigMap key reference. An omitted one is emitted empty;
   - an authored empty string in a required field (a group's `name: ""`),
     `prober.url` and a parameter's `name` excepted. It is a value, and the
     API server's to refuse;
@@ -3820,18 +3827,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     to refuse for that minimum length. An authored empty list of terms
     (`nodeSelectorTerms: []`) is not refused either: it is written as one,
     and the CRDs accept it.
+  - Of a match expression that is authored in a label selector of an HTTP01
+    solver's pod affinity (`acme.solvers[].http01.ingress.podTemplate.spec.affinity`,
+    and under `gatewayHTTPRoute`), on an issuer and a clusterissuer: its `key`
+    and `operator`. Presence only: the operator's value and its `values` are
+    left to the API server (see "A label selector's match expressions").
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
-  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (64 paths for an
+  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (96 paths for an
   issuer, 8 for a certificate) to the CRDs the linked module ships, which are
   the ones cert-manager's chart installs: every field of cert-manager's own
-  types that a CRD requires and the type writes unauthored is listed, with
-  the three fields of an embedded type above, and nothing else is. A
-  dependency bump that adds, drops or moves one fails there. **Not refused:**
+  types that a CRD requires and the type writes unauthored is listed, with the
+  fields of an embedded type above (the three, and the `key` and `operator` of
+  an expression at each of the 16 selectors), and nothing else is. A
+  dependency bump that adds, drops or moves one fails there.
+  `TestLabelSelectorKinds_CoverEverySelector` shows, at each of those
+  selectors, what the API server answers for an expression without its `key`
+  or its `operator`. **Not refused:**
   - every other required field of a Kubernetes or Gateway API type these
-    specs embed (the `key` and `operator` of a selector requirement): the
-    type writes it empty, and the CRDs accept it so;
+    specs embed (the `key` and `operator` of a node selector requirement, the
+    `topologyKey` of an affinity term): the type writes it empty, and the
+    CRDs accept it so;
   - every other value rule of the CRDs (enumerations, lengths, minima, and
     the one rule the CRDs write as an expression: that a `venafi` issuer
     names exactly one of `tpp`, `cloud` and `ngts`);
@@ -4414,6 +4431,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`parametersRef`, `infrastructure.parametersRef`), of a CA certificate
     reference (`caCertificateRefs`) and of a policy target (`targetRefs`);
     the `kind` of an allowed route kind (`allowedRoutes.kinds`).
+  - Of a match expression that is authored in a namespace `selector`, on a
+    `gateway` and a `listenerset` (a listener's
+    `allowedRoutes.namespaces.selector`, a Gateway's
+    `allowedListeners.namespaces.selector`): its `key` and `operator`, which
+    the CRDs of both channels require. Presence only: the operator's value
+    and its `values` are left to the API server (see "A label selector's
+    match expressions"). The selector is the one Kubernetes type these specs
+    embed; the test below derives these entries with the others, and
+    `TestLabelSelectorKinds_CoverEverySelector` shows what the API server
+    answers for them.
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
@@ -4438,20 +4465,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   required in both channels.
 
   `TestGatewayKinds_RequiredMatchCRD` holds the lists (4 paths for a
-  gatewayclass, 22 for a gateway, 4 for a listenerset, 7 for a referencegrant,
+  gatewayclass, 26 for a gateway, 6 for a listenerset, 7 for a referencegrant,
   9 for a backendtlspolicy) to the CRDs the linked module ships. The module
   ships two sets, one per channel of the API. The experimental one holds every
   field the Go types do and is the one each path is read in; the standard one
   must require the same wherever it holds the property. Every field of the
   Gateway API's own types that the CRDs require and the type writes
-  unauthored is listed, and nothing else is; no field is written empty
+  unauthored is listed, with the `key` and `operator` of a namespace
+  selector's expressions, and nothing else is; no field is written empty
   unauthored beside those. A dependency bump that adds, drops or moves one
   fails there. **Not refused:**
   - a list the API wants at least one item of that is authored empty, where
     the type writes it (`listeners: []` on a `gateway`, `from: []`): an
     authored empty value is a value;
-  - a required field of a Kubernetes type these specs embed (the expressions
-    of a label selector). An omitted one is emitted empty;
   - every other value rule of the CRDs: enumerations, lengths, patterns,
     minima and item limits, and the rules the CRDs write as expressions (a
     listener's `tls` and `hostname` against its `protocol`, the uniqueness of
@@ -4600,6 +4626,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     always carries this field, so the external-secrets API's default v2 never
     applies: write the value)`. The four are generated into the same file, in
     a list of their own.
+  - Of a match expression authored in a condition's `namespaceSelector`: its
+    `key` and `operator`. Presence only: the operator's value and its
+    `values` are left to the API server (see "A label selector's match
+    expressions"). 2 paths, beside the generated ones.
   - An `externalsecret` has no required top-level field. Of what is authored:
     a `data` entry's `secretKey`, `remoteRef` and its `key`; the `key` of an
     `extract`; the `source` and `target` of a `rewrite`'s `regexp` and the
@@ -4610,13 +4640,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`target.template.templateFrom[]`) its `name`, its `items` and an item's
     `key`. 23 paths.
   - A `clusterexternalsecret`: `externalSecretSpec`, and under it everything
-    an `externalsecret` requires. 24 paths.
+    an `externalsecret` requires; and the `key` and `operator` of a match
+    expression authored in `namespaceSelector` or in an entry of
+    `namespaceSelectors`, presence only. 28 paths.
 
   `TestExternalSecretsKinds_RequiredMatchSource` holds the three lists to the
   source of the linked module, which ships no CRD: the markers its CRDs are
   generated from are read from the Go files. A field counts as required where
   its json tag has no `omitempty` and it carries no optional marker, and as
-  written unauthored where the Go type encodes it when it is unset.
+  written unauthored where the Go type encodes it when it is unset. Of the
+  Kubernetes types the specs embed, only a match expression's `key` and
+  `operator` are derived, by the same rule on the source of the linked
+  `metav1.LabelSelectorRequirement`; every other required field of such a
+  type is not refused, and an omitted one is emitted empty.
   `TestExternalSecretsKinds_StoreRequiredIsGenerated` fails where the
   generated file and that derivation differ, in either direction and for
   either list, and names the path; a dependency bump that adds, drops or moves
@@ -4857,19 +4893,25 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     its `nodeSelectorTerms`, which the Kubernetes type would write as `null`
     where the CRD requires them. `TestKindComponents_NullRequired` shows the
     refusal with the validator of the linked CRDs.
+  - Of a match expression that is authored in a label selector of a mover's
+    pod affinity or anti-affinity (`moverAffinity`, on `rsyncTLS`, `rclone`,
+    `restic` and `syncthing`): `key` and `operator`. Presence only: the
+    operator's value and its `values` are left to the API server (see "A
+    label selector's match expressions").
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
-  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (11 paths for a source,
-  6 for a destination) to the CRDs the linked module ships: every field of
+  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (75 paths for a source,
+  54 for a destination) to the CRDs the linked module ships: every field of
   VolSync's own types that a CRD requires and the type writes unauthored is
-  listed, and nothing else is. A dependency bump that adds, drops or moves
-  one fails there. **Not refused:**
+  listed, and so is the `key` and `operator` of a match expression, and
+  nothing else is. A dependency bump that adds, drops or moves one fails
+  there. **Not refused:**
   - a required field the type omits when it is not authored: the object shows
     the omission, and the API server refuses it;
   - a required field of a Kubernetes type these specs embed, other than those
-    terms (the `key` of a selector requirement in an affinity, for one). An
-    omitted one is emitted empty;
+    terms and a match expression's two fields (the `key` of a node selector
+    requirement in an affinity, for one). An omitted one is emitted empty;
   - every other value rule of the CRDs (enumerations, patterns, minima).
 
   **Two fields the linked Kubernetes type holds and the CRDs do not are
@@ -7317,6 +7359,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   so an empty string on a defaulted field such as `primaryUpdateStrategy` is
   still omitted. The two pod-certificate fields above are the exception: an
   empty `signerName` or `keyType` is refused as an unauthored one is.
+  A match expression authored in one of the spec's label selectors without
+  its `key` or its `operator` is refused by path
+  (`podSelectorRefs[0].selector.matchExpressions[0].operator: required (…)`):
+  the CRD requires both, and the type would write them empty. Presence only;
+  "A label selector's match expressions" lists the selectors and says what is
+  left to the API server and to the operator's webhook.
   `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
   onto this kind, so it is the same code), in this order:
   the instance-count default when `instances` is not authored (an authored
@@ -7419,6 +7467,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
   A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
   label of at most 50 characters).
+  On the Pooler, a match expression authored in a label selector of
+  `template.spec` without its `key` or its `operator` is refused too, by
+  path; an authored empty one is not (presence only; see "A label selector's
+  match expressions").
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
   Service's, so it must be a DNS-1035 label of at most 63 characters, and a
@@ -8257,6 +8309,40 @@ with the `app` label, with apimachinery's reason and not the texts above (see it
 kinds hold the `key` and `operator` of Cilium's own selector type through the same required
 list, with the same wording; their entries say what else Cilium requires.
 
+**Presence only, where a CRD defines the object.** On the kinds below an expression without its
+`key` or its `operator` is refused, by the same required list and in the same words. The CRD
+requires both fields, and the Go type writes each whether or not it was authored, so the object
+would not show the omission: the document as authored is one the API server refuses, and the
+kind refuses the omission by presence, as it does every required field its type writes
+unauthored. An authored empty string is a value, left to the API server. Nothing else of the
+expression is refused: an operator that is none of the four and a mismatched `values` are left
+to the API server and to the operator's own admission, since a CRD's schema requires the two
+fields and says nothing of the pair.
+
+| Kind | Selectors | Ground |
+|---|---|---|
+| `servicemonitor`, `podmonitor` | `selector` | the linked type, by the generator's rule (below) |
+| `prometheus-probe` | `targets.ingress.selector` | the same |
+| `cnpg-cluster` | the `labelSelector` and `namespaceSelector` of every `affinity.additionalPodAffinity` and `affinity.additionalPodAntiAffinity` term, required or preferred; `topologySpreadConstraints[].labelSelector`; a `projectedVolumeTemplate` `clusterTrustBundle` source's `labelSelector`; the `selector` of `ephemeralVolumeSource.volumeClaimTemplate.spec` and of the `pvcTemplate` of `storage`, `walStorage` and each tablespace; `podSelectorRefs[].selector` | the Cluster CRD of the linked module |
+| `cnpg-pooler` | under `template.spec`, the selectors a `pod` holds | the Pooler CRD of the linked module |
+| `issuer`, `clusterissuer` | the `labelSelector` and `namespaceSelector` of every pod affinity and anti-affinity term of an HTTP01 solver's `podTemplate.spec.affinity`, under `ingress` and under `gatewayHTTPRoute` | the Issuer and ClusterIssuer CRDs of the linked module |
+| `gateway`, `listenerset` | a listener's `allowedRoutes.namespaces.selector`; a Gateway's `allowedListeners.namespaces.selector` | the CRDs of both Gateway API channels |
+| `cilium-nodeconfig` | `nodeSelector` | the CiliumNodeConfig CRD of the linked module |
+| `secretstore`, `clustersecretstore` | `conditions[].namespaceSelector` | the linked type, by the generator's rule (below) |
+| `clusterexternalsecret` | `namespaceSelector`; every entry of `namespaceSelectors` | the same |
+| `replicationsource`, `replicationdestination` | the `labelSelector` and `namespaceSelector` of every pod affinity and anti-affinity term of a mover's `moverAffinity`, required or preferred: `rclone`, `restic`, `rsyncTLS`, and on a source `syncthing` | the ReplicationSource and ReplicationDestination CRDs of the linked module |
+
+The Prometheus operator's module and the External Secrets Operator's ship no CRD to read, so
+the ground of their kinds is the source of the linked `metav1.LabelSelectorRequirement`: the
+schema generators require a field that carries no optional marker and whose json tag keeps it
+when empty, and `key` and `operator` are such fields where `values` is not.
+`TestMonitoringKinds_RequiredMatchMarkers` and `TestExternalSecretsKinds_RequiredMatchSource`
+derive the two from that source by that rule, beside the fields the operator's own types mark
+required, and hold each kind's list to them; on the monitoring kinds another field of an
+embedded Kubernetes type that the rule requires fails there unless it is named with the reason
+it is not refused. CloudNativePG's admission webhook runs apimachinery's whole selector
+validation on `podSelectorRefs[].selector`; that fuller check is the operator's, not launcher's.
+
 **Not held: the metric selectors of a `horizontalpodautoscaler`**
 (`metrics[].object.metric.selector`, `metrics[].pods.metric.selector`,
 `metrics[].external.metric.selector`). The API server's validation of an autoscaler does not
@@ -8268,7 +8354,18 @@ typed value can show: the operator, an empty one included, and the pair. A missi
 only in what was authored, so it is refused where the component is read.
 `TestLabelSelectorKinds_CoverEverySelector` walks the type of every strictly decoded kind and
 fails on a selector path that is neither held nor listed as left out with its reason, so a
-selector added by a dependency bump or a new kind cannot go unread.
+selector added by a dependency bump or a new kind cannot go unread. For a presence-only kind it
+also reads the CRDs named above, fails where one does not require `key` and `operator` at a
+held path, and asks the API server's own validation of a custom resource at each: the object
+the kind emits for a whole expression is accepted, and the same object with the `key` or the
+`operator` taken out is refused for that field alone. With the field as the empty string the
+type writes, the object is accepted again, which is why the omission is refused where the
+component is read.
+
+The walk covers the kinds that decode a type. The hand-parsed kinds (`deployment`, `daemonset`,
+`job`, `cronjob`, `statefulset`, `persistentvolumeclaim`) hold their selectors through their own
+parser (`parseLabelSelectorOpts`), which refuses the same and more, so their absence from the
+test's list is not a gap.
 
 ### Every spec field is this package's to write
 

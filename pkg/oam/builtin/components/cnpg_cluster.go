@@ -258,6 +258,9 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUnauthoredRequired(props, cnpgClusterRequired); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredRequired(props, labelSelectorRequired(cnpgClusterLabelSelectors...)); err != nil {
+		return nil, err
+	}
 	if err := validateCnpgClusterImageRefs(spec); err != nil {
 		return nil, err
 	}
@@ -316,6 +319,30 @@ var cnpgClusterRequired = map[string]string{
 	"postgresql.synchronous.method":                        "how the synchronous standbys are chosen: any or first",
 	"replica.source":                                       "the name of the external cluster this one replicates",
 }
+
+// cnpgClusterLabelSelectors lists the Kubernetes label selectors of a
+// cnpgv1.ClusterSpec, as required-list paths. The Cluster CRD requires the key
+// and the operator of a match expression of each, and the Go type writes both
+// whether or not they were authored, so both must be authored
+// (labelSelectorRequired). TestLabelSelectorKinds_CoverEverySelector holds the
+// list to the type and to the CRD of the linked module.
+//
+// Nothing else of an expression is read here. CloudNativePG's admission
+// webhook checks the selector of a podSelectorRefs entry further; that check
+// is the operator's, and the rest is the API server's by the CRD.
+var cnpgClusterLabelSelectors = slices.Concat(
+	podAffinityLabelSelectors("affinity.additionalPodAffinity"),
+	podAffinityLabelSelectors("affinity.additionalPodAntiAffinity"),
+	[]string{
+		"topologySpreadConstraints[].labelSelector",
+		"projectedVolumeTemplate.sources[].clusterTrustBundle.labelSelector",
+		"ephemeralVolumeSource.volumeClaimTemplate.spec.selector",
+		"storage.pvcTemplate.selector",
+		"walStorage.pvcTemplate.selector",
+		"tablespaces[].storage.pvcTemplate.selector",
+		"podSelectorRefs[].selector",
+	},
+)
 
 // cnpgClusterDefaultedZeroFields lists the ClusterSpec fields on which an
 // authored 0 or false would be silently replaced: non-pointer and omitempty,

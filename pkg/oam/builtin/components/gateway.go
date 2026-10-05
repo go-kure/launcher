@@ -100,6 +100,7 @@ var gatewayRequired = func() map[string]string {
 			frontend + "perPort[].tls" + validation: caRefs,
 		},
 		gatewayListenerRequired("listeners[]"),
+		gatewayNamespacesRequired("allowedListeners.namespaces"),
 		gatewayReferenceRequired("the object that holds the Gateway's parameters", "infrastructure.parametersRef"),
 		gatewayReferenceRequired(caRef, frontend+"default"+validation+"[]", frontend+"perPort[].tls"+validation+"[]"),
 	)

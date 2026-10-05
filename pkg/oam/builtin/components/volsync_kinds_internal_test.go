@@ -12,6 +12,7 @@ import (
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -67,8 +68,13 @@ func volsyncCRD(t *testing.T, file string) string {
 // those outside their required lists: the terms of a required node affinity,
 // which refuseVolsyncNullNodeSelectorTerms refuses and
 // TestKindComponents_NullRequired shows with the CRDs' validator. The set
-// derived must be exactly those, one per mover that holds an affinity.
+// derived must be exactly those, one per mover that holds an affinity. One
+// pair more is derived, as a field of VolSync's own types is: the key and the
+// operator of a label selector's match expression, which the CRDs require and
+// the type writes empty. TestLabelSelectorKinds_CoverEverySelector shows, path
+// by path, what the API server answers for them.
 func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	for _, kind := range volsyncKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := crdSpecProperties(t, volsyncCRD(t, kind.crd), "v1alpha1")
@@ -77,7 +83,11 @@ func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), volsyncModulePath+"/") {
 					prop, ok := props[f.path]
-					if ok && required[f.path] && f.writtenUnauthored() && (f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "") {
+					switch {
+					case !ok || !required[f.path] || !f.writtenUnauthored():
+					case f.owner == expression:
+						listed[f.path] = true
+					case f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "":
 						embedded[f.path] = true
 					}
 					return

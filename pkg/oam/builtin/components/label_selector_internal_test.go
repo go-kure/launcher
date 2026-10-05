@@ -1,12 +1,14 @@
 package components
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,10 +35,12 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1validation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -285,8 +289,149 @@ type labelSelectorKind struct {
 	expressions bool
 	// excluded maps a selector path the kind does not hold to the reason.
 	excluded map[string]string
-	// unheld, when set, is the reason no selector of the kind is held.
-	unheld string
+	// crds, on a kind that holds presence only, reads the CRDs of the linked
+	// module that define the kind's object: each must require key and operator
+	// at every selector path. A kind without one states its ground instead.
+	crds   func(t *testing.T) []crdSchema
+	ground string
+}
+
+// crdSchema is one CRD that defines the object of a presence-only kind, in the
+// version the kind emits: the properties of its spec by json path and the
+// paths their parent requires (schemaProperties), and the API server's own
+// answer for a document of it (crdCreate).
+type crdSchema struct {
+	name     string
+	props    map[string]apiextensionsv1.JSONSchemaProps
+	required map[string]bool
+	create   *crdCreate
+}
+
+// linkedCRDSchema reads the CRD in file, a path under the directory of the
+// linked module, and prepares its version as the API server serves it.
+func linkedCRDSchema(t *testing.T, modulePath, file, version string) crdSchema {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(linkedModuleDir(t, modulePath), filepath.FromSlash(file)))
+	if err != nil {
+		t.Fatalf("read the CRD: %v", err)
+	}
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	if err := yaml.Unmarshal(data, crd); err != nil {
+		t.Fatalf("decode the CRD %s: %v", file, err)
+	}
+	at := slices.IndexFunc(crd.Spec.Versions, func(v apiextensionsv1.CustomResourceDefinitionVersion) bool { return v.Name == version })
+	if at < 0 || crd.Spec.Versions[at].Schema == nil || crd.Spec.Versions[at].Schema.OpenAPIV3Schema == nil {
+		t.Fatalf("%s has no schema for the version %s", file, version)
+	}
+	spec, ok := crd.Spec.Versions[at].Schema.OpenAPIV3Schema.Properties["spec"]
+	if !ok {
+		t.Fatalf("%s has no spec", file)
+	}
+	props, required := schemaProperties(spec)
+	return crdSchema{
+		name: file, props: props, required: required,
+		create: crdCreateOf(t, crd, version),
+	}
+}
+
+// show holds the selector at path, of a presence-only kind, to the CRD: by the
+// schema's required lists, and by the API server's own answer for the object
+// the kind emits.
+//
+// With a whole expression the API server accepts the object. With the
+// expression's key, or its operator, taken out of that object, it refuses it,
+// for that field's absence and nothing else: that is the rule the kind's
+// refusal repeats. With the field written as the empty string, which is what
+// the Go type writes for one that was not authored, it accepts the object
+// again: the schema requires the field and bounds no value of it. The object
+// the kind would emit for an unauthored field therefore neither shows the
+// omission nor is refused for it, and only the kind, which reads what was
+// authored, can tell the author.
+func (s crdSchema) show(t *testing.T, kind labelSelectorKind, path string) {
+	t.Helper()
+	at := strings.ReplaceAll(path, "[]", "[0]") + ".matchExpressions[0]."
+	// create answers the create of the object the kind emits for a whole
+	// expression at the selector, after change has edited that expression in it.
+	create := func(change func(expr map[string]any)) crdAnswer {
+		props := withValueAt(kind.base, path, map[string]any{"matchExpressions": []any{
+			map[string]any{"key": "tier", "operator": "In", "values": []any{"a"}},
+		}})
+		object := kind.object(t, props)
+		spec, _ := object["spec"].(map[string]any)
+		expr, _ := fieldAt(t, spec, at+"key")
+		change(expr)
+		return s.create.create(t, object)
+	}
+	what := s.name + ": " + path
+	create(func(map[string]any) {}).accepted(t, what+" with a whole expression")
+	for _, name := range []string{"key", "operator"} {
+		prop := path + ".matchExpressions[]." + name
+		if _, ok := s.props[prop]; !ok {
+			t.Errorf("%s is no property of the CRD %s; the paths are keyed wrongly, or the CRD does not hold the selector", prop, s.name)
+			continue
+		}
+		if !s.required[prop] {
+			t.Errorf("%s is not required by the CRD %s; the kind refuses what the API admits", prop, s.name)
+		}
+		want := "spec." + at + name
+		if answer := create(func(expr map[string]any) { delete(expr, name) }); len(answer.unknown) > 0 || len(answer.rules) > 0 ||
+			len(answer.schema) != 1 || answer.schema[0].Type != field.ErrorTypeRequired || answer.schema[0].Field != want {
+			t.Errorf("%s with an expression without its %s: the API server answers %q, want one refusal, of %s as required", what, name, answer, want)
+		}
+		create(func(expr map[string]any) { expr[name] = "" }).accepted(t, what+" with an expression whose "+name+" is the empty string the type writes")
+	}
+}
+
+// object returns the one object the kind emits for the properties, as the JSON
+// it is written as.
+func (kind labelSelectorKind) object(t *testing.T, props map[string]any) map[string]any {
+	t.Helper()
+	cfg, err := kind.config(&oam.Component{Name: "web", Type: kind.component, Properties: props})
+	if err != nil {
+		t.Fatalf("build the kind: %v", err)
+	}
+	objs, err := cfg.Generate(stack.NewApplication("web", "default", cfg))
+	if err != nil {
+		t.Fatalf("generate the kind's object: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("the kind emits %d objects, want one", len(objs))
+	}
+	raw, err := json.Marshal(*objs[0])
+	if err != nil {
+		t.Fatalf("encode the object: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode the object: %v", err)
+	}
+	return out
+}
+
+// crdFile reads one CRD file of a linked module, in its v1 version.
+func crdFile(modulePath, file string) func(t *testing.T) []crdSchema {
+	return crdFileVersion(modulePath, file, "v1")
+}
+
+// crdFileVersion reads one CRD file of a linked module, in the version named.
+func crdFileVersion(modulePath, file, version string) func(t *testing.T) []crdSchema {
+	return func(t *testing.T) []crdSchema {
+		t.Helper()
+		return []crdSchema{linkedCRDSchema(t, modulePath, file, version)}
+	}
+}
+
+// gatewayAPICRDs reads one Gateway API CRD in both of its channels: a cluster
+// holds either.
+func gatewayAPICRDs(name string) func(t *testing.T) []crdSchema {
+	return func(t *testing.T) []crdSchema {
+		t.Helper()
+		var out []crdSchema
+		for _, channel := range gatewayAPIChannels {
+			out = append(out, linkedCRDSchema(t, gatewayAPIModulePath, gatewayAPICRDFile(channel, name), "v1"))
+		}
+		return out
+	}
 }
 
 var labelSelectorTestContainers = []any{map[string]any{"name": "app", "image": "registry.example.com/app:1.0"}}
@@ -352,29 +497,101 @@ var labelSelectorKinds = []labelSelectorKind{
 	},
 	{
 		component: "cilium-nodeconfig", typ: "ciliumv2.CiliumNodeConfigSpec", config: kindConfig(&CiliumNodeConfigHandler{}),
-		base: map[string]any{"defaults": map[string]any{"debug": "true"}},
+		base:   map[string]any{"defaults": map[string]any{"debug": "true"}},
+		ground: "the CiliumNodeConfig CRD of the linked module, which TestCiliumPlainKinds_RequiredMatchCRD holds the kind's whole required list to",
 	},
-	{component: "servicemonitor", typ: "monitoringv1.ServiceMonitorSpec", unheld: crdSelectorUnheld},
-	{component: "podmonitor", typ: "monitoringv1.PodMonitorSpec", unheld: crdSelectorUnheld},
-	{component: "prometheus-probe", typ: "monitoringv1.ProbeSpec", unheld: crdSelectorUnheld},
-	{component: "cnpg-cluster", typ: "cnpgv1.ClusterSpec", unheld: crdSelectorUnheld},
-	{component: "cnpg-pooler", typ: "cnpgv1.PoolerSpec", unheld: crdSelectorUnheld},
-	{component: "issuer", typ: "certv1.IssuerSpec", unheld: crdSelectorUnheld},
-	{component: "clusterissuer", typ: "certv1.IssuerSpec", unheld: crdSelectorUnheld},
-	{component: "gateway", typ: "gatewayv1.GatewaySpec", unheld: crdSelectorUnheld},
-	{component: "listenerset", typ: "gatewayv1.ListenerSetSpec", unheld: crdSelectorUnheld},
-	{component: "secretstore", typ: "esv1.SecretStoreSpec", unheld: crdSelectorUnheld},
-	{component: "clustersecretstore", typ: "esv1.SecretStoreSpec", unheld: crdSelectorUnheld},
-	{component: "clusterexternalsecret", typ: "esv1.ClusterExternalSecretSpec", unheld: crdSelectorUnheld},
-	{component: "replicationsource", typ: "volsyncv1alpha1.ReplicationSourceSpec", unheld: crdSelectorUnheld},
-	{component: "replicationdestination", typ: "volsyncv1alpha1.ReplicationDestinationSpec", unheld: crdSelectorUnheld},
+	{
+		component: "servicemonitor", typ: "monitoringv1.ServiceMonitorSpec", config: kindConfig(&ServiceMonitorHandler{}),
+		base:   map[string]any{"endpoints": []any{}, "selector": map[string]any{}},
+		ground: generatorRuleGround,
+	},
+	{
+		component: "podmonitor", typ: "monitoringv1.PodMonitorSpec", config: kindConfig(&PodMonitorHandler{}),
+		base:   map[string]any{"selector": map[string]any{}},
+		ground: generatorRuleGround,
+	},
+	{
+		component: "prometheus-probe", typ: "monitoringv1.ProbeSpec", config: kindConfig(&PrometheusProbeHandler{}),
+		base:   map[string]any{"prober": map[string]any{"url": "blackbox-exporter:9115"}},
+		ground: generatorRuleGround,
+	},
+	{
+		component: "cnpg-cluster", typ: "cnpgv1.ClusterSpec", config: kindConfig(&CnpgClusterHandler{}),
+		// The entry carries the name the kind requires of it, so that a selector
+		// written into it is the only thing a case changes.
+		base: map[string]any{"podSelectorRefs": []any{map[string]any{"name": "apps"}}},
+		crds: crdFile(cnpgModulePath, cnpgCRDs+"clusters.yaml"),
+	},
+	{
+		component: "cnpg-pooler", typ: "cnpgv1.PoolerSpec", config: kindConfig(&CnpgPoolerHandler{}),
+		base: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
+		crds: crdFile(cnpgModulePath, cnpgCRDs+"poolers.yaml"),
+	},
+	{
+		component: "issuer", typ: "certv1.IssuerSpec", config: kindConfig(&IssuerHandler{}),
+		base: labelSelectorTestIssuer,
+		crds: crdFile(certManagerModulePath, certManagerCRDs+"issuers.yaml"),
+	},
+	{
+		component: "clusterissuer", typ: "certv1.IssuerSpec", config: kindConfig(&ClusterIssuerHandler{}),
+		base: labelSelectorTestIssuer,
+		crds: crdFile(certManagerModulePath, certManagerCRDs+"clusterissuers.yaml"),
+	},
+	{
+		component: "gateway", typ: "gatewayv1.GatewaySpec", config: kindConfig(&GatewayHandler{}),
+		base: map[string]any{"gatewayClassName": "public", "listeners": labelSelectorTestListeners},
+		crds: gatewayAPICRDs("gateways"),
+	},
+	{
+		component: "listenerset", typ: "gatewayv1.ListenerSetSpec", config: kindConfig(&ListenerSetHandler{}),
+		base: map[string]any{"parentRef": map[string]any{"name": "public"}, "listeners": labelSelectorTestListeners},
+		crds: gatewayAPICRDs("listenersets"),
+	},
+	{
+		component: "secretstore", typ: "esv1.SecretStoreSpec", config: kindConfig(&SecretStoreHandler{}),
+		base:   labelSelectorTestStore,
+		ground: externalSecretsRuleGround,
+	},
+	{
+		component: "clustersecretstore", typ: "esv1.SecretStoreSpec", config: kindConfig(&ClusterSecretStoreHandler{}),
+		base:   labelSelectorTestStore,
+		ground: externalSecretsRuleGround,
+	},
+	{
+		component: "clusterexternalsecret", typ: "esv1.ClusterExternalSecretSpec", config: kindConfig(&ClusterExternalSecretHandler{}),
+		base:   map[string]any{"externalSecretSpec": map[string]any{}},
+		ground: externalSecretsRuleGround,
+	},
+	{
+		component: "replicationsource", typ: "volsyncv1alpha1.ReplicationSourceSpec", config: kindConfig(&ReplicationSourceHandler{}),
+		base: map[string]any{"sourcePVC": "data"},
+		crds: crdFileVersion(volsyncModulePath, volsyncCRDs+"replicationsources.yaml", "v1alpha1"),
+	},
+	{
+		component: "replicationdestination", typ: "volsyncv1alpha1.ReplicationDestinationSpec", config: kindConfig(&ReplicationDestinationHandler{}),
+		base: map[string]any{},
+		crds: crdFileVersion(volsyncModulePath, volsyncCRDs+"replicationdestinations.yaml", "v1alpha1"),
+	},
 }
 
-// crdSelectorUnheld is why a kind of an API that a CRD defines holds no
-// selector here: the API server validates its object by the CRD's schema, not
-// with ValidateLabelSelectorRequirement, and these kinds do not read the
-// expressions of a Kubernetes selector their spec embeds.
-const crdSelectorUnheld = "the object's API is defined by a CRD, and the kind does not read the expressions of a Kubernetes selector its spec embeds"
+var (
+	labelSelectorTestIssuer = map[string]any{"acme": map[string]any{
+		"server":              "https://acme.example.com/directory",
+		"privateKeySecretRef": map[string]any{"name": "acme-account"},
+	}}
+	labelSelectorTestListeners = []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}
+	// labelSelectorTestStore configures the one provider a store must, with
+	// nothing else of it.
+	labelSelectorTestStore = map[string]any{"provider": map[string]any{"fake": map[string]any{"data": []any{}}}}
+)
+
+// generatorRuleGround is the ground of a kind whose object a CRD defines that
+// the linked module does not ship: the Prometheus operator's.
+const generatorRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestMonitoringKinds_RequiredMatchMarkers derives the kind's whole required list; the module ships no CRD to read"
+
+// externalSecretsRuleGround is generatorRuleGround for the External Secrets
+// Operator's kinds.
+const externalSecretsRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestExternalSecretsKinds_RequiredMatchSource derives the expressions of the kind's required list; the module ships no CRD to read"
 
 // hpaMetricSelectorReason is why the horizontalpodautoscaler kind holds no
 // metric selector.
@@ -490,11 +707,29 @@ func TestLabelSelectorKinds_CoverEverySelector(t *testing.T) {
 					t.Errorf("%s is excluded without a reason", path)
 				}
 			}
-			if kind.unheld != "" {
-				t.Logf("not held (%s): %v", kind.unheld, paths)
-				return
+			// A kind that holds presence only says why key and operator are
+			// required of its object: the CRDs of the linked module, which are
+			// read here, or a stated ground.
+			var schemas []crdSchema
+			switch {
+			case kind.config == nil:
+			case kind.expressions && (kind.crds != nil || kind.ground != ""):
+				t.Errorf("the row checks expressions as the API server's own validation does, and names a CRD or a ground beside it")
+			case kind.expressions:
+			case kind.crds != nil:
+				schemas = kind.crds(t)
+			case strings.TrimSpace(kind.ground) == "":
+				t.Errorf("the row holds presence only and states neither a CRD nor a ground for it")
 			}
 			held := 0
+			for _, path := range paths {
+				if _, ok := kind.excluded[path]; ok {
+					continue
+				}
+				for _, schema := range schemas {
+					schema.show(t, kind, path)
+				}
+			}
 			for _, path := range paths {
 				if _, ok := kind.excluded[path]; ok {
 					continue
