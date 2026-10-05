@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -760,6 +761,38 @@ func TestLoweringResolveSharedName_Authored(t *testing.T) {
 		}
 	})
 
+	// One name for one identity is one object, whoever chose the name: an
+	// authored name equal to the document's own, or to the hook's answer for it,
+	// shares the object, in either order.
+	for _, tt := range []struct {
+		name          string
+		answers       map[string]string
+		first, second string // the authored name of each consumer, "" for none
+		want          string
+	}{
+		{"the document's default, authored first", nil, "shop-source-0123456789", "", "shop-source-0123456789"},
+		{"the document's default, authored second", nil, "", "shop-source-0123456789", "shop-source-0123456789"},
+		{"the hook's answer, authored first", map[string]string{"shop-source-0123456789": "charts"}, "charts", "", "charts"},
+		{"the hook's answer, authored second", map[string]string{"shop-source-0123456789": "charts"}, "", "charts", "charts"},
+	} {
+		t.Run("an authored name equal to "+tt.name, func(t *testing.T) {
+			h := newLoweringHarness(tt.answers)
+			if name, adopted, err := h.sharedSource("a", identity, tt.first); err != nil || adopted || name != tt.want {
+				t.Fatalf("first = %q, adopted %v, %v; want %q emitted", name, adopted, err, tt.want)
+			}
+			if name, adopted, err := h.sharedSource("b", identity, tt.second); err != nil || !adopted || name != tt.want {
+				t.Fatalf("second = %q, adopted %v, %v; want %q adopted", name, adopted, err, tt.want)
+			}
+			if len(h.namer.lowered) != 1 {
+				t.Errorf("%d names recorded, want the one emitted object's", len(h.namer.lowered))
+			}
+			// Another identity under that name is still the collision.
+			if _, _, err := h.sharedSource("c", "helm:https://other.example.com", tt.want); err == nil || !strings.Contains(err.Error(), "emitted it for different content") {
+				t.Errorf("another identity: err = %v, want the collision", err)
+			}
+		})
+	}
+
 	t.Run("the same name for two identities", func(t *testing.T) {
 		h := newLoweringHarness(nil)
 		if _, _, err := h.sharedSource("a", identity, "charts"); err != nil {
@@ -878,6 +911,33 @@ func TestClaimLowered_FluxScoped(t *testing.T) {
 			t.Fatalf("err = %v, want the collision in the application namespace", err)
 		}
 	})
+	// One owner resolving the name twice, once Flux-scoped and once not, is no
+	// exception: two objects with a Flux namespace of its own, one object, and
+	// refused, where both land in one namespace.
+	sameOwner := func(t *testing.T) *loweringHarness {
+		t.Helper()
+		h := newLoweringHarness(nil)
+		for _, fluxScoped := range []bool{true, false} {
+			spec := NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: fluxScoped}
+			if _, err := h.lctx("web").ResolveName("web", "values", spec); err != nil {
+				t.Fatalf("FluxScoped %v: %v", fluxScoped, err)
+			}
+		}
+		return h
+	}
+	t.Run("one owner, a Flux-scoped and a plain name, with a Flux namespace", func(t *testing.T) {
+		if err := sameOwner(t).namer.claimLowered("prod", "flux-system"); err != nil {
+			t.Fatalf("claimLowered: %v", err)
+		}
+	})
+	for _, fluxNamespace := range []string{"", "prod"} {
+		t.Run("one owner, a Flux-scoped and a plain name, Flux namespace "+strconv.Quote(fluxNamespace), func(t *testing.T) {
+			err := sameOwner(t).namer.claimLowered("prod", fluxNamespace)
+			if err == nil || !strings.Contains(err.Error(), `name collision: ConfigMap "prod/web-values"`) {
+				t.Fatalf("err = %v, want the collision in the one namespace", err)
+			}
+		})
+	}
 	t.Run("two Flux-scoped lowered names", func(t *testing.T) {
 		h := newLoweringHarness(nil)
 		spec := NameSpec{Role: NameRoleValuesConfigMap, Kind: configMapKind, FluxScoped: true, Property: "valuesConfigMapName", Authored: "shared"}

@@ -105,7 +105,10 @@ func (l LoweringContext) ResolveName(base, suffix string, spec NameSpec) (string
 // time. An authored name is the element's own, validated and used as ResolveName
 // uses one. It is not a second name for the unauthored object: an element that
 // names the object and one that does not get two objects, and two elements that
-// write the same name for the same identity share one.
+// write the same name for the same identity share one. One name for one
+// identity is one object whoever chose the name, so an authored name equal to
+// the unauthored object's (its default, or the hook's answer) shares that
+// object too, in either order.
 //
 // The name is recorded for the transform to claim only where the object is
 // emitted (adopted=false): an adopter names no second object.
@@ -263,7 +266,13 @@ func (n *NameAllocator) recordLowered(lowered loweredName) error {
 // when the transform has one), in the order they were resolved. It
 // runs once lowering has settled and before any other name is resolved, so a
 // name resolved later that names the same object is refused with both named.
+//
+// Two lowered names that land on one object are refused here whoever resolved
+// them. recordLowered left one pair to this point, a Flux-scoped name and one
+// that is not, and an equal owner is no exception for it either: claimName
+// alone would take the second for the first one claimed again.
 func (n *NameAllocator) claimLowered(namespace, fluxNamespace string) error {
+	claimed := make(map[nameClaimKey]resolvedNameClaim, len(n.lowered))
 	for _, lowered := range n.lowered {
 		key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
 			group: lowered.group, kind: lowered.kind, namespace: namespace, name: lowered.name,
@@ -274,6 +283,10 @@ func (n *NameAllocator) claimLowered(namespace, fluxNamespace string) error {
 		case lowered.fluxScoped && fluxNamespace != "":
 			key.namespace = fluxNamespace
 		}
+		if prior, ok := claimed[key]; ok {
+			return nameCollision(key, prior, lowered.claim)
+		}
+		claimed[key] = lowered.claim
 		if err := n.claimName(key, lowered.claim); err != nil {
 			return err
 		}

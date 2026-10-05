@@ -571,7 +571,9 @@ hook is asked once, with no component, and every later consumer of the same kind
 takes that answer without the hook being asked again. An authored name is the component's
 own and not a second name for the document's object: a component that names the object and
 one that does not get two objects, two components that write one name for one identity share
-it, and one name for two identities is `EmitOrAdopt`'s collision error. The name is also
+it, and one name for two identities is `EmitOrAdopt`'s collision error. One name for one
+identity is one object whoever chose the name: an authored name equal to the document's
+object's name (its default, or the hook's answer) shares that object. The name is also
 reserved as a component name, since the shared object is a component of the lowered
 document.
 

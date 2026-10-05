@@ -52,7 +52,9 @@ const ociType = "oci"
 // neither annotations nor traits, and each component that writes the name for
 // the same identity lowering to its fluxcd-kustomization alone. The name is the
 // component's own choice: a component that writes none does not share the
-// source of one that does, and is not counted among its consumers. The source a
+// source of one that does, and is not counted among its consumers (a name
+// equal to the shared unnamed source's own names that source: one name for one
+// identity is one source). The source a
 // component keeps to itself is named after the component, and neither
 // source.name's role nor the hook reaches it.
 //
