@@ -406,6 +406,83 @@ func TestCiliumNetworkPolicyHandler_NullSelector(t *testing.T) {
 	}
 }
 
+// TestCiliumNetworkPolicyHandler_RequiredFields: a field the API requires that
+// the Cilium type would write empty when it is not authored is refused where
+// its parent is authored, by its path with the indices. Without the refusal
+// the object carries the type's empty value and does not show the omission;
+// the four documents below were emitted so, each with a value the API server
+// refuses. The control is a rule with every such field authored, emitted as
+// written. A node selector is refused in a namespaced policy either way: an
+// incomplete one by this list, which is read first, a complete one as before.
+// TestCiliumNetworkPolicy_RequiredMatchCRD holds the list to the kind's CRD.
+func TestCiliumNetworkPolicyHandler_RequiredFields(t *testing.T) {
+	h := &components.CiliumNetworkPolicyHandler{}
+	errOf := func(props map[string]any) error {
+		return coreKindErr(h, "cilium-networkpolicy", "db-allow", props)
+	}
+	cnp := generateCiliumPolicy(t, map[string]any{"spec": ciliumCompleteRule(), "specs": []any{ciliumCompleteRule()}})
+	sameJSON(t, "the complete rule under spec", ciliumPolicyJSON(t, cnp)["spec"], ciliumCompleteRule())
+	sameJSON(t, "the complete rule under specs", ciliumPolicyJSON(t, cnp)["specs"], []any{ciliumCompleteRule()})
+
+	// Four documents as an author writes them: an object left empty, and an
+	// entry without one of its fields.
+	with := func(key string, value any) map[string]any {
+		rule := ciliumRule("db")
+		rule[key] = value
+		return rule
+	}
+	port := func(key string, value any) []any {
+		return []any{map[string]any{"toPorts": []any{map[string]any{
+			"ports": []any{map[string]any{"port": "443", "protocol": "TCP"}}, key: value,
+		}}}}
+	}
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"empty authentication": {
+			map[string]any{"spec": with("ingress", []any{map[string]any{"authentication": map[string]any{}}})},
+			"spec.ingress[0].authentication.mode: required (",
+		},
+		"empty terminatingTLS": {
+			map[string]any{"spec": with("ingress", port("terminatingTLS", map[string]any{}))},
+			"spec.ingress[0].toPorts[0].terminatingTLS.secret: required (",
+		},
+		"match expression without operator": {
+			map[string]any{"specs": []any{ciliumRule("db"), with("endpointSelector", map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "tier", "values": []any{"data"}}},
+			})}},
+			"specs[1].endpointSelector.matchExpressions[0].operator: required (",
+		},
+		"listener without priority": {
+			map[string]any{"spec": with("egress", port("listener", map[string]any{
+				"name": "edge", "envoyConfig": map[string]any{"kind": "CiliumEnvoyConfig", "name": "edge-listener"},
+			}))},
+			"spec.egress[0].toPorts[0].listener.priority: required (",
+		},
+		"incomplete node selector": {
+			map[string]any{"spec": with("nodeSelector", map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "node-role"}},
+			})},
+			"spec.nodeSelector.matchExpressions[0].operator: required (",
+		},
+		"complete node selector": {
+			map[string]any{"spec": with("nodeSelector", map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "node-role", "operator": "Exists"}},
+			})},
+			"spec.nodeSelector: not allowed in a CiliumNetworkPolicy",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := errOf(tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+	ciliumRuleRequiredFieldsRefused(t, errOf)
+}
+
 // TestCiliumNetworkPolicyHandler_TypedNilElement: a rule that is a typed nil (a
 // document built in Go, not parsed from YAML) is refused as a null one is.
 func TestCiliumNetworkPolicyHandler_TypedNilElement(t *testing.T) {

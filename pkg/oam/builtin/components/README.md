@@ -2998,6 +2998,40 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   combined) are left to Cilium. A null list element (`specs: [null]`, a null
   ingress entry or peer) is refused by its path.
 
+  **Required.** Inside a rule the CRD requires 59 fields that the Cilium type
+  writes whether or not they were authored, so that the object would not show
+  the omission: a match expression without its `operator` was emitted as
+  `operator: ""`, an `authentication: {}` as `mode: ""`, a `terminatingTLS: {}`
+  as `secret: null`, each of which the API server refuses. Each is refused
+  where its parent is authored, by its path
+  (`spec.ingress[0].authentication.mode: required (…)`):
+  - the `key` and `operator` of a match expression, in every selector of a
+    rule (`endpointSelector`, `fromEndpoints`, `toEndpoints`, `fromNodes`,
+    `toNodes`, a CIDR entry's `cidrGroupSelector`, a `k8sServiceSelector`'s
+    `selector`), under the deny lists too;
+  - a `k8sServiceSelector`'s `selector`, the `key` of a rule label and the
+    `type` of an `icmps` field;
+  - under an allow list only: an `authentication`'s `mode`; a port's
+    `listener` `name`, its `envoyConfig` and that configuration's `name`; the
+    `secret` of a port's `terminatingTLS` and `originatingTLS` and that
+    Secret's `name`; an HTTP header match's `name`, and the `name` of its
+    `secret` where one is authored.
+
+  Two more are optional to the API and required here: a listener's `priority`
+  and the `kind` of its `envoyConfig`. The type writes an unauthored one as
+  `0` and as the empty string, and the API refuses both (a priority is 1 to
+  100, a kind is `CiliumEnvoyConfig` or `CiliumClusterwideEnvoyConfig`), so a
+  listener that leaves one out cannot be emitted.
+  `TestCiliumNetworkPolicy_RequiredMatchCRD` holds the whole list to the
+  CiliumNetworkPolicy CRD of the linked module, its own file and not the
+  cluster-wide policy's, and to the rule type, under `spec` and under `specs`,
+  so a dependency bump that adds, drops or moves one fails there. The CRD
+  names a `nodeSelector`'s match expressions as well, and so does the list: an
+  incomplete one is refused by this rule, a complete one by the rule above. A
+  rule label without its `key` is refused earlier, by Cilium's own decoding,
+  as an `icmps` field without its `type` is (below). An authored empty value
+  in a required field is not checked: it is the API server's to refuse.
+
   **An unknown key inside a selector is refused**, by its path
   (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's
   endpoint selector unmarshals itself and drops a key it does not know, which

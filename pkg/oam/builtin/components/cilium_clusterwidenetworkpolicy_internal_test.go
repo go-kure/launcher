@@ -21,11 +21,12 @@ import (
 
 const ciliumClusterwidePolicyCRD = "ciliumclusterwidenetworkpolicies.yaml"
 
-// ciliumClusterwideRuleSchemas returns the schema of a rule at each of the two
-// positions that hold one, keyed by the path the kind's required list uses.
-func ciliumClusterwideRuleSchemas(t *testing.T) map[string]apiextensionsv1.JSONSchemaProps {
+// ciliumPolicyRuleSchemas returns, from the CRD of a Cilium network policy in
+// file, the schema of a rule at each of the two positions that hold one, keyed
+// by the path a kind's required list uses.
+func ciliumPolicyRuleSchemas(t *testing.T, file string) map[string]apiextensionsv1.JSONSchemaProps {
 	t.Helper()
-	_, root := ciliumBGPCRD(t, ciliumClusterwidePolicyCRD)
+	_, root := ciliumBGPCRD(t, file)
 	spec, ok := root.Properties["spec"]
 	if !ok {
 		t.Fatal("the CRD has no spec property")
@@ -70,6 +71,13 @@ func TestCiliumClusterwideNetworkPolicy_EmitsTheServedVersion(t *testing.T) {
 // be emitted without it. The fields the type writes unauthored with a value the
 // CRD admits are named here, so that a new one is read before it is emitted.
 func TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD(t *testing.T) {
+	ciliumRuleRequiredMatchesCRD(t, ciliumClusterwidePolicyCRD, ciliumClusterwideNetworkPolicyRequired)
+}
+
+// ciliumRuleRequiredMatchesCRD is that derivation for one kind: the CRD in
+// file, and the required list the kind refuses by.
+func ciliumRuleRequiredMatchesCRD(t *testing.T, file string, kindRequired map[string]string) {
+	t.Helper()
 	fields := ciliumBGPTypeFields(reflect.TypeFor[ciliumapi.Rule]())
 	// Optional, written unauthored, and the written value refused by the CRD.
 	wantRefusedZero := []string{
@@ -81,7 +89,7 @@ func TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD(t *testing.T) {
 	// Optional, written unauthored, and admitted: a label without a source
 	// carries `source: ""`, which Cilium reads as any source.
 	wantAdmittedZero := []string{"labels[].source"}
-	for at, schema := range ciliumClusterwideRuleSchemas(t) {
+	for at, schema := range ciliumPolicyRuleSchemas(t, file) {
 		t.Run(at, func(t *testing.T) {
 			crdRequired := ciliumPlainRequired(schema)
 			if len(crdRequired) == 0 || len(fields) == 0 {
@@ -155,13 +163,13 @@ func TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD(t *testing.T) {
 				if strings.TrimSpace(says) == "" {
 					t.Errorf("required field %s says nothing of itself", path)
 				}
-				if _, ok := ciliumClusterwideNetworkPolicyRequired[path]; !ok {
+				if _, ok := kindRequired[path]; !ok {
 					t.Errorf("the kind's required list lacks %s", path)
 				}
 			}
 		})
 	}
-	if got, want := len(ciliumClusterwideNetworkPolicyRequired), len(ciliumRuleRequired("spec"))+len(ciliumRuleRequired("specs[]")); got != want {
+	if got, want := len(kindRequired), len(ciliumRuleRequired("spec"))+len(ciliumRuleRequired("specs[]")); got != want {
 		t.Errorf("the kind's required list holds %d fields, want the %d of a rule at its two positions", got, want)
 	}
 }
@@ -264,7 +272,7 @@ func TestCiliumClusterwideNetworkPolicy_SchemaChoices(t *testing.T) {
 		t.Errorf("the object's expression rules are %v, want %v", objectRules, want)
 	}
 
-	for at, schema := range ciliumClusterwideRuleSchemas(t) {
+	for at, schema := range ciliumPolicyRuleSchemas(t, ciliumClusterwidePolicyCRD) {
 		t.Run(at, func(t *testing.T) {
 			var found []string
 			walkCiliumBGPSchema(schema, "", func(path string, s apiextensionsv1.JSONSchemaProps) {
@@ -306,7 +314,7 @@ func TestCiliumClusterwideNetworkPolicy_OneDefault(t *testing.T) {
 		"ingress[].icmps[].fields[].family = \"IPv4\"",
 		"ingressDeny[].icmps[].fields[].family = \"IPv4\"",
 	}
-	for at, schema := range ciliumClusterwideRuleSchemas(t) {
+	for at, schema := range ciliumPolicyRuleSchemas(t, ciliumClusterwidePolicyCRD) {
 		t.Run(at, func(t *testing.T) {
 			var found []string
 			walkCiliumBGPSchema(schema, "", func(path string, s apiextensionsv1.JSONSchemaProps) {
