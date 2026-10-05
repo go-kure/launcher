@@ -28,6 +28,14 @@ import (
 // post-install) and returns the repository URL.
 func serveHookChart(t *testing.T) string {
 	t.Helper()
+	return serveChartWithHooks(t, "pre-install", "post-install")
+}
+
+// serveChartWithHooks serves a chart with one ConfigMap outside every hook and
+// one for each of hooks, the value of its helm.sh/hook annotation, and returns
+// the repository URL.
+func serveChartWithHooks(t *testing.T, hooks ...string) string {
+	t.Helper()
 	cm := func(name, hook string) string {
 		out := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-" + name + "\n"
 		if hook != "" {
@@ -35,11 +43,11 @@ func serveHookChart(t *testing.T) string {
 		}
 		return out
 	}
-	chart := buildMinimalChartTar(t, "testchart", "0.1.0", map[string]string{
-		"testchart/templates/pre.yaml":  cm("pre", "pre-install"),
-		"testchart/templates/main.yaml": cm("main", ""),
-		"testchart/templates/post.yaml": cm("post", "post-install"),
-	})
+	templates := map[string]string{"testchart/templates/main.yaml": cm("main", "")}
+	for i, hook := range hooks {
+		templates[fmt.Sprintf("testchart/templates/hook%d.yaml", i)] = cm(fmt.Sprintf("hook%d", i), hook)
+	}
+	chart := buildMinimalChartTar(t, "testchart", "0.1.0", templates)
 	// The chart URL is derived from the request: the handler runs on the server's
 	// goroutines.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +96,38 @@ spec:
 // one Kustomization per layout does.
 func hookGroupTree(t *testing.T, doc string, ctx oam.TransformContext) (*layout.ManifestLayout, error) {
 	t.Helper()
+	cluster, err := hookGroupCluster(t, doc, ctx)
+	if err != nil {
+		return nil, err
+	}
+	root, err := layout.WalkCluster(cluster, perLayoutRules())
+	if err != nil {
+		return nil, err
+	}
+	if err := integrateHookGroupTree(root, cluster); err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
+// perLayoutRules are the layout rules of a consumer that writes one Flux
+// Kustomization per layout.
+func perLayoutRules() layout.LayoutRules {
+	rules := layout.DefaultLayoutRules()
+	rules.FluxPlacement = layout.FluxIntegratedPerLayout
+	return rules
+}
+
+// integrateHookGroupTree integrates Flux into root, the tree walked from
+// cluster under perLayoutRules.
+func integrateHookGroupTree(root *layout.ManifestLayout, cluster *stack.Cluster) error {
+	return fluxcd.NewWorkflowEngine().GetLayoutIntegrator().IntegrateWithLayout(root, cluster, perLayoutRules())
+}
+
+// hookGroupCluster transforms doc under ctx and gives every bundle that holds
+// applications a source, for the Flux integration.
+func hookGroupCluster(t *testing.T, doc string, ctx oam.TransformContext) (*stack.Cluster, error) {
+	t.Helper()
 	transformer := newBuiltinTransformer()
 	app, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes())
 	if err != nil {
@@ -125,17 +165,7 @@ func hookGroupTree(t *testing.T, doc string, ctx oam.TransformContext) (*layout.
 		}
 	}
 	nodes(cluster.Node)
-
-	rules := layout.DefaultLayoutRules()
-	rules.FluxPlacement = layout.FluxIntegratedPerLayout
-	root, err := layout.WalkCluster(cluster, rules)
-	if err != nil {
-		return nil, err
-	}
-	if err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().IntegrateWithLayout(root, cluster, rules); err != nil {
-		return nil, err
-	}
-	return root, nil
+	return cluster, nil
 }
 
 // mustHookGroupTree is hookGroupTree for a document that builds.
@@ -318,6 +348,32 @@ func TestHookGroupNames_LongDefaultsAreShortenedTo63(t *testing.T) {
 	}
 }
 
+// Two components with long names that begin alike: their defaults are cut to
+// one beginning and told apart by their digests, so the six Kustomization names
+// differ.
+func TestHookGroupNames_LongDefaultsThatBeginAlike(t *testing.T) {
+	url := serveHookChart(t)
+	application := strings.Repeat("a", 30)
+	first, second := strings.Repeat("c", 30), strings.Repeat("c", 29)+"d"
+	components := hookComponent(first, "helmtemplate", url, "") + hookComponent(second, "helmtemplate", url, "")
+	root := mustHookGroupTree(t, hookApp(application, components, ""), oam.TransformContext{})
+
+	want := map[string][]string{}
+	for _, component := range []string{first, second} {
+		var names []string
+		for _, suffix := range hookChartSuffixes {
+			names = append(names, oam.ShortenNameWithSuffix(application+"-"+component, suffix, oam.ShortenLimitLabel))
+		}
+		want[names[0]], want[names[1]], want[names[2]] = nil, []string{names[0]}, []string{names[1]}
+	}
+	if len(want) != 2*len(hookChartSuffixes) {
+		t.Fatalf("the expected names are not all different: %v", want)
+	}
+	if got := hookGroupsOnly(treeKustomizations(root)); !reflect.DeepEqual(got, want) {
+		t.Errorf("hook-group Kustomizations (name: dependsOn) = %v\nwant %v", got, want)
+	}
+}
+
 // The prefix by its three sources. An authored prefix and the hook's answer
 // name directory and Kustomization alike; the hook is asked once per component,
 // with the default prefix, and not at all where the author wrote one.
@@ -445,6 +501,72 @@ func TestHookGroupNames_Refusals(t *testing.T) {
 			_, err := hookGroupTree(t, hookApp("shop", tc.components, ""), ctx)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The limit the README states: the transform holds the prefixes apart, not the
+// names built from them after the render. Two different prefixes that give one
+// Kustomization name pass the transform and the walk, and the base library
+// refuses the name, used twice, when the tree is integrated, naming both
+// layouts.
+func TestHookGroupNames_NamesThatMeetAreRefusedAtIntegration(t *testing.T) {
+	url := serveHookChart(t)
+	// A default prefix of 57 characters is shortened inside each group's
+	// Kustomization name to what the group's suffix leaves of 63: 47 beside the 16
+	// of "-02-post-install". A second component whose prefix is that shortened
+	// form, which fits and is used as written, names its post-install group so.
+	longComponent := strings.Repeat("c", 52)
+	shortened := oam.ShortenName("shop-"+longComponent, 63-len("-02-post-install"))
+	if want := "shop-" + strings.Repeat("c", 31) + "-"; len(shortened) != 47 || !strings.HasPrefix(shortened, want) {
+		t.Fatalf("the shortened default %q is not 47 characters beginning %q", shortened, want)
+	}
+	for _, tc := range []struct {
+		name       string
+		components string
+		wantName   string
+		wantDirs   [2]string // the component directories of the two layouts
+	}{
+		{
+			name: "a shortened default equals a written prefix",
+			components: hookComponent(longComponent, "helmtemplate", url, "") +
+				hookComponent("db", "helmtemplate", url, "        hookGroupNamePrefix: "+shortened+"\n"),
+			wantName: shortened + "-02-post-install",
+			wantDirs: [2]string{longComponent, "db"},
+		},
+		{
+			// A phase is whatever the chart's hook annotation says. Component "a"
+			// has the groups "-00-main" and "-01-x-00-main", and component "b",
+			// under the prefix "shop-a-01-x", "-00-main" and "-01-a".
+			name: "a prefix ends as another chart's phase begins",
+			components: hookComponent("a", "helmtemplate", serveChartWithHooks(t, "x-00-main"), "") +
+				hookComponent("b", "helmtemplate", serveChartWithHooks(t, "a"), "        hookGroupNamePrefix: shop-a-01-x\n"),
+			wantName: "shop-a-01-x-00-main",
+			wantDirs: [2]string{"a", "b"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster, err := hookGroupCluster(t, hookApp("shop", tc.components, ""), oam.TransformContext{})
+			if err != nil {
+				t.Fatalf("the transform refused the document: %v", err)
+			}
+			root, err := layout.WalkCluster(cluster, perLayoutRules())
+			if err != nil {
+				t.Fatalf("the walk refused the tree: %v", err)
+			}
+			err = integrateHookGroupTree(root, cluster)
+			if err == nil {
+				t.Fatalf("the integration accepted two Kustomizations named %q", tc.wantName)
+			}
+			for _, want := range []string{
+				`Flux Kustomization name "` + tc.wantName + `" is used twice`,
+				`by layout "cluster/shop/` + tc.wantDirs[0] + `/`,
+				`and by layout "cluster/shop/` + tc.wantDirs[1] + `/`,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v\nwant it to contain %q", err, want)
+				}
 			}
 		})
 	}

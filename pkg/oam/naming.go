@@ -71,7 +71,7 @@ const (
 	// Flux Kustomization the base library generates for it under per-layout
 	// placement. Default: "<application>-<component>". It is the one role whose
 	// answer is a prefix and not a name: how many groups a chart has is known only
-	// once it is rendered, after every name is resolved.
+	// once it is rendered, and the prefix is resolved before that.
 	NameRoleHookGroup NameRole = "hook-group"
 )
 
@@ -102,7 +102,9 @@ const (
 	// nameClassHookGroupPrefix is the prefix of a component's hook-group layout
 	// names: claimed by the prefix across the document, so two components never
 	// share one. It is held against no bundle name: a prefix alone is no layout's
-	// name.
+	// name. The names built from two different prefixes are not held against
+	// each other here: they exist only after the render
+	// (resolveHookGroupNamePrefix).
 	nameClassHookGroupPrefix
 )
 

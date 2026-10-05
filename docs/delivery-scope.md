@@ -317,8 +317,10 @@ Decided in the ticket:
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
   under `delivery: template`, else the hook, else `<application>-<component>`.
   - It is the one role whose answer is a prefix: the group count is known only after the
-    render, which follows the name resolution. Two components resolving to one prefix are
-    refused in the transform.
+    render, and the prefix is resolved before it. Two components resolving to one prefix are
+    refused in the transform. The names built from two different prefixes are not held
+    apart there: they exist only after the render, and two that meet are refused by kure
+    when the walked tree is integrated.
   - Each child carries the name of its Flux Kustomization
     (`ManifestLayout.KustomizationName`). The default is shortened to 63 characters by the
     one shortening rule, while the directory keeps its 253-character name, so the two differ

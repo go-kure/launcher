@@ -4520,8 +4520,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   directory and Kustomization alike. Such a prefix is a DNS-1123 subdomain and is never
   shortened: a child name over 63 characters built from it fails `AugmentLayout`, in an error
   with the component, the role and the full name, and two components of one document that
-  resolve to one prefix fail the transform (`pkg/oam/README.md`, "Name roles and the `Naming`
-  hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`. `GenerateCoversAugmentLayout` is always true —
+  resolve to one prefix fail the transform. Known limit: the transform holds the prefixes
+  apart, not the names built from them after the render, so two different prefixes can still
+  give one Kustomization name (a shortened default that equals a written prefix; a prefix
+  that ends as another chart's phase begins). kure refuses that name, used twice, when the
+  walked tree is integrated; another `hookGroupNamePrefix` on one of the components is the
+  way out (`pkg/oam/README.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
