@@ -544,7 +544,7 @@ Explicit values are written into a Secret by `secretValues` under Flux delivery 
 | Check | Flux delivery | Template delivery |
 |---|---|---|
 | Registry allowlist | Chart source host, on the generated or authored Flux source (`HelmRepositoryConfig.ApplyPolicy`, `pkg/oam/builtin/components/helmrepository.go`, and the other source kinds). Chart images: not checked (`HelmReleaseConfig.ApplyPolicy` is a no-op). | Chart source host, before any fetch, and every image of a rendered workload (`HelmTemplateConfig.ApplyPolicy`, `helmtemplate_policy.go`). |
-| Image reference check (`ValidateImageRef`, `common.go`) | No | Yes, on every init and regular container of a rendered workload. |
+| Image reference check (`ValidateImageRef`, `common.go`) | No | Yes, on every init and regular container and every image volume of a rendered workload. |
 | Pod security (privileged, host namespaces, hostPath, capabilities; the `Policy` flags, `pkg/oam/policy.go`, read by `enforcePodTemplatePolicy`, `cnpg_common.go`) | No | Yes, on every rendered workload (`enforceRenderedObjectPolicy`, `helmtemplate_policy.go`). A chart rendering a privileged pod is refused unless the policy allows it. |
 | PersistentVolume (a `hostPath` or `local` source, `capacity.storage`) | No | Yes, since the `persistentvolume` kind (go-kure/launcher#790): a rendered PersistentVolume is held to what the kind holds its own to (`enforcePersistentVolumePolicy`, `enforce.go`). |
 | Namespace | HelmRelease and source in the Flux namespace | **Shipped (go-kure/launcher#794, item 4):** a namespaced object the chart rendered without `metadata.namespace` is given the application namespace, where a Helm install would create it (`stampRenderedNamespaces`, `helmtemplate_render.go`). A namespace the chart wrote is kept, and it is not checked. A cluster-scoped object is left as rendered. So is an object whose scope is unknown (a kind kure does not register, with no CustomResourceDefinition for it among the rendered objects; a chart's `crds/` directory is not rendered): it stays without a namespace, unless `scopeOverrides`, on the `helmtemplate` component or on `helm` under `delivery: template`, states the kind's scope (§7, item 11). |
@@ -583,7 +583,8 @@ be closed at build time.
      the `persistentvolume` kind (go-kure/launcher#790).
    - **Decided:** `ValidateImageRef` (tag or digest required, no `:latest`) applies to
      chart images, so a rendered workload is held to the same image rule as a
-     launcher-built one.
+     launcher-built one. The reference of an image volume is held to it as a container's
+     image is (go-kure/launcher#790).
    - **Decided:** with no policy passed, `NoopPolicy` denies a chart that renders a
      privileged container, a host namespace or a hostPath volume, as it does an authored
      workload. The `Policy` flags `AllowPrivileged`, `AllowHostNetwork`, `AllowHostPID`,
@@ -808,6 +809,15 @@ its text:
     the same list, as it holds `imageName`; the same test derives the image fields of
     the Cluster and the Pooler spec. Breaking for a `cnpg-cluster` whose extension image
     names a registry outside the list.
+  - Every one of those fields is held to the tag rule too (`ValidateImageRef`: a tag or a
+    digest, no `:latest`), with or without a policy: an image volume's `reference` on each
+    of those paths, `pgbouncer.image` and the template images of `cnpg-pooler`,
+    `imageName` and the extension references of `cnpg-cluster`, and the image a
+    `postgresql` component composes from `version`, refused under `version`. The same
+    test requires both rules on each field it derives. A field that names no image is
+    not checked, and a digest without a tag passes; CloudNativePG's own rules on
+    `imageName` are left to the operator. Breaking for a document, a chart or a source
+    that names an untagged or `:latest` image in one of those fields.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`

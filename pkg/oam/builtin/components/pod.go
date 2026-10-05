@@ -154,8 +154,9 @@ func podSpecDefaultedZeros(prefix string) defaultedZeroFields {
 // ephemeral containers, and the Priority and RuntimeClass admission controllers
 // set the other two. An empty ephemeralContainers or overhead carries nothing
 // and is read as unset. Every init and regular container's image is held to
-// ValidateImageRef: no untagged image and no :latest. The API's other value
-// rules are left to the API server.
+// ValidateImageRef: no untagged image and no :latest. So is the reference of
+// every image volume (validateImageVolumeRefs). The API's other value rules
+// are left to the API server.
 func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
@@ -176,6 +177,24 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 	for i, ctr := range ps.Containers {
 		if err := ValidateImageRef(ctr.Image); err != nil {
 			return errors.Wrapf(err, "%scontainers[%d] %q", prefix, i, ctr.Name)
+		}
+	}
+	return validateImageVolumeRefs(prefix, ps)
+}
+
+// validateImageVolumeRefs holds the reference of every image volume of a pod
+// spec to ValidateImageRef, with or without an environment policy: the kubelet
+// pulls it as it pulls a container's image. A volume that names no reference
+// names no image, and nothing is checked for it, as the registry allowlist
+// checks nothing for it (enforcePodTemplatePolicy). prefix is the spec's path,
+// as in validateAuthoredPodSpec.
+func validateImageVolumeRefs(prefix string, ps *corev1.PodSpec) error {
+	for i, v := range ps.Volumes {
+		if v.Image == nil || v.Image.Reference == "" {
+			continue
+		}
+		if err := ValidateImageRef(v.Image.Reference); err != nil {
+			return errors.Wrapf(err, "%svolumes[%d] %q image.reference", prefix, i, v.Name)
 		}
 	}
 	return nil

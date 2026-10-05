@@ -173,7 +173,8 @@ func TestPodTemplateKindsPolicy_AllowedOnEveryPath(t *testing.T) {
 
 // TestPodTemplateKindsPolicy_ReadTimeRefusalsAndTheRenderedPaths pins how the
 // four paths differ on what the kind refuses when it is read. An untagged
-// image and ephemeral containers are refused on every path. priority, overhead
+// image, an untagged image volume and ephemeral containers are refused on
+// every path. priority, overhead
 // and, on a kind whose controller keeps its pods running, activeDeadlineSeconds
 // are refused by the kind only: the three paths that take an object written
 // elsewhere pass them, and the API server decides. A PodTemplate is no such
@@ -187,6 +188,7 @@ func TestPodTemplateKindsPolicy_ReadTimeRefusalsAndTheRenderedPaths(t *testing.T
 		controllerOnly bool // refused by the kind of a controller only
 	}{
 		{"untagged image", "containers:\n  - name: app\n    image: registry.example/team/app\n", `containers[0] "app": image "registry.example/team/app" rejected`, true, false},
+		{"untagged image volume", htPlainPod + ivVolume("registry.example/team/ext"), `volumes[0] "ext" image.reference: image "registry.example/team/ext" rejected`, true, false},
 		{"ephemeral containers", htPlainPod + "ephemeralContainers:\n  - name: debug\n    image: registry.example/team/debug:1.0.0\n", "ephemeralContainers: not supported", true, false},
 		{"priority", htPlainPod + "priority: 1000\n", "priority: not authorable", false, false},
 		{"overhead", htPlainPod + "overhead:\n  cpu: 100m\n", "overhead: not authorable", false, false},

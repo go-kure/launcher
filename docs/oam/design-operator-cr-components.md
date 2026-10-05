@@ -250,6 +250,15 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
   authored `cnpg-cluster` can meet that refusal. An entry without a reference
   takes its image from the catalog `imageCatalogRef` names and is not checked,
   as the catalog itself is not.
+- The images these kinds name are held to the tag rule the workload kinds
+  apply to a container's image (`ValidateImageRef`: a tag or a digest, no
+  `:latest`), with or without a policy (go-kure/launcher#790): `imageName` and
+  each extension reference on `cnpg-cluster`; `pgbouncer.image`, the template's
+  container images and its image volumes on `cnpg-pooler`. A field that names
+  no image is not checked. `postgresql` checks the image it composes from
+  `version` itself and names `version` in the refusal. A digest without a tag
+  passes; CloudNativePG's webhook refuses one on `imageName`, and a tag that
+  is no PostgreSQL version, and that rule stays the operator's.
 - `postgresql` builds its kind properties from the same typed structs, so the
   omitted-zero refusal does not see a `0` or `false` its own parse already
   dropped; its parse decides those, as before.

@@ -474,9 +474,18 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		storage.Size = c.StorageSize
 	}
 
+	// The image is held to ValidateImageRef here, where the property that
+	// produced it is known: the cnpg-cluster component this lowers to would
+	// refuse the same image under imageName, which the author did not write
+	// when the image is the one composed from version.
 	imageName := c.ImageName
 	if imageName == "" {
 		imageName = fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%s", c.Version)
+		if err := ValidateImageRef(imageName); err != nil {
+			return cnpgv1.ClusterSpec{}, errors.Wrapf(err, "version: %q is refused as the tag of the default image", c.Version)
+		}
+	} else if err := ValidateImageRef(imageName); err != nil {
+		return cnpgv1.ClusterSpec{}, errors.Wrap(err, "imageName")
 	}
 
 	// primaryUpdateStrategy was injected by kure's retired config-struct layer

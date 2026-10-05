@@ -32,12 +32,55 @@ type imageFieldType struct {
 	// at that path names reference. For a field that is an image volume source
 	// the path is the source's and the image is its reference.
 	held map[string]func(reference string, p oam.Policy) error
+	// tagged is, for each held field, the check the build runs with or without
+	// a policy on a value of the type whose field at that path names reference:
+	// the tag rule (ValidateImageRef).
+	tagged map[string]imageTagCheck
 	// notHeld is, by json path, each field with "image" in its name that is not
 	// held, and why.
 	notHeld map[string]string
 }
 
-// imageFieldTypes are the types the registry rule is derived over.
+// imageTagCheck is the tag rule on one held field.
+type imageTagCheck struct {
+	check func(reference string) error
+	// emptyRefused says why the field must name an image. Left empty for a
+	// field the document may leave out: an empty reference names no image
+	// there, and the tag rule skips it as the registry rule does.
+	emptyRefused string
+}
+
+// podSpecTagRule is the tag rule of the pod-spec kinds on ps
+// (validateAuthoredPodSpec), which refuses a pod spec that lists no container:
+// one is added when ps has none.
+func podSpecTagRule(ps corev1.PodSpec) error {
+	if ps.Containers == nil {
+		ps.Containers = []corev1.Container{{Name: "app", Image: "registry.example/team/app:1.0.0"}}
+	}
+	return validateAuthoredPodSpec("", &ps)
+}
+
+// poolerTagRule is the cnpg-pooler kind's parse-time check on spec, for the
+// Pooler "pool" of the cluster "db".
+func poolerTagRule(spec cnpgv1.PoolerSpec) error {
+	spec.Cluster.Name = "db"
+	if spec.PgBouncer == nil {
+		spec.PgBouncer = &cnpgv1.PgBouncerSpec{}
+	}
+	return (&CnpgPoolerConfig{Name: "pool", Spec: spec}).validate("pool")
+}
+
+// poolerTemplateTagRule is poolerTagRule on a Pooler whose pod template has
+// the given spec.
+func poolerTemplateTagRule(ps corev1.PodSpec) error {
+	if ps.Containers == nil {
+		ps.Containers = []corev1.Container{}
+	}
+	return poolerTagRule(cnpgv1.PoolerSpec{Template: &cnpgv1.PodTemplateSpec{Spec: ps}})
+}
+
+// imageFieldTypes are the types the registry rule and the tag rule are derived
+// over.
 var imageFieldTypes = []imageFieldType{
 	{
 		// The one check behind every raw pod spec: the pod kind, the pod template
@@ -59,6 +102,26 @@ var imageFieldTypes = []imageFieldType{
 					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
 				}}}, p)
 			},
+		},
+		tagged: map[string]imageTagCheck{
+			"containers[].image": {
+				check: func(reference string) error {
+					return podSpecTagRule(corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: reference}}})
+				},
+				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
+			},
+			"initContainers[].image": {
+				check: func(reference string) error {
+					return podSpecTagRule(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
+				},
+				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
+			},
+			"volumes[].image": {check: func(reference string) error {
+				return podSpecTagRule(corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}})
+			}},
 		},
 		notHeld: map[string]string{
 			"ephemeralContainers[].image":           "every caller of the shared check refuses a pod spec that lists ephemeral containers (podSpecRejectedKeys)",
@@ -87,6 +150,19 @@ var imageFieldTypes = []imageFieldType{
 				return (&CnpgClusterConfig{Name: "db", Spec: spec}).ApplyPolicy(p)
 			},
 		},
+		tagged: map[string]imageTagCheck{
+			"imageName": {check: func(reference string) error {
+				return validateCnpgClusterImageRefs(&cnpgv1.ClusterSpec{ImageName: reference})
+			}},
+			"postgresql.extensions[].image": {check: func(reference string) error {
+				spec := cnpgv1.ClusterSpec{}
+				spec.PostgresConfiguration.Extensions = []cnpgv1.ExtensionConfiguration{{
+					Name:              "ext",
+					ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+				}}
+				return validateCnpgClusterImageRefs(&spec)
+			}},
+		},
 		notHeld: map[string]string{
 			"imageCatalogRef":  "names an image catalog object and a major version, not an image; the catalog's images are the catalog's to hold",
 			"imagePullPolicy":  "says when the image is pulled, not which image",
@@ -114,6 +190,23 @@ var imageFieldTypes = []imageFieldType{
 					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
 				}}}, p)
 			},
+		},
+		tagged: map[string]imageTagCheck{
+			"pgbouncer.image": {check: func(reference string) error {
+				return poolerTagRule(cnpgv1.PoolerSpec{PgBouncer: &cnpgv1.PgBouncerSpec{Image: reference}})
+			}},
+			"template.spec.containers[].image": {check: func(reference string) error {
+				return poolerTemplateTagRule(corev1.PodSpec{Containers: []corev1.Container{{Name: "pgbouncer", Image: reference}}})
+			}},
+			"template.spec.initContainers[].image": {check: func(reference string) error {
+				return poolerTemplateTagRule(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
+			}},
+			"template.spec.volumes[].image": {check: func(reference string) error {
+				return poolerTemplateTagRule(corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}})
+			}},
 		},
 		notHeld: map[string]string{
 			"pgbouncer.imageCatalogRef":                           "names an image catalog object and a key in it, not an image; the catalog's images are the catalog's to hold",
@@ -197,6 +290,7 @@ func TestImageFields_WhatIsRecognised(t *testing.T) {
 // with the registry class, and passes one inside it.
 func TestImageFields_HeldOrListed(t *testing.T) {
 	const listed, other = "registry.example/team/thing:1.0.0", "other.example/team/thing:1.0.0"
+	const digest = "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1"
 	policy := &imageFieldPolicy{allowed: []string{"registry.example"}}
 	for _, typ := range imageFieldTypes {
 		t.Run(typ.name, func(t *testing.T) {
@@ -241,6 +335,53 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 			for path := range typ.notHeld {
 				if !slices.Contains(candidates, path) {
 					t.Errorf("%s is listed as not held and is not a field of the type that could name an image", path)
+				}
+			}
+			// The tag rule is derived over the same list: every field held to the
+			// allowed registries is held to it too, with or without a policy.
+			for path := range typ.tagged {
+				if _, held := typ.held[path]; !held {
+					t.Errorf("%s has a tag rule check and is not held to the allowed registries", path)
+				}
+			}
+			for path, registry := range typ.held {
+				tag, ok := typ.tagged[path]
+				if !ok {
+					t.Errorf("%s is held to the allowed registries and has no tag rule check", path)
+					continue
+				}
+				for _, reference := range []string{
+					"registry.example/team/thing",
+					"registry.example/team/thing:latest",
+					"registry.example/team/thing:latest@" + digest,
+				} {
+					err := tag.check(reference)
+					var refusal *oam.PolicyRefusal
+					if err == nil || errors.As(err, &refusal) || !strings.Contains(err.Error(), `image "`+reference+`" rejected`) {
+						t.Errorf("%s: the reference %q gave %v, want the tag rule's refusal naming it, which is no policy refusal", path, reference, err)
+					}
+				}
+				for _, reference := range []string{
+					listed,
+					"registry.example/team/thing@" + digest,
+					"registry.example/team/thing:1.0.0@" + digest,
+				} {
+					if err := tag.check(reference); err != nil {
+						t.Errorf("%s: the reference %q is refused: %v", path, reference, err)
+					}
+				}
+				// An empty reference names no image where the document may leave
+				// the field out, and both rules skip it there.
+				err := tag.check("")
+				switch {
+				case tag.emptyRefused != "" && err == nil:
+					t.Errorf("%s: an empty reference passes, and the field is listed as one that must name an image (%s)", path, tag.emptyRefused)
+				case tag.emptyRefused == "" && err != nil:
+					t.Errorf("%s: an empty reference is refused, and the field is not listed as one that must name an image: %v", path, err)
+				case tag.emptyRefused == "":
+					if err := registry("", policy); err != nil {
+						t.Errorf("%s: the tag rule skips an empty reference and the registry rule refuses it: %v", path, err)
+					}
 				}
 			}
 		})
