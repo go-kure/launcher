@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
+
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // reservedKeyCarriers is one document per way a label or annotation key reaches
@@ -175,6 +179,38 @@ var reservedKeyCarriers = map[string]struct {
 `,
 		object: `Cluster "carrier"`, what: "spec.inheritedMetadata annotation",
 	},
+}
+
+// TestBuiltinTraits_SubApplicationDecoratorsLeaveTheConfig: the built-in traits
+// that also cover a component's sub-applications (oam.SubApplicationDecorator)
+// are prune-protection and force-replace, and neither puts a config of its own
+// around the application it is handed. So the Ingress sub-application of an
+// `ingress` or `expose` trait keeps the config that states the platform's
+// annotations to the reserved-key check, with nothing between it and the
+// ownership wrapper. A built-in added to that set fails here, to be held to the
+// same: a config it wraps must stay reachable (oam.ConfigWrapper).
+func TestBuiltinTraits_SubApplicationDecoratorsLeaveTheConfig(t *testing.T) {
+	var decorating []string
+	for name, h := range builtinTraitHandlers() {
+		d, ok := h.(oam.SubApplicationDecorator)
+		if !ok || !d.DecoratesSubApplications() {
+			continue
+		}
+		decorating = append(decorating, name)
+
+		cfg := &traits.IngressConfig{}
+		sub := stack.NewApplication("web-ingress", "default", cfg)
+		if err := h.Apply(&oam.Trait{Type: name}, sub, &stack.Bundle{}); err != nil {
+			t.Errorf("%s: Apply on a sub-application: %v", name, err)
+		}
+		if sub.Config != stack.ApplicationConfig(cfg) {
+			t.Errorf("%s: the sub-application's config is %T after Apply, want the one it was handed", name, sub.Config)
+		}
+	}
+	slices.Sort(decorating)
+	if want := []string{"force-replace", "prune-protection"}; !slices.Equal(decorating, want) {
+		t.Errorf("built-in traits that cover sub-applications = %v, want %v", decorating, want)
+	}
 }
 
 // TestReservedMetadataKeys_EveryCarrier is the one rule of

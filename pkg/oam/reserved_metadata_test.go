@@ -492,6 +492,85 @@ func TestOwnedConfig_PlatformAnnotations(t *testing.T) {
 	}
 }
 
+// sayingWrapper is a caller's own wrapper around a config, one that says so
+// (ConfigWrapper). It vouches for nothing itself: platform is what a
+// vouchingWrapper answers.
+type sayingWrapper struct {
+	inner    stack.ApplicationConfig
+	platform map[string]string
+}
+
+func (w *sayingWrapper) Generate(app *stack.Application) ([]*client.Object, error) {
+	return w.inner.Generate(app)
+}
+
+func (w *sayingWrapper) WrappedApplicationConfig() stack.ApplicationConfig { return w.inner }
+
+// vouchingWrapper is a sayingWrapper that vouches for annotations of its own.
+type vouchingWrapper struct{ sayingWrapper }
+
+func (w *vouchingWrapper) PlatformAnnotations() map[string]string { return w.platform }
+
+// silentWrapper wraps a config without saying so: nothing can look under it.
+type silentWrapper struct{ inner stack.ApplicationConfig }
+
+func (w *silentWrapper) Generate(app *stack.Application) ([]*client.Object, error) {
+	return w.inner.Generate(app)
+}
+
+// TestOwnedConfig_PlatformAnnotationsUnderAWrapper: the check finds the config
+// that vouches for the platform's annotations under every wrapper that says it
+// wraps (ConfigWrapper), as UnwrapConfig walks them, so a wrapper between the
+// ownership wrapper and that config does not turn the platform's own pairs into
+// refused ones. Each layer's pairs count. A wrapper that does not say it wraps
+// hides them, and the pairs are then checked as authored.
+func TestOwnedConfig_PlatformAnnotationsUnderAWrapper(t *testing.T) {
+	reserved := mustReserve(t, "platform.example/")
+	const issuer, zone = "platform.example/issuer", "platform.example/zone"
+	ingress := func(annotations map[string]string) client.Object {
+		return &networkingv1.Ingress{TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"}, ObjectMeta: metav1.ObjectMeta{Name: "i", Annotations: annotations}}
+	}
+	vouching := func(annotations map[string]string) stack.ApplicationConfig {
+		return &platformConfig{ownershipObjectsConfig{objects: []client.Object{ingress(annotations)}}, map[string]string{issuer: "letsencrypt"}}
+	}
+	generate := func(inner stack.ApplicationConfig) error {
+		_, err := stack.NewApplication("web-ingress", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, reserved)).Generate()
+		return err
+	}
+	own := map[string]string{issuer: "letsencrypt"}
+	both := map[string]string{issuer: "letsencrypt", zone: "a"}
+
+	for name, inner := range map[string]stack.ApplicationConfig{
+		"one wrapper":  &sayingWrapper{inner: vouching(own)},
+		"two wrappers": &sayingWrapper{inner: &sayingWrapper{inner: vouching(own)}},
+		"a wrapper that vouches for a pair of its own": &vouchingWrapper{sayingWrapper{inner: vouching(both), platform: map[string]string{zone: "a"}}},
+		"a wrapper that vouches for none":              &vouchingWrapper{sayingWrapper{inner: vouching(own)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := generate(inner); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+		})
+	}
+
+	for name, tc := range map[string]struct {
+		inner stack.ApplicationConfig
+		want  string
+	}{
+		"a pair no layer vouches for":              {&sayingWrapper{inner: vouching(both)}, zone},
+		"a layer's pair with another value":        {&vouchingWrapper{sayingWrapper{inner: vouching(both), platform: map[string]string{zone: "b"}}}, zone},
+		"a wrapper that does not say it wraps":     {&silentWrapper{inner: vouching(own)}, issuer},
+		"a saying wrapper around a silent wrapper": {&sayingWrapper{inner: &silentWrapper{inner: vouching(own)}}, issuer},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := generate(tc.inner)
+			if !errors.Is(err, ErrReservedMetadataKey) || !strings.Contains(err.Error(), `: annotation "`+tc.want+`"`) {
+				t.Fatalf("Generate = %v, want ErrReservedMetadataKey for the annotation %s", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestOwnedConfig_ReservedKeysMalformedMetadata: metadata the check cannot read
 // is refused with the object named, not read as holding no key.
 func TestOwnedConfig_ReservedKeysMalformedMetadata(t *testing.T) {

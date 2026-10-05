@@ -563,7 +563,13 @@ method `PlatformAnnotations()` on the `ingress` trait's config (`traits.IngressC
 The check reads that method through an unexported contract of this package, which a config
 of another package can only meet with an exported method. A consumer's own config that
 writes annotations from the platform's input, apart from authored ones, may implement the
-same method. **Breaking for documents:** an `expose` trait whose authored annotation
+same method. The check asks the application's config and every config under it that a
+`ConfigWrapper` says it holds, down to what `UnwrapConfig` returns, and passes a pair any of
+them states. So a trait that wraps a sub-application's config (none of the built-in ones
+does: `prune-protection` and `force-replace` set a delivery intent and leave the config)
+keeps `expose` working under a reserved prefix by being a `ConfigWrapper`, with no method to
+hand on. Under a wrapper that does not say it wraps, the pairs are checked as authored.
+**Breaking for documents:** an `expose` trait whose authored annotation
 contradicts a value the trait writes is now refused where the trait's value used to win
 silently (`pkg/oam/builtin/traits/README.md`, "Capability-aware traits").
 

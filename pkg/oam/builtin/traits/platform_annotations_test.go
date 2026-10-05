@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	pkgerrors "github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -271,6 +272,136 @@ func TestExposeRule_PlatformAnnotationsPassReservedKeys(t *testing.T) {
 	if !stderrors.Is(err, oam.ErrReservedMetadataKey) || !strings.Contains(err.Error(), `annotation "`+kSSLRedirect+`"`) {
 		t.Fatalf("a hand-written ssl-redirect: %v, want ErrReservedMetadataKey naming it", err)
 	}
+}
+
+// ingressSubApplication returns the application of cluster whose config is the
+// ingress trait's, under whatever says it wraps it.
+func ingressSubApplication(t *testing.T, cluster *stack.Cluster) *stack.Application {
+	t.Helper()
+	var found *stack.Application
+	var walk func(n *stack.Node)
+	walk = func(n *stack.Node) {
+		if n == nil {
+			return
+		}
+		if n.Bundle != nil {
+			for _, a := range n.Bundle.Applications {
+				if _, ok := oam.UnwrapConfig(a.Config).(*traits.IngressConfig); ok {
+					found = a
+				}
+			}
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(cluster.Node)
+	if found == nil {
+		t.Fatal("no application holds an IngressConfig under its wrappers")
+	}
+	return found
+}
+
+// subApplicationWrapper is a trait of a consumer's own that covers a component's
+// sub-applications and wraps the config of the Ingress one, saying so
+// (oam.ConfigWrapper). No built-in trait does that.
+type subApplicationWrapper struct{}
+
+func (subApplicationWrapper) CanHandle(traitType string) bool { return traitType == "wrap" }
+
+func (subApplicationWrapper) DecoratesSubApplications() bool { return true }
+
+func (subApplicationWrapper) Apply(_ *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
+	if _, ok := app.Config.(*traits.IngressConfig); ok {
+		app.Config = &wrappedIngressConfig{inner: app.Config}
+	}
+	return nil
+}
+
+type wrappedIngressConfig struct{ inner stack.ApplicationConfig }
+
+func (w *wrappedIngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	return w.inner.Generate(app)
+}
+
+func (w *wrappedIngressConfig) WrappedApplicationConfig() stack.ApplicationConfig { return w.inner }
+
+// TestExposeRule_PlatformAnnotationsOnADecoratedSubApplication: the traits that
+// cover a component's sub-applications reach the Ingress an expose trait
+// generates, and the platform's annotations on it still pass a reserved prefix.
+// The two built-in ones (prune-protection, force-replace) set a delivery intent
+// and leave the sub-application's config as the ingress trait made it. A trait
+// of a consumer's own that wraps that config, saying so, does not hide the
+// platform's pairs from the check either.
+func TestExposeRule_PlatformAnnotationsOnADecoratedSubApplication(t *testing.T) {
+	ctx := oam.TransformContext{Namespace: "default", Capabilities: exposeCapability(), ReservedMetadataKeys: reservedIngressPrefixes}
+	build := func(t *testing.T, decorators ...string) *stack.Application {
+		t.Helper()
+		tr := platformAnnotationsTransformer()
+		tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
+		tr.RegisterBuiltinTrait("force-replace", &traits.ForceReplaceHandler{})
+		tr.RegisterTrait("wrap", subApplicationWrapper{})
+		app := webWithTrait(exposeEveryAnnotation(nil))
+		for _, d := range decorators {
+			app.Spec.Components[0].Traits = append(app.Spec.Components[0].Traits, oam.Trait{Type: d})
+		}
+		cluster, err := tr.Transform(app, ctx)
+		if err != nil {
+			t.Fatalf("Transform: %v", err)
+		}
+		generated, err := oam.GenerateApplications(cluster)
+		if err != nil {
+			t.Fatalf("GenerateApplications: %v", err)
+		}
+		sub := ingressSubApplication(t, cluster)
+		read := false
+		for _, g := range generated {
+			if g.Name != sub.Name {
+				continue
+			}
+			read = true
+			ing, ok := (*g.Objects[0]).(*networkingv1.Ingress)
+			if !ok {
+				t.Fatalf("application %q generated %T, want the Ingress", g.Name, *g.Objects[0])
+			}
+			for k, want := range exposeWritten {
+				if got := ing.Annotations[k]; got != want {
+					t.Errorf("annotation %s = %q, want %q", k, got, want)
+				}
+			}
+		}
+		if !read {
+			t.Fatalf("no generated application is named %q: the Ingress was not read", sub.Name)
+		}
+		return sub
+	}
+
+	t.Run("the built-in decorators", func(t *testing.T) {
+		sub := build(t, "prune-protection", "force-replace")
+		if !sub.Delivery.PruneProtection || !sub.Delivery.ForceReplace {
+			t.Errorf("delivery intent = %+v, want both traits to have reached the Ingress sub-application", sub.Delivery)
+		}
+		// The ownership wrapper holds the ingress trait's config itself: neither
+		// trait put a config of its own around it.
+		wrapper, ok := sub.Config.(oam.ConfigWrapper)
+		if !ok {
+			t.Fatalf("config = %T, want the ownership wrapper", sub.Config)
+		}
+		if _, ok := wrapper.WrappedApplicationConfig().(*traits.IngressConfig); !ok {
+			t.Errorf("the ownership wrapper holds %T, want *IngressConfig", wrapper.WrappedApplicationConfig())
+		}
+	})
+
+	t.Run("a consumer's trait that wraps the config", func(t *testing.T) {
+		sub := build(t, "wrap")
+		wrapper, ok := sub.Config.(oam.ConfigWrapper)
+		if !ok {
+			t.Fatalf("config = %T, want the ownership wrapper", sub.Config)
+		}
+		if _, ok := wrapper.WrappedApplicationConfig().(*wrappedIngressConfig); !ok {
+			t.Fatalf("the ownership wrapper holds %T, want the trait's wrapper: the case is not the one under test", wrapper.WrappedApplicationConfig())
+		}
+	})
 }
 
 func countShared(a map[string]any, b map[string]string) int {
