@@ -318,11 +318,19 @@ func TestTransform_LoweredNameHeldAgainstALaterOne(t *testing.T) {
 }
 
 // resolvingRawRule is testRawRule, resolving a pooler name and writing it into
-// the document it emits.
-type resolvingRawRule struct{ testRawRule }
+// the document it emits. authored, when set, is the name the document's author
+// wrote for it.
+type resolvingRawRule struct {
+	testRawRule
+	authored string
+}
 
 func (r resolvingRawRule) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
-	name, err := lctx.ResolveName(doc.(*testRawDoc).Metadata.Name, "pooler", NameSpec{Role: NameRolePooler, Kind: poolerKind})
+	spec := NameSpec{Role: NameRolePooler, Kind: poolerKind}
+	if r.authored != "" {
+		spec.Property, spec.Authored = "poolerName", r.authored
+	}
+	name, err := lctx.ResolveName(doc.(*testRawDoc).Metadata.Name, "pooler", spec)
 	if err != nil {
 		return LoweringResult{}, err
 	}
@@ -337,7 +345,7 @@ func (r resolvingRawRule) LowerDocument(doc any, lctx LoweringContext) (Lowering
 // Naming hook.
 func TestLowerRaws_ResolveNameKeepsTheDefault(t *testing.T) {
 	tr := NewTransformer(nil, nil)
-	tr.RegisterRawDocumentLowering(resolvingRawRule{testRawRule{kind: "WebApplication"}})
+	tr.RegisterRawDocumentLowering(resolvingRawRule{testRawRule: testRawRule{kind: "WebApplication"}})
 	asked := 0
 	out, err := tr.LowerRaws([]json.RawMessage{rawWebApplication("shop")}, TransformContext{Naming: func(NameRequest) (string, bool) {
 		asked++
@@ -351,6 +359,66 @@ func TestLowerRaws_ResolveNameKeepsTheDefault(t *testing.T) {
 	}
 	if !strings.Contains(string(out[0]), "poolerName: shop-pooler") {
 		t.Errorf("the raw rule's name is not the default shop-pooler:\n%s", out[0])
+	}
+}
+
+// LowerRaws lowers several documents with one allocator: one name resolved for
+// two of them is one object only where they share a namespace.
+func TestLowerRaws_ResolveNameAcrossDocuments(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(resolvingRawRule{testRawRule: testRawRule{kind: "WebApplication"}, authored: "shared"})
+
+	apart := []json.RawMessage{rawWebApplicationNS("a", "one"), rawWebApplicationNS("b", "two")}
+	if _, err := tr.LowerRaws(apart, TransformContext{}); err != nil {
+		t.Fatalf("one name in two namespaces: %v", err)
+	}
+
+	together := []json.RawMessage{rawWebApplicationNS("a", "one"), rawWebApplicationNS("b", "one")}
+	_, err := tr.LowerRaws(together, TransformContext{})
+	const want = `name collision: Pooler.postgresql.cnpg.io "shared" is named by ` +
+		`document "a" (role "pooler", set by poolerName) and by ` +
+		`document "b" (role "pooler", set by poolerName); give one of them another name`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v\nwant one containing %s", err, want)
+	}
+}
+
+// resolvingTraitRule lowers its trait to a terminal one, after resolving the
+// pooler name of the component the trait is on.
+type resolvingTraitRule struct{ typ string }
+
+func (r resolvingTraitRule) TraitType() string { return r.typ }
+
+func (r resolvingTraitRule) LowerTrait(_ *Trait, lctx LoweringContext) (LoweringResult, error) {
+	if _, err := lctx.ResolveName(lctx.Component.Name, "pooler", NameSpec{Role: NameRolePooler, Kind: poolerKind}); err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Traits: []Trait{{Type: "expose", Properties: map[string]any{}}}}, nil
+}
+
+// Two rules that each resolve one name for one component would each generate
+// the object: the second is refused, with both named.
+func TestLoweringResolveName_TwoRulesOneName(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(resolvingTraitRule{typ: "pooled"})
+	tr.RegisterTraitLowering(resolvingTraitRule{typ: "pooled-too"})
+	app := makeApp("shop", Component{
+		Name: "db",
+		Type: "webservice",
+		Traits: []Trait{
+			{Type: "pooled", Properties: map[string]any{}},
+			{Type: "pooled-too", Properties: map[string]any{}},
+		},
+	})
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	_, err := tr.lower(app, TransformContext{})
+	const want = `name collision: Pooler.postgresql.cnpg.io "db-pooler" is named by ` +
+		`component "db" traits[0] "pooled" (role "pooler", its default) and by ` +
+		`component "db" traits[1] "pooled-too" (role "pooler", its default); give one of them another name`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v\nwant one containing %s", err, want)
 	}
 }
 
@@ -368,8 +436,9 @@ func TestLoweringResolveName_ReservesNoComponentName(t *testing.T) {
 	}
 }
 
-// Two names one rule resolves for one kind are refused when they are one name,
-// with both named; the same name resolved again by the same owner is not.
+// Two names resolved for one kind are refused when they are one name, with
+// both named. So is one name resolved a second time for the same default: each
+// resolution names an object the rule generates.
 func TestLoweringResolveName_TwoOfOneKind(t *testing.T) {
 	database := func(property, authored string) NameSpec {
 		return NameSpec{Role: NameRoleDatabase, Kind: databaseKind, Property: property, Authored: authored}
@@ -380,15 +449,19 @@ func TestLoweringResolveName_TwoOfOneKind(t *testing.T) {
 	if _, err := lctx.ResolveName("db", "orders", database("", "")); err != nil {
 		t.Fatalf("ResolveName: %v", err)
 	}
-	if _, err := lctx.ResolveName("db", "orders", database("", "")); err != nil {
-		t.Fatalf("the same name resolved again by its owner: %v", err)
-	}
 	_, err := lctx.ResolveName("db", "billing", database("databases[1].objectName", "db-orders"))
 	const want = `name collision: Database.postgresql.cnpg.io "db-orders" is named by ` +
 		`component "db" (role "database", its default) and by ` +
 		`component "db" (role "database", set by databases[1].objectName); give one of them another name`
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant %s", err, want)
+	}
+
+	_, err = lctx.ResolveName("db", "orders", database("", ""))
+	const wantTwice = `name collision: Database.postgresql.cnpg.io "db-orders" is named twice by ` +
+		`component "db" (role "database", its default); give one of them another name`
+	if err == nil || err.Error() != wantTwice {
+		t.Fatalf("err = %v\nwant %s", err, wantTwice)
 	}
 
 	// A Pooler and a Database of one name are two objects.

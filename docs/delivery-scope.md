@@ -264,9 +264,10 @@ Decided in the ticket:
 - **Shipped: the transform keeps the names of those roles apart.** Two that name one
   object, or one bundle, fail the transform, naming both and where each came from. The
   names a lowering rule resolves are held in the same space as the ones resolved after
-  lowering. Every other name is still compared only by `CheckInDocumentCollisions` over
-  `GenerateApplications`: a component's own objects, the lowering-rule names without a
-  role, and the objects of a trait outside the roles.
+  lowering, and two rules that resolve one kind and name for one component are refused
+  when the second resolves it. Every other name is still compared only by
+  `CheckInDocumentCollisions` over `GenerateApplications`: a component's own objects, the
+  lowering-rule names without a role, and the objects of a trait outside the roles.
 - **Shipped: `postgresql` `poolerName` and `databases[].objectName`**
   (`PostgresqlRule`, `pkg/oam/builtin/components/postgresql_lowering.go`). The Pooler's
   endpoint selector follows the chosen name. `poolerName` without `pooler.enabled: true`

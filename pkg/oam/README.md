@@ -466,6 +466,12 @@ document it emits. Where `<base>-<suffix>` is no valid name (a suffix with a cha
 object name takes), an authored name is still used; without one the name is refused, and the
 hook, which has no default to be asked about, is not asked.
 
+A rule resolves a name once and keeps it. Each call names one object, so a second call that
+resolves the same kind and name is refused with both named, whichever rule made it: two trait
+rules of one component, or the first rule asked again. Under `LowerRaws`, which lowers several
+documents with one allocator, two documents may resolve one kind and name only where their
+`metadata.namespace` differs.
+
 `Transformer.ComponentEndpoints` consults no hook either: the pooler endpoint of a
 `postgresql` component selects pods by the Pooler's name, and there it is the authored
 `poolerName` or the default. A consumer that sets `Naming` calls
