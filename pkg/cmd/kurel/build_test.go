@@ -479,6 +479,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		// (go-kure/launcher#790).
 		"limitrange", "namespace", "persistentvolume", "pod", "podtemplate", "replicaset",
 		"replicationcontroller", "resourcequota",
+		"csidriver", "ingressclass", "priorityclass", "runtimeclass", "storageclass",
+		"volumeattributesclass",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

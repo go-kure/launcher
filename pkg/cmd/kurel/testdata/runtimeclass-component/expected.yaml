@@ -1,0 +1,27 @@
+apiVersion: node.k8s.io/v1
+handler: kata
+kind: RuntimeClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: kata
+  name: kata
+overhead:
+  podFixed:
+    cpu: 250m
+    memory: 128Mi
+scheduling:
+  nodeSelector:
+    runtime: kata
+  tolerations:
+  - effect: NoSchedule
+    key: runtime
+    operator: Equal
+    value: kata
+---
+apiVersion: node.k8s.io/v1
+handler: runc
+kind: RuntimeClass
+metadata:
+  labels:
+    launcher.gokure.dev/component: runc
+  name: runc

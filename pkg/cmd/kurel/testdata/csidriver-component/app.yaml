@@ -1,0 +1,24 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: csi.example.com
+      type: csidriver
+      properties:
+        attachRequired: false
+        podInfoOnMount: true
+        volumeLifecycleModes:
+          - Persistent
+          - Ephemeral
+        storageCapacity: true
+        fsGroupPolicy: File
+        tokenRequests:
+          - audience: vault
+            expirationSeconds: 3600
+        requiresRepublish: true
+        seLinuxMount: false
+    - name: minimal.csi.example.com
+      type: csidriver

@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: fast
+      type: storageclass
+      properties:
+        provisioner: ebs.csi.aws.com
+        parameters:
+          type: gp3
+          encrypted: "true"
+        reclaimPolicy: Retain
+        allowVolumeExpansion: true
+        volumeBindingMode: WaitForFirstConsumer
+        mountOptions:
+          - noatime
+        allowedTopologies:
+          - matchLabelExpressions:
+              - key: topology.kubernetes.io/zone
+                values:
+                  - eu-west-1a
+                  - eu-west-1b
+    - name: local
+      type: storageclass
+      properties:
+        provisioner: kubernetes.io/no-provisioner
+        allowVolumeExpansion: false

@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: fast-io
+      type: volumeattributesclass
+      properties:
+        driverName: ebs.csi.aws.com
+        parameters:
+          iops: "6000"
+          throughput: "250"
+    - name: slow-io
+      type: volumeattributesclass
+      properties:
+        driverName: ebs.csi.aws.com
+        parameters:
+          iops: "1000"

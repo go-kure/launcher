@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: kata
+      type: runtimeclass
+      properties:
+        handler: kata
+        overhead:
+          podFixed:
+            cpu: 250m
+            memory: 128Mi
+        scheduling:
+          nodeSelector:
+            runtime: kata
+          tolerations:
+            - key: runtime
+              operator: Equal
+              value: kata
+              effect: NoSchedule
+    - name: runc
+      type: runtimeclass
+      properties:
+        handler: runc
