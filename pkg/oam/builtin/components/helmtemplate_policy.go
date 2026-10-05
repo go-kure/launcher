@@ -215,7 +215,7 @@ func enforceRenderedReplicas(obj client.Object, p oam.Policy) error {
 	case *autoscalingv2.HorizontalPodAutoscaler:
 		return check("spec.maxReplicas", o.Spec.MaxReplicas)
 	case *unstructured.Unstructured:
-		if gvk := o.GroupVersionKind(); gvk.Group != "autoscaling" || gvk.Kind != "HorizontalPodAutoscaler" {
+		if !isAutoscalerGVK(o.GroupVersionKind()) {
 			return nil
 		}
 		n, found, err := unstructured.NestedInt64(o.Object, "spec", "maxReplicas")
@@ -281,4 +281,23 @@ var (
 // built-in workload groups, whatever its version.
 func isWorkloadGVK(gvk schema.GroupVersionKind) bool {
 	return workloadGroups[gvk.Group] && workloadKinds[gvk.Kind]
+}
+
+// isAutoscalerGVK reports whether gvk is a HorizontalPodAutoscaler, whatever
+// its version: the one kind enforceRenderedReplicas reads from the object as
+// it arrived.
+func isAutoscalerGVK(gvk schema.GroupVersionKind) bool {
+	return gvk.Group == "autoscaling" && gvk.Kind == "HorizontalPodAutoscaler"
+}
+
+// policyReadsKind reports whether enforceRenderedObjectPolicy reads anything
+// from an object of gvk's group and kind, in any version: a workload, a claim
+// or a PersistentVolume (isWorkloadGVK), or a HorizontalPodAutoscaler
+// (isAutoscalerGVK). An object of any other kind passes that check unread. It
+// is asked where an object of a kind is to be written and its content is not
+// at hand (enforceTargetManifest), and is made of the two predicates the check
+// itself uses; TestPolicyReadsKind_IsWhatTheRenderedObjectCheckReads holds it
+// to the check.
+func policyReadsKind(gvk schema.GroupVersionKind) bool {
+	return isWorkloadGVK(gvk) || isAutoscalerGVK(gvk)
 }

@@ -34,18 +34,23 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 	return externalSecretSchema()
 }
 
-// externalSecretKind is the externalsecret kind: see policyFreeKind. validate
+// externalSecretKind is the externalsecret kind: see policyHeldKind. validate
 // refuses the one authored value the object cannot carry
-// (refuseDataGeneratorRef); the API's other rules are left to the API server.
-var externalSecretKind = &policyFreeKind[esv1.ExternalSecretSpec]{
-	upstream: "external-secrets.io/v1 ExternalSecretSpec",
-	required: externalSecretRequired,
-	validate: validateExternalSecret,
-	build: func(name, namespace string, spec *esv1.ExternalSecretSpec) client.Object {
-		secret := externalsecrets.CreateExternalSecret(name, namespace)
-		spec.DeepCopyInto(&secret.Spec)
-		return secret
+// (refuseDataGeneratorRef); enforce, a target.manifest of a kind the
+// environment policy checks (enforceTargetManifest). The API's other rules are
+// left to the API server.
+var externalSecretKind = &policyHeldKind[esv1.ExternalSecretSpec]{
+	policyFreeKind: policyFreeKind[esv1.ExternalSecretSpec]{
+		upstream: "external-secrets.io/v1 ExternalSecretSpec",
+		required: externalSecretRequired,
+		validate: validateExternalSecret,
+		build: func(name, namespace string, spec *esv1.ExternalSecretSpec) client.Object {
+			secret := externalsecrets.CreateExternalSecret(name, namespace)
+			spec.DeepCopyInto(&secret.Spec)
+			return secret
+		},
 	},
+	enforce: enforceExternalSecretPolicy,
 }
 
 // ToApplicationConfig decodes an OAM externalsecret component into its config.

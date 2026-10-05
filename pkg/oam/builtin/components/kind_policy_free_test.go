@@ -37,11 +37,10 @@ import (
 // PodDisruptionBudget, the four kinds of the Prometheus operator's API, the
 // four of Cilium's BGP control plane, five more of Cilium's API (a CIDR
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
-// policy and a node configuration), the five kinds of the Gateway API's
-// infrastructure objects and the two external-secret kinds of the External
-// Secrets Operator's API. The three kinds of cert-manager's API and that
-// operator's two stores are held here too: the policy reaches one part of
-// each (held), and everything else of them is the helper's.
+// policy and a node configuration) and the five kinds of the Gateway API's
+// infrastructure objects. The three kinds of cert-manager's API and the four
+// of the External Secrets Operator's are held here too: the policy reaches
+// one part of each (held), and everything else of them is the helper's.
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
@@ -607,7 +606,7 @@ var policyFreeKinds = []policyFreeKind{
 	{
 		component: "externalsecret", handler: &components.ExternalSecretHandler{},
 		gvk: esv1.SchemeGroupVersion.WithKind(esv1.ExtSecretKind),
-		typ: reflect.TypeFor[esv1.ExternalSecretSpec](), namespaced: true,
+		typ: reflect.TypeFor[esv1.ExternalSecretSpec](), namespaced: true, held: true,
 		// The API requires no field of an ExternalSecret's spec.
 		minimal: map[string]any{},
 		full:    externalSecretFull(),
@@ -616,6 +615,7 @@ var policyFreeKinds = []policyFreeKind{
 		component: "clusterexternalsecret", handler: &components.ClusterExternalSecretHandler{},
 		gvk:     esv1.SchemeGroupVersion.WithKind(esv1.ClusterExtSecretKind),
 		typ:     reflect.TypeFor[esv1.ClusterExternalSecretSpec](),
+		held:    true,
 		minimal: clusterExternalSecretOf(map[string]any{}),
 		full:    clusterExternalSecretFull(),
 	},

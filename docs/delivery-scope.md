@@ -1081,8 +1081,7 @@ its text:
   (`secretstore.go`, `clustersecretstore.go`, `externalsecret.go`,
   `clusterexternalsecret.go`, with what they share in `externalsecrets_common.go`), each
   the strict projection of its spec type, declaring its object and taking `objectName`.
-  The two cluster kinds are cluster-scoped. The stores are built on `policyHeldKind`,
-  the two external-secret kinds on `policyFreeKind`.
+  The two cluster kinds are cluster-scoped. All four are built on `policyHeldKind`.
   - **No capability is required and nothing gates them:** on a cluster without the
     operator's CRDs the component builds and the object is refused at apply. The
     cluster's `external-secret` capability is the trait's; the kinds do not read it,
@@ -1109,6 +1108,15 @@ its text:
     the Secret an external secret writes, where a reference and a literal look alike.
     **No host these objects name is held to the allowed registries** (a provider's
     server, URL or endpoint): none is an artifact source.
+  - **An object an external secret has the operator write instead of a Secret
+    (`target.manifest`) gets no more than the same policy gives that kind on
+    `passthrough`.** Its content is rendered in the cluster and cannot be read at
+    build, so a kind the rendered-object check reads (a workload, a claim, a
+    PersistentVolume, a HorizontalPodAutoscaler, in any version) is refused, under
+    every policy and under the default one; a core Secret is refused where
+    `passthrough` refuses it; any other kind passes as it would there, and whether
+    the operator writes it at all is the cluster's (the operator's generic-target
+    setting and its RBAC).
   - A trait's ExternalSecret and an `externalsecret` component's are one kind: given
     one name in one namespace they are refused as a collision.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the
