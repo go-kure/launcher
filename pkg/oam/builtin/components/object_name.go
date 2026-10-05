@@ -111,23 +111,42 @@ func validateJobName(name, componentName string) error {
 // not a DNS-1123 label: at most 63 characters, and no dot. name is the one the
 // Job takes, and the refusal says where it came from, as validateKindNameLength
 // does.
+//
+// The conversion refuses an Indexed job without completions, but a JobConfig
+// built by hand can leave it unset. Where parallelism is unset too the API
+// server reads both as 1 (SetDefaults_Job, pkg/apis/batch/v1) before it
+// validates, so the rule is held on "<job>-0" there. Completions unset beside a
+// set parallelism is refused by the API server for the missing completions, not
+// for the name, and is not this rule's.
 func validateJobNameAllowsCompletions(name, componentName string, spec JobSpecConfig) error {
-	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion ||
-		spec.Completions == nil || *spec.Completions <= 0 {
+	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion {
 		return nil
 	}
-	hostname := name + "-" + strconv.Itoa(int(*spec.Completions)-1)
+	var completions int32
+	var counted string
+	switch {
+	case spec.Completions != nil:
+		completions = *spec.Completions
+		counted = "completions " + strconv.Itoa(int(completions))
+	case spec.Parallelism == nil:
+		completions = 1
+		counted = "completions and parallelism unset, which the API server reads as completions 1,"
+	}
+	if completions <= 0 {
+		return nil
+	}
+	hostname := name + "-" + strconv.Itoa(int(completions)-1)
 	errs := validation.IsDNS1123Label(hostname)
 	if len(errs) == 0 {
 		return nil
 	}
-	const rule = "with completionMode Indexed and completions %d the pod of the last index takes the hostname %q, which must be a DNS-1123 label: %s"
+	const rule = "with completionMode Indexed and %s the pod of the last index takes the hostname %q, which must be a DNS-1123 label: %s"
 	if name == componentName {
 		return errors.Errorf("job %q: the component name is the Job's name, and "+rule,
-			name, *spec.Completions, hostname, strings.Join(errs, "; "))
+			name, counted, hostname, strings.Join(errs, "; "))
 	}
 	return errors.Errorf("%s: %q is not a valid name for this Job: "+rule,
-		objectNameField, name, *spec.Completions, hostname, strings.Join(errs, "; "))
+		objectNameField, name, counted, hostname, strings.Join(errs, "; "))
 }
 
 func coreKind(kind string) schema.GroupKind { return schema.GroupKind{Kind: kind} }

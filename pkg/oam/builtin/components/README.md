@@ -2674,6 +2674,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Indexed and completions 11 the pod of the last index takes the hostname
   "<name>-10", which must be a DNS-1123 label: …`. An Indexed job whose name
   leaves no room for its last index built before this rule and is refused now.
+  A document cannot leave `completions` unset on an Indexed job, but a
+  `JobConfig` built in Go can: with `Parallelism` unset too the API server
+  reads both as 1, so `Generate` holds the name to `<name>-0` there.
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
   job template, projected here onto `spec` directly. Every one is
