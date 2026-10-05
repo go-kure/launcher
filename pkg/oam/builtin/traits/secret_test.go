@@ -252,6 +252,34 @@ func TestSecretConfig_FluxNamespaceInput(t *testing.T) {
 	}
 }
 
+// TestSecretConfig_Generate_Name: the Secret is named by the config's Name, the
+// name FluxNamespaceInput gives, whatever its sub-application is called; a
+// config built directly without one is named after its application.
+func TestSecretConfig_Generate_Name(t *testing.T) {
+	generate := func(cfg *traits.SecretConfig, appName string) string {
+		t.Helper()
+		app := stack.NewApplication(appName, "shop", cfg)
+		objects, err := cfg.Generate(app)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if len(objects) != 1 {
+			t.Fatalf("Generate returned %d objects, want 1", len(objects))
+		}
+		return (*objects[0]).GetName()
+	}
+	cfg := &traits.SecretConfig{Name: "creds"}
+	if got := generate(cfg, "renamed-creds"); got != "creds" {
+		t.Errorf("Secret named %q under sub-application renamed-creds, want creds", got)
+	}
+	if _, name := cfg.FluxNamespaceInput(); name != "creds" {
+		t.Errorf("FluxNamespaceInput names %q, want the generated Secret's name creds", name)
+	}
+	if got := generate(&traits.SecretConfig{}, "fallback"); got != "fallback" {
+		t.Errorf("Secret of a config without a Name named %q, want its application's name", got)
+	}
+}
+
 // TestExplicitSecretsAllowed pins the optional interface's default: only a
 // policy that implements it and answers false forbids.
 func TestExplicitSecretsAllowed(t *testing.T) {
