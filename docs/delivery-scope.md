@@ -712,6 +712,22 @@ and the disposition of every item. The four this document started from:
   of the six pod-spec properties of `security-context` on such a component: it built,
   with the property applied to nothing, and is refused now. The two mount refusals
   existed already and changed wording only.
+- **The scope of a `passthrough` object (item 13): shipped.** `passthrough` resolves
+  whether its object is namespaced with the precedence `manifests` gives a
+  `scopeOverrides` entry, with `clusterScoped` in the entry's place
+  (`resolveClusterScoped`, `pkg/oam/builtin/components/passthrough.go`). For a kind
+  whose scope the Kubernetes API governs, the scope table decides, so a PriorityClass
+  gets no namespace without the property; a `clusterScoped` that contradicts the table
+  is refused, where `manifests` ignores such an override (its list may name kinds the
+  source does not hold; the property is a statement about the one object). For any
+  other kind an authored `clusterScoped` decides, either way; not authored, the table
+  decides for a kind it registers and an unknown kind stays namespaced, the default
+  the component always had (`manifests` fails closed there). An inline namespace on an
+  object that resolves cluster-scoped is refused. Breaking: an object of a
+  cluster-scoped kind the table knows loses the stamped namespace; `clusterScoped:
+  true` on a built-in namespaced kind and `false` on a built-in cluster-scoped kind
+  stop building; an inline namespace on a cluster-scoped kind the table knows is
+  refused without the property too.
 
 Item 5 was decided as "document" and needed no text: tiers are declared, never
 derived, since go-kure/launcher#783 (§2.2).
@@ -741,5 +757,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
-| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` and on `helm` under `delivery: template` (item 11), the refusal of a pod-spec trait on a component without a workload (item 14); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
+| [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Partly: `passthrough` and `manifests` policy, template namespace, undeclared fields (item 7), the nested `global` refusal in `secretValues` (item 9), `scopeOverrides` on `helmtemplate` and on `helm` under `delivery: template` (item 11), the scope of a `passthrough` object (item 13), the refusal of a pod-spec trait on a component without a workload (item 14); items 1, 2, 3 and 5 documented | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |

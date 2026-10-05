@@ -16,11 +16,12 @@ spec:
           mode: cluster
           image: spark:3.5.0
           mainClass: org.apache.spark.examples.JavaWordCount
-  # A cluster-scoped object — set clusterScoped so no namespace is injected.
+  # A cluster-scoped built-in kind: no namespace is injected. `clusterScoped` is
+  # not needed here; it states the scope of a custom resource the build does
+  # not know (`clusterScoped: true`), which is treated as namespaced otherwise.
   - name: word-count-reader
     type: passthrough
     properties:
-      clusterScoped: true
       object:
         apiVersion: rbac.authorization.k8s.io/v1
         kind: ClusterRole
