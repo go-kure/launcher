@@ -1,0 +1,26 @@
+apiVersion: cilium.io/v2
+kind: CiliumBGPNodeConfigOverride
+metadata:
+  labels:
+    launcher.gokure.dev/component: worker-1-bgp
+  name: worker-1
+spec:
+  bgpInstances:
+  - localASN: 65011
+    localPort: 1790
+    name: instance-65000
+    peers:
+    - localAddress: 192.0.2.11
+      localPort: 1791
+      name: tor-1
+    routerID: 192.0.2.11
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPNodeConfigOverride
+metadata:
+  labels:
+    launcher.gokure.dev/component: worker-2
+  name: worker-2
+spec:
+  bgpInstances:
+  - name: instance-65000

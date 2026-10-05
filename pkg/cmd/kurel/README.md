@@ -144,6 +144,13 @@ The kind components of cert-manager's API, `issuer`, `clusterissuer` and
 namespace, and a ClusterIssuer with no namespace. No capability is required
 of the cluster profile to build them either; the `certificate` trait, which
 shares the kind's name, still requires its own.
+The kind components of Cilium's BGP control plane, `cilium-bgpadvertisement`,
+`cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride` and
+`cilium-bgppeerconfig` (go-kure/launcher#790), are registered the same way,
+with a `<type>-component` fixture each: a CiliumBGPAdvertisement, a
+CiliumBGPClusterConfig, a CiliumBGPNodeConfigOverride and a
+CiliumBGPPeerConfig with no namespace. No capability is required to build
+them either.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

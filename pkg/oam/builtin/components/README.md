@@ -170,6 +170,10 @@ reads it.
 | `issuer` | Issuer | Kind-named cert-manager Issuer: the whole `IssuerSpec` (`acme`, `ca`, `vault`, `selfSigned`, `venafi`), strictly decoded; no top-level field is required. The cpu and memory of an ACME HTTP01 solver's pod template are held to the environment policy's maxima. No capability is required — see below. |
 | `clusterissuer` | ClusterIssuer | Kind-named cert-manager ClusterIssuer: the same `IssuerSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
 | `certificate` | Certificate | Kind-named cert-manager Certificate: the whole `CertificateSpec`, strictly decoded; `secretName` and `issuerRef` with its `name` are required. A keystore password written into the object is refused under an environment policy that forbids explicit secrets. The issuer is the author's, and no capability is required. Shares its name with the `certificate` trait — see below. |
+| `cilium-bgpadvertisement` | CiliumBGPAdvertisement | Kind-named Cilium BGP advertisement: the whole `CiliumBGPAdvertisementSpec` (`advertisements`, required), strictly decoded; an entry's `advertisementType` is required, and its `service`, `interface` and `selector` are held to the type. Cluster-scoped; no environment policy applies and no capability is required — see below. |
+| `cilium-bgpclusterconfig` | CiliumBGPClusterConfig | Kind-named Cilium BGP cluster configuration: the whole `CiliumBGPClusterConfigSpec` (`nodeSelector`, `bgpInstances`), strictly decoded; `bgpInstances`, an instance's `name` and a peer's `name` are required. The node selector is the author's. Cluster-scoped; no environment policy applies and no capability is required — see below. |
+| `cilium-bgpnodeconfigoverride` | CiliumBGPNodeConfigOverride | Kind-named Cilium BGP per-node override: the whole `CiliumBGPNodeConfigOverrideSpec` (`bgpInstances`, required), strictly decoded; an instance's `name` and a peer's `name` are required. It overrides the CiliumBGPNodeConfig of the same name: `objectName` sets that name. Cluster-scoped; no environment policy applies and no capability is required — see below. |
+| `cilium-bgppeerconfig` | CiliumBGPPeerConfig | Kind-named Cilium BGP peer configuration: the whole `CiliumBGPPeerConfigSpec` (`transport`, `timers`, `authSecretRef`, `gracefulRestart`, `ebgpMultihop`, `families`), strictly decoded; no top-level field is required. Cluster-scoped; no environment policy applies and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -313,11 +317,11 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `certmanager.CreateClusterIssuer` | cert-manager.io/v1 ClusterIssuer (cluster-scoped) | kind | `clusterissuer` | strict decode of `IssuerSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written; of an issuer type that is authored, the fields the API requires that the type would write empty. The cpu and memory of an ACME HTTP01 solver's pod template are held to the policy's maxima. No capability is required. |
 | `certmanager.CreateIssuer` | cert-manager.io/v1 Issuer | kind | `issuer` | strict decode of `IssuerSpec` | As `clusterissuer`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `certmanager.CreateOrder` | acme.cert-manager.io/v1 Order | not authorable | - | - | Created by cert-manager's ACME issuer. |
-| `cilium.CreateCiliumBGPAdvertisement` | cilium.io/v2 CiliumBGPAdvertisement (cluster-scoped) | missing | - | - | - |
-| `cilium.CreateCiliumBGPClusterConfig` | cilium.io/v2 CiliumBGPClusterConfig (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumBGPAdvertisement` | cilium.io/v2 CiliumBGPAdvertisement (cluster-scoped) | kind | `cilium-bgpadvertisement` | strict decode of `CiliumBGPAdvertisementSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties; a peer configuration selects it by its labels. The CRD's five rules on an entry's type are checked. No environment policy applies. |
+| `cilium.CreateCiliumBGPClusterConfig` | cilium.io/v2 CiliumBGPClusterConfig (cluster-scoped) | kind | `cilium-bgpclusterconfig` | strict decode of `CiliumBGPClusterConfigSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. A peer's address is not held to the allowed registries. No environment policy applies. |
 | `cilium.CreateCiliumBGPNodeConfig` | cilium.io/v2 CiliumBGPNodeConfig (cluster-scoped) | not authorable | - | - | Generated by the Cilium operator from a CiliumBGPClusterConfig. |
-| `cilium.CreateCiliumBGPNodeConfigOverride` | cilium.io/v2 CiliumBGPNodeConfigOverride (cluster-scoped) | missing | - | - | - |
-| `cilium.CreateCiliumBGPPeerConfig` | cilium.io/v2 CiliumBGPPeerConfig (cluster-scoped) | missing | - | - | - |
+| `cilium.CreateCiliumBGPNodeConfigOverride` | cilium.io/v2 CiliumBGPNodeConfigOverride (cluster-scoped) | kind | `cilium-bgpnodeconfigoverride` | strict decode of `CiliumBGPNodeConfigOverrideSpec` | The object overrides the CiliumBGPNodeConfig of the same name: `objectName` sets it where the component name is not that name. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
+| `cilium.CreateCiliumBGPPeerConfig` | cilium.io/v2 CiliumBGPPeerConfig (cluster-scoped) | kind | `cilium-bgppeerconfig` | strict decode of `CiliumBGPPeerConfigSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's rule on `timers` is checked where both of its fields are authored. `authSecretRef` names a Secret and holds no secret. No environment policy applies. |
 | `cilium.CreateCiliumCIDRGroup` | cilium.io/v2 CiliumCIDRGroup (cluster-scoped) | missing | - | - | - |
 | `cilium.CreateCiliumClusterwideEnvoyConfig` | cilium.io/v2 CiliumClusterwideEnvoyConfig (cluster-scoped) | missing | - | - | - |
 | `cilium.CreateCiliumClusterwideNetworkPolicy` | cilium.io/v2 CiliumClusterwideNetworkPolicy (cluster-scoped) | missing | - | - | - |
@@ -2705,8 +2709,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies; `servicecidr`, `poddisruptionbudget` and the four kinds of
-  the Prometheus operator's API, below, are built on it too. The three kinds
+  policy applies; `servicecidr`, `poddisruptionbudget`, the four kinds of
+  the Prometheus operator's API and the four of Cilium's BGP control plane,
+  below, are built on it too. The three kinds
   of cert-manager's API, below, are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
@@ -2733,7 +2738,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   default the comment words otherwise, or does not state, is not found. The
   types of the Prometheus operator's API publish no field comment;
   `TestMonitoringKinds_NoDefaultedZeros` reads the default markers of their
-  source instead.
+  source instead. Cilium's publish none either, and its module ships the CRDs:
+  `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
+  BGP CRDs to a field that is a pointer in the Go type.
 
   **What is authored.**
   - `ingressclass` and `csidriver` have a spec type, and the properties are
@@ -3442,6 +3449,154 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Secret and its key, a ServiceAccount, an ingress class, a Gateway), and
   whether cert-manager can reach what an issuer names. The object's status is
   cert-manager's and is not written.
+- **cilium-bgpadvertisement**, **cilium-bgpclusterconfig**,
+  **cilium-bgpnodeconfigoverride**, **cilium-bgppeerconfig**
+  (go-kure/launcher#790) are the kind-named projections of four objects of
+  Cilium's BGP control plane, in its `cilium.io/v2` API: a
+  CiliumBGPAdvertisement, a CiliumBGPClusterConfig, a
+  CiliumBGPNodeConfigOverride and a CiliumBGPPeerConfig. Each is built on
+  `policyFreeKind` and emits that one object, named after the component unless
+  `objectName` names it; the handler adds no label, no annotation and no
+  default. **All four are cluster-scoped**: the object carries no namespace,
+  whatever namespace the application is built for, and its name is claimed
+  cluster-wide. The type names carry the `cilium-` prefix: other products have
+  a BGPAdvertisement and a BGP peer of their own. The fifth object of that
+  API, the CiliumBGPNodeConfig, is generated by the Cilium operator and has no
+  component.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster runs Cilium or has its BGP control plane
+  enabled: where the CRDs are not installed the component builds, and the
+  object is refused at apply. Whoever may author a component may author
+  these, and with them what the cluster's nodes announce to its routers. The
+  open point "No capability gate on component types" on go-kure/launcher#790
+  carries it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (an advertisement, an instance, a peer, a family).
+  - `cilium-bgpadvertisement` (`CiliumBGPAdvertisementSpec`):
+    `advertisements`, each with its `advertisementType` (`PodCIDR`,
+    `CiliumPodIPPool`, `Service` or `Interface`), `service` (`addresses`,
+    `aggregationLengthIPv4`, `aggregationLengthIPv6`), `interface` (`name`),
+    `selector` and `attributes` (`communities`, `localPreference`).
+  - `cilium-bgpclusterconfig` (`CiliumBGPClusterConfigSpec`): `nodeSelector`
+    and `bgpInstances`, each with its `name`, `localASN`, `localPort` and
+    `peers`; a peer has a `name`, a `peerAddress` or an `autoDiscovery`, a
+    `peerASN` and a `peerConfigRef`.
+  - `cilium-bgpnodeconfigoverride` (`CiliumBGPNodeConfigOverrideSpec`):
+    `bgpInstances`, each with its `name`, `routerID`, `localPort`, `localASN`
+    and `peers`; a peer has a `name`, a `localAddress` and a `localPort`.
+  - `cilium-bgppeerconfig` (`CiliumBGPPeerConfigSpec`): `transport`
+    (`peerPort`, `sourceInterface`), `timers` (`connectRetryTimeSeconds`,
+    `holdTimeSeconds`, `keepAliveTimeSeconds`), `authSecretRef`,
+    `gracefulRestart` (`enabled`, `restartTimeSeconds`), `ebgpMultihop` and
+    `families`, each with its `afi`, its `safi` and the `advertisements` it
+    sends. A peer configuration that authors nothing builds, and carries
+    nothing.
+  - An authored `0` or `false` is kept: every number these specs hold is a
+    pointer in the Go type (`peerASN: 0`, which accepts any ASN the peer opens
+    with; `aggregationLengthIPv4: 0`), and `gracefulRestart.enabled` is always
+    written. **No default is filled.** The API's defaults (a peer's `peerASN`,
+    the three `timers`, `transport.peerPort`, `ebgpMultihop`,
+    `gracefulRestart.restartTimeSeconds`) are the API server's to fill where
+    the field was not authored; `TestCiliumBGPKinds_DefaultsSitOnPointers`
+    holds each to a pointer field, from the CRDs of the linked module.
+
+  **Required** follows the rule of the Prometheus operator's kinds above: a
+  field the API requires that the Go type writes whether or not it was
+  authored. Each must be authored
+  (`bgpInstances[0].peers[1].name: required (…)`):
+  - a `cilium-bgpadvertisement`'s `advertisements` and an entry's
+    `advertisementType`;
+  - a `cilium-bgpclusterconfig`'s `bgpInstances`, an instance's `name`, a
+    peer's `name`, an `autoDiscovery`'s `mode`, the `addressFamily` of its
+    `defaultGateway`, and the `name` of a `peerConfigRef`;
+  - a `cilium-bgpnodeconfigoverride`'s `bgpInstances`, an instance's `name`
+    and a peer's `name`;
+  - a `cilium-bgppeerconfig` family's `afi` and `safi`, and the `enabled` of a
+    `gracefulRestart`, which has no default: unauthored, the type would write
+    `enabled: false`;
+  - the `key` and the `operator` of a match expression, in every selector of
+    the four: `nodeSelector`, an advertisement's `selector`, a family's
+    `advertisements`. The selector is Cilium's own type and its fields are in
+    the CRD, so these are derived with the rest; on the Prometheus operator's
+    kinds, whose selector is the Kubernetes one, they are not.
+
+  `TestCiliumBGPKinds_RequiredMatchCRD` holds these lists to the fields the
+  linked module's `v2` CRD requires and the type writes unauthored, so a
+  dependency bump that adds, drops or moves one fails there.
+
+  **The CRDs' expression rules.** A rule is checked where it is one
+  comparison of authored fields and the refusal can name both; every rule the
+  four CRDs declare is classified in `TestCiliumBGPKinds_ExpressionRules`,
+  which fails on one that is added or reworded. **Checked:**
+  - the five rules on an advertisement, each the entry's `advertisementType`
+    against the presence of one sibling: `service` is required with `Service`
+    and refused with another type, `interface` is required with `Interface`
+    and refused with another type, and `selector` is refused with `PodCIDR`
+    (`advertisements[1].service: not allowed with advertisementType
+    "CiliumPodIPPool", only with "Service"`). An authored `{}` is a present
+    field and an authored `null` an absent one, as the API server reads them;
+  - a peer configuration's `timers.keepAliveTimeSeconds` no larger than its
+    `timers.holdTimeSeconds`, **where both are authored**
+    (`timers.keepAliveTimeSeconds: 90 is larger than timers.holdTimeSeconds
+    (30)`).
+
+  **Not checked**, and the API server's to refuse:
+  - the `timers` rule where one of the two is authored. The API server
+    compares it with the default it fills for the other (a keepalive of 30, a
+    hold time of 90, in the linked CRD), and that default is the installed
+    CRD's to say: `keepAliveTimeSeconds: 100` alone builds here;
+  - a required field the type omits when it is not authored: the `addresses`
+    of a `service` and the `name` of an `interface`. The object shows the
+    omission (`service: {}`);
+  - an authored empty value in a required field (`bgpInstances: []`, an
+    instance's `name: ""`). It is a value;
+  - every other value rule of the API: the enumerations
+    (`advertisementType`, `afi`, `safi`, a service address type, a well-known
+    community), the ranges of an ASN, a port, a timer, an aggregation length
+    and `ebgpMultihop`, the forms of an address, a router ID and a community,
+    the number of instances (one to sixteen in a cluster configuration, at
+    least one in an override), an instance name unique in its list and a peer
+    name unique in its instance;
+  - what Cilium itself decides of an object the API server has admitted.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **A peer configuration selects advertisements by label.** A family's
+  `advertisements` is a label query over CiliumBGPAdvertisement objects: write
+  the labels it names under the `labels` of the `cilium-bgpadvertisement`.
+  The object also carries the component label, whose value is the component's
+  (see "Component label and ownership" in the OAM model). `nodeSelector` and
+  an advertisement's `selector` query nodes, pools and Services, whose labels
+  are their owners'.
+
+  **An override takes effect by its name.** A CiliumBGPNodeConfigOverride
+  overrides the CiliumBGPNodeConfig of the same name, the per-node object the
+  Cilium operator generates; Cilium's API says the two names must match
+  exactly. Name the component so, or set `objectName`. Launcher does not know
+  the cluster's objects and checks neither.
+
+  **Policy.** No field of these specs is one an `oam.Policy` method speaks to,
+  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
+  same under every policy and under none.
+  - **Hosts are not checked.** An address these objects name is a BGP peer's
+    or the node's own, not an artifact source, and none is held to the
+    policy's allowed registries: a peer's `peerAddress` in a
+    `cilium-bgpclusterconfig`, and a peer's `localAddress` and an instance's
+    `routerID` in a `cilium-bgpnodeconfigoverride`.
+  - **No field holds a literal secret, and none is checked.**
+    `authSecretRef` is the name of a Secret Cilium fetches the session's TCP
+    authentication password from. The field holds a name and no namespace:
+    where Cilium looks the Secret up is its own configuration. Launcher does
+    not emit that Secret for it and does not check that one exists.
+
+  **Not covered.** The served `v2alpha1` version of these objects: the kinds
+  emit `v2`. Whether what is selected or referred to exists (a node, a pool,
+  a Service, an advertisement, a peer configuration, a Secret), and whether
+  the cluster's Cilium runs its BGP control plane. A
+  `cilium-bgpclusterconfig`'s and a `cilium-bgppeerconfig`'s status is the
+  operator's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -6123,7 +6278,9 @@ name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `sta
 `csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four
 kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometheus-probe`,
 `prometheusrule`), the three kinds of cert-manager's API (`issuer`, `clusterissuer`,
-`certificate`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
+`certificate`), the four kinds of Cilium's BGP control plane (`cilium-bgpadvertisement`,
+`cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`),
+the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`

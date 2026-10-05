@@ -233,6 +233,26 @@ func (h *CertificateHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumBGPAdvertisementHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-bgpadvertisement")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumBGPClusterConfigHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-bgpclusterconfig")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumBGPNodeConfigOverrideHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-bgpnodeconfigoverride")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *CiliumBGPPeerConfigHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("cilium-bgppeerconfig")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

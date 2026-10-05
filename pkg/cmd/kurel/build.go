@@ -335,6 +335,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"issuer":        &components.IssuerHandler{},
 		"clusterissuer": &components.ClusterIssuerHandler{},
 		"certificate":   &components.CertificateHandler{},
+
+		"cilium-bgpadvertisement":      &components.CiliumBGPAdvertisementHandler{},
+		"cilium-bgpclusterconfig":      &components.CiliumBGPClusterConfigHandler{},
+		"cilium-bgpnodeconfigoverride": &components.CiliumBGPNodeConfigOverrideHandler{},
+		"cilium-bgppeerconfig":         &components.CiliumBGPPeerConfigHandler{},
 	}
 }
 

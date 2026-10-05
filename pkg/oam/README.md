@@ -897,7 +897,9 @@ where the handler decodes its properties strictly, refuses it as a field it does
 (`namespace`, `helmrelease`, `cnpg-cluster`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
 kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
-`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`), and in the Flux namespace for a Flux kind when the
+`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`,
+`cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`,
+`cilium-bgppeerconfig`), and in the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
 
 ```
@@ -1048,10 +1050,12 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`,
 `poddisruptionbudget`, `horizontalpodautoscaler`, `servicemonitor`, `podmonitor`,
-`prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer` and `certificate`
-(go-kure/launcher#790) are on this list. `ingress`, `httproute`, `networkpolicy`,
-`cilium-networkpolicy` and `certificate` are also trait types: the two lists are
-separate, and a component of such a type is the authored object, not the trait.
+`prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`,
+`cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`
+and `cilium-bgppeerconfig` (go-kure/launcher#790) are on this list. `ingress`,
+`httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are also trait
+types: the two lists are separate, and a component of such a type is the authored
+object, not the trait.
 `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
