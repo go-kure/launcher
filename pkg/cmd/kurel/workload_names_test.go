@@ -90,12 +90,16 @@ func generatedDocs(t *testing.T, apps []oam.GeneratedApplication) []map[string]a
 	return docs
 }
 
+// isWorkloadRole reports whether role is one of the three workload roles.
+func isWorkloadRole(role oam.NameRole) bool {
+	return role == oam.NameRoleWorkloadDeployment || role == oam.NameRoleWorkloadService || role == oam.NameRoleWorkloadServiceAccount
+}
+
 // workloadRoleRequests keeps the requests of the three workload roles.
 func workloadRoleRequests(requests []oam.NameRequest) []oam.NameRequest {
 	var out []oam.NameRequest
 	for _, req := range requests {
-		switch req.Role {
-		case oam.NameRoleWorkloadDeployment, oam.NameRoleWorkloadService, oam.NameRoleWorkloadServiceAccount:
+		if isWorkloadRole(req.Role) {
 			out = append(out, req)
 		}
 	}
@@ -271,11 +275,7 @@ func TestWorkloadNames_AuthoredWinsAndHookIsNotAsked(t *testing.T) {
 	var requests []oam.NameRequest
 	hook := func(req oam.NameRequest) (string, bool) {
 		requests = append(requests, req)
-		switch req.Role {
-		case oam.NameRoleWorkloadDeployment, oam.NameRoleWorkloadService, oam.NameRoleWorkloadServiceAccount:
-			return "theirs", true
-		}
-		return "", false
+		return "theirs", isWorkloadRole(req.Role)
 	}
 	_, apps := namingTransform(t, doc, workloadNamesContext(hook))
 	if got := workloadRoleRequests(requests); len(got) != 0 {
