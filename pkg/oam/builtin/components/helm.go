@@ -48,8 +48,12 @@ var helmFluxOnlyKeys = []string{"interval", "targetNamespace", "driftDetection",
 // the helmrelease (see helmSecretValuesTrait).
 const helmSecretValuesKey = "secretValues"
 
-// helmOwnedKeys are the keys decodeHelm splits off before the strict decode.
-var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKey)
+// helmOwnedKeys are the keys decodeHelm splits off before the strict decode:
+// the passthrough keys, secretValues, and scopeOverrides, which only a
+// client-side render reads (go-kure/launcher#794, item 11). scopeOverrides is
+// forwarded to the helmtemplate terminal under delivery: template and refused
+// under delivery: flux.
+var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKey, scopeOverridesKey)
 
 // HelmRule lowers a "helm" component (D1 component position,
 // oam.ComponentLoweringRule) to the kind-named Flux terminals, the role-named
@@ -87,6 +91,10 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // HelmRelease reads (helmFluxOnlyKeys), a source reference, valuesMode:
 // configMap, and an OCI source without a version, each with a helm: message
 // naming what the author wrote rather than the terminal it would reach.
+// delivery: flux refuses scopeOverrides, which only a client-side render reads:
+// under delivery: template it is checked as the manifests component checks its
+// own (parseScopeOverrides) and forwarded to the helmtemplate
+// (go-kure/launcher#794, item 11).
 // valuesMode has no registration-time default and is never forwarded: under
 // configMap with non-empty values the rule moves the values into a configmap
 // trait on the helmrelease and prepends a valuesFrom entry for it
@@ -162,6 +170,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"valuesFrom": {Type: oam.PropertyTypeArray, Description: "HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values. Refused under delivery: template.", Items: &oam.PropertySchema{
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional).",
 		}},
+		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
 	}
 }
 
@@ -233,7 +242,9 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 // an endpoint and bucketName), each source key only in the form that reads it,
 // and a known valuesMode. The
 // passthrough keys come back in their own map under their declared spelling,
-// without nulls (absent), and secretValues on its own: nil when absent or null,
+// without nulls (absent), and with them scopeOverrides, which each delivery
+// takes out of the map before anything is forwarded (lowerHelmFlux refuses it,
+// lowerHelmTemplate checks it). secretValues comes back on its own: nil when absent or null,
 // refused when it is not an object or has a key named global below its top
 // level (refuseNestedGlobal). The strict decode matches keys
 // case-insensitively, as encoding/json does, so two spellings of one key, at the
@@ -269,6 +280,14 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, map[string
 		i := slices.IndexFunc(helmOwnedKeys, func(key string) bool { return strings.EqualFold(key, k) })
 		key := helmOwnedKeys[i] // owned holds only keys that fold onto one of these
 		v := owned[k]
+		if key == scopeOverridesKey {
+			// A null, typed or untyped, reads as omission, as it does on the
+			// manifests and helmtemplate components (parseScopeOverrides).
+			if !isExplicitNull(v) {
+				passthrough[key] = v
+			}
+			continue
+		}
 		if key != helmSecretValuesKey {
 			if v != nil {
 				passthrough[key] = v
@@ -356,6 +375,12 @@ const fluxUserinfoRemedy = ", which would be written in plain text into the gene
 // emitted the same one).
 func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough, secretValues map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
+	// Helm creates a HelmRelease's objects in the cluster, so nothing here
+	// could apply a stated scope; dropping the property silently would let an
+	// author believe it took effect.
+	if _, ok := passthrough[scopeOverridesKey]; ok {
+		return oam.LoweringResult{}, errors.Errorf("%s: delivery: flux does not support %s (only a client-side render reads it)", helmType, scopeOverridesKey)
+	}
 	release := maps.Clone(passthrough)
 	traits := comp.Traits
 	// The generated valuesFrom entries, in merge order: the values ConfigMap,
@@ -822,6 +847,15 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, 
 		if v, ok := passthrough[key]; ok {
 			rendered[key] = v
 		}
+	}
+	// The helmtemplate reads scopeOverrides with the same parser; a malformed
+	// entry is refused here first, so the message names the component type the
+	// author wrote. The authored list is forwarded as written.
+	if v, ok := passthrough[scopeOverridesKey]; ok {
+		if _, _, err := parseScopeOverrides(map[string]any{scopeOverridesKey: v}); err != nil {
+			return oam.LoweringResult{}, errors.Errorf("%s: %w", helmType, err)
+		}
+		rendered[scopeOverridesKey] = v
 	}
 	// The helmtemplate merges secretValues over values for the render and
 	// refuses a shared path itself; it is refused here first, so the message

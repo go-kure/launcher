@@ -21,7 +21,8 @@ func jsonKeys(t reflect.Type) []string {
 
 // TestHelmRule_SchemaMatchesDecode ties the published schema to what the rule
 // decodes: the top-level keys are helmProperties' fields plus the keys split
-// off before the decode (the passthrough keys and secretValues), and source's
+// off before the decode (the passthrough keys, secretValues and
+// scopeOverrides), and source's
 // declared keys are helmSource's fields. Authored-property validation and the
 // strict decode then admit the same set.
 func TestHelmRule_SchemaMatchesDecode(t *testing.T) {
