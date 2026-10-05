@@ -60,6 +60,18 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 			refused: "externalClusters[1].barmanObjectStore.destinationPath: required (",
 		},
 		{
+			// The object store map is decoded into the upstream type, which
+			// folds the key, so a null in another spelling is no path either.
+			name:    "external cluster with a null path in another spelling",
+			props:   map[string]any{"externalClusters": external(map[string]any{"DestinationPath": nil})},
+			refused: "externalClusters[0].barmanObjectStore.destinationPath: required (",
+		},
+		{
+			name:    "external cluster with its path in another spelling",
+			props:   map[string]any{"externalClusters": external(map[string]any{"DestinationPath": "s3://bucket/a"})},
+			carried: map[string][]any{externalPath: {"s3://bucket/a"}},
+		},
+		{
 			name:    "backup without a retention policy builds no object store",
 			props:   map[string]any{"backup": map[string]any{"endpointURL": "https://s3.example", "retentionPolicy": ""}},
 			carried: map[string][]any{},

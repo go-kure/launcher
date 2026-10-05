@@ -6225,9 +6225,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   is a value: it is written, and refusing it is left to the API server. These
   are two of the strings `cnpg-cluster` refuses unauthored (below); the
   lowering fills the parent of two more, `bootstrap.pg_basebackup.source` and
-  `replication.synchronous.method`, only from the string itself, and of the
+  the Cluster's `postgresql.synchronous.method` (authored here as
+  `replication.synchronous.method`), only from the string itself, and of the
   other seven never. `TestPostgresqlRule_UnauthoredRequiredStrings` reads all
-  eleven in the lowered component. The refusal is made on the authored
+  eleven in the lowered component. An external cluster's `barmanObjectStore`
+  is decoded into the upstream type, which reads a key in any spelling, so
+  its path counts as authored in any spelling. The refusal is made on the authored
   properties, so a `PostgresqlConfig` built in Go is not held to it.
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
