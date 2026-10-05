@@ -326,7 +326,8 @@ func (g *siblingGroupConfig) ServicePortName() (string, bool) {
 }
 
 // ServiceAccountName is the one member's non-empty ServiceAccount name, or "";
-// runsPods is whether any member runs pods.
+// runsPods is whether any member runs pods. A second member may give the same
+// name: the account itself, named as the pods run as it (checkSiblingGroups).
 func (g *siblingGroupConfig) ServiceAccountName() (string, bool) {
 	var name string
 	runsPods := false
@@ -453,11 +454,17 @@ type siblingNonRWXClaimer interface {
 // the same forwarded contract with a value, or a member that is a kure layout
 // augmenter. It tests values, not interface presence, because every trait
 // decorator satisfies every contract unconditionally (traits.decoratorBase).
+//
+// One answer is not a second one: a member that runs no pods and names the
+// account the group's one pod-running member runs as (namesPodAccount). That is
+// the account a role rule generates beside its workload, under a name of its own
+// (go-kure/launcher#787): the pods run as it, and it is named as itself.
 func checkSiblingGroups(entries []componentEntry) error {
 	for _, e := range entries {
 		if len(e.members) == 0 {
 			continue
 		}
+		podAccount, onePodRunner := siblingPodAccount(e.members)
 		answered := make(map[string][]string)
 		for _, m := range e.members {
 			cfg := m.app.Config
@@ -466,6 +473,9 @@ func checkSiblingGroups(entries []componentEntry) error {
 					"sibling group %q: member %q needs layout-level resources, which a sibling group cannot carry", e.component.Name, m.component.Type)}
 			}
 			for _, contract := range siblingAnswers(cfg) {
+				if contract == "ServiceAccountName" && onePodRunner && namesPodAccount(cfg, podAccount) {
+					continue
+				}
 				answered[contract] = append(answered[contract], m.component.Type)
 			}
 		}
@@ -483,6 +493,34 @@ func checkSiblingGroups(entries []componentEntry) error {
 		}
 	}
 	return nil
+}
+
+// siblingPodAccount returns the account the pods of a group run as, when exactly
+// one member runs pods and names one. A group with no pod-running member, with
+// two, or whose pods run as the namespace's default account has none.
+func siblingPodAccount(members []componentEntry) (account string, ok bool) {
+	runners := 0
+	for _, m := range members {
+		if n, isNamer := m.app.Config.(ServiceAccountNamer); isNamer {
+			if name, runsPods := n.ServiceAccountName(); runsPods {
+				runners++
+				account = name
+			}
+		}
+	}
+	return account, runners == 1 && account != ""
+}
+
+// namesPodAccount reports whether cfg runs no pods and names account, the one
+// the group's pods run as: the ServiceAccount itself, beside the workload that
+// runs as it.
+func namesPodAccount(cfg stack.ApplicationConfig, account string) bool {
+	n, ok := cfg.(ServiceAccountNamer)
+	if !ok {
+		return false
+	}
+	name, runsPods := n.ServiceAccountName()
+	return !runsPods && name == account
 }
 
 // adoptMemberDeliveryIntents gives each sibling group's application the delivery

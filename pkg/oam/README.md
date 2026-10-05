@@ -733,6 +733,9 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `helm-release` | The HelmRelease a `helm` component generates under `delivery: flux`. It names the object alone: the Helm release name (`releaseName`, `spec.releaseName`) and the default names of the values ConfigMap and Secret keep following the component name. | The component's name. | `helmReleaseName` | unless `helmReleaseName` is set; not under `delivery: template` |
 | `oci-kustomization` | The Flux Kustomization an `oci` component generates, whether the component keeps its source or shares one. | The component's name. | `kustomizationName` | unless `kustomizationName` is set |
 | `oci-source` | The OCIRepository an `oci` component keeps to itself: the one no other `oci` component of the document shares and no `source.name` names. | The component's name. | `source.objectName` | unless `source.objectName` is set; not for a shared source or one `source.name` names (`helm-source`) |
+| `workload-deployment` | The Deployment a `webservice` or `worker` component generates. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name. | The component's name. | `deploymentObjectName` | unless `deploymentObjectName` is set |
+| `workload-service` | The Service a `webservice` component generates; a DNS-1035 label. Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
+| `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
@@ -790,7 +793,8 @@ default.
 document rule may still change. Most names are made after lowering, and carry the lowered
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
 lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
-`helm-release`, `oci-kustomization`, `oci-source`)
+`helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`, `workload-service`,
+`workload-serviceaccount`)
 carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
@@ -808,7 +812,8 @@ hook, which has no default to be asked about, is not asked.
 `LoweringContext.ResolveMemberName(member, spec)` names the one object of a kind component
 the rule is about to emit under the component's name, where the rule lets the author and the
 hook choose that name (the HelmRelease of a `helm` component, the Kustomization and the kept
-OCIRepository of an `oci` component).
+OCIRepository of an `oci` component, the Deployment, the Service and the ServiceAccount of a
+`webservice` or `worker` component).
 The order is the same, the default being the member's component name, used as written. The
 name is resolved, recorded for the transform to claim and set on the member in the one call,
 and a rule has no other way to give a member's object a name of its own, so no such name
@@ -921,8 +926,8 @@ name collision: Database.postgresql.cnpg.io "db-orders" is named by component "d
 ```
 
 This knows only the names resolved this way: the roles above. An object of a component that
-is not a kind component, one a lowering rule names without a role (the Deployment and the
-Service a `webservice` component is lowered to), and the object of a trait that is not in the table (an
+is not a kind component, one a lowering rule names without a role (the Cluster and the
+ObjectStore a `postgresql` component is lowered to), and the object of a trait that is not in the table (an
 authored `configmap` trait's ConfigMap, an authored `secret` trait's Secret) are not in it, so
 `CheckInDocumentCollisions` (below) is still what compares every generated object: a
 `configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
@@ -933,7 +938,12 @@ generated-object collision: Secret "shop/shared" is generated by both component 
 ```
 
 The Secret a `helm` component generates for `secretValues` is in the table (role
-`values-secret`), so a `secret` component under that name is a name collision instead. The remaining lowering-rule names join it in later changes of go-kure/launcher#787.
+`values-secret`), so a `secret` component under that name is a name collision instead. So are
+the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component
+(roles `workload-deployment`, `workload-service`, `workload-serviceaccount`): a `service`
+component under the name of a `webservice` component's Service is a name collision. The
+remaining lowering-rule names, those of a `postgresql` component's Cluster and ObjectStore,
+join the table in a later change of go-kure/launcher#787.
 
 A sub-application's name is resolved and validated but not kept apart: it is not unique. A
 `configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
@@ -1016,7 +1026,8 @@ a component or trait lowering rule emitted the property is refused and the hook 
 a rule that wants a member's name choosable resolves it itself at lowering time, under its
 own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`),
 `LoweringContext.ResolveMemberName` for the object of a member it emits under the
-component's name (`helm-release`, `oci-kustomization`, `oci-source`). What a document rule or a raw document rule returns is
+component's name (`helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`,
+`workload-service`, `workload-serviceaccount`). What a document rule or a raw document rule returns is
 authored input, the components it built as much as the ones it forwarded: the property and
 the request apply there, so a document rule that wants to fix a kind component's object name
 writes `objectName` itself.
@@ -1040,6 +1051,26 @@ component's object carries the object name:
   `cnpg.io/poolerName`), which `ComponentEndpoints` reads with the authored name and
   `ComponentEndpointsNamed` with the hook's as well. A `cnpg-pooler` is refused its cluster's
   name by its object name.
+
+The same holds for the three objects a `webservice` or `worker` component generates, each
+named on its own (`deploymentObjectName`, `serviceObjectName`, `serviceAccountObjectName`, or
+the hook's answer for `workload-deployment`, `workload-service`, `workload-serviceaccount`):
+
+- the `scaler` trait's `scaleTargetRef` names the Deployment by the name it took, whatever
+  the Service and the ServiceAccount of the component are named;
+- a routing trait's own backend is the Service by the name it took, and a route that names
+  that Service resolves to the component for the synthesized NetworkPolicy, which keeps the
+  component's name and selects the component's pods;
+- the pods' `serviceAccountName` and the `rbac` trait's subject name the ServiceAccount by
+  the name it took.
+
+The labels, the selectors, the main container and every name a trait derives keep the
+component name, as for `objectName`.
+
+**A Service's name is its DNS name in the cluster, so a renamed Service is reached at another
+address. Launcher builds no such address: every address written with the component name (an
+`env` value, a URL in another component's properties, a backend another component's route
+names) is the author's to change.**
 
 What the author writes stays as written, so a reference to a renamed component is written with
 its object name: a HelmRelease's `chartRef.name` or `sourceRef.name` naming a renamed
@@ -1494,7 +1525,10 @@ The build refuses a group:
   unless a placement policy places the group (it is then in the placed tier);
 - in which two members answer the same contract (a member that runs pods
   answers `ServiceAccountName` even with no name, since its pods run as the
-  namespace's `default` account);
+  namespace's `default` account). One pair is a single answer: a member that runs
+  no pods and names the account the group's one pod-running member runs as, which
+  is the ServiceAccount beside the workload that runs as it (the renamed account of
+  a `webservice` or `worker` component);
 - that has a member needing layout-level resources;
 - in which two members generate the same Kubernetes object (API group, kind,
   namespace and name), such as two Services both named after the group;

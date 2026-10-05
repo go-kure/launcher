@@ -1332,9 +1332,11 @@ differs, so authoring one can at best repeat the derived value), and
 
 Every pod kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
 returning `(name, runsPods)`: the authored `serviceAccountName` (or `""`) and
-`true`. A role rule hands its `deployment` member `serviceAccountName:
-<component name>` unless one is authored, so a `webservice` or `worker` answers
-the account its `serviceaccount` member generates. The `rbac` trait
+`true`. A role rule hands its `deployment` member the name of the account its
+`serviceaccount` member generates (the component name, or the one
+`serviceAccountObjectName` or the `Naming` hook gave that object) unless
+`serviceAccountName` is authored, so a `webservice` or `worker` answers the
+account it generates. The `rbac` trait
 (`pkg/oam/builtin/traits/rbac.go`) binds its RoleBinding/ClusterRoleBinding
 subject to that name, so binding follows the account the pods run as; the Role
 and binding objects keep their component-derived names. A pod-running
@@ -2049,9 +2051,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
     `serviceaccount`. The member carries `automountServiceAccountToken: false`,
     the component's annotations, and the authored `prune-protection` and
-    `force-replace` traits. The `deployment` member is handed
-    `serviceAccountName: <component-name>`, so it runs as that account and
-    generates none of its own. The output is unchanged: the same ServiceAccount,
+    `force-replace` traits. The `deployment` member is handed the account's
+    object name as `serviceAccountName` (the component name, unless
+    `serviceAccountObjectName` or the `Naming` hook names the account, below),
+    so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
     in the same place, so every golden builds byte-identically. One consequence
     for a library caller: a registry that lowers `webservice` or `worker` must
     register a `serviceaccount` component handler too, or the build fails with
@@ -2110,6 +2113,46 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
     same rule to the Application name it is handed. `worker` emits no Service
     and keeps accepting such a name, within the container-name rule above.
+    The rule holds for the component name whatever the Service is named:
+    `serviceObjectName` (below) does not lift it.
+  - **`deploymentObjectName`, `serviceObjectName` and
+    `serviceAccountObjectName` name the objects the component generates**
+    (go-kure/launcher#787), each in place of the component name and each on its
+    own: the Deployment, the Service (`webservice` only; `worker` generates
+    none and does not declare the property) and the ServiceAccount. A name is
+    used as written, never shortened. The Deployment's and the ServiceAccount's
+    are DNS-1123 subdomains, the Service's a DNS-1035 label; anything else is
+    refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
+    for role "workload-service": not a valid DNS-1035 label: …`). Without the
+    property the `Naming` hook is asked (roles `workload-deployment`,
+    `workload-service`, `workload-serviceaccount`), and without an answer the
+    object keeps the component name, so a document that sets none builds
+    byte-identically. Each name is held against every other resolved name of
+    its kind and namespace: two components given one `serviceObjectName`, or a
+    `service` component whose object carries a `webservice`'s Service name, are
+    refused as a name collision with both named.
+    - *They name the objects alone.* The members keep the component's name, so
+      the `app` label, the pod template's labels, the Deployment's and the
+      Service's selectors, the main container, the claims (`<component>-<volume>`)
+      and every name a trait derives (`<component>-hpa`, `<component>-httproute`)
+      stay as they were.
+    - *What launcher writes to a renamed object follows it.* The `scaler`
+      trait's `scaleTargetRef` names the Deployment, whatever the Service and
+      the ServiceAccount are named. A routing trait's own backend (`expose`,
+      `ingress`, `httproute`) is the Service, and a route naming that Service
+      still resolves to the component for the synthesized NetworkPolicy. The
+      pods' `serviceAccountName` and the `rbac` trait's subject name the
+      ServiceAccount.
+    - **A renamed Service changes its DNS name: the Service's name is the name
+      it is reached at in the cluster. Launcher builds no such address, so every
+      address written with the component name (an `env` value, a URL in another
+      component's properties, a backend another component's route names) is the
+      author's to change.**
+    - *`serviceAccountObjectName` names the account the component generates,
+      `serviceAccountName` an account that exists.* With `serviceAccountName`
+      the component generates none, so the two together are refused
+      (`serviceAccountObjectName and serviceAccountName are both set: …`), and
+      the hook is not asked for an account.
   - **An ingress `portName` on a `webservice` must be `http`.** The Service's
     one port is named `http`, so an `ingress` path whose implicit backend is
     this component's Service (no `backend`, or `backend` naming that Service)

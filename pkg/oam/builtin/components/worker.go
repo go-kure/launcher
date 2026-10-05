@@ -14,8 +14,11 @@ import (
 // the same name and, unless `serviceAccountName` is authored, a same-name
 // "serviceaccount" sibling (roleServiceAccount): the component's own
 // ServiceAccount, with `automountServiceAccountToken: false` as the handler
-// generated it, while the deployment member is handed
-// `serviceAccountName: <component name>` so it generates none of its own. It
+// generated it, while the deployment member is handed the account's object name
+// as `serviceAccountName` so it generates none of its own. The objects of both
+// members are named as WebserviceRule names its members' (go-kure/launcher#787):
+// by `deploymentObjectName` and `serviceAccountObjectName`, else by the Naming
+// hook, else after the component. It
 // is the first production component-position rule, and the
 // re-expression of the former WorkerHandler: worker was a Deployment with no
 // Service plus two of launcher's own opinions, and `deployment` is the
@@ -77,7 +80,8 @@ func (WorkerRule) ComponentType() string { return "worker" }
 // webservice minus `port` (worker emits no Service). Unchanged by the move to a
 // lowering rule: HandlerSchemas publishes a rule's schema exactly as it
 // publishes a handler's, and TestWorkerRule_PropertySchemaUnchanged pins it
-// byte for byte.
+// byte for byte. The two object-name properties (schemaRoleObjectNames) were
+// added since, by go-kure/launcher#787.
 func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
@@ -100,6 +104,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
+	maps.Copy(m, schemaRoleObjectNames(false))
 	return m
 }
 
@@ -120,6 +125,7 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 	}
 	delete(props, "topologySpread")
 	delete(props, "affinity")
+	dropRoleObjectNames(props)
 	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)
 		if err != nil {
@@ -140,7 +146,6 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
-	sa := roleServiceAccount(comp, props, comp.Traits)
 
 	var synthesized []oam.Trait
 	if !opinions.topologySpreadDisabled {
@@ -159,6 +164,16 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 		Traits:      traits,
 		Annotations: comp.Annotations,
 	}}
+	// Each member's object is named in emission order, as WebserviceRule names
+	// its members': the member keeps the component's name, and the pods'
+	// serviceAccountName reads the account's object name.
+	if err := nameRoleMember(comp, lctx, &members[0], &DeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
+		return oam.LoweringResult{}, err
+	}
+	sa, err := roleServiceAccount(comp, props, comp.Traits, lctx)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
 	if sa != nil {
 		members = append(members, *sa)
 	}

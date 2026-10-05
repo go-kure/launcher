@@ -48,6 +48,10 @@
       "description": "A single string value."
     }
   },
+  "deploymentObjectName": {
+    "type": "string",
+    "description": "Name of the Deployment the component generates, in place of the component name, used as written. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name."
+  },
   "dnsConfig": {
     "type": "object",
     "description": "DNS parameters merged into the pod's resolver configuration according to dnsPolicy.",
@@ -1420,6 +1424,14 @@
   "serviceAccountName": {
     "type": "string",
     "description": "Name of an existing ServiceAccount the pod runs as. When set, the component's own per-component ServiceAccount is NOT generated, and identity-binding traits (rbac) target this account instead."
+  },
+  "serviceAccountObjectName": {
+    "type": "string",
+    "description": "Name of the ServiceAccount the component generates for its pods, in place of the component name, used as written. The pods run as it, and an rbac trait binds it. Not with serviceAccountName, which names an existing account: the component then generates none."
+  },
+  "serviceObjectName": {
+    "type": "string",
+    "description": "Name of the Service the component generates, in place of the component name, used as written; a DNS-1035 label. The routing traits on the component and the synthesized NetworkPolicy follow it. The Service's name is its DNS name in the cluster. Launcher builds no such address, so every address written with the component name (an env value, a URL in another component) is the author's to change."
   },
   "setHostnameAsFQDN": {
     "type": "boolean",

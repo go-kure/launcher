@@ -51,8 +51,9 @@ const (
 	// `configmap`. Default: the component name. It is not asked for a member a
 	// component or trait lowering rule emitted: the rule names its members, and
 	// one it lets the author or the hook name is asked for under the rule's own
-	// role (NameRoleHelmRelease, NameRoleOCIKustomization, NameRoleOCISource). A
-	// component of a
+	// role (NameRoleHelmRelease, NameRoleOCIKustomization, NameRoleOCISource,
+	// NameRoleWorkloadDeployment, NameRoleWorkloadService,
+	// NameRoleWorkloadServiceAccount). A component of a
 	// document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
 	// NameRoleHelmSource is a Flux source a lowering rule generates for the
@@ -85,6 +86,23 @@ const (
 	// A source the document's components share, and one `source.name` names, is
 	// the document's (NameRoleHelmSource).
 	NameRoleOCISource NameRole = "oci-source"
+	// NameRoleWorkloadDeployment is the Deployment a `webservice` or `worker`
+	// component generates. Default: the component name. The hook is asked with
+	// the component. It names the object alone: the pods' labels, the selectors
+	// and every name derived from the component keep following the component
+	// name.
+	NameRoleWorkloadDeployment NameRole = "workload-deployment"
+	// NameRoleWorkloadService is the Service a `webservice` component generates.
+	// Default: the component name. The hook is asked with the component. A name
+	// that is not the default must be a DNS-1035 label, as every Service name.
+	// The Service's name is its DNS name in the cluster: launcher writes no such
+	// address, so one written with the component name is the author's to change.
+	NameRoleWorkloadService NameRole = "workload-service"
+	// NameRoleWorkloadServiceAccount is the ServiceAccount a `webservice` or
+	// `worker` component generates for its pods. Default: the component name.
+	// The hook is asked with the component, and not at all for a component that
+	// names an existing account with `serviceAccountName`: it generates none.
+	NameRoleWorkloadServiceAccount NameRole = "workload-serviceaccount"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
 	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and the
 	// Flux Kustomization the base library generates for it under per-layout
@@ -150,6 +168,9 @@ var nameRoles = []struct {
 	{NameRoleHelmRelease, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleOCIKustomization, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleOCISource, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleWorkloadDeployment, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleWorkloadService, nameClassObject, nameSyntaxLabel1035},
+	{NameRoleWorkloadServiceAccount, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 }
 

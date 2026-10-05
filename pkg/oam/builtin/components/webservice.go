@@ -46,8 +46,22 @@ import (
 //   - unless `serviceAccountName` is authored, the serviceaccount member
 //     (roleServiceAccount): the component's own ServiceAccount, with
 //     `automountServiceAccountToken: false` as the handler generated it, and
-//     `serviceAccountName: <component name>` on the deployment member so it
-//     generates none of its own.
+//     the account's object name as `serviceAccountName` on the deployment
+//     member so it generates none of its own.
+//
+// Every member carries the component's name. The object of each is named on its
+// own (go-kure/launcher#787, nameRoleMember): by `deploymentObjectName`,
+// `serviceObjectName` or `serviceAccountObjectName`, else by the Naming hook
+// (roles oam.NameRoleWorkloadDeployment, oam.NameRoleWorkloadService,
+// oam.NameRoleWorkloadServiceAccount), else after the component, so a document
+// that sets none generates what it did. The three properties are the rule's and
+// reach no member. A name moves the object alone: the labels, the selectors and
+// the names the traits derive keep the component's, and what launcher writes to
+// the object follows it (the scaler's target, a route's backend, the pods'
+// account and the rbac subject). The Service's name is its DNS name in the
+// cluster and launcher writes no such address, so an address written with the
+// component name is the author's to change. The component name stays held to the
+// Service-name rule whatever the Service is named.
 //
 // Keys webservice does not declare are dropped rather than forwarded, as
 // WorkerRule drops them. Annotations go to every member, so a tier override
@@ -117,7 +131,9 @@ func (WebserviceRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, er
 // PropertySchema declares the webservice component's user-facing properties.
 // Unchanged by the move to a lowering rule: HandlerSchemas publishes a rule's
 // schema exactly as it publishes a handler's, and
-// TestWebserviceRule_PropertySchemaUnchanged pins it byte for byte.
+// TestWebserviceRule_PropertySchemaUnchanged pins it byte for byte. The three
+// object-name properties (schemaRoleObjectNames) were added since, by
+// go-kure/launcher#787.
 func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
@@ -141,6 +157,7 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
+	maps.Copy(m, schemaRoleObjectNames(true))
 	return m
 }
 
@@ -177,6 +194,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	delete(depProps, "port")
 	delete(depProps, "topologySpread")
 	delete(depProps, "affinity")
+	dropRoleObjectNames(depProps)
 	depProps["ports"] = []any{map[string]any{"name": webservicePortName, "containerPort": int(opinions.port)}}
 	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)
@@ -196,7 +214,6 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
-	sa := roleServiceAccount(comp, depProps, comp.Traits)
 
 	var depTraits, svcTraits []oam.Trait
 	if !opinions.topologySpreadDisabled {
@@ -232,6 +249,22 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 			Traits:      svcTraits,
 			Annotations: maps.Clone(comp.Annotations),
 		},
+	}
+	// Each member's object is named in emission order: the author's property,
+	// else the Naming hook, else the component name. Every member keeps the
+	// component's name, so the group, the labels and the selectors do not move;
+	// what is written as a reference to a renamed object reads the member's
+	// object name (the pods' serviceAccountName here, and in the members' own
+	// configs the routing backend and the scale target).
+	if err := nameRoleMember(comp, lctx, &members[0], &DeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
+		return oam.LoweringResult{}, err
+	}
+	if err := nameRoleMember(comp, lctx, &members[1], &ServiceHandler{}, oam.NameRoleWorkloadService, serviceObjectNameProperty, "Service"); err != nil {
+		return oam.LoweringResult{}, err
+	}
+	sa, err := roleServiceAccount(comp, depProps, comp.Traits, lctx)
+	if err != nil {
+		return oam.LoweringResult{}, err
 	}
 	if sa != nil {
 		members = append(members, *sa)

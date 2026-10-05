@@ -647,6 +647,52 @@ func namerHandler(typ, name string) *siblingStubHandler {
 	}}
 }
 
+// accountHandler builds a namerStub that runs no pods and names the account
+// name: a ServiceAccount named as itself.
+func accountHandler(typ, name string) *siblingStubHandler {
+	return &siblingStubHandler{typ: typ, build: func() stack.ApplicationConfig {
+		return &namerStub{name: name}
+	}}
+}
+
+// TestSiblingGroup_AccountMemberNamingThePodAccount: a member that runs no pods
+// and names the account the group's one pod-running member runs as gives the
+// same answer, not a second one, in either emission order. Any other pair of
+// answers stays refused: another account's name, pods that run as the default
+// account, two pod-running members, two accounts and no pods.
+func TestSiblingGroup_AccountMemberNamingThePodAccount(t *testing.T) {
+	const refused = `both answer ServiceAccountName; exactly one member may`
+	for _, tc := range []struct {
+		name     string
+		handlers []*siblingStubHandler
+		types    []string
+		want     string
+	}{
+		{name: "the account after its workload", handlers: []*siblingStubHandler{namerHandler("a", "sa"), accountHandler("b", "sa")}, types: []string{"a", "b"}},
+		{name: "the account before its workload", handlers: []*siblingStubHandler{accountHandler("a", "sa"), namerHandler("b", "sa")}, types: []string{"a", "b"}},
+		{name: "another account's name", handlers: []*siblingStubHandler{namerHandler("a", "sa"), accountHandler("b", "other")}, types: []string{"a", "b"},
+			want: `members a and b ` + refused},
+		{name: "pods running as the default account", handlers: []*siblingStubHandler{namerHandler("a", ""), accountHandler("b", "sa")}, types: []string{"a", "b"},
+			want: `members a and b ` + refused},
+		{name: "two pod-running members", handlers: []*siblingStubHandler{namerHandler("a", "sa"), accountHandler("b", "sa"), namerHandler("c", "sa")}, types: []string{"a", "b", "c"},
+			want: `members a and b and c ` + refused},
+		{name: "two accounts and no pods", handlers: []*siblingStubHandler{accountHandler("a", "sa"), accountHandler("b", "sa")}, types: []string{"a", "b"},
+			want: `members a and b ` + refused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := siblingTransformer(tc.handlers...)
+			tr.RegisterComponentLowering(emitRule{"group", pair(tc.types...)})
+			_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "group"}), TransformContext{})
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("err = %v, want the group accepted", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestSiblingGroup_ServiceAccountNameOrsRunsPods: the group answers the first
 // member's non-empty name and ORs every member's runsPods, so a named member
 // that runs no pods does not make the group run pods.
