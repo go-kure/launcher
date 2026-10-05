@@ -477,7 +477,9 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 		} else if present {
 			// As for backup.destinationPath above: an authored barmanObjectStore
 			// is lowered whole, and without the path the Cluster would carry "".
-			if _, authored := authoredValue(bos, "destinationPath"); !authored {
+			// The map is decoded into the upstream type (toBarmanObjectStore),
+			// which reads the key in any spelling, so any spelling is authored.
+			if !authoredInAnySpelling(bos, "destinationPath") {
 				return nil, errors.Errorf("%s.barmanObjectStore.destinationPath: required (the object store path the cluster's backups and WAL are read from)", label)
 			}
 			ext.BarmanObjectStore = bos
