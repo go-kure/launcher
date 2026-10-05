@@ -57,7 +57,7 @@ var ciliumBGPAdvertisementKind = &policyFreeKind[ciliumv2.CiliumBGPAdvertisement
 	required: requiredFields(map[string]string{
 		"advertisements":                     "the list of what is advertised",
 		"advertisements[].advertisementType": "what the entry advertises: PodCIDR, CiliumPodIPPool, Service or Interface",
-	}, ciliumSelectorRequired("advertisements[].selector")),
+	}, labelSelectorRequired("advertisements[].selector")),
 	validate: validateCiliumBGPAdvertisements,
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPAdvertisementSpec) client.Object {
 		advertisement := kurecilium.CreateCiliumBGPAdvertisement(name)

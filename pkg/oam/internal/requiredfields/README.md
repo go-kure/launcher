@@ -26,8 +26,10 @@ what was authored.
   each spelling is held to the list and the error names the one that leaves the
   field out. Paths are read in sorted order, the spellings of a field in theirs
   and a list in its own, so the field reported is the same on every build.
-- `CiliumSelector(at)` is the required list of one Cilium label selector under
-  `at`: the `key` and `operator` of each match expression.
+- `LabelSelector(at)` is the required list of one label selector under `at`:
+  the `key` and `operator` of each match expression. The Kubernetes type and
+  Cilium's copy of it declare the two fields alike, so the kinds of both read
+  this one list, with one wording.
 - `CiliumRule(at)` is the required list of one Cilium policy rule under `at`
   (`spec`, `specs[]`, or `""` for paths from the rule itself): every field the
   CiliumNetworkPolicy and CiliumClusterwideNetworkPolicy CRDs require inside a

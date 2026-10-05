@@ -38,6 +38,18 @@ func Refuse(authored map[string]any, required map[string]string) error {
 	return nil
 }
 
+// LabelSelector is the required list of one label selector under the path at
+// ("selector", "ingress[].from[].podSelector"): the two fields the API
+// requires of a match expression, each of which the Go type would write empty.
+// It holds for the Kubernetes type and for the copy of it Cilium's API
+// declares, which name and encode the two fields alike.
+func LabelSelector(at string) map[string]string {
+	return map[string]string{
+		at + ".matchExpressions[].key":      "the label key the expression applies to",
+		at + ".matchExpressions[].operator": "the operator of the expression: In, NotIn, Exists or DoesNotExist",
+	}
+}
+
 // unauthoredAt returns where under node, an authored value at the path at, the
 // field the segments name is missing: "" when it is authored wherever its
 // parent is, or when node holds no parent of it.

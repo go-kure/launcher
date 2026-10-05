@@ -82,11 +82,11 @@ var ciliumEgressGatewayPolicyKind = &policyFreeKind[ciliumv2.CiliumEgressGateway
 			"egressGateway.nodeSelector":    "the label query over the nodes the gateway is chosen from",
 			"egressGateways[].nodeSelector": "the label query over the nodes the gateway is chosen from",
 		},
-		ciliumSelectorRequired("egressGateway.nodeSelector"),
-		ciliumSelectorRequired("egressGateways[].nodeSelector"),
-		ciliumSelectorRequired("selectors[].namespaceSelector"),
-		ciliumSelectorRequired("selectors[].podSelector"),
-		ciliumSelectorRequired("selectors[].nodeSelector"),
+		labelSelectorRequired("egressGateway.nodeSelector"),
+		labelSelectorRequired("egressGateways[].nodeSelector"),
+		labelSelectorRequired("selectors[].namespaceSelector"),
+		labelSelectorRequired("selectors[].podSelector"),
+		labelSelectorRequired("selectors[].nodeSelector"),
 	),
 	build: func(name, _ string, spec *ciliumv2.CiliumEgressGatewayPolicySpec) client.Object {
 		policy := kurecilium.CreateCiliumEgressGatewayPolicy(name)

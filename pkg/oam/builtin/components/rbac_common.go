@@ -22,12 +22,15 @@ import (
 // linked module. The presence rules of that validation are checked here by
 // hand, each under a comment that names where it was read:
 // pkg/apis/rbac/validation/validation.go of k8s.io/kubernetes, at Kubernetes
-// v1.37.1. They are rules of presence only. The form of a value that
-// validation checks (a subject's kind, a role reference's kind or group, a
-// name) is left to the API server, as is the rule that a binding's roleRef
-// does not change once the binding exists. Whether a verb, a resource or an
-// API group exists is checked by neither: that validation counts a rule's
-// verbs, API groups and resources and does not read them.
+// v1.37.1. They are rules of presence only, with one exception: a match
+// expression of a clusterrole's aggregation selector is held to what the API
+// server refuses of an expression on every object (validateLabelSelector).
+// The form of any other value that validation checks (a subject's kind, a role
+// reference's kind or group, a name) is left to the API server, as is the rule
+// that a binding's roleRef does not change once the binding exists. Whether a
+// verb, a resource or an API group exists is checked by neither: that
+// validation counts a rule's verbs, API groups and resources and does not read
+// them.
 
 // rbacRuleRequired is the required list of a role's or a clusterrole's rules:
 // the one field of a rule the API marks required and the Go type writes

@@ -155,8 +155,10 @@ func podSpecDefaultedZeros(prefix string) defaultedZeroFields {
 // set the other two. An empty ephemeralContainers or overhead carries nothing
 // and is read as unset. Every init and regular container's image is held to
 // ValidateImageRef: no untagged image and no :latest. So is the reference of
-// every image volume (validateImageVolumeRefs). The API's other value rules
-// are left to the API server.
+// every image volume (validateImageVolumeRefs). A match expression of a label
+// selector is held to validateLabelSelector, in every selector the spec holds
+// (validatePodSpecLabelSelectors). The API's other value rules are left to the
+// API server.
 func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
@@ -179,7 +181,10 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 			return errors.Wrapf(err, "%scontainers[%d] %q", prefix, i, ctr.Name)
 		}
 	}
-	return validateImageVolumeRefs(prefix, ps)
+	if err := validateImageVolumeRefs(prefix, ps); err != nil {
+		return err
+	}
+	return validatePodSpecLabelSelectors(prefix, ps)
 }
 
 // validateImageVolumeRefs holds the reference of every image volume of a pod
@@ -203,13 +208,18 @@ func validateImageVolumeRefs(prefix string, ps *corev1.PodSpec) error {
 // ToApplicationConfig decodes an OAM pod component into a PodConfig, under the
 // package's null contract and the strict decode every spec-projecting kind
 // uses. What a pod may not hold is refused here, whatever the environment
-// policy: see validateAuthoredPodSpec and podSpecDefaultedZeros.
+// policy: see validateAuthoredPodSpec and podSpecDefaultedZeros. The key and
+// the operator of a selector's match expression must be authored
+// (labelSelectorRequired).
 func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[corev1.PodSpec](component.Properties, "v1 PodSpec")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, podSpecDefaultedZeros("")); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, labelSelectorRequired(podSpecLabelSelectors("")...)); err != nil {
 		return nil, err
 	}
 	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}

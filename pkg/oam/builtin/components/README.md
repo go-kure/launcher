@@ -182,14 +182,14 @@ reads it.
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are the `labels` property — see below. |
-| `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; no environment policy applies — see below. |
+| `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; a defective match expression of a selector is refused; no environment policy applies — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; a built-in kind has the scope the Kubernetes API gives it, any other kind the scope an authored `clusterScoped` states, or else the one registered for it (namespaced when unknown); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
-| `poddisruptionbudget` | PodDisruptionBudget | Kind-named PodDisruptionBudget: the whole `PodDisruptionBudgetSpec` (`minAvailable`, `maxUnavailable`, `selector`, `unhealthyPodEvictionPolicy`), strictly decoded; no field is required and the `selector` is the author's. No environment policy applies — see below. |
+| `poddisruptionbudget` | PodDisruptionBudget | Kind-named PodDisruptionBudget: the whole `PodDisruptionBudgetSpec` (`minAvailable`, `maxUnavailable`, `selector`, `unhealthyPodEvictionPolicy`), strictly decoded; no top-level field is required and the `selector` is the author's, a defective match expression of it refused. No environment policy applies — see below. |
 | `podmonitor` | PodMonitor | Kind-named Prometheus operator PodMonitor: the whole `PodMonitorSpec`, strictly decoded; `selector` is required. The selector is the author's. No environment policy applies and no capability is required — see below. |
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
@@ -308,7 +308,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
 | `kubernetes.CreatePod` | v1 Pod | kind | `pod` | strict decode of `PodSpec` | Held to environment policy by the check the rendered paths run on a Pod; `ephemeralContainers`, `priority` and `overhead` refused. |
-| `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | kind | `poddisruptionbudget` | strict decode of `PodDisruptionBudgetSpec` | No field is required. No environment policy applies. The `scaler` trait emits one for its workload too (`enablePDB`), through its own parser. |
+| `kubernetes.CreatePodDisruptionBudget` | policy/v1 PodDisruptionBudget | kind | `poddisruptionbudget` | strict decode of `PodDisruptionBudgetSpec` | No top-level field is required; a defective match expression of `selector` is refused. No environment policy applies. The `scaler` trait emits one for its workload too (`enablePDB`), through its own parser. |
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
 | `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. An unauthored `value` is emitted as `0`. No environment policy applies. |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
@@ -2655,6 +2655,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     boolean under `PodSpec` whose comment states a non-zero default) and fails
     when the two differ. It holds the list to the documented defaults, not to
     the API server's defaulting code.
+  - A match expression without its `key` or `operator`, with an operator that
+    is none of the four, or with `values` that do not go with the operator, in
+    every label selector of the spec: a pod affinity or anti-affinity term's
+    `labelSelector` and `namespaceSelector`, a topology spread constraint's
+    `labelSelector`, a projected `clusterTrustBundle` source's `labelSelector`
+    and a generic ephemeral volume's claim `selector` (see "A label selector's
+    match expressions"). A node selector term is not a label selector and is
+    left to the API server.
 
   **Marked required upstream and not checked:** the `action` of a container
   restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
@@ -2766,8 +2774,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the label value) is refused (``selector: rules out the label `app: web`
     …``). A selector on `app: <component>` is satisfied by the added label, so
     the template needs no label of its own for it. A selector that cannot be
-    read as one (an unknown operator, a key or value that is no label) cannot
-    be compared and is refused with apimachinery's reason.
+    read as one (an expression without its `key` or `operator`, an unknown
+    operator, `values` that do not go with the operator, a key or value that
+    is no label) cannot be compared and is refused with apimachinery's reason
+    (`selector: …`). That covers what "A label selector's match expressions"
+    lists, so this selector is not read a second time.
 
   **Traits.** A trait target as the `pod` kind is: `security-context`, a
   `configmap` trait's `mountPath` and an `external-secret` trait's
@@ -2783,7 +2794,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
     same checks and named by path (`template.spec.containers: required`,
     `template.spec.priority: not authorable …`, the image rule, a probe timing
-    written as `0`). A test holds the probe list to every non-pointer
+    written as `0`, a defective match expression in a label selector of the
+    pod spec). A test holds the probe list to every non-pointer
     `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
     states a non-zero default, the template's metadata included.
   - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
@@ -2868,7 +2880,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `template.spec`, what the `pod` kind refuses of its own spec, by the same
   checks and named by path (`template.spec.containers: required`, which an
   unauthored `template` also gives; `template.spec.priority: not authorable
-  …`; the image rule; a probe timing written as `0`).
+  …`; the image rule; a probe timing written as `0`; a defective match
+  expression in a label selector of the pod spec).
   `template.spec.activeDeadlineSeconds` is allowed, unlike on a
   `replicaset` or `replicationcontroller`: the API server accepts it on a
   PodTemplate. The two restart-rule fields and the two pod-certificate fields
@@ -3109,10 +3122,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
   `ingress`, `egress`, `policyTypes`), decoded strictly into that type. It
   emits one NetworkPolicy named after the component in the build namespace,
-  with the authored spec and nothing else. No field is required by the decode
-  and none is filled; the API's value rules (a peer naming at least one of
-  `podSelector`, `namespaceSelector` and `ipBlock`, an `ipBlock` beside no
-  selector, a valid CIDR) are left to the API server.
+  with the authored spec and nothing else. No top-level field is required and
+  none is filled. A match expression of `podSelector`, or of a peer's
+  `podSelector` or `namespaceSelector`, is refused without its `key` or
+  `operator`, with an operator that is none of the four, or with `values` that
+  do not go with the operator (see "A label selector's match expressions");
+  the config is exported, so `Generate` repeats what the typed spec can show.
+  The API's other value rules (a peer naming at least one of `podSelector`,
+  `namespaceSelector` and `ipBlock`, an `ipBlock` beside no selector, a valid
+  CIDR, a label key's syntax) are left to the API server.
 
   **The spec reads as the API reads it, which is not how the `networkpolicy`
   trait reads the same keys.** The two share the type name; the trait attaches
@@ -3295,10 +3313,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `unhealthyPodEvictionPolicy`. A count is emitted as a number and a
     percentage as a string, and an authored `0` is kept (`maxUnavailable: 0`
     allows no voluntary eviction).
-  - **Required:** nothing. The API server accepts a budget with an empty
-    spec. Its value rules are left to it, the one that `minAvailable` and
-    `maxUnavailable` exclude each other included: a component that authors
-    both builds here and is refused at apply.
+  - **Required:** no top-level field. The API server accepts a budget with an
+    empty spec. Inside `selector`, a match expression is refused without its
+    `key` or `operator`, with an operator that is none of the four, or with
+    `values` that do not go with the operator (see "A label selector's match
+    expressions"). The API's other value rules are left to it, the one that
+    `minAvailable` and `maxUnavailable` exclude each other included: a
+    component that authors both builds here and is refused at apply.
   - **The selector is the author's.** Launcher points it at no component: an
     unauthored `selector` selects no pod, and `selector: {}` selects every
     pod of the namespace. To cover a workload component, select its `app`
@@ -3480,7 +3501,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   least one entry of `clusterRoleSelectors`
   (`aggregationRule.clusterRoleSelectors: required …`); an empty selector
   (`{}`) is an entry. From the markers, a selector's match expression must
-  write its `key` and `operator`. An aggregated ClusterRole builds: it is
+  write its `key` and `operator`. By hand again, an expression that writes
+  both is refused for an operator that is none of the four and for `values`
+  that do not go with the operator
+  (`aggregationRule.clusterRoleSelectors[0].matchExpressions[0].values:
+  required with the operator In (at least one value)`): the API server
+  validates each selector as a label selector (see "A label selector's match
+  expressions"). An aggregated ClusterRole builds: it is
   emitted with `rules: null` when `rules` is not authored and with
   `rules: []` when authored so, and the control plane fills the rules.
 - **clusterrolebinding** emits its ClusterRoleBinding with no namespace; the
@@ -3512,7 +3539,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     config is exported, so `Generate` repeats both. Every other value rule
     is left to the API server: a negative `maxReplicas`, the `kind` and
     `name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
-    which metric source goes with which `type`.
+    which metric source goes with which `type`. The label selector of a
+    metric (`metrics[].object.metric.selector`, and under `pods` and
+    `external`) is not held as other kinds hold theirs: the API server
+    validates nothing of it, and a kind does not refuse what the API admits.
   - **Policy.** `maxReplicas` is held to the environment policy's replica
     maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
     HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
@@ -8178,6 +8208,67 @@ it on the object through `kindObject`, the one helper every kind returns its obj
 (the Flux sources through `emitFluxSource`, which does the same before it writes a long
 `spec.timeout`). `TestObjectMetadata_EveryKindComponentTakesIt` holds every registered kind
 to the two properties, so a kind added later cannot ship without them.
+
+### A label selector's match expressions
+
+A kind component whose spec holds a Kubernetes label selector (`metav1.LabelSelector`) decodes
+it strictly, and the strict decode refuses nothing of a match expression: the Go type writes
+`key` and `operator` whether or not they were authored, and reads any string as an operator.
+Three defects of an expression are therefore refused where the component is read, with or
+without an environment policy, each named by its path (go-kure/launcher#790):
+
+- **An expression without its `key` or its `operator`**
+  (`selector.matchExpressions[0].operator: required (the operator of the expression: In, NotIn,
+  Exists or DoesNotExist)`). The object would carry `key: ""` or `operator: ""` and not show
+  the omission.
+- **An `operator` that is none of the four**
+  (`selector.matchExpressions[0].operator: "Equals" is not a label selector operator (In, NotIn,
+  Exists or DoesNotExist)`).
+- **An operator and `values` that do not go together**: `In` or `NotIn` without a value
+  (`selector.matchExpressions[0].values: required with the operator In (at least one value)`),
+  `Exists` or `DoesNotExist` with one (`…values: not allowed with the operator Exists (it takes
+  no value)`).
+
+The API server refuses each of the three on every selector listed below, through one function,
+`ValidateLabelSelectorRequirement` of `k8s.io/apimachinery`, and under every option it passes
+that function. `TestValidateLabelSelector_MatchesAPIMachinery` holds launcher's check to the
+linked function on those three.
+
+**That function judges more, and these kinds do not.** It also refuses an expression `key` that
+is no label name, an expression value that is no label value (on the objects that still check
+it), and a `matchLabels` key or value that is no label name or value. Those are value rules,
+left to the API server as for every typed kind: a selector with `key: "not a label"` builds
+here and is refused at apply. An authored empty `key` (`key: ""`) is one of them: it differs
+from an unauthored key only in that the unauthored one is refused here, and the API server
+refuses both.
+
+**Where it holds:**
+
+| Kind | Selectors |
+|---|---|
+| `networkpolicy` | `podSelector`; the `podSelector` and `namespaceSelector` of every `ingress[].from[]` and `egress[].to[]` peer |
+| `poddisruptionbudget` | `selector` |
+| `clusterrole` | every entry of `aggregationRule.clusterRoleSelectors` |
+| `pod`, and under `template.spec` `podtemplate`, `replicaset` and `replicationcontroller` | the `labelSelector` and `namespaceSelector` of every `podAffinity` and `podAntiAffinity` term, required or preferred; a topology spread constraint's `labelSelector`; a projected `clusterTrustBundle` source's `labelSelector`; the `selector` of a generic ephemeral volume's claim template |
+
+A `replicaset`'s own `selector` is refused for the same defects by the check that compares it
+with the `app` label, with apimachinery's reason and not the texts above (see its entry);
+`TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt` holds that to each of them. The Cilium
+kinds hold the `key` and `operator` of Cilium's own selector type through the same required
+list, with the same wording; their entries say what else Cilium requires.
+
+**Not held: the metric selectors of a `horizontalpodautoscaler`**
+(`metrics[].object.metric.selector`, `metrics[].pods.metric.selector`,
+`metrics[].external.metric.selector`). The API server's validation of an autoscaler does not
+read them, and a kind does not refuse what the API admits.
+
+A config that is exported (`NetworkPolicyConfig`, `PodConfig`, `PodTemplateConfig`,
+`ReplicaSetConfig`, `ReplicationControllerConfig`) repeats at `Generate` the two checks its
+typed value can show: the operator, an empty one included, and the pair. A missing `key` shows
+only in what was authored, so it is refused where the component is read.
+`TestLabelSelectorKinds_CoverEverySelector` walks the type of every strictly decoded kind and
+fails on a selector path that is neither held nor listed as left out with its reason, so a
+selector added by a dependency bump or a new kind cannot go unread.
 
 ### Every spec field is this package's to write
 

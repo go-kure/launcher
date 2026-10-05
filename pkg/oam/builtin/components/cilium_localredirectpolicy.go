@@ -84,7 +84,7 @@ var ciliumLocalRedirectPolicyKind = &policyFreeKind[ciliumv2.CiliumLocalRedirect
 		ciliumPortRequired("redirectFrontend.addressMatcher.toPorts"),
 		ciliumPortRequired("redirectFrontend.serviceMatcher.toPorts"),
 		ciliumPortRequired("redirectBackend.toPorts"),
-		ciliumSelectorRequired("redirectBackend.localEndpointSelector"),
+		labelSelectorRequired("redirectBackend.localEndpointSelector"),
 	),
 	validate: validateCiliumLocalRedirectPolicy,
 	build: func(name, namespace string, spec *ciliumv2.CiliumLocalRedirectPolicySpec) client.Object {

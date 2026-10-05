@@ -48,13 +48,17 @@ func (h *ReplicationControllerHandler) PropertySchema() map[string]oam.PropertyS
 // ReplicationControllerConfig, under the package's null contract and the
 // strict decode every spec-projecting kind uses. What the controller may not
 // hold is refused here, whatever the environment policy: see
-// ReplicationControllerConfig.validate and podTemplateDefaultedZeros.
+// ReplicationControllerConfig.validate, podTemplateDefaultedZeros and
+// podTemplateLabelSelectorRequired.
 func (h *ReplicationControllerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[corev1.ReplicationControllerSpec](component.Properties, "v1 ReplicationControllerSpec")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
 	cfg := &ReplicationControllerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}

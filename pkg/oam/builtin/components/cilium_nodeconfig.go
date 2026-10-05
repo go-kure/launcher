@@ -51,7 +51,7 @@ var ciliumNodeConfigKind = &policyFreeKind[ciliumv2.CiliumNodeConfigSpec]{
 	required: requiredFields(map[string]string{
 		"defaults":     "the Cilium configuration keys the selected nodes take, with their values",
 		"nodeSelector": "the label query over the nodes the configuration applies to; an empty one selects every node",
-	}, ciliumSelectorRequired("nodeSelector")),
+	}, labelSelectorRequired("nodeSelector")),
 	build: func(name, namespace string, spec *ciliumv2.CiliumNodeConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumNodeConfig(name, namespace)
 		spec.DeepCopyInto(&config.Spec)
