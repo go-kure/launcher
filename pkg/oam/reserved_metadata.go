@@ -60,6 +60,12 @@ type platformAnnotated interface {
 	PlatformAnnotations() map[string]string
 }
 
+// platformAnnotationLayers is how many configs, one under the other, the check
+// asks for the platform's annotations (platformAnnotationsUnder). Launcher's own
+// configs make one layer: the bound is there to end a chain that has no end, and
+// it cuts a finite chain that is longer as well.
+const platformAnnotationLayers = 32
+
 // reservedMetadataKeys is TransformContext.ReservedMetadataKeys as the check
 // reads it. A nil one reserves nothing.
 type reservedMetadataKeys struct {
@@ -206,9 +212,18 @@ func (o *ownedConfig) checkReservedObject(obj client.Object) error {
 // returns, so a wrapper around the config that writes the platform's annotations
 // does not hide them, and needs no method of its own to hand them on. A wrapper
 // that is no ConfigWrapper ends the walk: what it wraps is not read.
+//
+// The walk runs inside Generate on configs a caller wrote, so it ends on any
+// chain: at a layer that is nil, a typed nil included, which it calls no method
+// of, and after platformAnnotationLayers layers, whatever the chain: wrappers
+// that say they wrap themselves or each other, and a finite chain that is longer.
+// What it has read by then counts, and a pair stated below is checked as authored.
 func platformAnnotationsUnder(cfg stack.ApplicationConfig) []map[string]string {
 	var platform []map[string]string
-	for cfg != nil {
+	for range platformAnnotationLayers {
+		if isNullValue(cfg) {
+			break
+		}
 		if p, ok := cfg.(platformAnnotated); ok {
 			if pairs := p.PlatformAnnotations(); len(pairs) > 0 {
 				platform = append(platform, pairs)
