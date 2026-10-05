@@ -71,8 +71,10 @@ func TestTypedNilSweep(t *testing.T) {
 	t.Run("expose sslRedirect onto a null annotations map", func(t *testing.T) {
 		sameNullAnswer(t, nilMap, func(v any) (any, error) {
 			props := map[string]any{"annotations": v, "sslRedirect": true}
-			setSSLRedirectAnnotations(props)
-			return props["annotations"], nil
+			authored, _ := props["annotations"].(map[string]any)
+			platform := &exposeAnnotations{component: "web", authored: authored}
+			err := setSSLRedirectAnnotations(props, platform)
+			return platform.written, err
 		})
 	})
 

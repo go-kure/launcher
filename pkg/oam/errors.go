@@ -14,6 +14,12 @@ var ErrMissingCapability = errors.New("oam: capability key not found in ClusterP
 // a value may only arrive via ClusterProfile capability rendering.
 var ErrPlatformReserved = errors.New("oam: property is platform-reserved")
 
+// ErrReservedMetadataKey is returned when an object an application generates
+// carries a label or annotation key TransformContext.ReservedMetadataKeys
+// reserves. It comes from generation, not from the transform: the objects of a
+// rendered chart and of a trait exist only then.
+var ErrReservedMetadataKey = errors.New("oam: metadata key is reserved")
+
 // TransformError represents a failure in the OAM-to-kure transformation pipeline.
 type TransformError struct {
 	Message string

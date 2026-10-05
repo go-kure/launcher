@@ -2,6 +2,7 @@ package traits_test
 
 import (
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -96,12 +97,19 @@ func TestExposeRule_Ingress_SSLRedirect(t *testing.T) {
 		{"override false", map[string]any{"sslRedirect": false}, "false", ""},
 		{"force true", map[string]any{"forceSslRedirect": true}, "", "true"},
 		{
-			"field beats annotation",
+			"an annotation saying the same as the field stays",
 			map[string]any{
 				"sslRedirect": true,
-				"annotations": map[string]any{"nginx.ingress.kubernetes.io/ssl-redirect": "false"},
+				"annotations": map[string]any{"nginx.ingress.kubernetes.io/ssl-redirect": true},
 			},
 			"true", "",
+		},
+		{
+			"an annotation with no field is left as written",
+			map[string]any{
+				"annotations": map[string]any{"nginx.ingress.kubernetes.io/ssl-redirect": "false"},
+			},
+			"false", "",
 		},
 	}
 	for _, tc := range cases {
@@ -121,6 +129,38 @@ func TestExposeRule_Ingress_SSLRedirect(t *testing.T) {
 			}
 			if got := ing.Annotations["nginx.ingress.kubernetes.io/force-ssl-redirect"]; got != tc.wantForce {
 				t.Errorf("force-ssl-redirect = %q, want %q", got, tc.wantForce)
+			}
+		})
+	}
+}
+
+// A raw annotation that contradicts the typed field is refused, naming the
+// annotation and the field: the field's value is not overridden, and not
+// silently either (go-kure/launcher#790).
+func TestExposeRule_Ingress_SSLRedirect_ContradictingAnnotationRefused(t *testing.T) {
+	for _, tc := range []struct{ field, key string }{
+		{"sslRedirect", "nginx.ingress.kubernetes.io/ssl-redirect"},
+		{"forceSslRedirect", "nginx.ingress.kubernetes.io/force-ssl-redirect"},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			authored := map[string]any{tc.key: "false"}
+			trait := exposeIngress(map[string]any{
+				"hostnames":   []any{"a.apps.example.com"},
+				tc.field:      true,
+				"annotations": authored,
+			})
+			err := applyExpose(trait, newWebApp("web", "default"), &stack.Bundle{})
+			var ve *pkgerrors.ValidationError
+			if !stderrors.As(err, &ve) {
+				t.Fatalf("want *ValidationError, got %v", err)
+			}
+			if ve.Field != "annotations."+tc.key || !strings.Contains(ve.Message, tc.field) {
+				t.Errorf("refusal names field %q with message %q, want annotations.%s and %s", ve.Field, ve.Message, tc.key, tc.field)
+			}
+			// The authored map is the document's: the rule reads it and writes
+			// nothing into it.
+			if len(authored) != 1 || authored[tc.key] != "false" {
+				t.Errorf("authored annotations changed: %v", authored)
 			}
 		})
 	}

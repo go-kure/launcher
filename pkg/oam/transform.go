@@ -81,6 +81,30 @@ type TransformContext struct {
 	// more than once: in the transform, and again by ComponentEndpointsNamed,
 	// which builds a selector from the answer.
 	Naming func(NameRequest) (string, bool)
+	// ReservedMetadataKeys names the label and annotation keys the consumer keeps
+	// to itself (go-kure/launcher#790). An entry is a key ("example.com/owner",
+	// "owner"), or a key prefix followed by "/" ("example.com/"), which reserves
+	// every key under that prefix. An entry that is neither fails the transform.
+	// Non-authorable platform input.
+	//
+	// A reserved key is refused on every object an application generates, whatever
+	// put it there: a component's or a trait's property, an object written out in
+	// full (passthrough, manifests), a chart launcher renders. The refusal comes
+	// from generation (Application.Generate, GenerateApplications), with
+	// ErrReservedMetadataKey, since a rendered chart's objects exist only then. It
+	// is read on an object's own labels and annotations, on the pod template's of
+	// a workload and of a PodTemplate, and on spec.inheritedMetadata of a
+	// CloudNativePG Cluster.
+	//
+	// The keys launcher writes itself are not refused: the `app` label, the
+	// component label (ComponentLabelKey), and an annotation the platform sets on
+	// an Ingress (the `ingress` trait's platform-reserved platformAnnotations,
+	// which the `expose` trait fills), with the value it set. What is
+	// added after generation is not read: the labels and annotations of a bundle,
+	// and what a delivery workflow or the cluster adds. Neither is what a Flux
+	// object hands on to the objects it applies, nor what a chart that Flux
+	// installs renders in the cluster.
+	ReservedMetadataKeys []string
 	// names resolves and claims every name of this transform. Internal only: nil
 	// on a caller-constructed ctx; TransformWithPolicy sets it. A pointer, so
 	// every by-value ctx copy shares the one claim space.
@@ -684,6 +708,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 			return nil, nil, errors.Errorf("invalid TransformContext.ComponentLabelKey %q: %s", ctx.ComponentLabelKey, strings.Join(errs, "; "))
 		}
 	}
+	reservedKeys, err := parseReservedMetadataKeys(ctx.ReservedMetadataKeys)
+	if err != nil {
+		return nil, nil, err
+	}
 	// The namespace override (kurel build --namespace) and the Flux namespace are stamped
 	// onto metadata.namespace as given, so both must be DNS-1123 labels. The messages name
 	// the value as a CLI reader knows it, not the field.
@@ -847,8 +875,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	// After every step that reads a config: from here on each application's
 	// config is its ownership wrapper, which labels what the application
-	// generates with its component (go-kure/launcher#788).
-	markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey)
+	// generates with its component (go-kure/launcher#788) and holds it to the
+	// consumer's reserved metadata keys (go-kure/launcher#790).
+	markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys)
 
 	if len(ctx.consumedCapabilities) > 0 {
 		keys := make([]string, 0, len(ctx.consumedCapabilities))

@@ -2,6 +2,8 @@ package traits
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
@@ -121,9 +123,19 @@ func (h *IngressHandler) CanHandle(traitType string) bool {
 	return traitType == "ingress"
 }
 
+// platformAnnotationsProperty is the ingress trait's property for the
+// annotations the platform sets on the Ingress: the ones the expose rule
+// derives from its capability rendering and typed properties, or a capability
+// rendering of the ingress trait itself. It is platform-reserved, so an author
+// cannot write it, and that is what lets the check of the consumer's reserved
+// metadata keys tell these annotations from authored ones
+// (IngressConfig.PlatformAnnotations, go-kure/launcher#790).
+const platformAnnotationsProperty = "platformAnnotations"
+
 // PropertySchema declares the ingress trait's user-facing properties.
-// `allowedHostnameWildcard` and `networkPolicy` are platform-reserved keys
-// populated by capability rendering.
+// `allowedHostnameWildcard`, `platformAnnotations` and `networkPolicy` are
+// platform-reserved keys populated by capability rendering, or by the expose
+// rule that emits the trait.
 func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"rules": {
@@ -167,7 +179,11 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 				},
 			},
 		},
-		"annotations":             {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the Ingress resource."},
+		"annotations": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the Ingress resource."},
+		platformAnnotationsProperty: {
+			Type: oam.PropertyTypeObject, AdditionalProperties: true, PlatformReserved: true,
+			Description: "Platform-reserved annotations the platform sets on the Ingress resource (annotation key to string value). An authored annotation of the same key must hold the same value.",
+		},
 		"ingressClassName":        {Type: oam.PropertyTypeString, Description: "IngressClass that should handle this Ingress."},
 		"servicePort":             {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one (e.g. a Helm chart)."},
 		"serviceName":             {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
@@ -282,10 +298,37 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.Scope = scope
 	}
 
-	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
+	rawAnnotations, _ := props["annotations"].(map[string]any)
+	if rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
 			config.Annotations[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	// The platform's annotations are kept apart from the authored ones up to
+	// Generate. Its value is authoritative: an authored annotation of the same
+	// key holding another value is refused, never overridden silently. The
+	// expose rule refuses the same before it emits the trait, naming the
+	// property it writes the value from; this covers a rendering of the ingress
+	// capability. An authored null states no value, as it does for the expose
+	// rule, and the platform's is written.
+	if raw, ok := props[platformAnnotationsProperty]; ok && !oam.IsNullValue(raw) {
+		rawPlatform, ok := raw.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("%s: expected object, got %T", platformAnnotationsProperty, raw)
+		}
+		config.platformAnnotations = make(map[string]string, len(rawPlatform))
+		for _, k := range slices.Sorted(maps.Keys(rawPlatform)) {
+			v, ok := rawPlatform[k].(string)
+			if !ok {
+				return nil, errors.Errorf("%s.%s: expected a string, got %T", platformAnnotationsProperty, k, rawPlatform[k])
+			}
+			if authored, ok := config.Annotations[k]; ok && authored != v && !oam.IsNullValue(rawAnnotations[k]) {
+				return nil, errors.Errorf("annotations.%s: %q is not the value the platform sets for this annotation (%q, %s) and cannot override it; remove the annotation",
+					k, authored, v, platformAnnotationsProperty)
+			}
+			config.platformAnnotations[k] = v
 		}
 	}
 
@@ -488,13 +531,16 @@ type IngressConfig struct {
 	Scope string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
 	// objectName is the Ingress's name as Apply settled it: Name, else the
 	// default. "" on a config built directly (routingObjectNameOr).
-	objectName       string
-	componentName    string
-	Annotations      map[string]string
-	IngressClassName string
-	Rules            []IngressRule
-	TLS              []IngressTLS
-	ServiceName      string
+	objectName    string
+	componentName string
+	Annotations   map[string]string
+	// platformAnnotations are the annotations the platform set
+	// (platformAnnotationsProperty), which Generate writes beside Annotations.
+	platformAnnotations map[string]string
+	IngressClassName    string
+	Rules               []IngressRule
+	TLS                 []IngressTLS
+	ServiceName         string
 
 	// sources/ports are populated in parseProperties from the platform-reserved
 	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
@@ -523,6 +569,30 @@ func (c *IngressConfig) TargetComponentName() string { return c.ComponentName() 
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.
 func (c *IngressConfig) BackendPorts() []intstr.IntOrString { return c.ports }
+
+// PlatformAnnotations returns the annotations the Ingress carries from the
+// platform's input, not from the document: what the trait's platformAnnotations
+// property held, in a map of its own, nil when it held none. The check of the
+// consumer's reserved metadata keys (oam.TransformContext.ReservedMetadataKeys)
+// reads it through an unexported contract of package oam, which a config of
+// another package can only meet with an exported method, and passes each of
+// these annotations with the value given here.
+func (c *IngressConfig) PlatformAnnotations() map[string]string {
+	return maps.Clone(c.platformAnnotations)
+}
+
+// annotations returns the Ingress's annotations: the authored ones, and the
+// platform's over them in a map of its own. parseProperties has refused an
+// authored value that differs from the platform's.
+func (c *IngressConfig) annotations() map[string]string {
+	if len(c.platformAnnotations) == 0 {
+		return c.Annotations
+	}
+	merged := make(map[string]string, len(c.Annotations)+len(c.platformAnnotations))
+	maps.Copy(merged, c.Annotations)
+	maps.Copy(merged, c.platformAnnotations)
+	return merged
+}
 
 // IngressRule represents a single host rule with its paths.
 type IngressRule struct {
@@ -553,7 +623,7 @@ type IngressTLS struct {
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	ingress := kubernetes.CreateIngress(routingObjectNameOr(c.objectName, app), app.Namespace)
 	ingress.Labels = componentLabels(c.componentName)
-	ingress.Annotations = c.Annotations
+	ingress.Annotations = c.annotations()
 	if c.IngressClassName != "" {
 		kubernetes.SetIngressClassName(ingress, c.IngressClassName)
 	}

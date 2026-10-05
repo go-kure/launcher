@@ -19,7 +19,7 @@ Every built-in trait handler also implements `oam.PropertySchemaProvider`
 (`PropertySchema()`), declaring a constrained schema for its user-facing properties so
 the downstream runtime can validate them before invocation. This includes the platform-reserved keys a
 handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
-`controllerType`). Some deeply nested or K8s-adjacent shapes are kept shallow/open
+`controllerType`, the `ingress` trait's `platformAnnotations`). Some deeply nested or K8s-adjacent shapes are kept shallow/open
 (`additionalProperties`) rather than modeled field-by-field, but strictness-sensitive traits are
 **closed**: the `rbac` rule object
 enumerates its fields and sets `additionalProperties: false` (unknown keys rejected), matching the
@@ -53,7 +53,7 @@ preflight reject every valid use of the trait.
 ### Networking
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations` |
+| `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations`; `platformAnnotations` is platform-reserved (see below) |
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`), `name` (optional; the policy's name, default `<component>-allow`) |
@@ -161,12 +161,31 @@ not the app — chooses the implementation:
   both together keep `rules` for routing while all hosts are still
   wildcard-validated). Platform-default `ssl-redirect` / `force-ssl-redirect`
   come from the `sslRedirect` / `forceSslRedirect` capability fields (author-overridable via
-  the same inline properties; the typed value wins over a raw same-key annotation).
+  the same inline properties).
   External-auth (oauth2-proxy): authoring `allowedGroups: [...]` on an ingress expose emits the
   nginx `auth-url` / `auth-signin` / `auth-response-headers` annotations from the capability's
   `authURL` / `authSigninURL` / `authResponseHeaders` (`authSigninURL` is override-able inline;
   `authURL` must be a bare base URL). `allowedGroups` must be non-empty, and the capability must
   supply `authURL` or the trait is rejected.
+  **The annotations expose writes** (go-kure/launcher#790). On the ingress path the rule
+  writes up to six annotations: `cert-manager.io/cluster-issuer`, and under
+  `nginx.ingress.kubernetes.io/` the keys `ssl-redirect`, `force-ssl-redirect`, `auth-url`,
+  `auth-signin` and `auth-response-headers`. It does not write them into the authored
+  `annotations`: they reach the emitted `ingress` trait in that trait's platform-reserved
+  `platformAnnotations` property, and the authored map is left as written. An authored
+  annotation of one of these keys must hold the value the rule writes; another value is a
+  `ValidationError` on `annotations.<key>` that names where the rule's value comes from
+  (`annotation nginx.ingress.kubernetes.io/ssl-redirect is platform-managed by the expose
+  trait and cannot be overridden: the trait writes "true" from the sslRedirect property (its
+  own, else the capability's default); remove the annotation`). Without the property or capability value that makes the rule write
+  a key, an annotation of that key is an authored one and is left as written.
+  `platformAnnotations` is not a property of `expose`: authored there it is a
+  `ValidationError`, on either path.
+  **Breaking for documents:** a raw `ssl-redirect`, `force-ssl-redirect`, `auth-url`,
+  `auth-signin` or `auth-response-headers` annotation that contradicts the trait's value was
+  overridden silently and is now refused, as a contradicting `cluster-issuer` already was.
+  Remove the annotation, or set the typed property (`sslRedirect`, `forceSslRedirect`,
+  `authSigninURL`) to the value meant.
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 
