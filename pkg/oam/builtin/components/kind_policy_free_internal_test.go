@@ -35,6 +35,10 @@ var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(serviceCIDRKind),
 	policyFreeTypeOf(podDisruptionBudgetKind),
 	policyFreeTypeOf(endpointSliceKind),
+	policyFreeTypeOf(roleKind),
+	policyFreeTypeOf(roleBindingKind),
+	policyFreeTypeOf(clusterRoleKind),
+	policyFreeTypeOf(clusterRoleBindingKind),
 }
 
 // TestPolicyFreeKinds_NoDefaultedZeros: policyFreeKind.config passes no

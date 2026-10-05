@@ -174,6 +174,16 @@ same way, with an `endpointslice-component` fixture: a Service named by
 `objectName`, an EndpointSlice in the build namespace whose authored
 `kubernetes.io/service-name` label holds that name as a literal, and a slice
 that authors only its address type.
+The `role`, `rolebinding`, `clusterrole` and `clusterrolebinding` kind
+components (go-kure/launcher#790) are registered the same way, each with a
+`<kind>-component` fixture: a Role with two rules and one that authors none
+(`rules: null`); two RoleBindings in the build namespace, one of them without
+`roleRef.apiGroup` (written `apiGroup: ""`); a ClusterRole with a rule of
+non-resource URLs and an aggregated one; a ClusterRoleBinding with no
+namespace. No capability is required to build them, and no environment
+policy restricts what they grant.
+`TestObjectName_CollidesWithAGeneratedName` holds that a component of one of
+the four and an `rbac` trait that names the same object are refused.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

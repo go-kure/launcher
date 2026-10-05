@@ -493,6 +493,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"cilium-clusterwidenetworkpolicy",
 		"backendtlspolicy", "gateway", "gatewayclass", "listenerset", "referencegrant",
 		"endpointslice",
+		"clusterrole", "clusterrolebinding", "role", "rolebinding",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}

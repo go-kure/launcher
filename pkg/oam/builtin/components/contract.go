@@ -313,6 +313,24 @@ func (h *EndpointSliceHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *RoleHandler) ContractMetadata() oam.ContractMetadata { return contract("role") }
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *RoleBindingHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("rolebinding")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ClusterRoleHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("clusterrole")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ClusterRoleBindingHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("clusterrolebinding")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

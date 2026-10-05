@@ -1205,6 +1205,37 @@ its text:
     empty (`null`, `null`, `{}`).
   - **Hosts are not checked:** the addresses of an endpoint, FQDNs included, are not
     artifact sources and are not held to the allowed registries.
+- **Shipped: `role`, `rolebinding`, `clusterrole`, `clusterrolebinding`** (`role.go`,
+  `rolebinding.go`, `clusterrole.go`, `clusterrolebinding.go`, with what they share in
+  `rbac_common.go`), the projections of the four objects of the
+  `rbac.authorization.k8s.io/v1` API on the shared helper `policyFreeKind`. The first
+  two are in the build namespace, the last two cluster-scoped.
+  - **They are ungated: no capability and no environment-policy check restricts what a
+    role grants,** nor to whom a binding grants it.
+  - None has a spec: the properties are the object's own fields (`rules`; `rules` and
+    `aggregationRule`; `subjects` and `roleRef`), strictly decoded, and its `kind`,
+    `apiVersion` and `metadata` are refused.
+  - The required lists (a rule's `verbs`; a binding's `roleRef` with its `kind` and
+    `name`, and a subject's `kind` and `name`; the `key` and `operator` of a match
+    expression of an aggregation selector) are derived from the markers of the linked
+    `k8s.io/api` module by the test that derives the `endpointslice` kind's, which also
+    fails on a required field the type omits when unauthored: the four have none.
+  - Beyond the markers, the kinds check presence rules read by hand from the API
+    server's validation at Kubernetes v1.37.1, which no linked module holds and no
+    test derives: a rule names `apiGroups` and `resources`, or in a ClusterRole
+    `nonResourceURLs` instead, which are refused in a Role and beside resources; a
+    ClusterRoleBinding's ServiceAccount subject names its `namespace`; an
+    `aggregationRule` holds a selector. The form of a value that validation checks
+    is left to the API server; whether a verb, a resource or an API group exists is
+    checked by neither.
+  - `roleRef.apiGroup` may be left out: the object carries it empty and the API server
+    fills the RBAC group. `roleRef.name` and the names of subjects are the author's
+    literals and follow no component's `objectName`.
+  - An aggregated ClusterRole is emitted with `rules: null` when `rules` is not
+    authored and with `[]` when authored so; the control plane fills the rules.
+  - They stand beside the `rbac` trait, which grants to a workload's own
+    ServiceAccount. A trait's object and a component's of one kind and name are
+    refused as a name collision.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
@@ -1243,8 +1274,7 @@ its text:
   ticket.
 - **Missing kinds:** the inventory's `missing` rows (APIService, GRPCRoute among
   them), and its `trait` rows, the
-  kinds reachable only as traits today (ExternalSecret, Role and RoleBinding,
-  ReplicationSource).
+  kinds reachable only as traits today (ExternalSecret, ReplicationSource).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
 
 ---
@@ -1405,7 +1435,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`). Open: an author override for bundle, ordered-group and synthesized NetworkPolicy names; a hook role for the names outside the roles of §3.2, among them the claim a `pvc` volume generates | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy` and `endpointslice` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`, `clusterrole` and `clusterrolebinding` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

@@ -19,6 +19,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -621,6 +622,71 @@ var policyFreeKinds = []policyFreeKind{
 			},
 		},
 	},
+	// The four kinds of the RBAC API are whole objects too. The API requires
+	// nothing of a role, and of a binding the role it grants.
+	{
+		component: "role", handler: &components.RoleHandler{},
+		gvk: rbacv1.SchemeGroupVersion.WithKind("Role"),
+		typ: reflect.TypeFor[rbacv1.Role](), wholeObject: true, namespaced: true,
+		minimal: map[string]any{},
+		full: map[string]any{"rules": []any{
+			policyRule("", "pods", "get", "list"),
+			map[string]any{"apiGroups": []any{"apps"}, "resources": []any{"deployments"}, "resourceNames": []any{"web"}, "verbs": []any{"*"}},
+		}},
+	},
+	{
+		component: "rolebinding", handler: &components.RoleBindingHandler{},
+		gvk: rbacv1.SchemeGroupVersion.WithKind("RoleBinding"),
+		typ: reflect.TypeFor[rbacv1.RoleBinding](), wholeObject: true, namespaced: true,
+		minimal: map[string]any{"roleRef": map[string]any{"kind": "Role", "name": "reader"}},
+		full:    bindingProperties(map[string]any{"apiGroup": rbacv1.GroupName, "kind": "ClusterRole", "name": "view"}),
+	},
+	{
+		component: "clusterrole", handler: &components.ClusterRoleHandler{},
+		gvk: rbacv1.SchemeGroupVersion.WithKind("ClusterRole"),
+		typ: reflect.TypeFor[rbacv1.ClusterRole](), wholeObject: true,
+		minimal: map[string]any{},
+		full: map[string]any{
+			"rules": []any{
+				map[string]any{"apiGroups": []any{""}, "resources": []any{"nodes"}, "resourceNames": []any{"node-a"}, "verbs": []any{"get"}},
+				map[string]any{"nonResourceURLs": []any{"/healthz", "/metrics"}, "verbs": []any{"get"}},
+			},
+			"aggregationRule": map[string]any{"clusterRoleSelectors": []any{map[string]any{
+				"matchLabels":      map[string]any{"rbac.example.com/aggregate-to-monitoring": "true"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"a", "b"}}},
+			}}},
+		},
+	},
+	{
+		component: "clusterrolebinding", handler: &components.ClusterRoleBindingHandler{},
+		gvk: rbacv1.SchemeGroupVersion.WithKind("ClusterRoleBinding"),
+		typ: reflect.TypeFor[rbacv1.ClusterRoleBinding](), wholeObject: true,
+		minimal: map[string]any{"roleRef": map[string]any{"kind": "ClusterRole", "name": "view"}},
+		full:    bindingProperties(map[string]any{"apiGroup": rbacv1.GroupName, "kind": "ClusterRole", "name": "view"}),
+	},
+}
+
+// policyRule is a rule that grants verbs on one resource of one API group.
+func policyRule(apiGroup, resource string, verbs ...any) map[string]any {
+	return map[string]any{"apiGroups": []any{apiGroup}, "resources": []any{resource}, "verbs": verbs}
+}
+
+// bindingProperties is a binding of roleRef to a subject of each kind.
+func bindingProperties(roleRef map[string]any) map[string]any {
+	return map[string]any{
+		"subjects": []any{
+			map[string]any{"kind": "ServiceAccount", "name": "web", "namespace": "apps"},
+			map[string]any{"kind": "User", "name": "jane", "apiGroup": rbacv1.GroupName},
+			map[string]any{"kind": "Group", "name": "ops", "apiGroup": rbacv1.GroupName},
+		},
+		"roleRef": roleRef,
+	}
+}
+
+// bindingTo is a binding of the role named view, of the given kind, to
+// subjects.
+func bindingTo(kind string, subjects ...any) map[string]any {
+	return map[string]any{"subjects": subjects, "roleRef": map[string]any{"kind": kind, "name": "view"}}
 }
 
 // endpointSlice is an IPv4 endpointslice of the given endpoints.
@@ -1075,6 +1141,17 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Endpoints[0].Zone", ".Endpoints[0].Hints", ".Endpoints[0].Hints.ForZones", ".Endpoints[0].Hints.ForNodes",
 			".Endpoints[1].Addresses", ".Ports", ".Ports[0].Name", ".Ports[0].Protocol", ".Ports[0].Port", ".Ports[0].AppProtocol",
 		},
+		"role": {
+			".Rules", ".Rules[0].Verbs", ".Rules[0].APIGroups", ".Rules[0].Resources", ".Rules[1].ResourceNames",
+		},
+		"rolebinding": {".Subjects"},
+		"clusterrole": {
+			".Rules", ".Rules[0].Verbs", ".Rules[0].APIGroups", ".Rules[0].Resources", ".Rules[0].ResourceNames",
+			".Rules[1].NonResourceURLs", ".AggregationRule", ".AggregationRule.ClusterRoleSelectors",
+			".AggregationRule.ClusterRoleSelectors[0].MatchLabels", ".AggregationRule.ClusterRoleSelectors[0].MatchExpressions",
+			".AggregationRule.ClusterRoleSelectors[0].MatchExpressions[0].Values",
+		},
+		"clusterrolebinding": {".Subjects"},
 	}
 	type copyCase struct {
 		name      string
@@ -1796,6 +1873,65 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"port a name", map[string]any{"addressType": "IPv4", "ports": []any{map[string]any{"port": "http"}}}, notA},
 			{"null endpoint", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}}, nil), "endpoints[1]"},
 			{"two spellings", map[string]any{"addressType": "IPv4", "AddressType": "IPv6"}, "sets the same field as"},
+		},
+		"role": {
+			{"rule without verbs", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}}}}, "rules[0].verbs: required"},
+			{"a later rule's null verbs", map[string]any{"rules": []any{policyRule("", "pods", "get"), map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": nil}}}, "rules[1].verbs: required"},
+			// What the API server requires of a rule beyond the markers.
+			{"rule without apiGroups", map[string]any{"rules": []any{map[string]any{"resources": []any{"pods"}, "verbs": []any{"get"}}}}, "rules[0].apiGroups: required"},
+			{"rule with no API group", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}, "rules[0].apiGroups: required"},
+			{"rule without resources", map[string]any{"rules": []any{policyRule("", "pods", "get"), map[string]any{"apiGroups": []any{""}, "verbs": []any{"get"}}}}, "rules[1].resources: required"},
+			{"non-resource URLs", map[string]any{"rules": []any{map[string]any{"nonResourceURLs": []any{"/healthz"}, "verbs": []any{"get"}}}}, "rules[0].nonResourceURLs: not allowed in a Role"},
+			{"unknown key", map[string]any{"rule": []any{}}, notA + "rbac.authorization.k8s.io/v1 Role"},
+			{"a clusterrole's field", map[string]any{"aggregationRule": map[string]any{}}, notA},
+			{"rule sub-key", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}, "namespaces": []any{"apps"}}}}, notA},
+			{"verbs a string", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": "get"}}}, notA},
+			{"null rule", map[string]any{"rules": []any{policyRule("", "pods", "get"), nil}}, "rules[1]"},
+			{"two spellings", map[string]any{"rules": []any{}, "Rules": []any{}}, "sets the same field as"},
+		},
+		"clusterrole": {
+			{"rule without verbs", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"nodes"}}}}, "rules[0].verbs: required"},
+			{"non-resource rule without verbs", map[string]any{"rules": []any{map[string]any{"nonResourceURLs": []any{"/healthz"}}}}, "rules[0].verbs: required"},
+			{"rule without apiGroups", map[string]any{"rules": []any{map[string]any{"resources": []any{"nodes"}, "verbs": []any{"get"}}}}, "rules[0].apiGroups: required"},
+			{"rule without resources", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "verbs": []any{"get"}}}}, "rules[0].resources: required"},
+			{"non-resource URLs beside resources", map[string]any{"rules": []any{map[string]any{"nonResourceURLs": []any{"/healthz"}, "resources": []any{"nodes"}, "verbs": []any{"get"}}}}, "rules[0].nonResourceURLs: not allowed beside"},
+			{"non-resource URLs beside an API group", map[string]any{"rules": []any{map[string]any{"nonResourceURLs": []any{"/healthz"}, "apiGroups": []any{""}, "verbs": []any{"get"}}}}, "rules[0].nonResourceURLs: not allowed beside"},
+			{"non-resource URLs beside resource names", map[string]any{"rules": []any{map[string]any{"nonResourceURLs": []any{"/healthz"}, "resourceNames": []any{"a"}, "verbs": []any{"get"}}}}, "rules[0].nonResourceURLs: not allowed beside"},
+			{"aggregation rule without selectors", map[string]any{"aggregationRule": map[string]any{}}, "aggregationRule.clusterRoleSelectors: required"},
+			{"aggregation rule with no selector", map[string]any{"aggregationRule": map[string]any{"clusterRoleSelectors": []any{}}}, "aggregationRule.clusterRoleSelectors: required"},
+			{"match expression without key", map[string]any{"aggregationRule": map[string]any{"clusterRoleSelectors": []any{map[string]any{"matchExpressions": []any{map[string]any{"operator": "Exists"}}}}}}, "aggregationRule.clusterRoleSelectors[0].matchExpressions[0].key: required"},
+			{"match expression without operator", map[string]any{"aggregationRule": map[string]any{"clusterRoleSelectors": []any{map[string]any{}, map[string]any{"matchExpressions": []any{map[string]any{"key": "tier"}}}}}}, "aggregationRule.clusterRoleSelectors[1].matchExpressions[0].operator: required"},
+			{"unknown key", map[string]any{"subjects": []any{}}, notA + "rbac.authorization.k8s.io/v1 ClusterRole"},
+			{"aggregation rule sub-key", map[string]any{"aggregationRule": map[string]any{"selectors": []any{}}}, notA},
+			{"selector a string", map[string]any{"aggregationRule": map[string]any{"clusterRoleSelectors": []any{"tier=a"}}}, notA},
+			{"two spellings", map[string]any{"rules": []any{}, "Rules": []any{}}, "sets the same field as"},
+		},
+		"rolebinding": {
+			{"no properties", nil, "roleRef: required"},
+			{"null roleRef", map[string]any{"roleRef": nil}, "roleRef: required"},
+			{"roleRef without kind", map[string]any{"roleRef": map[string]any{"name": "reader"}}, "roleRef.kind: required"},
+			{"roleRef without name", map[string]any{"roleRef": map[string]any{"kind": "Role"}}, "roleRef.name: required"},
+			{"subject without kind", bindingTo("Role", map[string]any{"name": "web"}), "subjects[0].kind: required"},
+			{"a later subject without name", bindingTo("Role", map[string]any{"kind": "User", "name": "jane"}, map[string]any{"kind": "Group"}), "subjects[1].name: required"},
+			{"unknown key", map[string]any{"roleRef": map[string]any{"kind": "Role", "name": "reader"}, "rules": []any{}}, notA + "rbac.authorization.k8s.io/v1 RoleBinding"},
+			{"roleRef sub-key", map[string]any{"roleRef": map[string]any{"kind": "Role", "name": "reader", "namespace": "apps"}}, notA},
+			{"subject sub-key", bindingTo("Role", map[string]any{"kind": "User", "name": "jane", "uid": "1"}), notA},
+			{"roleRef a string", map[string]any{"roleRef": "reader"}, notA},
+			{"null subject", bindingTo("Role", map[string]any{"kind": "User", "name": "jane"}, nil), "subjects[1]"},
+			{"two spellings", map[string]any{"roleRef": map[string]any{"kind": "Role", "name": "a"}, "RoleRef": map[string]any{"kind": "Role", "name": "b"}}, "sets the same field as"},
+		},
+		"clusterrolebinding": {
+			{"no properties", nil, "roleRef: required"},
+			{"roleRef without kind", map[string]any{"roleRef": map[string]any{"name": "view"}}, "roleRef.kind: required"},
+			{"roleRef without name", map[string]any{"roleRef": map[string]any{"kind": "ClusterRole"}}, "roleRef.name: required"},
+			{"subject without kind", bindingTo("ClusterRole", map[string]any{"name": "web"}), "subjects[0].kind: required"},
+			{"subject without name", bindingTo("ClusterRole", map[string]any{"kind": "Group"}), "subjects[0].name: required"},
+			// What the API server requires of a subject beyond the markers.
+			{"ServiceAccount without namespace", bindingTo("ClusterRole", map[string]any{"kind": "User", "name": "jane"}, map[string]any{"kind": "ServiceAccount", "name": "web"}), "subjects[1].namespace: required"},
+			{"ServiceAccount with an empty namespace", bindingTo("ClusterRole", map[string]any{"kind": "ServiceAccount", "name": "web", "namespace": ""}), "subjects[0].namespace: required"},
+			{"unknown key", map[string]any{"roleRef": map[string]any{"kind": "ClusterRole", "name": "view"}, "rules": []any{}}, notA + "rbac.authorization.k8s.io/v1 ClusterRoleBinding"},
+			{"subject sub-key", bindingTo("ClusterRole", map[string]any{"kind": "User", "name": "jane", "uid": "1"}), notA},
+			{"two spellings", map[string]any{"roleRef": map[string]any{"kind": "ClusterRole", "name": "a"}, "RoleRef": map[string]any{"kind": "ClusterRole", "name": "b"}}, "sets the same field as"},
 		},
 	}
 	for _, kind := range policyFreeKinds {

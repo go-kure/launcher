@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	discoveryv1 "k8s.io/api/discovery/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 // builtinMarkerSources maps each Go package whose types the kinds below reach
@@ -18,6 +19,7 @@ import (
 // the source, which the generated OpenAPI is built from.
 var builtinMarkerSources = map[string][2]string{
 	"k8s.io/api/discovery/v1":              {"k8s.io/api", "discovery/v1"},
+	"k8s.io/api/rbac/v1":                   {"k8s.io/api", "rbac/v1"},
 	"k8s.io/api/core/v1":                   {"k8s.io/api", "core/v1"},
 	"k8s.io/apimachinery/pkg/apis/meta/v1": {"k8s.io/apimachinery", "pkg/apis/meta/v1"},
 }
@@ -34,6 +36,10 @@ var builtinMarkerKinds = []struct {
 	emittedEmpty []string
 }{
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), endpointSliceKind.required, []string{"endpoints", "endpoints[].conditions", "ports"}},
+	{"role", reflect.TypeFor[rbacv1.Role](), roleKind.required, []string{"rules"}},
+	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), roleBindingKind.required, []string{"roleRef.apiGroup"}},
+	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), clusterRoleKind.required, []string{"rules"}},
+	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), clusterRoleBindingKind.required, []string{"roleRef.apiGroup"}},
 }
 
 // builtinFieldMarkers reads the markers of every package in

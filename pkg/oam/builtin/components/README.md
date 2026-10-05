@@ -186,6 +186,10 @@ reads it.
 | `referencegrant` | ReferenceGrant | Kind-named Gateway API ReferenceGrant: the whole `ReferenceGrantSpec`, strictly decoded; `from` and `to` are required, with the group, kind and namespace of a source and the group and kind of a target. No capability is required and no environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `endpointslice` | EndpointSlice | Kind-named EndpointSlice: the object's own fields (`addressType`, required; `endpoints`; `ports`), strictly decoded; an endpoint's `addresses` are required. It belongs to a Service through the `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow a Service's `objectName`. Namespaced; no environment policy applies and no capability is required — see below. |
+| `role` | Role | Kind-named RBAC Role: the object's own field (`rules`), strictly decoded; a rule's `verbs`, `apiGroups` and `resources` are required, and `nonResourceURLs` are refused. Namespaced. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
+| `rolebinding` | RoleBinding | Kind-named RBAC RoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required. The names of the role and of the subjects are the author's literals. Namespaced. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
+| `clusterrole` | ClusterRole | Kind-named RBAC ClusterRole: the object's own fields (`rules`, `aggregationRule`), strictly decoded; a rule's `verbs` are required, and either its `apiGroups` and `resources` or its `nonResourceURLs`; an `aggregationRule` needs a selector. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
+| `clusterrolebinding` | ClusterRoleBinding | Kind-named RBAC ClusterRoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required, and a ServiceAccount subject's `namespace`. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -264,8 +268,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
 | `kubernetes.CreateCSIStorageCapacity` | storage.k8s.io/v1 CSIStorageCapacity | not authorable | - | - | Written by a CSI driver's provisioner. |
-| `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | trait | `rbac` | hand-written parser | - |
-| `kubernetes.CreateClusterRoleBinding` | rbac.authorization.k8s.io/v1 ClusterRoleBinding (cluster-scoped) | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateClusterRole` | rbac.authorization.k8s.io/v1 ClusterRole (cluster-scoped) | kind | `clusterrole` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | **Ungated: no capability and no environment-policy check restricts what a role grants.** A rule's `verbs` must be written, and either its `apiGroups` and `resources` or its `nonResourceURLs`; an `aggregationRule` needs a selector. The `rbac` trait emits one too, through its own hand-written parser. |
+| `kubernetes.CreateClusterRoleBinding` | rbac.authorization.k8s.io/v1 ClusterRoleBinding (cluster-scoped) | kind | `clusterrolebinding` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | **Ungated: no capability and no environment-policy check restricts what a role grants.** `roleRef` with its `kind` and `name` must be written, a subject's `kind` and `name`, and a ServiceAccount subject's `namespace`. The names are the author's literals. The `rbac` trait emits one too, through its own hand-written parser. |
 | `kubernetes.CreateComponentStatus` | v1 ComponentStatus (cluster-scoped) | not authorable | - | - | Read-only: the API server computes it. |
 | `kubernetes.CreateConfigMap` | v1 ConfigMap | kind | `configmap` | hand-written parser | The `configmap` trait builds through the same path. |
 | `kubernetes.CreateControllerRevision` | apps/v1 ControllerRevision | not authorable | - | - | Written by the StatefulSet and DaemonSet controllers. |
@@ -306,8 +310,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
 | `kubernetes.CreateReplicationController` | v1 ReplicationController | kind | `replicationcontroller` | strict decode of `ReplicationControllerSpec` | Held to environment policy by the check the rendered paths run on a ReplicationController; the pod template is held as the `replicaset` kind's is, `activeDeadlineSeconds` is refused, and the template gains the `app` label. `selector` is optional. |
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
-| `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | trait | `rbac` | hand-written parser | - |
-| `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | trait | `rbac` | hand-written parser | - |
+| `kubernetes.CreateRole` | rbac.authorization.k8s.io/v1 Role | kind | `role` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | **Ungated: no capability and no environment-policy check restricts what a role grants.** A rule's `verbs`, `apiGroups` and `resources` must be written; `nonResourceURLs` are refused. The `rbac` trait emits one too, through its own hand-written parser. |
+| `kubernetes.CreateRoleBinding` | rbac.authorization.k8s.io/v1 RoleBinding | kind | `rolebinding` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | **Ungated: no capability and no environment-policy check restricts what a role grants.** `roleRef` with its `kind` and `name` must be written, and a subject's `kind` and `name`. The names are the author's literals. The `rbac` trait emits one too, through its own hand-written parser. |
 | `kubernetes.CreateRuntimeClass` | node.k8s.io/v1 RuntimeClass (cluster-scoped) | kind | `runtimeclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `kubernetes.CreateSecret` | v1 Secret | kind | `secret` | hand-written parser | The `secret` trait builds through the same path. The `helm` component's `secretValues` synthesizes the trait. Refused under a policy that forbids explicit secrets, on either path. |
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
@@ -2842,9 +2846,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
   policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
-  the Prometheus operator's API, the four of Cilium's BGP control plane and
-  the five kinds of the Gateway API's infrastructure objects, below, are built
-  on it too. The three kinds
+  the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
+  BGP control plane and the five kinds of the Gateway API's infrastructure
+  objects, below, are built on it too. The three kinds
   of cert-manager's API, below, are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
@@ -3308,6 +3312,120 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     immutable. Launcher does not compare a build with the cluster, so a
     changed one builds here and is refused at apply. Whether a Service of
     the labelled name exists is not checked.
+- **role**, **rolebinding**, **clusterrole**, **clusterrolebinding**
+  (go-kure/launcher#790) are the kind-named projections of the four objects
+  of the `rbac.authorization.k8s.io/v1` API, built on `policyFreeKind`. Each
+  emits that one object, named after the component unless `objectName` names
+  it, holding exactly what was authored: the handler adds no label, no
+  annotation and no default of its own. They are for the grants an
+  application needs that are not those of one workload's own ServiceAccount,
+  which is what the [`rbac` trait](../traits/README.md) writes: a role
+  several bindings share, a binding to a role that already exists, a grant to
+  a user or a group, an aggregated ClusterRole. What the four have in common
+  is stated here once; each kind's entry below holds what is its own.
+  - **Authored:** none of the four has a spec, so the properties are the
+    object's own top-level fields, decoded strictly at every depth. The
+    object's `kind`, `apiVersion` and `metadata` are launcher's and are
+    refused under any spelling.
+  - **Presence rules read by hand.** Beyond the `+required` markers of the
+    linked `k8s.io/api` module, these four kinds check presence rules read by
+    hand from the API server's validation at Kubernetes v1.37.1
+    (`pkg/apis/rbac/validation/validation.go` of `k8s.io/kubernetes`, which
+    no module launcher links holds). No test derives them, and a later
+    Kubernetes that changes one is not noticed by a dependency bump.
+  - **Required from the markers** are the fields the API's source marks
+    required and the Go type writes whether or not they were authored.
+    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives each kind's list
+    from the markers and fails on a dependency bump that changes it. The API
+    marks no field of the four required that the type leaves out when
+    unauthored; the same test fails if one appears. These checks are of
+    presence: an authored empty value (`verbs: []`, `name: ""`) builds and is
+    the API server's to refuse.
+  - **A rule** (`rules[]` of a `role` or a `clusterrole`) must write its
+    `verbs` (`rules[0].verbs: required …`, from the markers). By hand: it
+    must name at least one of `apiGroups` and at least one of `resources`
+    (`rules[0].apiGroups: required …`; `""` is the core group), so a rule
+    that lost its resources and grants nothing is refused. A `clusterrole`
+    rule may instead name `nonResourceURLs`, and then names no `apiGroups`,
+    `resources` or `resourceNames`
+    (`rules[0].nonResourceURLs: not allowed beside …`). These two hand-read
+    checks count what was decoded, so an authored empty `apiGroups: []` or
+    `resources: []` is refused too.
+  - **A binding** (`rolebinding`, `clusterrolebinding`) must write `roleRef`
+    with its `kind` and `name`, and each subject's `kind` and `name`
+    (`roleRef: required …`, `subjects[0].name: required …`, from the
+    markers). `subjects` may be left out: the API server's validation
+    requires none, and the key is then not written.
+  - **`roleRef.apiGroup` may be left out.** The object then carries
+    `apiGroup: ""`, which the type always writes, and the API server fills
+    the RBAC group before it validates. An authored group that is not the
+    RBAC group is written as authored and is the API server's to refuse. A
+    User or Group subject may leave its `apiGroup` out too: the key is then
+    not written, and the API server fills the RBAC group the same way.
+  - **The names are the author's literals.** `roleRef.name` and a subject's
+    `name` and `namespace` are written as authored. Launcher points none of
+    them at a component: a `roleRef.name` does not follow the `objectName`
+    of a `role` or `clusterrole` component, and a ServiceAccount subject's
+    name does not follow a `serviceaccount` component's, so write the name
+    the object takes. Whether the role or the subject exists is not checked.
+  - **Policy.** No field of the four is one an `oam.Policy` method speaks
+    to, so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Beside the `rbac` trait.** A trait's object and a component's of one
+    kind, name and namespace (or one cluster-scoped name) are refused: the
+    trait resolves the name of each object it generates, and the transform
+    reports a name collision that names both.
+  - **Not covered.** Every rule on the form of a value is left to the API
+    server: that a `roleRef` names the RBAC group and a kind the binding
+    may grant, the kind and API group of a subject, the form of its name,
+    and whether the `values` of a match expression of an aggregation
+    selector fit its `operator`. Whether a verb, a resource or an API group
+    exists, and the form of a non-resource URL, are checked by neither
+    launcher nor the API server's validation: a rule that names none that
+    exists builds and passes that validation. The API server refuses a change to the `roleRef` of an
+    existing binding. Launcher does not compare a build with the cluster, so
+    a changed one builds here and is refused at apply. Launcher does not
+    compare what a role grants with what its author, or whoever applies the
+    object, may grant.
+- **role** emits its Role in the build namespace; the handler declares its
+  object as namespaced, so the object name is claimed in the object's
+  namespace. **It is ungated: no capability and no environment-policy check
+  restricts what a role grants.** Its one property is `rules`.
+  `nonResourceURLs` are refused in a rule
+  (`rules[0].nonResourceURLs: not allowed in a Role …`): a non-resource URL
+  is not namespaced, and the API server refuses one in a Role. The API
+  requires no rule, and the type always writes the list: a role that authors
+  none carries `rules: null` and grants nothing, and an authored empty list
+  is written as `[]`.
+- **rolebinding** emits its RoleBinding in the build namespace; the handler
+  declares its object as namespaced, so the object name is claimed in the
+  object's namespace. **It is ungated: no capability and no
+  environment-policy check restricts what a role grants**, nor to whom: a
+  binding to any role the cluster holds, `cluster-admin` included, builds.
+  Its properties are `subjects` and `roleRef`, which names a Role of the
+  binding's namespace or a ClusterRole. A ServiceAccount subject may leave
+  its `namespace` out: the API server's validation takes it, the key is not
+  written, and the authorizer of that version reads the subject as one of
+  the binding's own namespace.
+- **clusterrole** emits its ClusterRole with no namespace; the handler
+  declares its object as cluster-scoped, so the object name is claimed
+  cluster-wide. **It is ungated: no capability and no environment-policy
+  check restricts what a role grants.** Its properties are `rules` and
+  `aggregationRule`. By hand: an authored `aggregationRule` must hold at
+  least one entry of `clusterRoleSelectors`
+  (`aggregationRule.clusterRoleSelectors: required …`); an empty selector
+  (`{}`) is an entry. From the markers, a selector's match expression must
+  write its `key` and `operator`. An aggregated ClusterRole builds: it is
+  emitted with `rules: null` when `rules` is not authored and with
+  `rules: []` when authored so, and the control plane fills the rules.
+- **clusterrolebinding** emits its ClusterRoleBinding with no namespace; the
+  handler declares its object as cluster-scoped, so the object name is
+  claimed cluster-wide. **It is ungated: no capability and no
+  environment-policy check restricts what a role grants**, nor to whom: a
+  binding of `cluster-admin` to any subject builds. Its properties are
+  `subjects` and `roleRef`, which names a ClusterRole. By hand: a
+  ServiceAccount subject must write its `namespace`
+  (`subjects[0].namespace: required …`), since the binding is in none.
 - **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
   projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
   one object in the build namespace, named after the component unless
@@ -7401,7 +7519,8 @@ kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometh
 `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`),
 five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`,
 `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`),
-`cilium-clusterwidenetworkpolicy`, `endpointslice`,
+`cilium-clusterwidenetworkpolicy`, `endpointslice`, the four kinds of the RBAC API (`role`,
+`rolebinding`, `clusterrole`, `clusterrolebinding`),
 the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`),
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

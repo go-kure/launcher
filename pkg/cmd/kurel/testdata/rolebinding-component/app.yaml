@@ -1,0 +1,36 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: pod-reader
+      type: role
+      properties:
+        rules:
+          - apiGroups: [""]
+            resources: [pods]
+            verbs: [get, list]
+    - name: read-pods
+      type: rolebinding
+      properties:
+        subjects:
+          - kind: ServiceAccount
+            name: web
+          - kind: User
+            name: jane
+            apiGroup: rbac.authorization.k8s.io
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: Role
+          name: pod-reader
+    - name: view
+      type: rolebinding
+      properties:
+        subjects:
+          - kind: Group
+            name: ops
+        roleRef:
+          kind: ClusterRole
+          name: view

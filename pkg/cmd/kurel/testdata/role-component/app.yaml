@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: pod-reader
+      type: role
+      properties:
+        rules:
+          - apiGroups: [""]
+            resources: [pods, pods/log]
+            verbs: [get, list, watch]
+          - apiGroups: [apps]
+            resources: [deployments]
+            resourceNames: [web]
+            verbs: [patch]
+    - name: grants-nothing
+      type: role
+      properties:
+        objectName: empty
