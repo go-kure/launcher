@@ -222,6 +222,7 @@ func assertOrdered(t *testing.T, cluster *stack.Cluster, own []string, groups []
 	if len(cluster.Node.Children) != 0 {
 		t.Errorf("root node has %d child nodes, want none: an application is one bundle", len(cluster.Node.Children))
 	}
+	assertRootNodeUnnamed(t, cluster)
 	if got := applicationNames(root); !slices.Equal(got, own) {
 		t.Errorf("application bundle's own applications = %v, want %v", got, own)
 	}
@@ -253,8 +254,19 @@ func assertFlat(t *testing.T, cluster *stack.Cluster, applications []string) {
 	if root.IsUmbrella() || len(cluster.Node.Children) != 0 {
 		t.Fatalf("got %d groups and %d child nodes, want one flat bundle", len(root.Children), len(cluster.Node.Children))
 	}
+	assertRootNodeUnnamed(t, cluster)
 	if got := applicationNames(root); !slices.Equal(got, applications) {
 		t.Errorf("applications = %v, want %v", got, applications)
+	}
+}
+
+// assertRootNodeUnnamed checks that the cluster's root node has no name, as it
+// has none whether or not the components are ordered: a named root node is a
+// directory of its own above the application bundle's (go-kure/launcher#783).
+func assertRootNodeUnnamed(t *testing.T, cluster *stack.Cluster) {
+	t.Helper()
+	if cluster.Node.Name != "" {
+		t.Errorf("root node name = %q, want none", cluster.Node.Name)
 	}
 }
 
