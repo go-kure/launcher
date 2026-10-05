@@ -29,9 +29,10 @@ import (
 // It rejects untagged images and images using the :latest tag, including a
 // digest reference that still carries an explicit :latest tag
 // (`repo:latest@sha256:...`). The digest pins the content, but the tag stays
-// part of the reference and a cluster is free to read it; since this package
-// stopped writing imagePullPolicy itself (go-kure/launcher#361) nothing here
-// overrides how it does. hasExplicitLatestTag already strips the digest before
+// part of the reference and a cluster is free to read it; this package writes
+// no imagePullPolicy of its own (go-kure/launcher#361), only the one a
+// component authors (ContainerFields), so without that nothing here overrides
+// how the cluster does. hasExplicitLatestTag already strips the digest before
 // looking for the tag, which only this call site exercises.
 // Digest references are otherwise accepted.
 func ValidateImageRef(image string) error {
@@ -195,6 +196,9 @@ type InitContainerConfig struct {
 	VolumeDevices   []corev1.VolumeDevice
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
+	// Fields are the container fields every container of the pod accepts
+	// (parseContainerFields).
+	Fields ContainerFields
 }
 
 // SidecarContainerConfig holds the parsed OAM fields for a sidecar container.
@@ -213,6 +217,9 @@ type SidecarContainerConfig struct {
 	WorkingDir      string
 	Probes          ProbeConfig
 	Lifecycle       *corev1.Lifecycle
+	// Fields are the container fields every container of the pod accepts
+	// (parseContainerFields).
+	Fields ContainerFields
 }
 
 // initContainerPropertyKeys is the accepted key set of one `initContainers`
@@ -225,15 +232,18 @@ type SidecarContainerConfig struct {
 // the keys they knew and ignored the rest, and the entry schema was published
 // with AdditionalProperties, so an authored workingDir, envFrom, probes or
 // lifecycle built cleanly and reached no container.
+//
+// Both end with containerFieldKeys, the fields parseContainerFields reads for
+// every container of the pod (go-kure/launcher#790).
 var (
-	initContainerPropertyKeys = []string{
+	initContainerPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
 		"volumeMounts", "volumeDevices", "securityContext", "workingDir",
-	}
-	sidecarPropertyKeys = []string{
+	}, containerFieldKeys...)
+	sidecarPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
 		"volumeMounts", "volumeDevices", "securityContext", "workingDir", "ports", "probes", "lifecycle",
-	}
+	}, containerFieldKeys...)
 )
 
 // initContainerRejectedKeys names the keys a sidecar accepts that an init
@@ -2994,6 +3004,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		} else if present {
 			ic.WorkingDir = wd
 		}
+		if ic.Fields, err = parseContainerFields(m, true); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
 		out = append(out, ic)
 	}
 	return out, nil
@@ -3099,6 +3112,9 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		}
 		sc.Lifecycle = lifecycle
 		if err := checkNamedPortsDeclared(sc.Probes, sc.Lifecycle, sc.Ports, "this sidecar"); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
+		if sc.Fields, err = parseContainerFields(m, false); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		out = append(out, sc)
@@ -4679,6 +4695,7 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container.VolumeDevices = copyVolumeDevices(ic.VolumeDevices)
 	container.EnvFrom = copyEnvFrom(ic.EnvFrom)
 	container.WorkingDir = ic.WorkingDir
+	ic.Fields.apply(container)
 	return container, nil
 }
 
@@ -4727,6 +4744,7 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	container.LivenessProbe = sc.Probes.Liveness.DeepCopy()
 	container.StartupProbe = sc.Probes.Startup.DeepCopy()
 	container.Lifecycle = sc.Lifecycle.DeepCopy()
+	sc.Fields.apply(container)
 	return container, nil
 }
 

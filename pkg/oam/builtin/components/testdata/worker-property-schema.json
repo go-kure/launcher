@@ -324,6 +324,15 @@
     "description": "Container image reference for the main container.",
     "required": true
   },
+  "imagePullPolicy": {
+    "type": "string",
+    "description": "When the kubelet pulls the container image. Omitted, the API server defaults it from the image reference. No environment policy gates it: Never and IfNotPresent run whatever image a node already holds under that reference.",
+    "enum": [
+      "Always",
+      "IfNotPresent",
+      "Never"
+    ]
+  },
   "imagePullSecrets": {
     "type": "array",
     "description": "Secrets in the component's namespace holding registry credentials for pulling the pod's images.",
@@ -535,10 +544,47 @@
           "description": "Container image reference.",
           "required": true
         },
+        "imagePullPolicy": {
+          "type": "string",
+          "description": "When the kubelet pulls the container image. Omitted, the API server defaults it from the image reference. No environment policy gates it: Never and IfNotPresent run whatever image a node already holds under that reference.",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
         "name": {
           "type": "string",
           "description": "Container name.",
           "required": true
+        },
+        "resizePolicy": {
+          "type": "array",
+          "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+          "items": {
+            "type": "object",
+            "description": "The resize policy of one resource; a resource may be named once.",
+            "properties": {
+              "resourceName": {
+                "type": "string",
+                "description": "The resource this policy applies to.",
+                "required": true,
+                "enum": [
+                  "cpu",
+                  "memory"
+                ]
+              },
+              "restartPolicy": {
+                "type": "string",
+                "description": "Whether the container is restarted when the resource is resized.",
+                "required": true,
+                "enum": [
+                  "NotRequired",
+                  "RestartContainer"
+                ]
+              }
+            }
+          }
         },
         "resources": {
           "type": "object",
@@ -711,6 +757,30 @@
               }
             }
           }
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Keep a stdin buffer allocated for the container. The API default is false."
+        },
+        "stdinOnce": {
+          "type": "boolean",
+          "description": "Close the stdin channel after the first attach session ends. It has an effect only with stdin: true."
+        },
+        "terminationMessagePath": {
+          "type": "string",
+          "description": "Path in the container the termination message is read from. The API default is /dev/termination-log."
+        },
+        "terminationMessagePolicy": {
+          "type": "string",
+          "description": "Where the termination message comes from: File reads terminationMessagePath, FallbackToLogsOnError uses the tail of the container log when that file is empty and the container failed. The API default is File.",
+          "enum": [
+            "File",
+            "FallbackToLogsOnError"
+          ]
+        },
+        "tty": {
+          "type": "boolean",
+          "description": "Allocate a TTY for the container. It needs stdin: true."
         },
         "volumeDevices": {
           "type": "array",
@@ -1080,6 +1150,34 @@
     "type": "integer",
     "description": "Number of Deployment pod replicas.",
     "default": 1
+  },
+  "resizePolicy": {
+    "type": "array",
+    "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+    "items": {
+      "type": "object",
+      "description": "The resize policy of one resource; a resource may be named once.",
+      "properties": {
+        "resourceName": {
+          "type": "string",
+          "description": "The resource this policy applies to.",
+          "required": true,
+          "enum": [
+            "cpu",
+            "memory"
+          ]
+        },
+        "restartPolicy": {
+          "type": "string",
+          "description": "Whether the container is restarted when the resource is resized.",
+          "required": true,
+          "enum": [
+            "NotRequired",
+            "RestartContainer"
+          ]
+        }
+      }
+    }
   },
   "resourceClaims": {
     "type": "array",
@@ -1522,6 +1620,15 @@
           "description": "Container image reference.",
           "required": true
         },
+        "imagePullPolicy": {
+          "type": "string",
+          "description": "When the kubelet pulls the container image. Omitted, the API server defaults it from the image reference. No environment policy gates it: Never and IfNotPresent run whatever image a node already holds under that reference.",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
         "lifecycle": {
           "type": "object",
           "description": "Lifecycle hooks run by the kubelet around container start/stop (exec, httpGet, or sleep).",
@@ -1590,6 +1697,34 @@
               "type": "object",
               "description": "Startup probe determining when the container has finished starting.",
               "additionalProperties": true
+            }
+          }
+        },
+        "resizePolicy": {
+          "type": "array",
+          "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+          "items": {
+            "type": "object",
+            "description": "The resize policy of one resource; a resource may be named once.",
+            "properties": {
+              "resourceName": {
+                "type": "string",
+                "description": "The resource this policy applies to.",
+                "required": true,
+                "enum": [
+                  "cpu",
+                  "memory"
+                ]
+              },
+              "restartPolicy": {
+                "type": "string",
+                "description": "Whether the container is restarted when the resource is resized.",
+                "required": true,
+                "enum": [
+                  "NotRequired",
+                  "RestartContainer"
+                ]
+              }
             }
           }
         },
@@ -1765,6 +1900,30 @@
             }
           }
         },
+        "stdin": {
+          "type": "boolean",
+          "description": "Keep a stdin buffer allocated for the container. The API default is false."
+        },
+        "stdinOnce": {
+          "type": "boolean",
+          "description": "Close the stdin channel after the first attach session ends. It has an effect only with stdin: true."
+        },
+        "terminationMessagePath": {
+          "type": "string",
+          "description": "Path in the container the termination message is read from. The API default is /dev/termination-log."
+        },
+        "terminationMessagePolicy": {
+          "type": "string",
+          "description": "Where the termination message comes from: File reads terminationMessagePath, FallbackToLogsOnError uses the tail of the container log when that file is empty and the container failed. The API default is File.",
+          "enum": [
+            "File",
+            "FallbackToLogsOnError"
+          ]
+        },
+        "tty": {
+          "type": "boolean",
+          "description": "Allocate a TTY for the container. It needs stdin: true."
+        },
         "volumeDevices": {
           "type": "array",
           "description": "Raw block volumes to attach to this container, by the name of a `volumes` pvc entry or claim template authored with volumeMode: Block.",
@@ -1821,6 +1980,14 @@
       }
     }
   },
+  "stdin": {
+    "type": "boolean",
+    "description": "Keep a stdin buffer allocated for the container. The API default is false."
+  },
+  "stdinOnce": {
+    "type": "boolean",
+    "description": "Close the stdin channel after the first attach session ends. It has an effect only with stdin: true."
+  },
   "strategy": {
     "type": "object",
     "description": "How pods are replaced when the pod template changes. Unset leaves the API default (RollingUpdate with maxUnavailable and maxSurge both 25%).",
@@ -1866,10 +2033,26 @@
     "type": "integer",
     "description": "Seconds the pod is given to terminate gracefully after a delete request. Must be \u003e= 0; the API default is 30."
   },
+  "terminationMessagePath": {
+    "type": "string",
+    "description": "Path in the container the termination message is read from. The API default is /dev/termination-log."
+  },
+  "terminationMessagePolicy": {
+    "type": "string",
+    "description": "Where the termination message comes from: File reads terminationMessagePath, FallbackToLogsOnError uses the tail of the container log when that file is empty and the container failed. The API default is File.",
+    "enum": [
+      "File",
+      "FallbackToLogsOnError"
+    ]
+  },
   "topologySpread": {
     "type": "boolean",
     "description": "Whether default topology spread constraints are applied across nodes.",
     "default": true
+  },
+  "tty": {
+    "type": "boolean",
+    "description": "Allocate a TTY for the container. It needs stdin: true."
   },
   "volumes": {
     "type": "array",

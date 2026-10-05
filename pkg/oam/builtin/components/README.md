@@ -936,7 +936,8 @@ below — see that prose for the field list rather than restating it here;
 each entry is a **closed key set** (go-kure/launcher#321): an
 `initContainers` entry accepts `name`, `image`, `command`, `args`, `env`,
 `envFrom`, `resources`, `volumeMounts`, `volumeDevices` (see "Raw block
-volumes" below), `securityContext` and `workingDir`,
+volumes" below), `securityContext`, `workingDir` and the seven keys of
+"Container fields" below,
 and a `sidecars` entry those plus `ports`, `probes` and `lifecycle`, each
 parsed by the same parser as the main container's field of that name. Any
 other key is an error naming the entry — before that the parsers read the
@@ -1025,6 +1026,67 @@ message, as the last step of its parse, as a pre-GA format change too
 before, into a Deployment the API server rejects. A webservice's name is
 checked against the Service-name rule first, so an over-long name is refused
 there, before this check.
+
+### Container fields
+
+Seven `corev1.Container` fields are read on every container of a hand-parsed
+workload kind (go-kure/launcher#790): as top-level keys for the main container
+of `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` — and of
+`webservice` and `worker`, which forward them to their `deployment` member — and
+as keys of each `initContainers` and `sidecars` entry. One parser
+(`parseContainerFields`, `container_fields.go`) and one schema fragment
+(`schemaContainerFields`) serve the three positions, pinned to each other by
+`TestContainerFieldsSchemaMatchesParser`.
+
+| Property | Type | Effect |
+|---|---|---|
+| `imagePullPolicy` | string: `Always`, `IfNotPresent`, `Never` | `imagePullPolicy` of the container. |
+| `terminationMessagePath` | string | `terminationMessagePath`, passed through: upstream validates no path shape for it, so none is invented here. |
+| `terminationMessagePolicy` | string: `File`, `FallbackToLogsOnError` | `terminationMessagePolicy`. |
+| `stdin`, `stdinOnce`, `tty` | boolean | The field of that name. Upstream has no rule relating the three, so none is applied. |
+| `resizePolicy` | list of `{resourceName, restartPolicy}` | `resizePolicy`. Both keys are required; `resourceName` is `cpu` or `memory`, `restartPolicy` is `NotRequired` or `RestartContainer`; a resource is named once. |
+
+- **Nothing is defaulted.** A field that is not authored is not emitted, which
+  leaves the API server's own defaults in force (for `imagePullPolicy` see
+  [Every spec field is this package's to write](#every-spec-field-is-this-packages-to-write)).
+  An authored `false` on a boolean is the field's zero value and renders as
+  absent too.
+- **No policy check.** `imagePullPolicy: Never` and `IfNotPresent` are accepted
+  with no capability gate and no `Policy` method: a platform that requires
+  `Always` has to enforce it at admission.
+- An explicit null is absence (see [The null contract](#the-null-contract)), and
+  so is an empty string on `terminationMessagePath` (`parseStringField`'s
+  convention) and an empty `resizePolicy` list. An empty string on
+  `imagePullPolicy` or `terminationMessagePolicy` is refused, as any value
+  outside the enum is: by property validation in a document, and by the parser
+  with the message below. The enum values are case-sensitive, as upstream:
+  `imagePullPolicy: always` is refused with
+  `imagePullPolicy: invalid value "always", must be one of Always, IfNotPresent, Never`.
+- The `resizePolicy` rules are upstream's (`validateResizePolicy`,
+  `validateInitContainers` in `k8s.io/kubernetes`
+  `pkg/apis/core/validation/validation.go`), checked at build time so the author
+  gets the entry named instead of an admission error:
+  - an unknown key, a missing key, a resource other than `cpu`/`memory`, an
+    unknown restart policy and a repeated resource are each refused by entry
+    (`resizePolicy[1].resourceName: "cpu" is named by an earlier entry; …`);
+  - `RestartContainer` is refused on an `initContainers` entry: Kubernetes
+    allows it only on a restartable init container, which this package does not
+    model. `NotRequired` is accepted there;
+  - on a pod whose `restartPolicy` is `Never` — which only `job` and `cronjob`
+    can author — every container's restart policy must be `NotRequired`. That
+    check runs on the assembled pod spec (`checkResizePolicyRestart`), so it is
+    reported at `Generate`, not at `ToApplicationConfig`.
+- On an `initContainers` or `sidecars` entry every message carries the entry
+  label first (`sidecars[0] "proxy": tty: must be a boolean, got string`).
+
+Two container fields stay unread: `restartPolicy`, which on an init container
+is what makes it restartable (a native sidecar) — a container this package does
+not model, the same reason `probes` and `lifecycle` are refused on an init
+entry — and `restartPolicyRules`, which upstream accepts only together with
+`restartPolicy` (`validateContainerRestartPolicy`). Both are refused as unknown
+keys on an `initContainers` or `sidecars` entry. At the top level neither is a
+container key either: `restartPolicy` there is the *pod's* restart policy, a
+key of `job` and `cronjob` only, and unknown on the other kinds.
 
 ### Referencing an existing claim (`pvc.claimName`)
 
@@ -4750,7 +4812,9 @@ and its matching pod labels itself.
 used to write `imagePullPolicy: IfNotPresent` onto every container and
 `podManagementPolicy: OrderedReady` onto every StatefulSet; neither is emitted
 now. `OrderedReady` is the apiserver's own default for that field, so that one
-is unchanged in effect. For `imagePullPolicy`, Kubernetes defaults an omitted
+is unchanged in effect. `imagePullPolicy` is written only when a component
+authors it (see [Container fields](#container-fields)); what follows is about
+the omitted case. Kubernetes defaults an omitted
 value from the image reference and keys that decision on the `latest` tag, so
 what matters here is that no accepted image can carry one: `ValidateImageRef`
 (`common.go`) refuses an untagged reference and an explicit `:latest` tag on

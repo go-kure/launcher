@@ -1174,6 +1174,9 @@ type mainContainerInput struct {
 	// VolumeDevices are the volumeMode: Block volumes the main container
 	// attaches as raw block devices (go-kure/launcher#385).
 	VolumeDevices []corev1.VolumeDevice
+	// Fields are the container fields every container of the pod accepts
+	// (parseContainerFields).
+	Fields ContainerFields
 }
 
 // buildMainContainer builds the main container of every workload kind.
@@ -1231,6 +1234,7 @@ func buildMainContainer(name string, in mainContainerInput) (*corev1.Container, 
 	}
 	container.VolumeMounts = append(container.VolumeMounts, in.VolumeMounts...)
 	container.VolumeDevices = copyVolumeDevices(in.VolumeDevices)
+	in.Fields.apply(container)
 	return container, nil
 }
 
@@ -1334,6 +1338,9 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 		ps.AutomountServiceAccountToken = &automount
 	}
 	if err := validateContainerOSFields(&ps); err != nil {
+		return corev1.PodSpec{}, err
+	}
+	if err := checkResizePolicyRestart(&ps); err != nil {
 		return corev1.PodSpec{}, err
 	}
 	if err := validateEffectiveRunAsUser(&ps); err != nil {

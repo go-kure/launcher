@@ -541,7 +541,7 @@ func schemaVolumes() oam.PropertySchema {
 // parser. A `volumeMounts` item stays open, as the `volumes` items do: its
 // parser reads name/mountPath/readOnly/subPath and rejects nothing else yet.
 func schemaContainerEntry() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return withContainerFields(map[string]oam.PropertySchema{
 		"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
 		"command":         schemaStringArray(),
@@ -580,7 +580,7 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 				},
 			},
 		},
-	}
+	})
 }
 
 // schemaInitContainers describes the `initContainers` property. An init

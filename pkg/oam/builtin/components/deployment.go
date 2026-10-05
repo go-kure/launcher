@@ -85,6 +85,7 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	return m
@@ -194,6 +195,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	} else if present {
 		config.WorkingDir = workingDir
 	}
+	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+		return nil, err
+	}
 
 	parsed, err := parsePodVolumes(props)
 	if err != nil {
@@ -277,6 +281,9 @@ type DeploymentConfig struct {
 	Lifecycle       *corev1.Lifecycle
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
+	// ContainerFields are the main container's fields every container of the
+	// pod accepts (see parseContainerFields).
+	ContainerFields ContainerFields
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
 	VolumeDevices   []corev1.VolumeDevice
@@ -420,6 +427,7 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 		VolumeDevices:   c.VolumeDevices,
+		Fields:          c.ContainerFields,
 	})
 	if err != nil {
 		return nil, err

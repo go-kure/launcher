@@ -602,7 +602,12 @@ be closed at build time.
   - `statefulset`: `tolerations`, `topologySpreadConstraints`;
   - `daemonset`: `affinity`, `topologySpreadConstraints`;
   - `job`, `cronjob`: `affinity`, `tolerations`, `topologySpreadConstraints`;
-  - all workloads: `imagePullPolicy` and further container and pod fields;
+  - all workloads: the container fields `restartPolicy` and `restartPolicyRules` (a
+    restartable init container, which the package does not model) and the pod field
+    `evictionResponders`. `imagePullPolicy`, `terminationMessagePath`,
+    `terminationMessagePolicy`, `stdin`, `stdinOnce`, `tty` and `resizePolicy` are read
+    on the main container, on an init container and on a sidecar (README "Container
+    fields");
   - `service`: `ExternalName` (refused today: not in `serviceTypes`,
     `pkg/oam/builtin/components/service.go`), traffic policies, load-balancer fields;
   - `persistentvolumeclaim`: `dataSource`, `dataSourceRef`, `selector`, `volumeName`.

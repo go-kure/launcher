@@ -40,6 +40,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"volumes":         schemaVolumes(),
 		"initContainers":  schemaInitContainers(),
 	}
+	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDaemonSetSpec())
 	return m
@@ -113,6 +114,9 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	} else if present {
 		config.WorkingDir = workingDir
 	}
+	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+		return nil, err
+	}
 
 	tolerations, err := parseTolerations(props)
 	if err != nil {
@@ -170,6 +174,9 @@ type DaemonsetConfig struct {
 	Lifecycle       *corev1.Lifecycle
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
+	// ContainerFields are the main container's fields every container of the
+	// pod accepts (see parseContainerFields).
+	ContainerFields ContainerFields
 	Tolerations     []corev1.Toleration
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
@@ -270,6 +277,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 		VolumeDevices:   c.VolumeDevices,
+		Fields:          c.ContainerFields,
 	})
 	if err != nil {
 		return nil, err
