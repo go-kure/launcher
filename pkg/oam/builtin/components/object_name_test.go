@@ -9,9 +9,11 @@ import (
 
 // A kind handler driven directly, outside a transform, is given a component the
 // engine resolved no object name for: the object keeps the component name. The
-// engine reads `objectName` and removes it before the handler runs; a handler
-// handed the property all the same does not read it, and its own schema, which
-// the engine adds the property to, does not declare it.
+// engine reads `objectName` and removes it before the handler runs; these three
+// handlers, handed the property all the same, pass over it, and their own
+// schema, which the engine adds the property to, does not declare it. A handler
+// that decodes its properties strictly refuses it instead; the walk over every
+// kind is pkg/cmd/kurel's TestObjectName_HandlerDrivenDirectly.
 func TestKindHandler_DrivenDirectly(t *testing.T) {
 	for typ, tc := range map[string]struct {
 		handler oam.ComponentHandler

@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -150,8 +151,9 @@ func TestObjectName_Refusals(t *testing.T) {
 	}
 }
 
-// A component a lowering rule emitted is named by its rule: the hook is not
-// asked for its object, and `objectName` on it is refused.
+// A member a component lowering rule emitted is named by its rule: the hook is
+// not asked for its object, and `objectName` on it is refused, in words that
+// name the rule kinds that emit a member.
 func TestObjectName_EmittedMember(t *testing.T) {
 	emit := func(props map[string]any) *Transformer {
 		tr := NewTransformer(map[string]ComponentHandler{"widget": kindStub("widget", widgetKind, ObjectScopeNamespaced)}, nil)
@@ -173,8 +175,121 @@ func TestObjectName_EmittedMember(t *testing.T) {
 	}
 
 	_, _, err := emit(map[string]any{"objectName": "renamed"}).TransformWithPolicy(doc(), TransformContext{})
-	if err == nil || !strings.Contains(err.Error(), "objectName") || !strings.Contains(err.Error(), "lowering rule") {
-		t.Fatalf("err = %v\nwant objectName refused on a component a lowering rule emitted", err)
+	if err == nil || !strings.Contains(err.Error(), "objectName is set on a component a component or trait lowering rule emitted") {
+		t.Fatalf("err = %v\nwant objectName refused on a member a component rule emitted", err)
+	}
+}
+
+// copyingDocRule is testDocRule building its components anew, by value, where
+// testDocRule forwards the ones it was given.
+type copyingDocRule struct{ testDocRule }
+
+func (r copyingDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	res, err := r.testDocRule.LowerDocument(doc, lctx)
+	if err == nil {
+		res.Documents[0].Spec.Components = append([]Component(nil), doc.Spec.Components...)
+	}
+	return res, err
+}
+
+// What a document rule returns is authored input, the components it forwards
+// and the ones it builds alike: `objectName` names the object of a kind
+// component there, and without one the hook is asked.
+func TestObjectName_ThroughADocumentRule(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		rule DocumentLoweringRule
+	}{
+		{name: "a forwarded component", rule: testDocRule{kind: "Wrapper"}},
+		{name: "a component the rule built", rule: copyingDocRule{testDocRule{kind: "Wrapper"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			transform := func(props map[string]any, asked *[]NameRequest) string {
+				t.Helper()
+				h := kindStub("widget", widgetKind, ObjectScopeNamespaced)
+				tr := NewTransformer(map[string]ComponentHandler{"widget": h}, nil)
+				tr.RegisterDocumentLowering(tt.rule)
+				doc := siblingDoc(widget("web", props))
+				doc.Kind = "Wrapper"
+				if _, _, err := tr.TransformWithPolicy(doc, TransformContext{Naming: objectHook(map[string]string{"web": "hooked"}, asked)}); err != nil {
+					t.Fatalf("transform: %v", err)
+				}
+				return h.names["web"]
+			}
+
+			var asked []NameRequest
+			if got := transform(map[string]any{"objectName": "renamed"}, &asked); got != "renamed" {
+				t.Errorf("object name %q, want the authored one", got)
+			}
+			if len(asked) != 0 {
+				t.Errorf("the hook was asked %+v though the author named the object", asked)
+			}
+			if got := transform(nil, &asked); got != "hooked" {
+				t.Errorf("object name %q, want the hook's", got)
+			}
+			if len(asked) != 1 {
+				t.Errorf("the hook was asked %d times for the object, want once", len(asked))
+			}
+		})
+	}
+}
+
+// widgetRawRule is testRawRule writing one widget component, with the
+// `objectName` its document's author gave it, if any.
+type widgetRawRule struct {
+	testRawRule
+	objectName string
+}
+
+func (r widgetRawRule) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
+	res, err := r.testRawRule.LowerDocument(doc, lctx)
+	if err == nil {
+		props := map[string]any{}
+		if r.objectName != "" {
+			props["objectName"] = r.objectName
+		}
+		res.Documents[0].Spec.Components[0].Properties = props
+	}
+	return res, err
+}
+
+// What a raw document rule writes is authored input too: LowerRaws keeps an
+// `objectName` on a kind component, and the transform of what it returns names
+// the object by it, or asks the hook without one.
+func TestObjectName_ThroughARawDocumentRule(t *testing.T) {
+	transform := func(objectName string, asked *[]NameRequest) string {
+		t.Helper()
+		// Registered under a type name the parser knows, since what LowerRaws
+		// returns is parsed before it is transformed.
+		h := kindStub("configmap", widgetKind, ObjectScopeNamespaced)
+		tr := NewTransformer(map[string]ComponentHandler{"configmap": h}, nil)
+		tr.RegisterRawDocumentLowering(widgetRawRule{testRawRule: testRawRule{kind: "WebApplication", compType: "configmap"}, objectName: objectName})
+		out, err := tr.LowerRaws([]json.RawMessage{rawWebApplication("shop")}, TransformContext{})
+		if err != nil || len(out) != 1 {
+			t.Fatalf("LowerRaws = %d documents, %v; want one", len(out), err)
+		}
+		doc, err := Parse(out[0])
+		if err != nil {
+			t.Fatalf("parse the lowered document: %v\n%s", err, out[0])
+		}
+		if _, _, err := tr.TransformWithPolicy(doc, TransformContext{Naming: objectHook(map[string]string{"web": "hooked"}, asked)}); err != nil {
+			t.Fatalf("transform: %v", err)
+		}
+		return h.names["web"]
+	}
+
+	var asked []NameRequest
+	if got := transform("renamed", &asked); got != "renamed" {
+		t.Errorf("object name %q, want the authored one", got)
+	}
+	if len(asked) != 0 {
+		t.Errorf("the hook was asked %+v though the author named the object", asked)
+	}
+	if got := transform("", &asked); got != "hooked" {
+		t.Errorf("object name %q, want the hook's", got)
+	}
+	if len(asked) != 1 {
+		t.Errorf("the hook was asked %d times for the object, want once", len(asked))
 	}
 }
 

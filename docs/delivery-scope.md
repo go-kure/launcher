@@ -281,9 +281,11 @@ Decided in the ticket:
   the component name. The engine reads it and asks the hook under role `object`; a handler
   opts in by declaring its object's kind and scope (`ComponentObjectProvider`), and a test
   walks the registry so that a new type either declares it or is listed as taking none.
-  - Only for a component no rule emitted: on an emitted member it is refused and the hook
-    is not asked. The party that writes a reference names its target, so a rule that wants
-    a member's name choosable resolves it itself.
+  - Only for a component no rule emitted: on a member a component or trait lowering rule
+    emitted it is refused and the hook is not asked. The party that writes a reference
+    names its target, so a rule that wants a member's name choosable resolves it itself.
+    What a document rule or a raw document rule returns is authored input, so it applies
+    there.
   - The references launcher writes to the object follow it (`scaleTargetRef`, a routing
     trait's own backend and the Service a route resolves to, the `rbac` subject on a
     `serviceaccount` component, the CloudNativePG endpoint selectors). A reference the

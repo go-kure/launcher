@@ -153,6 +153,8 @@ func (o Origin) String() string {
 // (DocumentLoweringRule, RawDocumentLoweringRule, ComponentLoweringRule,
 // TraitLoweringRule, PolicyLoweringRule) because they share no common type; the only
 // thing this function actually needs is the optional ContractDescriber assertion.
+//
+// isDocumentRuleIdentity reads the label back.
 func loweringRuleIdentity(label string, typeName string, rule any) string {
 	id := label + "/" + typeName
 	if cd, ok := rule.(ContractDescriber); ok {
@@ -161,6 +163,14 @@ func loweringRuleIdentity(label string, typeName string, rule any) string {
 		}
 	}
 	return id
+}
+
+// isDocumentRuleIdentity reports whether id, an Origin.Rule, names a
+// DocumentLoweringRule: the label loweringRuleIdentity gave it is
+// PositionDocument's. A raw document rule's "rawdocument" label is not, and
+// never reaches an Origin.
+func isDocumentRuleIdentity(id string) bool {
+	return strings.HasPrefix(id, string(PositionDocument)+"/")
 }
 
 // sameAuthoredLocation reports whether o and other name the same AUTHORED location —

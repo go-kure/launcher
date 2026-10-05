@@ -41,9 +41,12 @@ const (
 //     and selectors it generates keep the component name.
 //
 // On a type that does not implement it `objectName` is refused. It is also
-// refused, and the hook not asked, on a component a lowering rule emitted: a
-// rule that wants its member's name choosable resolves it itself, under its own
-// role (LoweringContext.ResolveName).
+// refused, and the hook not asked, on a member a component or trait lowering
+// rule emitted: a rule that wants its member's name choosable resolves it
+// itself, under its own role (LoweringContext.ResolveName). What a document
+// rule or a raw document rule returns is authored input, the components it
+// built included: the property and the hook apply there, and a document rule
+// that wants to fix a kind component's object name writes `objectName` itself.
 type ComponentObjectProvider interface {
 	ComponentObject() (kind schema.GroupKind, scope ObjectScope)
 }
@@ -77,10 +80,13 @@ func (c Component) ObjectName() string {
 	return c.Name
 }
 
-// emitted reports whether a lowering rule produced the component, as opposed to
-// an authored one, forwarded or not.
+// emitted reports whether the component is a member a component or trait
+// lowering rule emitted. An authored component is not, and neither is one a
+// document rule returned, forwarded or built: what a document rule returns is
+// authored input (lowerDocumentOnce). What a raw document rule writes carries no
+// rule at all.
 func (c Component) emitted() bool {
-	return c.origin != nil && c.origin.Rule != ""
+	return c.origin != nil && c.origin.Rule != "" && !isDocumentRuleIdentity(c.origin.Rule)
 }
 
 // authoredObjectName reads ObjectNameProperty off the component. present is
@@ -98,10 +104,12 @@ func authoredObjectName(component *Component) (name string, present bool, err er
 	return name, true, nil
 }
 
-// emittedObjectNameError refuses ObjectNameProperty on a kind component a
-// lowering rule emitted.
+// emittedObjectNameError refuses ObjectNameProperty on a kind component that is
+// a member a component or trait lowering rule emitted. It names those two rule
+// kinds, the only ones that emit a component into a document: what a document
+// rule returns is not refused.
 func emittedObjectNameError(origin *Origin) error {
-	return errors.Errorf("%s is set on a component a lowering rule emitted%s: the rule names what it emits, and a name it lets the author or the Naming hook choose it resolves itself, under its own role",
+	return errors.Errorf("%s is set on a component a component or trait lowering rule emitted%s: that rule names its members, and a name it lets the author or the Naming hook choose it resolves itself, under its own role",
 		ObjectNameProperty, emittedBy(origin))
 }
 
@@ -110,10 +118,11 @@ func emittedObjectNameError(origin *Origin) error {
 // which are copied first when they hold it. names resolves and claims the
 // name; fluxNamespace is the transform's, "" for none.
 //
-// The name is resolved only for an authored component of a type that takes the
-// property. On a component a lowering rule emitted the property is refused, and
-// without it the component is returned as it is: the rule named its object. A
-// type that does not take the property is left to its handler.
+// The name is resolved only for a component of a type that takes the property
+// that is no emitted member (Component.emitted). On a member a component or
+// trait lowering rule emitted the property is refused, and without it the
+// component is returned as it is: the rule named its object. A type that does
+// not take the property is left to its handler.
 func withObjectName(component Component, handler ComponentHandler, namespace, fluxNamespace string, names *nameResolver) (Component, error) {
 	authored, present, err := authoredObjectName(&component)
 	if err != nil {
