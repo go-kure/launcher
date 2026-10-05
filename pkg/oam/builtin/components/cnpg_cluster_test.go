@@ -853,10 +853,66 @@ func TestCnpgClusterHandler_Endpoints(t *testing.T) {
 	}
 }
 
+// TestCnpgClusterHandler_RefusesOmittedRequired: a pod certificate source of
+// the projected volume template needs the signer name and the key type the
+// Cluster CRD requires. The type leaves either out when it is empty, so the
+// object would show the omission and the API server refuse it.
+func TestCnpgClusterHandler_RefusesOmittedRequired(t *testing.T) {
+	sources := func(sources ...any) map[string]any {
+		return map[string]any{"projectedVolumeTemplate": map[string]any{"sources": append([]any{}, sources...)}}
+	}
+	cert := func(fields map[string]any) map[string]any { return map[string]any{"podCertificate": fields} }
+	for _, tt := range []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"no signer", sources(cert(map[string]any{"keyType": "ECDSAP384"})),
+			"projectedVolumeTemplate.sources[0].podCertificate.signerName: required (the signer the certificate is requested from)"},
+		{"an empty signer", sources(cert(map[string]any{"signerName": "", "keyType": "ECDSAP384"})),
+			"projectedVolumeTemplate.sources[0].podCertificate.signerName: required (the signer the certificate is requested from)"},
+		{"no key type", sources(cert(map[string]any{"signerName": "example.com/workload"})),
+			"projectedVolumeTemplate.sources[0].podCertificate.keyType: required (the type of the private key generated for the pod, such as ECDSAP384)"},
+		{"a null key type", sources(cert(map[string]any{"signerName": "example.com/workload", "keyType": nil})),
+			"projectedVolumeTemplate.sources[0].podCertificate.keyType: required (the type of the private key generated for the pod, such as ECDSAP384)"},
+		{"a later source", sources(map[string]any{"configMap": map[string]any{"name": "ca"}}, cert(map[string]any{})),
+			"projectedVolumeTemplate.sources[1].podCertificate.signerName: required (the signer the certificate is requested from)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := cnpgClusterErr(t, tt.props); err == nil || err.Error() != tt.want {
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+	// With both fields the source is carried as authored, and a source of
+	// another type is not held to them.
+	cluster := generateCnpgCluster(t, newCnpgCluster(t, sources(
+		map[string]any{"configMap": map[string]any{"name": "ca"}},
+		cert(map[string]any{"signerName": "example.com/workload", "keyType": "ECDSAP384"}),
+	)))
+	got := cluster.Spec.ProjectedVolumeTemplate.Sources
+	if len(got) != 2 || got[1].PodCertificate == nil || got[1].PodCertificate.SignerName != "example.com/workload" || got[1].PodCertificate.KeyType != "ECDSAP384" {
+		t.Errorf("sources = %+v, want the config map and the pod certificate as authored", got)
+	}
+}
+
 // TestCnpgClusterConfig_GenerateRevalidates pins the emission-boundary repeat
-// of the two parse-time refusals, for a config built directly in Go, which
-// never passes through ToApplicationConfig.
+// of the parse-time refusals, for a config built directly in Go, which never
+// passes through ToApplicationConfig.
 func TestCnpgClusterConfig_GenerateRevalidates(t *testing.T) {
+	t.Run("pod certificate without a key type", func(t *testing.T) {
+		c := &components.CnpgClusterConfig{Name: "db", Namespace: "data", Spec: cnpgv1.ClusterSpec{
+			Instances: 1,
+			ProjectedVolumeTemplate: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{
+				{PodCertificate: &corev1.PodCertificateProjection{SignerName: "example.com/workload"}},
+			}},
+		}}
+		_, err := c.Generate(stack.NewApplication("db", "data", c))
+		want := "projectedVolumeTemplate.sources[0].podCertificate.keyType: required (the type of the private key generated for the pod, such as ECDSAP384)"
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
 	t.Run("name CloudNativePG refuses", func(t *testing.T) {
 		c := &components.CnpgClusterConfig{Name: "db.main", Namespace: "data", Spec: cnpgv1.ClusterSpec{Instances: 1}}
 		_, err := c.Generate(stack.NewApplication("db.main", "data", c))

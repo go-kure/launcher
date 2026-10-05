@@ -159,6 +159,40 @@ func TestCnpgPoolerHandler_Refusals(t *testing.T) {
 		{"template overhead",
 			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "overhead": map[string]any{"cpu": "100m"}}}),
 			"template.spec.overhead: not authorable"},
+		// The CRD requires these and the pod spec's type leaves them out when
+		// they are empty.
+		{"restart rule without an action",
+			with("template", poolerTemplate("containers", map[string]any{"name": "pgbouncer", "restartPolicyRules": []any{
+				map[string]any{"action": "Restart"}, map[string]any{"exitCodes": map[string]any{"operator": "In", "values": []any{42}}},
+			}})),
+			"template.spec.containers[0].restartPolicyRules[1].action: required"},
+		{"restart rule with an empty action",
+			with("template", poolerTemplate("containers", map[string]any{"name": "pgbouncer", "restartPolicyRules": []any{map[string]any{"action": ""}}})),
+			"template.spec.containers[0].restartPolicyRules[0].action: required"},
+		{"exit codes without an operator",
+			with("template", poolerTemplate("containers", map[string]any{"name": "pgbouncer", "restartPolicyRules": []any{
+				map[string]any{"action": "Restart", "exitCodes": map[string]any{"values": []any{42}}},
+			}})),
+			"template.spec.containers[0].restartPolicyRules[0].exitCodes.operator: required"},
+		{"init container's restart rule without an action",
+			with("template", poolerTemplate("initContainers", map[string]any{"name": "wait"}, map[string]any{"name": "seed", "restartPolicyRules": []any{map[string]any{}}})),
+			"template.spec.initContainers[1].restartPolicyRules[0].action: required"},
+		{"init container's exit codes without an operator",
+			with("template", poolerTemplate("initContainers", map[string]any{"name": "seed", "restartPolicyRules": []any{
+				map[string]any{"action": "Restart", "exitCodes": map[string]any{"operator": nil}},
+			}})),
+			"template.spec.initContainers[0].restartPolicyRules[0].exitCodes.operator: required"},
+		{"pod certificate without a signer",
+			with("template", poolerTemplate("volumes", map[string]any{"name": "identity", "projected": map[string]any{"sources": []any{
+				map[string]any{"podCertificate": map[string]any{"keyType": "ECDSAP384"}},
+			}}})),
+			"template.spec.volumes[0].projected.sources[0].podCertificate.signerName: required"},
+		{"pod certificate without a key type",
+			with("template", poolerTemplate("volumes", map[string]any{"name": "tmp", "emptyDir": map[string]any{}}, map[string]any{"name": "identity", "projected": map[string]any{"sources": []any{
+				map[string]any{"serviceAccountToken": map[string]any{"path": "token"}},
+				map[string]any{"podCertificate": map[string]any{"signerName": "example.com/workload"}},
+			}}})),
+			"template.spec.volumes[1].projected.sources[1].podCertificate.keyType: required"},
 		{"two spellings of one field",
 			map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}, "type": "rw", "Type": "ro"},
 			"sets the same field as"},
@@ -170,6 +204,14 @@ func TestCnpgPoolerHandler_Refusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// poolerTemplate is a pooler's `template` whose pod spec holds the list, and
+// an empty container list where the list is another.
+func poolerTemplate(list string, entries ...any) map[string]any {
+	spec := map[string]any{"containers": []any{}}
+	spec[list] = append([]any{}, entries...)
+	return map[string]any{"spec": spec}
 }
 
 // TestCnpgPoolerHandler_NameBound pins the Pooler-name bound on both entry
@@ -361,6 +403,24 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 		{"template overhead", "db-pooler",
 			withTemplate(corev1.PodSpec{Overhead: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}}),
 			"template.spec.overhead: not authorable"},
+		{"restart rule without an action", "db-pooler",
+			withTemplate(corev1.PodSpec{Containers: []corev1.Container{{Name: "pgbouncer", RestartPolicyRules: []corev1.ContainerRestartRule{{}}}}}),
+			"template.spec.containers[0].restartPolicyRules[0].action: required"},
+		{"init container's exit codes without an operator", "db-pooler",
+			withTemplate(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "seed", RestartPolicyRules: []corev1.ContainerRestartRule{
+				{Action: corev1.ContainerRestartRuleActionRestart, ExitCodes: &corev1.ContainerRestartRuleOnExitCodes{Values: []int32{42}}},
+			}}}}),
+			"template.spec.initContainers[0].restartPolicyRules[0].exitCodes.operator: required"},
+		{"pod certificate without a signer", "db-pooler",
+			withTemplate(corev1.PodSpec{Volumes: []corev1.Volume{{Name: "identity", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{PodCertificate: &corev1.PodCertificateProjection{KeyType: "ECDSAP384"}}},
+			}}}}}),
+			"template.spec.volumes[0].projected.sources[0].podCertificate.signerName: required"},
+		{"pod certificate without a key type", "db-pooler",
+			withTemplate(corev1.PodSpec{Volumes: []corev1.Volume{{Name: "identity", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{PodCertificate: &corev1.PodCertificateProjection{SignerName: "example.com/workload"}}},
+			}}}}}),
+			"template.spec.volumes[0].projected.sources[0].podCertificate.keyType: required"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &components.CnpgPoolerConfig{Name: tt.app, Namespace: "data", Spec: tt.spec}

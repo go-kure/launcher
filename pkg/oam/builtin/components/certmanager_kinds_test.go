@@ -190,6 +190,11 @@ func certificateWith(name string, value any) map[string]any {
 	return withProperty(certificateMinimal(), name, value)
 }
 
+// renewalWindows is a Certificate's `renewal` with the windows.
+func renewalWindows(windows ...any) map[string]any {
+	return map[string]any{"windows": append([]any{}, windows...)}
+}
+
 // acmeIssuer is the properties of an ACME issuer with the two fields the API
 // requires of one and the solvers.
 func acmeIssuer(solvers ...any) map[string]any {

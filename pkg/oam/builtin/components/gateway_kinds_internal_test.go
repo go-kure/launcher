@@ -28,14 +28,9 @@ var gatewayAPIChannels = []string{"experimental", "standard"}
 // only the experimental channel's CRD holds, and omitted the numbers and
 // booleans the type omits when zero.
 //
-// refused and unshown answer, between them, for every field the CRD requires
-// that the type omits when it is not authored, which no required list can
-// name: a list is read against what was authored, and an authored empty value
-// is omitted as an unauthored one is. refused holds, per field, the kind's
-// validate on a spec that leaves out that field alone, and accepts the same
-// validate on the spec that leaves out none. unshown holds the fields the kind
-// does not refuse, each with the reason the decoded value cannot show the
-// omission.
+// The fields the CRD requires that the type omits when they are not authored,
+// which no required list can name, are answered in the kind's row of
+// apiSetKinds.
 var gatewayAPIKinds = []struct {
 	component    string
 	crd          string
@@ -43,9 +38,6 @@ var gatewayAPIKinds = []struct {
 	required     map[string]string
 	experimental []string
 	omitted      []string
-	accepts      func() error
-	refused      map[string]func() error
-	unshown      map[string]string
 }{
 	{component: "gatewayclass", crd: "gatewayclasses", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), required: gatewayClassKind.required},
 	{
@@ -55,40 +47,15 @@ var gatewayAPIKinds = []struct {
 	{
 		component: "listenerset", crd: "listenersets", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), required: listenerSetKind.required,
 		omitted: []string{"listeners[].port"},
-		accepts: func() error { return listenerSetKind.validate(listenerSetSpecWith(func(*gatewayv1.ListenerEntry) {})) },
-		refused: map[string]func() error{
-			"listeners": func() error { return listenerSetKind.validate(&gatewayv1.ListenerSetSpec{}) },
-			"listeners[].name": func() error {
-				return listenerSetKind.validate(listenerSetSpecWith(func(l *gatewayv1.ListenerEntry) { l.Name = "" }))
-			},
-			"listeners[].port": func() error {
-				return listenerSetKind.validate(listenerSetSpecWith(func(l *gatewayv1.ListenerEntry) { l.Port = 0 }))
-			},
-			"listeners[].protocol": func() error {
-				return listenerSetKind.validate(listenerSetSpecWith(func(l *gatewayv1.ListenerEntry) { l.Protocol = "" }))
-			},
-		},
 	},
 	{component: "referencegrant", crd: "referencegrants", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), required: referenceGrantKind.required},
-	{
-		component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required,
-		accepts: func() error {
-			return backendTLSPolicyKind.validate(&gatewayv1.BackendTLSPolicySpec{
-				TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{}},
-			})
-		},
-		refused: map[string]func() error{
-			"targetRefs": func() error { return backendTLSPolicyKind.validate(&gatewayv1.BackendTLSPolicySpec{}) },
-		},
-	},
+	{component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required},
 }
 
-// listenerSetSpecWith returns a ListenerSet spec of one listener that holds
-// every field the API requires of it and the type omits, after edit.
-func listenerSetSpecWith(edit func(*gatewayv1.ListenerEntry)) *gatewayv1.ListenerSetSpec {
-	listener := gatewayv1.ListenerEntry{Name: "web", Port: 80, Protocol: gatewayv1.HTTPProtocolType}
-	edit(&listener)
-	return &gatewayv1.ListenerSetSpec{Listeners: []gatewayv1.ListenerEntry{listener}}
+// gatewayAPICRDFile is the path of one CRD under the directory of the linked
+// module, in one channel.
+func gatewayAPICRDFile(channel, name string) string {
+	return "config/crd/" + channel + "/gateway.networking.k8s.io_" + name + ".yaml"
 }
 
 // gatewayAPICRDSpec reads one CRD of the linked module, in one channel, and
@@ -97,7 +64,7 @@ func listenerSetSpecWith(edit func(*gatewayv1.ListenerEntry)) *gatewayv1.Listene
 // single-version readers (crdSpecProperties) do not fit.
 func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
-	file := filepath.Join(linkedModuleDir(t, gatewayAPIModulePath), "config", "crd", channel, "gateway.networking.k8s.io_"+name+".yaml")
+	file := filepath.Join(linkedModuleDir(t, gatewayAPIModulePath), filepath.FromSlash(gatewayAPICRDFile(channel, name)))
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("read the CRD: %v", err)
@@ -128,11 +95,11 @@ func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONS
 // the CRDs of the linked module, the fields of each kind that the API requires
 // and the type would write unauthored, holds the kind's required list to them,
 // and holds every other field the type writes empty unauthored to a schema
-// that accepts it. It derives a second set as well, the fields the API
-// requires that the type omits when they are not authored, and holds each to
-// one of two answers in the kind's row: the kind's validate refuses the
-// omission, which the test runs, or the row states why the decoded value
-// cannot show it.
+// that accepts it. The fields the API requires that the type omits when they
+// are not authored are a second set, which
+// TestKindComponents_OmittedRequiredAndWrittenDefaults derives and holds to
+// the kind's answers; here each member is only held to a place a refusal can
+// name.
 //
 // The Go types hold the fields of both channels, so the experimental CRD is
 // the one every path is looked up in. The standard one must agree with it on
@@ -226,56 +193,33 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 					t.Errorf("required field %s says nothing of itself", path)
 				}
 			}
-
-			// The second set: required by the CRD and omitted by the type
-			// when unauthored. Each member is refused by the kind's validate
-			// or stated, with its reason, as one the decoded value cannot
-			// show.
-			answered := slices.Sorted(maps.Keys(kind.refused))
-			for path, why := range kind.unshown {
-				if _, both := kind.refused[path]; both {
-					t.Errorf("%s is both refused and stated as not shown", path)
-					continue
-				}
-				if strings.TrimSpace(why) == "" {
-					t.Errorf("%s is stated as not shown, with no reason", path)
-				}
-				answered = append(answered, path)
-			}
-			slices.Sort(answered)
-			if want := slices.Sorted(maps.Keys(omitted)); !slices.Equal(answered, want) {
-				t.Errorf("fields the kind answers for = %v\nthe CRD requires, and the type omits unauthored, %v", answered, want)
-			}
-			if kind.accepts != nil {
-				if err := kind.accepts(); err != nil {
-					t.Errorf("the spec that leaves out no such field is refused: %v; the refusals below would prove nothing", err)
-				}
-			} else if len(kind.refused) > 0 {
-				t.Errorf("the kind's row has refusals and no accepted spec to hold them against")
-			}
-			for path, refuse := range kind.refused {
-				// The message names the entry by its index, the first here.
-				want := strings.ReplaceAll(path, "[]", "[0]") + ": required"
-				if err := refuse(); err == nil || !strings.HasPrefix(err.Error(), want) {
-					t.Errorf("%s left out: err = %v, want one that starts with %q", path, err, want)
-				}
-			}
 		})
 	}
+}
+
+// gatewayAPIRefused returns the fields the row of apiSetKinds for the kind
+// says the kind refuses the omission of.
+func gatewayAPIRefused(t *testing.T, component string) []string {
+	t.Helper()
+	at := slices.IndexFunc(apiSetKinds, func(kind apiSetKind) bool { return kind.component == component })
+	if at < 0 {
+		t.Fatalf("apiSetKinds has no row for %s", component)
+	}
+	return apiSetKinds[at].refused
 }
 
 // TestGatewayKinds_RefusedOmissions holds every field a kind's validate
 // refuses the omission of to both channels of the API: each one is required in
 // the standard channel as in the experimental one that
-// TestGatewayKinds_RequiredMatchCRD derives the set from, so the refusal is no
-// wider than what a cluster on either channel refuses. The kind refuses an
-// authored empty value as it refuses the omission, since the type omits both;
-// of a list that is an empty list, so each refused list must be one the API
-// wants at least one item of, in both channels.
+// TestKindComponents_OmittedRequiredAndWrittenDefaults derives the set from,
+// so the refusal is no wider than what a cluster on either channel refuses.
+// The kind refuses an authored empty value as it refuses the omission, since
+// the type omits both; of a list that is an empty list, so each refused list
+// must be one the API wants at least one item of, in both channels.
 func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 	refusals := 0
 	for _, kind := range gatewayAPIKinds {
-		for path := range kind.refused {
+		for _, path := range gatewayAPIRefused(t, kind.component) {
 			refusals++
 			t.Run(kind.component+"/"+path, func(t *testing.T) {
 				for _, channel := range gatewayAPIChannels {

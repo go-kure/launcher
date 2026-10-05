@@ -49,7 +49,9 @@ func (h *CiliumBGPAdvertisementHandler) PropertySchema() map[string]oam.Property
 // ciliumBGPAdvertisementKind is the cilium-bgpadvertisement kind: see
 // policyFreeKind. validate holds the five expression rules of the CRD, each
 // one comparison of an entry's advertisementType with the presence of one
-// sibling. The API's other value rules are left to the API server.
+// sibling, and the two fields the CRD requires that the type leaves out when
+// they are empty: the `name` of an `interface` and the `addresses` of a
+// `service`. The API's other value rules are left to the API server.
 var ciliumBGPAdvertisementKind = &policyFreeKind[ciliumv2.CiliumBGPAdvertisementSpec]{
 	upstream: "cilium.io/v2 CiliumBGPAdvertisementSpec",
 	required: requiredFields(map[string]string{
@@ -69,6 +71,10 @@ var ciliumBGPAdvertisementKind = &policyFreeKind[ciliumv2.CiliumBGPAdvertisement
 // entry without `interface` and another with it, and a PodCIDR entry with a
 // `selector`. Presence is the decoded pointer's, which is what the emitted
 // object shows: an authored null is an unset field, an authored {} a set one.
+// It also refuses an `interface` without a `name` and a `service` without
+// `addresses`, which the CRD requires: the type leaves either out when it is
+// empty, an empty address list included, so the object would show the
+// omission.
 func validateCiliumBGPAdvertisements(spec *ciliumv2.CiliumBGPAdvertisementSpec) error {
 	for i, entry := range spec.Advertisements {
 		typ := entry.AdvertisementType
@@ -86,6 +92,10 @@ func validateCiliumBGPAdvertisements(spec *ciliumv2.CiliumBGPAdvertisementSpec) 
 			return refuse("interface", "not allowed with advertisementType %q, only with \"Interface\"")
 		case typ == ciliumv2.BGPPodCIDRAdvert && entry.Selector != nil:
 			return refuse("selector", "not allowed with advertisementType %q")
+		case entry.Interface != nil && entry.Interface.Name == "":
+			return errors.Errorf("advertisements[%d].interface.name: required (the local interface whose addresses are advertised)", i)
+		case entry.Service != nil && len(entry.Service.Addresses) == 0:
+			return errors.Errorf("advertisements[%d].service.addresses: required (at least one of the Service address types to advertise: ClusterIP, ExternalIP or LoadBalancerIP)", i)
 		}
 	}
 	return nil

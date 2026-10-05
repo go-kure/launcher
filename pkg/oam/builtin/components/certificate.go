@@ -6,6 +6,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -153,13 +154,30 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 // certificateKind is the certificate kind: see policyHeldKind. The API requires
 // `secretName` and `issuerRef` with its `name`, and of what is authored below
 // them the fields certificateRequired lists; the type would write each one
-// empty. The API's value rules and cert-manager's webhook are left to them
-// (certmanager_common.go). The policy reaches a keystore password written into
-// the object (enforceCertificatePolicy).
+// empty. Of a renewal window it requires `cron` and `windowDuration`, which
+// the type leaves out when they are empty, so that the object would show the
+// omission: validate refuses a window without either. The API's value rules
+// and cert-manager's webhook are left to them (certmanager_common.go). The
+// policy reaches a keystore password written into the object
+// (enforceCertificatePolicy).
 var certificateKind = &policyHeldKind[certv1.CertificateSpec]{
 	policyFreeKind: policyFreeKind[certv1.CertificateSpec]{
 		upstream: "cert-manager.io/v1 CertificateSpec",
 		required: certificateRequired,
+		validate: func(spec *certv1.CertificateSpec) error {
+			if spec.Renewal == nil {
+				return nil
+			}
+			for i, window := range spec.Renewal.Windows {
+				switch {
+				case window.WindowDuration == nil:
+					return errors.Errorf("renewal.windows[%d].windowDuration: required (how long the window stays open from each moment the cron expression names, such as 2h)", i)
+				case window.Cron == "":
+					return errors.Errorf("renewal.windows[%d].cron: required (the cron expression of the moments the window opens)", i)
+				}
+			}
+			return nil
+		},
 		build: func(name, namespace string, spec *certv1.CertificateSpec) client.Object {
 			cert := certmanager.CreateCertificate(name, namespace)
 			spec.DeepCopyInto(&cert.Spec)

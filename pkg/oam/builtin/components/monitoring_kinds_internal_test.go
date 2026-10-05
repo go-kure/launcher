@@ -48,17 +48,26 @@ type fieldMarkers struct {
 	hasDefault bool
 }
 
-var kubebuilderDefault = regexp.MustCompile(`^\+kubebuilder:default:?=(.*)$`)
+// fieldDefaultMarker is a default marker, as the CRD generator spells it
+// (+kubebuilder:default) and as the Kubernetes API types do (+default).
+var fieldDefaultMarker = regexp.MustCompile(`^\+(?:kubebuilder:)?default:?=(.*)$`)
 
 // monitoringFieldMarkers reads the markers of every struct field the linked
 // module's v1 package declares, keyed by "<type>.<Go field name>", an embedded
 // field under its type's name.
 func monitoringFieldMarkers(t *testing.T) map[string]fieldMarkers {
 	t.Helper()
-	dir := filepath.Join(linkedModuleDir(t, monitoringModulePath), "v1")
+	return packageFieldMarkers(t, filepath.Join(linkedModuleDir(t, monitoringModulePath), "v1"))
+}
+
+// packageFieldMarkers reads the markers of every struct field the Go package
+// in dir declares, keyed by "<type>.<Go field name>", an embedded field under
+// its type's name.
+func packageFieldMarkers(t *testing.T, dir string) map[string]fieldMarkers {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read the module's v1 package: %v", err)
+		t.Fatalf("read the package in %s: %v", dir, err)
 	}
 	out := map[string]fieldMarkers{}
 	fset := token.NewFileSet()
@@ -110,12 +119,12 @@ func markersOf(doc *ast.CommentGroup) fieldMarkers {
 	for _, comment := range doc.List {
 		line := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
 		switch {
-		case line == "+required", line == "+kubebuilder:validation:Required":
+		case line == "+required", line == "+kubebuilder:validation:Required", line == "+k8s:required":
 			m.required = true
-		case line == "+optional", line == "+kubebuilder:validation:Optional":
+		case line == "+optional", line == "+kubebuilder:validation:Optional", line == "+k8s:optional":
 			m.optional = true
 		default:
-			if def := kubebuilderDefault.FindStringSubmatch(line); def != nil {
+			if def := fieldDefaultMarker.FindStringSubmatch(line); def != nil {
 				m.def, m.hasDefault = strings.Trim(strings.TrimSpace(def[1]), `"`), true
 			}
 		}
