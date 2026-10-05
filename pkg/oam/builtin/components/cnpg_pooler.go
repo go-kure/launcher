@@ -136,7 +136,8 @@ type CnpgPoolerConfig struct {
 // activeDeadlineSeconds, priority or overhead. Of the template's pod spec it
 // also refuses a field the CRD requires that the Go type leaves out when it is
 // empty (refuseOmittedPodSpecFields) or writes as null when it is unauthored
-// (refuseNullPodSpecFields).
+// (refuseNullPodSpecFields). The images the Pooler names are held to the tag
+// rule (validateImageRefs).
 func (c *CnpgPoolerConfig) validate(name string) error {
 	if err := requireCnpgClusterRef(c.Spec.Cluster.Name); err != nil {
 		return err
@@ -146,6 +147,9 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 	}
 	if c.Spec.PgBouncer == nil {
 		return errors.New("pgbouncer: required (an empty object selects PgBouncer's defaults)")
+	}
+	if err := c.validateImageRefs(); err != nil {
+		return err
 	}
 	// As the workload kinds refuse them (podSpecRejectedKeys,
 	// podSpecJobOnlyKeys): the operator copies the template into its
@@ -202,6 +206,44 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 		}
 	}
 	return nil
+}
+
+// validateImageRefs holds the images the Pooler names to ValidateImageRef, with
+// or without an environment policy: pgbouncer.image, and in the template the
+// image of each init and regular container and the reference of each image
+// volume. No untagged image and no :latest, as for a workload's container.
+//
+// A field that names no image is not checked, as the registry allowlist does
+// not check it (ApplyPolicy): the operator supplies the PgBouncer image, so a
+// template container without one is the ordinary form here, where the pod
+// kinds refuse it (validateAuthoredPodSpec).
+func (c *CnpgPoolerConfig) validateImageRefs() error {
+	if pgb := c.Spec.PgBouncer; pgb != nil && pgb.Image != "" {
+		if err := ValidateImageRef(pgb.Image); err != nil {
+			return errors.Wrap(err, "pgbouncer.image")
+		}
+	}
+	t := c.Spec.Template
+	if t == nil {
+		return nil
+	}
+	for i, ctr := range t.Spec.InitContainers {
+		if ctr.Image == "" {
+			continue
+		}
+		if err := ValidateImageRef(ctr.Image); err != nil {
+			return errors.Wrapf(err, "template.spec.initContainers[%d] %q", i, ctr.Name)
+		}
+	}
+	for i, ctr := range t.Spec.Containers {
+		if ctr.Image == "" {
+			continue
+		}
+		if err := ValidateImageRef(ctr.Image); err != nil {
+			return errors.Wrapf(err, "template.spec.containers[%d] %q", i, ctr.Name)
+		}
+	}
+	return validateImageVolumeRefs("template.spec.", &t.Spec)
 }
 
 // Generate emits the Pooler: kure's identity-only constructor plus a deep copy

@@ -250,6 +250,9 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgClusterDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
+	if err := validateCnpgClusterImageRefs(spec); err != nil {
+		return nil, err
+	}
 
 	return &CnpgClusterConfig{
 		Name:                component.Name,
@@ -777,6 +780,33 @@ func (c *CnpgClusterConfig) validateStorageSizes() error {
 	return nil
 }
 
+// validateCnpgClusterImageRefs holds the images a ClusterSpec names to
+// ValidateImageRef, with or without an environment policy: imageName, and the
+// reference of each extension's image volume. No untagged image and no
+// :latest, as for a container's image. A field that names no image is not
+// checked, as the registry allowlist does not check it (ApplyPolicy): the
+// operator then takes the image from a catalog or runs its own default.
+//
+// A digest without a tag passes, as it does everywhere the rule runs. On
+// imageName CloudNativePG's webhook refuses one, and a tag that is no
+// PostgreSQL version: those are the operator's value rules and are left to it.
+func validateCnpgClusterImageRefs(spec *cnpgv1.ClusterSpec) error {
+	if spec.ImageName != "" {
+		if err := ValidateImageRef(spec.ImageName); err != nil {
+			return errors.Wrap(err, "imageName")
+		}
+	}
+	for i, ext := range spec.PostgresConfiguration.Extensions {
+		if ext.ImageVolumeSource.Reference == "" {
+			continue
+		}
+		if err := ValidateImageRef(ext.ImageVolumeSource.Reference); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("postgresql.extensions[%d].image.reference", i))
+		}
+	}
+	return nil
+}
+
 // cnpgStorageRequest returns the size a StorageConfiguration requests and the
 // path of the spelling that supplied it: size when set, since CNPG writes it
 // over the template, else the pvcTemplate's storage request. Reading size alone
@@ -822,6 +852,9 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	// Storage sizes are checked here, on the effective requests, so an
 	// authored size and a policy default are refused alike.
 	if err := c.validateStorageSizes(); err != nil {
+		return nil, err
+	}
+	if err := validateCnpgClusterImageRefs(&c.Spec); err != nil {
 		return nil, err
 	}
 	// As in postgresql, checked on the resources the Cluster actually carries:

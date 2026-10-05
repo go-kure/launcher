@@ -2580,6 +2580,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - An image without a tag or digest, or tagged `:latest`, on every init and
     regular container (`ValidateImageRef`), so a container without an image
     too.
+  - The same on the `reference` of an image volume (`volumes[0] "ext"
+    image.reference: image "…" rejected: …`); a volume that names no
+    reference is not checked. See *Image volumes* below.
   - A `timeoutSeconds`, `periodSeconds`, `successThreshold` or
     `failureThreshold` written as `0` on a liveness, readiness or startup
     probe of an init or regular container. The Go type omits a zero there and
@@ -2642,10 +2645,30 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   image volume naming a registry outside the list built before, on each of
   those paths, and is refused now.
 
+  **The tag rule on an image the document names.** The reference of an image
+  volume is also held to `ValidateImageRef`, as a container's image is: one
+  without a tag or digest, or tagged `:latest` (with a digest too), or one
+  that is no image reference, is refused, on each of the paths above
+  (`volumes[0] "ext" image.reference: image "registry.example/team/ext"
+  rejected: no tag or digest specified; use an explicit version tag or
+  digest`; a rendered path names it under the object,
+  `spec.template.spec.volumes[0] "ext" …`). The rule is the library's, not the
+  environment's: the kinds apply it when the component is read and again at
+  generation, with or without a policy, and the refusal carries no policy
+  class. A reference by digest alone passes, and a volume that names no
+  reference is not checked. The kinds that name an image outside a pod spec
+  hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
+  of its template, `cnpg-cluster` its `imageName` and the reference of each
+  extension, `postgresql` the image it composes from `version` (each below).
+  The test that walks the types fails on a field held to the registry rule
+  and not to this one. **Breaking** (go-kure/launcher#790): a document, a
+  chart or a source naming an untagged or `:latest` image in one of those
+  fields built before, and is refused now.
+
   **Known difference:** template delivery (`helmtemplate`), `passthrough` and
   `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
   admission controllers decide there. They do refuse ephemeral containers and
-  an untagged or `:latest` image.
+  an untagged or `:latest` image, an image volume's included.
 
   The config implements `oam.ServiceAccountNamer`: the account is the authored
   `serviceAccountName`, or the deprecated `serviceAccount` where that one is
@@ -2724,7 +2747,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
   on a ReplicaSet they emit, do not require a selector and add no `app` label;
   the API server decides there. They do refuse ephemeral containers and an
-  untagged or `:latest` image.
+  untagged or `:latest` image, an image volume's included.
 
   The config implements `oam.ServiceAccountNamer`, reading the template's
   `serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
@@ -2800,7 +2823,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Known difference:** template delivery (`helmtemplate`), `passthrough` and
   `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
   emit; the API server decides there. They do refuse ephemeral containers and
-  an untagged or `:latest` image. The PodTemplate's own labels and annotations
+  an untagged or `:latest` image, an image volume's included. The PodTemplate's
+  own labels and annotations
   are the `labels` and `annotations` properties; the template's metadata is
   carried as authored and takes neither.
 - **storageclass**, **volumeattributesclass**, **priorityclass**,
@@ -5449,7 +5473,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a chart that renders one from a registry outside the list built before; see *Image volumes*
     under **pod** above),
     and for every init and regular container the registry allowlist, the privileged, HostProcess
-    and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral
+    and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`), which holds
+    the reference of an image volume too (**breaking**, go-kure/launcher#790: a chart that
+    renders an untagged or `:latest` one built before). Ephemeral
     containers are refused. The storage a PersistentVolumeClaim, or a StatefulSet's claim
     template, requests is held to the storage maximum (`MaxStorageSize`), as the
     `persistentvolumeclaim` and `statefulset` kinds hold theirs. The replica count of a
@@ -6054,6 +6080,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
   pull rejected (go-kure/launcher#539). Only an omitted or null `version`
   takes the default. `storageSize: ""` is refused (above).
+  The image is held to the tag rule (`ValidateImageRef`), with or without a
+  policy (**breaking**, go-kure/launcher#790). Without `imageName` the image
+  is `ghcr.io/cloudnative-pg/postgresql:<version>`, so a `version` that makes
+  a `:latest` reference, or none that parses, is refused under the property
+  the author wrote, with the image it made: `version: "latest" is refused as
+  the tag of the default image: image
+  "ghcr.io/cloudnative-pg/postgresql:latest" rejected: :latest tag not
+  allowed; use an explicit version tag or digest`. An authored `imageName`
+  is refused under `imageName`; `version` is read for the default image only
+  and is not checked beside one. The default `version` builds.
   Any other storage size the Cluster would carry, authored or from the
   policy default, must parse and be positive (`storageSize: quantity must be
   positive, got "0"`): CloudNativePG's webhook parses only the size, so a
@@ -6379,6 +6415,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   extension entry. `imageName` and the extension images are every image a
   Cluster names today; the test that walks the pod spec for image fields
   walks the Cluster and the Pooler spec the same way.
+  Both are also held to the tag rule (`ValidateImageRef`) when the component
+  is read and again at generation, with or without a policy (**breaking**,
+  go-kure/launcher#790: an untagged or `:latest` `imageName` or extension
+  reference built before): `imageName: image "…" rejected: no tag or digest
+  specified; use an explicit version tag or digest`,
+  `postgresql.extensions[0].image.reference: image "…" rejected: …`. An unset
+  `imageName` and an entry without a reference name no image and are not
+  checked, as for the allowlist. A digest without a tag passes, here as
+  everywhere the rule runs; on `imageName` CloudNativePG's webhook refuses
+  one, and a tag that is no PostgreSQL version, and those are the operator's
+  value rules, left to the operator.
   Generation refuses `hugepages-<size>`
   in `resources` without `cpu` or `memory` after policy defaults. It also
   applies the shared parser's request/limit cross-check there
@@ -6424,7 +6471,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   registry allowlist (`template.spec: volume "ext" image.reference: image "…" is
   not from an allowed registry [...]`; **breaking**, go-kure/launcher#790, see
   *Image volumes* under **pod**), and applies the registry allowlist to an
-  authored `pgbouncer.image`. Generation runs the shared parser's
+  authored `pgbouncer.image`. With or without a policy, when the component is
+  read and again at generation, an authored `pgbouncer.image`, the image of
+  each init and regular container of the template and the reference of each
+  of its image volumes are held to the tag rule (`ValidateImageRef`;
+  **breaking**, go-kure/launcher#790: an untagged or `:latest` one built
+  before): `pgbouncer.image: image "…" rejected: …`,
+  `template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
+  container that names no image is not checked: the operator supplies the
+  PgBouncer image, so that is the ordinary form here, where the pod kinds
+  refuse it. Generation runs the shared parser's
   request/limit and hugepages checks on the template's pod and container
   resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
   2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
@@ -6612,7 +6668,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   registry outside the list built before; see *Image volumes* under **pod** above), and
   for every init and regular container
   the registry allowlist, the privileged, HostProcess and capability gates, and
-  `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral containers are refused.
+  `ValidateImageRef` (no untagged image, no `:latest`), which holds the reference of an
+  image volume too (**breaking**, go-kure/launcher#790: an object with an untagged or
+  `:latest` one built before). Ephemeral containers are refused.
   The storage a PersistentVolumeClaim, or a StatefulSet's claim template, requests is held
   to the storage maximum (`MaxStorageSize`); the replica count of a Deployment,
   StatefulSet, ReplicaSet or ReplicationController (one when the object sets none) and the
@@ -6751,7 +6809,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   ReplicaSet, Job and CronJob is checked as an authored workload is (host namespaces,
   hostPath volumes, the cpu/memory maxima, the registry allowlist on every init and
   regular container's image and on an image volume's reference, the privileged,
-  HostProcess and capability gates, `ValidateImageRef`, no ephemeral containers), a
+  HostProcess and capability gates, `ValidateImageRef` on both, no ephemeral containers), a
   PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
   maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
   replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds

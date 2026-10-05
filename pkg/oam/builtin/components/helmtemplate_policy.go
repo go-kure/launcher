@@ -88,8 +88,9 @@ func renderedObjectRef(obj client.Object) string {
 // storage and resource maxima, the registry allowlist on an image volume's
 // reference, and per init and regular container the registry
 // allowlist, the cpu and memory maxima, and the privileged, hostProcess and
-// capability gates), and every init and regular container's image by
-// ValidateImageRef: no untagged image and no :latest. Ephemeral containers are
+// capability gates), and every init and regular container's image and every
+// image volume's reference by ValidateImageRef: no untagged image and no
+// :latest. Ephemeral containers are
 // refused as the workload kinds refuse them: the API server accepts none on a
 // created pod. The storage a claim requests — a PersistentVolumeClaim's, and
 // each of a StatefulSet's claim templates' — is held to the storage maximum,
@@ -149,7 +150,7 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 			return errors.Wrapf(err, "%s.containers[%d] %q", path, i, ctr.Name)
 		}
 	}
-	return nil
+	return validateImageVolumeRefs(path+".", ps)
 }
 
 // enforceRenderedClaims holds the storage a rendered claim requests to the

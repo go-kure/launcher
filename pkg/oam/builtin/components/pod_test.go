@@ -439,8 +439,9 @@ func TestPodPolicy_AllowedOnEveryPath(t *testing.T) {
 }
 
 // TestPodPolicy_ReadTimeRefusalsAndTheRenderedPaths pins how the four paths
-// differ on what the kind refuses when it is read. An untagged image and
-// ephemeral containers are refused on every path. priority and overhead are
+// differ on what the kind refuses when it is read. An untagged image, an
+// untagged image volume and ephemeral containers are refused on every path
+// (TestImageTagRule_PodImageVolume holds the volume's rule). priority and overhead are
 // refused by the kind only: the three paths that take an object written
 // elsewhere pass them, and the API server's admission controllers decide.
 func TestPodPolicy_ReadTimeRefusalsAndTheRenderedPaths(t *testing.T) {
@@ -451,6 +452,7 @@ func TestPodPolicy_ReadTimeRefusalsAndTheRenderedPaths(t *testing.T) {
 		rendered bool // refused on the three rendered paths too
 	}{
 		{"untagged image", "containers:\n  - name: app\n    image: registry.example/team/app\n", `containers[0] "app": image "registry.example/team/app" rejected`, true},
+		{"untagged image volume", htPlainPod + ivVolume("registry.example/team/ext"), `volumes[0] "ext" image.reference: image "registry.example/team/ext" rejected`, true},
 		{"ephemeral containers", htPlainPod + "ephemeralContainers:\n  - name: debug\n    image: registry.example/team/debug:1.0.0\n", "ephemeralContainers: not supported", true},
 		{"priority", htPlainPod + "priority: 1000\n", "priority: not authorable", false},
 		{"overhead", htPlainPod + "overhead:\n  cpu: 100m\n", "overhead: not authorable", false},
