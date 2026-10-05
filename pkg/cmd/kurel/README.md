@@ -163,6 +163,12 @@ registered the same way, with a `cilium-clusterwidenetworkpolicy-component`
 fixture: two CiliumClusterwideNetworkPolicy objects with no namespace, one
 with a rule for nodes under `spec`, one named by `objectName` with two rules
 for endpoints under `specs`. No capability is required to build it.
+The kind components of the Gateway API's infrastructure objects,
+`gatewayclass`, `gateway`, `listenerset`, `referencegrant` and
+`backendtlspolicy` (go-kure/launcher#790), are registered the same way, with a
+`<type>-component` fixture each: a GatewayClass with no namespace, and a
+Gateway, a ListenerSet, a ReferenceGrant and a BackendTLSPolicy in the build
+namespace. No capability is required of the cluster profile to build them.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

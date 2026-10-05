@@ -61,6 +61,13 @@ func crdSpecProperties(t *testing.T, file string) (map[string]apiextensionsv1.JS
 	if !ok {
 		t.Fatalf("%s has no spec property", file)
 	}
+	return schemaProperties(spec)
+}
+
+// schemaProperties returns the schema of every property under spec, the
+// schema of a CRD's spec, and the paths the schema of their parent requires,
+// keyed as crdSpecProperties says.
+func schemaProperties(spec apiextensionsv1.JSONSchemaProps) (map[string]apiextensionsv1.JSONSchemaProps, map[string]bool) {
 	props, required := map[string]apiextensionsv1.JSONSchemaProps{}, map[string]bool{}
 	var walk func(s apiextensionsv1.JSONSchemaProps, path string)
 	walk = func(s apiextensionsv1.JSONSchemaProps, path string) {

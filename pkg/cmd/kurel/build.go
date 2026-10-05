@@ -348,6 +348,12 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"cilium-nodeconfig":          &components.CiliumNodeConfigHandler{},
 
 		"cilium-clusterwidenetworkpolicy": &components.CiliumClusterwideNetworkPolicyHandler{},
+
+		"gatewayclass":     &components.GatewayClassHandler{},
+		"gateway":          &components.GatewayHandler{},
+		"listenerset":      &components.ListenerSetHandler{},
+		"referencegrant":   &components.ReferenceGrantHandler{},
+		"backendtlspolicy": &components.BackendTLSPolicyHandler{},
 	}
 }
 

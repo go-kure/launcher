@@ -180,6 +180,11 @@ reads it.
 | `cilium-localredirectpolicy` | CiliumLocalRedirectPolicy | Kind-named Cilium local redirect policy: the whole `CiliumLocalRedirectPolicySpec` (`redirectFrontend`, `redirectBackend`, `skipRedirectFromBackend`, `description`), strictly decoded; the frontend, the backend, its selector and its ports are required, and the frontend takes exactly one of `addressMatcher` and `serviceMatcher`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `cilium-nodeconfig` | CiliumNodeConfig | Kind-named Cilium per-node configuration: the whole `CiliumNodeConfigSpec` (`defaults`, `nodeSelector`, both required), strictly decoded. The keys and values of `defaults` are written as authored. Namespaced; no environment policy applies and no capability is required — see below. |
 | `cilium-clusterwidenetworkpolicy` | CiliumClusterwideNetworkPolicy | Kind-named Cilium cluster-wide network policy: `spec`, `specs` or both, each a Cilium rule, strictly decoded as the `cilium-networkpolicy` kind decodes them. A rule takes exactly one of `endpointSelector` and `nodeSelector`, and at least one of `ingress`, `ingressDeny`, `egress` and `egressDeny`. Cluster-scoped; no environment policy applies and no capability is required — see below. |
+| `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
+| `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
+| `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
+| `referencegrant` | ReferenceGrant | Kind-named Gateway API ReferenceGrant: the whole `ReferenceGrantSpec`, strictly decoded; `from` and `to` are required, with the group, kind and namespace of a source and the group and kind of a target. No capability is required and no environment policy applies — see below. |
+| `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -253,7 +258,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | Constructor | Kind | Status | Type | Decode | Notes |
 |---|---|---|---|---|---|
 | `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | missing | - | - | - |
+| `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | kind | `backendtlspolicy` | strict decode of `BackendTLSPolicySpec` | `targetRefs`, at least one, and `validation` with its `hostname` must be written; of a target, a CA certificate reference and a subject alternative name that are authored, the fields the API requires that the type would write empty. The hostnames it validates are not held to the allowed registries. No capability is required. No environment policy applies. |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
 | `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
 | `kubernetes.CreateCSINode` | storage.k8s.io/v1 CSINode (cluster-scoped) | not authorable | - | - | Written by the kubelet for the CSI drivers on its node. |
@@ -272,8 +277,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
 | `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | missing | - | - | - |
-| `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | missing | - | - | - |
-| `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | kind | `gateway` | strict decode of `GatewaySpec` | `gatewayClassName` and `listeners` must be written, and of a listener its `name`, `port` and `protocol`; of what is authored below them, the fields the API requires that the type would write empty. `defaultScope` is an experimental-channel field. The pods a controller starts for a Gateway are not the object's to size. No capability is required: the Gateway an `httproute` trait takes from a capability is not this component. No environment policy applies. |
+| `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | kind | `gatewayclass` | strict decode of `GatewayClassSpec` | `controllerName` must be written, and of a `parametersRef` that is authored its `group`, `kind` and `name`. No capability is required. No environment policy applies. |
 | `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | kind | `httproute` | strict decode of `HTTPRouteSpec` | No type under `HTTPRouteSpec` unmarshals itself, so the decode reaches every depth. The `httproute` trait, which `expose` lowers onto, builds its own HTTPRoute with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis, takes its parent from a capability and is held to the policy's capability lists. |
 | `kubernetes.CreateHorizontalPodAutoscaler` | autoscaling/v2 HorizontalPodAutoscaler | kind | `horizontalpodautoscaler` | strict decode of `HorizontalPodAutoscalerSpec` | `scaleTargetRef` and `maxReplicas` must be written. `maxReplicas` is held to the environment policy's replica maximum. The `scaler` trait emits one for its workload too, through its own parser. |
 | `kubernetes.CreateIPAddress` | networking.k8s.io/v1 IPAddress (cluster-scoped) | not authorable | - | - | Allocated by the API server for a Service. |
@@ -282,7 +287,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateJob` | batch/v1 Job | kind | `job` | hand-written parser | - |
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
-| `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | missing | - | - | - |
+| `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | kind | `listenerset` | strict decode of `ListenerSetSpec` | `parentRef` with its `name` and `listeners`, at least one, must be written, and of each listener its `name`, `port` and `protocol`, as on a Gateway's. No capability is required. No environment policy applies. |
 | `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
@@ -296,7 +301,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreatePodTemplate` | v1 PodTemplate | kind | `podtemplate` | strict decode of the object's `template` (`PodTemplateSpec`) | Held to environment policy by the check the rendered paths run on a PodTemplate; the pod spec is held to the `pod` kind's refusals, and `activeDeadlineSeconds` is allowed. Stored, not run: no `app` label, not a trait target. |
 | `kubernetes.CreatePriorityClass` | scheduling.k8s.io/v1 PriorityClass (cluster-scoped) | kind | `priorityclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. An unauthored `value` is emitted as `0`. No environment policy applies. |
 | `kubernetes.CreateRangeAllocation` | v1 RangeAllocation (cluster-scoped) | not authorable | - | - | The API server's own allocation record. |
-| `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | missing | - | - | - |
+| `kubernetes.CreateReferenceGrant` | gateway.networking.k8s.io/v1 ReferenceGrant | kind | `referencegrant` | strict decode of `ReferenceGrantSpec` | `from` and `to` must be written, and of a source its `group`, `kind` and `namespace`, of a target its `group` and `kind`. The grant is emitted in the build namespace, which is the namespace it allows references into. No capability is required. No environment policy applies. |
 | `kubernetes.CreateReplicaSet` | apps/v1 ReplicaSet | kind | `replicaset` | strict decode of `ReplicaSetSpec` | Held to environment policy by the check the rendered paths run on a ReplicaSet; the pod template is held to the `pod` kind's refusals, `activeDeadlineSeconds` is refused, and the template gains the `app` label. |
 | `kubernetes.CreateReplicationController` | v1 ReplicationController | kind | `replicationcontroller` | strict decode of `ReplicationControllerSpec` | Held to environment policy by the check the rendered paths run on a ReplicationController; the pod template is held as the `replicaset` kind's is, `activeDeadlineSeconds` is refused, and the template gains the `app` label. `selector` is optional. |
 | `kubernetes.CreateResourceQuota` | v1 ResourceQuota | kind | `resourcequota` | strict decode of `ResourceQuotaSpec` | - |
@@ -2717,8 +2722,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **One shared helper builds all six** (`policyFreeKind`, in
   `kind_policy_free.go`), for a kind to which no dimension of the environment
   policy applies; `servicecidr`, `poddisruptionbudget`, the four kinds of
-  the Prometheus operator's API and the four of Cilium's BGP control plane,
-  below, are built on it too. The three kinds
+  the Prometheus operator's API, the four of Cilium's BGP control plane and
+  the five kinds of the Gateway API's infrastructure objects, below, are built
+  on it too. The three kinds
   of cert-manager's API, below, are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
@@ -3884,6 +3890,177 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Not covered.** The object's metadata beyond its name, its labels and its
   annotations (`objectName`, `labels`, `annotations`), and its `status`, which
   the Cilium agent writes.
+- **gatewayclass**, **gateway**, **listenerset**, **referencegrant**,
+  **backendtlspolicy** (go-kure/launcher#790) are the kind-named projections
+  of the infrastructure objects of the Gateway API's
+  `gateway.networking.k8s.io/v1`: a GatewayClass, a Gateway, a ListenerSet, a
+  ReferenceGrant and a BackendTLSPolicy. Each is built on `policyFreeKind`
+  (above) and emits that one object, named after the component unless
+  `objectName` names it; the handler adds no label, no annotation and no
+  default. A `gatewayclass` is emitted with no namespace and declares its
+  object as cluster-scoped, so its name is claimed in no namespace. The other
+  four are emitted in the build namespace and declare their object as
+  namespaced. The routes of the same API are their own kinds (`httproute`).
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `gateway.networking.k8s.io/v1`: where the
+  Gateway API's CRDs are not installed the component builds, and the object is
+  refused at apply. Whoever may author a component may author these: a
+  GatewayClass, which is cluster-scoped, and a ReferenceGrant, which lets
+  objects of another namespace refer to objects of the build namespace,
+  included. The open point "No capability gate on component types" on
+  go-kure/launcher#790 carries it. The `httproute` trait may take the Gateway
+  it attaches to from a capability (`gatewayName`, `gatewayNamespace`); the
+  `gateway` kind does not read it, and a `gateway` component is not what that
+  capability names unless the platform says so.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (a listener, a certificate reference, a validation).
+  - `gatewayclass` (`GatewayClassSpec`): `controllerName`, `parametersRef` and
+    `description`.
+  - `gateway` (`GatewaySpec`): `gatewayClassName`, `listeners`, `addresses`,
+    `infrastructure`, `allowedListeners`, `tls` and `defaultScope`.
+    **`defaultScope` is an experimental-channel field:** the Go type holds it
+    and the standard channel's Gateway CRD does not, so a cluster on that
+    channel does not keep it. It is the only such field of these five specs
+    at v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+  - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
+    entries take the fields of a Gateway's listener.
+  - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
+  - `backendtlspolicy` (`BackendTLSPolicySpec`): `targetRefs`, `validation`
+    and `options`.
+  - **No default is filled.** The defaults are the CRDs', and the API server
+    applies them to what the object leaves out: a listener's `allowedRoutes`
+    (routes of the Gateway's own namespace), a listener's `tls.mode`
+    (`Terminate`), an address's `type` (`IPAddress`), the `group` and `kind`
+    of a certificate reference (a core Secret) and of a parent reference (a
+    Gateway), the `group` of an allowed route kind (the Gateway API's),
+    `allowedListeners.namespaces.from` (`None`), a client certificate
+    validation's `mode` (`AllowValidOnly`).
+  - One number of these types is omitted when zero, a ListenerSet listener's
+    `port`, and the CRD gives it no default: an authored `port: 0` is left out
+    as an unset one is, the API accepts neither, and the kind refuses both
+    (below).
+    `TestGatewayKinds_NoDefaultedZeros` holds the types to having no number or
+    boolean that is omitted when zero and that a CRD of either channel
+    defaults to something else.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, so that the object would not show the omission: the
+  rule every kind follows (see the Prometheus operator's kinds above). Each
+  must be authored (`gatewayClassName: required (…)`,
+  `listeners[1].port: required (…)`); an authored empty value is a value, and
+  the API server's to refuse.
+  - A `gatewayclass`: `controllerName`.
+  - A `gateway`: `gatewayClassName` and `listeners`, and of each listener its
+    `name`, `port` and `protocol`. Of a Gateway-wide `tls.frontend` that is
+    authored: its `default` (`default: {}` asks for no client certificate),
+    and of a `perPort` entry its `port` and `tls`; of a `validation` that is
+    authored, its `caCertificateRefs`.
+  - A `listenerset`: `parentRef` with its `name`.
+  - A `referencegrant`: `from` and `to`; of a source its `group`, `kind` and
+    `namespace`, of a target its `group` and `kind`. The core group is
+    authored as `group: ""`.
+  - A `backendtlspolicy`: `validation` with its `hostname`; of a subject
+    alternative name that is authored, its `type`.
+  - Of a reference that is authored, on every kind, what the type would write
+    empty: the `name` of a certificate reference (a listener's
+    `tls.certificateRefs`, the Gateway's `tls.backend.clientCertificateRef`);
+    the `group`, `kind` and `name` of a parameters reference
+    (`parametersRef`, `infrastructure.parametersRef`), of a CA certificate
+    reference (`caCertificateRefs`) and of a policy target (`targetRefs`);
+    the `kind` of an allowed route kind (`allowedRoutes.kinds`).
+  - A required field under a parent the author left out is not asked for: the
+    list follows what was authored.
+
+  **A required field the type omits is refused by the kind itself,** since no
+  required list can name it: the type leaves it out where it is not authored
+  and where it is authored empty alike, and the API server refuses the object
+  either way. There are five at v1.6.2:
+  - a `listenerset` with no `listeners` and a `backendtlspolicy` with no
+    `targetRefs`, absent or empty (`listeners: required (…)`), as a
+    `servicecidr` with no `cidrs` is;
+  - a ListenerSet listener without its `name`, its `port` or its `protocol`,
+    absent or empty, a `port: 0` included
+    (`listeners[1].port: required (…)`). A Gateway's listener must author the
+    same three, by the list above: the two listener types carry different
+    json tags, and the answer is the same on both kinds.
+
+  `TestGatewayKinds_RequiredMatchCRD` derives that set from the CRDs as it
+  derives the lists, at every depth of the five specs, and holds each member to
+  one of two answers: the kind's refusal, which it runs, or a stated reason
+  the decoded value cannot show the omission. None has the second answer.
+  `TestGatewayKinds_RefusedOmissions` holds each refused field to being
+  required in both channels.
+
+  `TestGatewayKinds_RequiredMatchCRD` holds the lists (4 paths for a
+  gatewayclass, 22 for a gateway, 4 for a listenerset, 7 for a referencegrant,
+  9 for a backendtlspolicy) to the CRDs the linked module ships. The module
+  ships two sets, one per channel of the API. The experimental one holds every
+  field the Go types do and is the one each path is read in; the standard one
+  must require the same wherever it holds the property. Every field of the
+  Gateway API's own types that the CRDs require and the type writes
+  unauthored is listed, and nothing else is; no field is written empty
+  unauthored beside those. A dependency bump that adds, drops or moves one
+  fails there. **Not refused:**
+  - a list the API wants at least one item of that is authored empty, where
+    the type writes it (`listeners: []` on a `gateway`, `from: []`): an
+    authored empty value is a value;
+  - a required field of a Kubernetes type these specs embed (the expressions
+    of a label selector). An omitted one is emitted empty;
+  - every other value rule of the CRDs: enumerations, lengths, patterns,
+    minima and item limits, and the rules the CRDs write as expressions (a
+    listener's `tls` and `hostname` against its `protocol`, the uniqueness of
+    a listener's name and of its port, protocol and hostname, of an address
+    and of a `perPort` port, one of `caCertificateRefs` and
+    `wellKnownCACertificates`, a subject alternative name's field against
+    its `type`, a target's `sectionName` among several targets, a
+    GatewayClass's `controllerName` not changing);
+  - what a Gateway API controller refuses when it reads the object, which
+    shows in the object's status, not at creation.
+
+  **Policy.** No dimension of the environment policy reaches these objects:
+  they run no pod, hold no image, request no storage and have no replica
+  count. A nil policy and a strict one build the same object.
+  - **The pods of a Gateway are not sized here.** A controller may start a
+    proxy for a Gateway; the Gateway object holds no pod template and no
+    resources, so the policy's maxima and defaults have nothing to hold.
+    `infrastructure.labels` and `infrastructure.annotations` are written as
+    authored, and what a controller reads into them is its own.
+  - **No field holds a literal secret, and none is checked.** A certificate is
+    a reference: to a Secret on a listener and for the Gateway's client
+    certificate, to a ConfigMap or another object for CA certificates. The
+    free maps a controller defines, a listener's `tls.options` and a
+    BackendTLSPolicy's `options`, are written to the object as authored,
+    under a policy that forbids explicit secrets too.
+  - **Hosts are not checked.** A host these objects name is one a Gateway
+    serves or a backend is checked against, not an artifact source, and none
+    is held to the policy's allowed registries: a listener's `hostname`, an
+    address's `value`, a BackendTLSPolicy's `validation.hostname` and the
+    `hostname` and `uri` of its subject alternative names.
+
+  **References are the author's.** A Gateway names its class
+  (`gatewayClassName`), a ListenerSet its Gateway (`parentRef`), a
+  BackendTLSPolicy its backends (`targetRefs`), and each of them Secrets or
+  ConfigMaps; launcher points none at a component and does not look for the
+  target in the document. To refer to another component's object, name it:
+  the component name, or its `objectName`. A ListenerSet attaches only where
+  its Gateway's `allowedListeners` lets its namespace, and a reference across
+  namespaces works only where a ReferenceGrant of the target's namespace
+  allows it; launcher checks neither. A `referencegrant` allows references
+  into the namespace it is emitted in, so it belongs to the application of
+  the objects referred to.
+
+  **Labels and annotations** are the `labels` and `annotations` properties. A
+  Gateway's `infrastructure.labels` and `infrastructure.annotations` are not
+  these: they are what the controller puts on the resources it creates for the
+  Gateway.
+
+  **Not covered.** Whether what is referred to exists (a class, a Gateway,
+  a Secret, a ConfigMap, a Service and its port), and whether a controller of
+  the cluster implements the class. The object's status is the controller's
+  and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -6660,6 +6837,8 @@ kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometh
 five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`,
 `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`),
 `cilium-clusterwidenetworkpolicy`,
+the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gateway`,
+`listenerset`, `referencegrant`, `backendtlspolicy`),
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no

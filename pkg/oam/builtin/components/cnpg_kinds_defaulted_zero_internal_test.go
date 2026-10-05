@@ -124,6 +124,13 @@ func crdSpecScalarDefaults(t *testing.T, file string, types ...string) map[strin
 	if !ok {
 		t.Fatalf("%s has no spec property", file)
 	}
+	return schemaScalarDefaults(spec, types...)
+}
+
+// schemaScalarDefaults returns the default of every property under spec, the
+// schema of a CRD's spec, whose schema type is one of types, keyed as
+// crdSpecScalarDefaults says.
+func schemaScalarDefaults(spec apiextensionsv1.JSONSchemaProps, types ...string) map[string]string {
 	out := map[string]string{}
 	var walk func(s apiextensionsv1.JSONSchemaProps, path string)
 	walk = func(s apiextensionsv1.JSONSchemaProps, path string) {

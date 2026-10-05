@@ -283,6 +283,31 @@ func (h *CiliumClusterwideNetworkPolicyHandler) ContractMetadata() oam.ContractM
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *GatewayClassHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("gatewayclass")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *GatewayHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("gateway")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ListenerSetHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("listenerset")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ReferenceGrantHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("referencegrant")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *BackendTLSPolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("backendtlspolicy")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

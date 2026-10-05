@@ -1,0 +1,29 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: routes-to-services
+      type: referencegrant
+      properties:
+        from:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            namespace: shop
+        to:
+          - group: ""
+            kind: Service
+    - name: gateway-to-certificate
+      type: referencegrant
+      properties:
+        objectName: edge-reads-wildcard-tls
+        from:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            namespace: edge
+        to:
+          - group: ""
+            kind: Secret
+            name: wildcard-tls
