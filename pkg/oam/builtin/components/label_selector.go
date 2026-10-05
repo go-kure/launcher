@@ -77,21 +77,33 @@ func validateLabelSelector(at string, sel *metav1.LabelSelector) error {
 // selector of a topology spread constraint, of a projected cluster trust
 // bundle and of a generic ephemeral volume's claim.
 func podSpecLabelSelectors(prefix string) []string {
-	var paths []string
-	for _, affinity := range []string{"podAffinity", "podAntiAffinity"} {
-		at := prefix + "affinity." + affinity
-		for _, term := range []string{
-			at + ".requiredDuringSchedulingIgnoredDuringExecution[]",
-			at + ".preferredDuringSchedulingIgnoredDuringExecution[].podAffinityTerm",
-		} {
-			paths = append(paths, term+".labelSelector", term+".namespaceSelector")
-		}
-	}
-	return append(paths,
+	return append(affinityLabelSelectors(prefix+"affinity"),
 		prefix+"topologySpreadConstraints[].labelSelector",
 		prefix+"volumes[].projected.sources[].clusterTrustBundle.labelSelector",
 		prefix+"volumes[].ephemeral.volumeClaimTemplate.spec.selector",
 	)
+}
+
+// affinityLabelSelectors lists the label selectors of the corev1.Affinity at
+// the path at: those of its pod affinity and of its pod anti-affinity
+// (podAffinityLabelSelectors). A node affinity holds none: a node selector
+// term is another type.
+func affinityLabelSelectors(at string) []string {
+	return append(podAffinityLabelSelectors(at+".podAffinity"), podAffinityLabelSelectors(at+".podAntiAffinity")...)
+}
+
+// podAffinityLabelSelectors lists the label selectors of the corev1.PodAffinity
+// or corev1.PodAntiAffinity at the path at: the label and namespace selectors
+// of its required and of its preferred terms.
+func podAffinityLabelSelectors(at string) []string {
+	var paths []string
+	for _, term := range []string{
+		at + ".requiredDuringSchedulingIgnoredDuringExecution[]",
+		at + ".preferredDuringSchedulingIgnoredDuringExecution[].podAffinityTerm",
+	} {
+		paths = append(paths, term+".labelSelector", term+".namespaceSelector")
+	}
+	return paths
 }
 
 // validatePodSpecLabelSelectors holds every label selector of ps to

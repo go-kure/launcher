@@ -75,13 +75,15 @@ func (h *PodMonitorHandler) PropertySchema() map[string]oam.PropertySchema {
 // `selector`, and of an endpoint's `oauth2` its three fields; the type would
 // write each one empty, and an empty selector selects every Pod.
 // `podMetricsEndpoints` is optional to the API, which the type writes as null
-// when it is not authored. The API's value rules, and the operator's own
-// checks of an object it has admitted, are left to them.
+// when it is not authored. Of a match expression of the selector the API
+// requires the key and the operator (labelSelectorRequired;
+// monitoring_common.go states the ground). The API's value rules, and the
+// operator's own checks of an object it has admitted, are left to them.
 var podMonitorKind = &policyFreeKind[monitoringv1.PodMonitorSpec]{
 	upstream: "monitoring.coreos.com/v1 PodMonitorSpec",
 	required: requiredFields(map[string]string{
 		"selector": "the label query over the Pods to scrape; no default selector is filled, use {} to select every Pod of the selected namespaces",
-	}, oauth2Required("podMetricsEndpoints[].oauth2")),
+	}, oauth2Required("podMetricsEndpoints[].oauth2"), labelSelectorRequired("selector")),
 	build: func(name, namespace string, spec *monitoringv1.PodMonitorSpec) client.Object {
 		monitor := prometheus.CreatePodMonitor(name, namespace)
 		spec.DeepCopyInto(&monitor.Spec)

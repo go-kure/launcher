@@ -829,9 +829,14 @@ its text:
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
     requires that the Go type writes whether or not it was authored must be authored. A
     test holds each list to the CRDs the linked module ships (4 paths for a gatewayclass,
-    22 for a gateway, 4 for a listenerset, 7 for a referencegrant, 9 for a
+    26 for a gateway, 6 for a listenerset, 7 for a referencegrant, 9 for a
     backendtlspolicy), read in the experimental channel's CRDs, which hold every field
-    the Go types do, and held to agree with the standard channel's.
+    the Go types do, and held to agree with the standard channel's. A `gateway` and a
+    `listenerset` also hold the `key` and `operator` of a match expression in a namespace
+    selector (`allowedRoutes.namespaces.selector`, `allowedListeners.namespaces.selector`),
+    presence only (go-kure/launcher#790); those are derived from the CRDs with the rest of
+    the list, and the test of the label selectors shows, in both channels, what the API
+    server answers for an expression without one.
   - **A field the API requires and the type omits when it is not authored is refused by
     the kind itself,** as `servicecidr` refuses a missing `cidrs`, absent or authored
     empty: a `listenerset` with no `listeners`, a `backendtlspolicy` with no
@@ -869,12 +874,16 @@ its text:
     and no `Policy` method is added.
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
     requires that the Go type writes whether or not it was authored must be authored. A
-    test holds each list to the CRDs the linked module ships (64 paths for an issuer, 8
+    test holds each list to the CRDs the linked module ships (96 paths for an issuer, 8
     for a certificate). An issuer has none at the top level; a required field under a
     parent the author left out is not asked for. Three of an issuer's paths are fields
     of a Kubernetes or Gateway API type an ACME HTTP01 solver embeds (the terms of a
     required node affinity, the name of a parent reference): the CRDs refuse each as the
-    type writes it unauthored, which a second test shows with the CRDs' validator.
+    type writes it unauthored, which a second test shows with the CRDs' validator. An
+    issuer's list also holds the `key` and `operator` of a match expression in the label
+    selectors of an HTTP01 solver's pod affinity, presence only (go-kure/launcher#790);
+    those are derived from the same CRDs with the rest of the list, and the test of the
+    label selectors shows what the API server answers for an expression without one.
   - **cert-manager's validating webhook refuses more than the CRDs do, and launcher
     repeats none of it:** an issuer of no type or of two, a keystore with a password
     beside a reference that names a Secret or with neither, a certificate that names no
@@ -1010,7 +1019,12 @@ its text:
     provider at this pin, in `zz_generated_externalsecrets_required.go`), and a test
     fails where the file and the derivation differ. Four more fields of a store are
     ones the API would default and the type always writes, so the default never
-    applies and the value must be written: **a Vault store writes its `version`.**
+    applies and the value must be written: **a Vault store writes its `version`.** The
+    `key` and `operator` of a match expression must be authored too, presence only
+    (go-kure/launcher#790), in a store condition's `namespaceSelector` and in a
+    cluster external secret's `namespaceSelector` and `namespaceSelectors`: the same
+    test derives them from the source of the linked Kubernetes type by the schema
+    generators' rule.
   - An authored `false` or `0` the type would omit and the API would replace with
     another default is refused, on three fields of single providers.
   - Of the API's count and expression rules two are checked: a store configures exactly
@@ -1282,8 +1296,11 @@ its text:
     the document is one the API server refuses, and only the Go type's zero value hides
     that. `policyFreeKind` gained a list of such fields for this
     (`refuseUnauthoredRequired`), and a test holds each kind's list to the required
-    markers of the linked module's source. A required field of a Kubernetes type these
-    specs embed (the `key` of a Secret key reference) is not checked.
+    markers of the linked module's source. Of the Kubernetes types these specs embed, the
+    `key` and `operator` of a selector's match expression must be authored too, presence
+    only (go-kure/launcher#790): the module ships no CRD, so the same test derives them
+    from the source of the linked type by the schema generators' rule. Another required field
+    of such a type (the `key` of a Secret key reference) is not checked.
   - A Probe needs `prober.url` here because the object always carries a prober: a limit
     of the Go type, which writes one whether or not it was authored, not a rule of the
     API, which does not require `prober` and refuses one without a `url`.
@@ -1325,11 +1342,14 @@ its text:
     others, which the kind does not know, and that the container runs as root is not
     held: the policy has no dimension for it.
   - Required fields follow the rule of the Prometheus operator's kinds. A test holds
-    each list to the CRDs the linked module ships (11 paths for a source, 6 for a
+    each list to the CRDs the linked module ships (75 paths for a source, 54 for a
     destination): of a volume mounted into a mover its `mountPath` and `volumeSource`,
-    of a Syncthing peer its `address`, `ID` and `introducer`. The terms of a required
-    node affinity in a mover's affinity, which the Kubernetes type would write as
-    `null`, are refused when left out.
+    of a Syncthing peer its `address`, `ID` and `introducer`, and the `key` and
+    `operator` of a match expression in the label selectors of a mover's pod affinity
+    and anti-affinity, presence only (go-kure/launcher#790); the test of the label
+    selectors shows what the API server answers for an expression without one. The
+    terms of a required node affinity in a mover's affinity, which the Kubernetes type
+    would write as `null`, are refused when left out.
   - **Two fields the linked Kubernetes type holds and the CRDs do not are refused when
     authored:** `defaultUser` and `items[].user` of a Secret mounted into a mover. The
     linked Kubernetes API is newer than the one VolSync's CRDs were generated from. A

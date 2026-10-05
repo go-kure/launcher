@@ -75,6 +75,12 @@ func issuerSchema(kind string) map[string]oam.PropertySchema {
 // null, which the API server drops before it validates, and the name of a
 // parent reference, written empty, which is below its minimum length.
 // TestKindComponents_NullRequired shows each refusal on the linked CRDs.
+//
+// The others of such a type are the key and the operator of a match
+// expression, in the label selectors a solver's pod template holds: those of
+// its pod affinity and anti-affinity (labelSelectorRequired).
+// TestLabelSelectorKinds_CoverEverySelector holds them to the CRDs, path by
+// path.
 var issuerRequired = func() map[string]string {
 	const (
 		dns01  = "acme.solvers[].dns01."
@@ -82,6 +88,8 @@ var issuerRequired = func() map[string]string {
 		terms  = ".podTemplate.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms"
 	)
 	return requiredFields(
+		labelSelectorRequired(affinityLabelSelectors(http01+"ingress.podTemplate.spec.affinity")...),
+		labelSelectorRequired(affinityLabelSelectors(http01+"gatewayHTTPRoute.podTemplate.spec.affinity")...),
 		map[string]string{
 			http01 + "gatewayHTTPRoute.parentRefs[].name": "the name of the Gateway the route attaches to",
 			http01 + "gatewayHTTPRoute" + terms:           "the node selector terms, of which a node must match one",

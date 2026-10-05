@@ -44,12 +44,31 @@ func gatewayListenerItems(typ string) *oam.PropertySchema {
 // gatewayListenerRequired is the required list of the listeners under the
 // path at ("listeners[]") that a Gateway and a ListenerSet share: of a
 // certificate reference and of an allowed route kind that are authored, the
-// field the API requires that the type would write empty.
+// field the API requires that the type would write empty, and the key and the
+// operator of a match expression in the selector of the namespaces routes may
+// attach from (gatewayNamespacesRequired).
 func gatewayListenerRequired(at string) map[string]string {
-	return map[string]string{
-		at + ".tls.certificateRefs[].name": "the name of the Secret, or of the other object, that holds the certificate",
-		at + ".allowedRoutes.kinds[].kind": "the kind of route the listener allows, such as HTTPRoute",
+	return requiredFields(
+		map[string]string{
+			at + ".tls.certificateRefs[].name": "the name of the Secret, or of the other object, that holds the certificate",
+			at + ".allowedRoutes.kinds[].kind": "the kind of route the listener allows, such as HTTPRoute",
+		},
+		gatewayNamespacesRequired(at+".allowedRoutes.namespaces"),
+	)
+}
+
+// gatewayNamespacesRequired is the required list of the namespace choices
+// under the paths at ("listeners[].allowedRoutes.namespaces"): the key and the
+// operator of a match expression of their `selector`, a Kubernetes label
+// selector (labelSelectorRequired). The CRDs require both, which
+// TestLabelSelectorKinds_CoverEverySelector holds them to; the rest of an
+// expression is left to the API server.
+func gatewayNamespacesRequired(at ...string) map[string]string {
+	selectors := make([]string, 0, len(at))
+	for _, path := range at {
+		selectors = append(selectors, path+".selector")
 	}
+	return labelSelectorRequired(selectors...)
 }
 
 // gatewayReferenceRequired is the required list of the references under the

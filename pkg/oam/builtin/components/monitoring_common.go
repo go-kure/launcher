@@ -18,6 +18,13 @@ import (
 // false is lost on these types, and TestMonitoringKinds_RequiredMatchMarkers
 // holds each kind's required list to the fields the source marks required.
 //
+// One pair of required fields is of a Kubernetes type, which carries no
+// +required marker: the key and the operator of a match expression, in the
+// label selector of the three scrape kinds (labelSelectorRequired). No CRD is
+// linked to read them from, so the same test derives them from the source of
+// metav1.LabelSelectorRequirement by the schema generators' rule: a field with
+// no optional marker whose json tag keeps it when empty is required.
+//
 // A host these objects name is one Prometheus reaches, not an artifact source:
 // a prober, a proxy, an OAuth2 token endpoint, a static probe target. None is
 // held to the environment policy's allowed registries.

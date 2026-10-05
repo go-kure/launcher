@@ -77,10 +77,19 @@ const (
 // other one is a field, and a defaulted one names its default.
 // TestExternalSecretsKinds_StoreRequiredIsGenerated holds the generated file
 // to the derivation, each class in both directions.
+//
+// Beside the two, the list holds the key and the operator of a match
+// expression in a condition's namespace selector (labelSelectorRequired),
+// which the API requires and the Kubernetes type writes empty; the same
+// derivation finds them, from the source of the linked type.
 var secretStoreRequired = requiredFields(
 	generatedRequired(secretStoreRequiredPaths),
 	unappliedDefaults(secretStoreUnappliedDefaults),
+	labelSelectorRequired(secretStoreLabelSelectors...),
 )
+
+// secretStoreLabelSelectors are the label selectors of esv1.SecretStoreSpec.
+var secretStoreLabelSelectors = []string{"conditions[].namespaceSelector"}
 
 // unappliedDefaults is the required list of the given fields the API would
 // default, each mapped to that default.
@@ -372,10 +381,13 @@ func templateRefRequired(at, kind string) map[string]string {
 
 // clusterExternalSecretRequired is the required list of the
 // clusterexternalsecret kind: the spec of the ExternalSecrets it creates, and
-// under it everything externalSecretRequired lists.
+// under it everything externalSecretRequired lists; and the key and the
+// operator of a match expression in a selector of the namespaces
+// (labelSelectorRequired).
 var clusterExternalSecretRequired = func() map[string]string {
 	const at = "externalSecretSpec"
-	out := map[string]string{at: "the spec of the ExternalSecrets created in the selected namespaces"}
+	out := labelSelectorRequired("namespaceSelector", "namespaceSelectors[]")
+	out[at] = "the spec of the ExternalSecrets created in the selected namespaces"
 	for path, says := range externalSecretRequired {
 		out[at+"."+path] = says
 	}

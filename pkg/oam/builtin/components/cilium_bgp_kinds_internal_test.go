@@ -212,10 +212,11 @@ func ciliumBGPSpec(t *testing.T, file string) apiextensionsv1.JSONSchemaProps {
 }
 
 // ciliumBGPTypeFields is every field the encoding of typ reaches, by json
-// path, as walkMonitoringFields reads it.
+// path, as walkKindFields reads it. Nothing here reads what the walk holds
+// forced, so no field is said to be required.
 func ciliumBGPTypeFields(typ reflect.Type) map[string]kindField {
 	fields := map[string]kindField{}
-	walkMonitoringFields(typ, nil, func(f kindField) { fields[f.path] = f })
+	walkKindFields(typ, func(kindField) bool { return false }, func(f kindField) { fields[f.path] = f })
 	return fields
 }
 

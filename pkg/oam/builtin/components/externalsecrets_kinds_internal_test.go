@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -56,6 +57,8 @@ type externalSecretsSource struct {
 	// for one on a field, the marker without its "+kubebuilder:validation:"
 	// prefix. Only the externalsecrets/v1 package declares any.
 	rules []string
+	// embedded reads the Kubernetes types the specs embed (markerAPISource).
+	embedded apiSource
 }
 
 // externalSecretsRuleMarkers are the markers read as a rule over more than one
@@ -68,7 +71,7 @@ var externalSecretsRuleMarkers = []string{"XValidation", "MinProperties", "MaxPr
 func readExternalSecretsSource(t *testing.T) externalSecretsSource {
 	t.Helper()
 	root := linkedModuleDir(t, externalSecretsModulePath)
-	src := externalSecretsSource{fields: map[string]fieldMarkers{}}
+	src := externalSecretsSource{fields: map[string]fieldMarkers{}, embedded: markerAPISource(t)}
 	ruleOf := func(doc *ast.CommentGroup) []string {
 		var out []string
 		if doc == nil {
@@ -145,12 +148,26 @@ func (s externalSecretsSource) required(f kindField) bool {
 // source was not read, one marked both required and optional, one required
 // under a map value, and one required or defaulted under a parent that is
 // written unauthored without being required itself.
-func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, omitted []string, defaulted map[string]string) {
+//
+// Of the Kubernetes types these specs embed it derives the key and the
+// operator of a label selector's match expression, apart (expressions): the
+// schema generators' rule on the source of the linked
+// metav1.LabelSelectorRequirement requires both, and the type writes them
+// whether or not they were authored.
+func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, omitted, expressions []string, defaulted map[string]string) {
 	t.Helper()
 	fields := 0
 	defaulted = map[string]string{}
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	walkKindFields(typ, s.required, func(f kindField) {
 		if !strings.HasPrefix(f.owner.PkgPath(), externalSecretsModulePath+"/") {
+			switch {
+			case f.owner != expression || !s.embedded.required(f) || !f.writtenUnauthored():
+			case f.forced || strings.Contains(f.path, "{}"):
+				t.Errorf("%s is the field of a match expression under a map value or a parent the type writes unauthored; a required list cannot hold it, and this test knows no such field", f.path)
+			default:
+				expressions = append(expressions, f.path)
+			}
 			return
 		}
 		fields++
@@ -187,7 +204,8 @@ func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, 
 	}
 	slices.Sort(written)
 	slices.Sort(omitted)
-	return written, omitted, defaulted
+	slices.Sort(expressions)
+	return written, omitted, expressions, defaulted
 }
 
 // unappliedDefault returns the CRD default of an optional field that the API
@@ -281,9 +299,11 @@ func pathsDiffer(got, want []string) (missing, extra []string) {
 // sentence that names the default. Each such field must be in the list with
 // that sentence, and the list may hold no other under it.
 //
-// Only the module's own types are derived. A field of a Kubernetes type these
-// specs embed (the key and operator of a label selector requirement) is not,
-// and no kind refuses its omission.
+// Of a Kubernetes type these specs embed, only the key and the operator of a
+// label selector's match expression are derived, by the schema generators'
+// rule on the linked type's source, and must be in the list. The module ships
+// no CRD to show them with; TestLabelSelectorKinds_CoverEverySelector holds
+// each kind's refusal of them, path by path.
 func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 	src := readExternalSecretsSource(t)
 	// Vacuity guards: both spellings of a required field are read.
@@ -295,14 +315,14 @@ func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 	}
 	for _, kind := range externalSecretsKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			written, omitted, defaulted := src.derive(t, kind.typ)
+			written, omitted, expressions, defaulted := src.derive(t, kind.typ)
 			for _, path := range written {
 				if _, both := defaulted[path]; both {
 					t.Errorf("%s is derived both as required and as optional with a default", path)
 				}
 			}
 			listed := slices.Sorted(maps.Keys(kind.required))
-			missing, extra := pathsDiffer(listed, slices.Concat(written, slices.Sorted(maps.Keys(defaulted))))
+			missing, extra := pathsDiffer(listed, slices.Concat(written, expressions, slices.Sorted(maps.Keys(defaulted))))
 			for _, path := range missing {
 				t.Errorf("%s is written unauthored, and required by the API or given a default by it, and the required list does not hold it", path)
 			}
@@ -323,7 +343,7 @@ func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 					t.Errorf("%s has no default the source gives it, and the list says %q of it", path, says)
 				}
 			}
-			t.Logf("%d required fields written unauthored, %d omitted when unauthored, %d optional fields written unauthored with a default", len(written), len(omitted), len(defaulted))
+			t.Logf("%d required fields written unauthored, %d omitted when unauthored, %d optional fields written unauthored with a default, %d of a match expression", len(written), len(omitted), len(defaulted), len(expressions))
 		})
 	}
 }
@@ -374,7 +394,7 @@ func renderSecretStoreRequired(t *testing.T, paths []string, defaults map[string
 // module that changes either list, run this test once with
 // UPDATE_EXTERNALSECRETS_REQUIRED=1: it writes the file and compares nothing.
 func TestExternalSecretsKinds_StoreRequiredIsGenerated(t *testing.T) {
-	derived, _, defaults := readExternalSecretsSource(t).derive(t, reflect.TypeFor[esv1.SecretStoreSpec]())
+	derived, _, _, defaults := readExternalSecretsSource(t).derive(t, reflect.TypeFor[esv1.SecretStoreSpec]())
 	// Vacuity guards: the derivation reaches a provider's own fields, in each
 	// class.
 	for _, path := range []string{"provider", "provider.vault.server", "provider.aws.region", "provider.vault.auth.kubernetes.serviceAccountRef.name"} {
@@ -488,8 +508,13 @@ func TestExternalSecretsKinds_GeneratedComparisonBites(t *testing.T) {
 	}
 
 	// What a refusal says of a generated path is one of three sentences, by
-	// the class of the path and not by the field.
+	// the class of the path and not by the field. The fields of a match
+	// expression are not generated.
+	selectors := labelSelectorRequired(secretStoreLabelSelectors...)
 	for path, says := range secretStoreRequired {
+		if _, ok := selectors[path]; ok {
+			continue
+		}
 		want := externalSecretsRequiresField
 		if strings.HasSuffix(path, ".name") {
 			want = externalSecretsRequiresName
@@ -501,8 +526,8 @@ func TestExternalSecretsKinds_GeneratedComparisonBites(t *testing.T) {
 			t.Errorf("%s says %q, want %q", path, says, want)
 		}
 	}
-	if len(secretStoreRequired) != len(secretStoreRequiredPaths)+len(secretStoreUnappliedDefaults) {
-		t.Errorf("the required list holds %d paths, the generated ones %d and %d", len(secretStoreRequired), len(secretStoreRequiredPaths), len(secretStoreUnappliedDefaults))
+	if len(secretStoreRequired) != len(secretStoreRequiredPaths)+len(secretStoreUnappliedDefaults)+len(selectors) {
+		t.Errorf("the required list holds %d paths, the generated ones %d and %d, the match expressions %d", len(secretStoreRequired), len(secretStoreRequiredPaths), len(secretStoreUnappliedDefaults), len(selectors))
 	}
 }
 

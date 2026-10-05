@@ -111,7 +111,10 @@ var cnpgPoolerDefaultedZeroFields = map[string]string{}
 // CnpgPoolerConfig, under the same null contract and strict decode as
 // cnpg-cluster. The fields the Pooler CRD requires must be authored:
 // cluster.name, and pgbouncer, which the Go type would otherwise encode as
-// null.
+// null; and of a match expression in a label selector of the pod template, the
+// key and the operator (podTemplateLabelSelectorRequired), which the type
+// writes empty. Nothing else of an expression is read: the template's value
+// rules are the API server's by the CRD, and the operator's.
 func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	name := component.ObjectName()
 	if err := validateCnpgPoolerName(name); err != nil {
@@ -122,6 +125,9 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
 	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
