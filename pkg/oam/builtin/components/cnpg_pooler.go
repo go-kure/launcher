@@ -74,8 +74,14 @@ func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 	// The one relation between two names the build refuses (validate): a
 	// cluster reference that is the Pooler's own name. Only an authored string
 	// is compared; whatever else `cluster` holds is the decode's to refuse.
-	if cluster, ok := component.Properties["cluster"].(map[string]any); ok {
-		if clusterName, ok := cluster["name"].(string); ok {
+	// The two keys are matched as the decode matches them, in any case
+	// (foldedFieldMaps), so `Cluster: {Name: …}` is read as it is built.
+	for _, cluster := range foldedFieldMaps(component.Properties, "cluster") {
+		for _, key := range foldedFieldKeys(cluster, "name") {
+			clusterName, ok := cluster[key].(string)
+			if !ok {
+				continue
+			}
 			if err := refusePoolerNamedAsCluster(name, clusterName); err != nil {
 				return nil, err
 			}
