@@ -234,5 +234,5 @@ func enforceCertificatePolicy(spec *certv1.CertificateSpec, p oam.Policy) error 
 	default:
 		return nil
 	}
-	return errors.Errorf("%s.password: holds the keystore password in the object, and the environment policy forbids explicit secrets; name the key of a Secret created out of band in %s.passwordSecretRef instead", at, at)
+	return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, fmt.Sprintf("%s.password: holds the keystore password in the object, and the environment policy forbids explicit secrets; name the key of a Secret created out of band in %s.passwordSecretRef instead", at, at))
 }

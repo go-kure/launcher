@@ -1,7 +1,9 @@
 package traits
 
 import (
-	"github.com/go-kure/launcher/pkg/errors"
+	"fmt"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // applyDefaultReplicas returns dflt when the value was not user-authored and a
@@ -21,7 +23,7 @@ func enforceMaxReplicas(current int32, max *int32) error {
 		return nil
 	}
 	if current > *max {
-		return errors.Errorf("replicas %d exceeds enforced maximum %d", current, *max)
+		return oam.NewPolicyRefusal(oam.RefusalReplicaMaximum, fmt.Sprintf("replicas %d exceeds enforced maximum %d", current, *max))
 	}
 	return nil
 }

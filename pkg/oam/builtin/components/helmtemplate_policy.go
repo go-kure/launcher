@@ -47,7 +47,7 @@ func (c *HelmTemplateConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 	if len(c.SecretValues) > 0 && !oam.ExplicitSecretsAllowed(p) {
-		return errors.Errorf("%s: %s is set and the environment policy forbids explicit secrets; have the chart read a Secret created out of band instead", helmTemplateType, helmSecretValuesKey)
+		return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, fmt.Sprintf("%s: %s is set and the environment policy forbids explicit secrets; have the chart read a Secret created out of band instead", helmTemplateType, helmSecretValuesKey))
 	}
 	src, err := c.source()
 	if err != nil {
@@ -124,9 +124,9 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 		case !ok:
 			return nil
 		case u.IsList():
-			return errors.New("the object has a top-level items list and sits inside a list of an unregistered kind, so it is read as a list whose objects cannot be checked against environment policy")
+			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, "the object has a top-level items list and sits inside a list of an unregistered kind, so it is read as a list whose objects cannot be checked against environment policy")
 		case isWorkloadGVK(u.GroupVersionKind()):
-			return errors.Errorf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion())
+			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, fmt.Sprintf("apiVersion %q is not one whose pod spec this build can read, so the object cannot be checked against environment policy", u.GetAPIVersion()))
 		}
 		return nil
 	}
@@ -158,7 +158,7 @@ func enforceRenderedClaims(obj client.Object, p oam.Policy) error {
 		if !ok {
 			return nil
 		}
-		return enforceMaxResource(q.String(), p.MaxStorageSize(), where+".resources.requests.storage")
+		return enforceMaxStorageAt(q.String(), p.MaxStorageSize(), where+".resources.requests.storage")
 	}
 	switch o := obj.(type) {
 	case *corev1.PersistentVolumeClaim:
@@ -217,7 +217,7 @@ func enforceRenderedReplicas(obj client.Object, p oam.Policy) error {
 		}
 		n, found, err := unstructured.NestedInt64(o.Object, "spec", "maxReplicas")
 		if err != nil || !found || n > math.MaxInt32 || n < math.MinInt32 {
-			return errors.New("spec.maxReplicas is not an integer this build can read, so the object cannot be checked against environment policy")
+			return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, "spec.maxReplicas is not an integer this build can read, so the object cannot be checked against environment policy")
 		}
 		return check("spec.maxReplicas", int32(n))
 	}

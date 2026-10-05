@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/base64"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -95,7 +96,7 @@ type SecretComponentConfig struct {
 // reports the refusal as a violation naming the component.
 func (c *SecretComponentConfig) ApplyPolicy(policy oam.Policy) error {
 	if !oam.ExplicitSecretsAllowed(policy) {
-		return errors.Errorf("%s: the environment policy forbids explicit secrets; reference a Secret created out of band instead", secretType)
+		return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, fmt.Sprintf("%s: the environment policy forbids explicit secrets; reference a Secret created out of band instead", secretType))
 	}
 	return nil
 }

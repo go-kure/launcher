@@ -79,7 +79,7 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 		}
 		if q, ok := v.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
 			where := fmt.Sprintf("volume %q ephemeral.volumeClaimTemplate.spec.resources.requests.storage", v.Name)
-			if err := enforceMaxResource(q.String(), p.MaxStorageSize(), where); err != nil {
+			if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), where); err != nil {
 				return at(err)
 			}
 		}
@@ -90,7 +90,7 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	// podResources properties.
 	if sc := ps.SecurityContext; !p.AllowPrivileged() && sc != nil && sc.WindowsOptions != nil &&
 		sc.WindowsOptions.HostProcess != nil && *sc.WindowsOptions.HostProcess {
-		return errors.Errorf("%s is not allowed by environment policy", under("securityContext.windowsOptions.hostProcess"))
+		return oam.NewPolicyRefusal(oam.RefusalPrivileged, fmt.Sprintf("%s is not allowed by environment policy", under("securityContext.windowsOptions.hostProcess")))
 	}
 	if r := ps.Resources; r != nil {
 		for _, c := range []struct {

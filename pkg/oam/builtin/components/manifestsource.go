@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"io"
 	"maps"
 	"net"
@@ -169,7 +170,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 			case validateURLScheme(target) != nil:
 				redirectRefusal = errors.New("redirect to a url that is not http(s) refused")
 			case enforceAllowedURLHosts(target, allowedHosts) != nil:
-				redirectRefusal = errors.New("redirect to a host not in allowed registries refused")
+				redirectRefusal = oam.NewPolicyRefusal(oam.RefusalRegistry, "redirect to a host not in allowed registries refused")
 			default:
 				redirectRefusal = nil
 			}
@@ -339,11 +340,11 @@ func enforceAllowedURLHosts(rawURL string, allowed []string) error {
 	shown, trimmed := displayHost(urlAuthority(rawURL))
 	switch {
 	case !trimmed:
-		return errors.Errorf("source registry %q is not in allowed registries %v", shown, allowed)
+		return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("source registry %q is not in allowed registries %v", shown, allowed))
 	case shown != "":
-		return errors.Errorf("source registry %q is not in allowed registries %v; the url's userinfo, IPv6 zone, query or fragment, which no entry matches, is not shown", shown, allowed)
+		return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("source registry %q is not in allowed registries %v; the url's userinfo, IPv6 zone, query or fragment, which no entry matches, is not shown", shown, allowed))
 	default:
-		return errors.Errorf("source registry is not in allowed registries %v; it is not shown, since the url's userinfo, IPv6 zone, query or fragment cannot be told apart from its host", allowed)
+		return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("source registry is not in allowed registries %v; it is not shown, since the url's userinfo, IPv6 zone, query or fragment cannot be told apart from its host", allowed))
 	}
 }
 
@@ -498,7 +499,7 @@ func (c *manifestConfig) Generate(_ *stack.Application) ([]*client.Object, error
 	}
 	if c.policy != nil {
 		if err := enforceManifestPolicy(objs, c.policy); err != nil {
-			return nil, &oam.ViolationError{Component: c.name, Cause: err}
+			return nil, oam.NewViolationError(c.name, err)
 		}
 	}
 	out := make([]*client.Object, len(objs))

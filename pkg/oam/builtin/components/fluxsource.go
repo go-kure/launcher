@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -99,9 +100,9 @@ func enforceFluxSourceOCIHost(typ, field, value string, requireRepository bool, 
 		}
 		// The value is not quoted: its first segment can be userinfo, which can
 		// carry a credential.
-		return errors.Errorf("%s: %s: the url does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
+		return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("%s: %s: the url does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
 			"under an allowed-registries policy write %s with a registry that is localhost or contains \".\" or \":\" "+
-			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", typ, field, form)
+			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", typ, field, form))
 	}
 	return enforceFluxSourceHost(typ, field, value, p)
 }

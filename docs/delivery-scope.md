@@ -565,6 +565,30 @@ be closed at build time.
      the check and to the undeclared-field rule as a document of its own is
      (go-kure/launcher#790, with the kure commit that reads such lists).
 
+### 5.3 Shipped (go-kure/launcher#849): refusal classes
+
+A consumer tells one refusal by the environment policy from another by its class, not by
+its text:
+
+- `oam.ViolationError` has a `Class` (`pkg/oam/pipeline.go`), filled from the first
+  `oam.PolicyRefusal` in the cause chain (`NewViolationError`, `pkg/oam/policy_refusal.go`).
+- The classes are a closed set of eleven: host namespace, privileged, host path, container
+  capability, registry, resource maximum, storage maximum, replica maximum, explicit
+  secret, trait capability and unreadable object (`RefusalClasses`). Every built-in refusal
+  by the policy carries one, on every path: a component's `ApplyPolicy`, a trait
+  sub-application's, the rendered-object check of template delivery (§5.2), and
+  `passthrough` and `manifests` at the transform and at generation (§7).
+- No message changed.
+- What is not a refusal by the policy is unclassified, an explicit value and never a guess:
+  a chart that does not render, a policy default or maximum that does not parse, and the
+  library's own rules on an object.
+- A consumer's own `Enforceable` gives a class through `oam.NewPolicyRefusal`.
+- **Limit:** a redirect of a `manifests` `url` source to a host outside the allowed
+  registries stays a fetch failure and no violation; its error holds the refusal with the
+  registry class.
+- **Breaking** for an unkeyed `oam.ViolationError` literal only.
+- The table of classes is in `pkg/oam/README.md`, "Refusal classes".
+
 ---
 
 ## 6. Contract metadata and kind coverage (go-kure/launcher#789, go-kure/launcher#790)
@@ -1060,3 +1084,4 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
+| [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |

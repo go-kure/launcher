@@ -873,8 +873,8 @@ reference a Secret created out of band.
 **Policy.** A policy may forbid explicit secrets through the optional interface
 `oam.ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`). The trait's sub-application asks it
 in `ApplyPolicy` and, on `false`, fails the transform with a `ViolationError` naming the
-component: `secret "creds": the environment policy forbids explicit secrets; reference a Secret
-created out of band instead`. **The default is to allow**: a policy that does not implement the
+component, of class `oam.RefusalExplicitSecret`: `secret "creds": the environment policy forbids
+explicit secrets; reference a Secret created out of band instead`. **The default is to allow**: a policy that does not implement the
 interface, `NoopPolicy` included, permits the trait. A consumer that must forbid Secrets in
 documents has to implement it. The `secret` kind component, the `helm` component's
 `secretValues` and the `helmtemplate` kind's are held to the same answer, and so is a core
@@ -1039,6 +1039,15 @@ included, `TestBuild_NullStringMapValueIsAbsent` in the output of `kurel build`,
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
 modes, restart policies, etc.) rather than string literals — never re-define values
 that already exist upstream.
+
+A refusal by the environment policy that a trait's sub-application raises in `ApplyPolicy`
+is an `oam.PolicyRefusal` with a class, which a consumer reads from
+`oam.ViolationError.Class` (go-kure/launcher#849; `pkg/oam/README.md`, "Refusal classes"):
+`oam.RefusalExplicitSecret` for the `secret` trait, `oam.RefusalReplicaMaximum` for a
+`scaler` over the policy's `maxReplicas`, and `oam.RefusalStorageMaximum` for a `pvc` over
+its `maxStorageSize`. The violation names the component the trait is on. A trait type the
+policy forbids, does not allow, or requires and does not find is refused by the transform,
+with `oam.RefusalTraitCapability`.
 
 A trait that generates several objects gives each one its own label map, never one map
 shared between them. These maps leave the package on objects the caller owns and edits,
