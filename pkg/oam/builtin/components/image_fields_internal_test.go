@@ -218,6 +218,60 @@ var imageFieldTypes = []imageFieldType{
 			"template.spec.volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
 		},
 	},
+	{
+		// The cnpg-imagecatalog and cnpg-clusterimagecatalog kinds, which share the
+		// spec and the check. Major is set so the catalog is one the API would take.
+		name: "cnpg image catalog spec",
+		typ:  reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"images[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}}, p)
+			},
+			"images[].extensions[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
+					Image: "registry.example/team/postgresql:18",
+					Major: 18,
+					Extensions: []cnpgv1.ExtensionConfiguration{{
+						Name:              "ext",
+						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+					}},
+				}}}, p)
+			},
+			"componentImages[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}}, p)
+			},
+		},
+		// The check is the kinds' validate step, which config runs on every
+		// catalog it decodes, with or without a policy.
+		tagged: map[string]imageTagCheck{
+			"images[].image": {
+				check: func(reference string) error {
+					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}})
+				},
+				emptyRefused: "the CRD requires the image of a catalog entry: it is what a Cluster of that major version runs",
+			},
+			"images[].extensions[].image": {check: func(reference string) error {
+				return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
+					Image: "registry.example/team/postgresql:18",
+					Major: 18,
+					Extensions: []cnpgv1.ExtensionConfiguration{{
+						Name:              "ext",
+						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+					}},
+				}}})
+			}},
+			"componentImages[].image": {
+				check: func(reference string) error {
+					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}})
+				},
+				emptyRefused: "the CRD requires the image of a component entry: it is what a Cluster resolves by the key",
+			},
+		},
+		notHeld: map[string]string{
+			"images":          "the list of the catalog's entries, not an image; the image each entry names is held under images[]",
+			"componentImages": "the list of the catalog's component entries, not an image; the image each entry names is held under componentImages[]",
+		},
+	},
 }
 
 // poolerTemplatePolicy is the cnpg-pooler kind's policy step on a Pooler whose

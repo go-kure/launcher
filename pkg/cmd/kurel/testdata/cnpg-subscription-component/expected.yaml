@@ -1,0 +1,33 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Subscription
+metadata:
+  labels:
+    launcher.gokure.dev/component: sales
+  name: sales
+  namespace: default
+spec:
+  cluster:
+    name: replica
+  dbname: app
+  externalClusterName: origin
+  name: sales
+  parameters:
+    copy_data: "false"
+  publicationDBName: orders
+  publicationName: sales
+  subscriptionReclaimPolicy: delete
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Subscription
+metadata:
+  labels:
+    launcher.gokure.dev/component: everything
+  name: replica-everything
+  namespace: default
+spec:
+  cluster:
+    name: replica
+  dbname: app
+  externalClusterName: origin
+  name: everything
+  publicationName: everything

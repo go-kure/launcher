@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: postgresql
+      type: cnpg-imagecatalog
+      properties:
+        images:
+          - major: 17
+            image: ghcr.io/cloudnative-pg/postgresql:17.2
+            extensions:
+              - name: pgvector
+                image:
+                  reference: ghcr.io/cloudnative-pg/pgvector:0.8.0
+                  pullPolicy: IfNotPresent
+                extension_control_path: [/share]
+                dynamic_library_path: [/lib]
+          - major: 16
+            image: ghcr.io/cloudnative-pg/postgresql:16.6
+        componentImages:
+          - key: pgbouncer
+            image: ghcr.io/cloudnative-pg/pgbouncer:1.24.0
+    - name: one
+      type: cnpg-imagecatalog
+      properties:
+        objectName: one-major
+        images:
+          - major: 17
+            image: ghcr.io/cloudnative-pg/postgresql:17.2

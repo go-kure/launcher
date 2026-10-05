@@ -1,0 +1,26 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: nightly
+      type: cnpg-scheduledbackup
+      properties:
+        cluster:
+          name: postgres
+        schedule: "0 0 3 * * *"
+        immediate: true
+        suspend: false
+        backupOwnerReference: self
+        method: plugin
+        pluginConfiguration:
+          name: barman-cloud.cloudnative-pg.io
+    - name: weekly
+      type: cnpg-scheduledbackup
+      properties:
+        objectName: postgres-weekly
+        cluster:
+          name: postgres
+        schedule: "0 0 4 * * 0"

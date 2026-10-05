@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 // environment policy: no untagged image and no :latest. These tests hold the
 // fields that are no container's image to it (go-kure/launcher#790): an image
 // volume's reference on every path that produces a pod spec, the images of a
-// cnpg-pooler and a cnpg-cluster, and the image a postgresql component
-// composes. TestImageFields_HeldOrListed derives the same over the types; these
+// cnpg-pooler, a cnpg-cluster and the two cnpg image catalogs, and the image a
+// postgresql component composes. TestImageFields_HeldOrListed derives the same over the types; these
 // run each field through its handler and pin the text of the refusal.
 
 const trDigest = "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -287,6 +288,86 @@ func TestImageTagRule_CnpgCluster(t *testing.T) {
 		_, err := c.Generate(stack.NewApplication("db", "data", c))
 		trWant(t, err, "imageName: "+trRejected("registry.example/team/postgresql:latest", trLatest))
 	})
+}
+
+// TestImageTagRule_CnpgImageCatalogs: the three fields of a catalog that name
+// an image are held to the rule on both catalog kinds, under a policy that
+// lists the registry and with none passed: a Cluster that takes its image from
+// the catalog runs what the entry names. An extension that names no reference
+// names no image and is not checked; an image and a component image are
+// required, and an empty one is no reference.
+func TestImageTagRule_CnpgImageCatalogs(t *testing.T) {
+	extension := func(reference string) map[string]any {
+		return map[string]any{"name": "pgvector", "image": map[string]any{"reference": reference}}
+	}
+	componentImages := func(images ...string) map[string]any {
+		list := make([]any, len(images))
+		for i, image := range images {
+			list[i] = map[string]any{"key": "component-" + strconv.Itoa(i), "image": image}
+		}
+		return cnpgWith(cnpgImages(cnpgImage(17)), "componentImages", list)
+	}
+	fields := []struct {
+		name, at string
+		props    func(reference string) map[string]any
+	}{
+		{"image", "images[0].image: ", func(reference string) map[string]any {
+			return cnpgImages(cnpgWith(cnpgImage(17), "image", reference))
+		}},
+		{"the second image", "images[1].image: ", func(reference string) map[string]any {
+			return cnpgImages(cnpgImage(17), cnpgWith(cnpgImage(16), "image", reference))
+		}},
+		{"extension", "images[0].extensions[0].image.reference: ", func(reference string) map[string]any {
+			return cnpgImages(cnpgImage(17, extension(reference)))
+		}},
+		{"the second extension", "images[0].extensions[1].image.reference: ", func(reference string) map[string]any {
+			return cnpgImages(cnpgImage(17, extension("registry.example/team/first:1.0.0"), extension(reference)))
+		}},
+		{"component image", "componentImages[0].image: ", func(reference string) map[string]any { return componentImages(reference) }},
+		{"the second component image", "componentImages[1].image: ", func(reference string) map[string]any {
+			return componentImages("registry.example/team/first:1.0.0", reference)
+		}},
+	}
+	policies := map[string]oam.Policy{"under a policy": rcStrict(), "with no policy passed": nil}
+	for _, component := range []string{"cnpg-imagecatalog", "cnpg-clusterimagecatalog"} {
+		kind := cnpgFurtherKind(t, component)
+		for name, policy := range policies {
+			for _, f := range fields {
+				for _, tc := range trRefused {
+					t.Run(component+"/"+name+"/"+f.name+"/refused: "+tc.name, func(t *testing.T) {
+						_, err := pvTransform(component, kind.handler, f.props(tc.reference), policy)
+						trWant(t, err, f.at+trRejected(tc.reference, tc.reason))
+					})
+				}
+				for _, tc := range trAccepted {
+					t.Run(component+"/"+name+"/"+f.name+"/accepted: "+tc.name, func(t *testing.T) {
+						if _, err := pvTransform(component, kind.handler, f.props(tc.reference), policy); err != nil {
+							t.Errorf("refused: %v", err)
+						}
+					})
+				}
+			}
+
+			t.Run(component+"/"+name+"/an extension with no reference is not checked", func(t *testing.T) {
+				props := cnpgImages(cnpgImage(17, map[string]any{"name": "pgvector"}, extension("")))
+				if _, err := pvTransform(component, kind.handler, props, policy); err != nil {
+					t.Errorf("refused: %v", err)
+				}
+			})
+
+			// The required-field refusal reads whether the field was authored,
+			// not what it holds: an authored empty image reaches the rule.
+			for at, props := range map[string]map[string]any{
+				"images[0].image: ":          cnpgImages(cnpgWith(cnpgImage(17), "image", "")),
+				"componentImages[0].image: ": componentImages(""),
+			} {
+				t.Run(component+"/"+name+"/an empty "+at, func(t *testing.T) {
+					_, err := pvTransform(component, kind.handler, props, policy)
+					trWant(t, err, at+trRejected("", ""))
+				})
+			}
+		}
+	}
 }
 
 // TestImageTagRule_Postgresql: the image a postgresql component runs is held to

@@ -909,6 +909,42 @@ its text:
     `pathPattern` whose artifact is not named as a Kubernetes object. The rules are listed from the markers of
     the linked source, and a test fails on one added or reworded.
   - No default is filled, and the API's other value rules are the API server's.
+- **Shipped: seven more kinds of the CloudNativePG API, `postgresql.cnpg.io/v1`,**
+  `cnpg-imagecatalog`, `cnpg-clusterimagecatalog`, `cnpg-backup`,
+  `cnpg-scheduledbackup`, `cnpg-databaserole`, `cnpg-publication` and
+  `cnpg-subscription` (`cnpg_imagecatalog.go`, `cnpg_clusterimagecatalog.go`,
+  `cnpg_backup.go`, `cnpg_scheduledbackup.go`, `cnpg_databaserole.go`,
+  `cnpg_publication.go`, `cnpg_subscription.go`), each the strict projection of its
+  spec type, declaring its object and taking `objectName`. The ClusterImageCatalog is
+  cluster-scoped; the other six are namespaced. No rule lowers onto them.
+  - **No capability is required and nothing gates them.**
+  - The required lists are read from the CRDs of the linked module and held to them by
+    a test. The five kinds that refer to a Cluster hold `cluster.name` to a name a
+    Cluster can have, as `cnpg-pooler` and `cnpg-database` do.
+  - The CRDs carry 26 expression rules. The 15 that read one document are checked: a
+    catalog's one image per major version and one component image per key; a role's
+    reserved names, `ensure: absent`, a password Secret beside `disablePassword: true`
+    and a client certificate without `login: true`; a publication's choice between all
+    tables and a list of objects, an object's between a schema's tables and one table,
+    and a column list beside a schema's tables. The other eleven refuse a change of the
+    stored object, which a build does not have. A test fails on a rule of the linked
+    CRDs that is neither listed as checked nor as left.
+  - **Every image a catalog names is held to the allowed registries** (an image, a
+    component image, the reference of an extension's image volume): a catalog runs no
+    pod, but the operator runs what a Cluster takes from it. The same three fields are
+    held to the tag rule (`ValidateImageRef`), with or without a policy; an extension
+    that names no reference is not checked by either. The other five kinds have
+    no field a policy speaks to. **No field holds a literal secret:** a role's
+    `passwordSecret` is a Secret's name.
+  - Eight defaults of these CRDs sit on a field the Go type omits when zero and are not
+    that zero: a role's `connectionLimit`, `-1`, and seven strings (`method` on a Backup
+    and a ScheduledBackup, a ScheduledBackup's `backupOwnerReference`, a role's `ensure`
+    and its reclaim policy, and those of a Publication and a Subscription). An authored
+    `0` or `""` there is refused, since the default would replace it; a test derives
+    that list from the CRDs.
+  - A Backup is a one-shot request: the operator takes it once and the API refuses
+    every change of its spec, so applied again from a repository it runs nothing. A
+    backup that recurs is a `cnpg-scheduledbackup`.
 - **Shipped: five kinds of the Gateway API's `gateway.networking.k8s.io/v1`
   infrastructure objects,** `gatewayclass`, `gateway`, `listenerset`, `referencegrant`
   and `backendtlspolicy` (`gatewayclass.go`, `gateway.go`, `listenerset.go`,

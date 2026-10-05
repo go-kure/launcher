@@ -294,15 +294,27 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
 	// The Cluster's pods are created and labelled by the operator, so postgresql
 	// and cnpg-cluster emit no `app` label and no pod selector of their own.
-	// CloudNativePG admits a Cluster name of at most 50 characters.
+	// CloudNativePG admits a Cluster name of at most 50 characters. The other
+	// CloudNativePG kinds run no pods of their own either: each emits identity
+	// and the authored spec, with no `app` label. CloudNativePG names the
+	// Pooler's Service after it, so its name is a DNS-1035 label.
+	"cnpg-backup": {props: map[string]any{"cluster": map[string]any{"name": "db"}}},
 	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
-	// The other CloudNativePG kinds also run no pods of their own. CloudNativePG
-	// names the Pooler's Service after it, so its name is a DNS-1035 label.
-	"cnpg-database":    {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
+	"cnpg-clusterimagecatalog": {props: map[string]any{"images": []any{
+		map[string]any{"image": "ghcr.io/cloudnative-pg/postgresql:17.2", "major": 17}}}},
+	"cnpg-database":     {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
+	"cnpg-databaserole": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app"}},
+	"cnpg-imagecatalog": {props: map[string]any{"images": []any{
+		map[string]any{"image": "ghcr.io/cloudnative-pg/postgresql:17.2", "major": 17}}}},
 	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
 	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
 		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
+	"cnpg-publication": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "pub", "dbname": "app",
+		"target": map[string]any{"allTables": true}}},
+	"cnpg-scheduledbackup": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "schedule": "0 0 3 * * *"}},
+	"cnpg-subscription": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "sub", "dbname": "app",
+		"publicationName": "pub", "externalClusterName": "origin"}},
 	// The go-kure/launcher#702 kinds name their one object after the
 	// component, and a ServiceAccount, ConfigMap or claim name is a DNS-1123
 	// subdomain, so each accepts the 200-character name and labels its object.

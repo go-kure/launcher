@@ -1,0 +1,29 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    launcher.gokure.dev/component: nightly
+  name: nightly
+  namespace: default
+spec:
+  backupOwnerReference: self
+  cluster:
+    name: postgres
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  schedule: 0 0 3 * * *
+  suspend: false
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    launcher.gokure.dev/component: weekly
+  name: postgres-weekly
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  schedule: 0 0 4 * * 0

@@ -1744,10 +1744,17 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `clusterrole` |
 | `clusterrolebinding` |
 | `clustersecretstore` |
+| `cnpg-backup` |
 | `cnpg-cluster` |
+| `cnpg-clusterimagecatalog` |
 | `cnpg-database` |
+| `cnpg-databaserole` |
+| `cnpg-imagecatalog` |
 | `cnpg-objectstore` |
 | `cnpg-pooler` |
+| `cnpg-publication` |
+| `cnpg-scheduledbackup` |
+| `cnpg-subscription` |
 | `configmap` |
 | `crd` |
 | `cronjob` |

@@ -10,9 +10,9 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// This file holds what the cnpg-pooler, cnpg-database and cnpg-objectstore
-// kind components share (docs/oam/design-operator-cr-components.md). Their
-// strict decode is the one every spec-projecting kind uses (kind_decode.go).
+// This file holds what the kind components of the CloudNativePG API share
+// (docs/oam/design-operator-cr-components.md). Their strict decode is the one
+// every spec-projecting kind uses (kind_decode.go).
 
 // cnpgDefaultedZeros is a CloudNativePG kind's defaulted-zero list for
 // refuseUncarriedSpecValues: fields maps a json path, with [] for an array
@@ -21,11 +21,15 @@ func cnpgDefaultedZeros(fields map[string]string) defaultedZeroFields {
 	return defaultedZeroFields{api: "CloudNativePG", defaulter: "operator", fields: fields}
 }
 
-// requireCnpgClusterRef refuses a spec.cluster reference with no name: the
-// Pooler and Database CRDs require it, and the Go type would encode an
-// unauthored one as `cluster: {name: ""}`. The referenced name must also be one
-// CloudNativePG accepts for a Cluster (validateCnpgClusterName's rule), or the
-// reference could never resolve.
+// requireCnpgClusterRef refuses a spec.cluster reference with no name, on every
+// kind that refers to a Cluster. The Pooler, Backup and ScheduledBackup CRDs
+// require the name, and their Go type writes an unauthored one as
+// `cluster: {name: ""}`. The Database, DatabaseRole, Publication and
+// Subscription CRDs default it to "" instead, and their Go type writes
+// `cluster: {}`: the API admits that reference, which no Cluster can answer,
+// so the build refuses it on its own account. The referenced name must also be
+// one CloudNativePG accepts for a Cluster (validateCnpgClusterName's rule), or
+// the reference could never resolve.
 func requireCnpgClusterRef(name string) error {
 	if name == "" {
 		return errors.New("cluster.name: required (the name of the CloudNativePG Cluster this object belongs to)")
