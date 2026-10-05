@@ -631,8 +631,12 @@ be closed at build time.
     `terminationMessagePolicy`, `stdin`, `stdinOnce`, `tty` and `resizePolicy` are read
     on the main container, on an init container and on a sidecar (README "Container
     fields");
-  - `service`: `ExternalName` (refused today: not in `serviceTypes`,
-    `pkg/oam/builtin/components/service.go`), traffic policies, load-balancer fields;
+  - `service`: a literal `clusterIP`, `clusterIPs` and `externalIPs`, which are
+    refused. Every other `ServiceSpec` field is read: `type: ExternalName` with
+    `externalName`, the traffic policies, session affinity, the IP families, the
+    load-balancer fields, and a port's `nodePort` and `appProtocol`. `type:
+    ExternalName` has no capability gate, and a route to such a Service gets no
+    synthesized inbound NetworkPolicy (README, the `service` entry);
   - `persistentvolumeclaim`: the long `resources` spelling of `size`. `selector`,
     `dataSourceRef`, `volumeName` and `volumeAttributesClassName` are read, by the kind
     and by the `pvc` trait; `volumeName` has no policy check (README, the

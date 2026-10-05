@@ -1,0 +1,45 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: deployment
+      properties:
+        image: ghcr.io/example/web:v1.0
+    - name: web-lb
+      type: service
+      properties:
+        type: LoadBalancer
+        selector:
+          app: web
+        ports:
+          - name: http
+            port: 80
+            targetPort: 8080
+            nodePort: 30080
+            appProtocol: kubernetes.io/h2c
+        externalTrafficPolicy: Local
+        internalTrafficPolicy: Local
+        trafficDistribution: PreferClose
+        sessionAffinity: ClientIP
+        sessionAffinityConfig:
+          clientIP:
+            timeoutSeconds: 600
+        publishNotReadyAddresses: true
+        ipFamilies:
+          - IPv4
+          - IPv6
+        ipFamilyPolicy: PreferDualStack
+        loadBalancerClass: example.com/internal
+        loadBalancerSourceRanges:
+          - 10.0.0.0/8
+        allocateLoadBalancerNodePorts: true
+        healthCheckNodePort: 30081
+    - name: db
+      type: service
+      properties:
+        type: ExternalName
+        externalName: db.example.com

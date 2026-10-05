@@ -45,13 +45,16 @@ func (h *ServiceHandler) CanHandle(componentType string) bool {
 	return componentType == "service"
 }
 
-// serviceTypes is the set of spec.type values this kind emits. ExternalName is
-// left out: it carries no selector and no ports, so it is not a projection of
-// the same object.
+// serviceTypes is the set of spec.type values this kind emits: all four the
+// API has. An ExternalName Service selects no pods, so it is no backend of a
+// routing trait on its own component, no NetworkPolicy endpoint, and a route
+// naming it gets no synthesized inbound policy (go-kure/launcher#790); see
+// isExternalName.
 var serviceTypes = []corev1.ServiceType{
 	corev1.ServiceTypeClusterIP,
 	corev1.ServiceTypeNodePort,
 	corev1.ServiceTypeLoadBalancer,
+	corev1.ServiceTypeExternalName,
 }
 
 // serviceClusterIPNone is the one spec.clusterIP value this kind emits: a
@@ -60,6 +63,11 @@ const serviceClusterIPNone = "None"
 
 // serviceProtocols is the set of port protocols the API accepts.
 var serviceProtocols = []corev1.Protocol{corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP}
+
+// servicePortKeys are the keys of one `ports` entry: what parseServicePort
+// reads and the item schema publishes, pinned to each other by
+// TestServiceSpecSchemaMatchesParser.
+var servicePortKeys = []string{"name", "port", "targetPort", "protocol", "nodePort", "appProtocol"}
 
 // PropertySchema declares the service component's user-facing properties.
 func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
@@ -71,12 +79,12 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 	for _, p := range serviceProtocols {
 		protoEnum = append(protoEnum, string(p))
 	}
-	return map[string]oam.PropertySchema{
+	schema := map[string]oam.PropertySchema{
 		"type": {
 			Type:        oam.PropertyTypeString,
 			Default:     string(corev1.ServiceTypeClusterIP),
 			Enum:        typeEnum,
-			Description: "Service type: ClusterIP, NodePort or LoadBalancer. ExternalName is not supported.",
+			Description: "Service type: ClusterIP, NodePort, LoadBalancer or ExternalName. An ExternalName Service is a DNS alias for externalName: it selects no pods, so selector is refused and ports are optional.",
 		},
 		"clusterIP": {
 			Type:        oam.PropertyTypeString,
@@ -86,11 +94,11 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 		"selector": {
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
-			Description:          "Labels of the pods the Service routes to, as label key to string value. Defaults to app: <component name>, the label every launcher workload kind puts on its own pods; set it when the Service fronts a workload component with a different name. Must name at least one label.",
+			Description:          "Labels of the pods the Service routes to, as label key to string value. Defaults to app: <component name>, the label every launcher workload kind puts on its own pods; set it when the Service fronts a workload component with a different name. Must name at least one label. Refused with type ExternalName.",
 		},
 		"ports": {
 			Type:        oam.PropertyTypeArray,
-			Description: "The Service's ports; at least one, unless clusterIP is None. Routing traits on this component default to, and accept only, the first port.",
+			Description: "The Service's ports; at least one, unless clusterIP is None or type is ExternalName. Routing traits on this component default to, and accept only, the first port.",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "One Service port. Every port needs a name when there is more than one; names and port/protocol pairs must be unique.",
@@ -104,10 +112,16 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 					// integral float) narrows nothing it accepts.
 					"targetPort": {Types: intOrStringTypes(), Description: "Port on the selected pods: a number (1-65535) or a container port name. Defaults to port."},
 					"protocol":   {Type: oam.PropertyTypeString, Default: string(corev1.ProtocolTCP), Enum: protoEnum, Description: "TCP, UDP or SCTP. Defaults to TCP. Only TCP ports receive a synthesized NetworkPolicy allow."},
+					// The two below: go-kure/launcher#790.
+					"nodePort":    {Type: oam.PropertyTypeInteger, Description: "Port opened on every node for this port, 1-65535 (the cluster's node port range is narrower, 30000-32767 by default). Only with type NodePort or LoadBalancer; unset, the cluster allocates one. Unique per protocol."},
+					"appProtocol": {Type: oam.PropertyTypeString, Description: "Application protocol of the port, a qualified name: an IANA service name (http) or a prefixed one (kubernetes.io/h2c)."},
 				},
 			},
 		},
 	}
+	// The ServiceSpec fields beyond the four above (service_spec.go).
+	maps.Copy(schema, schemaServiceSpec())
+	return schema
 }
 
 // ToApplicationConfig converts an OAM service component to a ServiceConfig.
@@ -123,7 +137,8 @@ func (h *ServiceHandler) ToApplicationConfig(component *oam.Component, namespace
 // Endpoints implements oam.EndpointProvider: the pods the Service selects, on
 // every TCP targetPort. A UDP or SCTP port is not declared, because the
 // endpoint-ingress NetworkPolicy it feeds is TCP-only (netpol.Endpoint); a
-// Service with no TCP port declares no endpoint. It parses the component
+// Service with no TCP port declares no endpoint, and neither does an
+// ExternalName Service, which selects no pods. It parses the component
 // itself, since ComponentEndpoints calls it with no schema validation first.
 func (h *ServiceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	c, err := parseService(component)
@@ -131,7 +146,7 @@ func (h *ServiceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint,
 		return nil, err
 	}
 	var ports []intstr.IntOrString
-	for _, p := range c.Ports {
+	for _, p := range c.routedPorts() {
 		if p.Protocol == corev1.ProtocolTCP {
 			ports = appendUniquePort(ports, p.TargetPort)
 		}
@@ -156,15 +171,40 @@ type ServiceConfig struct {
 	Selector map[string]string
 	// Ports carries every port with its defaults applied (targetPort, protocol).
 	Ports []corev1.ServicePort
+
+	// Spec carries the authored ServiceSpec fields beyond the four above
+	// (go-kure/launcher#790); see service_spec.go.
+	Spec ServiceSpecFields
+}
+
+// isExternalName reports whether the Service is a DNS alias. Such a Service
+// selects no pods (Selector is nil), so it has no endpoint, no pods a routed
+// port may be opened on (ServiceRoutingTarget) and no port a routing trait may
+// route to, whatever ports it lists.
+func (c *ServiceConfig) isExternalName() bool {
+	return c.Type == corev1.ServiceTypeExternalName
+}
+
+// routedPorts are the ports that lead to pods: every port, or none on an
+// ExternalName Service.
+func (c *ServiceConfig) routedPorts() []corev1.ServicePort {
+	if c.isExternalName() {
+		return nil
+	}
+	return c.Ports
 }
 
 // ServicePort returns the first port: routing traits resolve an implicit
-// backend from it, and reject an implicit backend on any other port.
+// backend from it, and reject an implicit backend on any other port. It is 0
+// on an ExternalName Service, as on a port-less headless one: a routing trait
+// that takes the component as its backend is refused rather than pointed at a
+// name outside the cluster.
 func (c *ServiceConfig) ServicePort() int32 {
-	if len(c.Ports) == 0 {
+	ports := c.routedPorts()
+	if len(ports) == 0 {
 		return 0
 	}
-	return c.Ports[0].Port
+	return ports[0].Port
 }
 
 // ServicePortName returns the first port's name ("" when it is unnamed) and
@@ -174,11 +214,13 @@ func (c *ServiceConfig) ServicePort() int32 {
 // port-less headless Service also knows its ports, all none of them: it
 // returns "" and true, so routing traits refuse a trait-level servicePort on
 // it rather than route to a port the Service lacks (go-kure/launcher#690).
+// An ExternalName Service answers the same way, with or without ports.
 func (c *ServiceConfig) ServicePortName() (string, bool) {
-	if len(c.Ports) == 0 {
+	ports := c.routedPorts()
+	if len(ports) == 0 {
 		return "", true
 	}
-	return c.Ports[0].Name, true
+	return ports[0].Name, true
 }
 
 // BackendServiceName names the Service this component owns when it has no
@@ -187,7 +229,8 @@ func (c *ServiceConfig) ServicePortName() (string, bool) {
 // otherwise read as no Service at all, and NetworkPolicy synthesis would then
 // treat a route naming it as an external backend and trust that route's
 // backendSelector. It returns "" when the Service has ports, leaving that
-// path unchanged.
+// path unchanged. An ExternalName Service is named here with or without
+// ports, since its ServicePort is always 0.
 //
 // A Service named apart from its component (`objectName`) is named here with
 // or without ports: a route reaches it by the Service's name, and one that
@@ -196,7 +239,7 @@ func (c *ServiceConfig) BackendServiceName() string {
 	if c.ObjectName != "" && c.ObjectName != c.Name {
 		return c.ObjectName
 	}
-	if len(c.Ports) > 0 {
+	if len(c.routedPorts()) > 0 {
 		return ""
 	}
 	return c.Name
@@ -208,7 +251,18 @@ func (c *ServiceConfig) BackendServiceName() string {
 // matching the routed Service ports. A routed port is matched by number or by
 // port name; one that matches no TCP port of this Service is dropped, because
 // the synthesized rules are TCP.
+//
+// An ExternalName Service has no such pods. It returns a non-nil selector
+// without labels and never a port, whatever ports it lists. That selector is a
+// marker, read as "owns its Service name and selects no pods": the synthesis
+// then drops every rule routed to the component and writes no policy for it,
+// instead of opening the routed port on pods carrying the component's label
+// (go-kure/launcher#790). The marker is never written into an object: in an
+// object a selector without labels selects every pod of the namespace.
 func (c *ServiceConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
+	if c.isExternalName() {
+		return &metav1.LabelSelector{}, nil
+	}
 	var out []intstr.IntOrString
 	for _, routed := range servicePorts {
 		for _, p := range c.Ports {
@@ -227,14 +281,16 @@ func (c *ServiceConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) 
 // IdentityTargetPorts reports whether every port, whatever its protocol, targets
 // its own port number. A sibling group reads it (pkg/oam identityPortMapper):
 // only then is a policy opening the routed Service ports on the selected pods
-// the same as one opening their target ports. A named targetPort is never one.
+// the same as one opening their target ports. A named targetPort is never one,
+// and an ExternalName Service, which selects no pods, never is either.
 func (c *ServiceConfig) IdentityTargetPorts() bool {
-	for _, p := range c.Ports {
+	ports := c.routedPorts()
+	for _, p := range ports {
 		if p.TargetPort.Type != intstr.Int || p.TargetPort.IntVal != p.Port {
 			return false
 		}
 	}
-	return len(c.Ports) > 0
+	return len(ports) > 0
 }
 
 // Generate creates the Service. Nothing else: the selected pods' workload
@@ -251,8 +307,11 @@ func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	svc.Spec.ClusterIP = c.ClusterIP
 	svc.Spec.Selector = maps.Clone(c.Selector)
 	for _, p := range c.Ports {
-		kubernetes.AddServicePort(svc, p)
+		// Copied: appProtocol is a pointer, and one render must not share it
+		// with the next.
+		kubernetes.AddServicePort(svc, *p.DeepCopy())
 	}
+	c.Spec.apply(&svc.Spec)
 	obj := client.Object(svc)
 	return []*client.Object{&obj}, nil
 }
@@ -340,7 +399,20 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 		c.ClusterIP = ip
 	}
 
-	c.Selector = appLabels(component.Name)
+	if err := parseServiceSpec(props, c); err != nil {
+		return nil, err
+	}
+
+	// An ExternalName Service selects no pods, so it gets no default selector.
+	// An authored one is this parser's own refusal: the API accepts and
+	// ignores it.
+	if c.isExternalName() {
+		if _, authored := authoredValue(props, "selector"); authored {
+			return nil, errors.Errorf("selector: may not be set with type %s, which selects no pods", corev1.ServiceTypeExternalName)
+		}
+	} else {
+		c.Selector = appLabels(component.Name)
+	}
 	if raw, present, err := parseObjectField(props, "selector", "selector"); err != nil {
 		return nil, err
 	} else if present {
@@ -360,11 +432,12 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if (!present || len(entries) == 0) && c.ClusterIP != serviceClusterIPNone {
+	if (!present || len(entries) == 0) && c.ClusterIP != serviceClusterIPNone && !c.isExternalName() {
 		return nil, errors.New("ports: at least one port is required")
 	}
 	names := map[string]bool{}
 	pairs := map[string]bool{}
+	nodePorts := map[string]bool{}
 	for i, m := range entries {
 		label := indexedLabel("ports", i)
 		p, err := parseServicePort(m, label)
@@ -385,6 +458,19 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 			return nil, errors.Errorf("%s: duplicate port %s", label, pair)
 		}
 		pairs[pair] = true
+		if p.NodePort != 0 {
+			// The API refuses a node port on a ClusterIP Service; on an
+			// ExternalName one the refusal is this parser's own.
+			if c.Type != corev1.ServiceTypeNodePort && c.Type != corev1.ServiceTypeLoadBalancer {
+				return nil, errors.Errorf("%s.nodePort: may only be set with type %s or %s, got %s",
+					label, corev1.ServiceTypeNodePort, corev1.ServiceTypeLoadBalancer, c.Type)
+			}
+			nodePort := fmt.Sprintf("%d/%s", p.NodePort, p.Protocol)
+			if nodePorts[nodePort] {
+				return nil, errors.Errorf("%s.nodePort: duplicate node port %s", label, nodePort)
+			}
+			nodePorts[nodePort] = true
+		}
 		c.Ports = append(c.Ports, p)
 	}
 	return c, nil
@@ -392,7 +478,7 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 
 func parseServicePort(m map[string]any, label string) (corev1.ServicePort, error) {
 	var p corev1.ServicePort
-	if err := rejectUnknownKeys(m, []string{"name", "port", "targetPort", "protocol"}, label); err != nil {
+	if err := rejectUnknownKeys(m, servicePortKeys, label); err != nil {
 		return p, err
 	}
 
@@ -434,6 +520,23 @@ func parseServicePort(m map[string]any, label string) (corev1.ServicePort, error
 			return p, errors.Errorf("%s.protocol: must be one of %s, got %q", label, joinValues(serviceProtocols), proto)
 		}
 		p.Protocol = corev1.Protocol(proto)
+	}
+
+	if nodePort, present, err := parsePortField(m, "nodePort", label+".nodePort", 1); err != nil {
+		return p, err
+	} else if present {
+		p.NodePort = nodePort
+	}
+
+	// "" is kept as a value, so it meets the refusal below rather than read
+	// as an omitted key.
+	if proto, present, err := parseRawStringField(m, "appProtocol", label+".appProtocol"); err != nil {
+		return p, err
+	} else if present {
+		if errs := validation.IsQualifiedName(proto); len(errs) > 0 {
+			return p, errors.Errorf("%s.appProtocol: %q is not a qualified name: %s", label, proto, strings.Join(errs, "; "))
+		}
+		p.AppProtocol = &proto
 	}
 	return p, nil
 }

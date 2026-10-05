@@ -86,7 +86,7 @@ reads it.
 | `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
 | `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`, the raw `affinity` and `topologySpreadConstraints`, and takes `sidecars`. Emits no Service (go-kure/launcher#690). |
 | `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
-| `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
+| `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list (with `nodePort` and `appProtocol`), all four `type` values, `clusterIP: None` for a headless one, `externalName`, the traffic policies, session affinity, the IP families and the load-balancer fields. Emits nothing else — see below. |
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
@@ -2002,14 +2002,70 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   every workload kind puts on its pods; set it when the Service fronts a
   workload named differently (a `deployment` named `api-server` behind a
   `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
-  least one entry unless the Service is headless: `port` (required), `targetPort` (a number or a container
+  least one entry unless the Service is headless or of type `ExternalName`: `port` (required), `targetPort` (a number or a container
   port name, published as the `Types: [integer, string]` union
   (go-kure/launcher#383), so a value of any other type is rejected by property
   validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
-  to `TCP`) and `name` (required once there is more than one port; names and
-  port/protocol pairs must be unique). `type` is `ClusterIP` (default),
-  `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no
-  selector. An empty `selector` is refused.
+  to `TCP`), `name` (required once there is more than one port; names and
+  port/protocol pairs must be unique), `nodePort` (1-65535, only with `type`
+  `NodePort` or `LoadBalancer`, unique per protocol, as the API requires; two
+  refusals are launcher's own: `0`, which the API reads as "allocate one" —
+  leave the key out instead — and a node port on an `ExternalName` Service,
+  which the API accepts; the
+  cluster's own node port range is narrower and is checked on apply) and
+  `appProtocol` (a qualified name such as `http` or `kubernetes.io/h2c`).
+  `type` is `ClusterIP` (default), `NodePort`, `LoadBalancer` or
+  `ExternalName`. An empty `selector` is refused.
+  - **ExternalName.** `type: ExternalName` (go-kure/launcher#790) emits a DNS
+    alias for `externalName`, which is then required: a DNS-1123 subdomain,
+    with one trailing dot allowed. The Service selects no pods, so `selector`
+    is refused with it (launcher's own rule; the API accepts and ignores one),
+    and so are `clusterIP: None`, `ipFamilies` and `ipFamilyPolicy`; `ports`
+    is optional. On any other type `externalName` is refused (launcher's own
+    rule; the API ignores it there). Whatever ports it lists, an ExternalName
+    Service has no first port for a routing trait and no NetworkPolicy
+    endpoint: an `ingress` or `httproute` trait refuses it as an implicit
+    backend (`component "db" has no service port`), a trait-level
+    `servicePort` is refused, and it declares no endpoint. As on a port-less
+    headless Service, the refusal is of the component as a backend, not of
+    the trait: a trait on it that names another Service explicitly is carried
+    as on any component, and that route's policy is the routed Service's. It
+    still owns its name
+    (`BackendServiceName`): a route from another component naming it is a
+    route to a Service of this application, so that route's `backendSelector`
+    is not trusted, and **no inbound NetworkPolicy is synthesized for that
+    route**, in a same-name sibling group either: the Service leads to no pods
+    of the cluster, and the group's component label is on its workload's
+    pods, which the Service does not lead to. Named apart from its component
+    (`objectName`), it owns that name instead: a route naming the Service's
+    name gets no policy, and one naming the component's name is a route to a
+    Service from elsewhere.
+  - **Further `ServiceSpec` fields** (go-kure/launcher#790). Each is written
+    only when authored; unauthored, the API server's own default applies. The
+    rules are the API server's (`validateService`), except where marked as
+    launcher's own.
+
+    | Property | Rules |
+    |----------|-------|
+    | `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
+    | `internalTrafficPolicy` | `Cluster` or `Local`. |
+    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). |
+    | `sessionAffinity` | `None` or `ClientIP`. |
+    | `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
+    | `publishNotReadyAddresses` | A boolean; written only when `true`. |
+    | `ipFamilies` | `IPv4` and/or `IPv6`, each once, at most two. |
+    | `ipFamilyPolicy` | `SingleStack`, `PreferDualStack` or `RequireDualStack`; `SingleStack` is refused with two `ipFamilies` (the API server's allocator refuses it). |
+    | `loadBalancerClass` | A qualified name. Only with `type: LoadBalancer`. |
+    | `loadBalancerSourceRanges` | CIDRs in canonical form (launcher's own: the API tolerates surrounding spaces and some non-canonical forms). Only with `type: LoadBalancer`. |
+    | `loadBalancerIP` | Only with `type: LoadBalancer` (launcher's own: the API ignores it elsewhere). The value is not validated, as in the API. |
+    | `allocateLoadBalancerNodePorts` | A boolean. Only with `type: LoadBalancer`. |
+    | `healthCheckNodePort` | 1-65535. Only with `type: LoadBalancer` and `externalTrafficPolicy: Local`. `0` is refused (launcher's own: the API reads it as "allocate one"; leave the key out instead). |
+
+    `externalIPs` and `clusterIPs` are refused, and so is a literal
+    `clusterIP` address. `externalIPs` routes traffic for addresses the
+    cluster does not manage and is deprecated by the API; a Service's cluster
+    IPs are the cluster's to allocate. In a document all three are refused by
+    property validation before the parser's reason is reached.
   - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
     `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
     the selected pods, as a StatefulSet's governing Service needs. It requires
@@ -2018,7 +2074,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     address is refused, and so is an empty string, rather than read as
     absence. A headless Service may have no `ports` at all; without
     `clusterIP`, at least one port is still required (`ports: at least one
-    port is required`). A port-less Service has no first port, so routing
+    port is required`), except on an `ExternalName` Service (above). A
+    port-less Service has no first port, so routing
     traits refuse it as an implicit backend, refuse a trait-level
     `servicePort` on it, and it declares no NetworkPolicy endpoint. It still
     owns its name (`BackendServiceName`): a route from another component
@@ -2051,7 +2108,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     policy for traffic routed to a `service` selects its `selector` pods — not
     the component label, which no pod carries — and opens the `targetPort` of
     each routed TCP port. A route that reaches only a UDP or SCTP port
-    synthesizes no policy. In a same-name sibling group whose `selector`
+    synthesizes no policy, and neither does a route to an `ExternalName`
+    Service, which has no pods to open a port on (above). In a same-name
+    sibling group whose `selector`
     picks a sibling's own pods, the policy selects the component label
     instead, but only when `IdentityTargetPorts` is true: the Service has at
     least one port and every port, whatever its protocol, has a numeric
@@ -2060,12 +2119,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
-    none.
+    none, and neither does an `ExternalName` Service.
   - **No policy check.** `service` has no `ApplyPolicy`, deliberately
     (go-kure/launcher#794, item 2): none of its properties maps to an
     environment-policy method, so there is nothing to enforce. The policy
     makes no statement about a Service's `type`, so `NodePort` and
-    `LoadBalancer` build under every policy.
+    `LoadBalancer` build under every policy. **`type: ExternalName` has no
+    capability gate either: whoever may author a `service` component may give
+    an in-cluster name to any DNS name outside the cluster**, and workloads
+    that resolve the Service name are sent there. `nodePort`,
+    `loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
+    are accepted the same way. The open point "No capability gate on
+    component types" on go-kure/launcher#790 carries it.
 - **serviceaccount**, **persistentvolumeclaim**, **configmap**
   (go-kure/launcher#702) are kind-named projections of one object each. Each
   emits that object, named after the component, and nothing else, so another
