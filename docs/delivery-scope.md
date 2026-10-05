@@ -614,7 +614,11 @@ be closed at build time.
     fields");
   - `service`: `ExternalName` (refused today: not in `serviceTypes`,
     `pkg/oam/builtin/components/service.go`), traffic policies, load-balancer fields;
-  - `persistentvolumeclaim`: `dataSource`, `dataSourceRef`, `selector`, `volumeName`.
+  - `persistentvolumeclaim`: the long `resources` spelling of `size`. `selector`,
+    `dataSourceRef`, `volumeName` and `volumeAttributesClassName` are read, by the kind
+    and by the `pvc` trait; `volumeName` has no policy check (README, the
+    `persistentvolumeclaim` entry). `dataSource` is refused: `dataSourceRef` supersedes
+    it.
 
   `selector` is refused today with an explicit reason on `deployment`, `statefulset`,
   `daemonset` and `job`, and `template` on `deployment` and `job`

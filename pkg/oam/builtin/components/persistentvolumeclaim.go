@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -41,7 +43,7 @@ func (h *PersistentVolumeClaimHandler) PropertySchema() map[string]oam.PropertyS
 	for _, m := range []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce, corev1.ReadOnlyMany, corev1.ReadWriteMany, corev1.ReadWriteOncePod} {
 		modes = append(modes, string(m))
 	}
-	return map[string]oam.PropertySchema{
+	schema := map[string]oam.PropertySchema{
 		"size": {
 			Type:        oam.PropertyTypeString,
 			Description: "Requested storage as a positive Kubernetes quantity (e.g. 10Gi). May instead come from an EnvironmentPolicy storage default.",
@@ -62,6 +64,8 @@ func (h *PersistentVolumeClaimHandler) PropertySchema() map[string]oam.PropertyS
 			Description: "The claim's volumeMode. Unset leaves it to the API server, which defaults it to Filesystem; Block provisions a raw block device.",
 		},
 	}
+	maps.Copy(schema, schemaClaimSpec())
+	return schema
 }
 
 // ToApplicationConfig converts an OAM persistentvolumeclaim component to a
@@ -116,8 +120,9 @@ func parsePersistentVolumeClaim(component *oam.Component) (*PersistentVolumeClai
 
 // ParseClaimProperties reads a claim's size, storageClassName, accessModes
 // and volumeMode with the parsers a workload's `pvc` volume uses for the same
-// fields. Keys it does not know are left to the caller: the pvc trait reads
-// `name`, and the engine reads `scope`. The returned Name is unset.
+// fields, then the fields only a standalone claim authors (parseClaimSpec).
+// Keys it does not know are left to the caller: the pvc trait reads `name`,
+// and the engine reads `scope`. The returned Name is unset.
 func ParseClaimProperties(props map[string]any) (PVCConfig, error) {
 	var claim PVCConfig
 	if size, present, err := parseStringField(props, "size", "size"); err != nil {
@@ -153,6 +158,12 @@ func ParseClaimProperties(props map[string]any) (PVCConfig, error) {
 		}
 		claim.VolumeMode = mode
 	}
+
+	spec, err := parseClaimSpec(props)
+	if err != nil {
+		return PVCConfig{}, err
+	}
+	claim.Spec = spec
 	return claim, nil
 }
 
