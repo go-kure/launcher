@@ -537,7 +537,8 @@ object named, and is not read as holding no key.
   capability value or one of its typed properties (`cert-manager.io/cluster-issuer`,
   `nginx.ingress.kubernetes.io/ssl-redirect`, `force-ssl-redirect`, `auth-url`,
   `auth-signin`, `auth-response-headers`), and the ones a rendering of the `ingress`
-  capability supplies. They reach the `ingress` trait in its platform-reserved
+  capability supplies (a map of strings, a `map[string]string` as well as a
+  `map[string]any`). They reach the `ingress` trait in its platform-reserved
   `platformAnnotations` property, apart from the authored `annotations`, and pass as that key
   **and value**, on the Ingress's own annotations only. An authored annotation of such a key
   must hold the same value (it then says what the platform says, and passes); another value

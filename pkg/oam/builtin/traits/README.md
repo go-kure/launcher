@@ -183,7 +183,12 @@ not the app — chooses the implementation:
   `ValidationError`, on either path.
   **Breaking for documents:** a raw `ssl-redirect`, `force-ssl-redirect`, `auth-url`,
   `auth-signin` or `auth-response-headers` annotation that contradicts the trait's value was
-  overridden silently and is now refused, as a contradicting `cluster-issuer` already was.
+  overridden silently and is now refused. A contradicting `cluster-issuer` already was when
+  the authored value was a string; one that is no string (a number, a boolean) was
+  overridden silently and is now refused too. An authored value that is not null is compared
+  by its text, as the `ingress` trait writes it: `ssl-redirect: true` says the same as
+  `"true"`. A null states no value: it is not refused and the trait's value is written, as
+  before.
   Remove the annotation, or set the typed property (`sslRedirect`, `forceSslRedirect`,
   `authSigninURL`) to the value meant.
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
