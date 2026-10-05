@@ -5995,12 +5995,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `poolerName`, `managedRoles`,
-  `databases` (each with an optional `objectName`).
+  `databases` (each with an optional `objectName`), `clusterObjectName`,
+  `objectStoreObjectName`.
+  **`clusterObjectName` names the Cluster in place of the component name.
+  CloudNativePG derives the Cluster's Services and Secrets from the Cluster's
+  name, the default backup path moves with it, and renaming an existing
+  Cluster creates a new one: the old one is pruned with its data unless it is
+  protected** (see "The Cluster's and the ObjectStore's names" below).
   **A component lowering rule** (`PostgresqlRule`, `postgresql_lowering.go`,
   go-kure/launcher#281), not a dispatchable handler: it reads the properties
   as before (`Parse`; the published schema is pinned byte for byte,
   `testdata/postgresql-property-schema.json`: the former handler's, with
-  `poolerName` added) and emits
+  `poolerName`, `clusterObjectName` and `objectStoreObjectName` added) and emits
   the CNPG kind components that build the same objects — a `cnpg-cluster`
   under the component's name, a `cnpg-objectstore` under the same name (one
   same-name sibling group) when `objectStore` is set, a `cnpg-pooler`
@@ -6062,14 +6068,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   take the policy default or 1Gi`), which built a Cluster CloudNativePG's
   webhook refuses ("Size not configured").
   The component name becomes the Cluster's name and its `cnpg.io/cluster`
-  endpoint selector, so it carries cnpg-cluster's name rule: a DNS-1035
+  endpoint selector unless the Cluster is named apart (`clusterObjectName`
+  or the `Naming` hook, below), so it carries cnpg-cluster's name rule: a DNS-1035
   label (no leading digit, no dot) of at most 50 characters. Any other name
   is refused when the rule lowers it and when endpoints are collected
   (`postgresql name "db.main": must be a DNS-1035 label of at most 50
   characters …`). The cap also keeps both endpoint selector values, the
   name and the pooler's default `<name>-pooler`, within the 63-character label-value
   limit (a `poolerName` or a hook-given name is held to it as a DNS-1035
-  label). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
+  label, and so is the default where the Cluster is named apart and the
+  component name is not bounded by the Cluster's rule). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
   such a name used to build and was then refused by CloudNativePG at apply,
   or, over 63 characters (56 with the pooler), gave a network-policy
   selector the API server refuses; it is now refused at build
@@ -6172,9 +6180,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   holds for `nodeSelector` values in both affinity readers, which share the
   helper.
   An `objectStore` block emits a barman-cloud `ObjectStore` named after the
-  component and a WAL-archiver entry on the Cluster for the plugin
+  component (or by `objectStoreObjectName` or the `Naming` hook, below) and a
+  WAL-archiver entry on the Cluster for the plugin
   `barman-cloud.cloudnative-pg.io`, whose `barmanObjectName` parameter names
-  that store. An authored `objectStore.serverName` becomes that entry's
+  that store by the name it took. An authored `objectStore.serverName` becomes that entry's
   `serverName` parameter, where the plugin reads it (it defaults to the
   Cluster name); the ObjectStore CRD forbids a `configuration.serverName`.
   Until go-kure/launcher#643 the entry named a plugin CloudNativePG does not
@@ -6226,18 +6235,61 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The hook is asked only inside `Transform`: a rule driven directly keeps
   the author's names and the defaults. With neither an authored name nor a
   hook the output is what it was.
+  **The Cluster's and the ObjectStore's names** (go-kure/launcher#787) are
+  resolved in the same order. `clusterObjectName` names the Cluster (role
+  `postgresql-cluster`) and `objectStoreObjectName` the ObjectStore (role
+  `postgresql-objectstore`); the default of each is the component name. The
+  two end in `ObjectName` as `objectName` does on a kind component, while
+  `poolerName`, the older property, keeps the name it has.
+  `objectStoreObjectName` is refused without `objectStore`
+  (`objectStoreObjectName: names the ObjectStore, and objectStore is not
+  set; remove it, or set objectStore`), and the hook is not asked for a
+  store the component does not generate. The Cluster's name is held to the
+  Cluster's rule whoever chose it, a DNS-1035 label of at most 50 characters:
+  a name that is no label is refused as every role's is, and a label over 50
+  characters by the rule, naming both places it can come from
+  (`clusterObjectName (or the Naming hook's answer for role
+  "postgresql-cluster"): postgresql Cluster name "…": must be a DNS-1035
+  label of at most 50 characters …`). A component whose own name is no such
+  label is accepted once its Cluster is named apart. The ObjectStore's name is a
+  DNS-1123 subdomain. Each is used as written or refused, never shortened.
+  Each names its object alone: the two member components, their same-name
+  sibling group, the policies the rule adds and the component label keep the
+  component name. What the rule writes to the two objects follows the names
+  they took: the Pooler's `cluster.name`, each Database's `cluster.name`, the
+  `cnpg.io/cluster` endpoint selector, and the `barmanObjectName` parameter
+  of the Cluster's backup plugin. **The default names of the Pooler and the
+  Databases keep deriving from the component name** (`<name>-pooler`,
+  `<name>-<db>`), whatever the Cluster is named. With the Cluster named
+  apart the component name is no longer bounded by the Cluster's rule, so
+  the Pooler's default is held to the Pooler's own, by the lowering and where
+  endpoints are collected alike, and the refusal says what settles it
+  (`pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1035 label of
+  at most 63 characters (CloudNativePG names the pooler's Service after it);
+  the default derives from the component name: set poolerName to name the
+  Pooler otherwise`).
+  **CloudNativePG derives the Cluster's Services (`<cluster>-rw`,
+  `<cluster>-ro`, `<cluster>-r`) and Secrets (`<cluster>-app` and the others)
+  from the Cluster's name, and the default backup path moves with it: the
+  server name a backup is stored under is the Cluster's name unless
+  `objectStore.serverName` sets it. Renaming an existing Cluster creates a
+  new one: the old one is pruned with its data unless it is protected. Every
+  address or Secret reference written with the old name is the author's to
+  change.**
   Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
-  data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
+  data-plane endpoint (`cnpg.io/cluster: <Cluster name>`, the component name unless the
+  Cluster is named apart, on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
   without hardcoding the operator selector. When `pooler.enabled` is set it declares a **second**
   endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <pooler name>` on port
   `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
   matched by the direct-cluster selector — also gets its connection synthesized. The pooler
-  name there is the authored `poolerName`, else `<component-name>-pooler`:
+  name there is the authored `poolerName`, else `<component-name>-pooler`, and the Cluster
+  name the authored `clusterObjectName`, else the component name:
   `Transformer.ComponentEndpoints` asks no naming hook. The rule also implements
-  `oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed` resolves the
+  `oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed` resolves each
   name with the consumer's hook, asked the request the transform asks, so a consumer that
-  names the Pooler through the hook gets a selector for the name the Pooler has.
+  names the Pooler or the Cluster through the hook gets a selector for the name the object has.
 - **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
   `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
   component name becomes the Cluster's name and its `cnpg.io/cluster`

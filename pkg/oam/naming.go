@@ -53,7 +53,8 @@ const (
 	// one it lets the author or the hook name is asked for under the rule's own
 	// role (NameRoleHelmRelease, NameRoleOCIKustomization, NameRoleOCISource,
 	// NameRoleWorkloadDeployment, NameRoleWorkloadService,
-	// NameRoleWorkloadServiceAccount). A component of a
+	// NameRoleWorkloadServiceAccount, NameRolePostgresqlCluster,
+	// NameRolePostgresqlObjectStore). A component of a
 	// document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
 	// NameRoleHelmSource is a Flux source a lowering rule generates for the
@@ -103,6 +104,21 @@ const (
 	// The hook is asked with the component, and not at all for a component that
 	// names an existing account with `serviceAccountName`: it generates none.
 	NameRoleWorkloadServiceAccount NameRole = "workload-serviceaccount"
+	// NameRolePostgresqlCluster is the CloudNativePG Cluster a `postgresql`
+	// component generates. Default: the component name. The hook is asked with
+	// the component. A name that is not the default must be a DNS-1035 label, and
+	// the rule holds every Cluster name to CloudNativePG's 50 characters. The
+	// operator derives the Cluster's Services and Secrets from this name, and
+	// launcher writes it wherever the component's other objects refer to the
+	// Cluster. The Pooler's and the Databases' default names keep following the
+	// component name.
+	NameRolePostgresqlCluster NameRole = "postgresql-cluster"
+	// NameRolePostgresqlObjectStore is the Barman Cloud ObjectStore a
+	// `postgresql` component generates for `objectStore`. Default: the component
+	// name. The hook is asked with the component, and not at all for a component
+	// without `objectStore`: it generates none. The Cluster's plugin entry names
+	// the store by this name.
+	NameRolePostgresqlObjectStore NameRole = "postgresql-objectstore"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
 	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and the
 	// Flux Kustomization the base library generates for it under per-layout
@@ -171,6 +187,8 @@ var nameRoles = []struct {
 	{NameRoleWorkloadDeployment, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleWorkloadService, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleWorkloadServiceAccount, nameClassObject, nameSyntaxSubdomain},
+	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
+	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 }
 
