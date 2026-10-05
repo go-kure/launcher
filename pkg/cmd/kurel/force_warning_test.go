@@ -12,19 +12,25 @@ import (
 )
 
 // These tests pin go-kure/launcher#720 through kurel's own transformer: every
-// force-applied PersistentVolumeClaim gets one warning, whichever source built
+// PersistentVolumeClaim that is force-applied or under the force-replace trait
+// gets one warning, whichever source built
 // the claim (a component's `volumes` entry, a `pvc` trait, a
 // persistentvolumeclaim component or a manifests component), and the output is
 // unchanged. The force-replace trait sets the delivery intent on the claim's
-// application (go-kure/launcher#782) and a manifests component can carry the
-// Flux annotation itself; kurel sets no bundle's Force (go-kure/launcher#781),
-// and that reason is covered in pkg/oam.
+// application (go-kure/launcher#782), which kurel's output carries no mapping
+// of, so that warning is conditional on the delivery workflow; a manifests
+// component can carry the Flux annotation itself, and is force-applied as
+// written. kurel sets no bundle's Force (go-kure/launcher#781), and that reason
+// is covered in pkg/oam.
 
 const forcedWarningTail = ": when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data"
 
 const forceAnnotationReason = "kustomize.toolkit.fluxcd.io/force: enabled"
 
-const forceIntentReason = "its application sets the force-replace delivery intent"
+// forceIntentOnly is the warning of a volume whose only reason is the
+// force-replace delivery intent, which is every claim under the trait here: it is
+// conditional, since kurel's output carries no mapping of the intent.
+const forceIntentOnly = " is covered by the force-replace delivery intent of its application: where the delivery workflow maps that intent (kure's Flux layout integration writes kustomize.toolkit.fluxcd.io/force: enabled), an update that changes an immutable field deletes and recreates it instead of failing the apply, which can lose its data"
 
 const forcedClaimsHeader = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -86,8 +92,8 @@ func forcedVolumeWarnings(t *testing.T, appYAML string) []string {
 func TestWarnForcedVolumes_BothClaimSources(t *testing.T) {
 	// A role kind turns a described volume claim into a synthesized `pvc` trait
 	// (go-kure/launcher#702), so it is attributed as a sub-application too.
-	volumeClaim := `PersistentVolumeClaim default/api-cache (sub-application "api-cache" of component "api") is force-applied (` + forceIntentReason + `)` + forcedWarningTail
-	traitClaim := `PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (` + forceIntentReason + `)` + forcedWarningTail
+	volumeClaim := `PersistentVolumeClaim default/api-cache (sub-application "api-cache" of component "api")` + forceIntentOnly
+	traitClaim := `PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api")` + forceIntentOnly
 	cases := []struct {
 		name, app string
 		want      []string
@@ -122,7 +128,7 @@ spec:
       traits:
         - type: force-replace
 `
-	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (` + forceIntentReason + `)` + forcedWarningTail}
+	want := []string{`PersistentVolumeClaim default/media (component "media")` + forceIntentOnly}
 	if got := forcedVolumeWarnings(t, app); !slices.Equal(got, want) {
 		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 	}
@@ -195,12 +201,12 @@ func TestBuild_ForcedClaimWarnsOnStderr(t *testing.T) {
 		t.Errorf("unforced build warned: %q", plainErr)
 	}
 	forcedOut, forcedErr := build(forced)
-	want := "warning: PersistentVolumeClaim default/api-cache (sub-application \"api-cache\" of component \"api\") is force-applied (" + forceIntentReason + ")" + forcedWarningTail + "\n" +
-		"warning: PersistentVolumeClaim default/shared-data (sub-application \"shared-data\" of component \"api\") is force-applied (" + forceIntentReason + ")" + forcedWarningTail + "\n"
+	want := "warning: PersistentVolumeClaim default/api-cache (sub-application \"api-cache\" of component \"api\")" + forceIntentOnly + "\n" +
+		"warning: PersistentVolumeClaim default/shared-data (sub-application \"shared-data\" of component \"api\")" + forceIntentOnly + "\n"
 	if forcedErr != want {
 		t.Errorf("stderr =\n%s\nwant\n%s", forcedErr, want)
 	}
-	if forcedOut == "" || strings.Contains(forcedOut, "is force-applied") {
+	if forcedOut == "" || strings.Contains(forcedOut, "force-replace delivery intent") {
 		t.Errorf("the manifest output is empty or carries the warning:\n%s", forcedOut)
 	}
 }

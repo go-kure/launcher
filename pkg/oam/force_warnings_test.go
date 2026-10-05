@@ -14,7 +14,10 @@ import (
 )
 
 const (
-	forcedTail       = ": when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data"
+	forcedTail = ": when an update changes an immutable field, Flux deletes and recreates it instead of failing the apply, which can lose its data"
+	// intentOnly is the conditional text for a volume whose only reason is the
+	// force-replace delivery intent: nothing in the objects forces it.
+	intentOnly       = " is covered by the force-replace delivery intent of its application: where the delivery workflow maps that intent (kure's Flux layout integration writes kustomize.toolkit.fluxcd.io/force: enabled), an update that changes an immutable field deletes and recreates it instead of failing the apply, which can lose its data"
 	annotationReason = "kustomize.toolkit.fluxcd.io/force: enabled"
 	intentReason     = "its application sets the force-replace delivery intent"
 	bundleReason     = "its bundle sets force: true"
@@ -60,7 +63,10 @@ func listObject(kind string, items ...any) *client.Object {
 
 // TestWarnForcedVolumes pins that every force-applied PersistentVolume and
 // PersistentVolumeClaim gets exactly one warning naming it, its producer and every
-// reason it is forced, and that nothing else warns (go-kure/launcher#720).
+// reason it is forced, and that nothing else warns (go-kure/launcher#720). One
+// whose only reason is the force-replace delivery intent is warned about
+// conditionally, since the objects alone carry no force (go-kure/launcher#782);
+// with a second reason it is force-applied in fact and the intent is listed.
 func TestWarnForcedVolumes(t *testing.T) {
 	deployment := collisionObject(&appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -94,9 +100,11 @@ func TestWarnForcedVolumes(t *testing.T) {
 		{"both reasons, one warning", []GeneratedApplication{forced(generatedApp("db", "", claimObject("shop", "data", forceAnnotated("enabled"))))},
 			[]string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `; ` + bundleReason + `)` + forcedTail}},
 		{"claim under the force-replace intent, unannotated", []GeneratedApplication{intent(generatedApp("data", "db", claimObject("shop", "data", nil)))},
-			[]string{`PersistentVolumeClaim shop/data (sub-application "data" of component "db") is force-applied (` + intentReason + `)` + forcedTail}},
+			[]string{`PersistentVolumeClaim shop/data (sub-application "data" of component "db")` + intentOnly}},
 		{"volume under the force-replace intent", []GeneratedApplication{intent(generatedApp("db", "", volumeObject("pv-data", nil)))},
-			[]string{`PersistentVolume pv-data (component "db") is force-applied (` + intentReason + `)` + forcedTail}},
+			[]string{`PersistentVolume pv-data (component "db")` + intentOnly}},
+		{"intent on an annotated claim", []GeneratedApplication{intent(generatedApp("db", "", claimObject("shop", "data", forceAnnotated("enabled"))))},
+			[]string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `; ` + intentReason + `)` + forcedTail}},
 		{"intent in a forced bundle", []GeneratedApplication{intentInForcedBundle(generatedApp("db", "", claimObject("shop", "data", nil)))},
 			[]string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + intentReason + `; ` + bundleReason + `)` + forcedTail}},
 		{"all three reasons, one warning", []GeneratedApplication{intentInForcedBundle(generatedApp("db", "", claimObject("shop", "data", forceAnnotated("enabled"))))},
@@ -109,7 +117,7 @@ func TestWarnForcedVolumes(t *testing.T) {
 			}(),
 		}, nil},
 		{"list members under the intent", []GeneratedApplication{intent(generatedApp("raw", "", listObject("List", unstructuredClaim("a", false))))},
-			[]string{`PersistentVolumeClaim shop/a (component "raw") is force-applied (` + intentReason + `)` + forcedTail}},
+			[]string{`PersistentVolumeClaim shop/a (component "raw")` + intentOnly}},
 		{"intent on a Deployment is not a volume", []GeneratedApplication{intent(generatedApp("web", "", deployment))}, nil},
 		{"a repeat joins the intent to the first", []GeneratedApplication{
 			forced(generatedApp("db", "", claimObject("shop", "data", nil))),
@@ -224,12 +232,15 @@ func TestGenerateApplications_Forced(t *testing.T) {
 	warning := func(name, reasons string) string {
 		return `PersistentVolumeClaim shop/` + name + ` (component "` + name + `") is force-applied (` + reasons + `)` + forcedTail
 	}
+	conditional := func(name string) string {
+		return `PersistentVolumeClaim shop/` + name + ` (component "` + name + `")` + intentOnly
+	}
 	wantWarnings := []string{
 		warning("a", bundleReason),
 		warning("d", intentReason+"; "+bundleReason),
-		warning("e", intentReason),
-		warning("f", intentReason),
-		warning("h", intentReason),
+		conditional("e"),
+		conditional("f"),
+		conditional("h"),
 	}
 	if !slices.Equal(warnings, wantWarnings) {
 		t.Errorf("warnings =\n%q\nwant\n%q", warnings, wantWarnings)

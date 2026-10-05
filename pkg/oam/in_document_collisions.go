@@ -13,7 +13,7 @@ import (
 // GeneratedApplication is one application's generated output, as a caller that
 // generates a transformed document holds it: the stack.Application's name, the OAM
 // component it belongs to, every object it generated, and whether they are
-// force-applied.
+// force-applied or covered by the ForceReplace delivery intent.
 type GeneratedApplication struct {
 	Name string // the stack.Application's name
 	// Component is the authored OAM component the application belongs to
@@ -26,10 +26,12 @@ type GeneratedApplication struct {
 	// cluster) it is the config's ComponentNamed answer, else Name.
 	Component string
 	Objects   []*client.Object
-	// Forced reports that every object of the application is force-applied,
-	// annotated or not, for either of two reasons. The application carries the
-	// ForceReplace delivery intent (stack.Application.Delivery), which the
-	// force-replace trait sets (go-kure/launcher#782). Or its own bundle sets
+	// Forced reports that every object of the application is to be
+	// force-applied, annotated or not, for either of two reasons. The
+	// application carries the ForceReplace delivery intent
+	// (stack.Application.Delivery), which the force-replace trait sets
+	// (go-kure/launcher#782): the objects carry nothing for it, and it takes
+	// effect where the delivery workflow maps it. Or its own bundle sets
 	// Force, so its Flux Kustomization (spec.force) forces them: launcher never
 	// sets a bundle's Force (go-kure/launcher#781), so that is a bundle whose
 	// Force the caller set before generating.
