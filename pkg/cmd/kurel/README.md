@@ -133,6 +133,13 @@ at its position.
 | `clusterrole` | A ClusterRole with a rule of non-resource URLs and an aggregated one. No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
 | `clusterrolebinding` | A ClusterRoleBinding with no namespace. No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
 | `clustersecretstore` | A ClusterSecretStore with no namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `cnpg-backup` | Two Backup objects in the build namespace, the second named by `objectName`. No capability is required to build it. |
+| `cnpg-clusterimagecatalog` | Two ClusterImageCatalog objects with no namespace, the second named by `objectName`. No capability is required to build it. |
+| `cnpg-databaserole` | Two DatabaseRole objects in the build namespace, the second named by `objectName`. The fixture authors a `validUntil` with an offset and expects it in UTC. No capability is required to build it. |
+| `cnpg-imagecatalog` | Two ImageCatalog objects in the build namespace, the second named by `objectName`. No capability is required to build it. |
+| `cnpg-publication` | Two Publication objects in the build namespace, the second named by `objectName`. No capability is required to build it. |
+| `cnpg-scheduledbackup` | Two ScheduledBackup objects in the build namespace, the second named by `objectName`. No capability is required to build it. |
+| `cnpg-subscription` | Two Subscription objects in the build namespace, the second named by `objectName`. No capability is required to build it. |
 | `csidriver` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 | `endpointslice` | A Service named by `objectName`, an EndpointSlice in the build namespace whose authored `kubernetes.io/service-name` label holds that name as a literal, and a slice that authors only its address type. |
 | `externalsecret` | An ExternalSecret in the build namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |

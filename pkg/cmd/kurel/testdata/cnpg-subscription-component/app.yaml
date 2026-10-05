@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: sales
+      type: cnpg-subscription
+      properties:
+        cluster:
+          name: replica
+        dbname: app
+        name: sales
+        publicationName: sales
+        publicationDBName: orders
+        externalClusterName: origin
+        parameters:
+          copy_data: "false"
+        subscriptionReclaimPolicy: delete
+    - name: everything
+      type: cnpg-subscription
+      properties:
+        objectName: replica-everything
+        cluster:
+          name: replica
+        dbname: app
+        name: everything
+        publicationName: everything
+        externalClusterName: origin

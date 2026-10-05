@@ -1,0 +1,29 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  labels:
+    launcher.gokure.dev/component: before-upgrade
+  name: before-upgrade
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+    parameters:
+      compression: gzip
+  target: prefer-standby
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  labels:
+    launcher.gokure.dev/component: snapshot
+  name: postgres-snapshot
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  method: volumeSnapshot
+  online: false

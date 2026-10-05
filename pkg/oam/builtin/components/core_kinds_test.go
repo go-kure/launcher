@@ -10,6 +10,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
@@ -105,6 +106,14 @@ var coreKindSchemas = []struct {
 	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), &components.ClusterRoleBindingHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRoleBinding")},
 	// A ClusterSecretStore and a SecretStore hold one spec type.
 	{"clustersecretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.ClusterSecretStoreHandler{}, nil},
+	{"cnpg-backup", reflect.TypeFor[cnpgv1.BackupSpec](), &components.CnpgBackupHandler{}, nil},
+	// A ClusterImageCatalog and an ImageCatalog share one spec type.
+	{"cnpg-clusterimagecatalog", reflect.TypeFor[cnpgv1.ImageCatalogSpec](), &components.CnpgClusterImageCatalogHandler{}, nil},
+	{"cnpg-databaserole", reflect.TypeFor[cnpgv1.DatabaseRoleSpec](), &components.CnpgDatabaseRoleHandler{}, nil},
+	{"cnpg-imagecatalog", reflect.TypeFor[cnpgv1.ImageCatalogSpec](), &components.CnpgImageCatalogHandler{}, nil},
+	{"cnpg-publication", reflect.TypeFor[cnpgv1.PublicationSpec](), &components.CnpgPublicationHandler{}, nil},
+	{"cnpg-scheduledbackup", reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), &components.CnpgScheduledBackupHandler{}, nil},
+	{"cnpg-subscription", reflect.TypeFor[cnpgv1.SubscriptionSpec](), &components.CnpgSubscriptionHandler{}, nil},
 	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
 	// An EndpointSlice has no spec type either: the component projects the
 	// object, less its identity.
@@ -237,10 +246,10 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 		return
 	}
 	// A duration is a struct that decodes from a string ("2160h") and from
-	// nothing else.
-	if typ == reflect.TypeFor[metav1.Duration]() {
+	// nothing else, and so is a time ("2030-01-01T00:00:00Z").
+	if typ == reflect.TypeFor[metav1.Duration]() || typ == reflect.TypeFor[metav1.Time]() {
 		if prop.Type != oam.PropertyTypeString {
-			t.Errorf("schema key %q declares type %q, but the field is a duration, which decodes from a string", key, prop.Type)
+			t.Errorf("schema key %q declares type %q, but the field is a %s, which decodes from a string", key, prop.Type, typ.Name())
 		}
 		if prop.Description == "" {
 			t.Errorf("schema key %q has no description", key)

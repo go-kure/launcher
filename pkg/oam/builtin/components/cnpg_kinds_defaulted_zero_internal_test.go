@@ -24,8 +24,8 @@ import (
 const barmanCloudModulePath = "github.com/cloudnative-pg/plugin-barman-cloud"
 
 // TestCnpgKindsDefaultedZeroFields_MatchCRD is
-// TestCnpgClusterDefaultedZeroFields_MatchCRD for the Pooler, Database and
-// ObjectStore kinds: each kind's list must equal every non-pointer omitempty
+// TestCnpgClusterDefaultedZeroFields_MatchCRD for the other kinds of the
+// CloudNativePG API and the ObjectStore: each kind's list must equal every non-pointer omitempty
 // scalar of its spec type (by json path) whose CRD default is not zero or
 // false, with that default, read from the linked module. A dependency bump
 // that adds, removes or changes one fails here, naming it.
@@ -50,6 +50,15 @@ func TestCnpgKindsDefaultedZeroFields_MatchCRD(t *testing.T) {
 			reflect.TypeFor[cnpgv1.DatabaseSpec](), cnpgDatabaseDefaultedZeroFields, 0, 0},
 		{"ObjectStore", filepath.Join(barmanDir, "config", "crd", "bases", "barmancloud.cnpg.io_objectstores.yaml"),
 			reflect.TypeFor[barmanv1.ObjectStoreSpec](), cnpgObjectStoreDefaultedZeroFields, 1, 5},
+		// The seven further kinds. The two catalogs have no such field; their
+		// rows hold that a dependency bump gives them none.
+		{"ImageCatalog", cnpgCRDFile(cnpgDir, "imagecatalogs"), reflect.TypeFor[cnpgv1.ImageCatalogSpec](), nil, 0, 0},
+		{"ClusterImageCatalog", cnpgCRDFile(cnpgDir, "clusterimagecatalogs"), reflect.TypeFor[cnpgv1.ImageCatalogSpec](), nil, 0, 0},
+		{"Backup", cnpgCRDFile(cnpgDir, "backups"), reflect.TypeFor[cnpgv1.BackupSpec](), cnpgBackupDefaultedZeroFields, 1, 1},
+		{"ScheduledBackup", cnpgCRDFile(cnpgDir, "scheduledbackups"), reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), cnpgScheduledBackupDefaultedZeroFields, 2, 2},
+		{"DatabaseRole", cnpgCRDFile(cnpgDir, "databaseroles"), reflect.TypeFor[cnpgv1.DatabaseRoleSpec](), cnpgDatabaseRoleDefaultedZeroFields, 3, 8},
+		{"Publication", cnpgCRDFile(cnpgDir, "publications"), reflect.TypeFor[cnpgv1.PublicationSpec](), cnpgPublicationDefaultedZeroFields, 1, 2},
+		{"Subscription", cnpgCRDFile(cnpgDir, "subscriptions"), reflect.TypeFor[cnpgv1.SubscriptionSpec](), cnpgSubscriptionDefaultedZeroFields, 1, 1},
 	} {
 		t.Run(tt.kind, func(t *testing.T) {
 			defaults := crdSpecScalarDefaults(t, tt.crd, "integer", "number", "boolean", "string")
@@ -82,6 +91,12 @@ func TestCnpgKindsDefaultedZeroFields_MatchCRD(t *testing.T) {
 			}
 		})
 	}
+}
+
+// cnpgCRDFile is the file of one CRD of the CloudNativePG module at moduleDir,
+// by the plural of its kind.
+func cnpgCRDFile(moduleDir, plural string) string {
+	return filepath.Join(moduleDir, "config", "crd", "bases", "postgresql.cnpg.io_"+plural+".yaml")
 }
 
 // linkedModuleDir is cnpgModuleDir for any module: the directory of the
@@ -174,6 +189,14 @@ func TestCnpgKindsAlwaysEncodedDefaults_MatchCRD(t *testing.T) {
 			reflect.TypeFor[cnpgv1.DatabaseSpec](), cnpgDatabaseAlwaysEncodedDefaults},
 		{"ObjectStore", filepath.Join(barmanDir, "config", "crd", "bases", "barmancloud.cnpg.io_objectstores.yaml"),
 			reflect.TypeFor[barmanv1.ObjectStoreSpec](), map[string]string{}},
+		// None of the seven further kinds has such a field.
+		{"ImageCatalog", cnpgCRDFile(cnpgDir, "imagecatalogs"), reflect.TypeFor[cnpgv1.ImageCatalogSpec](), map[string]string{}},
+		{"ClusterImageCatalog", cnpgCRDFile(cnpgDir, "clusterimagecatalogs"), reflect.TypeFor[cnpgv1.ImageCatalogSpec](), map[string]string{}},
+		{"Backup", cnpgCRDFile(cnpgDir, "backups"), reflect.TypeFor[cnpgv1.BackupSpec](), map[string]string{}},
+		{"ScheduledBackup", cnpgCRDFile(cnpgDir, "scheduledbackups"), reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), map[string]string{}},
+		{"DatabaseRole", cnpgCRDFile(cnpgDir, "databaseroles"), reflect.TypeFor[cnpgv1.DatabaseRoleSpec](), map[string]string{}},
+		{"Publication", cnpgCRDFile(cnpgDir, "publications"), reflect.TypeFor[cnpgv1.PublicationSpec](), map[string]string{}},
+		{"Subscription", cnpgCRDFile(cnpgDir, "subscriptions"), reflect.TypeFor[cnpgv1.SubscriptionSpec](), map[string]string{}},
 	} {
 		t.Run(tt.kind, func(t *testing.T) {
 			defaults := crdSpecScalarDefaults(t, tt.crd, "integer", "number", "boolean", "string")

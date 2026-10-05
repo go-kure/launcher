@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: sales
+      type: cnpg-publication
+      properties:
+        cluster:
+          name: postgres
+        dbname: app
+        name: sales
+        target:
+          objects:
+            - tablesInSchema: sales
+            - table:
+                name: orders
+                schema: public
+                only: true
+        parameters:
+          publish: insert,update
+        publicationReclaimPolicy: delete
+    - name: everything
+      type: cnpg-publication
+      properties:
+        objectName: postgres-everything
+        cluster:
+          name: postgres
+        dbname: app
+        name: everything
+        target:
+          allTables: true

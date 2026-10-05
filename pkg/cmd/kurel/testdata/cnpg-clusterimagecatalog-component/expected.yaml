@@ -1,0 +1,30 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgresql
+  name: postgresql
+spec:
+  componentImages:
+  - image: ghcr.io/cloudnative-pg/pgbouncer:1.24.0
+    key: pgbouncer
+  images:
+  - extensions:
+    - image:
+        reference: ghcr.io/cloudnative-pg/pgvector:0.8.0
+      name: pgvector
+    image: ghcr.io/cloudnative-pg/postgresql:17.2
+    major: 17
+  - image: ghcr.io/cloudnative-pg/postgresql:16.6
+    major: 16
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  labels:
+    launcher.gokure.dev/component: one
+  name: one-major
+spec:
+  images:
+  - image: ghcr.io/cloudnative-pg/postgresql:17.2
+    major: 17

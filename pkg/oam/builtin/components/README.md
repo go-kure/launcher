@@ -153,10 +153,17 @@ reads it.
 | `clusterrole` | ClusterRole | Kind-named RBAC ClusterRole: the object's own fields (`rules`, `aggregationRule`), strictly decoded; a rule's `verbs` are required, and either its `apiGroups` and `resources` or its `nonResourceURLs`; an `aggregationRule` needs a selector. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `clusterrolebinding` | ClusterRoleBinding | Kind-named RBAC ClusterRoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required, and a ServiceAccount subject's `namespace`. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the `SecretStoreSpec` of `secretstore`, strictly decoded, and its policy check. Cluster-scoped. No capability is required — see below. |
+| `cnpg-backup` | CNPG Backup | Kind-named CloudNativePG Backup: the whole `BackupSpec`, strictly decoded; `cluster.name` is required. A one-shot request with a spec the API never lets change: a backup that recurs is a `cnpg-scheduledbackup`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `cnpg-cluster` | CNPG Cluster | Operator-CR kind component: the whole `postgresql.cnpg.io/v1` `ClusterSpec`, strictly decoded, with no launcher opinions — see below. |
+| `cnpg-clusterimagecatalog` | CNPG ClusterImageCatalog | Kind-named CloudNativePG cluster-wide image catalog: the same `ImageCatalogSpec`, strictly decoded, and the same policy check and tag rule. Cluster-scoped. No capability is required — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
+| `cnpg-databaserole` | CNPG DatabaseRole | Kind-named CloudNativePG DatabaseRole: the whole `DatabaseRoleSpec`, strictly decoded; `cluster.name` and `name` are required, and the names the CRD reserves, `ensure: absent`, a password Secret beside `disablePassword: true` and a client certificate without `login: true` are refused. Its password is a Secret's name, never a value. Namespaced; no environment policy applies and no capability is required — see below. |
+| `cnpg-imagecatalog` | CNPG ImageCatalog | Kind-named CloudNativePG image catalog: the whole `ImageCatalogSpec` (`images`, required, and `componentImages`), strictly decoded; an image's `image` and `major` and a component image's `key` and `image` are required. Every image the catalog names is held to the environment policy's allowed registries and, with or without a policy, to the tag rule (a tag or a digest, no `:latest`). Namespaced; no capability is required — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
+| `cnpg-publication` | CNPG Publication | Kind-named CloudNativePG Publication: the whole `PublicationSpec`, strictly decoded; `cluster.name`, `name`, `dbname` and `target` are required, and the target publishes all tables or a list of objects, not both. Namespaced; no environment policy applies and no capability is required — see below. |
+| `cnpg-scheduledbackup` | CNPG ScheduledBackup | Kind-named CloudNativePG ScheduledBackup: the whole `ScheduledBackupSpec`, strictly decoded; `schedule` and `cluster.name` are required. The schedule is the operator's to read. Namespaced; no environment policy applies and no capability is required — see below. |
+| `cnpg-subscription` | CNPG Subscription | Kind-named CloudNativePG Subscription: the whole `SubscriptionSpec`, strictly decoded; `cluster.name`, `name`, `dbname`, `publicationName` and `externalClusterName` are required. Namespaced; no environment policy applies and no capability is required — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
@@ -400,18 +407,18 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cilium.CreateCiliumNetworkPolicy` | cilium.io/v2 CiliumNetworkPolicy | kind | `cilium-networkpolicy` | strict decode of `spec` and `specs` into the Cilium `Rule` | The endpoint selector, the ICMP field and the rule label unmarshal themselves and drop an unknown key; the kind refuses one by its path at every position that holds any of them (`builtin.UnknownCiliumKeyPath`), and a test holds the list of such types to the Cilium API. The `cilium-networkpolicy` trait builds its own CiliumNetworkPolicy from one rule's `endpointSelector`, `ingress` and `egress`, with the same decode, the same check and the kind's required list cut to those three fields. |
 | `cilium.CreateCiliumNode` | cilium.io/v2 CiliumNode (cluster-scoped) | not authorable | - | - | Written by the Cilium agent for its node. |
 | `cilium.CreateCiliumNodeConfig` | cilium.io/v2 CiliumNodeConfig | kind | `cilium-nodeconfig` | strict decode of `CiliumNodeConfigSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The keys and the values of `defaults` are not checked. No environment policy applies. |
-| `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | missing | - | - | - |
+| `cnpg.CreateBackup` | postgresql.cnpg.io/v1 Backup | kind | `cnpg-backup` | strict decode of `BackupSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. A one-shot request: the API refuses every change of its spec, and applied again it runs nothing. No environment policy applies. |
 | `cnpg.CreateCluster` | postgresql.cnpg.io/v1 Cluster | kind | `cnpg-cluster` | strict decode of `ClusterSpec` | `postgresql` lowers onto it. |
-| `cnpg.CreateClusterImageCatalog` | postgresql.cnpg.io/v1 ClusterImageCatalog (cluster-scoped) | missing | - | - | - |
+| `cnpg.CreateClusterImageCatalog` | postgresql.cnpg.io/v1 ClusterImageCatalog (cluster-scoped) | kind | `cnpg-clusterimagecatalog` | strict decode of `ImageCatalogSpec` | As `cnpg-imagecatalog`, with no namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `cnpg.CreateDatabase` | postgresql.cnpg.io/v1 Database | kind | `cnpg-database` | strict decode of `DatabaseSpec` | `postgresql` lowers onto it. |
-| `cnpg.CreateDatabaseRole` | postgresql.cnpg.io/v1 DatabaseRole | missing | - | - | - |
+| `cnpg.CreateDatabaseRole` | postgresql.cnpg.io/v1 DatabaseRole | kind | `cnpg-databaserole` | strict decode of `DatabaseRoleSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's eight rules on a new object are checked; its two against a change are the API server's. `passwordSecret` names a Secret and holds no secret. No environment policy applies. |
 | `cnpg.CreateFailoverQuorum` | postgresql.cnpg.io/v1 FailoverQuorum | not authorable | - | - | Written by the CloudNativePG operator. |
-| `cnpg.CreateImageCatalog` | postgresql.cnpg.io/v1 ImageCatalog | missing | - | - | - |
+| `cnpg.CreateImageCatalog` | postgresql.cnpg.io/v1 ImageCatalog | kind | `cnpg-imagecatalog` | strict decode of `ImageCatalogSpec` | The object is named after the component unless `objectName` names it, and a Cluster refers to it by that name. Its labels and annotations are the `labels` and `annotations` properties. The CRD's two rules (one image per major version, one component image per key) are checked. Every image it names is held to the policy's allowed registries. |
 | `cnpg.CreateObjectStore` | barmancloud.cnpg.io/v1 ObjectStore | kind | `cnpg-objectstore` | strict decode of `ObjectStoreSpec` | `postgresql` lowers onto it. |
 | `cnpg.CreatePooler` | postgresql.cnpg.io/v1 Pooler | kind | `cnpg-pooler` | strict decode of `PoolerSpec` | `postgresql` lowers onto it. |
-| `cnpg.CreatePublication` | postgresql.cnpg.io/v1 Publication | missing | - | - | - |
-| `cnpg.CreateScheduledBackup` | postgresql.cnpg.io/v1 ScheduledBackup | missing | - | - | - |
-| `cnpg.CreateSubscription` | postgresql.cnpg.io/v1 Subscription | missing | - | - | - |
+| `cnpg.CreatePublication` | postgresql.cnpg.io/v1 Publication | kind | `cnpg-publication` | strict decode of `PublicationSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's three rules on a target are checked; its four against a change are the API server's. No environment policy applies. |
+| `cnpg.CreateScheduledBackup` | postgresql.cnpg.io/v1 ScheduledBackup | kind | `cnpg-scheduledbackup` | strict decode of `ScheduledBackupSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The schedule is not parsed. No environment policy applies. |
+| `cnpg.CreateSubscription` | postgresql.cnpg.io/v1 Subscription | kind | `cnpg-subscription` | strict decode of `SubscriptionSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. The CRD's three rules refuse a change and are the API server's. No environment policy applies. |
 | `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | kind | `clusterexternalsecret` | strict decode of `ClusterExternalSecretSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties; those of the ExternalSecrets it creates are `externalSecretMetadata`. `externalSecretSpec` must be written, with what an `externalsecret` requires. `externalSecretSpec.target.manifest` is held to the environment policy as on an `externalsecret`. |
 | `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | kind | `clustersecretstore` | strict decode of `SecretStoreSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `provider` must be written with exactly one provider; of that provider, the fields the API requires that the type would write empty, and the four it would default. A credential written as a `value`, and the data of the `fake` provider, are refused under a policy that forbids explicit secrets. No capability is required. |
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
@@ -2755,6 +2762,253 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
+- **cnpg-imagecatalog**, **cnpg-clusterimagecatalog**, **cnpg-backup**,
+  **cnpg-scheduledbackup**, **cnpg-databaserole**, **cnpg-publication**,
+  **cnpg-subscription** (go-kure/launcher#790) are the kind-named projections
+  of seven objects of the CloudNativePG API, `postgresql.cnpg.io/v1`, beyond
+  those of **cnpg-cluster** and **cnpg-pooler**, below: an
+  ImageCatalog, a ClusterImageCatalog, a Backup, a ScheduledBackup, a
+  DatabaseRole, a Publication and a Subscription. Each emits that one object,
+  named after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default of its own. **The ClusterImageCatalog
+  is cluster-scoped**: the object carries no namespace, whatever namespace the
+  application is built for, and its name is claimed cluster-wide. The other
+  six are namespaced and are written in the build namespace. No rule lowers
+  onto these kinds: `postgresql` emits none of them.
+
+  **No capability is required, and nothing gates these kinds**: where the
+  CloudNativePG CRDs are not installed the component builds. Whoever may
+  author a component may author these, and with them the images the Clusters
+  of a namespace or of the whole cluster may run, a role with any attribute
+  PostgreSQL has (`superuser`, `bypassrls`, `replication`), and what a
+  database publishes or subscribes to. The open point "No capability gate on
+  component types" on go-kure/launcher#790 carries it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (an image, an extension, a plugin configuration, a target's object).
+  - `cnpg-imagecatalog` and `cnpg-clusterimagecatalog` (`ImageCatalogSpec`,
+    which the two objects share): `images`, each an `image`, a `major` and
+    its `extensions` (a `name`, an `image` volume source with its `reference`
+    and `pullPolicy`, the four path lists and `env`), and `componentImages`,
+    each a `key` and an `image`.
+  - `cnpg-backup` (`BackupSpec`): `cluster`, `target`, `method`,
+    `pluginConfiguration` (`name`, `parameters`), `online` and
+    `onlineConfiguration`.
+  - `cnpg-scheduledbackup` (`ScheduledBackupSpec`): the six of a Backup, and
+    `schedule`, `suspend`, `immediate` and `backupOwnerReference`.
+  - `cnpg-databaserole` (`DatabaseRoleSpec`): `cluster`,
+    `databaseRoleReclaimPolicy`, `clientCertificate`, and the fields of the
+    role configuration the type embeds: `name`, `comment`, `ensure`,
+    `passwordSecret`, `disablePassword`, `connectionLimit`, `validUntil`,
+    `inRoles`, `inherit`, `superuser`, `createdb`, `createrole`, `login`,
+    `replication` and `bypassrls`.
+  - `cnpg-publication` (`PublicationSpec`): `cluster`, `name`, `dbname`,
+    `parameters`, `target` (`allTables`, or `objects`, each a
+    `tablesInSchema` or a `table` with its `name`, `schema`, `only` and
+    `columns`) and `publicationReclaimPolicy`.
+  - `cnpg-subscription` (`SubscriptionSpec`): `cluster`, `name`, `dbname`,
+    `parameters`, `publicationName`, `publicationDBName`,
+    `externalClusterName` and `subscriptionReclaimPolicy`.
+  - **No default is filled.** An unauthored `method`, `ensure`, `inherit`,
+    `backupOwnerReference` or reclaim policy is left out and the API server
+    fills its own.
+  - **A role's `connectionLimit: 0` is refused** (`connectionLimit: 0 cannot
+    be carried by the CloudNativePG API types`): the field is no pointer and
+    is omitted when zero, and the CRD's default, `-1` (no limit), would apply
+    in its place, so a role authored to accept no connection would accept
+    any number.
+  - **An empty string is refused on the seven string fields the CRDs
+    default** (`method: "" cannot be carried by the CloudNativePG API types
+    (the field is omitted when zero, so the operator would apply its default
+    "barmanObjectStore")`): `method` on a Backup and a ScheduledBackup
+    (`barmanObjectStore`), a ScheduledBackup's `backupOwnerReference`
+    (`none`), a role's `ensure` (`present`) and `databaseRoleReclaimPolicy`
+    (`retain`), and `publicationReclaimPolicy` and
+    `subscriptionReclaimPolicy` (`retain`). The type omits an empty string,
+    so the default would replace the authored value. With `connectionLimit`
+    these are every such field of the seven specs;
+    `TestCnpgKindsDefaultedZeroFields_MatchCRD` derives each kind's list from
+    the linked CRDs and fails on another.
+  - **A role's `validUntil` is written in UTC.** The API type holds an
+    instant: `2030-01-01T02:00:00+02:00` is written
+    `2030-01-01T00:00:00Z`. It writes the instant to the second and the zero
+    time as null, which the API server drops, so a `validUntil` with a
+    fraction of a second other than zero is refused
+    (`validUntil "2030-01-01T00:00:00.5Z": a fraction of a second cannot be
+    carried by the CloudNativePG API types`), after a period or a comma, read
+    from the authored string, since the decode keeps only nine digits of a
+    fraction; and so is
+    `0001-01-01T00:00:00Z` (`validUntil: the zero time cannot be carried by
+    the CloudNativePG API types`), which would leave a password that never
+    expires. The time as the API type writes it is held to the CRD's
+    `date-time` format and to the decoded instant, so an instant outside the
+    four-digit years in UTC is refused whatever its authored offset:
+    `9999-12-31T23:00:00-02:00` (`validUntil: the CloudNativePG API types
+    write it as 10000-01-01T01:00:00Z, which the DatabaseRole CRD's date-time
+    format refuses`).
+
+  **Required** follows the rule of the other kinds built on `policyFreeKind`:
+  a field the API requires that the Go type writes whether or not it was
+  authored. Each must be authored (`images[1].major: required (…)`):
+  - a catalog's `images`; an image's `image` and `major`; an extension's
+    `name`, and the `name` and the `value` of each of its `env` entries; a
+    component image's `key` and `image`;
+  - `cluster`, on the five kinds that refer to a Cluster, and its `name` on a
+    `cnpg-backup` and a `cnpg-scheduledbackup`. The DatabaseRole,
+    Publication and Subscription CRDs default the `name` to an empty string,
+    which no Cluster has, so the other three refuse a reference with no name
+    on launcher's own account, with the same `cluster.name: required`;
+  - a plugin configuration's `name`, on a `cnpg-backup` and a
+    `cnpg-scheduledbackup` that author one;
+  - a `cnpg-scheduledbackup`'s `schedule`;
+  - a `cnpg-databaserole`'s `name`, and the `name` of an authored
+    `passwordSecret`;
+  - a `cnpg-publication`'s `name`, `dbname` and `target`, and the `name` of a
+    target's `table`;
+  - a `cnpg-subscription`'s `name`, `dbname`, `publicationName` and
+    `externalClusterName`.
+
+  `TestCnpgFurtherKinds_RequiredMatchCRD` holds these lists to the fields the
+  linked module's CRD requires and the type writes unauthored, so a
+  dependency bump that adds, drops or moves one fails there. An authored
+  empty value satisfies the rule and is the API server's to refuse
+  (`schedule: ""`), with three exceptions the build refuses itself: a
+  `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
+  label of at most 50 characters), as on `cnpg-pooler` and `cnpg-database`;
+  a role's `name: ""` breaks a rule of its CRD (below); and a catalog's
+  `image: ""`, on an image or a component image, is no image reference and is
+  refused by the tag rule (below).
+
+  **The CRDs' expression rules.** The seven CRDs declare 26. The build checks
+  the 15 that read one document, each a comparison of authored fields with
+  each other or with a string the CRD itself states, so a document that
+  breaks one could never be admitted:
+  - a catalog (two rules, on each of the two CRDs): no two images of one
+    `major` (`images[1].major: 17 is also the major version of images[0]; the
+    API takes each major version once`), and no two component images of one
+    `key`;
+  - a role (eight): a `name` that is empty, `postgres` or
+    `streaming_replica`, or that starts with `pg_` or `cnpg_` (`name
+    "postgres": reserved, the DatabaseRole CRD refuses it`); `ensure:
+    absent`, which the API does not take on a DatabaseRole (a role is removed
+    by deleting the object with `databaseRoleReclaimPolicy: delete`);
+    `passwordSecret` beside `disablePassword: true`; and a client certificate
+    that is enabled without `login: true`. A certificate is enabled where its
+    block is authored and `enabled` is not `false`: the API fills `true` into
+    an omitted one before it evaluates the rule;
+  - a publication (three): a `target` that publishes neither or both of
+    `allTables: true` and `objects` (`target: one of allTables: true and
+    objects is required`); an object that is neither or both of
+    `tablesInSchema` and `table`; and a table that lists its `columns` where
+    another object publishes `tablesInSchema`. The Go type leaves out a false
+    `allTables` and an empty `objects`, `tablesInSchema` or `columns`, so
+    each is read as the object will hold it: `allTables: false` beside a list
+    of objects builds, and is a list of objects.
+
+  The other eleven refuse a change of the stored object, which a build does
+  not have, and stay the API server's: a Backup's whole `spec`; the `cluster`
+  of a ScheduledBackup, a DatabaseRole, a Publication and a Subscription; the
+  `name` of a role; the `name` and the `dbname` of a publication and of a
+  subscription; and a publication's `target.allTables`, from one authored
+  value to another. Such a change builds here and is refused at apply, until
+  the object is deleted and created again. The rule on `allTables` sits on
+  that optional field, and the API server does not evaluate it where the
+  field is absent from the stored object or from the new one: a target moved
+  from `allTables` to `objects`, or back, is not refused by it.
+  `TestCnpgFurtherKinds_ExpressionRules` lists all 26 with what is
+  done with each, and fails on a rule that is added, dropped or reworded.
+
+  **A Backup is a one-shot request.** The operator takes the backup once,
+  when the object is created, and the API refuses every later change of its
+  `spec`. A `cnpg-backup` kept in a repository and applied again is the same
+  object: nothing runs, and a change to its properties is refused at apply.
+  Where the repository is applied continuously, the API refuses the changed
+  document at every apply, so the delivery fails on it each time until the
+  change is taken back, or the request is authored as a new object (another
+  `objectName`), which is a new Backup and a new backup taken. What a
+  delivery tool set to replace an object it cannot update does with that
+  refusal is the tool's, and is not read here.
+  It suits a backup that is asked for once, under a name of its own (before
+  an upgrade, say), and is then left as the record of that backup. A backup
+  that recurs is a `cnpg-scheduledbackup`, whose Backups the operator creates
+  and names.
+
+  **Not checked**, and the API server's or the operator's to refuse:
+  - the number of a catalog's images (one to eight) and of its component
+    images (at most 32), a `major` below 10, and the forms of a `key`, of an
+    extension's `name` and of an `env` name;
+  - a `schedule`: launcher does not parse it. The operator reads a cron
+    expression of six fields, the first of which is the seconds; its webhook
+    refuses a schedule that does not parse and only warns of one that parses
+    with another number of fields;
+  - what the operator's webhook holds a Backup and a ScheduledBackup to: that
+    `online` and `onlineConfiguration` do not come with the
+    `barmanObjectStore` method, which is also the method of a document that
+    authors none, and, on a Backup only, that the `plugin` method comes with
+    a `pluginConfiguration`;
+  - `parameters` on a publication, a subscription and a plugin configuration:
+    a free map of strings, written as authored;
+  - every other value rule of the API: the enumerations (`method`, `target`,
+    `backupOwnerReference`, `ensure`, the reclaim policies, an image volume's
+    `pullPolicy`). A `validUntil` is the exception: the strict decode reads
+    an RFC 3339 time and refuses anything else.
+
+  **The tag rule on a catalog's images.** The three fields of a catalog that
+  name an image are held to `ValidateImageRef`, as a container's image is,
+  when the component is read, with or without a policy: an image's `image`, a
+  component image's `image` and the `reference` of an extension's image
+  volume. One without a tag or digest, or tagged `:latest` (with a digest
+  too), or one that is no image reference, is refused by the field's path
+  (`images[0].image: image "registry.example/team/postgresql" rejected: no tag
+  or digest specified; use an explicit version tag or digest`), and the
+  refusal carries no policy class: a Cluster that takes its image from the
+  catalog runs what the entry names. An extension that names no reference
+  names no image and is not checked. A reference by digest alone passes; what
+  CloudNativePG itself requires of a catalog's image is the operator's rule
+  and is left to it. The rule runs at that read and nowhere else: generation
+  builds the object from what the read decoded and does not repeat it.
+  `cnpg-cluster` and `cnpg-pooler` repeat theirs at generation because their
+  config is an exported value a caller can change after the read; nothing but
+  the read can make a catalog's config.
+  `TestImageTagRule_CnpgImageCatalogs` holds the three, on both kinds.
+
+  **Policy.** The two catalogs are held to the environment policy; the other
+  five have no field an `oam.Policy` method speaks to, and build the same
+  under every policy and under none.
+  - **Every image a catalog names is held to the allowed registries.** A
+    catalog runs no pod, but an image a Cluster takes from it is one the
+    operator runs. `ApplyPolicy` checks the three fields that name one, and
+    refuses by the field's path with the class `oam.RefusalRegistry`: an
+    image's `image`
+    (`images[0].image`), a component image's `image`
+    (`componentImages[0].image`) and the `reference` of an extension's image
+    volume (`images[0].extensions[0].image.reference`). An extension that
+    names no reference names no image, and nothing is checked for it.
+    `TestCnpgImageCatalogs_ImagesAreHeldToTheAllowedRegistries` holds the
+    three, on both kinds.
+  - **A Cluster's reference to a catalog is a name.** A `cnpg-cluster`'s
+    `imageCatalogRef` names a catalog and a major version, and holds no
+    image: the host is read where the image is authored, on the catalog. A
+    catalog that is not built with launcher is not seen.
+  - **No field holds a literal secret.** A role's `passwordSecret` is the
+    name of a Secret in the role's namespace, and launcher emits no Secret
+    for it; a subscription's credentials are those of the external cluster
+    the subscriber Cluster defines. A plugin's `parameters` and an
+    extension's `env` are free text: a value written there is written into
+    the object as authored and is not checked.
+
+  **Labels and annotations** are the `labels` and `annotations` properties,
+  and the object also carries the component label (see "Component label and
+  ownership" in the OAM model).
+
+  **Not covered.** Whether what is referred to exists: the Cluster, the
+  Secret, the database, the publication, the external cluster of a
+  subscription, the plugin, the schema and the tables a publication names. A
+  status of any of the seven is the operator's and is not written. The
+  Backups a ScheduledBackup creates, and the Secret a role's client
+  certificate is issued into (`<object name>-client-cert`), are the
+  operator's too.
 - **metallb-bfdprofile** (go-kure/launcher#790) is the kind-named projection
   of a fourth object of MetalLB's `metallb.io/v1beta1` API: a BFDProfile. It
   is built on `policyFreeKind` as the kinds above are and emits that one
@@ -4004,7 +4258,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The test that walks the types fails on a field held to the registry rule
   and not to this one. **Breaking** (go-kure/launcher#790): a document, a
   chart or a source naming an untagged or `:latest` image in one of those
-  fields built before, and is refused now.
+  fields built before, and is refused now. The two catalog kinds
+  (`cnpg-imagecatalog`, `cnpg-clusterimagecatalog`) hold each image, component
+  image and extension reference of a catalog to the rule from the release
+  that adds them, so nothing that built is refused there.
 
   **Known difference:** template delivery (`helmtemplate`), `passthrough` and
   `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
@@ -8945,11 +9202,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a catalog's images are not checked by this kind, as for an unset
   `imageName`. A build reads the objects a document brings, not an object a
   reference points at: a catalog's images are held where the catalog is
-  authored, by a kind that builds it. No kind here builds an image catalog
-  today, so nothing in this library holds a catalog's images: not for a raw
-  catalog on `manifests`, `passthrough` or a chart, and not for one that
-  already exists in the cluster. A `postgresql` component writes no
-  extension entry. `imageName` and the extension images are every image a
+  authored, by the kind that builds it. `cnpg-imagecatalog` and
+  `cnpg-clusterimagecatalog` hold every image of a catalog they build to the
+  same list (see their entry above). Nothing in this library holds the images
+  of any other catalog: not of a raw catalog on `manifests`, `passthrough` or
+  a chart, and not of one that already exists in the cluster. A `postgresql`
+  component writes no extension entry. `imageName` and the extension images are every image a
   Cluster names today; the test that walks the pod spec for image fields
   walks the Cluster and the Pooler spec the same way.
   Both are also held to the tag rule (`ValidateImageRef`) when the component

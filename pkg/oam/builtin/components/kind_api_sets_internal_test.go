@@ -414,6 +414,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "clusterissuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"clusterissuers.yaml", "v1")},
 	{component: "clusterrole", typ: reflect.TypeFor[rbacv1.ClusterRole](), source: markerAPISource, skip: objectIdentity},
 	{component: "clusterrolebinding", typ: reflect.TypeFor[rbacv1.ClusterRoleBinding](), source: markerAPISource, skip: objectIdentity},
+	{component: "cnpg-backup", typ: reflect.TypeFor[cnpgv1.BackupSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"backups.yaml", "v1")},
 	{
 		component: "cnpg-cluster", typ: reflect.TypeFor[cnpgv1.ClusterSpec](),
 		source: crdAPISource(cnpgModulePath, cnpgCRDs+"clusters.yaml", "v1"),
@@ -432,6 +433,7 @@ var apiSetKinds = []apiSetKind{
 			"backup.volumeSnapshot.onlineConfiguration": "the type writes {} under an authored volumeSnapshot; the object's default is waitForArchive true and immediateCheckpoint false, and in a {} the CRD fills waitForArchive with the field's own default true, while an absent immediateCheckpoint is false",
 		},
 	},
+	{component: "cnpg-clusterimagecatalog", typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"clusterimagecatalogs.yaml", "v1")},
 	{
 		component: "cnpg-database", typ: reflect.TypeFor[cnpgv1.DatabaseSpec](),
 		source: crdAPISource(cnpgModulePath, cnpgCRDs+"databases.yaml", "v1"),
@@ -439,6 +441,8 @@ var apiSetKinds = []apiSetKind{
 		// the same CRD, and the kind refuses an authored empty value.
 		filled: cnpgDatabaseAlwaysEncodedDefaults,
 	},
+	{component: "cnpg-databaserole", typ: reflect.TypeFor[cnpgv1.DatabaseRoleSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"databaseroles.yaml", "v1")},
+	{component: "cnpg-imagecatalog", typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"imagecatalogs.yaml", "v1")},
 	{component: "cnpg-objectstore", typ: reflect.TypeFor[barmanv1.ObjectStoreSpec](), source: crdAPISource(barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml", "v1")},
 	{
 		component: "cnpg-pooler", typ: reflect.TypeFor[cnpgv1.PoolerSpec](),
@@ -473,6 +477,9 @@ var apiSetKinds = []apiSetKind{
 			"template.spec.ephemeralContainers[].restartPolicyRules[].exitCodes.operator": "the kind refuses every ephemeral container of the template",
 		},
 	},
+	{component: "cnpg-publication", typ: reflect.TypeFor[cnpgv1.PublicationSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"publications.yaml", "v1")},
+	{component: "cnpg-scheduledbackup", typ: reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"scheduledbackups.yaml", "v1")},
+	{component: "cnpg-subscription", typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"subscriptions.yaml", "v1")},
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
 	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), source: markerAPISource},

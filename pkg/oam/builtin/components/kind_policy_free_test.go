@@ -14,6 +14,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
@@ -385,6 +386,57 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[esv1.SecretStoreSpec](), held: true,
 		minimal: secretStoreMinimal(),
 		full:    secretStoreFull(),
+	},
+	{
+		component: "cnpg-backup", handler: &components.CnpgBackupHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind(cnpgv1.BackupKind),
+		typ: reflect.TypeFor[cnpgv1.BackupSpec](), namespaced: true,
+		minimal: map[string]any{"cluster": cnpgCluster()},
+		full:    cnpgBackupFull(),
+	},
+	// The two catalogs hold one spec type, and the policy reaches its images.
+	{
+		component: "cnpg-clusterimagecatalog", handler: &components.CnpgClusterImageCatalogHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind(cnpgv1.ClusterImageCatalogKind),
+		typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](), held: true,
+		minimal: map[string]any{"images": []any{}},
+		full:    cnpgImageCatalogFull(),
+	},
+	{
+		component: "cnpg-databaserole", handler: &components.CnpgDatabaseRoleHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind("DatabaseRole"),
+		typ: reflect.TypeFor[cnpgv1.DatabaseRoleSpec](), namespaced: true,
+		minimal: cnpgDatabaseRoleMinimal(),
+		full:    cnpgDatabaseRoleFull(),
+	},
+	{
+		component: "cnpg-imagecatalog", handler: &components.CnpgImageCatalogHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind(cnpgv1.ImageCatalogKind),
+		typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](), namespaced: true, held: true,
+		// The API takes one image at least; that bound is the API server's.
+		minimal: map[string]any{"images": []any{}},
+		full:    cnpgImageCatalogFull(),
+	},
+	{
+		component: "cnpg-publication", handler: &components.CnpgPublicationHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind(cnpgv1.PublicationKind),
+		typ: reflect.TypeFor[cnpgv1.PublicationSpec](), namespaced: true,
+		minimal: cnpgPublicationOf(map[string]any{"allTables": true}),
+		full:    cnpgPublicationFull(),
+	},
+	{
+		component: "cnpg-scheduledbackup", handler: &components.CnpgScheduledBackupHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind("ScheduledBackup"),
+		typ: reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), namespaced: true,
+		minimal: map[string]any{"cluster": cnpgCluster(), "schedule": "0 0 3 * * *"},
+		full:    cnpgScheduledBackupFull(),
+	},
+	{
+		component: "cnpg-subscription", handler: &components.CnpgSubscriptionHandler{},
+		gvk: cnpgv1.SchemeGroupVersion.WithKind(cnpgv1.SubscriptionKind),
+		typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](), namespaced: true,
+		minimal: cnpgSubscriptionMinimal(),
+		full:    cnpgSubscriptionFull(),
 	},
 	{
 		component: "csidriver", handler: &components.CSIDriverHandler{},
@@ -1410,7 +1462,25 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		},
 		"clusterrolebinding": {".Subjects"},
 		"clustersecretstore": storeReaches,
-		"csidriver":          {".Spec.AttachRequired", ".Spec.VolumeLifecycleModes", ".Spec.TokenRequests"},
+		"cnpg-backup": {
+			".Spec.PluginConfiguration", ".Spec.PluginConfiguration.Parameters", ".Spec.Online",
+			".Spec.OnlineConfiguration", ".Spec.OnlineConfiguration.WaitForArchive",
+			".Spec.OnlineConfiguration.ImmediateCheckpoint",
+		},
+		"cnpg-clusterimagecatalog": cnpgImageCatalogReaches,
+		"cnpg-databaserole": {
+			".Spec.RoleConfiguration.PasswordSecret", ".Spec.RoleConfiguration.ValidUntil",
+			".Spec.RoleConfiguration.InRoles", ".Spec.RoleConfiguration.Inherit", ".Spec.ClientCertificate",
+			".Spec.ClientCertificate.Enabled",
+		},
+		"cnpg-imagecatalog": cnpgImageCatalogReaches,
+		"cnpg-publication":  {".Spec.Parameters", ".Spec.Target.Objects", ".Spec.Target.Objects[1].Table"},
+		"cnpg-scheduledbackup": {
+			".Spec.Suspend", ".Spec.Immediate", ".Spec.PluginConfiguration", ".Spec.PluginConfiguration.Parameters",
+			".Spec.Online", ".Spec.OnlineConfiguration", ".Spec.OnlineConfiguration.ImmediateCheckpoint",
+		},
+		"cnpg-subscription": {".Spec.Parameters"},
+		"csidriver":         {".Spec.AttachRequired", ".Spec.VolumeLifecycleModes", ".Spec.TokenRequests"},
 		"endpointslice": {
 			".Endpoints", ".Endpoints[0].Addresses", ".Endpoints[0].Conditions.Ready", ".Endpoints[0].Conditions.Terminating",
 			".Endpoints[0].Hostname", ".Endpoints[0].TargetRef", ".Endpoints[0].DeprecatedTopology", ".Endpoints[0].NodeName",
@@ -1626,6 +1696,12 @@ func sharedReferences(a, b reflect.Value, path string) []string {
 		}
 		return append(shared, sharedReferences(a.Elem(), b.Elem(), path)...)
 	case reflect.Struct:
+		// A time is a value: what it points at is its location, which is one
+		// of the process (time.Local, for every time the API types decode)
+		// and never written through.
+		if a.Type() == reflect.TypeFor[time.Time]() {
+			return nil
+		}
 		for i := range a.NumField() {
 			shared = append(shared, sharedReferences(a.Field(i), b.Field(i), path+"."+a.Type().Field(i).Name)...)
 		}
@@ -2756,6 +2832,13 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		refusal{"refresh time a number", withProperty(clusterExternalSecretOf(map[string]any{}), "refreshTime", 60), notA},
 		refusal{"null namespace", withProperty(clusterExternalSecretOf(map[string]any{}), "namespaces", []any{"shop", nil}), "namespaces[1]"},
 	)
+	// The seven further CloudNativePG kinds keep their cases beside their
+	// fixtures (cnpg_further_kinds_test.go).
+	for component, refusals := range cnpgFurtherKindRefusals() {
+		for _, r := range refusals {
+			cases[component] = append(cases[component], refusal(r))
+		}
+	}
 	for _, kind := range policyFreeKinds {
 		if len(cases[kind.component]) == 0 {
 			t.Errorf("%s has no refusal cases", kind.component)

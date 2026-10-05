@@ -1,0 +1,33 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  labels:
+    launcher.gokure.dev/component: orders
+  name: orders
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  comment: The orders service's role.
+  connectionLimit: 20
+  databaseRoleReclaimPolicy: delete
+  inRoles:
+  - pg_monitor
+  inherit: false
+  login: true
+  name: orders
+  passwordSecret:
+    name: orders-password
+  validUntil: "2030-01-01T00:00:00Z"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  labels:
+    launcher.gokure.dev/component: readers
+  name: postgres-readers
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  name: readers
