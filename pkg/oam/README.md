@@ -652,6 +652,21 @@ authored name and returns it or the default, the hook is not consulted and nothi
 apart. The handler names the namespace its object is generated in (`NameSpec.Namespace`), or
 sets `NameSpec.ClusterScoped` for an object that has none.
 
+A trait that names its object itself, under no role, claims the name with
+`(*Trait).ClaimObjectName(kind, namespace, name, property)`: the `ingress` trait's Ingress, the
+`httproute` trait's HTTPRoute and the `cilium-networkpolicy` trait's CiliumNetworkPolicy. The
+name is the handler's own (its `name` property, else its default) and is not changed, and the
+`Naming` hook is not asked about it: there is no role for these objects. The claim only holds
+the name against every other one of the transform, so that a second owner of the same kind,
+namespace and name is refused with both named, whichever comes first:
+
+```
+name collision: Ingress.networking.k8s.io "default/api-ingress" is named by component "web" traits[0] "ingress" (its own object, set by name) and by component "api" traits[0] "ingress" (its own object, its default name); give one of them another name
+```
+
+`property` is the property the author wrote the name in, empty for the default. On a trait
+built outside a transform nothing is claimed.
+
 ### `objectName`: the object of a kind component
 
 A kind component (`deployment`, `service`, `configmap`, `cnpg-cluster`, `helmrelease`, …) is

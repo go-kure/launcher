@@ -3,8 +3,11 @@ package traits
 import (
 	"strings"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -54,6 +57,30 @@ func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored str
 		spec.Property, spec.Authored = property, authored
 	}
 	return trait.ResolveName(spec)
+}
+
+// The kinds of the objects a trait names itself and claims
+// (claimOwnObjectName). A name is claimed by group, kind, namespace and name,
+// so these are what another owner of the same object must agree on.
+var (
+	ingressKind             = schema.GroupKind{Group: networkingv1.GroupName, Kind: "Ingress"}
+	httpRouteKind           = schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}
+	ciliumNetworkPolicyKind = schema.GroupKind{Group: ciliumv2.CustomResourceDefinitionGroup, Kind: ciliumv2.CNPKindDefinition}
+)
+
+// claimOwnObjectName claims the name of an object a trait names itself, under
+// no name role (oam.Trait.ClaimObjectName): the `ingress` trait's Ingress, the
+// `httproute` trait's HTTPRoute, the `cilium-networkpolicy` trait's
+// CiliumNetworkPolicy. The name is the one the handler settled and is not
+// changed; the claim refuses a second owner of it, a second trait's object or
+// a kind component's, with both named. authored is the value of the trait's
+// `name` as the handler parsed it, "" when the name is the trait's default.
+func claimOwnObjectName(trait *oam.Trait, kind schema.GroupKind, namespace, name, authored string) error {
+	property := ""
+	if authored != "" {
+		property = "name"
+	}
+	return trait.ClaimObjectName(kind, namespace, name, property)
 }
 
 // resolveSubApplicationName resolves the name of the sub-application a trait

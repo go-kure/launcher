@@ -49,6 +49,9 @@ func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Applicat
 		return err
 	}
 
+	if err := claimOwnObjectName(trait, ciliumNetworkPolicyKind, app.Namespace, config.Name, config.Name); err != nil {
+		return err
+	}
 	subAppName, err := resolveSubApplicationName(trait, config.Name)
 	if err != nil {
 		return err
