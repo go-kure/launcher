@@ -591,7 +591,10 @@ and the disposition of every item. The four this document started from:
     kind kure's scheme registers is decoded as that kind for the check alone
     (`policyObject`); what is emitted stays the authored object. One that cannot be read
     is refused: a registered kind that does not decode, and a workload kind, a claim or a
-    PersistentVolume in an API version the scheme does not register.
+    PersistentVolume in an API version the scheme does not register. An object the decoder
+    of its kind panics on is refused the same way, as is such a document in a `manifests`
+    source or a rendered chart, named by its position, kind and name (a Cilium policy whose
+    `icmps` field leaves its `type` out is the known case): a build error, not a crash.
   - `manifests` and `crd` (`manifestConfig.ApplyPolicy`, `enforceManifestPolicy`,
     `manifestsource.go`): the objects of an `inline` source are checked at the policy
     step, those of a `url` source at generation, where they are first known. The `url`
