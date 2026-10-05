@@ -1038,7 +1038,15 @@ The names of the `scaler`, `rbac` and `networkpolicy` objects are resolved under
 (`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the author's property, else the
 consumer's `TransformContext.Naming` hook, else the default. `Transform` keeps those names
 apart and refuses two that name one object, naming both: an `hpaName` equal to another
-component's HPA, or two `scaler` traits on one component. Every other authored name in the
+component's HPA, or two `scaler` traits on one component.
+
+The Ingress, the HTTPRoute and the CiliumNetworkPolicy have no name role: the trait names its
+object itself (`name`, else the default; the `cilium-networkpolicy` `name` is required), and
+the hook is not asked. The name is claimed all the same (`(*Trait).ClaimObjectName`), so
+`Transform` refuses a second owner of that object with both named: two `ingress` traits under
+one name, on one component or two. The name itself is what it was before it was claimed.
+
+Every other authored name in the
 table below is checked as a name, not against the other objects of the document:
 `oam.GenerateApplications` and `oam.CheckInDocumentCollisions` report those (`kurel build`
 runs both; see `pkg/oam/README.md`, "Nothing above compares the applications inside one

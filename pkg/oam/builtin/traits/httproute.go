@@ -38,6 +38,9 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	if config.objectName == "" {
 		config.objectName = routingObjectName(app.Name, "httproute", config.Scope)
 	}
+	if err := claimOwnObjectName(trait, httpRouteKind, app.Namespace, config.objectName, config.Name); err != nil {
+		return err
+	}
 	subAppName, err := resolveSubApplicationName(trait, config.objectName)
 	if err != nil {
 		return err

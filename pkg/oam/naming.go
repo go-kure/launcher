@@ -302,6 +302,14 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 	if o.trait != "" && detail >= describeOutput {
 		who += fmt.Sprintf(", output %d of its lowering", o.nth)
 	}
+	if o.role == "" {
+		// A name the trait settled itself (Trait.ClaimObjectName): no role, and
+		// the hook is never its source.
+		if source == nameFromAuthor {
+			return fmt.Sprintf("%s (its own object, set by %s)", who, property)
+		}
+		return fmt.Sprintf("%s (its own object, its default name)", who)
+	}
 	switch source {
 	case nameFromAuthor:
 		return fmt.Sprintf("%s (role %q, set by %s)", who, o.role, property)
@@ -484,6 +492,49 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default})
 	}
 	return name, err
+}
+
+// ClaimObjectName claims the name of an object the trait generates and names
+// itself: one that has no name role, whose name is the handler's own property
+// or its own default, and for which the Naming hook is not asked (the `ingress`
+// trait's Ingress). Nothing is resolved, and the name is used as the handler
+// settled it. The claim holds it against every name the transform resolves or
+// claims: a second owner of the same kind, namespace and name is refused with
+// both named, whichever of the two comes first (a kind component's object, a
+// second trait's).
+//
+// property is the property the author wrote the name in, "" when the name is
+// the handler's default. namespace is the one the object is generated in, ""
+// for a cluster-scoped object. The same trait claiming the same name again
+// claims nothing new.
+//
+// On a trait built outside a transform (a handler's Apply called directly)
+// nothing is claimed, as ResolveName claims nothing there.
+func (t *Trait) ClaimObjectName(kind schema.GroupKind, namespace, name, property string) error {
+	if kind.Kind == "" {
+		return errors.New("naming: an object claim has no Kind")
+	}
+	if name == "" {
+		return errors.Errorf("naming: the claim of a %s has no name", kind)
+	}
+	if t.naming == nil || t.naming.resolver == nil || t.naming.resolver.claims == nil {
+		return nil
+	}
+	// def tells two objects of one trait apart, as a role's default does.
+	owner := nameOwner{
+		component: t.naming.component, trait: t.Type, member: t.naming.member,
+		slot: t.naming.slot, authored: t.naming.authored,
+		apply: t.naming.apply, nth: t.naming.nth,
+		def: name,
+	}
+	source := nameFromDefault
+	if property != "" {
+		source = nameFromAuthor
+	}
+	key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
+		group: kind.Group, kind: kind.Kind, namespace: namespace, name: name,
+	}}
+	return t.naming.resolver.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: property})
 }
 
 // ComponentObjectName returns the name of the object of the component the trait

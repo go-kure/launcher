@@ -215,6 +215,9 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	if config.objectName == "" {
 		config.objectName = routingObjectName(app.Name, "ingress", config.Scope)
 	}
+	if err := claimOwnObjectName(trait, ingressKind, app.Namespace, config.objectName, config.Name); err != nil {
+		return err
+	}
 	subAppName, err := resolveSubApplicationName(trait, config.objectName)
 	if err != nil {
 		return err
