@@ -3441,7 +3441,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     server drops before it validates, so the required field is then missing;
     and the name as `""`, which is below the CRD's minimum length of 1.
     `TestKindComponents_NullRequired` shows each refusal by running the CRD's
-    schema validator on the object the type would encode.
+    schema validator on the object the type would encode. An authored empty
+    name (`name: ""`) is not refused here: it is a value, and the API server's
+    to refuse for that minimum length. An authored empty list of terms
+    (`nodeSelectorTerms: []`) is not refused either: it is written as one,
+    and the CRDs accept it.
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
