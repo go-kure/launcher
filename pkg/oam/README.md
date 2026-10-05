@@ -644,7 +644,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component generates for itself alone, which carries the component's name. | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
 | `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
 | `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
-| `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, after every name is resolved. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
+| `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
 that resolve to the same prefix are refused: their groups would share names. The names are
@@ -657,6 +657,26 @@ in an error that carries the component, the role and the full name. A consumer t
 only `Generate` writes no hook-group layout and never sees that refusal. On a `helm`
 component under `delivery: flux` the property is refused: a HelmRelease installs the chart,
 no hook-group layout exists, and the prefix would name nothing.
+
+**Limit: the transform holds the prefixes apart, not the names built from them.** Those
+exist only after the render, and two different prefixes can still give one Kustomization
+name. Two shapes:
+
+- A shortened default equals a written prefix. `shop-<52 characters>` beside
+  `-02-post-install` becomes `shop-<31 characters>-<digest>-02-post-install`, and a second
+  component whose prefix is `shop-<31 characters>-<digest>` names its own post-install group
+  so.
+- A prefix ends as another chart's phase begins. A phase is whatever the chart's
+  `helm.sh/hook` annotation says, so prefix `shop-a` with a group `-01-x-00-main` and prefix
+  `shop-a-01-x` with a group `-00-main` both give `shop-a-01-x-00-main`.
+
+The transform accepts both documents. Nothing wrong is written: kure refuses a Flux
+Kustomization name used twice when the walked tree is integrated, where every name of the
+walked tree is known, and names both layouts with their paths
+(`Flux Kustomization name "…" is used twice, by layout "…" (spec.path "…") and by layout "…" (spec.path "…")`).
+The way out is another prefix for one of the components: `hookGroupNamePrefix`, or the
+`Naming` hook's answer for the `hook-group` role. A consumer that walks the tree itself can
+also set `KustomizationName` on a walked child before the integration.
 
 The hook sees every role. It is asked once for each name the transform resolves, and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component

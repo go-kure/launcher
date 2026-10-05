@@ -53,6 +53,13 @@ func (r *nameResolver) resolveBundleName(role NameRole, def string) (string, err
 // "<application>-<component>", is claimed like any other and left for the config
 // to build: it is the only prefix the config may shorten. Two components that
 // resolve one prefix are refused with both named.
+//
+// Only the prefix is claimed. The child names are built from it after the
+// render, and two different prefixes can still give one name: a default that
+// is shortened to another component's prefix, or a prefix that ends as the
+// phase of another component's group begins. The transform accepts those; the
+// base library refuses a Flux Kustomization name used twice where it
+// integrates the walked tree, which is where every name is known.
 func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookGroupNamePrefixSetter) error {
 	def := component
 	if r != nil && r.application != "" {
