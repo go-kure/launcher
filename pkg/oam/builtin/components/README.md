@@ -3289,9 +3289,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `+required` and `+optional` markers of the linked `k8s.io/api` module and
     fails on a dependency bump that changes it. The API marks no field of the
     kind required that the type leaves out when unauthored; the same test
-    fails if one appears. The check is one of presence: an authored empty
-    value (`addressType: ""`, `addresses: []`) builds and is the API
-    server's to refuse.
+    fails if one appears. `TestKindComponents_OmittedRequiredAndWrittenDefaults`
+    holds the kind in its table as well, from the same markers: to that, and
+    to no default marked on a field the type writes unauthored. The check is
+    one of presence: an authored empty value (`addressType: ""`,
+    `addresses: []`) builds and is the API server's to refuse.
   - **Emitted empty.** The type writes three fields the API does not require
     whether or not they were authored. A slice that authors no `endpoints` or
     no `ports` carries `endpoints: null` or `ports: null`, an authored empty
@@ -3339,7 +3341,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives each kind's list
     from the markers and fails on a dependency bump that changes it. The API
     marks no field of the four required that the type leaves out when
-    unauthored; the same test fails if one appears. These checks are of
+    unauthored; the same test fails if one appears.
+    `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds the four in
+    its table as well, from the same markers: to that, and to no default
+    marked on a field the type writes unauthored. These checks are of
     presence: an authored empty value (`verbs: []`, `name: ""`) builds and is
     the API server's to refuse.
   - **A rule** (`rules[]` of a `role` or a `clusterrole`) must write its
@@ -3551,13 +3556,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
   or empty. The object would show the omission and the API server refuse it.
   `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives these fields
-  for every kind that decodes its properties into an upstream type, from the
-  CRD the linked module ships or, where it ships none, from the markers of
-  its source. It holds each to a refusal, shown on a document, or to a stated
-  reason. The same test derives the fields the API defaults and the type
-  writes unauthored, where the default would never apply, and holds each to
-  one of three answers: refused, filled by the kind with the API's default,
-  or harmless with the reason.
+  for every kind in its table, from the CRD the linked module ships or, where
+  it ships none, from the markers of its source. It holds each to a refusal,
+  shown on a document, or to a stated reason. The same test derives the
+  fields the API defaults and the type writes unauthored, where the default
+  would never apply, and holds each to one of three answers: refused, filled
+  by the kind with the API's default, or harmless with the reason.
+
+  The table holds the kind components that decode their properties into an
+  upstream type, but for two groups. The `httproute` kind is not in it: the
+  experimental-channel CRD requires the `protocol` of an `externalAuth`
+  filter, of a rule and of a backend reference, the type leaves an empty one
+  out, and the kind does not refuse it. The Flux kinds (`helmrelease`,
+  `fluxcd-kustomization`, `helmrepository`, `ocirepository`, `gitrepository`,
+  `bucket`, `helmchart`) are not in it either: no row is written for them.
 
   **A Probe needs `prober.url` here, because the object always carries a
   prober.** This is a limit of the Go type, not a rule of the API: the API

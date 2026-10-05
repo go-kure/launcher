@@ -18,9 +18,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -368,6 +370,12 @@ var apiSetKinds = []apiSetKind{
 	{component: "cilium-bgpnodeconfigoverride", typ: reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgpnodeconfigoverrides.yaml", "v2")},
 	{component: "cilium-bgppeerconfig", typ: reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgppeerconfigs.yaml", "v2")},
 	{component: "cilium-networkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumnetworkpolicies.yaml", "v2")},
+	{component: "cilium-clusterwidenetworkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumclusterwidenetworkpolicies.yaml", "v2")},
+	{component: "cilium-cidrgroup", typ: reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumcidrgroups.yaml", "v2")},
+	{component: "cilium-loadbalancerippool", typ: reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumloadbalancerippools.yaml", "v2")},
+	{component: "cilium-egressgatewaypolicy", typ: reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumegressgatewaypolicies.yaml", "v2")},
+	{component: "cilium-localredirectpolicy", typ: reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumlocalredirectpolicies.yaml", "v2")},
+	{component: "cilium-nodeconfig", typ: reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumnodeconfigs.yaml", "v2")},
 
 	// CloudNativePG's API and its Barman Cloud plugin's, from the CRDs their
 	// modules ship.
@@ -483,6 +491,11 @@ var apiSetKinds = []apiSetKind{
 	{component: "podtemplate", typ: reflect.TypeFor[corev1.PodTemplate](), source: markerAPISource, skip: objectIdentity, listed: podSpecOmitted("template.spec.")},
 	{component: "replicaset", typ: reflect.TypeFor[appsv1.ReplicaSetSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "replicationcontroller", typ: reflect.TypeFor[corev1.ReplicationControllerSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
+	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
+	{component: "role", typ: reflect.TypeFor[rbacv1.Role](), source: markerAPISource, skip: objectIdentity},
+	{component: "rolebinding", typ: reflect.TypeFor[rbacv1.RoleBinding](), source: markerAPISource, skip: objectIdentity},
+	{component: "clusterrole", typ: reflect.TypeFor[rbacv1.ClusterRole](), source: markerAPISource, skip: objectIdentity},
+	{component: "clusterrolebinding", typ: reflect.TypeFor[rbacv1.ClusterRoleBinding](), source: markerAPISource, skip: objectIdentity},
 }
 
 // editAt replaces the field of props at path, in the first element of each
