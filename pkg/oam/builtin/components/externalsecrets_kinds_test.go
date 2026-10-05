@@ -417,6 +417,87 @@ func TestSecretStoreKinds_FakeData(t *testing.T) {
 	}
 }
 
+// TestExternalSecretKinds_TargetManifest: `target.manifest` has the operator
+// write an object of another kind in place of a Secret, with a body that is
+// template text rendered in the cluster. It gets what the same kind gets on
+// `passthrough` and no more. A kind the environment policy reads something
+// from (a workload, a claim, a volume, an autoscaler, in any version) cannot be
+// read here, so it is refused, under every policy and under none passed. A
+// core Secret is refused where `passthrough` refuses one, under a policy that
+// forbids explicit secrets. Any other kind passes unread, as it does there.
+func TestExternalSecretKinds_TargetManifest(t *testing.T) {
+	manifest := func(at, apiVersion, kind string) map[string]any {
+		return externalSecretIn(at, map[string]any{"target": map[string]any{
+			"manifest": map[string]any{"apiVersion": apiVersion, "kind": kind},
+		}})
+	}
+	policies := map[string]oam.Policy{
+		"strict":           ptStrictPolicy(),
+		"forbidding":       esForbidding(),
+		"allowing":         esPolicy{stubPolicy: &stubPolicy{}, allow: true},
+		"no answer":        &stubPolicy{},
+		"no policy passed": nil,
+	}
+	checked := [][2]string{
+		{"apps/v1", "Deployment"}, {"apps/v1beta2", "Deployment"}, {"extensions/v1beta1", "DaemonSet"},
+		{"apps/v1", "StatefulSet"}, {"apps/v1", "ReplicaSet"}, {"batch/v1", "Job"}, {"batch/v1", "CronJob"},
+		{"v1", "Pod"}, {"v1", "PodTemplate"}, {"v1", "ReplicationController"},
+		{"v1", "PersistentVolumeClaim"}, {"v1", "PersistentVolume"},
+		{"autoscaling/v2", "HorizontalPodAutoscaler"}, {"autoscaling/v1", "HorizontalPodAutoscaler"},
+	}
+	unread := [][2]string{
+		{"v1", "ConfigMap"}, {"v1", "Service"}, {"argoproj.io/v1alpha1", "Application"},
+		// Named like a workload, in a group that has none.
+		{"example.io/v1", "Deployment"},
+	}
+	const secretRefusal = "target.manifest: the object is a Secret, and the environment policy forbids explicit secrets; " +
+		"reference a Secret created out of band instead"
+	// onPassthrough is what `passthrough` makes of a bare object of the kind.
+	onPassthrough := func(apiVersion, kind string, policy oam.Policy) error {
+		_, err := ptTransform(map[string]any{"apiVersion": apiVersion, "kind": kind, "metadata": map[string]any{"name": "written"}}, policy)
+		return err
+	}
+	for _, kind := range externalSecrets {
+		for policyName, policy := range policies {
+			for _, gvk := range checked {
+				t.Run(kind.component+"/"+policyName+"/"+gvk[0]+" "+gvk[1], func(t *testing.T) {
+					_, err := pvTransform(kind.component, kind.handler, manifest(kind.at, gvk[0], gvk[1]), policy)
+					htWantViolation(t, err, fmt.Sprintf(`component "web": %starget.manifest: the operator would write a %s, `+
+						"a kind the environment policy checks, and what the object would hold is not known at build, "+
+						"so it cannot be checked against environment policy", kind.at, gvk[1]))
+					rcWantClass(t, err, oam.RefusalUnreadableObject)
+				})
+			}
+			for _, gvk := range unread {
+				t.Run(kind.component+"/"+policyName+"/"+gvk[0]+" "+gvk[1], func(t *testing.T) {
+					if err := onPassthrough(gvk[0], gvk[1], policy); err != nil {
+						t.Fatalf("passthrough refuses the kind, so it is no control here: %v", err)
+					}
+					objs, err := pvTransform(kind.component, kind.handler, manifest(kind.at, gvk[0], gvk[1]), policy)
+					if err != nil || len(objs) != 1 {
+						t.Fatalf("%d objects, err %v; want the one object, as passthrough passes the kind", len(objs), err)
+					}
+				})
+			}
+			t.Run(kind.component+"/"+policyName+"/v1 Secret", func(t *testing.T) {
+				there := onPassthrough("v1", "Secret", policy)
+				objs, err := pvTransform(kind.component, kind.handler, manifest(kind.at, "v1", "Secret"), policy)
+				if (there == nil) != (err == nil) {
+					t.Fatalf("passthrough: %v\nhere: %v\nwant a Secret refused here exactly where passthrough refuses one", there, err)
+				}
+				if policyName != "forbidding" {
+					if err != nil || len(objs) != 1 {
+						t.Fatalf("%d objects, err %v; want the one object", len(objs), err)
+					}
+					return
+				}
+				htWantViolation(t, err, `component "web": `+kind.at+secretRefusal)
+				rcWantClass(t, err, oam.RefusalExplicitSecret)
+			})
+		}
+	}
+}
+
 // TestExternalSecretsKinds_WrittenUnauthored: what the API's types write into
 // the object that the author did not: an empty object where the type holds one
 // by value, and an empty string where a string field is not omitted. The API

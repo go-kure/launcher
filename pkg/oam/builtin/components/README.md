@@ -192,8 +192,8 @@ reads it.
 | `clusterrolebinding` | ClusterRoleBinding | Kind-named RBAC ClusterRoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required, and a ServiceAccount subject's `namespace`. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `secretstore` | SecretStore | Kind-named External Secrets Operator SecretStore: the whole `SecretStoreSpec` (`provider`, `controller`, `retrySettings`, `refreshInterval`, `conditions`), strictly decoded; `provider` with exactly one provider is required, and of that provider what the API requires. A credential written into the object is refused under an environment policy that forbids explicit secrets. No capability is required — see below. |
 | `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the same `SecretStoreSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
-| `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. No environment policy applies and no capability is required. Beside the `external-secret` trait — see below. |
-| `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires. Cluster-scoped; no environment policy applies and no capability is required — see below. |
+| `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
+| `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires and what it refuses of a `target.manifest` under the environment policy. Cluster-scoped; no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -366,9 +366,9 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `cnpg.CreatePublication` | postgresql.cnpg.io/v1 Publication | missing | - | - | - |
 | `cnpg.CreateScheduledBackup` | postgresql.cnpg.io/v1 ScheduledBackup | missing | - | - | - |
 | `cnpg.CreateSubscription` | postgresql.cnpg.io/v1 Subscription | missing | - | - | - |
-| `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | kind | `clusterexternalsecret` | strict decode of `ClusterExternalSecretSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties; those of the ExternalSecrets it creates are `externalSecretMetadata`. `externalSecretSpec` must be written, with what an `externalsecret` requires. No environment policy applies. |
+| `externalsecrets.CreateClusterExternalSecret` | external-secrets.io/v1 ClusterExternalSecret (cluster-scoped) | kind | `clusterexternalsecret` | strict decode of `ClusterExternalSecretSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties; those of the ExternalSecrets it creates are `externalSecretMetadata`. `externalSecretSpec` must be written, with what an `externalsecret` requires. `externalSecretSpec.target.manifest` is held to the environment policy as on an `externalsecret`. |
 | `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | kind | `clustersecretstore` | strict decode of `SecretStoreSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `provider` must be written with exactly one provider; of that provider, the fields the API requires that the type would write empty, and the four it would default. A credential written as a `value`, and the data of the `fake` provider, are refused under a policy that forbids explicit secrets. No capability is required. |
-| `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. No environment policy applies and no capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
+| `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | missing | - | - | - |
 | `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | missing | - | - | - |
@@ -4433,8 +4433,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   claimed cluster-wide. Nothing else is emitted: no Secret, ServiceAccount or
   generator a store or an external secret names, no store an external secret
   reads from, and not the ExternalSecrets a ClusterExternalSecret has the
-  operator create. The two stores are built on `policyHeldKind`, the two
-  external-secret kinds on `policyFreeKind`.
+  operator create. All four are built on `policyHeldKind`: the stores for the
+  credentials a provider takes as a value, the two external-secret kinds for
+  the one field that has the operator write another kind than a Secret
+  (`target.manifest`, under **Policy** below).
 
   **No capability is required, and nothing gates these kinds.** Launcher does
   not ask whether the cluster runs the operator: where the CRDs are not
@@ -4630,10 +4632,32 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     provider's URL, and the template of the Secret an external secret writes
     (`target.template.data`, a `templateFrom` literal, the template's
     metadata). A secret written there is in the build's output.
-  - **No field of an external secret is a credential, and none is checked.**
-    An `externalsecret` and a `clusterexternalsecret` name what is read and
-    where it is written; `ApplyPolicy` enforces nothing and fills nothing on
-    either, and each builds the same under every policy and under none.
+  - **No field of an external secret is a credential, and one field is
+    checked: `target.manifest`.** An `externalsecret` and a
+    `clusterexternalsecret` name what is read and where it is written, and
+    `ApplyPolicy` fills nothing on either. With `target.manifest` (an
+    `apiVersion` and a `kind`) the operator writes an object of that kind
+    instead of a Secret, from template text it renders in the cluster. **That
+    object gets no more than the same policy gives the same kind on
+    `passthrough`.** What `passthrough` would read cannot be read at build,
+    so a kind the rendered-object check reads anything from is refused, in
+    any version and whatever the policy's own limits: a Pod, PodTemplate,
+    ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet,
+    Job, CronJob, PersistentVolumeClaim or PersistentVolume of the built-in
+    groups, and a HorizontalPodAutoscaler: `target.manifest: the operator
+    would write a Deployment, a kind the environment policy checks, and what
+    the object would hold is not known at build, so it cannot be checked
+    against environment policy` (on a `clusterexternalsecret` the path is
+    `externalSecretSpec.target.manifest`). The transform applies `NoopPolicy`
+    when no policy is passed, so this holds then too. A core `Secret` named
+    there is refused under a policy that forbids explicit secrets and passes
+    under any other, as on `passthrough`. **Any other kind (a ConfigMap, a
+    custom resource) passes as it would on `passthrough`**, and whether the
+    operator writes it at all is the cluster's: the operator's generic-target
+    setting and its RBAC. The `target` path of a `templateFrom` entry needs
+    no check of its own: it places text inside the object `target.manifest`
+    names. `TestPolicyReadsKind_IsWhatTheRenderedObjectCheckReads` fails when
+    the refused set and the check differ.
   - **Hosts are not checked.** A host these objects name is one the operator
     reaches, not an artifact source, and none is held to the policy's allowed
     registries: the server, URL, host or endpoint of every provider
