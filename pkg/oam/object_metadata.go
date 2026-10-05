@@ -61,6 +61,11 @@ func (c Component) ObjectMetadata() ObjectMetadata {
 // annotations were held to the API server's size limit on their own; with the
 // ones the config set they are held to it again. A refusal leaves obj as it
 // was: both maps are checked before either is set.
+//
+// ApplyTo does not check that a key or value of m is a valid one: the engine
+// did, for what Component.ObjectMetadata returns, which is where a handler's
+// config takes its metadata from. Metadata a caller builds itself, in a config
+// built directly, is the caller's to check.
 func (m ObjectMetadata) ApplyTo(obj client.Object) error {
 	labels, err := withAuthored(obj.GetLabels(), m.Labels, ObjectLabelsProperty)
 	if err != nil {
