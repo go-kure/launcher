@@ -242,11 +242,14 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
 - `cnpg-cluster` applies the registry allowlist to `imageName`, and a lowered
   `postgresql` always writes it (derived from `version` or authored), so since
   go-kure/launcher#281 a `postgresql` image from a registry outside the list is
-  refused. `imageCatalogRef` names a catalog object rather than an image and is
-  not checked, nor is the operator's default image when `imageName` is unset.
+  refused. When `imageName` is unset the operator takes the image from the
+  catalog `imageCatalogRef` names or, without one, runs its default image;
+  neither is checked.
   The image of a `postgresql.extensions[]` entry is held to the same list
   (go-kure/launcher#790); `postgresql` writes no such entry, so only an
-  authored `cnpg-cluster` can meet that refusal.
+  authored `cnpg-cluster` can meet that refusal. An entry without a reference
+  takes its image from the catalog `imageCatalogRef` names and is not checked,
+  as the catalog itself is not.
 - `postgresql` builds its kind properties from the same typed structs, so the
   omitted-zero refusal does not see a `0` or `false` its own parse already
   dropped; its parse decides those, as before.

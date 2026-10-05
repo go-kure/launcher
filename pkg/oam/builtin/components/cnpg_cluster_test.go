@@ -763,7 +763,8 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 		}
 	})
 	t.Run("unset imageName is not checked", func(t *testing.T) {
-		// The operator's default image is not one the document chose.
+		// The operator then takes a catalog's image or its own default: neither
+		// is an image the document names.
 		c := newCnpgCluster(t, map[string]any{})
 		if err := c.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"registry.invalid"}}); err != nil {
 			t.Errorf("ApplyPolicy: %v", err)
@@ -772,7 +773,7 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 }
 
 // cnpgExtensions is a cnpg-cluster's properties naming one extension per
-// reference, in order; an empty reference is an extension that names no image.
+// reference, in order; an empty reference is an entry without one.
 func cnpgExtensions(references ...string) map[string]any {
 	extensions := make([]any, 0, len(references))
 	for i, reference := range references {
@@ -825,8 +826,9 @@ func TestCnpgClusterConfig_ApplyPolicy_ExtensionImageRegistry(t *testing.T) {
 		{"an allowed registry", []string{"ghcr.io/team/pgvector:1.0.0"}, ghcr},
 		{"an allowed registry by digest", []string{"ghcr.io/team/pgvector@sha256:" + strings.Repeat("a", 64)}, ghcr},
 		{"Docker Hub when it is listed", []string{"team/pgvector:1.0.0"}, []string{"docker.io"}},
-		// An extension with no reference names no image: the document chose
-		// none, as with an unset imageName.
+		// An entry without a reference is not checked: the operator takes its
+		// image from the catalog imageCatalogRef names, which this kind does
+		// not read, as with an unset imageName.
 		{"no reference", []string{""}, []string{"registry.invalid"}},
 		{"any registry with no list", []string{"other.example/team/pgvector:1.0.0"}, nil},
 	}
