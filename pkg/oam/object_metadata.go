@@ -243,7 +243,9 @@ func authoredStringMap(raw any, property string) (map[string]string, error) {
 	if isNullValue(raw) {
 		return nil, nil
 	}
-	entries, ok := raw.(map[string]any)
+	// Any string-keyed map, as the schema check reads an object (asObjectValue):
+	// a component built in Go may hold a map[string]string.
+	entries, ok := asObjectValue(raw)
 	if !ok {
 		return nil, errors.Errorf("%s: expected a map of strings, got %T", property, raw)
 	}

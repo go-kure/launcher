@@ -61,6 +61,17 @@ func TestObjectMetadata_ReadOffTheComponent(t *testing.T) {
 		{name: "a null entry is none", props: map[string]any{"labels": map[string]any{"team": nil, "tier": "backend"}},
 			wantLabels: map[string]string{"tier": "backend"}},
 		{name: "an empty map is none", props: map[string]any{"labels": map[string]any{}, "annotations": map[string]any{}}},
+		// A component built in Go, by a lowering rule for one, may hold the map
+		// a decoder never produces.
+		{name: "maps of strings as Go builds them",
+			props: map[string]any{
+				"labels":      map[string]string{"team": "payments"},
+				"annotations": map[string]string{"example.com/owner": "a b, c"},
+			},
+			wantLabels:      map[string]string{"team": "payments"},
+			wantAnnotations: map[string]string{"example.com/owner": "a b, c"}},
+		{name: "a nil map of strings is none",
+			props: map[string]any{"labels": map[string]string(nil), "annotations": map[string]string(nil)}},
 		{name: "the component's own app label", props: map[string]any{"labels": map[string]any{"app": "web"}},
 			wantLabels: map[string]string{"app": "web"}},
 		{name: "an annotation key in upper case, as the API server reads it",
@@ -130,6 +141,8 @@ func TestObjectMetadata_Refusals(t *testing.T) {
 			want: []string{`labels["replicas"]`, "string"}},
 		{name: "an annotation value that is a boolean", props: map[string]any{"annotations": map[string]any{"enabled": true}},
 			want: []string{`annotations["enabled"]`, "string"}},
+		{name: "a label value that is a number, in a map as Go builds it", props: map[string]any{"labels": map[string]int{"replicas": 3}},
+			want: []string{`labels["replicas"]`, "must be a string, got int"}},
 		{name: "a label key that is none", props: map[string]any{"labels": map[string]any{"not a key": "x"}},
 			want: []string{`labels["not a key"]`, "not a valid label key"}},
 		{name: "a label key with an empty prefix", props: map[string]any{"labels": map[string]any{"/name": "x"}},
