@@ -98,8 +98,13 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		specKeys []string
 		jobPods  bool
 	}{
-		{"webservice", WebserviceRule{}.PropertySchema(), 17, deploymentSpecPropertyKeys, false},
-		{"worker", WorkerRule{}.PropertySchema(), 16, deploymentSpecPropertyKeys, false},
+		// 20 and 18, not 17 and 16: go-kure/launcher#787 added the object name
+		// properties as own keys (deploymentObjectName and
+		// serviceAccountObjectName on both, serviceObjectName on the
+		// webservice). None is in a shared list, so the merged count rises by
+		// as many.
+		{"webservice", WebserviceRule{}.PropertySchema(), 20, deploymentSpecPropertyKeys, false},
+		{"worker", WorkerRule{}.PropertySchema(), 18, deploymentSpecPropertyKeys, false},
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 20, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 17, daemonSetSpecPropertyKeys, false},
