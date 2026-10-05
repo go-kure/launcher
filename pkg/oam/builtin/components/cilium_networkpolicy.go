@@ -162,6 +162,12 @@ func validateCiliumRule(path string, rule *ciliumapi.Rule) error {
 	if rule.EndpointSelector.LabelSelector == nil {
 		return errors.Errorf("%s.endpointSelector: required (no default selector is filled; use {} to select every endpoint of the namespace)", path)
 	}
+	return requireCiliumRuleEntry(path, rule)
+}
+
+// requireCiliumRuleEntry refuses a rule, at path, with no entry in any of its
+// four lists. The namespaced and the cluster-wide policy share it.
+func requireCiliumRuleEntry(path string, rule *ciliumapi.Rule) error {
 	if len(rule.Ingress) == 0 && len(rule.IngressDeny) == 0 && len(rule.Egress) == 0 && len(rule.EgressDeny) == 0 {
 		return errors.Errorf("%s: at least one of 'ingress', 'ingressDeny', 'egress' and 'egressDeny' is required, with a rule in it (a null or empty list holds none, and Cilium rejects a rule without one)", path)
 	}

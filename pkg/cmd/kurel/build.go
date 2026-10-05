@@ -346,6 +346,8 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"cilium-egressgatewaypolicy": &components.CiliumEgressGatewayPolicyHandler{},
 		"cilium-localredirectpolicy": &components.CiliumLocalRedirectPolicyHandler{},
 		"cilium-nodeconfig":          &components.CiliumNodeConfigHandler{},
+
+		"cilium-clusterwidenetworkpolicy": &components.CiliumClusterwideNetworkPolicyHandler{},
 	}
 }
 

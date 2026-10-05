@@ -900,7 +900,7 @@ kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
 `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`,
 `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`,
 `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`,
-`cilium-egressgatewaypolicy`), and in the Flux namespace for a Flux kind when the
+`cilium-egressgatewaypolicy`, `cilium-clusterwidenetworkpolicy`), and in the Flux namespace for a Flux kind when the
 transform has one, so it is held against every other resolved name:
 
 ```
@@ -1054,8 +1054,8 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`,
 `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`,
 `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`,
-`cilium-egressgatewaypolicy`, `cilium-localredirectpolicy` and `cilium-nodeconfig`
-(go-kure/launcher#790) are on this list. `ingress`,
+`cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig` and
+`cilium-clusterwidenetworkpolicy` (go-kure/launcher#790) are on this list. `ingress`,
 `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are also trait
 types: the two lists are separate, and a component of such a type is the authored
 object, not the trait.

@@ -381,6 +381,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"defaults":     map[string]any{"enable-hubble": "false"},
 		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
 	}},
+	// A CiliumClusterwideNetworkPolicy's selectors are the author's, as the
+	// CiliumNetworkPolicy's above: endpoints of the whole cluster, or nodes.
+	"cilium-clusterwidenetworkpolicy": {props: map[string]any{"spec": map[string]any{
+		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
+		"ingress": []any{map[string]any{"fromEndpoints": []any{
+			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

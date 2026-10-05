@@ -158,6 +158,11 @@ are registered the same way, with a `<type>-component` fixture each: a
 CiliumCIDRGroup, a CiliumLoadBalancerIPPool and a CiliumEgressGatewayPolicy
 with no namespace, and a CiliumLocalRedirectPolicy and a CiliumNodeConfig in
 the build namespace. No capability is required to build them.
+The `cilium-clusterwidenetworkpolicy` kind component (go-kure/launcher#790) is
+registered the same way, with a `cilium-clusterwidenetworkpolicy-component`
+fixture: two CiliumClusterwideNetworkPolicy objects with no namespace, one
+with a rule for nodes under `spec`, one named by `objectName` with two rules
+for endpoints under `specs`. No capability is required to build it.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
