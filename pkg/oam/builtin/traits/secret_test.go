@@ -280,6 +280,72 @@ func TestSecretConfig_Generate_Name(t *testing.T) {
 	}
 }
 
+// TestSecretTrait_SubApplicationTakesDeliveryIntent: the Secret's
+// sub-application takes the delivery intent of its component's prune-protection
+// and force-replace traits, whichever side of the secret trait they are
+// authored on (go-kure/launcher#782), and none without them.
+func TestSecretTrait_SubApplicationTakesDeliveryIntent(t *testing.T) {
+	secret := oam.Trait{Type: "secret", Properties: map[string]any{
+		"name": "web-creds", "stringData": map[string]any{"password": secretSentinel}}}
+	cases := []struct {
+		name   string
+		traits []oam.Trait
+		want   stack.DeliveryIntent
+	}{
+		{name: "no delivery trait", traits: []oam.Trait{secret}},
+		{name: "prune-protection before, force-replace after",
+			traits: []oam.Trait{{Type: "prune-protection"}, secret, {Type: "force-replace"}},
+			want:   stack.DeliveryIntent{PruneProtection: true, ForceReplace: true}},
+		{name: "force-replace only", traits: []oam.Trait{secret, {Type: "force-replace"}},
+			want: stack.DeliveryIntent{ForceReplace: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := oam.NewTransformer(nil, nil)
+			registerWebservice(tr)
+			tr.RegisterBuiltinTrait("secret", &traits.SecretHandler{})
+			tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
+			tr.RegisterBuiltinTrait("force-replace", &traits.ForceReplaceHandler{})
+			cluster, err := tr.Transform(&oam.Application{
+				APIVersion: oam.SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+				Spec: oam.ApplicationSpec{Components: []oam.Component{{
+					Name:       "web",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits:     tc.traits,
+				}}},
+			}, oam.TransformContext{Namespace: "default"})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			var subApps []*stack.Application
+			for _, b := range bundlesWithApplications(cluster.Node) {
+				for _, app := range b.Applications {
+					if app.Name == "web-creds" {
+						subApps = append(subApps, app)
+					}
+				}
+			}
+			if len(subApps) != 1 {
+				t.Fatalf("the cluster holds %d applications named web-creds, want the one secret sub-application", len(subApps))
+			}
+			objects := generatedObjects(t, subApps[0])
+			if len(objects) != 1 {
+				t.Fatalf("sub-application web-creds generates %d objects, want the one Secret", len(objects))
+			}
+			if _, ok := objects[0].(*corev1.Secret); !ok {
+				t.Fatalf("sub-application web-creds generates a %T, want a Secret", objects[0])
+			}
+			assertNoFluxObjectKeys(t, objects...)
+			if got := subApps[0].Delivery; got != tc.want {
+				t.Errorf("sub-application %q Delivery = %+v, want %+v", subApps[0].Name, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestExplicitSecretsAllowed pins the optional interface's default: only a
 // policy that implements it and answers false forbids.
 func TestExplicitSecretsAllowed(t *testing.T) {
