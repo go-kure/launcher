@@ -170,6 +170,59 @@ func TestTransform_ConsumerEnforceableClass(t *testing.T) {
 	}
 }
 
+// TestTransform_PostPolicyStepRefusalClass: a post-policy step that refuses by
+// the policy fails the transform as the component's violation with the class
+// of the refusal, wrapped or not, and no later step runs. A step error that is
+// no refusal stays a TransformError and is no violation. The text is the same
+// either way.
+func TestTransform_PostPolicyStepRefusalClass(t *testing.T) {
+	const message = `storageSize "1Gi" exceeds enforced maximum "512Mi"`
+	refusal := NewPolicyRefusal(RefusalStorageMaximum, message)
+	cases := []struct {
+		name      string
+		err       error
+		violation bool
+		class     RefusalClass
+		text      string
+	}{
+		{"a refusal", refusal, true, RefusalStorageMaximum, message},
+		{"a refusal, wrapped", fmt.Errorf("defaults: %w", refusal), true, RefusalStorageMaximum, "defaults: " + message},
+		{"a plain error", errors.New(message), false, RefusalUnclassified, message},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var log []string
+			failing := func(stack.ApplicationConfig) error { return tc.err }
+			err := stepTransform(&log, "logged", failing, loggingStep(t, &log, "after"))
+			if err == nil {
+				t.Fatal("no error, want the step's error to fail the transform")
+			}
+			if want := `component "web": ` + tc.text; err.Error() != want {
+				t.Errorf("Error() = %q, want %q", err.Error(), want)
+			}
+			if !errors.Is(err, tc.err) {
+				t.Error("the error does not wrap the step's error")
+			}
+			var v *ViolationError
+			var te *TransformError
+			isViolation, isTransform := errors.As(err, &v), errors.As(err, &te)
+			if isViolation != tc.violation || isTransform == tc.violation {
+				t.Fatalf("error is %T (violation %v, transform error %v), want violation %v and not both", err, isViolation, isTransform, tc.violation)
+			}
+			if tc.violation {
+				if v.Class != tc.class || v.Component != "web" {
+					t.Errorf("violation = component %q, class %q; want component %q, class %q", v.Component, v.Class, "web", tc.class)
+				}
+			} else if te.Message != `component "web"` {
+				t.Errorf("TransformError.Message = %q, want %q", te.Message, `component "web"`)
+			}
+			if want := []string{"policy"}; !slices.Equal(log, want) {
+				t.Errorf("ran %v, want %v: a step after the failing one ran, or a trait did", log, want)
+			}
+		})
+	}
+}
+
 // TestTransform_TraitCapabilityRefusalClass: each of the three trait-capability
 // constraints refuses with the trait-capability class, on the application the
 // constraint is checked for, in the text it had.

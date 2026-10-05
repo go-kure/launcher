@@ -1461,7 +1461,10 @@ cannot write a value it derives from what the policy decided. It attaches a
 `Component.AfterPolicy(step)`. The transform runs the steps on the config the
 component's handler built, in the order attached, right after
 `Enforceable.ApplyPolicy` and before any trait of the component; an error fails the
-transform, naming the component. A step is part of the component value: it survives
+transform, naming the component. A step that holds the config to the policy refuses as
+`ApplyPolicy` does: an error that holds a `PolicyRefusal` fails the transform as the
+component's `ViolationError` with the refusal's class, any other error as a
+`TransformError` (go-kure/launcher#849). A step is part of the component value: it survives
 copies and later lowering rounds, including a trait rule rewriting the component's
 traits, but not serialization, and a document cannot author one. A
 `ComponentLoweringRule` that lowers a component carrying a step carries it over only
@@ -2041,7 +2044,9 @@ A `RefusalClass` is a string, and the value is what a consumer may log or store.
 | `RefusalUnreadableObject` | `unreadable-object` | An object written elsewhere (rendered by a chart, carried by `passthrough` or by a `manifests` source) that the build cannot read, so that it cannot be held to the policy and is refused instead of passed. |
 
 The class is the same on every path a refusal comes from: a component's `ApplyPolicy`, a
-trait sub-application's, the check on the objects a chart renders under template delivery,
+post-policy step a lowering rule attached (the `1Gi` storage fallback of `postgresql` over
+`MaxStorageSize`), a trait sub-application's, the check on the objects a chart renders under
+template delivery,
 and the `passthrough` and `manifests` checks, at the transform and again at generation. Of a
 `manifests` `url` source the transform checks the host of the url; the objects it yields are
 first known at generation, so a violation about one of them comes from `Generate`, not from
@@ -2071,8 +2076,9 @@ own, which the library passes on as given. The class of a violation is that of t
 the same way, for a config that reports one itself at generation, as `passthrough` and
 `manifests` do.
 
-**Breaking** only for an unkeyed `ViolationError` literal, which no longer compiles; a keyed
-one is unaffected.
+**Breaking** for an unkeyed `ViolationError` literal, which no longer compiles; a keyed
+one is unaffected. And for a caller that matched `*TransformError` on a refusal by the
+policy raised in a post-policy step: it is a `*ViolationError` now, with the same text.
 
 ## Capability system
 

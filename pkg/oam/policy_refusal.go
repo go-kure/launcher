@@ -1,6 +1,6 @@
 package oam
 
-import "errors"
+import "github.com/go-kure/launcher/pkg/errors"
 
 // RefusalClass names what a refusal by the environment policy is about, so
 // that a consumer can tell one kind of refusal from another without matching
