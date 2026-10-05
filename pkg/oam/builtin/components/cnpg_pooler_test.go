@@ -275,6 +275,42 @@ func TestCnpgPoolerHandler_EndpointMatchesPostgresqlPooler(t *testing.T) {
 	}
 }
 
+// TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster: a pooler
+// whose cluster reference is its own name is refused by the build, and its
+// endpoint in the same words, so no selector is answered for a pooler that
+// cannot be built. Only that relation is checked there: a cluster reference the
+// decode refuses for another reason is still the decode's to refuse.
+func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing.T) {
+	h := &components.CnpgPoolerHandler{}
+	pooler := func(cluster any) *oam.Component {
+		props := minimalPooler()
+		props["cluster"] = cluster
+		return &oam.Component{Name: "main", Type: "cnpg-pooler", Properties: props}
+	}
+
+	const want = `cluster.name "main": a pooler cannot have the same name as its cluster`
+	same := pooler(map[string]any{"name": "main"})
+	_, buildErr := h.ToApplicationConfig(same, "data")
+	_, endpointsErr := h.Endpoints(same)
+	for reader, err := range map[string]error{"ToApplicationConfig": buildErr, "Endpoints": endpointsErr} {
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v\nwant %q", reader, err, want)
+		}
+	}
+
+	for name, cluster := range map[string]any{
+		"another cluster": map[string]any{"name": "db"},
+		"no name":         map[string]any{},
+		"null":            nil,
+		"no object":       "main",
+	} {
+		eps, err := h.Endpoints(pooler(cluster))
+		if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/poolerName"] != "main" {
+			t.Errorf("%s: Endpoints = %+v, %v; want the pooler's own endpoint", name, eps, err)
+		}
+	}
+}
+
 func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 	tmpl := func(spec map[string]any) map[string]any {
 		p := minimalPooler()
