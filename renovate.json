@@ -51,6 +51,7 @@
         "github.com/fluxcd/kustomize-controller/api",
         "github.com/fluxcd/pkg/apis/meta",
         "github.com/fluxcd/source-controller/api",
+        "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring",
         "gopkg.in/yaml.v3",
         "helm.sh/helm/v4",
         "k8s.io/api",
