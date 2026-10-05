@@ -4282,6 +4282,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     single providers (an authentication method, a reference, how a Yandex
     provider fetches an entry). The minimum of one on a `data` entry's
     `sourceRef` is met by the `storeRef` the object always carries;
+  - the six counts over named fields, on three providers: `openBao` (at most
+    one of `caBundle` and `caProvider`; exactly one authentication method
+    under `auth`; exactly one of `roleId` and `roleRef` on an app role;
+    exactly one of `serviceAccountRef` and `secretRef` on its Kubernetes
+    authentication), `onepasswordSDK` (at most one of `vault` and
+    `environment`) and `crd` (at most one of `auth` and `authRef`). The type
+    omits each of those fields when unauthored, so the object carries what
+    was authored and no more;
   - the thirteen rules written as expressions, each on one provider: Barbican
     (four), Pulumi (two), Secret Server (two), AWS, `crd`, Doppler, GitHub and
     Nebius;

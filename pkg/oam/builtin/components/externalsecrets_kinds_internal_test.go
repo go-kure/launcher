@@ -59,8 +59,10 @@ type externalSecretsSource struct {
 }
 
 // externalSecretsRuleMarkers are the markers read as a rule over more than one
-// field: an expression rule, and a bound on the number of properties.
-var externalSecretsRuleMarkers = []string{"XValidation", "MinProperties", "MaxProperties"}
+// field: an expression rule, a bound on the number of properties, and a count
+// over named fields (the source uses two of those three at this pin; the third
+// is read so that a bump which brings one fails).
+var externalSecretsRuleMarkers = []string{"XValidation", "MinProperties", "MaxProperties", "AtMostOneOf", "ExactlyOneOf", "AtLeastOneOf"}
 
 // readExternalSecretsSource reads the linked module's source.
 func readExternalSecretsSource(t *testing.T) externalSecretsSource {
@@ -514,8 +516,9 @@ const (
 
 // externalSecretsRules classifies every rule the module's source declares over
 // more than one field of a type these kinds decode: the expression rules
-// (XValidation) and the bounds on a number of properties (MinProperties,
-// MaxProperties), keyed as externalSecretsSource.rules lists them. The kinds
+// (XValidation), the bounds on a number of properties (MinProperties,
+// MaxProperties) and the counts over named fields (AtMostOneOf, ExactlyOneOf),
+// keyed as externalSecretsSource.rules lists them. The kinds
 // hold two: that a store configures exactly one provider
 // (validateSecretStore), and that a `data` entry's source reference holds no
 // more than one property, which a generator reference beside the store
@@ -562,6 +565,16 @@ var externalSecretsRules = map[string]string{
 	"StoreGeneratorSourceRef MinProperties=1": ruleLeft,
 	"StoreSourceRef MaxProperties=1":          ruleChecked,
 	"StoreSourceRef MinProperties=1":          ruleLeft,
+
+	// The counts over named fields. Every field one of them names is omitted
+	// by the type when unauthored, so the object carries what was authored and
+	// no more, and the count is the API server's to take.
+	"CRDProvider AtMostOneOf=auth;authRef":                                ruleLeft,
+	"OnePasswordSDKProvider AtMostOneOf=vault;environment":                ruleLeft,
+	"OpenBaoAppRole ExactlyOneOf=roleId;roleRef":                          ruleLeft,
+	"OpenBaoAuth ExactlyOneOf=appRole;tokenSecretRef;userPass;kubernetes": ruleLeft,
+	"OpenBaoKubernetesAuth ExactlyOneOf=serviceAccountRef;secretRef":      ruleLeft,
+	"OpenBaoProvider AtMostOneOf=caBundle;caProvider":                     ruleLeft,
 }
 
 // TestExternalSecretsKinds_Rules holds externalSecretsRules to the source, in
