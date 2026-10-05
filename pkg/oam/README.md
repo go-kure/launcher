@@ -88,34 +88,44 @@ which the root's `kustomization.yaml` does not list. `Bundle.DirName` on the bun
 returned gives that directory another name (go-kure/kure#972). **Breaking output change** for such a
 consumer: with `layout.DefaultLayoutRules()`, everything launcher returns is written one
 directory down. Below, `<bundle>` is the application bundle's name: the Application's name,
-unless the `Naming` hook renames the bundle. A flat application has an unnamed root node, an
-ordered one a root node named `<bundle>`:
+unless the `Naming` hook renames the bundle. The root node is unnamed whether or not the
+components are ordered, so `<bundle>/` is in the same place for both:
 
 | Application | Before | Now |
 |-------------|--------|-----|
 | Flat: every component | `cluster/` | `cluster/<bundle>/` |
-| Ordered: the generated sources | `<bundle>/` | `<bundle>/<bundle>/` |
-| Ordered: a group | `<bundle>/<group>/` | `<bundle>/<bundle>/<group>/` |
+| Ordered: the generated sources | `<bundle>/` | `cluster/<bundle>/` |
+| Ordered: a group | `<bundle>/<group>/` | `cluster/<bundle>/<group>/` |
 
-With `LayoutRules.ClusterName`, `<cluster>` takes the place of `cluster` for a flat
-application (`<cluster>/<bundle>/`) and comes in front of an ordered one
-(`<cluster>/<bundle>/<bundle>/`). A `ClusterName` whose last segment is the ordered
-application's root node name adds no directory for it: the root node is that directory
-(`ClusterName: <bundle>` gives `<bundle>/<bundle>/`, as with none). A component with a
+**Breaking output change** for a layout-walking consumer of an ordered application
+(go-kure/launcher#783): its root node was named `<bundle>` until then, which put a directory
+of the root node's own above the bundle's. The tree was `<bundle>/<bundle>/`
+(`<cluster>/<bundle>/<bundle>/` with a `ClusterName`; a `ClusterName` whose last segment is
+the bundle's name was the node's directory itself, with no directory added and no
+Kustomization of the node's own). Under `FluxIntegratedPerLayout` with any other cluster
+directory, the node had a Flux Kustomization of its own (named `...-node`) between the top of
+the tree and the application's. kure's Flux integration refused the application when every
+Source that Kustomization could take was one the integration generates, from a `SourceRef`
+with a URL: it would have delivered its own Source. The top of an ordered
+application's tree is now the flat application's: the same top directory, the application's
+Flux Kustomization where the flat application's is, and no node Kustomization. What ordering
+adds is inside `<bundle>/` (the groups) and in the Flux objects kure generates for them: the
+application's Kustomization checks the health of each group's.
+
+With `LayoutRules.ClusterName`, `<cluster>` takes the place of `cluster`
+(`<cluster>/<bundle>/`, and `<cluster>/<bundle>/<group>/` for a group). A component with a
 directory of its own, a `helmtemplate` component or any component under
 `ApplicationGrouping: GroupByName`, is a directory inside the one above
 (`cluster/<bundle>/<component>/`). The `spec.path` of the Flux Kustomization, or the
 `source.path` of the ArgoCD Application, that kure generates for the bundle moves with it.
 `layout.TopDirectory(rootNode, rules)` returns the directory at the top of that tree
-(`cluster`, `<bundle>` or the `ClusterName` directory above), the one kure's bootstrap
-points Flux at since go-kure/kure#979.
+(`cluster` or the `ClusterName` directory above), the one kure's bootstrap points Flux at
+since go-kure/kure#979.
 
 With the default `BundleGrouping: GroupFlat`, `ManifestLayout.OriginUnit()` on the root
 node's layout returns the bundle directory's layout; it is nil on every other layout, and on
 every layout under `BundleGrouping: GroupByName`. `WalkCluster` returns the root node's
-layout, except for an ordered application under a `ClusterName` whose last segment is not
-the root node's name: it then returns a layout for `<cluster>` whose one child is the root
-node's.
+layout.
 
 Launcher adds no limit of a delivery engine to the names it returns. A document name over
 63 characters builds, and kure's Flux workflow then refuses its bundle unless the consumer

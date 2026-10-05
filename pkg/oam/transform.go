@@ -1096,9 +1096,7 @@ func (t *Transformer) buildCluster(app *Application, order *componentOrder, ctx 
 		return nil, &TransformError{Message: "failed to validate application bundle", Cause: err}
 	}
 
-	rootNode := &stack.Node{Name: root.Name, Bundle: root}
-	rootNode.InitializePathMap()
-	return stack.NewCluster(ctx.ClusterID, rootNode), nil
+	return stack.NewCluster(ctx.ClusterID, &stack.Node{Name: "", Bundle: root}), nil
 }
 
 // buildBundle creates the bundle name holding entries' applications and applies
