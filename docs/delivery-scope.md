@@ -652,6 +652,17 @@ be closed at build time.
     policy that forbids the trait does not refuse the component; the rendered
     paths emit the same object under the same terms. A capability gate on component
     types is an open point of go-kure/launcher#790.
+- **Shipped: the `networkpolicy` kind** (`networkpolicy.go`), on the same recipe and
+  ungated under the same terms.
+  - It projects `NetworkPolicySpec`. No field is required by the decode and none is
+    filled.
+  - It is an authored object, not the trait of the same type name, and reads as the
+    API reads it. The trait always selects its component's pods; on the kind an
+    unwritten `podSelector` selects every pod of the namespace. The trait lists a
+    direction when its key is present; on the kind `policyTypes` is the author's, so
+    `egress: []` alone isolates no egress.
+  - A null rule, peer or port is refused by its path: decoded, it would be the empty
+    one, which allows everything.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
     `tolerations` and `topologySpreadConstraints` are read;
@@ -849,7 +860,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress` and `httproute` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute` and `networkpolicy` kinds | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

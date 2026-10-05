@@ -244,6 +244,14 @@ func (h *HTTPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope)
 	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}, oam.ObjectScopeNamespaced
 }
 
+// ComponentObject declares the networkpolicy kind's NetworkPolicy. The
+// `networkpolicy` trait resolves its policy's name under role "networkpolicy",
+// and the synthesis its policies' under "netpol-synth", both as this kind, so
+// all three are held apart.
+func (h *NetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return networkingKind("NetworkPolicy"), oam.ObjectScopeNamespaced
+}
+
 // ComponentObject declares the configmap kind's ConfigMap.
 func (h *ConfigMapHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return coreKind("ConfigMap"), oam.ObjectScopeNamespaced

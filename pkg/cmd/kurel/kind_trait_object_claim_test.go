@@ -42,6 +42,18 @@ var kindTraitPairs = []struct {
                 port: 8080
 `,
 	},
+	{
+		// The trait's name has a role of its own; the claim space is the same.
+		typ: "networkpolicy", identity: `NetworkPolicy.networking.k8s.io "default/api-allow"`,
+		trait: networkPolicyTrait, object: "api-allow",
+		traitOwner: `component "api" traits[0] "networkpolicy" (role "networkpolicy", its default)`,
+		kind: `        podSelector:
+          matchLabels:
+            app: api
+        policyTypes:
+          - Ingress
+`,
+	},
 }
 
 // claimKind is a kind component of type typ.
@@ -50,6 +62,46 @@ func claimKind(name, typ, properties string) string {
       type: ` + typ + `
       properties:
 ` + properties
+}
+
+// TestNetworkPolicyKind_HeldAgainstASynthesizedPolicy: the synthesis names its
+// policies under a role too, as the same kind, so a networkpolicy component
+// under one of those names is refused with both named.
+func TestNetworkPolicyKind_HeldAgainstASynthesizedPolicy(t *testing.T) {
+	// A profile whose ingress capability names a traffic source: the synthesis
+	// then opens the backend's port to it.
+	const profile = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: test-cluster
+spec:
+  capabilities:
+    ingress:
+      rendering:
+        networkPolicy:
+          trafficSources:
+            - namespace: ingress-nginx
+`
+	workload := claimWorkload("api", claimIngressTrait)
+	docs, err := buildWithProfile(t, duplicateApp(workload, "", ""), profile)
+	if err != nil {
+		t.Fatalf("kurel build: %v", err)
+	}
+	const synthesized = "api-allow-ingress-traffic"
+	if got := docsOfKind(docs, "NetworkPolicy", "networking.k8s.io"); len(got) != 1 || got[0] != synthesized {
+		t.Fatalf("the synthesized NetworkPolicies are %v, want the one named %q", got, synthesized)
+	}
+	kind := claimKind(synthesized, "networkpolicy", "        podSelector: {}\n")
+	_, err = buildWithProfile(t, duplicateApp(workload+kind, "", ""), profile)
+	for _, want := range []string{
+		`name collision: NetworkPolicy.networking.k8s.io "default/` + synthesized + `" is named by `,
+		`component "` + synthesized + `" (role "object", its default)`,
+		`component "api" (role "netpol-synth", its default)`,
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v\nwant it to contain %q", err, want)
+		}
+	}
 }
 
 func TestKindAndTrait_NameOneObject(t *testing.T) {

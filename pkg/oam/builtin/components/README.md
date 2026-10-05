@@ -157,6 +157,7 @@ reads it.
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
 | `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
+| `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; no environment policy applies — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -262,7 +263,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels are not authorable. |
-| `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | trait | `networkpolicy` | hand-written parser | The transform's NetworkPolicy synthesis in `pkg/oam` emits it too. |
+| `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | kind | `networkpolicy` | strict decode of `NetworkPolicySpec` | No type under `NetworkPolicySpec` unmarshals itself except `intstr.IntOrString` (a port), a scalar with no nested key to drop. The `networkpolicy` trait builds its own NetworkPolicy with a hand-written parser and scopes it to its component's pods; the kind selects what the author wrote. The transform's NetworkPolicy synthesis in `pkg/oam` emits NetworkPolicies of its own and reads neither. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
 | `kubernetes.CreatePersistentVolume` | v1 PersistentVolume (cluster-scoped) | kind | `persistentvolume` | strict decode of `PersistentVolumeSpec` | Held to environment policy on every path that produces one. |
 | `kubernetes.CreatePersistentVolumeClaim` | v1 PersistentVolumeClaim | kind | `persistentvolumeclaim` | hand-written parser | The `pvc` trait builds through the same path. |
@@ -2772,6 +2773,55 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Not covered:** the HTTPRoute's own metadata, so its labels and annotations
   cannot be authored, and its `status`, which the Gateway controller writes.
+- **networkpolicy** (go-kure/launcher#790) is the kind-named projection of a
+  networking.k8s.io/v1 NetworkPolicy, on the same recipe as `ingress`: one
+  schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
+  `ingress`, `egress`, `policyTypes`), decoded strictly into that type. It
+  emits one NetworkPolicy named after the component in the build namespace,
+  with the authored spec and nothing else. No field is required by the decode
+  and none is filled; the API's value rules (a peer naming at least one of
+  `podSelector`, `namespaceSelector` and `ipBlock`, an `ipBlock` beside no
+  selector, a valid CIDR) are left to the API server.
+
+  **The spec reads as the API reads it, which is not how the `networkpolicy`
+  trait reads the same keys.** The two share the type name; the trait attaches
+  to a component and scopes the policy to that component's pods, and this kind
+  is a component of its own that scopes nothing:
+  - **`podSelector` is not defaulted.** The trait has no such property: it
+    always selects its component's pods. Here an unwritten `podSelector`, like
+    `{}`, is the empty selector: **the policy applies to every pod of the
+    namespace**. An author moving a policy from the trait to the kind writes
+    the selector out.
+  - **`policyTypes` is not derived.** The trait has no such property either: it
+    lists a direction when that direction's key is present, so its `egress: []`
+    denies all egress. Here `policyTypes` is what the author wrote; unwritten,
+    the API server derives it: `Ingress` always, `Egress` only when `egress`
+    holds a rule. So on the kind `egress: []` alone isolates no egress; a
+    policy that denies all egress writes `policyTypes: [Egress]`.
+  - **An empty rule allows everything in its direction.** `ingress: [{}]` is
+    the API's allow-all, and is carried when written. It is never the result
+    of a null: a null rule, peer or port (`ingress: [null]`,
+    `from: [null]`) is refused by its path, since decoded it would be the
+    empty, allow-all one. An empty `ingress` or `egress` list is carried as an
+    unwritten one, which the API reads the same way.
+  - **A selector picks pods by label.** A peer's `podSelector` is not a
+    component reference and nothing resolves it; the label a workload
+    component's pods carry is described under "The `app` label" below.
+  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
+    capability lists gate trait types, so a policy that forbids the
+    `networkpolicy` trait does not refuse a `networkpolicy` component.
+    `passthrough`, `manifests` and template delivery emit a NetworkPolicy
+    under the same terms. A consumer that restricts network policy restricts
+    the component types it registers.
+
+  The transform's NetworkPolicy synthesis does not read this kind: it neither
+  counts an authored policy as covering a component nor merges into it, and
+  the policies it emits (`{comp}-allow-ingress-traffic` and the others) are
+  additive beside it. **The name** is the component's, or its `objectName`; a
+  component whose policy would carry the name of a `networkpolicy` trait's
+  (`<component>-allow`, or its `name`) or of a synthesized one is refused, with
+  both named. **Not covered:** the NetworkPolicy's own metadata, so its
+  labels and annotations cannot be authored.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -5276,7 +5326,7 @@ See "Component label and ownership" in the
 Every kind component takes `objectName`, which names its one object in place of the component
 name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
 `job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`ingress`, `httproute`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
+`ingress`, `httproute`, `networkpolicy`, `configmap`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
 `limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
 (`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
 `csidriver`), the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,

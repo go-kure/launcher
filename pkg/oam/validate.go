@@ -79,6 +79,7 @@ var validComponentTypes = map[string]bool{
 	"csidriver":             true,
 	"ingress":               true,
 	"httproute":             true,
+	"networkpolicy":         true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.
