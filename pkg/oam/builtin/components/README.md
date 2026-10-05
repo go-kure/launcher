@@ -3200,10 +3200,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   it, holding exactly what was authored: the handler adds no label, no
   annotation and no default of its own. They are for the grants an
   application needs that are not those of one workload's own ServiceAccount,
-  which is what the [`rbac` trait](../traits/README.md) writes: a role
-  several bindings share, a binding to a role that already exists, a grant to
-  a user or a group, an aggregated ClusterRole. What the four have in common
-  is stated here once; each kind's entry below holds what is its own.
+  which is what the `rbac` trait (`pkg/oam/builtin/traits/README.md`)
+  writes: a role several bindings share, a binding to a role that already
+  exists, a grant to a user or a group, an aggregated ClusterRole. What the
+  four have in common is stated here once; each kind's entry below holds what
+  is its own.
   - **Authored:** none of the four has a spec, so the properties are the
     object's own top-level fields, decoded strictly at every depth. The
     object's `kind`, `apiVersion` and `metadata` are launcher's and are
