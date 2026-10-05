@@ -629,7 +629,9 @@ The engine reads the property, not the handler. A handler opts its type in by de
 object's kind and scope (`ComponentObjectProvider.ComponentObject`); the engine adds
 `objectName` to that type's schema, resolves and claims the name, removes the property, and
 hands the handler the result as `Component.ObjectName()`. A type that declares no object
-(`helmtemplate`, `manifests`, `crd`, `passthrough`) refuses the property. A kind handler
+(`helmtemplate`, `manifests`, `crd`, `passthrough`) refuses the property; a consumer's own
+type that declares no object and a property of that name keeps its property, which the
+engine does not read. A kind handler
 driven directly, outside a transform, never names its object with it: its own
 `PropertySchema` does not declare the property, and its `ToApplicationConfig` either passes
 over it, the object keeping the component name (`configmap`, `service`, `deployment`), or,

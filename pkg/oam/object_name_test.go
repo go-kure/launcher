@@ -155,8 +155,8 @@ func TestObjectName_Refusals(t *testing.T) {
 // not asked for its object, and `objectName` on it is refused, in words that
 // name the rule kinds that emit a member.
 func TestObjectName_EmittedMember(t *testing.T) {
-	emit := func(props map[string]any) *Transformer {
-		tr := NewTransformer(map[string]ComponentHandler{"widget": kindStub("widget", widgetKind, ObjectScopeNamespaced)}, nil)
+	emit := func(h ComponentHandler, props map[string]any) *Transformer {
+		tr := NewTransformer(map[string]ComponentHandler{"widget": h}, nil)
 		tr.RegisterComponentLowering(emitRule{typ: "role", fn: func(c *Component) []Component {
 			return []Component{{Name: c.Name, Type: "widget", Properties: props}}
 		}})
@@ -167,17 +167,59 @@ func TestObjectName_EmittedMember(t *testing.T) {
 	}
 
 	var asked []NameRequest
-	if _, _, err := emit(map[string]any{}).TransformWithPolicy(doc(), TransformContext{Naming: objectHook(map[string]string{"web": "hooked"}, &asked)}); err != nil {
+	h := kindStub("widget", widgetKind, ObjectScopeNamespaced)
+	if _, _, err := emit(h, map[string]any{}).TransformWithPolicy(doc(), TransformContext{Naming: objectHook(map[string]string{"web": "hooked"}, &asked)}); err != nil {
 		t.Fatalf("transform: %v", err)
 	}
 	if len(asked) != 0 {
 		t.Errorf("the hook was asked %+v for an emitted member, want no request of role object", asked)
 	}
 
-	_, _, err := emit(map[string]any{"objectName": "renamed"}).TransformWithPolicy(doc(), TransformContext{})
-	if err == nil || !strings.Contains(err.Error(), "objectName is set on a component a component or trait lowering rule emitted") {
-		t.Fatalf("err = %v\nwant objectName refused on a member a component rule emitted", err)
+	for _, value := range []any{"renamed", 3} {
+		_, _, err := emit(kindStub("widget", widgetKind, ObjectScopeNamespaced), map[string]any{"objectName": value}).TransformWithPolicy(doc(), TransformContext{})
+		if err == nil || !strings.Contains(err.Error(), "objectName is set on a component a component or trait lowering rule emitted") {
+			t.Fatalf("objectName: %v: err = %v\nwant objectName refused on a member a component rule emitted", value, err)
+		}
 	}
+
+	// An explicit null is no name on a member either: the member is taken as one
+	// without the property, whether or not its handler declares a schema.
+	for _, tt := range []struct {
+		name    string
+		handler func(*kindStubHandler) ComponentHandler
+	}{
+		{name: "a handler with a schema", handler: func(h *kindStubHandler) ComponentHandler { return h }},
+		{name: "a handler without one", handler: func(h *kindStubHandler) ComponentHandler { return schemalessKind{h} }},
+	} {
+		t.Run("an explicit null on "+tt.name, func(t *testing.T) {
+			h := kindStub("widget", widgetKind, ObjectScopeNamespaced)
+			var asked []NameRequest
+			_, _, err := emit(tt.handler(h), map[string]any{"objectName": nil}).TransformWithPolicy(doc(), TransformContext{Naming: objectHook(map[string]string{"web": "hooked"}, &asked)})
+			if err != nil {
+				t.Fatalf("transform: %v\nwant a null objectName on an emitted member read as none", err)
+			}
+			if got := h.names["web"]; got != "web" {
+				t.Errorf("object name %q, want the member's own", got)
+			}
+			if h.property["web"] {
+				t.Error("the handler was handed the objectName property; the engine takes it out")
+			}
+			if len(asked) != 0 {
+				t.Errorf("the hook was asked %+v for an emitted member", asked)
+			}
+		})
+	}
+}
+
+// schemalessKind is a kind component's handler that declares no schema.
+type schemalessKind struct{ h *kindStubHandler }
+
+func (s schemalessKind) CanHandle(t string) bool { return s.h.CanHandle(t) }
+func (s schemalessKind) ComponentObject() (schema.GroupKind, ObjectScope) {
+	return s.h.ComponentObject()
+}
+func (s schemalessKind) ToApplicationConfig(c *Component, ns string) (stack.ApplicationConfig, error) {
+	return s.h.ToApplicationConfig(c, ns)
 }
 
 // copyingDocRule is testDocRule building its components anew, by value, where
@@ -302,6 +344,66 @@ func TestObjectName_NotAKindComponent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "objectName") {
 		t.Fatalf("err = %v\nwant objectName refused on a type that declares no object", err)
 	}
+}
+
+// On a type that declares no object, `objectName` is the handler's own
+// business: one that declares the key itself, or no schema at all, reads
+// whatever it takes there, a string or not, and the engine does not parse it.
+func TestObjectName_AHandlersOwnProperty(t *testing.T) {
+	value := map[string]any{"prefix": "a"}
+	for _, tt := range []struct {
+		name   string
+		schema map[string]PropertySchema
+	}{
+		{name: "declared by the handler", schema: map[string]PropertySchema{
+			"objectName": {Type: PropertyTypeObject, AdditionalProperties: true}}},
+		{name: "a handler without a schema"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var h ComponentHandler = &ownHandler{}
+			if tt.schema != nil {
+				h = &ownSchemaHandler{ownHandler: ownHandler{}, schema: tt.schema}
+			}
+			tr := NewTransformer(map[string]ComponentHandler{"own": h}, nil)
+			doc := siblingDoc(Component{Name: "web", Type: "own", Properties: map[string]any{"objectName": value}})
+			var asked []NameRequest
+			if _, _, err := tr.TransformWithPolicy(doc, TransformContext{Naming: objectHook(nil, &asked)}); err != nil {
+				t.Fatalf("transform: %v\nwant the handler's own objectName left to it", err)
+			}
+			got, _ := seenByOwn(h).(map[string]any)
+			if got["prefix"] != "a" {
+				t.Errorf("the handler read objectName = %v, want what the author wrote", seenByOwn(h))
+			}
+			if len(asked) != 0 {
+				t.Errorf("the hook was asked %+v for a type that declares no object", asked)
+			}
+		})
+	}
+}
+
+// ownHandler declares no object and no schema, and records the `objectName` it
+// reads off its component.
+type ownHandler struct{ seen any }
+
+func (*ownHandler) CanHandle(t string) bool { return t == "own" }
+func (h *ownHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
+	h.seen = c.Properties[ObjectNameProperty]
+	return &siblingStub{}, nil
+}
+
+// ownSchemaHandler is ownHandler declaring a schema.
+type ownSchemaHandler struct {
+	ownHandler
+	schema map[string]PropertySchema
+}
+
+func (h *ownSchemaHandler) PropertySchema() map[string]PropertySchema { return h.schema }
+
+func seenByOwn(h ComponentHandler) any {
+	if s, ok := h.(*ownSchemaHandler); ok {
+		return s.seen
+	}
+	return h.(*ownHandler).seen
 }
 
 // plainHandler declares a schema of its own and no object.

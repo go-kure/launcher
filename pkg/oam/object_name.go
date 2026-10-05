@@ -89,19 +89,11 @@ func (c Component) emitted() bool {
 	return c.origin != nil && c.origin.Rule != "" && !isDocumentRuleIdentity(c.origin.Rule)
 }
 
-// authoredObjectName reads ObjectNameProperty off the component. present is
-// false when the author wrote none; an explicit null is none, as it is at every
-// other property.
-func authoredObjectName(component *Component) (name string, present bool, err error) {
-	raw, has := component.Properties[ObjectNameProperty]
-	if !has || raw == nil {
-		return "", false, nil
-	}
-	name, ok := raw.(string)
-	if !ok {
-		return "", false, errors.Errorf("%s: expected string, got %T", ObjectNameProperty, raw)
-	}
-	return name, true, nil
+// objectNameSet reports whether props holds ObjectNameProperty with a value. An
+// explicit null is none, as it is at every other property.
+func objectNameSet(props map[string]any) (raw any, set bool) {
+	raw, has := props[ObjectNameProperty]
+	return raw, has && !isNullValue(raw)
 }
 
 // emittedObjectNameError refuses ObjectNameProperty on a kind component that is
@@ -121,16 +113,13 @@ func emittedObjectNameError(origin *Origin) error {
 // The name is resolved only for a component of a type that takes the property
 // that is no emitted member (Component.emitted). On a member a component or
 // trait lowering rule emitted the property is refused, and without it the
-// component is returned as it is: the rule named its object. A type that does
-// not take the property is left to its handler.
+// rule's name for the object stands. A type that does not take the property is
+// left to its handler, whatever it holds under that key: the engine reads the
+// value as a name only where the property is its own.
 func withObjectName(component Component, handler ComponentHandler, namespace, fluxNamespace string, names *nameResolver) (Component, error) {
-	authored, present, err := authoredObjectName(&component)
-	if err != nil {
-		return component, err
-	}
+	raw, present := objectNameSet(component.Properties)
 	provider, takes := handler.(ComponentObjectProvider)
-	switch {
-	case !takes:
+	if !takes {
 		// The property is then the handler's own business, as any other key is: one
 		// that declares a schema without it is told why it is refused; one that
 		// declares it, or no schema at all, reads it itself.
@@ -141,15 +130,25 @@ func withObjectName(component Component, handler ComponentHandler, namespace, fl
 			}
 		}
 		return component, nil
-	case present && component.emitted():
-		return component, emittedObjectNameError(component.origin)
-	case component.emitted():
-		return component, nil
 	}
-
+	if present && component.emitted() {
+		return component, emittedObjectNameError(component.origin)
+	}
+	// The handler never sees the property, an explicit null included.
 	if _, has := component.Properties[ObjectNameProperty]; has {
 		component.Properties = maps.Clone(component.Properties)
 		delete(component.Properties, ObjectNameProperty)
+	}
+	if component.emitted() {
+		return component, nil
+	}
+	var authored string
+	if present {
+		name, ok := raw.(string)
+		if !ok {
+			return component, errors.Errorf("%s: expected string, got %T", ObjectNameProperty, raw)
+		}
+		authored = name
 	}
 	kind, scope := provider.ComponentObject()
 	spec := NameSpec{Role: NameRoleObject, Kind: kind, Default: component.Name}

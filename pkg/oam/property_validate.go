@@ -1383,21 +1383,23 @@ func (t *Transformer) validateEmittedComponent(comp *Component) error {
 //
 //   - on a member it is refused, and said here, before the schema says only that
 //     the key is unsupported;
-//   - on a document's component it is checked as on the authored path, with the
-//     property folded into the handler's schema (withObjectNameProperty), and
-//     left for the transform to resolve.
+//   - on a document's component it is checked as on the authored path, and left
+//     for the transform to resolve.
+//
+// Both are checked against the handler's schema with the property folded in
+// (withObjectNameProperty), so an explicit null is none on a member too, and is
+// dropped as at any other optional key, where the handler's own schema would
+// call the key unsupported.
 func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) error {
 	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
 	if h, ok := t.componentHandlers[comp.Type]; ok {
-		_, takes := h.(ComponentObjectProvider)
-		p, declares := h.(PropertySchemaProvider)
-		switch {
-		case takes && member:
-			if raw, has := comp.Properties[ObjectNameProperty]; has && raw != nil {
+		if _, takes := h.(ComponentObjectProvider); takes {
+			if _, set := objectNameSet(comp.Properties); set && member {
 				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
 			}
-		case takes && declares:
-			return validateEmittedAgainst(withObjectNameProperty(h, p.PropertySchema()), &comp.Properties, path)
+			if p, declares := h.(PropertySchemaProvider); declares {
+				return validateEmittedAgainst(withObjectNameProperty(h, p.PropertySchema()), &comp.Properties, path)
+			}
 		}
 		return validateEmittedProperties(h, &comp.Properties, path)
 	}
