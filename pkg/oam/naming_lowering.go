@@ -27,11 +27,12 @@ type loweredName struct {
 // built, validated and shortened as Namer.Name builds it. A name that is not
 // the default is validated for spec.Role and used as written or refused, never
 // shortened. spec.Role must name an object and spec.Kind say which;
-// spec.Default and spec.Namespace are not read: the default is the one built
-// here, and the namespace is the document's. A cluster-scoped object (a
+// spec.Default and spec.Namespace choose nothing here: the default is the one
+// built here, and the namespace is the document's. A cluster-scoped object (a
 // ClusterRole) has none: the rule says so with spec.ClusterScoped, and the name
 // is then held against every other of its kind, whatever namespace its document
-// has. Where base and suffix build no valid default, an authored name is still
+// has; a spec.Namespace beside it is refused, as it is for a trait. Where base
+// and suffix build no valid default, an authored name is still
 // used; without one the call fails with the default's problem, and the hook is
 // not asked.
 //
