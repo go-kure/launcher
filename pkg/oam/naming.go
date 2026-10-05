@@ -428,22 +428,24 @@ func (n *NameAllocator) claimName(key nameClaimKey, claim resolvedNameClaim) err
 }
 
 // nameCollision is the error for two owners, prior and claim, that resolved the
-// name key identifies.
+// name key identifies: a *NameCollisionError, which prints both.
 func nameCollision(key nameClaimKey, prior, claim resolvedNameClaim) error {
+	collision := &NameCollisionError{
+		Kind:      schema.GroupKind{Group: key.group, Kind: key.kind},
+		Namespace: key.namespace,
+		Name:      key.name,
+	}
 	// The two are told apart in the fewest words that do.
-	var first, second string
 	for detail := describeSlot; detail <= describeOutput; detail++ {
-		first, second = prior.owner.describe(prior.source, prior.property, detail), claim.owner.describe(claim.source, claim.property, detail)
-		if first != second {
-			break
+		collision.First, collision.Second = collisionMember(prior, detail), collisionMember(claim, detail)
+		if collision.First.Description != collision.Second.Description {
+			return collision
 		}
 	}
-	if first == second {
-		// One trait that resolved one name for two of its objects.
-		return errors.Errorf("name collision: %s is named twice by %s; give one of them another name",
-			key, claim.owner.describe(claim.source, claim.property, describeSlot))
-	}
-	return errors.Errorf("name collision: %s is named by %s and by %s; give one of them another name", key, first, second)
+	// One trait that resolved one name for two of its objects: "named twice by".
+	collision.Second = collisionMember(claim, describeSlot)
+	collision.First = collision.Second
+	return collision
 }
 
 // nameResolver resolves every name of one transform: the author's own, else the

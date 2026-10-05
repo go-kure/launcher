@@ -277,7 +277,10 @@ Decided in the ticket:
     sub-application of a `configmap`, `secret`, `ingress`, `httproute` or `volsync` trait
     leaves the object's name alone.
 - **Shipped: the transform keeps the names of those roles apart.** Two that name one
-  object, or one bundle, fail the transform, naming both and where each came from. The
+  object, or one bundle, fail the transform, naming both and where each came from. A
+  caller recognises that refusal through the transform's own prefix:
+  `errors.Is(err, ErrNameCollision)`, and `errors.As` finds a `*NameCollisionError` with
+  the object and the two members that named it (`pkg/oam/name_collision.go`). The
   names a lowering rule resolves are held in the same space as the ones resolved after
   lowering, and two rules that resolve one kind and name for one component are refused
   when the second resolves it. Every other name is still compared only by
