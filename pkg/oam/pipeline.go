@@ -3,6 +3,9 @@ package oam
 import "fmt"
 
 // PolicyHandler dispatches a single OAM policy document during pipeline execution.
+//
+// The transform returns an error from Apply as `policy "<name>": <error>`, so a
+// handler says what is wrong and does not name the policy itself.
 type PolicyHandler interface {
 	CanHandle(policyType string) bool
 	Apply(policy *ApplicationPolicy, components []string, result *PolicyResult) error

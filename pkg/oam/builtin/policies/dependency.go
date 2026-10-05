@@ -34,10 +34,12 @@ func (h *DependencyHandler) CanHandle(policyType string) bool {
 // The policy's edges are staged on a copy of result.Dependencies and committed only
 // once every rule and the cycle check have passed, so a rejected policy leaves
 // result exactly as it found it.
+//
+// An error does not name the policy: the transform does (oam.PolicyHandler).
 func (h *DependencyHandler) Apply(policy *oam.ApplicationPolicy, components []string, result *oam.PolicyResult) error {
 	rules, err := parseDependencyRules(policy.Properties)
 	if err != nil {
-		return errors.Wrapf(err, "policy %q", policy.Name)
+		return err
 	}
 
 	componentSet := toSet(components)
@@ -49,23 +51,21 @@ func (h *DependencyHandler) Apply(policy *oam.ApplicationPolicy, components []st
 
 	for _, rule := range rules {
 		if !componentSet[rule.Component] {
-			return errors.Errorf("policy %q references unknown component %q", policy.Name, rule.Component)
+			return errors.Errorf("references unknown component %q", rule.Component)
 		}
 		for _, dep := range rule.DependsOn {
 			if !componentSet[dep] {
-				return errors.Errorf("policy %q: component %q depends on unknown component %q",
-					policy.Name, rule.Component, dep)
+				return errors.Errorf("component %q depends on unknown component %q", rule.Component, dep)
 			}
 			if dep == rule.Component {
-				return errors.Errorf("policy %q: component %q cannot depend on itself",
-					policy.Name, rule.Component)
+				return errors.Errorf("component %q cannot depend on itself", rule.Component)
 			}
 		}
 		staged[rule.Component] = append(staged[rule.Component], rule.DependsOn...)
 	}
 
 	if err := detectCycles(staged); err != nil {
-		return errors.Wrapf(err, "policy %q", policy.Name)
+		return err
 	}
 
 	result.Dependencies = staged

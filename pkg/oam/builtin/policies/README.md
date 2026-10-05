@@ -135,6 +135,17 @@ an unknown tier or component, a self-dependency or a cycle is an error. A caller
 check, in which a key the handler does not read is ignored. A wrongly typed value
 the handler does read is still an error there.
 
+The transform names the policy in this second check, once, in front of what the handler
+reports:
+
+```text
+policy "order": rules[0].dependsOn must not be empty
+policy "cache-in-infra": references unknown component "cache"
+```
+
+A handler's own error does not carry the name, so a caller of `Apply` outside the
+transform adds it.
+
 ## What `kurel build` shows
 
 `kurel build` prints the objects each component generates, not the bundles that group

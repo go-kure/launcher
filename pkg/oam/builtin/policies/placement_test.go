@@ -1,7 +1,6 @@
 package policies_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -63,8 +62,8 @@ func TestPlacementHandler_SecondPlacement(t *testing.T) {
 			t.Fatalf("first: %v", err)
 		}
 		err := h.Apply(place("second", "apps"), components, result)
-		want := `policy "second": component "cache" is already placed in tier "infra" by an earlier placement policy, cannot also place it in "apps"`
-		if err == nil || !strings.Contains(err.Error(), want) {
+		want := `component "cache" is already placed in tier "infra" by an earlier placement policy, cannot also place it in "apps"`
+		if err == nil || err.Error() != want {
 			t.Fatalf("error = %v, want %q", err, want)
 		}
 		if got := result.TierOverrides["cache"]; got != oam.Tier("infra") {
@@ -87,41 +86,44 @@ func TestPlacementHandler_SecondPlacement(t *testing.T) {
 	})
 }
 
+// TestPlacementHandler_Errors holds the handler's own message for each refusal.
+// It does not name the policy: the transform does, once
+// (TestRefusalsNameThePolicyOnce).
 func TestPlacementHandler_Errors(t *testing.T) {
 	cases := []struct {
-		name    string
-		props   map[string]any
-		wantSub string
+		name  string
+		props map[string]any
+		want  string
 	}{
 		{
-			name:    "unknown component",
-			props:   map[string]any{"component": "nonexistent", "tier": "infra"},
-			wantSub: `references unknown component "nonexistent"`,
+			name:  "unknown component",
+			props: map[string]any{"component": "nonexistent", "tier": "infra"},
+			want:  `references unknown component "nonexistent"`,
 		},
 		{
-			name:    "invalid tier",
-			props:   map[string]any{"component": "web", "tier": "custom"},
-			wantSub: `unknown tier "custom" (valid: infra, services, apps)`,
+			name:  "invalid tier",
+			props: map[string]any{"component": "web", "tier": "custom"},
+			want:  `unknown tier "custom" (valid: infra, services, apps)`,
 		},
 		{
-			name:    "missing component",
-			props:   map[string]any{"tier": "infra"},
-			wantSub: "missing required property 'component'",
+			name:  "missing component",
+			props: map[string]any{"tier": "infra"},
+			want:  "missing required property 'component'",
 		},
 		{
-			name:    "component not a string",
-			props:   map[string]any{"component": 1, "tier": "infra"},
-			wantSub: "missing required property 'component'",
+			name:  "component not a string",
+			props: map[string]any{"component": 1, "tier": "infra"},
+			want:  "missing required property 'component'",
 		},
 		{
-			name:    "missing tier",
-			props:   map[string]any{"component": "web"},
-			wantSub: "missing required property 'tier'",
+			name:  "missing tier",
+			props: map[string]any{"component": "web"},
+			want:  "missing required property 'tier'",
 		},
 		{
-			name:    "empty tier",
-			props:   map[string]any{"component": "web", "tier": ""},
-			wantSub: "missing required property 'tier'",
+			name:  "empty tier",
+			props: map[string]any{"component": "web", "tier": ""},
+			want:  "missing required property 'tier'",
 		},
 	}
 	for _, tc := range cases {
@@ -130,13 +132,10 @@ func TestPlacementHandler_Errors(t *testing.T) {
 			policy := &oam.ApplicationPolicy{Name: "place", Type: "placement", Properties: tc.props}
 			err := h.Apply(policy, []string{"web"}, oam.NewPolicyResult())
 			if err == nil {
-				t.Fatalf("expected error containing %q", tc.wantSub)
+				t.Fatalf("expected error %q", tc.want)
 			}
-			if !strings.Contains(err.Error(), tc.wantSub) {
-				t.Errorf("error = %q, want to contain %q", err, tc.wantSub)
-			}
-			if !strings.Contains(err.Error(), `policy "place"`) {
-				t.Errorf("error = %q, want it to name the policy", err)
+			if got := err.Error(); got != tc.want {
+				t.Errorf("error = %q, want %q", got, tc.want)
 			}
 		})
 	}
