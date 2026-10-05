@@ -4684,7 +4684,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   |---|---|---|
   | A list (a `v1` `List`, a typed list, a list of an unregistered kind) with a label or an annotation on its own metadata | Built: the items emitted, the list's metadata dropped. Template delivery refused only `helm.sh/hook` there, and still does, with its own text | `List has metadata of its own that its items cannot keep: annotations …; labels …` |
   | `Kind` or `apiversion` beside the exact key, on a document or on an item of a list | Built, with two exceptions: emitted as written, the extra key kept. A workload or a claim was refused already, by *Undeclared fields* (`undeclared field Kind`), and so was an item of a typed list whose `Kind` or `apiversion` states another value than the list holds, by the parser (`the item states …, the list holds …`). Both are refused now with the other text | `the key "Kind" equals "kind" only after case folding; write it "kind" or remove it` |
-  | `Items` on a `v1` `List` | Built, to no object at all | The same text, for `"Items"` |
+  | `Items` on a `v1` `List` | Decoded, to no object at all: a chart or a source with other objects built. A `manifests` or `crd` source that held nothing else was refused already (`source resolved to no manifests`) | The same text, for `"Items"` |
   | `Items` on a list of an unregistered kind | Built: the list emitted as one object | The same text |
   | A `null` item in a list of an unregistered kind | Built: an otherwise empty object emitted, with the list's `apiVersion` and its kind without `List` | `item 0 of WidgetList: the item is null, not an object` |
   | An item of a registered kind, in a list of an unregistered kind, that does not decode as its type (`data: 1` on a ConfigMap) | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable, and it is refused now for the decode | The item's decode error, naming its position |
@@ -4899,7 +4899,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the
   decode that checks its fields reads the document as example.com/v1 Deployment, so its
   fields cannot be checked; a second apiVersion or kind that is null is the known cause,
-  state each once`). The parser refuses the same in an item of a typed list itself.
+  state each once`). The parser refuses the same in an item of a typed list itself. An item
+  the parser leaves untyped, its kind not registered at the list's `apiVersion`, is emitted
+  as the parser read it and is not checked as the kind the strict decode would read: nothing
+  of an unstructured object is dropped.
 
   Whether a cluster accepts a kept field its own version does not know is not verified
   here; the object reaches it as the chart wrote it.
