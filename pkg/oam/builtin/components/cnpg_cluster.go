@@ -265,8 +265,18 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 // refuseOmittedClusterFields refuses a ClusterSpec that leaves out a field the
 // Cluster CRD requires and the Go type omits when it is empty, so that the
 // object would show the omission and the API server refuse it: the signer name
-// and the key type of a pod certificate source of projectedVolumeTemplate.
+// and the key type of a pod certificate source of projectedVolumeTemplate. It
+// refuses as well the two fields the CRD requires that the Go type writes as
+// null when they are unauthored, a null the API server drops before it
+// validates: the terms of a required node affinity, and the databases of an
+// import. An authored empty list is written as one and is not refused here.
 func refuseOmittedClusterFields(spec *cnpgv1.ClusterSpec) error {
+	if err := refuseNullNodeSelectorTerms("affinity.nodeAffinity", spec.Affinity.NodeAffinity); err != nil {
+		return err
+	}
+	if b := spec.Bootstrap; b != nil && b.InitDB != nil && b.InitDB.Import != nil && b.InitDB.Import.Databases == nil {
+		return errors.New("bootstrap.initdb.import.databases: required (the databases to import)")
+	}
 	if spec.ProjectedVolumeTemplate == nil {
 		return nil
 	}

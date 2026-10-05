@@ -46,6 +46,58 @@ func refuseOmittedPodSpecFields(path string, spec *corev1.PodSpec) error {
 	return nil
 }
 
+// refuseNullPodSpecFields refuses a pod spec that leaves out a field the
+// schema of the CRD that embeds it requires and the Go type writes as null
+// when nothing was decoded into it: the terms of a required node affinity, the
+// priority of an eviction responder, the monitors of a CephFS or an RBD
+// volume, and the Secret reference of a ScaleIO volume. The API server drops a
+// null of a field that is not nullable before it validates, so the object
+// would show the omission and the API server refuse it. An authored empty
+// list is written as one and is not refused here. path is the pod spec's, for
+// the refusal.
+//
+// It is for a kind whose CRD publishes the pod spec's schema, as
+// refuseOmittedPodSpecFields is. The list of a pod's containers is not held
+// here: a kind that requires it writes the list itself.
+func refuseNullPodSpecFields(path string, spec *corev1.PodSpec) error {
+	if spec.Affinity != nil {
+		if err := refuseNullNodeSelectorTerms(path+".affinity.nodeAffinity", spec.Affinity.NodeAffinity); err != nil {
+			return err
+		}
+	}
+	for i := range spec.EvictionResponders {
+		if spec.EvictionResponders[i].Priority == nil {
+			return errors.Errorf("%s.evictionResponders[%d].priority: required (the responder's priority, from 0 to 100000; no default is filled)", path, i)
+		}
+	}
+	for i := range spec.Volumes {
+		volume := &spec.Volumes[i]
+		switch {
+		case volume.RBD != nil && volume.RBD.CephMonitors == nil:
+			return errors.Errorf("%s.volumes[%d].rbd.monitors: required (the addresses of the Ceph monitors)", path, i)
+		case volume.CephFS != nil && volume.CephFS.Monitors == nil:
+			return errors.Errorf("%s.volumes[%d].cephfs.monitors: required (the addresses of the Ceph monitors)", path, i)
+		case volume.ScaleIO != nil && volume.ScaleIO.SecretRef == nil:
+			return errors.Errorf("%s.volumes[%d].scaleIO.secretRef: required (the Secret that holds the ScaleIO credentials)", path, i)
+		}
+	}
+	return nil
+}
+
+// refuseNullNodeSelectorTerms refuses the node affinity at path whose required
+// arm is authored without its terms: the Go type writes nodeSelectorTerms:
+// null, which the schema of a CRD that embeds the type requires and the API
+// server drops before it validates. A nil affinity holds nothing to refuse.
+func refuseNullNodeSelectorTerms(path string, affinity *corev1.NodeAffinity) error {
+	if affinity == nil {
+		return nil
+	}
+	if required := affinity.RequiredDuringSchedulingIgnoredDuringExecution; required != nil && required.NodeSelectorTerms == nil {
+		return errors.Errorf("%s.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: required (the node selector terms, of which a node must match one)", path)
+	}
+	return nil
+}
+
 // refuseOmittedRestartRuleFields refuses a restart rule of the container at
 // path without an action, or with exit codes without an operator.
 func refuseOmittedRestartRuleFields(path string, rules []corev1.ContainerRestartRule) error {

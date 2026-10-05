@@ -3504,21 +3504,30 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     refuse it; an empty `cron` is refused as an unauthored one is.
     `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two
     from the CRD and shows the refusals.
+  - Of an ACME HTTP01 solver, on an issuer and a clusterissuer, three fields
+    of the Kubernetes and Gateway API types it embeds: the `nodeSelectorTerms`
+    of a required node affinity of the solver pod, under `http01.ingress` and
+    under `http01.gatewayHTTPRoute`
+    (`acme.solvers[0].http01.ingress.podTemplate.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
+    required (…)`), and the `name` of a parent reference
+    (`acme.solvers[0].http01.gatewayHTTPRoute.parentRefs[0].name: required
+    (…)`). Unauthored, the type writes the terms as `null`, which the API
+    server drops before it validates, so the required field is then missing;
+    and the name as `""`, which is below the CRD's minimum length of 1.
+    `TestKindComponents_NullRequired` shows each refusal by running the CRD's
+    schema validator on the object the type would encode.
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
-  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (61 paths for an
+  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (64 paths for an
   issuer, 8 for a certificate) to the CRDs the linked module ships, which are
   the ones cert-manager's chart installs: every field of cert-manager's own
-  types that a CRD requires and the type writes unauthored is listed, and
-  nothing else is. A dependency bump that adds, drops or moves one fails
-  there. **Not refused:**
-  - a required field of a Kubernetes or Gateway API type these specs embed,
-    on an issuer and a clusterissuer: the terms of a solver pod's affinity
-    (`podTemplate.spec.affinity`), and the `name` of a parent reference
-    (`http01.gatewayHTTPRoute.parentRefs[].name`). An omitted one is emitted
-    empty: a parent reference then carries `name: ""`, which the CRD refuses
-    for its minimum length of 1;
+  types that a CRD requires and the type writes unauthored is listed, with
+  the three fields of an embedded type above, and nothing else is. A
+  dependency bump that adds, drops or moves one fails there. **Not refused:**
+  - every other required field of a Kubernetes or Gateway API type these
+    specs embed (the `key` and `operator` of a selector requirement): the
+    type writes it empty, and the CRDs accept it so;
   - every other value rule of the CRDs (enumerations, lengths, minima, and
     the one rule the CRDs write as an expression: that a `venafi` issuer
     names exactly one of `tpp`, `cloud` and `ngts`);
@@ -6283,6 +6292,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `keyType` of a pod certificate source of the projected volume template
   (`projectedVolumeTemplate.sources[0].podCertificate.signerName: required
   (…)`). The object would show the omission and the API server refuse it.
+  Two more that the CRD requires, which the Go type writes as `null` when
+  they are unauthored, are refused when unauthored: the `nodeSelectorTerms`
+  of a required node affinity
+  (`affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
+  required (…)`) and the `databases` of an import
+  (`bootstrap.initdb.import.databases: required (…)`). The API server drops a
+  null of a field that is not nullable before it validates, so the required
+  field is then missing. An authored empty list is written as one and is not
+  refused here. A third such field is not refused:
+  `replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so
+  the API server puts the default (`true`) in the place of the null.
+  `TestKindComponents_NullRequired` derives the three from the CRD and shows
+  each answer by running the CRD's schema validator on the object.
   `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
   the CRD and shows the refusals. It also holds the two fields the CRD
   defaults and the type writes unauthored to a reason they are harmless:
@@ -6420,7 +6442,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   refuse it; the CRD of the linked module settles that, which is what the
   built-in pod kinds lack.
   `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
-  from the CRD and shows the refusals. The instance count is deliberately not policed:
+  from the CRD and shows the refusals. Five more that the CRD requires under
+  `template.spec`, which the pod spec's type writes as `null` when they are
+  unauthored, are refused when unauthored: the `nodeSelectorTerms` of a
+  required node affinity, the `priority` of an eviction responder, the
+  `monitors` of a `cephfs` or an `rbd` volume, and the `secretRef` of a
+  `scaleIO` volume (`template.spec.volumes[0].cephfs.monitors: required (…)`).
+  The API server drops a null of a field that is not nullable before it
+  validates, so the required field is then missing. An authored empty list is
+  written as one and is not refused here. `template.spec.containers` is such
+  a field too and is not refused: the kind writes `containers: []` itself
+  (below). `TestKindComponents_NullRequired` derives these fields and
+  `pgbouncer` from the CRD and shows each answer by running the CRD's schema
+  validator on the object. The instance count is deliberately not policed:
   `postgresql`, which lowers its pooler onto this kind, never applied a
   policy to the pooler's count, so a maximum here would refuse a document
   that built before.

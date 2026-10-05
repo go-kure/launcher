@@ -970,9 +970,12 @@ its text:
     and no `Policy` method is added.
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
     requires that the Go type writes whether or not it was authored must be authored. A
-    test holds each list to the CRDs the linked module ships (61 paths for an issuer, 8
+    test holds each list to the CRDs the linked module ships (64 paths for an issuer, 8
     for a certificate). An issuer has none at the top level; a required field under a
-    parent the author left out is not asked for.
+    parent the author left out is not asked for. Three of an issuer's paths are fields
+    of a Kubernetes or Gateway API type an ACME HTTP01 solver embeds (the terms of a
+    required node affinity, the name of a parent reference): the CRDs refuse each as the
+    type writes it unauthored, which a second test shows with the CRDs' validator.
   - **cert-manager's validating webhook refuses more than the CRDs do, and launcher
     repeats none of it:** an issuer of no type or of two, a keystore with a password
     beside a reference that names a Secret or with neither, a certificate that names no

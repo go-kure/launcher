@@ -135,7 +135,8 @@ type CnpgPoolerConfig struct {
 // declaring a pod field the workload kinds refuse: ephemeral containers,
 // activeDeadlineSeconds, priority or overhead. Of the template's pod spec it
 // also refuses a field the CRD requires that the Go type leaves out when it is
-// empty (refuseOmittedPodSpecFields).
+// empty (refuseOmittedPodSpecFields) or writes as null when it is unauthored
+// (refuseNullPodSpecFields).
 func (c *CnpgPoolerConfig) validate(name string) error {
 	if err := requireCnpgClusterRef(c.Spec.Cluster.Name); err != nil {
 		return err
@@ -167,6 +168,10 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 		// The Pooler CRD publishes the pod spec's schema, and with it the
 		// fields that schema requires and the Go type leaves out when empty.
 		if err := refuseOmittedPodSpecFields("template.spec", ps); err != nil {
+			return err
+		}
+		// And the fields that schema requires and the Go type writes as null.
+		if err := refuseNullPodSpecFields("template.spec", ps); err != nil {
 			return err
 		}
 	}
