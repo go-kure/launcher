@@ -3,6 +3,7 @@ package traits
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -243,6 +244,31 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	return nil
 }
 
+// platformAnnotationsOf reads the platformAnnotations property. A capability
+// rendering is the consumer's Go value and reaches the handler as it was
+// written, so the object may be any string-keyed map (a map[string]string as
+// well as the map[string]any a decoder gives) and a value any string type. The
+// first key in sorted order whose value is no string is the one refused.
+func platformAnnotationsOf(raw any) (map[string]string, error) {
+	object := reflect.ValueOf(raw)
+	if object.Kind() != reflect.Map || object.Type().Key().Kind() != reflect.String {
+		return nil, errors.Errorf("%s: expected object, got %T", platformAnnotationsProperty, raw)
+	}
+	values := make(map[string]any, object.Len())
+	for entries := object.MapRange(); entries.Next(); {
+		values[entries.Key().String()] = entries.Value().Interface()
+	}
+	annotations := make(map[string]string, len(values))
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		value := reflect.ValueOf(values[k])
+		if value.Kind() != reflect.String {
+			return nil, errors.Errorf("%s.%s: expected a string, got %T", platformAnnotationsProperty, k, values[k])
+		}
+		annotations[k] = value.String()
+	}
+	return annotations, nil
+}
+
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &IngressConfig{
@@ -314,16 +340,13 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	// capability. An authored null states no value, as it does for the expose
 	// rule, and the platform's is written.
 	if raw, ok := props[platformAnnotationsProperty]; ok && !oam.IsNullValue(raw) {
-		rawPlatform, ok := raw.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("%s: expected object, got %T", platformAnnotationsProperty, raw)
+		platform, err := platformAnnotationsOf(raw)
+		if err != nil {
+			return nil, err
 		}
-		config.platformAnnotations = make(map[string]string, len(rawPlatform))
-		for _, k := range slices.Sorted(maps.Keys(rawPlatform)) {
-			v, ok := rawPlatform[k].(string)
-			if !ok {
-				return nil, errors.Errorf("%s.%s: expected a string, got %T", platformAnnotationsProperty, k, rawPlatform[k])
-			}
+		config.platformAnnotations = make(map[string]string, len(platform))
+		for _, k := range slices.Sorted(maps.Keys(platform)) {
+			v := platform[k]
 			if authored, ok := config.Annotations[k]; ok && authored != v && !oam.IsNullValue(rawAnnotations[k]) {
 				return nil, errors.Errorf("annotations.%s: %q is not the value the platform sets for this annotation (%q, %s) and cannot override it; remove the annotation",
 					k, authored, v, platformAnnotationsProperty)

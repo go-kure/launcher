@@ -314,6 +314,61 @@ func TestExposeRule_AuthoredAnnotationAgainstThePlatform(t *testing.T) {
 	}
 }
 
+// TestExposeRule_AuthoredNonStringAgainstThePlatform: an authored annotation
+// that is no string is compared by its text, as the ingress trait reads it. One
+// that differs is refused, the cluster-issuer too, which used to be overridden
+// silently when it was no string; one whose text is the rule's value stays, and
+// a null is not compared at all.
+func TestExposeRule_AuthoredNonStringAgainstThePlatform(t *testing.T) {
+	ctx := oam.TransformContext{Namespace: "default", Capabilities: exposeCapability()}
+
+	for key, authored := range map[string]any{
+		kClusterIssuer:    123,
+		kSSLRedirect:      false,
+		kForceSSLRedirect: true,
+		kAuthRespHdrs:     42,
+	} {
+		t.Run("differs/"+key, func(t *testing.T) {
+			_, err := generatedIngress(t, webWithTrait(exposeEveryAnnotation(map[string]any{key: authored})), ctx)
+			var ve *pkgerrors.ValidationError
+			if !stderrors.As(err, &ve) || ve.Field != "annotations."+key {
+				t.Fatalf("want *ValidationError on annotations.%s, got %v", key, err)
+			}
+			if !strings.Contains(ve.Message, exposeWritten[key]) || !strings.Contains(ve.Message, "cannot be overridden") {
+				t.Errorf("refusal %q does not name the rule's value %q", ve.Message, exposeWritten[key])
+			}
+		})
+	}
+
+	for key, authored := range map[string]any{
+		kSSLRedirect:      true,
+		kForceSSLRedirect: false,
+	} {
+		t.Run("same text/"+key, func(t *testing.T) {
+			ing, err := generatedIngress(t, webWithTrait(exposeEveryAnnotation(map[string]any{key: authored})), ctx)
+			if err != nil {
+				t.Fatalf("transform and generate: %v", err)
+			}
+			if got := ing.Annotations[key]; got != exposeWritten[key] {
+				t.Errorf("annotation %s = %q, want %q", key, got, exposeWritten[key])
+			}
+		})
+	}
+
+	// A null states no value: it is not refused, and the rule's value is written.
+	for key, want := range exposeWritten {
+		t.Run("null/"+key, func(t *testing.T) {
+			ing, err := generatedIngress(t, webWithTrait(exposeEveryAnnotation(map[string]any{key: nil})), ctx)
+			if err != nil {
+				t.Fatalf("transform and generate: %v", err)
+			}
+			if got := ing.Annotations[key]; got != want {
+				t.Errorf("annotation %s = %q, want the rule's %q", key, got, want)
+			}
+		})
+	}
+}
+
 // TestExposeRule_PlatformAnnotationsNotAuthorable: platformAnnotations is the
 // ingress trait's property, which only the rule writes. On an expose trait it is
 // refused on either rendering, not handed on.
@@ -407,6 +462,45 @@ func TestIngressHandler_PlatformAnnotations_FromCapability(t *testing.T) {
 		t.Fatalf("an authored reserved annotation: %v, want ErrReservedMetadataKey naming it", err)
 	}
 }
+
+// TestIngressHandler_PlatformAnnotations_TypedCapabilityMap: a rendering is the
+// consumer's Go value, so its annotations may arrive in a typed map. They are
+// read like the map[string]any a decoder gives, and an authored annotation is
+// still held to them.
+func TestIngressHandler_PlatformAnnotations_TypedCapabilityMap(t *testing.T) {
+	type annotationValue string
+	for name, rendered := range map[string]any{
+		"map[string]string":         map[string]string{kSSLRedirect: "true"},
+		"a named map type":          labelsLike{kSSLRedirect: "true"},
+		"a map of a named string":   map[string]annotationValue{kSSLRedirect: "true"},
+		"map[string]any, as before": map[string]any{kSSLRedirect: "true"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := oam.TransformContext{
+				Namespace:            "default",
+				ReservedMetadataKeys: reservedIngressPrefixes,
+				Capabilities: map[string]oam.CapabilityBinding{"ingress": {Rendering: map[string]any{
+					"platformAnnotations": rendered,
+				}}},
+			}
+			ing, err := generatedIngress(t, webWithTrait(ingressTraitWith(nil)), ctx)
+			if err != nil {
+				t.Fatalf("transform and generate: %v", err)
+			}
+			if got := ing.Annotations[kSSLRedirect]; got != "true" {
+				t.Errorf("annotation %s = %q, want the platform's true", kSSLRedirect, got)
+			}
+
+			_, err = generatedIngress(t, webWithTrait(ingressTraitWith(map[string]any{"annotations": map[string]any{kSSLRedirect: "false"}})), ctx)
+			if err == nil || !strings.Contains(err.Error(), "annotations."+kSSLRedirect) || !strings.Contains(err.Error(), "cannot override it") {
+				t.Fatalf("an authored value against the platform's: %v, want it refused by key", err)
+			}
+		})
+	}
+}
+
+// labelsLike is a named string map, as a consumer's own type for annotations.
+type labelsLike map[string]string
 
 // TestIngressHandler_PlatformAnnotations_Malformed: a value the platform's input
 // cannot hold is refused, not written.
