@@ -85,7 +85,8 @@ func renderedObjectRef(obj client.Object) string {
 // A workload — a Pod, a PodTemplate, a ReplicationController, a Deployment,
 // StatefulSet, DaemonSet or ReplicaSet, a Job or CronJob — has its pod spec
 // checked by enforcePodTemplatePolicy (host namespaces, hostPath volumes, the
-// storage and resource maxima, and per init and regular container the registry
+// storage and resource maxima, the registry allowlist on an image volume's
+// reference, and per init and regular container the registry
 // allowlist, the cpu and memory maxima, and the privileged, hostProcess and
 // capability gates), and every init and regular container's image by
 // ValidateImageRef: no untagged image and no :latest. Ephemeral containers are

@@ -2559,7 +2559,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
   Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
-  storage maximum on a generic ephemeral volume's claim, the pod-level cpu and
+  storage maximum on a generic ephemeral volume's claim, the registry
+  allowlist on an image volume's reference, the pod-level cpu and
   memory maxima, and for every init and regular container the registry
   allowlist, the cpu and memory maxima and the privileged, HostProcess and
   capability gates. It fills no policy default: a container without resources
@@ -2567,6 +2568,35 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   not allowed by environment policy`, `containers[0] "app": …`); the three
   rendered paths name it under the object (`passthrough: object Pod "runner":
   spec.containers[0] "app": …`).
+
+  **Image volumes** (go-kure/launcher#790). An image volume (`volumes[].image`)
+  mounts an OCI image the kubelet pulls as it pulls a container's, so its
+  `reference` is held to the allowed registries (`AllowedRegistries`), refused
+  with the registry class: `volume "ext" image.reference: image
+  "other.example/team/ext:1.0.0" is not from an allowed registry
+  [registry.example]`. The reference is read as a container image is: one
+  that names no registry host is Docker Hub's (`docker.io`), a tag or a digest
+  is not part of the host, and the host must equal a list entry exactly, a
+  trailing `/` on the entry aside (`registry.example:5000` is not
+  `registry.example`). A volume that names no
+  reference is not checked, and no list, or an empty one, allows every
+  registry. The one check holds it on every path by which a document brings
+  a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
+  `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
+  template delivery (`helmtemplate`), `passthrough` or a `manifests` source
+  carries. The components with a volume schema of their own (`webservice`,
+  `worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
+  no image volume: their `volumes` has no such type. With the container images these
+  are every field of a pod spec that names an image the kubelet pulls today.
+  A test walks the linked `k8s.io/api` type and fails on a field whose name
+  holds `image`, or whose type is the image volume source, that is neither
+  held nor listed with a reason; an image field under another name and
+  another type is not found by it. **Not covered:** a custom
+  resource that `passthrough`, a `manifests` source or a chart carries passes
+  whatever it holds, the pod template of a CloudNativePG Pooler included;
+  only the kind that builds the object holds its fields. **Breaking:** an
+  image volume naming a registry outside the list built before, on each of
+  those paths, and is refused now.
 
   **Known difference:** template delivery (`helmtemplate`), `passthrough` and
   `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
@@ -5358,6 +5388,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob in it,
     a kept hook's included, is checked as an authored workload is: host namespaces, hostPath
     volumes, the cpu/memory maxima, the storage maximum on a generic ephemeral volume's claim,
+    the registry allowlist on an image volume's reference (**breaking**, go-kure/launcher#790:
+    a chart that renders one from a registry outside the list built before; see *Image volumes*
+    under **pod** above),
     and for every init and regular container the registry allowlist, the privileged, HostProcess
     and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral
     containers are refused. The storage a PersistentVolumeClaim, or a StatefulSet's claim
@@ -6299,7 +6332,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   registry allowlist on each authored container image, cpu and memory maxima;
   errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
   limit "2" exceeds enforced maximum "1"`), caps a generic ephemeral volume's
-  claim at the policy storage maximum, and applies the registry allowlist to an
+  claim at the policy storage maximum, holds an image volume's reference to the
+  registry allowlist (`template.spec: volume "ext" image.reference: image "…" is
+  not from an allowed registry [...]`; **breaking**, go-kure/launcher#790, see
+  *Image volumes* under **pod**), and applies the registry allowlist to an
   authored `pgbouncer.image`. Generation runs the shared parser's
   request/limit and hugepages checks on the template's pod and container
   resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
@@ -6471,7 +6507,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `NoopPolicy` when no policy is passed. A Pod, PodTemplate, ReplicationController,
   Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob is checked as an authored
   workload is: host namespaces, hostPath volumes, the cpu/memory maxima, the storage
-  maximum on a generic ephemeral volume's claim, and for every init and regular container
+  maximum on a generic ephemeral volume's claim, the registry allowlist on an image
+  volume's reference (**breaking**, go-kure/launcher#790: an object with one from a
+  registry outside the list built before; see *Image volumes* under **pod** above), and
+  for every init and regular container
   the registry allowlist, the privileged, HostProcess and capability gates, and
   `ValidateImageRef` (no untagged image, no `:latest`). Ephemeral containers are refused.
   The storage a PersistentVolumeClaim, or a StatefulSet's claim template, requests is held
@@ -6610,14 +6649,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   environment policy with the check template delivery (`helmtemplate`) and `passthrough`
   use: each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet,
   ReplicaSet, Job and CronJob is checked as an authored workload is (host namespaces,
-  hostPath volumes, the cpu/memory maxima, the registry allowlist, the privileged,
+  hostPath volumes, the cpu/memory maxima, the registry allowlist on every init and
+  regular container's image and on an image volume's reference, the privileged,
   HostProcess and capability gates, `ValidateImageRef`, no ephemeral containers), a
   PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
   maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
   replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds
   its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
   `spec.capacity.storage` is held to the storage maximum (breaking for a source that
-  holds one; see **persistentvolume** above). The error names the object and the field (`manifest source: object
+  holds one; see **persistentvolume** above). An image volume from a registry outside
+  the list is refused since go-kure/launcher#790 (**breaking** for a source that holds
+  one; see *Image volumes* under **pod** above). The error names the object and the field (`manifest source: object
   Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
   holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
   before.
