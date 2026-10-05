@@ -6,6 +6,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -34,7 +35,8 @@ func (h *IngressClassHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"controller": {
 			Type:        oam.PropertyTypeString,
-			Description: "IngressClass spec.controller: the controller that handles Ingresses of this class, a domain-prefixed path such as k8s.io/ingress-nginx. Immutable once created.",
+			Required:    true,
+			Description: "Required. IngressClass spec.controller: the controller that handles Ingresses of this class, a domain-prefixed path such as k8s.io/ingress-nginx. Immutable once created.",
 		},
 		"parameters": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
@@ -44,10 +46,17 @@ func (h *IngressClassHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // ingressClassKind is the ingressclass kind: see policyFreeKind. The API
-// requires no top-level field of the spec; the value rules inside parameters
-// are left to the API server.
+// requires controller: the Go type omits an empty one, and the API server
+// refuses a class without it. The API's other value rules, those inside
+// parameters included, are left to the API server.
 var ingressClassKind = &policyFreeKind[networkingv1.IngressClassSpec]{
 	upstream: "networking.k8s.io/v1 IngressClassSpec",
+	validate: func(spec *networkingv1.IngressClassSpec) error {
+		if spec.Controller == "" {
+			return errors.New("controller: required (the controller that handles Ingresses of this class, a domain-prefixed path such as k8s.io/ingress-nginx)")
+		}
+		return nil
+	},
 	build: func(name, _ string, spec *networkingv1.IngressClassSpec) client.Object {
 		ic := kubernetes.CreateIngressClass(name)
 		spec.DeepCopyInto(&ic.Spec)

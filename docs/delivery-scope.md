@@ -630,10 +630,10 @@ be closed at build time.
   - `ingressclass` and `csidriver` project their spec type. The four classes have no
     spec type: the properties are the object's fields beside its identity, and `kind`,
     `apiVersion` and `metadata` are refused by name.
-  - A top-level field the API documents as required must be authored (`provisioner`,
-    `handler`, `driverName`, and at least one of a VolumeAttributesClass's `parameters`).
-    A PriorityClass `value` is not one: unauthored, it is emitted as `0`. Other value
-    rules are left to the API server.
+  - A top-level field the API server refuses an object without must be authored
+    (`provisioner`, `handler`, `driverName`, an IngressClass's `controller`, and at least
+    one of a VolumeAttributesClass's `parameters`). A PriorityClass `value` is not one:
+    unauthored, it is emitted as `0`. Other value rules are left to the API server.
   - Metadata is not authorable, as on every kind component, so a default StorageClass or
     IngressClass (an annotation) cannot be written with these kinds.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
