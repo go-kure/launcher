@@ -166,7 +166,7 @@ func ciliumRuleRequiredFromCRD(t *testing.T, schema apiextensionsv1.JSONSchemaPr
 		case strings.Contains(path, "{}"):
 			t.Errorf("%s is required under a map value, which a required list cannot name", path)
 		case !f.writtenUnauthored():
-			t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; the kind does not list it, and its documentation must say so", path)
+			t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; refuse it in the kind's validate with a test row, or list it in this test with the reason the decoded value cannot show the omission", path)
 		default:
 			listed = append(listed, path)
 		}

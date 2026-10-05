@@ -125,8 +125,11 @@ func TestCiliumPlainKinds_EmitTheServedVersion(t *testing.T) {
 // type would write unauthored, and holds the kind's required list to them. A
 // dependency bump that adds, drops or moves one fails here, naming it.
 //
-// None of these types leaves a required field out when it is not authored; one
-// that came to do so is reported, to be listed as left to the API server.
+// None of these types leaves a required field out when it is not authored. One
+// that came to do so fails here: the required list cannot hold it, so the
+// kind's validate refuses it on the decoded value, with a test row, or it is
+// listed in this test with the reason the decoded value cannot show the
+// omission.
 //
 // A required field may sit under a struct that is no pointer (a redirect
 // backend's selector and ports). The list reads what was authored, so such a
@@ -149,7 +152,7 @@ func TestCiliumPlainKinds_RequiredMatchCRD(t *testing.T) {
 				case strings.Contains(path, "{}"):
 					t.Errorf("%s is required under a map value, which a required list cannot name", path)
 				case !f.writtenUnauthored():
-					t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; the kind does not list it, and its documentation must say so", path)
+					t.Errorf("the CRD requires %s, which the type leaves out when it is not authored; refuse it in the kind's validate with a test row, or list it in this test with the reason the decoded value cannot show the omission", path)
 				default:
 					listed = append(listed, path)
 				}

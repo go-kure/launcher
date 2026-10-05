@@ -3066,7 +3066,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   not refuse a `cilium-networkpolicy` component. `passthrough`, `manifests`
   and template delivery emit a CiliumNetworkPolicy under the same terms. A
   consumer that restricts network policy restricts the component types it
-  registers. The object's own labels and annotations are the top-level
+  registers. **No literal secret is checked:** an HTTP header match's `value`
+  is written into the object as authored and is not refused, since a header
+  value cannot be told from a credential; a header match's `secret` refers to
+  a Secret by name and keeps the value out of the document. The object's own
+  labels and annotations are the top-level
   `labels` and `annotations` properties; a `labels` under `spec` or a `specs`
   entry is the rule's own field. **Not covered:** its `status`, which the
   Cilium agent writes.

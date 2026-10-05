@@ -429,61 +429,61 @@ func (h *CertificateHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // ComponentObject declares the cilium-bgpadvertisement kind's
 // CiliumBGPAdvertisement, which is cluster-scoped.
 func (h *CiliumBGPAdvertisementHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.BGPAKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.BGPAKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-bgpclusterconfig kind's
 // CiliumBGPClusterConfig, which is cluster-scoped.
 func (h *CiliumBGPClusterConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.BGPCCKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.BGPCCKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-bgpnodeconfigoverride kind's
 // CiliumBGPNodeConfigOverride, which is cluster-scoped.
 func (h *CiliumBGPNodeConfigOverrideHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.BGPNCOKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.BGPNCOKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-bgppeerconfig kind's
 // CiliumBGPPeerConfig, which is cluster-scoped.
 func (h *CiliumBGPPeerConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.BGPPCKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.BGPPCKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-cidrgroup kind's CiliumCIDRGroup, which
 // is cluster-scoped.
 func (h *CiliumCIDRGroupHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.CCGKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.CCGKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-loadbalancerippool kind's
 // CiliumLoadBalancerIPPool, which is cluster-scoped.
 func (h *CiliumLoadBalancerIPPoolHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.PoolKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.PoolKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-egressgatewaypolicy kind's
 // CiliumEgressGatewayPolicy, which is cluster-scoped.
 func (h *CiliumEgressGatewayPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.CEGPKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.CEGPKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cilium-localredirectpolicy kind's
 // CiliumLocalRedirectPolicy.
 func (h *CiliumLocalRedirectPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.CLRPKindDefinition), oam.ObjectScopeNamespaced
+	return ciliumKind(ciliumv2.CLRPKindDefinition), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cilium-nodeconfig kind's CiliumNodeConfig.
 func (h *CiliumNodeConfigHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.CNCKindDefinition), oam.ObjectScopeNamespaced
+	return ciliumKind(ciliumv2.CNCKindDefinition), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cilium-clusterwidenetworkpolicy kind's
 // CiliumClusterwideNetworkPolicy, which is cluster-scoped. It is another kind
 // than the CiliumNetworkPolicy the cilium-networkpolicy kind and trait claim.
 func (h *CiliumClusterwideNetworkPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return ciliumBGPKind(ciliumv2.CCNPKindDefinition), oam.ObjectScopeCluster
+	return ciliumKind(ciliumv2.CCNPKindDefinition), oam.ObjectScopeCluster
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

@@ -994,6 +994,11 @@ property that the list lacks.
 **Breaking**: a `cilium-networkpolicy` trait that leaves one of these fields out built
 before, into a policy the API server refuses, and is now refused at build time.
 
+**No literal secret is checked.** An HTTP header match's `value` is written into the
+policy as authored and is not refused, since a header value cannot be told from a
+credential. A header match's `secret` refers to a Secret by name and keeps the value out
+of the document.
+
 ### Null or empty `endpointSelector` / `egress` / `ingress`
 
 A `null` is **absence**, whatever its Go shape — the same contract as the

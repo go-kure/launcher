@@ -27,8 +27,8 @@ import (
 // artifact source, and none is held to the environment policy's allowed
 // registries.
 
-// ciliumBGPKind is the group and kind of one object of Cilium's API.
-func ciliumBGPKind(kind string) schema.GroupKind {
+// ciliumKind is the group and kind of one object of Cilium's API.
+func ciliumKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: ciliumv2.CustomResourceDefinitionGroup, Kind: kind}
 }
 
