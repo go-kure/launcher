@@ -115,7 +115,7 @@ reads it.
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
 | `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
 | `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; its scope follows its kind where that is known and `clusterScoped` otherwise; a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; a built-in kind has the scope the Kubernetes API gives it, any other kind the scope an authored `clusterScoped` states, or else the one registered for it (namespaced when unknown); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 
