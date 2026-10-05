@@ -34,6 +34,7 @@ var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(csiDriverKind),
 	policyFreeTypeOf(serviceCIDRKind),
 	policyFreeTypeOf(podDisruptionBudgetKind),
+	policyFreeTypeOf(endpointSliceKind),
 }
 
 // TestPolicyFreeKinds_NoDefaultedZeros: policyFreeKind.config passes no

@@ -714,8 +714,8 @@ its text:
   - It answers four cases: the Pod Security Admission labels of a Namespace, the
     default-class annotation of a StorageClass or an IngressClass, the labels a
     Prometheus selects a ServiceMonitor, a PodMonitor, a Probe or a PrometheusRule by,
-    and the `kubernetes.io/service-name` label of an EndpointSlice, whose kind is the
-    next to add.
+    and the `kubernetes.io/service-name` label of an EndpointSlice (the
+    `endpointslice` kind, below).
   - Breaking: nothing for a document that built before. A type that declared a property
     named `labels` or `annotations` of its own keeps it only if it declares no object.
 - **Shipped: the kind inventory.** `pkg/oam/builtin/components/README.md` "Kind
@@ -1049,11 +1049,26 @@ its text:
   - The pods a controller starts for a Gateway are not sized by the object, so the
     policy's maxima have nothing to hold. Labels and annotations are the `labels` and
     `annotations` properties, as on every kind component.
-- **Held: `endpointslice`.** A slice belongs to a Service only through the
-  `kubernetes.io/service-name` label, which a kind component could not carry before
-  the kinds took `labels` (above). Its inventory row stays `held` until the kind is
-  added; the label will be the author's literal, which does not follow the Service's
-  `objectName`.
+- **Shipped: `endpointslice`** (`endpointslice.go`), the projection of a
+  `discovery.k8s.io/v1` EndpointSlice on the shared helper `policyFreeKind`, in the
+  build namespace. It was held until the kinds took `labels` (above).
+  - An EndpointSlice has no spec: the properties are the object's own fields
+    (`addressType`, `endpoints`, `ports`), strictly decoded, and its `kind`,
+    `apiVersion` and `metadata` are refused.
+  - A slice belongs to a Service only through the `kubernetes.io/service-name` label,
+    authored under `labels`. It is the author's literal and does not follow a
+    Service's `objectName`.
+  - The required list (`addressType`, an endpoint's `addresses`, the `name` of a zone
+    or node hint) is the fields the API's source marks required and the type writes
+    whether or not they were authored. A test derives it from the markers of the
+    linked `k8s.io/api` module, and fails on a required field the type omits when
+    unauthored: the kind has none. The check is of presence; the form of every value
+    is left to the API server.
+  - The type writes `endpoints`, `ports` and an endpoint's `conditions` when they
+    are not authored, and the API does not require them: the object carries them
+    empty (`null`, `null`, `{}`).
+  - **Hosts are not checked:** the addresses of an endpoint, FQDNs included, are not
+    artifact sources and are not held to the allowed registries.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
@@ -1254,7 +1269,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant` and `backendtlspolicy` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy` and `endpointslice` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

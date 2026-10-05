@@ -14,6 +14,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -121,6 +122,9 @@ var coreKindSchemas = []struct {
 	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
 	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
 	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
+	// An EndpointSlice has no spec type either: the component projects the
+	// object, less its identity.
+	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no
@@ -141,6 +145,14 @@ func objectIdentityExcluded(emits string) map[string]string {
 		"apiVersion": "launcher emits " + emits + "; the object's type is not authored",
 		"metadata":   "launcher sets the object's name, as on every kind component",
 	}
+}
+
+// namespacedObjectIdentityExcluded is objectIdentityExcluded for a kind that
+// projects a whole namespaced object.
+func namespacedObjectIdentityExcluded(emits string) map[string]string {
+	excluded := objectIdentityExcluded(emits)
+	excluded["metadata"] = "launcher sets the object's name and namespace, as on every kind component"
+	return excluded
 }
 
 // checkCoreKindProperty holds one published property to the Go type it decodes

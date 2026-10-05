@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -514,6 +515,11 @@ func (h *ReferenceGrantHandler) ComponentObject() (schema.GroupKind, oam.ObjectS
 // ComponentObject declares the backendtlspolicy kind's BackendTLSPolicy.
 func (h *BackendTLSPolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return gatewayAPIKind("BackendTLSPolicy"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the endpointslice kind's EndpointSlice.
+func (h *EndpointSliceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: discoveryv1.GroupName, Kind: "EndpointSlice"}, oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cnpg-cluster kind's Cluster.

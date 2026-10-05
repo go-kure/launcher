@@ -55,10 +55,17 @@ var kubebuilderDefault = regexp.MustCompile(`^\+kubebuilder:default:?=(.*)$`)
 // field under its type's name.
 func monitoringFieldMarkers(t *testing.T) map[string]fieldMarkers {
 	t.Helper()
-	dir := filepath.Join(linkedModuleDir(t, monitoringModulePath), "v1")
+	return packageFieldMarkers(t, filepath.Join(linkedModuleDir(t, monitoringModulePath), "v1"))
+}
+
+// packageFieldMarkers reads the markers of every struct field the Go package
+// in dir declares, keyed by "<type>.<Go field name>", an embedded field under
+// its type's name.
+func packageFieldMarkers(t *testing.T, dir string) map[string]fieldMarkers {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read the module's v1 package: %v", err)
+		t.Fatalf("read the package in %s: %v", dir, err)
 	}
 	out := map[string]fieldMarkers{}
 	fset := token.NewFileSet()

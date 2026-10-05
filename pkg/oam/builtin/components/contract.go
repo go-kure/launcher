@@ -308,6 +308,11 @@ func (h *BackendTLSPolicyHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *EndpointSliceHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("endpointslice")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the

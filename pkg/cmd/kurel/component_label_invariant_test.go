@@ -404,6 +404,14 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"backendtlspolicy": {props: map[string]any{
 		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
 		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
+	// An EndpointSlice is identity and the authored fields too. It selects no
+	// pod: it lists addresses, and belongs to a Service through a label the
+	// author writes under `labels`. It checks no name rule of its own.
+	"endpointslice": {props: map[string]any{
+		"addressType": "IPv4",
+		"endpoints":   []any{map[string]any{"addresses": []any{"192.0.2.10"}}},
+		"ports":       []any{map[string]any{"name": "http", "port": 8080}},
+	}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
