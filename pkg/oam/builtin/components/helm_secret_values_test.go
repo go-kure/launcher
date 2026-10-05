@@ -258,7 +258,7 @@ func TestHelmRule_SecretValuesNameBounds(t *testing.T) {
 // TestHelmRule_SecretValuesSharedPath: a path set in both values and
 // secretValues is refused under every delivery and values mode, naming the path
 // and never a value. Two objects at one key are compared key by key, so a
-// sibling key is not a shared path.
+// sibling key is not a shared path; a nil map is a null, not an object.
 func TestHelmRule_SecretValuesSharedPath(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -272,6 +272,9 @@ func TestHelmRule_SecretValuesSharedPath(t *testing.T) {
 		{"object against scalar", map[string]any{"auth": map[string]any{"user": "admin"}}, map[string]any{"auth": sensitive}, "auth"},
 		{"scalar against object", map[string]any{"auth": "plain"}, map[string]any{"auth": map[string]any{"password": sensitive}}, "auth"},
 		{"lists", map[string]any{"hosts": []any{"a"}}, map[string]any{"hosts": []any{sensitive}}, "hosts"},
+		// A nil map is a null on either side, under every delivery.
+		{"nil map against object", map[string]any{"auth": map[string]any(nil)}, map[string]any{"auth": map[string]any{"password": sensitive}}, "auth"},
+		{"object against nil map", map[string]any{"auth": map[string]any{"user": "admin"}}, map[string]any{"auth": map[string]any(nil), "token": sensitive}, "auth"},
 		{"first in sorted order", map[string]any{"b": 1, "a": 1}, map[string]any{"b": sensitive, "a": sensitive}, "a"},
 	}
 	modes := map[string]func(map[string]any){
