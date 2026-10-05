@@ -30,8 +30,8 @@ func validateCnpgPoolerName(name string) error {
 // refusePoolerNamedAsCluster refuses a Pooler whose cluster reference is the
 // Pooler's own name. It is the one text of that refusal: for the object
 // (CnpgPoolerConfig.validate) and wherever a pooler's endpoint is answered
-// (PostgresqlRule.EndpointsNamed), so no caller is handed a selector for a
-// pooler the build refuses.
+// (CnpgPoolerHandler.Endpoints, PostgresqlRule.EndpointsNamed), so no caller
+// is handed a selector for a pooler the build refuses.
 func refusePoolerNamedAsCluster(pooler, cluster string) error {
 	if cluster == pooler {
 		return errors.Errorf("cluster.name %q: a pooler cannot have the same name as its cluster", pooler)
@@ -63,11 +63,23 @@ func (h *CnpgPoolerHandler) CanHandle(componentType string) bool {
 // its Pooler <component name>-pooler unless the author or the consumer's naming
 // hook names it otherwise: a cnpg-pooler component of that name
 // declares an identical selector, so a synthesized ingress allow does not
-// change when a pooler moves from one to the other.
+// change when a pooler moves from one to the other. A pooler whose authored
+// `cluster.name` is its own name has no endpoint: it is refused here as the
+// build refuses it (refusePoolerNamedAsCluster).
 func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	name := component.ObjectName()
 	if err := validateCnpgPoolerName(name); err != nil {
 		return nil, err
+	}
+	// The one relation between two names the build refuses (validate): a
+	// cluster reference that is the Pooler's own name. Only an authored string
+	// is compared; whatever else `cluster` holds is the decode's to refuse.
+	if cluster, ok := component.Properties["cluster"].(map[string]any); ok {
+		if clusterName, ok := cluster["name"].(string); ok {
+			if err := refusePoolerNamedAsCluster(name, clusterName); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: name}},

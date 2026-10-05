@@ -6517,7 +6517,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
   Service's, so it must be a DNS-1035 label of at most 63 characters, and a
-  pooler named like its cluster is refused, as CloudNativePG's webhook does.
+  pooler named like its cluster is refused, as CloudNativePG's webhook does:
+  by the build, and where its endpoint is collected in the same words
+  (`cluster.name "main": a pooler cannot have the same name as its cluster`).
   `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
   namespaces, hostPath volumes, privilege, host-process, capabilities, the
   registry allowlist on each authored container image, cpu and memory maxima;
