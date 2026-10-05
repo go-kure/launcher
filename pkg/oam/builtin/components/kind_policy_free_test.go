@@ -211,6 +211,10 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 				// properties, so a handler that changed its input could not
 				// change what its object is compared with.
 				authored, data := authoredProperties(t, props)
+				before, err := json.Marshal(props)
+				if err != nil {
+					t.Fatalf("marshal the properties: %v", err)
+				}
 
 				obj := generateCoreKind(t, kind.handler, kind.component, "fast", props)
 				if got := obj.GetObjectKind().GroupVersionKind(); got != kind.gvk {
@@ -219,8 +223,9 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 				if obj.GetNamespace() != "" {
 					t.Errorf("namespace = %q, want none on a cluster-scoped object", obj.GetNamespace())
 				}
-				if _, after := authoredProperties(t, props); !bytes.Equal(after, data) {
-					t.Errorf("the handler changed its input: %s, was %s", after, data)
+				// The whole input, null entries included.
+				if after, err := json.Marshal(props); err != nil || !bytes.Equal(after, before) {
+					t.Errorf("the handler changed its input: %s (err %v), was %s", after, err, before)
 				}
 
 				// What the object must encode to: its identity and the authored
