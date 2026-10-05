@@ -996,8 +996,8 @@ runs both; see `pkg/oam/README.md`, "Nothing above compares the applications ins
 document").
 
 Every trait's sub-application name is resolved under the `sub-application` role, so the hook
-can rename it. That name is not the object's: the `configmap`, `ingress`, `httproute` and
-`volsync` objects keep their own name when their sub-application is renamed.
+can rename it. That name is not the object's: the `configmap`, `secret`, `ingress`,
+`httproute` and `volsync` objects keep their own name when their sub-application is renamed.
 
 | Trait | Property | What it names |
 |-------|----------|---------------|

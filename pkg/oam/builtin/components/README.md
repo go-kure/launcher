@@ -2755,7 +2755,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `helm: auth.password is set in both values and secretValues; a path may be
       set in only one of them`. Two objects at the same key are compared key by
       key; anything else at a key both trees set (a scalar, a list, a null, and
-      a nil map a Go caller passes, which is a null) is a shared path. An empty
+      a nil map a Go caller passes, which is a null) is a shared path. Under
+      `delivery: template` the two trees are compared as they are, without a
+      JSON round trip, since the render takes the values with their Go types:
+      an object is a `map[string]any`, which is all a parsed document holds, and
+      a map of another type a Go caller passes (`map[string]string`) at a key
+      both trees set is a shared path too. An empty
       key is a key like any other and is written `""` in
       the message. Without the refusal the winner would depend on the values mode,
       since Flux applies inline `spec.values` after every `valuesFrom` entry.
