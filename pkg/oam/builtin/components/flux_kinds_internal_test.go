@@ -17,6 +17,7 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
@@ -32,6 +33,7 @@ var fluxMarkerModules = []string{
 	"github.com/fluxcd/image-reflector-controller/api",
 	"github.com/fluxcd/image-automation-controller/api",
 	"github.com/fluxcd/source-controller/api",
+	"github.com/fluxcd/source-watcher/api/v2",
 	"github.com/fluxcd/pkg/apis/meta",
 }
 
@@ -49,6 +51,7 @@ var fluxKindRows = []struct {
 	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations)},
 	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations)},
 	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations)},
+	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), artifactGeneratorKind.required, nil, durationForms(artifactGeneratorKind.durations)},
 }
 
 // durationForms is a kind's duration fields by path, each with its form.
@@ -74,6 +77,9 @@ var fluxRulesLeft = map[string]map[string]string{
 	imagePolicyType: {
 		"spec: !has(self.interval) || (has(self.digestReflectionPolicy) && self.digestReflectionPolicy == 'Always')": "an `interval` without `digestReflectionPolicy: Always` builds and is refused at apply: " + fluxNoCRD,
 		"spec: has(self.interval) || !has(self.digestReflectionPolicy) || self.digestReflectionPolicy != 'Always'":   "`digestReflectionPolicy: Always` without an `interval` builds and is refused at apply: " + fluxNoCRD,
+	},
+	artifactGeneratorType: {
+		`spec: has(self.pathPattern) && size(self.pathPattern) > 0 || self.artifacts.all(a, a.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'))`: "without a `pathPattern`, an artifact whose `name` is no Kubernetes object name builds and is refused at apply: " + fluxNoCRD,
 	},
 }
 

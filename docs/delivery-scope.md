@@ -798,6 +798,35 @@ its text:
   (`TestKindInventory_CoversEveryConstructor`, `TestKindInventory_MatchesCallSites`,
   `kind_inventory_internal_test.go`): a base-library bump that adds a kind fails until the
   table has its row.
+- **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
+  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `imagepolicy`
+  (`imagepolicy.go`), `imageupdateautomation` (`imageupdateautomation.go`) and
+  `artifactgenerator` (`artifactgenerator.go`), with
+  what such kinds share in `kind_flux.go`: the strict projection of its spec type,
+  declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
+  two additions. The Flux namespace: the object lands there when one is set, as the
+  Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
+  an Alert, an ImagePolicy and an ArtifactGenerator read nothing, an
+  ImageUpdateAutomation the Secret of its signing key). And its durations, held to the pattern their fields declare as on the
+  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation).
+  - **Nothing gates what such an object reaches outside its namespace:** a source's
+    `namespace` on an Alert, the repository's on an ImagePolicy, the GitRepository's
+    on an ImageUpdateAutomation, which commits and pushes through it, and a source's on
+    an ArtifactGenerator, which copies that source's content into its artifacts, are
+    written as authored, as the references and the accounts of a `helmrelease` and a
+    `fluxcd-kustomization` are. No environment policy applies and no `Policy` method is
+    added.
+  - Required fields follow the rule of the Prometheus operator's kinds, and are derived
+    as theirs are, from the `+required` markers of the linked modules' Go source: the
+    API modules of the Flux controllers ship no CRD, so no list is held to the API
+    server's validator.
+  - **The APIs' expression rules are not checked,** for the same reason: a check is
+    held to the API server's validator (go-kure/launcher#874), which answers from a
+    CRD. An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
+    reverse, builds and is refused at apply; so does an ArtifactGenerator without a
+    `pathPattern` whose artifact is not named as a Kubernetes object. The rules are listed from the markers of
+    the linked source, and a test fails on one added or reworded.
+  - No default is filled, and the API's other value rules are the API server's.
 - **Shipped: five kinds of the Gateway API's `gateway.networking.k8s.io/v1`
   infrastructure objects,** `gatewayclass`, `gateway`, `listenerset`, `referencegrant`
   and `backendtlspolicy` (`gatewayclass.go`, `gateway.go`, `listenerset.go`,
@@ -1105,32 +1134,6 @@ its text:
     empty (`null`, `null`, `{}`).
   - **Hosts are not checked:** the addresses of an endpoint, FQDNs included, are not
     artifact sources and are not held to the allowed registries.
-- **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
-  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `imagepolicy`
-  (`imagepolicy.go`) and `imageupdateautomation` (`imageupdateautomation.go`), with
-  what such kinds share in `kind_flux.go`: the strict projection of its spec type,
-  declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
-  two additions. The Flux namespace: the object lands there when one is set, as the
-  Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
-  an Alert and an ImagePolicy read nothing, an ImageUpdateAutomation the Secret of its
-  signing key). And its durations, held to the pattern their fields declare as on the
-  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation).
-  - **Nothing gates what such an object reaches outside its namespace:** a source's
-    `namespace` on an Alert, the repository's on an ImagePolicy and the GitRepository's
-    on an ImageUpdateAutomation, which commits and pushes through it, are written as
-    authored, as the references and the accounts of a `helmrelease` and a
-    `fluxcd-kustomization` are. No environment policy applies and no `Policy` method is
-    added.
-  - Required fields follow the rule of the Prometheus operator's kinds, and are derived
-    as theirs are, from the `+required` markers of the linked modules' Go source: the
-    API modules of the Flux controllers ship no CRD, so no list is held to the API
-    server's validator.
-  - **The APIs' expression rules are not checked,** for the same reason: a check is
-    held to the API server's validator (go-kure/launcher#874), which answers from a
-    CRD. An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
-    reverse, builds and is refused at apply. The rules are listed from the markers of
-    the linked source, and a test fails on one added or reworded.
-  - No default is filled, and the API's other value rules are the API server's.
 - **Shipped: `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`**
   (`servicecidr.go`, `poddisruptionbudget.go`, `horizontalpodautoscaler.go`), each the
   strict projection of its spec type, declaring its object and taking `objectName`.

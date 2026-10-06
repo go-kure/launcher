@@ -89,6 +89,11 @@ func (h *ImageUpdateAutomationHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ArtifactGeneratorHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(artifactGeneratorType)
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *HelmRepositoryHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("helmrepository")
 }

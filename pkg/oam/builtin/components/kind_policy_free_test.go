@@ -17,6 +17,7 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -109,6 +110,13 @@ func (k policyFreeKind) scope() oam.ObjectScope {
 // policyFreeKinds lists them, in the order of their component type: a new
 // kind's row goes at its position (TestKindLists_InOrder, pkg/cmd/kurel).
 var policyFreeKinds = []policyFreeKind{
+	{
+		component: "artifactgenerator", handler: &components.ArtifactGeneratorHandler{},
+		gvk: swv1beta1.GroupVersion.WithKind(swv1beta1.ArtifactGeneratorKind),
+		typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), namespaced: true, flux: true,
+		minimal: artifactGeneratorMinimal(),
+		full:    artifactGeneratorFull(),
+	},
 	{
 		component: "backendtlspolicy", handler: &components.BackendTLSPolicyHandler{},
 		gvk: gatewayGVK("BackendTLSPolicy"),
@@ -1126,6 +1134,11 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 	}
 	// In the order of the component types, as policyFreeKinds.
 	reaches := map[string][]string{
+		"artifactgenerator": {
+			".Spec.CommonMetadata", ".Spec.CommonMetadata.Labels", ".Spec.CommonMetadata.Annotations",
+			".Spec.Sources", ".Spec.OutputArtifacts", ".Spec.OutputArtifacts[0].Copy",
+			".Spec.OutputArtifacts[0].Copy[0].Exclude",
+		},
 		"backendtlspolicy": {
 			".Spec.TargetRefs", ".Spec.TargetRefs[1].SectionName", ".Spec.Validation.CACertificateRefs",
 			".Spec.Validation.SubjectAltNames", ".Spec.Options",
@@ -1519,6 +1532,25 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 	}
 	// In the order of the component types, as policyFreeKinds.
 	cases := map[string][]refusal{
+		"artifactgenerator": {
+			{"no properties", nil, ": required"},
+			{"no sources", map[string]any{"artifacts": []any{artifactGeneratorArtifact()}}, "sources: required"},
+			{"source without an alias", artifactGeneratorWith(map[string]any{"kind": "GitRepository", "name": "app"}), "sources[0].alias: required"},
+			{"source without a kind", artifactGeneratorWith(map[string]any{"alias": "app", "name": "app"}), "sources[0].kind: required"},
+			{"second source without a name", artifactGeneratorWith(artifactGeneratorSource(), map[string]any{"alias": "base", "kind": "OCIRepository"}), "sources[1].name: required"},
+			{"no artifacts", map[string]any{"sources": []any{artifactGeneratorSource()}}, "artifacts: required"},
+			{"artifact without a name", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"copy": []any{artifactGeneratorCopy()}}}), "artifacts[0].name: required"},
+			{"artifact without a copy", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app"}}), "artifacts[0].copy: required"},
+			{"copy without a from", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app", "copy": []any{map[string]any{"to": "@artifact/"}}}}), "artifacts[0].copy[0].from: required"},
+			{"copy without a to", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app", "copy": []any{artifactGeneratorCopy(), map[string]any{"from": "@app/**"}}}}), "artifacts[0].copy[1].to: required"},
+			{"unknown key", withProperty(artifactGeneratorMinimal(), "outputArtifacts", []any{}), notA + "source.extensions.fluxcd.io/v1beta1 ArtifactGeneratorSpec"},
+			{"the object's spec", map[string]any{"spec": artifactGeneratorMinimal()}, notA},
+			{"source sub-key", artifactGeneratorWith(map[string]any{"alias": "app", "kind": "GitRepository", "name": "app", "apiVersion": "source.toolkit.fluxcd.io/v1"}), notA},
+			{"copy sub-key", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app", "copy": []any{map[string]any{"from": "@app/**", "to": "@artifact/", "mode": "0644"}}}}), notA},
+			{"sources a map", withProperty(artifactGeneratorMinimal(), "sources", map[string]any{"app": artifactGeneratorSource()}), notA},
+			{"null source", artifactGeneratorWith(artifactGeneratorSource(), nil), "sources[1]"},
+			{"two spellings", withProperty(artifactGeneratorMinimal(), "Sources", []any{artifactGeneratorSource()}), "sets the same field as"},
+		},
 		"backendtlspolicy": {
 			{"no properties", nil, ": required"},
 			{"no validation", map[string]any{"targetRefs": []any{backendTLSTarget()}}, "validation: required"},
