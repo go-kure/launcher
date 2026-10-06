@@ -1,0 +1,721 @@
+package oam
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// holding returns base with labels at path, the object that holds labels and
+// annotations there. Nil labels leave base as it is.
+func holding(t *testing.T, base *unstructured.Unstructured, labels map[string]string, path ...string) *unstructured.Unstructured {
+	t.Helper()
+	if labels == nil {
+		return base
+	}
+	raw := make(map[string]any, len(labels))
+	for k, v := range labels {
+		raw[k] = v
+	}
+	if err := unstructured.SetNestedField(base.Object, raw, append(slices.Clone(path), "labels")...); err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
+// unstructuredObject is an object of kind named w, with nothing but its name.
+func unstructuredObject(apiVersion, kind string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata":   map[string]any{"name": "w"},
+	}}
+}
+
+// labelHeldAt returns the value obj holds for key in the labels at path, and
+// whether it holds one.
+func labelHeldAt(t *testing.T, obj client.Object, key string, path ...string) (string, bool) {
+	t.Helper()
+	content, err := objectContent(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, found, err := nestedObject(content, path...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		return "", false
+	}
+	labels, _, err := objectField(holder, "labels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, held := labels[key].(string)
+	return got, held
+}
+
+// labelHolderRow is one place the component label check reads, on one kind of
+// object, typed or unstructured.
+type labelHolderRow struct {
+	name string
+	// where is the object as a refusal names it, and path where it holds the
+	// labels.
+	where string
+	path  []string
+	// filled says the wrapper writes the label there when the key is absent. It
+	// reads the other places and writes nothing into them.
+	filled bool
+	// build returns the object the config hands out, with labels at path, and
+	// the object that holds them: the object itself, or a member of the list it
+	// is.
+	build func(t *testing.T, labels map[string]string) (obj, holder client.Object)
+}
+
+func labelHolderRows() []labelHolderRow {
+	own := func(build func(t *testing.T, labels map[string]string) client.Object) func(*testing.T, map[string]string) (client.Object, client.Object) {
+		return func(t *testing.T, labels map[string]string) (client.Object, client.Object) {
+			obj := build(t, labels)
+			return obj, obj
+		}
+	}
+	typed := func(build func(labels map[string]string) client.Object) func(*testing.T, map[string]string) (client.Object, client.Object) {
+		return own(func(_ *testing.T, labels map[string]string) client.Object { return build(labels) })
+	}
+	unstructuredAt := func(base func() *unstructured.Unstructured, path ...string) func(*testing.T, map[string]string) (client.Object, client.Object) {
+		return own(func(t *testing.T, labels map[string]string) client.Object { return holding(t, base(), labels, path...) })
+	}
+	// member returns a list holding the object build returns, at depth lists.
+	member := func(depth int, build func(*testing.T, map[string]string) (client.Object, client.Object)) func(*testing.T, map[string]string) (client.Object, client.Object) {
+		return func(t *testing.T, labels map[string]string) (client.Object, client.Object) {
+			_, holder := build(t, labels)
+			items := []any{holder.(*unstructured.Unstructured).Object}
+			for range depth - 1 {
+				items = []any{map[string]any{"apiVersion": "v1", "kind": "List", "items": items}}
+			}
+			return &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": items}}, holder
+		}
+	}
+	workload := func(apiVersion, kind string) func() *unstructured.Unstructured {
+		return func() *unstructured.Unstructured { return unstructuredWorkload(apiVersion, kind) }
+	}
+	object := func(apiVersion, kind string) func() *unstructured.Unstructured {
+		return func() *unstructured.Unstructured { return unstructuredObject(apiVersion, kind) }
+	}
+
+	metadata := []string{"metadata"}
+	template := []string{"spec", "template", "metadata"}
+	cronTemplate := []string{"spec", "jobTemplate", "spec", "template", "metadata"}
+	bareTemplate := []string{"template", "metadata"}
+	inherited := []string{"spec", "inheritedMetadata"}
+	podMetadata := []string{"spec", "podMetadata"}
+	named := metav1.ObjectMeta{Name: "w"}
+
+	rows := []labelHolderRow{
+		// An object's own labels. A typed object that states no kind is named by
+		// its Go type.
+		{name: "typed ConfigMap", where: `*v1.ConfigMap "w"`, path: metadata, filled: true, build: typed(func(l map[string]string) client.Object {
+			return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "w", Labels: l}}
+		})},
+		{name: "typed Pod", where: `Pod "w"`, path: metadata, filled: true, build: typed(func(l map[string]string) client.Object {
+			return &corev1.Pod{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}, ObjectMeta: metav1.ObjectMeta{Name: "w", Labels: l}}
+		})},
+		{name: "unstructured ConfigMap", where: `ConfigMap "w"`, path: metadata, filled: true, build: unstructuredAt(object("v1", "ConfigMap"), metadata...)},
+		{name: "unstructured Pod", where: `Pod "w"`, path: metadata, filled: true, build: unstructuredAt(object("v1", "Pod"), metadata...)},
+		{name: "unstructured Deployment, its own labels", where: `Deployment "w"`, path: metadata, filled: true, build: unstructuredAt(workload("apps/v1", "Deployment"), metadata...)},
+
+		// The eight pod templates, typed.
+		{name: "typed Deployment", where: `Deployment "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &appsv1.Deployment{ObjectMeta: named}
+			o.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed StatefulSet", where: `StatefulSet "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &appsv1.StatefulSet{ObjectMeta: named}
+			o.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed DaemonSet", where: `DaemonSet "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &appsv1.DaemonSet{ObjectMeta: named}
+			o.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed Job", where: `Job "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &batchv1.Job{ObjectMeta: named}
+			o.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed CronJob", where: `CronJob "w"`, path: cronTemplate, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &batchv1.CronJob{ObjectMeta: named}
+			o.Spec.JobTemplate.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed ReplicaSet", where: `ReplicaSet "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &appsv1.ReplicaSet{ObjectMeta: named}
+			o.Spec.Template.Labels = l
+			return o
+		})},
+		{name: "typed ReplicationController", where: `ReplicationController "w"`, path: template, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &corev1.ReplicationController{ObjectMeta: named}
+			o.Spec.Template = &corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: l}}
+			return o
+		})},
+		{name: "typed PodTemplate", where: `PodTemplate "w"`, path: bareTemplate, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &corev1.PodTemplate{ObjectMeta: named}
+			o.Template.Labels = l
+			return o
+		})},
+
+		// The same eight, unstructured.
+		{name: "unstructured Deployment", where: `Deployment "w"`, path: template, filled: true, build: unstructuredAt(workload("apps/v1", "Deployment"), template...)},
+		{name: "unstructured StatefulSet", where: `StatefulSet "w"`, path: template, filled: true, build: unstructuredAt(workload("apps/v1", "StatefulSet"), template...)},
+		{name: "unstructured DaemonSet", where: `DaemonSet "w"`, path: template, filled: true, build: unstructuredAt(workload("apps/v1", "DaemonSet"), template...)},
+		{name: "unstructured Job", where: `Job "w"`, path: template, filled: true, build: unstructuredAt(workload("batch/v1", "Job"), template...)},
+		{name: "unstructured CronJob", where: `CronJob "w"`, path: cronTemplate, filled: true, build: unstructuredAt(workload("batch/v1", "CronJob"), cronTemplate...)},
+		{name: "unstructured ReplicaSet", where: `ReplicaSet "w"`, path: template, filled: true, build: unstructuredAt(workload("apps/v1", "ReplicaSet"), template...)},
+		{name: "unstructured ReplicationController", where: `ReplicationController "w"`, path: template, filled: true, build: unstructuredAt(workload("v1", "ReplicationController"), template...)},
+		{name: "unstructured PodTemplate", where: `PodTemplate "w"`, path: bareTemplate, filled: true, build: unstructuredAt(workload("v1", "PodTemplate"), bareTemplate...)},
+
+		// The members of a list envelope, as Flux applies them.
+		{name: "a List member", where: `ConfigMap "w"`, path: metadata, filled: true, build: member(1, unstructuredAt(object("v1", "ConfigMap"), metadata...))},
+		{name: "a List member's pod template", where: `Deployment "w"`, path: template, filled: true, build: member(1, unstructuredAt(workload("apps/v1", "Deployment"), template...))},
+		{name: "the member of a list inside a List", where: `StatefulSet "w"`, path: template, filled: true, build: member(2, unstructuredAt(workload("apps/v1", "StatefulSet"), template...))},
+
+		// Metadata an operator hands on: read, and never written.
+		{name: "typed Cluster", where: `Cluster "w"`, path: inherited, build: typed(func(l map[string]string) client.Object {
+			return &cnpgv1.Cluster{ObjectMeta: named, Spec: cnpgv1.ClusterSpec{InheritedMetadata: &cnpgv1.EmbeddedObjectMetadata{Labels: l}}}
+		})},
+		{name: "unstructured Cluster", where: `Cluster "w"`, path: inherited, build: unstructuredAt(object("postgresql.cnpg.io/v1", "Cluster"), inherited...)},
+		{name: "typed Pooler", where: `Pooler "w"`, path: template, build: typed(func(l map[string]string) client.Object {
+			return &cnpgv1.Pooler{ObjectMeta: named, Spec: cnpgv1.PoolerSpec{Template: &cnpgv1.PodTemplateSpec{ObjectMeta: cnpgv1.Metadata{Labels: l}}}}
+		})},
+		{name: "unstructured Pooler", where: `Pooler "w"`, path: template, build: unstructuredAt(object("postgresql.cnpg.io/v1", "Pooler"), template...)},
+		{name: "Prometheus", where: `Prometheus "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "Prometheus"), podMetadata...)},
+		{name: "PrometheusAgent", where: `PrometheusAgent "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1alpha1", "PrometheusAgent"), podMetadata...)},
+		{name: "Alertmanager", where: `Alertmanager "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "Alertmanager"), podMetadata...)},
+		{name: "ThanosRuler", where: `ThanosRuler "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "ThanosRuler"), podMetadata...)},
+	}
+	return rows
+}
+
+// TestOwnedConfig_ComponentLabelIsAuthoritative: wherever an object holds
+// labels that reach pods or objects in the cluster, a value under the component
+// label's key is the owning component's. Another component's is refused, with
+// the component, the object and the path; the component's own stays; and where
+// the key is absent the wrapper writes it, except into metadata an operator
+// hands on, which it only reads.
+func TestOwnedConfig_ComponentLabelIsAuthoritative(t *testing.T) {
+	generate := func(obj client.Object) ([]*client.Object, error) {
+		inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+		return stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+	}
+	for _, row := range labelHolderRows() {
+		labelsPath := strings.Join(row.path, ".") + ".labels"
+
+		t.Run(row.name+"/another component's value is refused", func(t *testing.T) {
+			obj, holder := row.build(t, map[string]string{"tier": "front", ownershipKey: "db"})
+			objs, err := generate(obj)
+			if err == nil {
+				t.Fatal("Generate accepted another component's value")
+			}
+			if objs != nil {
+				t.Errorf("Generate returned %d objects beside the refusal", len(objs))
+			}
+			for _, want := range []string{row.where, labelsPath + `["` + ownershipKey + `"]`, `"db"`, `component "web" ("web")`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not say %s", err, want)
+				}
+			}
+			// Refused before the stamp: the object is as its config made it.
+			if got, _ := labelHeldAt(t, holder, ownershipKey, row.path...); got != "db" {
+				t.Errorf("%s[%s] = %q after the refusal, want it as written", labelsPath, ownershipKey, got)
+			}
+			if len(row.path) > 1 {
+				if got, stamped := labelHeldAt(t, holder, ownershipKey, "metadata"); stamped {
+					t.Errorf("the refused object carries the component label %q", got)
+				}
+			}
+		})
+
+		t.Run(row.name+"/the component's value stays", func(t *testing.T) {
+			obj, holder := row.build(t, map[string]string{"tier": "front", ownershipKey: "web"})
+			for range 2 {
+				if _, err := generate(obj); err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+			}
+			if got, _ := labelHeldAt(t, holder, ownershipKey, row.path...); got != "web" {
+				t.Errorf("%s[%s] = %q, want web", labelsPath, ownershipKey, got)
+			}
+			if got, _ := labelHeldAt(t, holder, "tier", row.path...); got != "front" {
+				t.Errorf("%s[tier] = %q, want it as written", labelsPath, got)
+			}
+		})
+
+		t.Run(row.name+"/an absent key", func(t *testing.T) {
+			obj, holder := row.build(t, nil)
+			for range 2 {
+				if _, err := generate(obj); err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+			}
+			if got, _ := labelHeldAt(t, holder, ownershipKey, "metadata"); got != "web" {
+				t.Errorf("object label = %q, want web", got)
+			}
+			got, held := labelHeldAt(t, holder, ownershipKey, row.path...)
+			if row.filled && got != "web" {
+				t.Errorf("%s[%s] = %q, want the wrapper's web", labelsPath, ownershipKey, got)
+			}
+			if !row.filled && held {
+				t.Errorf("%s[%s] = %q, want nothing written there", labelsPath, ownershipKey, got)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_ComponentLabelValueAsWritten: an unstructured object's value
+// is read as written. A null is the empty string the cluster reads it as, which
+// is no component's value, and a value that is no string is refused as such.
+func TestOwnedConfig_ComponentLabelValueAsWritten(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value any
+		want  string
+	}{
+		"a null value":     {nil, `"" is not the component label of component "web"`},
+		"an empty value":   {"", `"" is not the component label of component "web"`},
+		"a number":         {int64(1), `is a int64, not a string`},
+		"a nested object":  {map[string]any{}, `not a string`},
+		"a value in a mix": {"db ", `"db " is not the component label`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := unstructuredWorkload("apps/v1", "Deployment")
+			if err := unstructured.SetNestedField(u.Object, map[string]any{ownershipKey: tc.value}, "spec", "template", "metadata", "labels"); err != nil {
+				t.Fatal(err)
+			}
+			inner := &ownershipObjectsConfig{objects: []client.Object{u}}
+			_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `Deployment "w"`) {
+				t.Fatalf("Generate = %v, want a refusal of the Deployment saying %s", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), `spec.template.metadata.labels["`+ownershipKey+`"]`) {
+				t.Errorf("refusal %q does not name the path", err)
+			}
+		})
+	}
+
+	// Metadata the check cannot read fails generation: it is not read as holding
+	// no key.
+	for name, tc := range map[string]struct {
+		set  any
+		path []string
+		want string
+	}{
+		"labels that are a list":            {[]any{"a"}, []string{"spec", "podMetadata", "labels"}, "spec.podMetadata: labels is a"},
+		"metadata that is a text":           {"oops", []string{"spec", "podMetadata"}, "podMetadata is a"},
+		"a spec above it that is no object": {"oops", []string{"spec"}, "spec is a"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := unstructuredObject("monitoring.coreos.com/v1", "Alertmanager")
+			if err := unstructured.SetNestedField(u.Object, tc.set, tc.path...); err != nil {
+				t.Fatal(err)
+			}
+			inner := &ownershipObjectsConfig{objects: []client.Object{u}}
+			_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+			if err == nil || !strings.Contains(err.Error(), `Alertmanager "w"`) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Generate = %v, want an error naming the Alertmanager and %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_ComponentLabelNotRead is the control: what the check does not
+// read holds any value, and so does every object of an application the document
+// as a whole owns, which has no component to be held to.
+func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
+	foreign := map[string]string{ownershipKey: "db"}
+	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: foreign}}}
+	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	cronJob.Spec.JobTemplate.Labels = foreign
+	annotated := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w", Annotations: foreign}}
+	annotated.Spec.Template.Annotations = foreign
+
+	for name, obj := range map[string]client.Object{
+		"a volume claim template's label": statefulSet,
+		"a job template's label":          cronJob,
+		"the key as an annotation":        annotated,
+		"commonMetadata a Flux object hands on": holding(t, unstructuredObject("kustomize.toolkit.fluxcd.io/v1", "Kustomization"),
+			foreign, "spec", "commonMetadata"),
+		"a pod template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "Job"),
+			foreign, "spec", "template", "metadata"),
+		"inheritedMetadata of a Cluster of another group": holding(t, unstructuredObject("example.com/v1", "Cluster"),
+			foreign, "spec", "inheritedMetadata"),
+		"podMetadata of an Alertmanager of another group": holding(t, unstructuredObject("example.com/v1", "Alertmanager"),
+			foreign, "spec", "podMetadata"),
+		"podMetadata of another kind of the group": holding(t, unstructuredObject("monitoring.coreos.com/v1", "ServiceMonitor"),
+			foreign, "spec", "podMetadata"),
+		"inheritedMetadata of a Pooler": holding(t, unstructuredObject("postgresql.cnpg.io/v1", "Pooler"),
+			foreign, "spec", "inheritedMetadata"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+			if _, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate(); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if got := obj.GetLabels()[ownershipKey]; got != "web" {
+				t.Errorf("object label = %q, want web", got)
+			}
+		})
+	}
+
+	t.Run("an object of the document's", func(t *testing.T) {
+		source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c", Labels: map[string]string{ownershipKey: "db"}}}
+		inner := &ownershipObjectsConfig{objects: []client.Object{source}}
+		for _, reserved := range []*reservedMetadataKeys{nil, mustReserve(t, reservedForTest...)} {
+			if _, err := stack.NewApplication("shop-source", "ns", wrapOwnedConfigReserving(inner, "", ownershipKey, reserved)).Generate(); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+		}
+		if got := source.Labels[ownershipKey]; got != "db" {
+			t.Errorf("label = %q, want it as written", got)
+		}
+	})
+}
+
+// TestOwnedConfig_ComponentLabelSelector: a workload whose own selector
+// requires a value for the component label's key that is not the component's is
+// refused. A selector that requires the component's value, or that only rules
+// values out, is not: the second keeps its pod template as written
+// (TestStampComponentLabel_SelectorThatRulesTheLabelOut).
+func TestOwnedConfig_ComponentLabelSelector(t *testing.T) {
+	requirement := func(op metav1.LabelSelectorOperator, values ...string) *metav1.LabelSelector {
+		return &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: op, Values: values}}}
+	}
+	deployment := func(selector *metav1.LabelSelector) client.Object {
+		d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+		d.Spec.Selector = selector
+		return d
+	}
+	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	cronJob.Spec.JobTemplate.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{ownershipKey: "db"}}
+	typedRC := func(selector map[string]string) client.Object {
+		rc := &corev1.ReplicationController{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+		rc.Spec.Selector = selector
+		rc.Spec.Template = &corev1.PodTemplateSpec{}
+		return rc
+	}
+	withSelector := func(u *unstructured.Unstructured, selector any, path ...string) *unstructured.Unstructured {
+		if err := unstructured.SetNestedField(u.Object, selector, append(slices.Clone(path), "selector")...); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	const hasMember = "spec.selector requires"
+
+	for name, tc := range map[string]struct {
+		obj client.Object
+		// want is what the refusal says; empty when the object passes.
+		want string
+	}{
+		"matchLabels with another value": {
+			deployment(&metav1.LabelSelector{MatchLabels: map[string]string{ownershipKey: "db"}}), hasMember + ` "db" for the label`,
+		},
+		"In with other values only": {deployment(requirement(metav1.LabelSelectorOpIn, "db", "cache")), hasMember + ` one of "db", "cache" for the label`},
+		"a CronJob's job selector":  {cronJob, `spec.jobTemplate.spec.selector requires "db"`},
+		"a typed ReplicationController's label map": {
+			typedRC(map[string]string{ownershipKey: "db"}), hasMember + ` "db"`,
+		},
+		"an unstructured ReplicationController's label map": {
+			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{ownershipKey: "db"}, "spec"), hasMember + ` "db"`,
+		},
+		"an unstructured ReplicationController's null value": {
+			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{ownershipKey: nil}, "spec"), hasMember + ` ""`,
+		},
+		"an unstructured Deployment's matchLabels": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchLabels": map[string]any{ownershipKey: "db"}}, "spec"), hasMember + ` "db"`,
+		},
+		"an unstructured CronJob's In": {
+			withSelector(unstructuredWorkload("batch/v1", "CronJob"), map[string]any{"matchExpressions": []any{
+				map[string]any{"key": ownershipKey, "operator": "In", "values": []any{"db"}},
+			}}, "spec", "jobTemplate", "spec"), `spec.jobTemplate.spec.selector requires "db"`,
+		},
+		"a List member's selector": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{
+				withSelector(unstructuredWorkload("apps/v1", "ReplicaSet"), map[string]any{"matchLabels": map[string]any{ownershipKey: "db"}}, "spec").Object,
+			}}}, `ReplicaSet "w": ` + hasMember + ` "db"`,
+		},
+
+		"matchLabels with the component's value": {deployment(&metav1.LabelSelector{MatchLabels: map[string]string{ownershipKey: "web"}}), ""},
+		"matchLabels on another key":             {deployment(&metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}), ""},
+		"In that holds the component's value":    {deployment(requirement(metav1.LabelSelectorOpIn, "db", "web")), ""},
+		"NotIn another value":                    {deployment(requirement(metav1.LabelSelectorOpNotIn, "db")), ""},
+		"NotIn the component's value":            {deployment(requirement(metav1.LabelSelectorOpNotIn, "web")), ""},
+		"DoesNotExist":                           {deployment(requirement(metav1.LabelSelectorOpDoesNotExist)), ""},
+		"Exists":                                 {deployment(requirement(metav1.LabelSelectorOpExists)), ""},
+		"no selector":                            {deployment(nil), ""},
+		// No selector the cluster accepts, and not this check's to refuse.
+		"In with no value":                    {deployment(requirement(metav1.LabelSelectorOpIn)), ""},
+		"a ReplicationController's own value": {typedRC(map[string]string{ownershipKey: "web"}), ""},
+		// A ReplicationController's selector is a label map: a key named like a
+		// label selector's field is a label.
+		"a ReplicationController label named matchLabels": {
+			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{"matchLabels": "kept"}, "spec"), "",
+		},
+		"a selector that does not decode": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchLabels": "oops"}, "spec"), "",
+		},
+		"a selector that is no object": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), "oops", "spec"), "",
+		},
+		"a kind of another group": {
+			withSelector(unstructuredWorkload("example.com/v1", "Job"), map[string]any{"matchLabels": map[string]any{ownershipKey: "db"}}, "spec"), "",
+		},
+		// A PodTemplate has no selector: a field of that name is not one.
+		"a PodTemplate": {
+			withSelector(unstructuredWorkload("v1", "PodTemplate"), map[string]any{"matchLabels": map[string]any{ownershipKey: "db"}}), "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := &ownershipObjectsConfig{objects: []client.Object{tc.obj}}
+			_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Generate accepted a selector that requires another value")
+			}
+			for _, want := range []string{tc.want, `"` + ownershipKey + `"`, `component "web" ("web")`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not say %s", err, want)
+				}
+			}
+		})
+	}
+}
+
+// appLabelled is a Deployment as a kind writes one for the component after
+// lowering named name: the `app` label on the object, in the selector and on
+// the pod template.
+func appLabelled(name string) *appsv1.Deployment {
+	d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app": name}}}
+	d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}}
+	d.Spec.Template.Labels = map[string]string{"app": name}
+	return d
+}
+
+// TestOwnedConfig_ComponentLabelUnderAppKey: with the component label key set
+// to `app`, the label the kinds write themselves, an entry a lowering rule
+// emitted under a name of its own carries that name's value, which launcher
+// wrote. It is accepted on that entry's objects and on no other, and only under
+// that key; every other value is refused as under any key.
+func TestOwnedConfig_ComponentLabelUnderAppKey(t *testing.T) {
+	generate := func(component, entry, key string, obj client.Object) error {
+		inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+		_, err := stack.NewApplication(entry, "ns", wrapOwnedEntryConfig(inner, component, entry, key, nil)).Generate()
+		return err
+	}
+
+	t.Run("the entry's own value is kept", func(t *testing.T) {
+		d := appLabelled("web-renamed")
+		service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web-renamed", Labels: map[string]string{"app": "web-renamed"}}}
+		for _, obj := range []client.Object{d, service} {
+			if err := generate("web", "web-renamed", "app", obj); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+		}
+		if d.Labels["app"] != "web-renamed" || d.Spec.Template.Labels["app"] != "web-renamed" || service.Labels["app"] != "web-renamed" {
+			t.Errorf("labels = %v / %v / %v, want the entry's value as the kinds wrote it", d.Labels, d.Spec.Template.Labels, service.Labels)
+		}
+	})
+
+	t.Run("the owner's value is kept, and written where the key is absent", func(t *testing.T) {
+		d := appLabelled("web")
+		bare := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "bare"}}
+		for _, obj := range []client.Object{d, bare} {
+			if err := generate("web", "web-renamed", "app", obj); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+		}
+		if d.Labels["app"] != "web" || d.Spec.Template.Labels["app"] != "web" {
+			t.Errorf("labels = %v / %v, want the owner's value kept", d.Labels, d.Spec.Template.Labels)
+		}
+		if bare.Labels["app"] != "web" || bare.Spec.Template.Labels["app"] != "web" {
+			t.Errorf("labels = %v / %v, want the owner's value written", bare.Labels, bare.Spec.Template.Labels)
+		}
+	})
+
+	for name, tc := range map[string]struct {
+		component, entry, key string
+		obj                   client.Object
+		want                  string
+	}{
+		"another component's value on the entry's object": {
+			"web", "web-renamed", "app", appLabelled("db"), `metadata.labels["app"]: "db" is not the component label of component "web" ("web")`,
+		},
+		"another component's value on the pod template": {
+			"web", "web-renamed", "app", func() client.Object {
+				d := appLabelled("web-renamed")
+				d.Spec.Template.Labels = map[string]string{"app": "db"}
+				return d
+			}(), `spec.template.metadata.labels["app"]: "db"`,
+		},
+		"a selector that requires another component's value": {
+			"web", "web-renamed", "app", func() client.Object {
+				d := appLabelled("web-renamed")
+				d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}
+				return d
+			}(), `spec.selector requires "db" for the label "app"`,
+		},
+		// The exemption is the entry's: an entry under its component's own name
+		// has one value.
+		"another entry's value on a component's own entry": {
+			"web", "web", "app", appLabelled("web-renamed"), `"web-renamed" is not the component label of component "web"`,
+		},
+		// And it is the `app` label's: under another key the kinds write nothing,
+		// so the entry's name there is an authored value.
+		"the entry's name under another key": {
+			"web", "web-renamed", ownershipKey, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c", Labels: map[string]string{ownershipKey: "web-renamed"}}},
+			`"web-renamed" is not the component label of component "web"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := generate(tc.component, tc.entry, tc.key, tc.obj)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Generate = %v, want a refusal saying %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// renamedPartsRule lowers a "renamed-parts" component into a webservice named
+// "<name>-renamed" and a worker named "<name>-other".
+type renamedPartsRule struct{}
+
+func (renamedPartsRule) ComponentType() string { return "renamed-parts" }
+
+func (renamedPartsRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{
+		{Name: comp.Name + "-renamed", Type: "webservice", Traits: comp.Traits},
+		{Name: comp.Name + "-other", Type: "worker"},
+	}}, nil
+}
+
+// TestTransform_ComponentLabelUnderAppKey_EntryOfEachApplication: the transform
+// tells the wrapper of each application the entry it came from, so the entry's
+// own `app` value passes on its application, on the sub-application a trait
+// added to it and on its synthesized policies, and on no other application of
+// the component.
+func TestTransform_ComponentLabelUnderAppKey_EntryOfEachApplication(t *testing.T) {
+	tr := ownershipTransformer()
+	tr.RegisterComponentLowering(renamedPartsRule{})
+	app := makeApp("shop", Component{Name: "api", Type: "renamed-parts", Traits: []Trait{
+		{Type: "settings", Properties: map[string]any{"name": "api-settings"}},
+		{Type: "routed", Properties: map[string]any{}},
+	}})
+	app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+	cluster, err := tr.Transform(app, TransformContext{ComponentLabelKey: "app"})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	entries := map[string]string{}
+	walkBundles(cluster.Node, func(bundle *stack.Bundle) {
+		for _, a := range bundle.Applications {
+			owned, ok := a.Config.(componentOwner)
+			if !ok {
+				t.Fatalf("application %q has no ownership wrapper", a.Name)
+			}
+			if got := owned.owningComponent(); got != "api" {
+				t.Errorf("application %q is owned by %q, want api", a.Name, got)
+			}
+			var w *ownedConfig
+			switch c := a.Config.(type) {
+			case *ownedConfig:
+				w = c
+			case *augmentingOwnedConfig:
+				w = c.ownedConfig
+			case *intentAugmentingOwnedConfig:
+				w = c.ownedConfig
+			default:
+				t.Fatalf("application %q config is a %T", a.Name, a.Config)
+			}
+			entries[a.Name] = w.entry
+		}
+	})
+	want := map[string]string{
+		"api-renamed":                       "api-renamed",
+		"api-settings":                      "api-renamed",
+		"api-renamed-route":                 "api-renamed",
+		"api-renamed-allow-ingress-traffic": "api-renamed",
+		"api-other":                         "api-other",
+	}
+	for name, entry := range want {
+		if got, ok := entries[name]; !ok || got != entry {
+			t.Errorf("application %q: entry = %q (found %v), want %q; have %v", name, got, ok, entry, entries)
+		}
+	}
+}
+
+// TestTransform_ComponentLabelUnderAppKey_EntryNamedAsAnotherComponent: the
+// entry's own value is accepted under the key `app` because it is no other
+// component's. A rule that emits, for one component, an entry named as another
+// authored component would make it one: that component is lowered into entries
+// under other names, so no name collides, and its NetworkPolicies select by the
+// value the first component's pods would carry. The transform refuses the
+// document under `app`, and builds it under a key the kinds do not write.
+func TestTransform_ComponentLabelUnderAppKey_EntryNamedAsAnotherComponent(t *testing.T) {
+	document := func() *Application {
+		app := makeApp("shop",
+			Component{Name: "api", Type: "renamed-parts"},
+			Component{Name: "api-renamed", Type: "renamed-parts"},
+		)
+		app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+		return app
+	}
+	tr := ownershipTransformer()
+	tr.RegisterComponentLowering(renamedPartsRule{})
+	_, err := tr.Transform(document(), TransformContext{ComponentLabelKey: "app"})
+	want := `component "api": its lowering emitted "api-renamed", whose ` + "`app`" + ` label value "api-renamed" is the component label of component "api-renamed"`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Transform under app = %v, want a refusal saying %s", err, want)
+	}
+	if _, err := tr.Transform(document(), TransformContext{}); err != nil {
+		t.Fatalf("Transform under the default key: %v", err)
+	}
+}
+
+// TestCheckEntryLabelValues holds the comparison to the label values, which a
+// long name is projected onto, and to the key `app`.
+func TestCheckEntryLabelValues(t *testing.T) {
+	long := strings.Repeat("a", 70)
+	for name, tc := range map[string]struct {
+		owners  map[string]string
+		key     string
+		refused bool
+	}{
+		"an entry under its component's name":       {map[string]string{"web": "web", "db": "db"}, "app", false},
+		"a renamed entry no component is named as":  {map[string]string{"web-main": "web", "db": "db"}, "app", false},
+		"a renamed entry named as another":          {map[string]string{"db": "web", "db-main": "db"}, "app", true},
+		"named as the projection of another's name": {map[string]string{ComponentLabelValue(long): "web", "x": long}, "app", true},
+		"an entry of the document as a whole":       {map[string]string{"db": "", "db-main": "db"}, "app", false},
+		"another key":                               {map[string]string{"db": "web", "db-main": "db"}, ownershipKey, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := checkEntryLabelValues(tc.owners, tc.key)
+			if (err != nil) != tc.refused {
+				t.Fatalf("checkEntryLabelValues = %v, want refused %v", err, tc.refused)
+			}
+		})
+	}
+}

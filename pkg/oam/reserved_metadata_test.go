@@ -121,8 +121,9 @@ func cnpgCluster(apiVersion, kind string, inherited map[string]any) *unstructure
 }
 
 // TestOwnedConfig_ReservedKeyRefused: a reserved key is refused wherever the
-// check reads: the object's own labels and annotations, a pod template's, a
-// CloudNativePG Cluster's inheritedMetadata, and a list member's. The refusal
+// check reads: the object's own labels and annotations, a pod template's, what
+// an operator hands on (a CloudNativePG Cluster's inheritedMetadata, a Pooler's
+// pod template, the Prometheus operator's podMetadata), and a list member's. The refusal
 // names the component, the object, the key and the entry that reserves it.
 func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 	typedPods := func(labels, annotations map[string]string) metav1.ObjectMeta {
@@ -232,6 +233,35 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 			}},
 			[]string{`Cluster "db"`, `spec.inheritedMetadata annotation "example.org/tenant"`, exact},
 		},
+		// A Pooler's pod template, and the pod metadata of the Prometheus
+		// operator's pod-running kinds: the operator puts both on its pods.
+		"a Pooler's pod template label": {
+			holding(t, unstructuredObject("postgresql.cnpg.io/v1", "Pooler"), map[string]string{"platform.example/zone": "a"}, "spec", "template", "metadata"),
+			[]string{`Pooler "w"`, `pod template label "platform.example/zone"`, prefix},
+		},
+		"a typed Pooler's pod template annotation, no kind stated": {
+			&cnpgv1.Pooler{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: cnpgv1.PoolerSpec{
+				Template: &cnpgv1.PodTemplateSpec{ObjectMeta: cnpgv1.Metadata{Annotations: map[string]string{"example.org/tenant": "a"}}},
+			}},
+			[]string{`Pooler "w"`, `pod template annotation "example.org/tenant"`, exact},
+		},
+		"a Prometheus's pod label": {
+			holding(t, unstructuredObject("monitoring.coreos.com/v1", "Prometheus"), map[string]string{"platform.example/zone": "a"}, "spec", "podMetadata"),
+			[]string{`Prometheus "w"`, `spec.podMetadata label "platform.example/zone"`, prefix},
+		},
+		"a PrometheusAgent's pod label": {
+			holding(t, unstructuredObject("monitoring.coreos.com/v1alpha1", "PrometheusAgent"), map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
+			[]string{`PrometheusAgent "w"`, `spec.podMetadata label "example.org/tenant"`, exact},
+		},
+		"an Alertmanager's pod annotation": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "monitoring.coreos.com/v1", "kind": "Alertmanager", "metadata": map[string]any{"name": "w"},
+				"spec": map[string]any{"podMetadata": map[string]any{"annotations": map[string]any{"platform.example/zone": "a"}}}}},
+			[]string{`Alertmanager "w"`, `spec.podMetadata annotation "platform.example/zone"`, prefix},
+		},
+		"a ThanosRuler's pod label": {
+			holding(t, unstructuredObject("monitoring.coreos.com/v1", "ThanosRuler"), map[string]string{"platform.example/zone": "a"}, "spec", "podMetadata"),
+			[]string{`ThanosRuler "w"`, `spec.podMetadata label "platform.example/zone"`, prefix},
+		},
 		"a List member's label": {
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{
 				map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "plain"}},
@@ -287,8 +317,10 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 // read, and the keys a config writes itself, pass and are stamped as without a
 // list.
 func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
-	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w", Labels: map[string]string{"app": "web", ownershipKey: "authored"}}}
-	deployment.Spec.Template.Labels = map[string]string{"app": "web", ownershipKey: "authored"}
+	// The component label key is exempt as a key. Its value is the other check's
+	// (TestOwnedConfig_ComponentLabelIsAuthoritative): here it is the component's.
+	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w", Labels: map[string]string{"app": "web", ownershipKey: "web"}}}
+	deployment.Spec.Template.Labels = map[string]string{"app": "web", ownershipKey: "web"}
 	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: map[string]string{"example.org/tenant": "a"}}}}
 	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
@@ -301,11 +333,11 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		"the app label and the component label, typed": deployment,
 		"the app label and the component label, unstructured": &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "apps/v1", "kind": "Deployment",
-			"metadata": map[string]any{"name": "w", "labels": map[string]any{"app": "web", ownershipKey: "authored"}},
-			"spec":     map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"app": "web", ownershipKey: "authored"}}}},
+			"metadata": map[string]any{"name": "w", "labels": map[string]any{"app": "web", ownershipKey: "web"}},
+			"spec":     map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"app": "web", ownershipKey: "web"}}}},
 		}},
 		"the two labels a Cluster's objects inherit": cnpgCluster("postgresql.cnpg.io/v1", "Cluster",
-			map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "authored"}}),
+			map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "web"}}),
 		"a volume claim template's label": statefulSet,
 		"a job template's label":          cronJob,
 		"inheritedMetadata of a Cluster of another group": cnpgCluster("example.com/v1", "Cluster",
@@ -313,6 +345,10 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		"inheritedMetadata of another kind of the group": cnpgCluster("postgresql.cnpg.io/v1", "Pooler",
 			map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}),
 		"a pod template of a kind of another group": reservedWorkload(t, "example.com/v1", "Job", "labels", "example.org/tenant"),
+		"podMetadata of an Alertmanager of another group": holding(t, unstructuredObject("example.com/v1", "Alertmanager"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
+		"podMetadata of another kind of the group": holding(t, unstructuredObject("monitoring.coreos.com/v1", "ServiceMonitor"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
 		"commonMetadata a Flux object hands on": &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": map[string]any{"name": "k"},
 			"spec": map[string]any{"commonMetadata": map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}},
@@ -367,6 +403,33 @@ func TestOwnedConfig_ReservedExemptionsAreLabels(t *testing.T) {
 				t.Fatalf("Generate = %v, want ErrReservedMetadataKey for the %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestOwnedConfig_ReservedKeyBeforeComponentLabel: a reserved key is refused as
+// one wherever it is among an object and the members it stands for, whatever
+// the component label beside it holds: the reserved keys are read on all of
+// them before the component label is read on any. A list envelope that carries
+// another component's label and holds a member with a reserved key is refused
+// for the key, so a caller that tells the refusals apart still finds it.
+func TestOwnedConfig_ReservedKeyBeforeComponentLabel(t *testing.T) {
+	list := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "List",
+		"metadata": map[string]any{"labels": map[string]any{ownershipKey: "db"}},
+		"items": []any{map[string]any{
+			"apiVersion": "v1", "kind": "ConfigMap",
+			"metadata": map[string]any{"name": "c", "labels": map[string]any{"example.org/tenant": "a"}},
+		}},
+	}}
+	inner := &ownershipObjectsConfig{objects: []client.Object{list}}
+	_, err := stack.NewApplication("web", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, mustReserve(t, reservedForTest...))).Generate()
+	if !errors.Is(err, ErrReservedMetadataKey) || !strings.Contains(err.Error(), `label "example.org/tenant"`) {
+		t.Fatalf("Generate = %v, want ErrReservedMetadataKey for the member's label", err)
+	}
+	// Without the reserved list the envelope's own label is what is refused.
+	_, err = stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+	if err == nil || errors.Is(err, ErrReservedMetadataKey) || !strings.Contains(err.Error(), `"db" is not the component label of component "web"`) {
+		t.Fatalf("Generate = %v, want the component label refusal", err)
 	}
 }
 

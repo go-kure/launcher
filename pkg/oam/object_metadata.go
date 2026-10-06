@@ -165,8 +165,8 @@ func withObjectProperties(handler any, schema map[string]PropertySchema) map[str
 //   - the `app` label with another value than the component's, which the kinds
 //     that set it select by;
 //   - the component label with another value than the one launcher gives the
-//     component: the wrapper keeps a value that is already there, so the object
-//     would leave the selectors generated for its component.
+//     component: the ownership wrapper refuses that value on every object
+//     (checkComponentLabel), and this names the property that holds it.
 func withObjectMetadata(component Component, handler ComponentHandler, labelKey string) (Component, error) {
 	rawLabels, hasLabels := component.Properties[ObjectLabelsProperty]
 	rawAnnotations, hasAnnotations := component.Properties[ObjectAnnotationsProperty]

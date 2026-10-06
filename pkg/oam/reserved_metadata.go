@@ -32,7 +32,9 @@ import (
 // bundle's labels and annotations do (GenerateApplications), so neither stamp is
 // ever read. The two labels a config writes itself are exempt as keys:
 // appLabelKey and the component label key, which a consumer may well configure
-// under a prefix it reserves. An annotation launcher wrote from the platform's
+// under a prefix it reserves. The component label's value is held to the
+// component's by the wrapper's other check (checkComponentLabel), which reads
+// the same places (metadataHolders). An annotation launcher wrote from the platform's
 // own input is exempt as a key and value pair, which the config states
 // (platformAnnotated), also from under a wrapper (platformAnnotationsUnder).
 
@@ -121,95 +123,49 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 	return "", false
 }
 
-// checkReserved refuses obj when it carries a reserved key the config's owner
-// may not set, with ErrReservedMetadataKey. It reads, on obj and on every object
-// obj stands for when Flux applies it (appliedObjects, a list envelope's
-// members):
+// checkReserved refuses g when it carries a reserved key the config's owner may
+// not set, with ErrReservedMetadataKey. The wrapper runs it on every object its
+// config generates and on every object such an object stands for when Flux
+// applies it (ownedConfig.check). It reads every place the object holds
+// metadata in (metadataHolders):
 //
 //   - the object's own labels and annotations;
 //   - the pod template's, on a kind that has one (podTemplateKinds): they become
 //     the metadata of the pods;
-//   - spec.inheritedMetadata of a CloudNativePG Cluster, which is not metadata of
-//     an object launcher writes: the operator copies it onto every object it
-//     creates for the cluster.
+//   - what an operator hands on (operatorMetadataKinds), which is not metadata
+//     of an object launcher writes: a CloudNativePG Cluster's
+//     spec.inheritedMetadata, a Pooler's pod template, spec.podMetadata of the
+//     Prometheus operator's pod-running kinds.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
 // read: not the metadata a Flux object hands on to what it applies
 // (spec.commonMetadata), not a volume claim template's or a job template's, and
 // not what a chart that Flux installs renders in the cluster.
-func (o *ownedConfig) checkReserved(obj client.Object) error {
-	if o.reserved == nil {
-		return nil
-	}
-	if err := o.checkReservedObject(obj); err != nil {
-		return err
-	}
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		for _, applied := range appliedObjects(u) {
-			if applied == obj {
-				continue
-			}
-			if err := o.checkReservedObject(applied); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (o *ownedConfig) checkReservedObject(obj client.Object) error {
-	group, kind := statedOrTypedKind(obj)
-	where := fmt.Sprintf("%s %q", kind, obj.GetName())
-	if kind == "" {
-		// A typed object that states no kind is named by its Go type.
-		where = fmt.Sprintf("%T %q", obj, obj.GetName())
-	}
-	content, err := objectContent(obj)
-	if err != nil {
-		return errors.Errorf("reserved metadata keys: %s: %w", where, err)
-	}
+func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
 	refusal := ReservedMetadataKeyError{
 		Component: o.component,
-		Kind:      schema.GroupKind{Group: group, Kind: kind},
-		Namespace: obj.GetNamespace(),
-		Name:      obj.GetName(),
-		Object:    where,
+		Kind:      schema.GroupKind{Group: g.group, Kind: g.kind},
+		Namespace: g.obj.GetNamespace(),
+		Name:      g.obj.GetName(),
+		Object:    g.where,
 	}
-
-	metadata, _, err := objectField(content, "metadata")
-	if err != nil {
-		return errors.Errorf("reserved metadata keys: %s: %w", where, err)
-	}
-	if err := o.checkReservedHolder(metadata, refusal, ReservedKeyInObjectMetadata, platform); err != nil {
-		return err
-	}
-
-	for _, k := range podTemplateKinds {
-		if group != k.group || kind != k.kind {
+	for _, h := range metadataHolders(g.group, g.kind) {
+		holder, found, err := nestedObject(g.content, h.path...)
+		if err != nil {
+			return errors.Errorf("reserved metadata keys: %s: %w", g.where, err)
+		}
+		if !found {
 			continue
 		}
-		template, found, err := nestedObject(content, append(slices.Clone(k.spec), "template", "metadata")...)
-		if err != nil {
-			return errors.Errorf("reserved metadata keys: %s: %w", where, err)
+		// The platform's own annotations are exempt on the object's metadata only.
+		var exempt []map[string]string
+		if h.in == ReservedKeyInObjectMetadata {
+			exempt = platform
 		}
-		if found {
-			if err := o.checkReservedHolder(template, refusal, ReservedKeyInPodTemplate, nil); err != nil {
-				return err
-			}
-		}
-	}
-
-	if group == cnpgGroup && kind == cnpgClusterKind {
-		inherited, found, err := nestedObject(content, "spec", "inheritedMetadata")
-		if err != nil {
-			return errors.Errorf("reserved metadata keys: %s: %w", where, err)
-		}
-		if found {
-			if err := o.checkReservedHolder(inherited, refusal, ReservedKeyInInheritedMetadata, nil); err != nil {
-				return err
-			}
+		if err := o.checkReservedHolder(holder, refusal, h.in, exempt); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -248,7 +204,7 @@ func platformAnnotationsUnder(cfg stack.ApplicationConfig) []map[string]string {
 }
 
 // checkReservedHolder checks the labels and annotations holder holds, which is
-// an object's metadata, a pod template's, or a Cluster's inheritedMetadata: in
+// an object's metadata, a pod template's, or metadata an operator hands on: in
 // says which. refusal says the owner and the object, and is returned with the
 // key and the entry that reserves it filled in (a *ReservedMetadataKeyError).
 // platform holds the annotation pairs that are exempt, on an object's own
@@ -333,12 +289,17 @@ const (
 	// metadata.annotations.
 	ReservedKeyInObjectMetadata ReservedKeyHolder = ""
 	// ReservedKeyInPodTemplate is the metadata of the object's pod template,
-	// which becomes the metadata of its pods.
+	// which becomes the metadata of its pods: a workload's, a PodTemplate's, a
+	// CloudNativePG Pooler's.
 	ReservedKeyInPodTemplate ReservedKeyHolder = "pod template"
 	// ReservedKeyInInheritedMetadata is spec.inheritedMetadata of a
 	// CloudNativePG Cluster, which the operator copies onto every object it
 	// creates for the cluster.
 	ReservedKeyInInheritedMetadata ReservedKeyHolder = "spec.inheritedMetadata"
+	// ReservedKeyInPodMetadata is spec.podMetadata of a Prometheus, a
+	// PrometheusAgent, an Alertmanager or a ThanosRuler, which the operator
+	// puts on the pods it creates for the object.
+	ReservedKeyInPodMetadata ReservedKeyHolder = "spec.podMetadata"
 )
 
 // prefix is the holder as a text puts it before what it holds: "" for the
@@ -400,9 +361,11 @@ func nestedObject(m map[string]any, path ...string) (map[string]any, bool, error
 }
 
 // statedOrTypedKind returns obj's API group and kind: the ones it states, else,
-// for a typed object that states none and is of a kind the check reads more
+// for a typed object that states none and is of a kind the checks read more
 // than the metadata of (a pod template, a Cluster's inheritedMetadata), its Go
-// type's, as stampComponentLabel tells the pod template kinds.
+// type's, as stampComponentLabel tells the pod template kinds. The Prometheus
+// operator's kinds are not among them: this package does not import their
+// types, so a typed one is recognized only when it states its kind.
 func statedOrTypedKind(obj client.Object) (group, kind string) {
 	if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
 		return gvk.Group, gvk.Kind
@@ -410,6 +373,8 @@ func statedOrTypedKind(obj client.Object) (group, kind string) {
 	switch obj.(type) {
 	case *cnpgv1.Cluster:
 		return cnpgGroup, cnpgClusterKind
+	case *cnpgv1.Pooler:
+		return cnpgGroup, cnpgPoolerKind
 	case *appsv1.Deployment:
 		return appsv1.GroupName, "Deployment"
 	case *appsv1.StatefulSet:

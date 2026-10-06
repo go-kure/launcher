@@ -45,9 +45,22 @@ type TransformContext struct {
 	// like EgressPeers. It is also the key of the label the transform puts on every
 	// object a component owns and on its pod templates, valued ComponentLabelValue(component)
 	// as the selector is, so the selector matches the component's pods with no caller
-	// labelling anything (go-kure/launcher#788). On the objects launcher generates the
-	// label is added only where the key is absent: set to a key the objects already carry
-	// (e.g. "app"), the values they carry stay. A workload whose own selector rules the
+	// labelling anything (go-kure/launcher#788).
+	//
+	// The label is authoritative (go-kure/launcher#790): the key must be one nothing
+	// else writes. On the objects launcher generates, a value already under the key
+	// is the component's own, or generation fails, wherever the object holds labels
+	// that reach pods: its own, a pod template's, and the metadata an operator puts
+	// on its pods (a CloudNativePG Cluster's spec.inheritedMetadata, a Pooler's
+	// template, spec.podMetadata of the Prometheus operator's kinds). A workload
+	// whose selector requires another value for the key is refused too. Where the
+	// key is absent launcher writes it, on the object and its pod template. One
+	// value besides the component's passes, under the key "app" only: the one the
+	// kinds write for an entry a lowering rule emitted under a name of its own,
+	// whose pods then carry that entry's value and are not selected by the
+	// component's policies.
+	//
+	// A workload whose own selector rules the
 	// label out (DoesNotExist on the key, NotIn with the component's value) keeps its pod
 	// template as written: its pods carry no component label, and a synthesized policy
 	// does not select them. A HelmRelease's post-renderer overwrites instead: with a
@@ -93,8 +106,9 @@ type TransformContext struct {
 	// from generation (Application.Generate, GenerateApplications), with
 	// ErrReservedMetadataKey, since a rendered chart's objects exist only then. It
 	// is read on an object's own labels and annotations, on the pod template's of
-	// a workload and of a PodTemplate, and on spec.inheritedMetadata of a
-	// CloudNativePG Cluster.
+	// a workload, of a PodTemplate and of a CloudNativePG Pooler, on
+	// spec.inheritedMetadata of a CloudNativePG Cluster, and on spec.podMetadata
+	// of a Prometheus, a PrometheusAgent, an Alertmanager and a ThanosRuler.
 	//
 	// The keys launcher writes itself are not refused: the `app` label, the
 	// component label (ComponentLabelKey), and an annotation the platform sets on
@@ -893,7 +907,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// config is its ownership wrapper, which labels what the application
 	// generates with its component (go-kure/launcher#788) and holds it to the
 	// consumer's reserved metadata keys (go-kure/launcher#790).
-	markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys)
+	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys); err != nil {
+		return nil, nil, err
+	}
 
 	if len(ctx.consumedCapabilities) > 0 {
 		keys := make([]string, 0, len(ctx.consumedCapabilities))

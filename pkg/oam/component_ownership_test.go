@@ -195,33 +195,43 @@ func TestStampComponentLabel_OtherObjects(t *testing.T) {
 	}
 }
 
-// TestStampComponentLabel_KeepsAnExistingValue: a value the object or its pod
-// template already carries under the key stays. With the key set to one a
-// workload selects on, an overwrite would part the selector from the template.
+// TestStampComponentLabel_KeepsAnExistingValue: the stamp never overwrites a
+// value the object or its pod template carries under the key. With the key set
+// to one a workload selects on, an overwrite would part the selector from the
+// template. What the stamp keeps is a value the wrapper accepted before it ran:
+// under the key `app`, the one a kind wrote for an entry a rule emitted under a
+// name of its own. Any other value never reaches the stamp: the wrapper refuses
+// the object (TestOwnedConfig_ComponentLabelIsAuthoritative).
 func TestStampComponentLabel_KeepsAnExistingValue(t *testing.T) {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web-worker"}}}
 	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web-worker"}}
 	dep.Spec.Template.Labels = map[string]string{"app": "web-worker"}
-	if err := stampComponentLabel(dep, "app", "web"); err != nil {
-		t.Fatalf("stampComponentLabel: %v", err)
+	inner := &ownershipObjectsConfig{objects: []client.Object{dep}}
+	if _, err := stack.NewApplication("web-worker", "ns", wrapOwnedEntryConfig(inner, "web", "web-worker", "app", nil)).Generate(); err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 	if got := dep.Labels["app"]; got != "web-worker" {
-		t.Errorf("object label = %q, want the authored web-worker", got)
+		t.Errorf("object label = %q, want the entry's web-worker", got)
 	}
 	if got := dep.Spec.Template.Labels["app"]; got != "web-worker" {
-		t.Errorf("pod template label = %q, want the authored web-worker", got)
+		t.Errorf("pod template label = %q, want the entry's web-worker", got)
 	}
 
 	u := unstructuredWorkload("apps/v1", "Deployment")
 	if err := unstructured.SetNestedStringMap(u.Object, map[string]string{ownershipKey: "authored"}, "spec", "template", "metadata", "labels"); err != nil {
 		t.Fatal(err)
 	}
-	if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
-		t.Fatalf("stampComponentLabel: %v", err)
+	inner = &ownershipObjectsConfig{objects: []client.Object{u}}
+	_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+	if err == nil || !strings.Contains(err.Error(), `"authored" is not the component label of component "web"`) {
+		t.Fatalf("Generate = %v, want the authored value refused", err)
 	}
 	labels, _ := podTemplateLabelsOf(t, u)
 	if got := labels[ownershipKey]; got != "authored" {
-		t.Errorf("unstructured pod template label = %q, want the authored value", got)
+		t.Errorf("unstructured pod template label = %q after the refusal, want it as written", got)
+	}
+	if _, stamped := u.GetLabels()[ownershipKey]; stamped {
+		t.Error("the refused object carries the component label")
 	}
 }
 
@@ -425,28 +435,53 @@ func testStampComponentLabelNullPodTemplateMetadata(t *testing.T, nullName strin
 }
 
 // TestStampComponentLabel_PodTemplate: a PodTemplate's pod template is a field
-// of the object itself. A value the template already carries stays, the
-// object's own label is added beside it, and a second call changes nothing.
+// of the object itself, and the wrapper holds it to the component label there.
+// The component's own value stays, the object's own label is added beside it,
+// and a second generation changes nothing. Another value is refused with the
+// template's path, and the object is left as written.
 func TestStampComponentLabel_PodTemplate(t *testing.T) {
-	typed := &corev1.PodTemplate{}
-	typed.Template.Labels = map[string]string{ownershipKey: "authored"}
-	u := unstructuredWorkload("v1", "PodTemplate")
-	if err := unstructured.SetNestedStringMap(u.Object, map[string]string{ownershipKey: "authored"}, "template", "metadata", "labels"); err != nil {
-		t.Fatal(err)
+	podTemplates := func(value string) map[string]client.Object {
+		typed := &corev1.PodTemplate{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+		typed.Template.Labels = map[string]string{ownershipKey: value}
+		u := unstructuredWorkload("v1", "PodTemplate")
+		if err := unstructured.SetNestedStringMap(u.Object, map[string]string{ownershipKey: value}, "template", "metadata", "labels"); err != nil {
+			t.Fatal(err)
+		}
+		return map[string]client.Object{"typed": typed, "unstructured": u}
 	}
-	for name, obj := range map[string]client.Object{"typed": typed, "unstructured": u} {
-		t.Run(name, func(t *testing.T) {
+	generate := func(obj client.Object) error {
+		inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+		_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+		return err
+	}
+	for name, obj := range podTemplates("web") {
+		t.Run(name+", the component's value", func(t *testing.T) {
 			for range 2 {
-				if err := stampComponentLabel(obj, ownershipKey, "web"); err != nil {
-					t.Fatalf("stampComponentLabel: %v", err)
+				if err := generate(obj); err != nil {
+					t.Fatalf("Generate: %v", err)
 				}
 			}
 			if got := obj.GetLabels()[ownershipKey]; got != "web" {
 				t.Errorf("object label = %q, want web", got)
 			}
 			labels, _ := podTemplateLabelsOf(t, obj)
+			if want := map[string]string{ownershipKey: "web"}; !reflect.DeepEqual(labels, want) {
+				t.Errorf("pod template labels = %v, want them as written: %v", labels, want)
+			}
+		})
+	}
+	for name, obj := range podTemplates("authored") {
+		t.Run(name+", another value", func(t *testing.T) {
+			err := generate(obj)
+			if err == nil || !strings.Contains(err.Error(), `PodTemplate "w": template.metadata.labels["`+ownershipKey+`"]: "authored"`) {
+				t.Fatalf("Generate = %v, want the PodTemplate's template label refused", err)
+			}
+			if _, stamped := obj.GetLabels()[ownershipKey]; stamped {
+				t.Error("the refused object carries the component label")
+			}
+			labels, _ := podTemplateLabelsOf(t, obj)
 			if want := map[string]string{ownershipKey: "authored"}; !reflect.DeepEqual(labels, want) {
-				t.Errorf("pod template labels = %v, want the authored value kept: %v", labels, want)
+				t.Errorf("pod template labels = %v, want them as written: %v", labels, want)
 			}
 		})
 	}
