@@ -4350,7 +4350,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     is not allowed by environment policy`. An authored `false` builds. With
     no policy passed it is refused too, since `NoopPolicy` allows nothing
     privileged.
-  - **Not held:** a mover's affinity; the volumes mounted into it
+  - **Not held:** the rest of `moverSecurityContext`. It is a pod security
+    context, and of it only `windowsOptions.hostProcess` is held: the user
+    and groups the mover runs as, its sysctls and its SELinux and seccomp
+    settings are written as authored, since the environment policy has no
+    dimension for them. The service account the mover runs under
+    (`moverServiceAccount`, on every mover) is an identity carried as
+    authored. Nor are held a mover's affinity; the volumes mounted into it
     (`moverVolumes`: a Secret, a claim or an NFS export; the type holds no
     host path); the type of the Service a mover is reached through
     (`serviceType`); and whether a mover runs with elevated permissions at

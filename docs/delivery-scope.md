@@ -1179,7 +1179,10 @@ its text:
     and memory of a mover's `moverResources`, to the maxima; and a mover's
     `moverSecurityContext.windowsOptions.hostProcess`, refused unless privileged
     workloads are allowed. No default is filled. **Not held:** a capacity the author
-    left out, a mover's affinity, the volumes mounted into it, the type of its Service,
+    left out, the rest of a mover's pod security context (the user and groups it runs
+    as, sysctls, SELinux and seccomp settings), for which the policy has no dimension,
+    the service account it runs under (`moverServiceAccount`), which is carried as
+    authored, a mover's affinity, the volumes mounted into it, the type of its Service,
     and the namespace annotation by which an administrator lets movers run privileged,
     which is no field of the object.
   - Required fields follow the rule of the Prometheus operator's kinds. A test holds
