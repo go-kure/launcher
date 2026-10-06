@@ -41,11 +41,16 @@ import (
 // the environment policy's container-capability lists for those seven, as a
 // container that adds them is on a pod kind (enforceContainerCapabilities),
 // and refused with the capability named. Two limits. The list is what the
-// LINKED operator version writes, held to its source by
-// TestVolsyncKinds_RsyncCapabilities: a cluster that runs another version of
-// the operator may add other capabilities, and the kind does not know. And
-// that the container runs as root is said here, not held: the policy has no
-// dimension for it.
+// LINKED operator version writes: a cluster that runs another version of the
+// operator may add other capabilities, and the kind does not know.
+// TestVolsyncKinds_RsyncCapabilities holds the list to that version's source
+// by a digest over the two packages the mover's container is built in, which
+// a person restates after re-reading the mover. The test cannot check that
+// the re-reading was done, a dependency bump that touches either package
+// needs it even when the container is untouched, and the module's other
+// packages and what the functions of other modules do are outside the digest.
+// And that the container runs as root is said here, not held: the policy has
+// no dimension for it.
 //
 // The module ships its CRDs. TestVolsyncKinds_RequiredMatchCRD holds each
 // kind's required list to them, TestVolsyncKinds_NoDefaults the claim that
@@ -100,8 +105,12 @@ const volsyncOperatorVersion = "v0.16.0"
 // allowPrivilegeEscalation to false and runAsUser to 0. The mover's builder
 // (builder.go in that directory, lines 97 and 156) takes the namespace's
 // answer on privileged movers as a parameter it does not name.
-// TestVolsyncKinds_RsyncCapabilities reads that source from the module cache
-// and fails when this list and it differ.
+// TestVolsyncKinds_RsyncCapabilities reads that literal from the module cache
+// and fails when this list and it differ. It also holds the non-test Go
+// source of the two packages the container is built in (that directory and
+// internal/controller/utils) to a digest stated beside it, so that any change
+// there fails until a person has re-read the mover and restated the digest;
+// the procedure of that re-reading and its limits are in the test's comment.
 var volsyncRsyncCapabilities = []corev1.Capability{
 	"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "SYS_CHROOT",
 }

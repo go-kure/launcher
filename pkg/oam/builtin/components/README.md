@@ -4857,12 +4857,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     build it; allowing privileged workloads does not lift a forbidden
     capability, as it does not on a pod kind. Two limits. The seven are what
     the **linked** operator version writes
-    (`internal/controller/mover/rsync/mover.go` in its module;
-    `TestVolsyncKinds_RsyncCapabilities` reads that source and fails on a
-    dependency bump that changes it): a cluster that runs another version of
-    the operator may add other capabilities, and the kind does not know. And
-    that the container runs as root is stated here, not held: the policy has
-    no dimension for it.
+    (`internal/controller/mover/rsync/mover.go` in its module): a cluster
+    that runs another version of the operator may add other capabilities, and
+    the kind does not know. `TestVolsyncKinds_RsyncCapabilities` reads that
+    literal and holds the non-test Go source of the two packages the
+    container is built in (`internal/controller/mover/rsync` and
+    `internal/controller/utils`) to a stated digest: a dependency bump that
+    changes either package fails, whatever the change, until a person has
+    re-read the mover and restated the digest. The test cannot check that the
+    re-reading was done; a bump that touches either package needs it even
+    when the container is untouched; and the module's other packages and the
+    functions of other modules that the mover calls are outside the digest.
+    And that the container runs as root is stated here, not held: the policy
+    has no dimension for it.
   - **Not held:** the rest of `moverSecurityContext`. It is a pod security
     context, and of it only `windowsOptions.hostProcess` is held: the user
     and groups the mover runs as, its sysctls and its SELinux and seccomp
