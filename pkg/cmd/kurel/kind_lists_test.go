@@ -5,6 +5,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,7 +19,8 @@ import (
 // side merge without a conflict only where their lines land between different
 // neighbours. So every list here stands in the order of its component types,
 // as sort.Strings gives it, and a new entry goes at its position instead of at
-// the end: TestKindLists_InOrder holds that.
+// the end: TestKindLists_InOrder holds that, and the same of the tables of
+// kindTables.
 //
 // file is relative to this package. name is a package-level variable,
 // "Func.variable" for a variable a function declares, or "Func.return" for the
@@ -33,6 +37,18 @@ var kindLists = []struct {
 	{"../../oam/builtin/components/kind_policy_free_test.go", "TestPolicyFreeKinds_GenerateCopies.reaches"},
 	{"../../oam/builtin/components/kind_policy_free_test.go", "TestPolicyFreeKinds_Refusals.cases"},
 	{"../../oam/validate.go", "validComponentTypes"},
+}
+
+// kindTables names the Markdown tables that hold one row per component type,
+// the type in backquotes in the first cell. They stand in the same order, for
+// the same reason. file is relative to this package, heading is the heading
+// line the table stands under.
+var kindTables = []struct {
+	file, heading string
+}{
+	{"README.md", "## `kurel build`"},
+	{"../../oam/builtin/components/README.md", "## Component types"},
+	{"../../../docs/oam/design-kurel-package.md", "### 4.2 Supported component types (Phase 1)"},
 }
 
 // The reasons more than one component type gives for having no row.
@@ -117,6 +133,13 @@ func TestKindLists_InOrder(t *testing.T) {
 			}
 			for _, defect := range kindListMisplaced(keys) {
 				t.Errorf("%s: in %s, %s", list.file, list.name, defect)
+			}
+		})
+	}
+	for _, table := range kindTables {
+		t.Run(table.file, func(t *testing.T) {
+			for _, defect := range kindListMisplaced(markdownTableKeys(t, table.file, table.heading)) {
+				t.Errorf("%s: in the table under %q, %s", table.file, table.heading, defect)
 			}
 		})
 	}
@@ -382,4 +405,148 @@ func goListKey(elt ast.Expr) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// markdownType is a table cell that holds one component type in backquotes.
+var markdownType = regexp.MustCompile("^`([a-z][a-z0-9-]*)`$")
+
+// markdownTableKeys reads the component types of the tables under a heading
+// of a Markdown file (markdownTableTypes).
+func markdownTableKeys(t *testing.T, file, heading string) []string {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	keys, defect := markdownTableTypes(string(data), heading)
+	if defect != "" {
+		t.Fatalf("%s: under %q, %s", file, heading, defect)
+	}
+	return keys
+}
+
+// markdownTableTypes returns, in the order they are written, the component
+// types in the first cell of the body rows of the tables under a heading of a
+// Markdown text, up to the next heading.
+//
+// It reads one way of writing a table and names a defect for every other, so
+// that no row is passed over: every row starts with "|" after at most three
+// blanks, and the rows end at a blank line, a code block or a heading. A table
+// written another way is known by its row of dashes, which every table has. A
+// defect is also a body row whose first cell is not one type in backquotes,
+// and a heading with no row, which is what a heading or a table inside a code
+// block comes to.
+func markdownTableTypes(text, heading string) (keys []string, defect string) {
+	inSection, inBody, header := false, false, false
+	fence := "" // the run that opened the code block a line stands in
+	for n, line := range strings.Split(text, "\n") {
+		run, rest := markdownFence(line)
+		if fence != "" {
+			// A block ends at a run of its own character, at least as long, alone on its line.
+			if run != "" && run[0] == fence[0] && len(run) >= len(fence) && rest == "" {
+				fence = ""
+			}
+			continue
+		}
+		if run != "" {
+			fence, inBody, header = run, false, false
+			continue
+		}
+		row := strings.TrimSpace(line)
+		shallow := len(line)-len(strings.TrimLeft(line, " ")) <= 3 && !strings.HasPrefix(line, "\t")
+		if shallow && strings.HasPrefix(row, "#") {
+			if inSection {
+				break
+			}
+			inSection = line == heading
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		readable := shallow && strings.HasPrefix(row, "|")
+		switch {
+		case inBody && row == "":
+			inBody, header = false, false
+		case inBody && !readable:
+			return nil, fmt.Sprintf("line %d: a line under the rows of a table does not start with |, or is indented: %s", n+1, row)
+		case inBody:
+			first := strings.TrimSpace(strings.Split(strings.Trim(row, "|"), "|")[0])
+			m := markdownType.FindStringSubmatch(first)
+			if m == nil {
+				return nil, fmt.Sprintf("line %d: the first cell of a row is not one component type in backquotes: %s", n+1, row)
+			}
+			keys = append(keys, m[1])
+		case strings.Contains(row, "|") && markdownRule.MatchString(row):
+			// The row of dashes under the header opens the body.
+			if !readable || !header {
+				return nil, fmt.Sprintf("line %d: a table this test cannot read: its rows do not start with |, or are indented: %s", n+1, row)
+			}
+			inBody = true
+		default:
+			header = readable
+		}
+	}
+	if len(keys) == 0 {
+		return nil, "no row with a component type"
+	}
+	return keys, ""
+}
+
+// markdownRule is the row of dashes between the header and the body of a
+// table, with or without the bars at its ends. A line of dashes with no bar
+// is no table.
+var markdownRule = regexp.MustCompile(`^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$`)
+
+// markdownFence returns the run of three or more backquotes or tildes a line
+// opens with, after at most three blanks, and what follows the run.
+func markdownFence(line string) (run, rest string) {
+	text := strings.TrimLeft(line, " ")
+	if len(line)-len(text) > 3 || text == "" || (text[0] != '`' && text[0] != '~') {
+		return "", ""
+	}
+	end := len(text) - len(strings.TrimLeft(text, text[:1]))
+	if end < 3 {
+		return "", ""
+	}
+	return text[:end], strings.TrimSpace(text[end:])
+}
+
+// TestKindLists_MarkdownReader holds the reader of the Markdown tables to what
+// it must not pass over: a row it cannot read, a table written another way
+// than it reads, a table in a code block, a heading that is not there.
+func TestKindLists_MarkdownReader(t *testing.T) {
+	const table = "| `type` | text |\n|---|---|\n"
+	tests := []struct {
+		name, text string
+		want       []string
+		defect     string
+	}{
+		{"rows up to the next heading", "## H\n\n" + table + "| `a` | x |\n| `b-2` | y |\n\ntext\n\n## Next\n\n" + table + "| `z` | x |\n", []string{"a", "b-2"}, ""},
+		{"blanks around a cell", "## H\n" + table + "| `b` | x |\n|  `a`  | y |\n", []string{"b", "a"}, ""},
+		{"rule row with alignment", "## H\n| `type` | text |\n| :--- | ---: |\n| `a` | x |\n", []string{"a"}, ""},
+		{"row with no type", "## H\n" + table + "| `a` | x |\n| b | y |\n", nil, "line 5"},
+		{"row with two types", "## H\n" + table + "| `a`, `b` | x |\n", nil, "line 4"},
+		{"table in a tilde block", "~~~markdown\n## H\n" + table + "| `a` | x |\n~~~\n", nil, "no row"},
+		{"shorter run inside a block", "````\n```\n## H\n" + table + "| `a` | x |\n````\n", nil, "no row"},
+		{"block inside the section", "## H\n```\n" + table + "| `b` | x |\n```\n" + table + "| `a` | x |\n", []string{"a"}, ""},
+		{"heading that is not there", "## Other\n" + table + "| `a` | x |\n", nil, "no row"},
+		{"row without its first bar", "## H\n" + table + "| `b` | x |\n`a` | y |\n| `c` | z |\n", nil, "line 5"},
+		{"indented heading ends the section", "## H\n\n  ## Next\n" + table + "| `a` | x |\n", nil, "no row"},
+		{"indented table", "## H\n\n    | `type` | text |\n    |---|---|\n    | `a` | x |\n", nil, "line 4"},
+		{"table without the bars at the ends", "## H\n\n`type` | text\n---|---\n`a` | x\n", nil, "line 4"},
+		{"rule row with no header", "## H\n\n|---|---|\n| `a` | x |\n", nil, "line 3"},
+		{"line of dashes is no table", "## H\n\n---\n\n" + table + "| `a` | x |\n", []string{"a"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, defect := markdownTableTypes(tt.text, "## H")
+			if tt.defect == "" && (defect != "" || !slices.Equal(got, tt.want)) {
+				t.Fatalf("got %q and defect %q, want %q and none", got, defect, tt.want)
+			}
+			if tt.defect != "" && !strings.Contains(defect, tt.defect) {
+				t.Fatalf("got %q and defect %q, want a defect that names %q", got, defect, tt.defect)
+			}
+		})
+	}
 }
