@@ -52,7 +52,9 @@ type TransformContext struct {
 	// is the component's own, or generation fails, wherever the object holds labels
 	// that reach pods: its own, a pod template's, and the metadata an operator puts
 	// on its pods (a CloudNativePG Cluster's spec.inheritedMetadata, a Pooler's
-	// template, spec.podMetadata of the Prometheus operator's kinds). A workload
+	// template, spec.podMetadata of the Prometheus operator's kinds, the
+	// moverPodLabels of a VolSync mover, the pod template of a cert-manager
+	// issuer's HTTP01 solvers, a Gateway's spec.infrastructure). A workload
 	// whose selector requires another value for the key is refused too. Where the
 	// key is absent launcher writes it, on the object and its pod template. One
 	// value besides the component's passes, under the key "app" only: the one the
@@ -111,8 +113,11 @@ type TransformContext struct {
 	// ErrReservedMetadataKey, since a rendered chart's objects exist only then. It
 	// is read on an object's own labels and annotations, on the pod template's of
 	// a workload, of a PodTemplate and of a CloudNativePG Pooler, on
-	// spec.inheritedMetadata of a CloudNativePG Cluster, and on spec.podMetadata
-	// of a Prometheus, a PrometheusAgent, an Alertmanager and a ThanosRuler.
+	// spec.inheritedMetadata of a CloudNativePG Cluster, on spec.podMetadata
+	// of a Prometheus, a PrometheusAgent, an Alertmanager and a ThanosRuler, on
+	// the moverPodLabels of a VolSync mover, on the pod template of a
+	// cert-manager issuer's HTTP01 solvers, and on a Gateway's
+	// spec.infrastructure.
 	//
 	// The keys launcher writes itself are not refused: the `app` label, the
 	// component label (ComponentLabelKey), and an annotation the platform sets on
