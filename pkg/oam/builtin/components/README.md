@@ -4973,6 +4973,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     an `externalsecret` requires; and the `key` and `operator` of a match
     expression authored in `namespaceSelector` or in an entry of
     `namespaceSelectors`, presence only. 28 paths.
+  - The published schema marks the two top-level ones as required
+    (go-kure/launcher#790): `provider` of a `secretstore` and of a
+    `clustersecretstore`, and `externalSecretSpec` of a
+    `clusterexternalsecret`. That refuses no component that built before,
+    since the kind refused each without it already.
 
   `TestExternalSecretsKinds_RequiredMatchSource` holds the three lists to the
   source of the linked module, which ships no CRD: the markers its CRDs are
@@ -7821,6 +7826,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
   (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
   `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
+  The published schema marks the top-level property of each as required
+  (go-kure/launcher#790): `cluster` and `pgbouncer` of a `cnpg-pooler`;
+  `cluster`, `name` and `owner` of a `cnpg-database`; `configuration` of a
+  `cnpg-objectstore`. That refuses no component that built before, since the
+  kind refused each without it already.
   A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
   label of at most 50 characters).
   On the Pooler, a match expression authored in a label selector of

@@ -142,7 +142,7 @@ func secretStoreSchema(kind string) map[string]oam.PropertySchema {
 			Description: spec + "controller: the name of the operator instance that reconciles the store, where several run; an instance started with a controller name reads only the stores that name it.",
 		},
 		"provider": {
-			Type: oam.PropertyTypeObject, AdditionalProperties: true,
+			Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true,
 			Description: spec + "provider: the provider the store reads from, under its key (aws, vault, kubernetes, webhook and the others the API lists). Required, and exactly one key. What the API requires inside the provider is required here too. Under an environment policy that forbids explicit secrets, a credential written as a `value` beside a `secretRef` is refused, and so is the data of the `fake` provider. Decoded strictly into the operator's API type: see SecretStoreProvider in its API reference.",
 		},
 		"retrySettings": {
@@ -532,7 +532,7 @@ func clusterExternalSecretSchema() map[string]oam.PropertySchema {
 	const spec = "ClusterExternalSecret spec."
 	return map[string]oam.PropertySchema{
 		"externalSecretSpec": {
-			Type: oam.PropertyTypeObject, AdditionalProperties: true,
+			Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true,
 			Description: spec + "externalSecretSpec: the spec of the ExternalSecret created in each selected namespace: the fields of the externalsecret kind (secretStoreRef, target, refreshPolicy, refreshInterval, syncWindows, data, dataFrom), with what that kind requires and what it refuses of a target.manifest. Required. Decoded strictly into the operator's API type: see ExternalSecretSpec in its API reference.",
 		},
 		"externalSecretName": {

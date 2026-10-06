@@ -88,12 +88,14 @@ func (h *CnpgPoolerHandler) PropertySchema() map[string]oam.PropertySchema {
 	obj := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc + ref}
 	}
+	// required marks a property the kind refuses a component without.
+	required := func(s oam.PropertySchema) oam.PropertySchema { s.Required = true; return s }
 	return map[string]oam.PropertySchema{
-		"cluster":            obj("Required. Reference to the CloudNativePG Cluster the pooler serves: {name: <cluster>}. The name must differ from this pooler's own."),
+		"cluster":            required(obj("Required. Reference to the CloudNativePG Cluster the pooler serves: {name: <cluster>}. The name must differ from this pooler's own.")),
 		"type":               {Type: oam.PropertyTypeString, Description: "Service the pooler forwards to: rw, ro or r. The operator's default (rw) applies when omitted."},
 		"instances":          {Type: oam.PropertyTypeInteger, Description: "Number of PgBouncer pods. The operator's default (1) applies when omitted. Not subject to the environment's replica policy."},
 		"template":           obj("Pod template for the PgBouncer pods. Environment policy applies to it: host namespaces, hostPath volumes, privilege, capabilities, image registries and cpu/memory maxima."),
-		"pgbouncer":          obj("Required. PgBouncer configuration: poolMode, parameters, pg_hba, authentication secrets, image. An empty object selects PgBouncer's defaults. A policy registry allowlist applies to an authored image."),
+		"pgbouncer":          required(obj("Required. PgBouncer configuration: poolMode, parameters, pg_hba, authentication secrets, image. An empty object selects PgBouncer's defaults. A policy registry allowlist applies to an authored image.")),
 		"deploymentStrategy": obj("Deployment strategy used to replace the PgBouncer pods."),
 		"monitoring":         obj("Monitoring configuration of the pooler."),
 		"serviceTemplate":    obj("Template for the Service created for the pooler."),
