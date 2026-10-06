@@ -855,6 +855,11 @@ its text:
     written as authored, as the references and the accounts of a `helmrelease` and a
     `fluxcd-kustomization` are. No environment policy applies and no `Policy` method is
     added.
+  - **In the Flux namespace such an object shares its namespace with every other
+    application's Flux objects,** so a reference without a namespace and a selector over
+    the object's namespace reach them with no `namespace` written: an
+    ImageUpdateAutomation without a `policySelector` selects every ImagePolicy there and
+    commits their selections through its own GitRepository. Nothing gates this either.
   - Required fields follow the rule of the Prometheus operator's kinds, and are derived
     as theirs are, from the `+required` markers of the linked modules' Go source: the
     API modules of the Flux controllers ship no CRD, so no list is held to the API

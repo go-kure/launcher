@@ -6955,7 +6955,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   them restricts the component types it registers.
   *Assumption, not read here:* a cluster's Flux controllers can be started so
   that they refuse a reference into another namespace. Launcher reads no such
-  setting, and no build depends on it. The fields, per kind:
+  setting, and no build depends on it.
+
+  **In the Flux namespace these objects share a namespace with every other
+  application's Flux objects.** When a Flux namespace is set, the objects of
+  this group land there (Namespace, below), and so do those of every other
+  application built with that Flux namespace. A reference without a
+  namespace, and a selector over "the object's namespace", then reach them:
+  an Alert's `providerRef` may name another application's Provider, an
+  ImagePolicy's `imageRepositoryRef` another application's ImageRepository,
+  the source of an ImageUpdateAutomation or of an ArtifactGenerator another
+  application's source, and an ImageUpdateAutomation without a
+  `policySelector` takes every ImagePolicy there. Nothing gates this
+  either, and no `namespace` has to be written for it.
+
+  The fields, per kind:
   - `fluxcd-alert`: `eventSources[].namespace` names the namespace of the
     objects whose events are sent, and a source's `name: "*"`, with or
     without `matchLabels`, takes every object of its kind there. The events
@@ -6983,6 +6997,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     whose selections it applies are those of the namespace it lands in
     (`policySelector` narrows them; it names no other namespace), and the
     Secret of `git.commit.signingKey` is one of that namespace too.
+    **In the Flux namespace, an ImageUpdateAutomation without a
+    `policySelector` selects every ImagePolicy there, those of other
+    applications included** (the API: "By default includes all policies in
+    namespace"), and the automation then commits their selections through
+    its own GitRepository.
   - `artifactgenerator`: `sources[].namespace` names the namespace of a
     Flux source (a Bucket, GitRepository, OCIRepository, HelmChart or
     ExternalArtifact); left out, the API takes "the same namespace as the
