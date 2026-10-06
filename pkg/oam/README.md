@@ -1732,6 +1732,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `listenerset` |
 | `manifests` |
 | `metallb-ipaddresspool` |
+| `metallb-l2advertisement` |
 | `namespace` |
 | `networkpolicy` |
 | `oci` |

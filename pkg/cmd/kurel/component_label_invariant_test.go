@@ -420,6 +420,9 @@ spec:
 		"addresses": []any{"192.0.2.0/24"},
 		"serviceAllocation": map[string]any{"serviceSelectors": []any{
 			map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}}},
+	"metallb-l2advertisement": {props: map[string]any{
+		"ipAddressPools": []any{"edge"},
+		"nodeSelectors":  []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
 	// The namespace, limitrange, resourcequota and persistentvolume kinds of
 	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
 	// label and no pods. The component name is the Namespace's name, which the

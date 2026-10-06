@@ -1,0 +1,29 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: metallb-system
+spec:
+  components:
+    - name: edge
+      type: metallb-l2advertisement
+      properties:
+        ipAddressPools: [edge, shared]
+        ipAddressPoolSelectors:
+          - matchLabels:
+              tier: edge
+        nodeSelectors:
+          - matchLabels:
+              role: edge
+            matchExpressions:
+              - key: zone
+                operator: In
+                values: [a, b]
+        interfaces: [eth1, eth2]
+        serviceSelectors:
+          - matchLabels:
+              exposure: public
+    - name: everything
+      type: metallb-l2advertisement
+      properties:
+        objectName: every-pool

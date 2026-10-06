@@ -518,6 +518,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"listenerset",
 		"manifests",
 		"metallb-ipaddresspool",
+		"metallb-l2advertisement",
 		"namespace",
 		"networkpolicy",
 		"ocirepository",

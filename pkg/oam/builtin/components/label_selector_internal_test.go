@@ -176,6 +176,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"imagev1.ImagePolicySpec":                    reflect.TypeFor[imagev1.ImagePolicySpec](),
 	"kustv1.KustomizationSpec":                   reflect.TypeFor[kustv1.KustomizationSpec](),
 	"metallbv1beta1.IPAddressPoolSpec":           reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
+	"metallbv1beta1.L2AdvertisementSpec":         reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
 	"monitoringv1.PodMonitorSpec":                reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 	"monitoringv1.ProbeSpec":                     reflect.TypeFor[monitoringv1.ProbeSpec](),
 	"monitoringv1.PrometheusRuleSpec":            reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
@@ -591,6 +592,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		component: "metallb-ipaddresspool", typ: "metallbv1beta1.IPAddressPoolSpec", config: kindConfig(&MetalLBIPAddressPoolHandler{}),
 		base: map[string]any{"addresses": []any{"192.0.2.0/24"}},
 		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion),
+	},
+	{
+		component: "metallb-l2advertisement", typ: "metallbv1beta1.L2AdvertisementSpec", config: kindConfig(&MetalLBL2AdvertisementHandler{}),
+		base: map[string]any{},
+		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion),
 	},
 }
 

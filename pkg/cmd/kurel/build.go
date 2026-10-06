@@ -327,6 +327,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"listenerset":                     &components.ListenerSetHandler{},
 		"manifests":                       &components.ManifestsHandler{},
 		"metallb-ipaddresspool":           &components.MetalLBIPAddressPoolHandler{},
+		"metallb-l2advertisement":         &components.MetalLBL2AdvertisementHandler{},
 		"namespace":                       &components.NamespaceHandler{},
 		"networkpolicy":                   &components.NetworkPolicyHandler{},
 		"ocirepository":                   &components.OCIRepositoryHandler{},
