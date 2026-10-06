@@ -43,6 +43,9 @@ var kindLists = []struct {
 // the type in backquotes in the first cell. They stand in the same order, for
 // the same reason. file is relative to this package, heading is the heading
 // line the table stands under.
+//
+// One list of the same documents is not read: the "Per-type highlights" of
+// pkg/oam/builtin/components/README.md are not yet in order of their types.
 var kindTables = []struct {
 	file, heading string
 }{
