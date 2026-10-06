@@ -263,8 +263,10 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 // TestPostgresqlRule_PoolerInstances: what the emitted Pooler holds at
 // instances for each authored pooler.instances. The Pooler CRD gives the field
 // a default of 1 and no minimum, so a Pooler without it runs one pod. An
-// authored 0 or negative count is left out of the Pooler: the document builds,
-// and the operator's default replaces what the author wrote.
+// authored 0 or negative count used to be left out of the Pooler, where the
+// operator's default replaced it. It is written as authored: the upstream type
+// carries a 0, and the CRD does not bound the count, so refusing a negative one
+// is left to the cluster. The cnpg-pooler kind takes each.
 func TestPostgresqlRule_PoolerInstances(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -273,8 +275,9 @@ func TestPostgresqlRule_PoolerInstances(t *testing.T) {
 	}{
 		{name: "not authored", pooler: map[string]any{"enabled": true}, want: int64(3)},
 		{name: "two", pooler: map[string]any{"enabled": true, "instances": 2}, want: int64(2)},
-		{name: "zero", pooler: map[string]any{"enabled": true, "instances": 0}, want: nil},
-		{name: "negative", pooler: map[string]any{"enabled": true, "instances": -1}, want: nil},
+		{name: "zero", pooler: map[string]any{"enabled": true, "instances": 0}, want: int64(0)},
+		{name: "negative", pooler: map[string]any{"enabled": true, "instances": -1}, want: int64(-1)},
+		{name: "null", pooler: map[string]any{"enabled": true, "instances": nil}, want: int64(3)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"pooler": tc.pooler}}

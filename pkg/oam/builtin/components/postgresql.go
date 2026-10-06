@@ -479,6 +479,7 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, errors.Errorf("invalid pooler instances value: %v", v)
 			}
 			config.PoolerInstances = n
+			config.explicitPoolerInstances = true
 		}
 		config.PoolerType = "rw"
 		if typ, present, err := parseRawStringField(pooler, "type", "pooler.type"); err != nil {
@@ -1095,6 +1096,9 @@ type PostgresqlConfig struct {
 	// explicitBackupDestinationPath is set when backup.destinationPath was
 	// authored, an empty one included: the backup is then built from it.
 	explicitBackupDestinationPath bool
+	// explicitPoolerInstances is set when pooler.instances was authored: the
+	// count is then written as authored, a 0 or a negative one included.
+	explicitPoolerInstances bool
 }
 
 // bootstrapSource reads the source of one bootstrap method's block. The

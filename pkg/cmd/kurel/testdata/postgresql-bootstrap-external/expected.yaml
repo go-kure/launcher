@@ -91,6 +91,7 @@ metadata:
 spec:
   cluster:
     name: postgres
+  instances: 0
   pgbouncer:
     poolMode: session
   type: ro
