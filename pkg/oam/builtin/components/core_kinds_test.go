@@ -50,6 +50,10 @@ import (
 // The rows stand in the order of their component type, as sort.Strings gives
 // it, and a new kind's row goes at its position: TestKindLists_InOrder
 // (pkg/cmd/kurel) holds it.
+//
+// Every registered component type has its row here, or its reason for having
+// none in kindListExceptions (pkg/cmd/kurel): TestKindLists_Complete holds
+// that, so a new kind is given one of the two.
 var coreKindSchemas = []struct {
 	component string
 	typ       reflect.Type
