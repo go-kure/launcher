@@ -195,61 +195,262 @@ func helmtemplateLabelProps(t *testing.T) map[string]any {
 	return map[string]any{"chart": "labelchart", "version": "0.1.0", "source": map[string]any{"url": srvURL}}
 }
 
+// componentLabelFixtures holds one fixture per component type, in the order
+// of the types: a new type's entry goes at its position
+// (TestKindLists_InOrder).
 var componentLabelFixtures = map[string]componentLabelFixture{
-	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
-	// selector the workload kinds build into the output.
-	"webservice": {props: workloadProps(map[string]any{"port": 8080, "replicas": 3, "topologySpread": true,
-		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 5},
-	"worker": {props: workloadProps(map[string]any{"replicas": 3, "topologySpread": true,
-		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 4},
-	"deployment": {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
-	// The two batch kinds refuse a long name by the length of their own object
-	// first: a CronJob's name is at most 52 characters, a Job's at most 63.
-	"cronjob": {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}),
-		nameBound: 52, longRefusal: "the component name is the CronJob's name, which must be at most 52 characters", labelled: true},
-	"job": {props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true},
-	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
-	// their long-name refusal is the container name's, as deployment's.
-	"daemonset":   {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
-	"statefulset": {props: workloadProps(map[string]any{"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 2},
-	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
-		longRefusal: serviceNameRefusal, labelled: true},
-	// The Cluster's pods are created and labelled by the operator, so these
-	// two components emit no `app` label and no pod selector of their own.
+	// The five kinds of the Gateway API's infrastructure objects emit identity
+	// and the authored fields too, with no `app` label and no pods: a
+	// GatewayClass cluster-scoped, the other four namespaced. None checks a
+	// name rule of its own.
+	"backendtlspolicy": {props: map[string]any{
+		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
+		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
+	// The kind-named Flux sources each emit one source CR named after the
+	// component: no `app` label, no pods, and a name up to a DNS-1123 subdomain.
+	"bucket": {props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"}},
+	// The three cert-manager kinds emit identity and the authored fields too,
+	// with no `app` label and no pods: an Issuer and a Certificate namespaced, a
+	// ClusterIssuer cluster-scoped. None checks a name rule of its own.
+	"certificate": {props: map[string]any{
+		"secretName": "web-tls", "dnsNames": []any{"web.example.com"},
+		"issuerRef": map[string]any{"name": "selfsigned", "kind": "ClusterIssuer"}}},
+	// The four kinds of Cilium's BGP control plane emit identity and the
+	// authored fields too, cluster-scoped, with no `app` label and no pods. A
+	// selector in one is the author's label query over nodes, pools, Services
+	// or advertisements, not a pod selector of this document. None checks a
+	// name rule of its own.
+	"cilium-bgpadvertisement": {props: map[string]any{"advertisements": []any{
+		map[string]any{"advertisementType": "PodCIDR"}}}},
+	"cilium-bgpclusterconfig": {props: map[string]any{"bgpInstances": []any{
+		map[string]any{"name": "instance-65000", "localASN": 65000}}}},
+	"cilium-bgpnodeconfigoverride": {props: map[string]any{"bgpInstances": []any{
+		map[string]any{"name": "instance-65000", "routerID": "192.0.2.1"}}}},
+	"cilium-bgppeerconfig": {props: map[string]any{"ebgpMultihop": 2}},
+	// Five more kinds of Cilium's API (cilium-cidrgroup,
+	// cilium-loadbalancerippool, cilium-egressgatewaypolicy,
+	// cilium-localredirectpolicy, cilium-nodeconfig) emit identity and the
+	// authored spec. A selector in one is the author's label query over Services,
+	// nodes, namespaces or pods of the cluster, not a pod selector of this
+	// document, so the rows select on `role`: the invariant reads every `app`
+	// value as this component's own. None checks a name rule of its own.
+	"cilium-cidrgroup": {props: map[string]any{"externalCIDRs": []any{"192.0.2.0/24"}}},
+	// A CiliumClusterwideNetworkPolicy's selectors are the author's, as the
+	// CiliumNetworkPolicy's: endpoints of the whole cluster, or nodes.
+	"cilium-clusterwidenetworkpolicy": {props: map[string]any{"spec": map[string]any{
+		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
+		"ingress": []any{map[string]any{"fromEndpoints": []any{
+			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
+	"cilium-egressgatewaypolicy": {props: map[string]any{
+		"selectors":        []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"role": "web"}}}},
+		"destinationCIDRs": []any{"192.0.2.0/24"},
+		"egressGateway":    map[string]any{"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "true"}}},
+	}},
+	"cilium-loadbalancerippool": {props: map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}}}},
+	"cilium-localredirectpolicy": {props: map[string]any{
+		"redirectFrontend": map[string]any{"addressMatcher": map[string]any{
+			"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
+		}},
+		"redirectBackend": map[string]any{
+			"localEndpointSelector": map[string]any{"matchLabels": map[string]any{"role": "metadata-proxy"}},
+			"toPorts":               []any{map[string]any{"port": "8080", "protocol": "TCP"}},
+		},
+	}},
+	// A CiliumNetworkPolicy's endpoint selectors are the author's, as a
+	// NetworkPolicy's podSelector is.
+	"cilium-networkpolicy": {props: map[string]any{"spec": map[string]any{
+		"endpointSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
+		"ingress": []any{map[string]any{"fromEndpoints": []any{
+			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
+	"cilium-nodeconfig": {props: map[string]any{
+		"defaults":     map[string]any{"enable-hubble": "false"},
+		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
+	}},
+	// The four external-secrets kinds emit identity and the authored fields
+	// too, with no `app` label and no pods: a SecretStore and an ExternalSecret
+	// namespaced, the two cluster kinds cluster-scoped. A selector in one is the
+	// author's label query over namespaces, not a pod selector of this document.
+	// None checks a name rule of its own.
+	"clusterexternalsecret": {props: map[string]any{
+		"namespaceSelectors": []any{map[string]any{"matchLabels": map[string]any{"team": "payments"}}},
+		"externalSecretSpec": map[string]any{
+			"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
+			"data": []any{map[string]any{
+				"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}}},
+	"clusterissuer": {props: map[string]any{"ca": map[string]any{"secretName": "ca-key-pair"}}},
+	// The four kinds of the RBAC API are identity and the authored fields too.
+	// They select no pod, and check no name rule of their own.
+	"clusterrole": {props: map[string]any{"rules": []any{
+		map[string]any{"apiGroups": []any{""}, "resources": []any{"nodes"}, "verbs": []any{"get"}}}}},
+	"clusterrolebinding": {props: map[string]any{
+		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web", "namespace": "default"}},
+		"roleRef":  map[string]any{"kind": "ClusterRole", "name": "node-reader"}}},
+	"clustersecretstore": {props: map[string]any{"provider": map[string]any{
+		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
+	// The Cluster's pods are created and labelled by the operator, so postgresql
+	// and cnpg-cluster emit no `app` label and no pod selector of their own.
 	// CloudNativePG admits a Cluster name of at most 50 characters.
-	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"},
-		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	// The other CloudNativePG kinds also run no pods of their own. CloudNativePG
 	// names the Pooler's Service after it, so its name is a DNS-1035 label.
-	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
-		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
 	"cnpg-database":    {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
 	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
+	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
+		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
 	// The go-kure/launcher#702 kinds name their one object after the
 	// component, and a ServiceAccount, ConfigMap or claim name is a DNS-1123
 	// subdomain, so each accepts the 200-character name and labels its object.
-	"serviceaccount":        {props: map[string]any{}, labelled: true},
-	"persistentvolumeclaim": {props: map[string]any{"size": "1Gi"}, labelled: true},
-	"configmap":             {props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true},
-	// The go-kure/launcher#790 kinds below, up to persistentvolume, emit identity
-	// and the authored spec, with no `app` label and no pods. The component name
-	// is the Namespace's name,
-	// which the API holds to a DNS-1123 label.
-	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
+	"configmap": {props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true},
+	"crd": {props: map[string]any{"inline": `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`}},
+	// The two batch kinds refuse a long name by the length of their own object
+	// first: a CronJob's name is at most 52 characters, a Job's at most 63.
+	"cronjob": {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}),
+		nameBound: 52, longRefusal: "the component name is the CronJob's name, which must be at most 52 characters", labelled: true},
+	// The six cluster-scoped kinds storageclass, volumeattributesclass,
+	// priorityclass, runtimeclass, ingressclass and csidriver emit identity and
+	// the authored fields, with no `app` label and no pods. They leave the name
+	// rules of their object to the API server, so each accepts the 200-character
+	// name.
+	"csidriver": {props: map[string]any{"attachRequired": false}},
+	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
+	// their long-name refusal is the container name's, as deployment's.
+	"daemonset":  {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"deployment": {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	// An EndpointSlice is identity and the authored fields too. It selects no
+	// pod: it lists addresses, and belongs to a Service through a label the
+	// author writes under `labels`. It checks no name rule of its own.
+	"endpointslice": {props: map[string]any{
+		"addressType": "IPv4",
+		"endpoints":   []any{map[string]any{"addresses": []any{"192.0.2.10"}}},
+		"ports":       []any{map[string]any{"name": "http", "port": 8080}},
+	}},
+	"externalsecret": {props: map[string]any{
+		"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
+		"data": []any{map[string]any{
+			"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}},
+	// Emits only the Kustomization, which carries no `app` label.
+	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
+		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
+	"gateway": {props: map[string]any{
+		"gatewayClassName": "public",
+		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
+	"gatewayclass":  {props: map[string]any{"controllerName": "example.net/gateway-controller"}},
+	"gitrepository": {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
+	// Lowers to the helmrelease terminal plus a generated HelmRepository;
+	// valuesMode configMap with non-empty values adds the values ConfigMap
+	// through a configmap trait, the one labelled object.
+	"helm": {props: map[string]any{"chart": "app",
+		"source":     map[string]any{"url": "https://charts.example.com"},
+		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
+	"helmchart": {props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}}},
+	// Emits only the HelmRelease, which carries no `app` label.
+	"helmrelease": {props: map[string]any{
+		"chart": map[string]any{"spec": map[string]any{"chart": "app",
+			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
+		"values": map[string]any{"replicaCount": 2}}},
+	"helmrepository": {props: map[string]any{"url": "https://charts.example.com"}},
+	// Renders a locally served chart; helmtemplateLabelProps says why it is
+	// unlabelled, selects no pods and accepts the 200-character name.
+	"helmtemplate": {propsFor: helmtemplateLabelProps},
+	// The servicecidr, poddisruptionbudget and horizontalpodautoscaler kinds emit
+	// identity and the authored fields too, with no `app` label and no pods: a
+	// ServiceCIDR is cluster-scoped, the budget and the autoscaler are
+	// namespaced. None checks a name rule of its own. The budget authors no
+	// selector, so it selects no pod.
+	"horizontalpodautoscaler": {props: map[string]any{
+		"scaleTargetRef": map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "web"},
+		"maxReplicas":    3}},
+	// An HTTPRoute name is a DNS-1123 subdomain too, and the object is authored
+	// as an Ingress is: no pods, no selector, a backend by name.
+	"httproute": {props: map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gateway"}},
+		"rules": []any{map[string]any{"backendRefs": []any{
+			map[string]any{"name": "web", "port": 80}}}}}},
+	// An Ingress name is a DNS-1123 subdomain. The object is authored: it runs
+	// no pods and selects none, and its backend is a Service by name.
+	"ingress": {props: map[string]any{"defaultBackend": map[string]any{
+		"service": map[string]any{"name": "web", "port": map[string]any{"number": 80}}}}},
+	"ingressclass": {props: map[string]any{"controller": "example.com/ingress-controller"}},
+	"issuer":       {props: map[string]any{"selfSigned": map[string]any{}}},
+	"job":          {props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true},
 	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
 		"default": map[string]any{"cpu": "500m"}}}}},
-	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
+	"listenerset": {props: map[string]any{
+		"parentRef": map[string]any{"name": "public"},
+		"listeners": []any{map[string]any{"name": "http", "port": 8080, "protocol": "HTTP"}}}},
+	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
+	// The namespace, limitrange, resourcequota and persistentvolume kinds of
+	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
+	// label and no pods. The component name is the Namespace's name, which the
+	// API holds to a DNS-1123 label.
+	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
+	// A NetworkPolicy name is a DNS-1123 subdomain too. Its podSelector is the
+	// author's and picks pods another component owns, so the output holds no pod
+	// template to compare it with, as with a Service fronting another component.
+	"networkpolicy": {props: map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
+		"policyTypes": []any{"Ingress"}}},
+	// Lowers to the ocirepository and fluxcd-kustomization terminals, both named
+	// after the component.
+	"oci":           {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
+	"ocirepository": {props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}}},
+	"passthrough":   {props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}}},
 	// A PersistentVolume name is a DNS-1123 subdomain, so the 200-character
 	// name is accepted.
 	"persistentvolume": {props: map[string]any{
 		"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteMany"},
 		"nfs": map[string]any{"server": "nfs.example.com", "path": "/exports/data"}}},
+	"persistentvolumeclaim": {props: map[string]any{"size": "1Gi"}, labelled: true},
 	// A Pod name is a DNS-1123 subdomain too. The pod carries the authored spec
 	// and the `app` label; it is a pod, not a selector over pods.
 	"pod": {props: map[string]any{"containers": []any{
 		map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}, labelled: true},
+	"poddisruptionbudget": {props: map[string]any{"maxUnavailable": 1}},
+	// The four Prometheus operator kinds emit identity and the authored fields
+	// too, namespaced, with no `app` label and no pods. A monitor's selector is
+	// the author's label query over Services or Pods, not a pod selector of
+	// this document. None checks a name rule of its own.
+	"podmonitor": {props: map[string]any{
+		"selector":            map[string]any{"matchLabels": map[string]any{"team": "payments"}},
+		"podMetricsEndpoints": []any{map[string]any{"port": "metrics"}}}},
+	// A PodTemplate name is a DNS-1123 subdomain too. The template is stored,
+	// not run: it gets no `app` label, and nothing selects it. It still carries
+	// the component label, on a template authored without labels.
+	"podtemplate": {props: map[string]any{
+		"template": map[string]any{
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
+		storedTemplates: 1},
+	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"},
+		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
+	"priorityclass": {props: map[string]any{"value": 1000}},
+	"prometheus-probe": {props: map[string]any{
+		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
+		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},
+	"prometheusrule": {props: map[string]any{"groups": []any{map[string]any{
+		"name":  "availability",
+		"rules": []any{map[string]any{"alert": "TargetDown", "expr": "up == 0"}}}}}},
+	"referencegrant": {props: map[string]any{
+		"from": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "shop"}},
+		"to":   []any{map[string]any{"group": "", "kind": "Service"}}}},
 	// A ReplicaSet name is a DNS-1123 subdomain too. The `app` label is on the
 	// pod template, beside the authored label the authored selector picks.
 	"replicaset": {props: map[string]any{
@@ -269,236 +470,43 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 			"spec": map[string]any{"containers": []any{
 				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
 		labelled: true, selectors: 1},
-	// A PodTemplate name is a DNS-1123 subdomain too. The template is stored,
-	// not run: it gets no `app` label, and nothing selects it. It still carries
-	// the component label, on a template authored without labels.
-	"podtemplate": {props: map[string]any{
-		"template": map[string]any{
-			"spec": map[string]any{"containers": []any{
-				map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}}},
-		storedTemplates: 1},
-	// The six cluster-scoped kinds below emit identity and the authored fields,
-	// with no `app` label and no pods. They leave the name rules of their
-	// object to the API server, so each accepts the 200-character name.
-	"storageclass":          {props: map[string]any{"provisioner": "csi.example.com"}},
-	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
-	"priorityclass":         {props: map[string]any{"value": 1000}},
-	"runtimeclass":          {props: map[string]any{"handler": "runc"}},
-	"ingressclass":          {props: map[string]any{"controller": "example.com/ingress-controller"}},
-	"csidriver":             {props: map[string]any{"attachRequired": false}},
-	// An Ingress name is a DNS-1123 subdomain. The object is authored: it runs
-	// no pods and selects none, and its backend is a Service by name.
-	"ingress": {props: map[string]any{"defaultBackend": map[string]any{
-		"service": map[string]any{"name": "web", "port": map[string]any{"number": 80}}}}},
-	// An HTTPRoute name is a DNS-1123 subdomain too, and the object is authored
-	// in the same way: no pods, no selector, a backend by name.
-	"httproute": {props: map[string]any{
-		"parentRefs": []any{map[string]any{"name": "gateway"}},
-		"rules": []any{map[string]any{"backendRefs": []any{
-			map[string]any{"name": "web", "port": 80}}}}}},
-	// A NetworkPolicy name is a DNS-1123 subdomain too. Its podSelector is the
-	// author's and picks pods another component owns, so the output holds no pod
-	// template to compare it with, as with a Service fronting another component.
-	"networkpolicy": {props: map[string]any{
-		"podSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
-		"policyTypes": []any{"Ingress"}}},
-	// A CiliumNetworkPolicy's endpoint selectors are the author's, as a
-	// NetworkPolicy's podSelector is.
-	"cilium-networkpolicy": {props: map[string]any{"spec": map[string]any{
-		"endpointSelector": map[string]any{"matchLabels": map[string]any{"role": "db"}},
-		"ingress": []any{map[string]any{"fromEndpoints": []any{
-			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
-	// The three kinds below emit identity and the authored fields too, with no
-	// `app` label and no pods: a ServiceCIDR is cluster-scoped, the budget and
-	// the autoscaler are namespaced. None checks a name rule of its own. The
-	// budget authors no selector, so it selects no pod.
-	"servicecidr":         {props: map[string]any{"cidrs": []any{"10.96.0.0/16"}}},
-	"poddisruptionbudget": {props: map[string]any{"maxUnavailable": 1}},
-	"horizontalpodautoscaler": {props: map[string]any{
-		"scaleTargetRef": map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "web"},
-		"maxReplicas":    3}},
-	// A Secret name is a DNS-1123 subdomain, and the kind labels its Secret as
-	// the configmap kind labels its ConfigMap.
-	"secret": {props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true},
-	// The four Prometheus operator kinds emit identity and the authored fields
-	// too, namespaced, with no `app` label and no pods. A monitor's selector is
-	// the author's label query over Services or Pods, not a pod selector of
-	// this document. None checks a name rule of its own.
-	"servicemonitor": {props: map[string]any{
-		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
-		"endpoints": []any{map[string]any{"port": "metrics"}}}},
-	"podmonitor": {props: map[string]any{
-		"selector":            map[string]any{"matchLabels": map[string]any{"team": "payments"}},
-		"podMetricsEndpoints": []any{map[string]any{"port": "metrics"}}}},
-	"prometheus-probe": {props: map[string]any{
-		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
-		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},
-	"prometheusrule": {props: map[string]any{"groups": []any{map[string]any{
-		"name":  "availability",
-		"rules": []any{map[string]any{"alert": "TargetDown", "expr": "up == 0"}}}}}},
-	// The three cert-manager kinds emit identity and the authored fields too,
-	// with no `app` label and no pods: an Issuer and a Certificate namespaced, a
-	// ClusterIssuer cluster-scoped. None checks a name rule of its own.
-	"issuer":        {props: map[string]any{"selfSigned": map[string]any{}}},
-	"clusterissuer": {props: map[string]any{"ca": map[string]any{"secretName": "ca-key-pair"}}},
-	"certificate": {props: map[string]any{
-		"secretName": "web-tls", "dnsNames": []any{"web.example.com"},
-		"issuerRef": map[string]any{"name": "selfsigned", "kind": "ClusterIssuer"}}},
-	// The four kinds of Cilium's BGP control plane emit identity and the
-	// authored fields too, cluster-scoped, with no `app` label and no pods. A
-	// selector in one is the author's label query over nodes, pools, Services
-	// or advertisements, not a pod selector of this document. None checks a
-	// name rule of its own.
-	"cilium-bgpadvertisement": {props: map[string]any{"advertisements": []any{
-		map[string]any{"advertisementType": "PodCIDR"}}}},
-	"cilium-bgpclusterconfig": {props: map[string]any{"bgpInstances": []any{
-		map[string]any{"name": "instance-65000", "localASN": 65000}}}},
-	"cilium-bgpnodeconfigoverride": {props: map[string]any{"bgpInstances": []any{
-		map[string]any{"name": "instance-65000", "routerID": "192.0.2.1"}}}},
-	"cilium-bgppeerconfig": {props: map[string]any{"ebgpMultihop": 2}},
-	// So do five more kinds of Cilium's API: identity and the authored spec.
-	// A selector in one is the author's label query over Services, nodes,
-	// namespaces or pods of the cluster, not a pod selector of this document,
-	// so the rows select on `role`: the invariant reads every `app` value as
-	// this component's own. None checks a name rule of its own.
-	"cilium-cidrgroup":          {props: map[string]any{"externalCIDRs": []any{"192.0.2.0/24"}}},
-	"cilium-loadbalancerippool": {props: map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}}}},
-	"cilium-egressgatewaypolicy": {props: map[string]any{
-		"selectors":        []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"role": "web"}}}},
-		"destinationCIDRs": []any{"192.0.2.0/24"},
-		"egressGateway":    map[string]any{"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "true"}}},
-	}},
-	"cilium-localredirectpolicy": {props: map[string]any{
-		"redirectFrontend": map[string]any{"addressMatcher": map[string]any{
-			"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
-		}},
-		"redirectBackend": map[string]any{
-			"localEndpointSelector": map[string]any{"matchLabels": map[string]any{"role": "metadata-proxy"}},
-			"toPorts":               []any{map[string]any{"port": "8080", "protocol": "TCP"}},
-		},
-	}},
-	"cilium-nodeconfig": {props: map[string]any{
-		"defaults":     map[string]any{"enable-hubble": "false"},
-		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
-	}},
-	// A CiliumClusterwideNetworkPolicy's selectors are the author's, as the
-	// CiliumNetworkPolicy's above: endpoints of the whole cluster, or nodes.
-	"cilium-clusterwidenetworkpolicy": {props: map[string]any{"spec": map[string]any{
-		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
-		"ingress": []any{map[string]any{"fromEndpoints": []any{
-			map[string]any{"matchLabels": map[string]any{"role": "api"}}}}}}}},
-	// The five kinds of the Gateway API's infrastructure objects emit identity
-	// and the authored fields too, with no `app` label and no pods: a
-	// GatewayClass cluster-scoped, the other four namespaced. None checks a
-	// name rule of its own.
-	"gatewayclass": {props: map[string]any{"controllerName": "example.net/gateway-controller"}},
-	"gateway": {props: map[string]any{
-		"gatewayClassName": "public",
-		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
-	"listenerset": {props: map[string]any{
-		"parentRef": map[string]any{"name": "public"},
-		"listeners": []any{map[string]any{"name": "http", "port": 8080, "protocol": "HTTP"}}}},
-	"referencegrant": {props: map[string]any{
-		"from": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "shop"}},
-		"to":   []any{map[string]any{"group": "", "kind": "Service"}}}},
-	"backendtlspolicy": {props: map[string]any{
-		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
-		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
-	// An EndpointSlice is identity and the authored fields too. It selects no
-	// pod: it lists addresses, and belongs to a Service through a label the
-	// author writes under `labels`. It checks no name rule of its own.
-	"endpointslice": {props: map[string]any{
-		"addressType": "IPv4",
-		"endpoints":   []any{map[string]any{"addresses": []any{"192.0.2.10"}}},
-		"ports":       []any{map[string]any{"name": "http", "port": 8080}},
-	}},
-	// The four kinds of the RBAC API are identity and the authored fields too.
-	// They select no pod, and check no name rule of their own.
-	"role": {props: map[string]any{"rules": []any{
-		map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}},
-	"clusterrole": {props: map[string]any{"rules": []any{
-		map[string]any{"apiGroups": []any{""}, "resources": []any{"nodes"}, "verbs": []any{"get"}}}}},
-	"rolebinding": {props: map[string]any{
-		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web"}},
-		"roleRef":  map[string]any{"kind": "Role", "name": "reader"}}},
-	"clusterrolebinding": {props: map[string]any{
-		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web", "namespace": "default"}},
-		"roleRef":  map[string]any{"kind": "ClusterRole", "name": "node-reader"}}},
-	// The four external-secrets kinds emit identity and the authored fields
-	// too, with no `app` label and no pods: a SecretStore and an ExternalSecret
-	// namespaced, the two cluster kinds cluster-scoped. A selector in one is the
-	// author's label query over namespaces, not a pod selector of this document.
-	// None checks a name rule of its own.
-	"secretstore": {props: map[string]any{"provider": map[string]any{
-		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
-	"clustersecretstore": {props: map[string]any{"provider": map[string]any{
-		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
-	"externalsecret": {props: map[string]any{
-		"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
-		"data": []any{map[string]any{
-			"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}},
-	"clusterexternalsecret": {props: map[string]any{
-		"namespaceSelectors": []any{map[string]any{"matchLabels": map[string]any{"team": "payments"}}},
-		"externalSecretSpec": map[string]any{
-			"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
-			"data": []any{map[string]any{
-				"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}}},
 	// The two kinds of VolSync's API emit identity and the authored fields too,
 	// namespaced, with no `app` label and no pods of their own: the mover pod
 	// is the operator's. Neither checks a name rule of its own.
-	"replicationsource": {props: map[string]any{
-		"sourcePVC": "data", "trigger": map[string]any{"schedule": "0 3 * * *"},
-		"restic": map[string]any{"repository": "restic-repo", "copyMethod": "Snapshot"}}},
 	"replicationdestination": {props: map[string]any{
 		"trigger": map[string]any{"manual": "restore-1"},
 		"restic":  map[string]any{"repository": "restic-repo", "copyMethod": "Direct", "destinationPVC": "data"}}},
-	// Renders a locally served chart; helmtemplateLabelProps says why it is
-	// unlabelled, selects no pods and accepts the 200-character name.
-	"helmtemplate": {propsFor: helmtemplateLabelProps},
-	// Emits only the HelmRelease, which carries no `app` label.
-	"helmrelease": {props: map[string]any{
-		"chart": map[string]any{"spec": map[string]any{"chart": "app",
-			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
-		"values": map[string]any{"replicaCount": 2}}},
-	// Lowers to the helmrelease terminal above plus a generated HelmRepository;
-	// valuesMode configMap with non-empty values adds the values ConfigMap
-	// through a configmap trait, the one labelled object.
-	"helm": {props: map[string]any{"chart": "app",
-		"source":     map[string]any{"url": "https://charts.example.com"},
-		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
-	"passthrough": {props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}}},
-	"crd": {props: map[string]any{"inline": `apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: widgets.example.com
-spec:
-  group: example.com
-  names:
-    kind: Widget
-    plural: widgets
-  scope: Namespaced
-  versions:
-    - name: v1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-`}},
-	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
-	// Lowers to the ocirepository and fluxcd-kustomization terminals below,
-	// both named after the component.
-	"oci": {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
-	// Emits only the Kustomization, which carries no `app` label.
-	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
-		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
-	// The kind-named Flux sources each emit one source CR named after the
-	// component: no `app` label, no pods, and a name up to a DNS-1123 subdomain.
-	"helmrepository": {props: map[string]any{"url": "https://charts.example.com"}},
-	"ocirepository":  {props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}}},
-	"gitrepository":  {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
-	"bucket":         {props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"}},
-	"helmchart":      {props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}}},
+	"replicationsource": {props: map[string]any{
+		"sourcePVC": "data", "trigger": map[string]any{"schedule": "0 3 * * *"},
+		"restic": map[string]any{"repository": "restic-repo", "copyMethod": "Snapshot"}}},
+	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
+	"role": {props: map[string]any{"rules": []any{
+		map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}},
+	"rolebinding": {props: map[string]any{
+		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web"}},
+		"roleRef":  map[string]any{"kind": "Role", "name": "reader"}}},
+	"runtimeclass": {props: map[string]any{"handler": "runc"}},
+	// A Secret name is a DNS-1123 subdomain, and the kind labels its Secret as
+	// the configmap kind labels its ConfigMap.
+	"secret": {props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true},
+	"secretstore": {props: map[string]any{"provider": map[string]any{
+		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
+	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
+		longRefusal: serviceNameRefusal, labelled: true},
+	"serviceaccount": {props: map[string]any{}, labelled: true},
+	"servicecidr":    {props: map[string]any{"cidrs": []any{"10.96.0.0/16"}}},
+	"servicemonitor": {props: map[string]any{
+		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
+		"endpoints": []any{map[string]any{"port": "metrics"}}}},
+	"statefulset":           {props: workloadProps(map[string]any{"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 2},
+	"storageclass":          {props: map[string]any{"provisioner": "csi.example.com"}},
+	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
+	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
+	// selector the workload kinds build into the output.
+	"webservice": {props: workloadProps(map[string]any{"port": 8080, "replicas": 3, "topologySpread": true,
+		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 5},
+	"worker": {props: workloadProps(map[string]any{"replicas": 3, "topologySpread": true,
+		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 4},
 }
 
 // traitLabelFixture renders one trait on a host component.
