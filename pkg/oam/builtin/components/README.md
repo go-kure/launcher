@@ -216,6 +216,7 @@ reads it.
 | `replicationdestination` | ReplicationDestination | Kind-named VolSync ReplicationDestination: the whole `ReplicationDestinationSpec` (`trigger`, the movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external`, `paused`), strictly decoded, with the policy checks of `replicationsource`. No top-level field is required and no capability is required — see below. |
 | `replicationsource` | ReplicationSource | Kind-named VolSync ReplicationSource: the whole `ReplicationSourceSpec` (`sourcePVC`, `trigger`, the movers `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`, `external`, `paused`), strictly decoded; no top-level field is required. An authored capacity is held to the environment policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. Its object is of the kind the `volsync` trait builds — see below. |
 | `resourcequota` | ResourceQuota | Kind-named ResourceQuota: the whole `ResourceQuotaSpec` (`hard`, `scopes`, `scopeSelector`), strictly decoded — see below. |
+| `resourcesetinputprovider` | ResourceSetInputProvider | Kind-named Flux Operator ResourceSetInputProvider: the whole `ResourceSetInputProviderSpec`, strictly decoded; `type` is required, of an authored Secret reference its `name` and of a schedule its `cron`. A user or a password in `url` is refused under every policy and under none, and the host of `url` is held to the environment policy's allowed registries, whatever the type. An `ExternalArtifact` provider's selectors may list the ExternalArtifacts of another namespace or of every namespace, and nothing gates them or `serviceAccountName`. The API's expression rules are not checked — see below. |
 | `role` | Role | Kind-named RBAC Role: the object's own field (`rules`), strictly decoded; a rule's `verbs`, `apiGroups` and `resources` are required, and `nonResourceURLs` are refused. Namespaced. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `rolebinding` | RoleBinding | Kind-named RBAC RoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required. The names of the role and of the subjects are the author's literals. Namespaced. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `runtimeclass` | RuntimeClass | Kind-named RuntimeClass: `handler` (required), `overhead`, `scheduling`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
@@ -404,7 +405,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | kind | `fluxcd-provider` | strict decode of `ProviderSpec` | `type` must be written, and of an authored `secretRef`, `proxySecretRef` or `certSecretRef` its `name`: the fields the linked Go source marks required, not held to a CRD. `interval` and `timeout` are each held to the pattern of their field; `timeout` takes no `h`, and one of an hour or more is written in minutes. It lands in the Flux namespace when one is set. A user or a password in `address` or `proxy` is refused; no environment policy applies. |
 | `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | kind | `fluxcd-receiver` | strict decode of `ReceiverSpec` | `type` and `resources` must be written, of each resource its `kind` and `name`, of an authored `secretRef` its `name`, and of an OIDC provider its `issuerURL` and `validations` with the fields of each validation and variable: the fields the linked Go source marks required, not held to a CRD. `interval` is held to the pattern of a Flux duration. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | held | - | - | Its `resourcesTemplate` is, in the API's words, "a Go template that generates the list of Kubernetes resources to reconcile". The operator renders it on the cluster, so no build sees the objects and none can be held to a rule: the kind would be a way round every rule a policy holds a workload or a Secret to (go-kure/launcher#790). |
-| `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
+| `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | kind | `resourcesetinputprovider` | strict decode of `ResourceSetInputProviderSpec` | `type` must be written, of an authored `secretRef` or `certSecretRef` its `name` and of a schedule its `cron`: the fields the linked Go source marks required. A schedule's `window` is held to the pattern of a Flux duration by its authored text; `filter.limit` cannot be authored as 0, nor a schedule's `timeZone` as empty. It lands in the Flux namespace when one is set. A user or a password in `url` is refused, and the host of `url` is held to the allowed registries of the environment policy. |
 | `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | kind | `metallb-bfdprofile` | strict decode of `BFDProfileSpec` | The object is named after the component unless `objectName` names it, and a MetalLB BGPPeer refers to it by that name. No field is required. Every field is a pointer, so an authored 0 or false is written; the bounds of the numbers are not checked. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. No capability is required. No environment policy applies. |
 | `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | kind | `metallb-bgpadvertisement` | strict decode of `BGPAdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing is the widest advertisement, of every pool, to every peer, for every Service, with no node excluded. A service selector beside an aggregation length other than the API's default is refused, as the CRD's expression rule refuses it. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The communities and the pool and peer names are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | kind | `metallb-bgppeer` | strict decode of `BGPPeerSpec` | The object is named after the component unless `objectName` names it, and a MetalLB BGPAdvertisement refers to it by that name. `myASN` must be written. A `peerPort: 0` is refused: the type would leave it out and the API server would fill 179. A `connectTime` is held to the CRD's two expression rules; the CRD's rule against a change of `enableGracefulRestart` is the API server's. A `password` is refused under a policy that forbids explicit secrets; `passwordSecret` names a Secret and holds no secret, and is written as `{}` where it is not authored. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The addresses and the profile's name are not read. No capability is required. |
@@ -2133,14 +2134,16 @@ type for every field it reads, so an out-of-range `replicas` or
 reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
 go-kure/launcher#512 (see the `postgresql` entry below).
 
-- **fluxcd-alert, fluxcd-provider, fluxcd-receiver, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator**
+- **fluxcd-alert, fluxcd-provider, fluxcd-receiver, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator, resourcesetinputprovider**
   (go-kure/launcher#790) are the kind-named projections of objects of the
   Flux APIs beside the sources, the HelmRelease and the Kustomization: a
   notification.toolkit.fluxcd.io/v1beta3 Alert and Provider, a
   notification.toolkit.fluxcd.io/v1 Receiver, an
   image.toolkit.fluxcd.io/v1 ImagePolicy, ImageRepository and
-  ImageUpdateAutomation, and a
-  source.extensions.fluxcd.io/v1beta1 ArtifactGenerator. Each is
+  ImageUpdateAutomation, a
+  source.extensions.fluxcd.io/v1beta1 ArtifactGenerator, and a
+  fluxcd.controlplane.io/v1 ResourceSetInputProvider of the Flux Operator's
+  API. Each is
   built on `policyFreeKind` (see the **storageclass** entry) with the Flux
   namespace, the check of its durations and, where a field names a host the
   environment policy holds, a check under that policy (`fluxKind`), and
@@ -2175,7 +2178,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Receiver's `resources` another application's Flux objects, an
   ImagePolicy's `imageRepositoryRef` another application's ImageRepository,
   the source of an ImageUpdateAutomation or of an ArtifactGenerator another
-  application's source, and an ImageUpdateAutomation without a
+  application's source, a ResourceSetInputProvider's selector without a
+  `namespace` another application's ExternalArtifacts, and an
+  ImageUpdateAutomation without a
   `policySelector` takes every ImagePolicy there. An ImageRepository there
   is in the namespace of every other application's ImagePolicy, so a
   reference to it is not the cross-namespace one the API says `accessFrom`
@@ -2275,6 +2280,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     describes as ExternalArtifacts, so one that names another namespace's
     source republishes that source's content as an artifact its author
     named. It names no account.
+  - `resourcesetinputprovider`: the object makes the Flux Operator ask the
+    provider its `type` names for input sets, which, in the API's words,
+    "populate the inputs" of a ResourceSet; **the answer decides what that
+    ResourceSet deploys.** Every type but `Static` and `ExternalArtifact`
+    asks the host of `url` (Policy, below), with the credentials of the
+    Secret `secretRef` names; an `ExternalService` provider sends that
+    Secret's token or user and password to it. **An `ExternalArtifact`
+    provider reads ExternalArtifacts of the cluster instead:
+    `selectors[].namespace` names the namespace it lists them in, and
+    `namespace: "*"` lists them "across all namespaces".** Left out, the
+    namespace is the provider's own. **`serviceAccountName` names the
+    account the operator acts as:** in the API's words the ServiceAccount
+    "used for authentication with AWS, Azure or GCP services through
+    workload identity federation features", taken, without one, from "the
+    ServiceAccount of the operator". **For an `ExternalArtifact` provider,
+    the list is made with the operator's own client unless an account is
+    set**; with one, the operator lists as that account, of the namespace
+    the object lands in. *Read from the controller of the linked module, not
+    from the type:* an operator started with a default account lists as
+    that account where none is set; launcher reads no operator setting, and
+    the installed operator may differ from the linked one. Launcher writes
+    the selectors and the account as authored and refuses none.
 
   **Authored.** The properties are the top-level json fields of the spec
   type, decoded strictly at every depth: an unknown key is refused wherever
@@ -2329,24 +2356,45 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     writes nothing there. The
     aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
     written as authored: launcher resolves none of them.
+  - `resourcesetinputprovider` (`ResourceSetInputProviderSpec`): `type`,
+    `url`, `serviceAccountName`, `secretRef`, `certSecretRef` (each a
+    `name`), `insecure`, `defaultValues`, `filter` (`includeBranch`,
+    `excludeBranch`, `includeTag`, `excludeTag`, `includeEnvironment`,
+    `excludeEnvironment`, `labels`, `limit` and `semver`), `skip` (`labels`),
+    `schedule` (each a `cron`, `timeZone` and `window`) and `selectors`
+    (each a `name`, `namespace`, `matchLabels` and `matchExpressions`).
+    `defaultValues` is a free map, written as authored; the regular
+    expressions of `filter`, its `semver` range and a schedule's `cron` are
+    written as authored and not parsed.
   - **No default is filled.** The API's own (`eventSeverity: info`,
     `digestReflectionPolicy: Never`, a policy's `order: asc`,
     `update: {strategy: Setters}`, an ImageRepository's `provider: generic`
-    and its `exclusionList` of `^.*\.sig$`, a Receiver's `interval: 10m`) is
+    and its `exclusionList` of `^.*\.sig$`, a Receiver's `interval: 10m`, a
+    ResourceSetInputProvider's `filter.limit: 100` and a schedule's
+    `timeZone: UTC`) is
     applied by the API server to what the object leaves out; the `timeout`
     of an ImageRepository left out is, in the API's words, the "'Interval'
     duration", and the `audience` of a Receiver's OIDC provider
-    `notification-controller`, which are the controller's to apply. One default cannot apply: `sourceRef.kind`, which
+    `notification-controller`, which are the controller's to apply. A
+    schedule's `window` left out is written `0s`, the API's own default.
+    One default cannot apply: `sourceRef.kind`, which
     the API defaults to `GitRepository` and the Go type writes empty when
     it is left out, an empty value being a value. It is required instead
-    (below). The other five are strings the type omits when empty, so an
-    authored `""` on one would be left out and defaulted: it is refused
-    (`eventSeverity: "" cannot be carried by the Flux API types (…)`).
-    `TestFluxKinds_DefaultedZeros` holds each kind's list of such fields to
-    the numbers, booleans and strings that are omitted when zero and that
-    the API defaults to something else. An authored empty `exclusionList`
-    is not refused: the type omits it, so the API fills its default, and
-    the controller also reads an empty list as that default.
+    (below). `eventSeverity`, `digestReflectionPolicy`, a policy's `order`,
+    `update.strategy`, an ImageRepository's `provider` and a schedule's
+    `timeZone` are strings the
+    type omits when empty, so an authored `""` on one would be left out and
+    defaulted: it is refused (`eventSeverity: "" cannot be carried by the
+    Flux API types (…)`). A ResourceSetInputProvider's `filter.limit: 0` is
+    omitted the same way, and the API server would then apply its default
+    100, so it is refused too (`filter.limit: 0 cannot be carried by the
+    Flux Operator API types (…)`). `TestFluxKinds_DefaultedZeros` holds each
+    kind's list of such fields to the numbers, booleans and strings that are
+    omitted when zero and that the API defaults to something else. An
+    authored empty `exclusionList` (`[]`) is not refused, and it does not
+    mean that nothing is excluded: the type omits an empty list, so the
+    object gets the API's default list (`^.*\.sig$`), and the controller also
+    reads an empty list as that default.
   - **A duration is held to the pattern its field declares**, as on the Flux
     kinds below (go-kure/launcher#601): unsigned, in the units `ms`, `s`,
     `m` and `h`. A value outside it is refused (`imagepolicy: interval
@@ -2357,7 +2405,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of durations to its type and to the pattern markers of the linked
     source: the `interval` of a Receiver, of an ImagePolicy and of an
     ImageUpdateAutomation, and the `interval` and `timeout` of a Provider
-    and of an ImageRepository; an Alert and an ArtifactGenerator have none.
+    and of an ImageRepository, and the `window` of a ResourceSetInputProvider's
+    schedule; an Alert and an ArtifactGenerator have none. **A schedule's
+    `window` is held by its authored text:** it sits under a list, and a
+    window of `500us` in any schedule is refused (`resourcesetinputprovider:
+    schedule[].window "500us" is invalid: must be a Flux duration (…)`); its
+    pattern takes `h`, so one is written as Go formats it (`90m` as
+    `1h30m0s`).
     **The `timeout` of a Provider and of an ImageRepository takes no `h`:**
     its pattern holds the units `ms`, `s` and `m`, so `1h` is refused
     (`imagerepository: timeout "1h" is invalid: must be a Flux duration
@@ -2397,10 +2451,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - An `artifactgenerator`: `sources` and `artifacts`; of each source its
     `alias`, `kind` and `name`; of each artifact its `name` and `copy`; of
     each copy its `from` and `to`.
+  - A `resourcesetinputprovider`: `type`; of an authored `secretRef` or
+    `certSecretRef` its `name`; of each schedule its `cron`. Of a match
+    expression of a selector, its `key` and its `operator`
+    (`selectors[0].matchExpressions[0].operator: required (…)`); its
+    `values` and the operator's value are the API server's.
 
   **The lists are read from the markers of the Go source, not from a CRD.**
-  The API modules of the Flux controllers hold the Go types and ship no CRD,
-  so `TestFluxKinds_RequiredMatchMarkers` derives each list from the
+  The API modules of the Flux controllers hold the Go types and ship no CRD;
+  the Flux Operator's module ships its CRDs, and its list is read the same
+  way. `TestFluxKinds_RequiredMatchMarkers` derives each list from the
   `+required` markers of the linked modules' source, as the kinds of the
   Prometheus operator's API are derived: every field so marked that the type
   writes unauthored is listed, and nothing else is. The `key` and `operator`
@@ -2445,16 +2505,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `originRevision`, a copy's `from` and `to`), the lengths and the
     enumerations (a source's `kind`, a copy's `strategy`); that an alias is
     unique and that a path, a `revision` or an `originRevision` names an
-    alias that is declared, which the type documents and no marker states.
+    alias that is declared, which the type documents and no marker states;
+  - of a `resourcesetinputprovider`, the enumeration of `type`, the pattern
+    of `url` (an `http`, `https` or `oci` URL) and the maximum of
+    `filter.limit` (10000); the `url` scheme each type takes is an
+    expression rule (below).
 
   **The APIs' expression rules are not checked.** A kind checks an
   expression rule only where the check is held to the API server's own
   validator, which answers from a CRD (go-kure/launcher#874), and the linked
-  modules of these APIs ship none. A component that breaks one of the rules
+  modules of the Flux controllers' APIs ship none. **The Flux Operator's
+  module does ship its CRDs, and the `resourcesetinputprovider` kind
+  deliberately checks none of their rules:** it leaves every one to the API
+  server, as the other Flux kinds do. A component that breaks one of the rules
   below builds, and the API server refuses the object at apply.
   `TestFluxKinds_ExpressionRules` reads every such rule from the markers of
-  the linked source and holds the list (`fluxRulesLeft`) to them, so a
-  dependency bump that adds or rewords one fails there.
+  the linked source and holds the list (`fluxRulesLeft`) to them, and
+  `TestFluxOperatorKinds_ExpressionRulesMatchCRD` holds the
+  ResourceSetInputProvider's list to the `x-kubernetes-validations` of the
+  shipped CRD, in both directions, so a dependency bump that adds, drops or
+  rewords one fails there.
   - The types of an Alert, of an ImageRepository and of an
     ImageUpdateAutomation declare none.
   - A `fluxcd-provider`: `commitStatusExpr` set on a `type` other than
@@ -2471,9 +2541,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `name` must be a Kubernetes object name (lower case letters, digits,
     `-` and `.`). One that is not, `App_Manifests` for one, builds and is
     refused at apply.
+  - A `resourcesetinputprovider`: seventeen rules, sixteen of them on the
+    spec and one on a selector. `url` must be left out under `Static` and
+    `ExternalArtifact` and written under every other type, with the scheme
+    the type takes (`http` or `https` for a Git, AzureDevOps and
+    `ExternalService` provider, `https` for AWSCodeCommit, `oci` with a
+    repository after the registry for an OCI provider); `https` for an
+    `ExternalService` provider unless `insecure` is true, and `insecure`
+    only under `ExternalService` and `OCIArtifactTag`; `serviceAccountName`
+    only under the AzureDevOps, AWSCodeCommit, artifact-tag and
+    `ExternalArtifact` types; `secretRef` and `certSecretRef` not under
+    the types that take none; `selectors` written under `ExternalArtifact`
+    and only there; and a selector's `name` not beside `matchLabels` or
+    `matchExpressions`. Each builds and is refused at apply.
 
-  **Policy.** One dimension of the environment policy reaches one of these
-  objects: the allowed registries hold the `image` of an `imagerepository`.
+  **Policy.** One dimension of the environment policy reaches two of these
+  objects: the allowed registries hold the `image` of an `imagerepository`
+  and the host of a `resourcesetinputprovider`'s `url`.
   No other dimension reaches any of them: they run no pod, request no
   storage and have no replica count.
   - **No field of an Alert holds a secret or a host.** The address and the
@@ -2538,6 +2622,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     carries is not checked:** the copy is the controller's to perform, and no
     build sees the files, so the rules a policy holds a workload or a Secret to
     do not reach manifests that travel inside an artifact.
+  - **A user or a password in a ResourceSetInputProvider's `url` is
+    refused**, under every policy and under none, by the same rule
+    (`resourcesetinputprovider: url must not carry a user or password, which
+    would be written in plain text into the ResourceSetInputProvider; …`):
+    the credentials belong in the Secret `secretRef` names. **The host of
+    `url` is held to the allowed registries, whatever the type:** the answer
+    of that host decides what a ResourceSet deploys, the `ExternalService`
+    call sends the referenced credential to it, and one rule holds a type a
+    later operator version adds. An `oci://` url is held by the rule that
+    holds an `ocirepository`'s: under a policy that lists registries it must
+    name its registry explicitly and a repository after it. Every other url
+    is held by the host rule of the Flux sources: under a policy that allows
+    `registry.example`, `url: https://git.other.example/shop/fleet` is
+    refused, a refusal of the class `registry`. A `Static` or
+    `ExternalArtifact` provider has no `url` and nothing is held. A policy
+    that lists no registry refuses none, and neither does a build without a
+    policy. **Not held:** `serviceAccountName`, `insecure` and the
+    selectors of an `ExternalArtifact` provider, which name no host; the
+    inputs the provider returns, which the operator reads at run time and
+    no build sees. `defaultValues` is a free map, written to the object as
+    authored under a policy that forbids explicit secrets too.
 
   **Namespace.** The object lands in the Flux namespace when one is
   configured, else in the build namespace (`SetFluxNamespace`), as the Flux
@@ -2550,10 +2655,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   object one of them names moves with it; an Alert, an ImagePolicy and an ArtifactGenerator read
   none, a Provider and an ImageRepository read the Secrets of `secretRef`,
   `proxySecretRef` and `certSecretRef`, a Receiver reads the Secret of
-  `secretRef`, and an ImageUpdateAutomation reads
+  `secretRef`, a ResourceSetInputProvider reads the Secrets of `secretRef`
+  and `certSecretRef`, and an ImageUpdateAutomation reads
   the Secret of `git.commit.signingKey.secretRef`. The ServiceAccount of a
-  Provider's or an ImageRepository's `serviceAccountName` is not reported:
-  the report holds ConfigMaps and Secrets only.
+  Provider's, an ImageRepository's or a ResourceSetInputProvider's
+  `serviceAccountName` is not reported: the report holds ConfigMaps and
+  Secrets only.
 
   **Labels and annotations** are the `labels` and `annotations` properties.
 
@@ -2561,12 +2668,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   objects of a source, the ImageRepository, the GitRepository, the signing
   key's Secret, the sources of an ArtifactGenerator, the Secrets and the
   ServiceAccount of a Provider and of an ImageRepository, the resources and
-  the Secret of a Receiver), whether the registry of an ImageRepository
-  answers and holds the repository, whether the address of a Provider or
-  the issuer of a Receiver answers, whether a `commitStatusExpr` or a
+  the Secret of a Receiver, the Secrets, the ServiceAccount and the
+  ExternalArtifacts of a ResourceSetInputProvider), whether the registry of
+  an ImageRepository answers and holds the repository, whether the address
+  of a Provider, the issuer of a Receiver or the `url` of a
+  ResourceSetInputProvider answers, whether a `commitStatusExpr` or a
   Receiver's CEL expression compiles,
   whether a `filterTags`
-  pattern, a `semver` range, a commit message template or a `pathPattern`
+  pattern, a `semver` range, a commit message template, a `pathPattern`, a
+  ResourceSetInputProvider's filter expression or a schedule's `cron`
   parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
@@ -9658,12 +9768,15 @@ fields and says nothing of the pair.
 | `secretstore`, `clustersecretstore` | `conditions[].namespaceSelector` | the linked type, by the generator's rule (below) |
 | `clusterexternalsecret` | `namespaceSelector`; every entry of `namespaceSelectors` | the same |
 | `imageupdateautomation` | `policySelector` | the same |
+| `resourcesetinputprovider` | every entry of `selectors` | the ResourceSetInputProvider CRD of the linked module, and the linked type, by the generator's rule |
 | `replicationsource`, `replicationdestination` | the `labelSelector` and `namespaceSelector` of every pod affinity and anti-affinity term of a mover's `moverAffinity`, required or preferred: `rclone`, `restic`, `rsyncTLS`, and on a source `syncthing` | the ReplicationSource and ReplicationDestination CRDs of the linked module |
 
 The Prometheus operator's module, the External Secrets Operator's and Flux's image automation
 module ship no CRD to read, so the ground of their kinds is the source of the linked
-`metav1.LabelSelectorRequirement`: the schema generators require a field that carries no
-optional marker and whose json tag keeps it when empty, and `key` and `operator` are such fields
+`metav1.LabelSelectorRequirement`; the Flux Operator's module ships its CRDs, and its kind is
+held to both, to its CRD and, as the other Flux kinds are, to that source: the schema generators
+require a field that carries no optional marker and whose json tag keeps it when empty, and
+`key` and `operator` are such fields
 where `values` is not. `TestMonitoringKinds_RequiredMatchMarkers`,
 `TestExternalSecretsKinds_RequiredMatchSource` and `TestFluxKinds_RequiredMatchMarkers` derive
 the two from that source by that rule, beside the fields the operator's own types mark

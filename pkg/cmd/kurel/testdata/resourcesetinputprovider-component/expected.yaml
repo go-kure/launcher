@@ -1,0 +1,39 @@
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    launcher.gokure.dev/component: previews
+  name: previews
+  namespace: default
+spec:
+  defaultValues:
+    env: preview
+  filter:
+    labels:
+    - deploy/preview
+    limit: 10
+  schedule:
+  - cron: 0 8 * * 1-5
+    timeZone: Europe/Brussels
+    window: 1h30m0s
+  secretRef:
+    name: github-token
+  skip:
+    labels:
+    - '!ready'
+  type: GitHubPullRequest
+  url: https://github.example/shop/app
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    launcher.gokure.dev/component: artifacts
+  name: fleet-artifacts
+  namespace: default
+spec:
+  selectors:
+  - matchLabels:
+      team: shop
+    namespace: '*'
+  type: ExternalArtifact

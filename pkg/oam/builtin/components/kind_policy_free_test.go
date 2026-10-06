@@ -14,6 +14,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
@@ -782,6 +783,13 @@ var policyFreeKinds = []policyFreeKind{
 		full:    replicationSourceFull(),
 	},
 	{
+		component: "resourcesetinputprovider", handler: &components.ResourceSetInputProviderHandler{},
+		gvk: fluxoperatorv1.GroupVersion.WithKind(fluxoperatorv1.ResourceSetInputProviderKind),
+		typ: reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), namespaced: true, flux: true, held: true,
+		minimal: resourceSetInputProviderMinimal(),
+		full:    resourceSetInputProviderFull(),
+	},
+	{
 		component: "role", handler: &components.RoleHandler{},
 		gvk: rbacv1.SchemeGroupVersion.WithKind("Role"),
 		typ: reflect.TypeFor[rbacv1.Role](), wholeObject: true, namespaced: true,
@@ -1492,6 +1500,11 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Rclone.MoverConfig.MoverVolumes[0].VolumeSource.Secret", ".Spec.Restic", ".Spec.Restic.Retain",
 			".Spec.Restic.Retain.Hourly", ".Spec.Restic.CacheCapacity", ".Spec.Restic.MoverConfig.MoverResources.Limits",
 			".Spec.Syncthing", ".Spec.Syncthing.Peers", ".Spec.Syncthing.ConfigCapacity", ".Spec.External", ".Spec.External.Parameters",
+		},
+		"resourcesetinputprovider": {
+			".Spec.SecretRef", ".Spec.CertSecretRef", ".Spec.DefaultValues", ".Spec.DefaultValues[env]", ".Spec.Filter",
+			".Spec.Filter.Labels", ".Spec.Skip", ".Spec.Skip.Labels", ".Spec.Schedule", ".Spec.Selectors",
+			".Spec.Selectors[1].LabelSelector.MatchLabels", ".Spec.Selectors[1].LabelSelector.MatchExpressions",
 		},
 		"role": {
 			".Rules", ".Rules[0].Verbs", ".Rules[0].APIGroups", ".Rules[0].Resources", ".Rules[1].ResourceNames",
@@ -2525,6 +2538,30 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			refusal{"null peer", syncthingPeers(syncthingPeer(), nil), "syncthing.peers[1]"},
 			refusal{"two spellings", map[string]any{"sourcePVC": "data", "SourcePVC": "other"}, "sets the same field as"},
 		),
+		"resourcesetinputprovider": {
+			{"no properties", nil, "type: required"},
+			{"no type", map[string]any{"url": "https://git.example/shop/fleet"}, "type: required"},
+			{"secret without a name", withProperty(resourceSetInputProviderMinimal(), "secretRef", map[string]any{}), "secretRef.name: required"},
+			{"certificate secret without a name", withProperty(resourceSetInputProviderMinimal(), "certSecretRef", map[string]any{}), "certSecretRef.name: required"},
+			{"a later schedule without a cron", withProperty(resourceSetInputProviderMinimal(), "schedule", []any{map[string]any{"cron": "0 * * * *"}, map[string]any{"window": "1h"}}), "schedule[1].cron: required"},
+			{"a limit of 0", withProperty(resourceSetInputProviderMinimal(), "filter", map[string]any{"limit": 0}), "cannot be carried by the Flux Operator API types"},
+			{"unknown key", withProperty(resourceSetInputProviderMinimal(), "token", "s3cr3t"), notA + "fluxcd.controlplane.io/v1 ResourceSetInputProviderSpec"},
+			{"the object's spec", map[string]any{"spec": resourceSetInputProviderMinimal()}, notA},
+			{"secret sub-key", withProperty(resourceSetInputProviderMinimal(), "secretRef", map[string]any{"name": "provider-credentials", "namespace": "shop"}), notA},
+			{"selector sub-key", withProperty(resourceSetInputProviderMinimal(), "selectors", []any{map[string]any{"name": "bundle", "kind": "ExternalArtifact"}}), notA},
+			{"selector expression without a key", withProperty(resourceSetInputProviderMinimal(), "selectors", []any{map[string]any{
+				"matchExpressions": []any{map[string]any{"operator": "Exists"}},
+			}}), "selectors[0].matchExpressions[0].key: required"},
+			{"a later selector's expression without an operator", withProperty(resourceSetInputProviderMinimal(), "selectors", []any{map[string]any{"name": "bundle"}, map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "app"}},
+			}}), "selectors[1].matchExpressions[0].operator: required"},
+			{"insecure a string", withProperty(resourceSetInputProviderMinimal(), "insecure", "yes"), notA},
+			{"window not a duration", withProperty(resourceSetInputProviderMinimal(), "schedule", []any{map[string]any{"cron": "0 * * * *", "window": "soon"}}), notA},
+			{"window in a unit the API refuses", withProperty(resourceSetInputProviderMinimal(), "schedule", []any{map[string]any{"cron": "0 * * * *", "window": "500us"}}), `resourcesetinputprovider: schedule[].window "500us" is invalid: must be a Flux duration`},
+			{"window emitted below a millisecond", withProperty(resourceSetInputProviderMinimal(), "Schedule", []any{map[string]any{"cron": "0 * * * *", "Window": "0.5ms"}}), `resourcesetinputprovider: schedule[].window "0.5ms" is invalid: it would be emitted as "500µs"`},
+			{"a user in the url", map[string]any{"type": "GitHubBranch", "url": "https://flux:s3cr3t@git.example/shop/fleet"}, "resourcesetinputprovider: url must not carry a user or password"},
+			{"two spellings", withProperty(resourceSetInputProviderMinimal(), "Type", "Static"), "sets the same field as"},
+		},
 		"role": {
 			{"rule without verbs", map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}}}}, "rules[0].verbs: required"},
 			{"a later rule's null verbs", map[string]any{"rules": []any{policyRule("", "pods", "get"), map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": nil}}}, "rules[1].verbs: required"},
