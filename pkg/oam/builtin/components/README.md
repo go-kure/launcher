@@ -16,9 +16,10 @@ Container projection shared by every kind). Only genuine escape-hatch fields (`p
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
 `lifecycle`, `volumes`, the `volumeMounts` items inside an `initContainers`/`sidecars`
-entry, the four-key `affinity` shorthand) are a known gap, not the target shape; the
+entry) are a known gap, not the target shape; the
 `volumeDevices` items beside them, and a sidecar's `ports` items (go-kure/launcher#660), are
-closed. The
+closed, and so is the four-key `affinity` shorthand: its schema declares the four keys and
+no other, and since go-kure/launcher#790 its parser refuses any other key too. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
 config"). The raw `corev1` `affinity` that `deployment` publishes is
 a different schema and is not part of that gap — it is modeled field-by-field. `helmrelease`
@@ -709,7 +710,13 @@ deliberately not covered — it only *references* pod-level claims by name, and
 the pod-level `resourceClaims` property that declares them is now accepted
 (see Pod-level properties below, go-kure/launcher#342), so what remains
 missing is the container-side reference list alone, tracked with the rest of
-DRA support, see `parseResources`'s doc comment), `command`/`args` (must be an
+DRA support, see `parseResources`'s doc comment. An authored `claims` is
+refused by name, whatever its value, on the main container and on an
+`initContainers` or `sidecars` entry — `resources.claims: not read by this
+component — …` — and no longer dropped for a caller that skips the document
+check; see
+[Upstream fields a hand-parsed kind does not read](#upstream-fields-a-hand-parsed-kind-does-not-read)),
+`command`/`args` (must be an
 array, and each element must be a string — both are rejected outright rather
 than silently discarded. Until go-kure/launcher#423 they were mishandled twice
 over: a mistyped `command: /bin/sh -c true` fell through their comma-ok guard
@@ -1132,6 +1139,15 @@ supplies the two defaults above, and omitting the block entirely leaves
 `topologyKey`/`podAntiAffinityType` empty rather than defaulted (the defaults
 are applied by `parseAffinity` only once the block is present, unlike the
 `postgresql` component, which also tracks whether the block was authored at all).
+The key set is closed (go-kure/launcher#790). The shorthand is not a
+Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
+under it are each refused with what the shorthand has for the field and where
+an affinity in the Kubernetes shape is authored (`deployment`, `daemonset`,
+`job`, `cronjob`), and any other key is refused as
+`affinity: unrecognized key "<key>"`, each whatever its value. The parser read
+none of them before, so a caller that skips the document check had them
+dropped; see
+[Upstream fields a hand-parsed kind does not read](#upstream-fields-a-hand-parsed-kind-does-not-read).
 Each of the four sub-fields is read with a presence-reporting helper, so a
 sub-field authored with the wrong type is **rejected by name**
 (`affinity.topologyKey: must be a string, got float64`) rather than
@@ -1236,8 +1252,15 @@ not model, the same reason `probes` and `lifecycle` are refused on an init
 entry — and `restartPolicyRules`, which upstream accepts only together with
 `restartPolicy` (`validateContainerRestartPolicy`). Both are refused as unknown
 keys on an `initContainers` or `sidecars` entry. At the top level neither is a
-container key either: `restartPolicy` there is the *pod's* restart policy, a
-key of `job` and `cronjob` only, and unknown on the other kinds.
+container key either. `restartPolicyRules` is refused there on every workload
+kind, with that reason. `restartPolicy` there is the *pod's* restart policy: a
+key of `job` and `cronjob`, where the main container's own `restartPolicy`
+therefore has no name to be authored or refused under, and refused with its
+reason on the other kinds, whose pod template apps/v1 validation holds to
+`Always`. See
+[Upstream fields a hand-parsed kind does not read](#upstream-fields-a-hand-parsed-kind-does-not-read)
+for these and for the container fields read under another name (`name`, the
+three probe fields, `volumeMounts`, `volumeDevices`).
 
 ### Referencing an existing claim (`pvc.claimName`)
 
@@ -1371,7 +1394,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored (go-kure/launcher#702); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
-| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
+| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason (on `job` and `cronjob` that name is the JobSpec's). Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
 | `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all seven kinds; `NoopPolicy` denies all three). | additive |
@@ -1386,8 +1409,12 @@ pod through its `ephemeralcontainers` subresource, never on a template),
 `priority` and `overhead` (the Priority and RuntimeClass admission
 controllers, on by default, derive them from
 `priorityClassName`/`runtimeClassName` and reject a pod whose authored value
-differs, so authoring one can at best repeat the derived value), and
-`serviceAccount` (deprecated alias of `serviceAccountName`).
+differs, so authoring one can at best repeat the derived value),
+`serviceAccount` (deprecated alias of `serviceAccountName`),
+`evictionResponders` (alpha upstream, behind the `EvictionRequestAPI` feature
+gate) and `containers` (the pod's one main container is the component's own
+container properties, and further ones are `sidecars` entries where the kind
+has them).
 
 Every pod kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
 returning `(name, runsPods)`: the authored `serviceAccountName` (or `""`) and
@@ -1599,8 +1626,12 @@ published (go-kure/launcher#790):
 | `job` | raw | yes | yes |
 | `cronjob` | raw | yes | yes |
 
-- The raw `affinity` shape on a kind that publishes the shorthand is refused by
-  the authored-property check, not dropped.
+- The raw `affinity` shape on a kind that publishes the shorthand is refused,
+  not dropped: by the authored-property check, and by the shorthand's parser
+  with its reason for a caller that skips that check. So the pod's `affinity`
+  is not authorable in full on `statefulset`: the shorthand gives anti-affinity
+  to the component's own pods and a required node affinity on listed labels,
+  and nothing else of the upstream type.
 - Nothing is defaulted on any of them: an unauthored key emits nothing, and a
   constraint or an affinity term selects only the pods its authored
   `labelSelector` names. The pods a kind builds carry `app: <component>` (see
@@ -2307,7 +2338,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `clusterIP` address. `externalIPs` routes traffic for addresses the
     cluster does not manage and is deprecated by the API; a Service's cluster
     IPs are the cluster's to allocate. In a document all three are refused by
-    property validation before the parser's reason is reached.
+    property validation before the parser runs: `externalIPs` and `clusterIPs`
+    as unsupported fields, each with the kind's reason after the list of
+    allowed keys (go-kure/launcher#790), and a literal `clusterIP` address as
+    a value outside the property's enum, which has `None` alone.
   - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
     `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
     the selected pods, as a StatefulSet's governing Service needs. It requires
@@ -5034,6 +5068,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | `minReadySeconds` | int ≥ 0 | Seconds a new pod must stay ready before it counts as available. | additive |
   | `revisionHistoryLimit` | int ≥ 0 | Superseded ControllerRevisions kept for rollback. | additive |
   | `selector` | — | **Rejected outright**, not silently dropped: the selector is builder-managed (`app: <component>`), must equal the generated template labels, and is immutable once created. | **Behavior-changing** |
+  | `template` | — | **Rejected outright** (go-kure/launcher#790), as on `deployment`: the pod template is projected from the component's own container and pod-level properties. A document was refused already, by the authored-property check; the parser now refuses it too, where a caller that skips that check had it dropped. | **Behavior-changing** for such a caller |
 
   `maxUnavailable` and `maxSurge` each accept a non-negative integer or a `"N%"`
   string with N ≤ 100 (the integer form is a pod count and is deliberately
@@ -5213,7 +5248,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
   | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
   | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
-  | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. | **Behavior-changing** (see below) |
+  | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. `cronjob` refuses the three as well (go-kure/launcher#790): its job is the same JobSpec, and its parser read none of them and said nothing. | **Behavior-changing** (see below) |
+  | `scheduling` | — | **Rejected outright** on `job` and `cronjob` (go-kure/launcher#790): alpha upstream, behind the `WorkloadWithJob` feature gate, and read by neither. | **Behavior-changing** for a caller that skips the authored-property check |
   | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
 
   Every cross-field rule above is ported from `ValidateJobSpec`
@@ -5303,8 +5339,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   fields in a launcher-native document are a build error, so neither key was
   ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a
   tightening — `job` is a new component type, so no document that built before
-  this change can carry either key. The explicit rejection exists only so the
-  message says *why* rather than emitting the generic unknown-key error.
+  this change can carry either key. The explicit rejection exists so the
+  message says *why*: to a caller of the handler, which gets the reason alone,
+  and since go-kure/launcher#790 in a document too, where the authored-property
+  check appends the reason to its refusal of the undeclared key.
 
   The six CronJobSpec-only keys — `schedule`, `timeZone`, `concurrencyPolicy`,
   `startingDeadlineSeconds`, `successfulJobsHistoryLimit` and
@@ -7889,6 +7927,9 @@ reason rather than silently ignored:
 
 - `spec.selector` (StatefulSet-level) — the builder derives it from the
   component name, and a StatefulSet's selector is immutable after creation.
+- `spec.template` (StatefulSet-level, go-kure/launcher#790) — the pod template
+  is projected from the component's own container and pod-level properties, as
+  on `deployment`. The parser dropped an authored one before.
 - `volumeName` (claim) — pre-binding a claim *template* to one named
   PersistentVolume would point every replica at the same volume.
 - `volumeMount` (claim) — not a claim-spec field at all; the container mount
@@ -7899,6 +7940,154 @@ reason rather than silently ignored:
   both is redundant; when it does carry a `namespace` the apiserver does not
   mirror, and `dataSource` must stay empty. Either way the field is authored
   through `dataSourceRef` alone.
+
+The three claim-level refusals sit inside a `volumeClaimTemplates` entry, so
+their reason reaches a caller of the handler; in a document the
+authored-property check refuses the key first, with its own text and no reason
+(see the section below).
+
+## Upstream fields a hand-parsed kind does not read
+
+Nine kinds read their properties key by key instead of decoding them into the
+Kubernetes type: `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`,
+`service`, `persistentvolumeclaim`, `configmap` and `serviceaccount`. The first
+five build pods and are "the five pod-building kinds" below. For such
+a kind an upstream field its parser does not know is no decode error; it is a
+key the parser never looks at. The rule that closes that gap
+(go-kure/launcher#790):
+
+> Every field of the upstream type that such a kind does not read, under its
+> name or in another shape, is an entry of one of the kind's refusal maps with
+> its reason. No upstream field is dropped in silence.
+
+`webservice` and `worker` lower to a `deployment` and refuse what it refuses;
+the `pvc` trait reads a claim through the `persistentvolumeclaim` kind's
+parser and refuses what that kind refuses.
+
+### The two paths
+
+An authored key reaches a kind on one of two paths, and both give the reason:
+
+- **A caller of the handler** (`ToApplicationConfig`, or `Transform` without
+  the check below) gets the reason alone:
+  `scheduling: not read by this component — alpha upstream, behind the WorkloadWithJob feature gate`.
+- **A document** goes through the authored-property check first
+  (`Transformer.ValidateAuthoredProperties`, which `kurel build` calls). The
+  check refuses a key the kind does not declare before the parser runs, and
+  appends the kind's reason to its own text:
+  `component "batch" (type "job"): properties: unsupported field "scheduling" (allowed: …); scheduling: not read by this component — …`.
+  The kind gives the reason through `UnsupportedFieldHint`
+  (`pkg/oam`'s README, "A reason on a refused key").
+
+A hint answers for a kind's **top-level** keys. A refusal that sits inside a
+property the kind declares — a key of a `volumeClaimTemplates` entry, of the
+`affinity` shorthand, of a container's `resources` — reaches a caller of the
+handler with its reason; in a document the check refuses the key at that
+position with its own text and no reason
+(`properties.affinity: unsupported field "nodeAffinity" (allowed: …)`).
+
+A key that is **no field of the upstream type** is not in a refusal map. The
+check refuses it as it refuses any undeclared key, with nothing appended; a
+caller that skips the check has it dropped, as `pkg/oam`'s README states for
+every handler. The one exception is the six `CronJobSpec` keys `job` refuses by
+name, which a `cronjob` document retyped to `job` leaves behind.
+
+### Refused, with the reason
+
+| Key | On | Why |
+|-----|----|-----|
+| `selector` | `deployment`, `statefulset`, `daemonset` (`webservice`, `worker`) | Builder-managed (`app: <component>`), equal to the template labels, immutable once created. |
+| `selector`, `manualSelector` | `job`, `cronjob` | The job controller generates the selector from a per-job label; a hand-written one adopts another job's pods. |
+| `scheduling` | `job`, `cronjob` | Alpha upstream, behind the `WorkloadWithJob` feature gate. |
+| `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `deployment`, `statefulset`, `daemonset` (`webservice`, `worker`) | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. On `job` and `cronjob` both names are read: the pod's `restartPolicy`, and the JobSpec's `activeDeadlineSeconds`. |
+| `ephemeralContainers`, `priority`, `overhead`, `serviceAccount` | every workload kind | See [Pod-level properties](#pod-level-properties). |
+| `evictionResponders` | every workload kind | Alpha upstream, behind the `EvictionRequestAPI` feature gate. |
+| `restartPolicyRules` (the main container's) | every workload kind | Upstream accepts a container's restart rules only with the container's own `restartPolicy`, which no kind reads. |
+| `externalIPs`, `clusterIPs` | `service` | See the `service` kind. |
+| `dataSource` | `persistentvolumeclaim`, the `pvc` trait | Authored through `dataSourceRef`. |
+| `secrets` | `serviceaccount` | The list limits mountable Secrets only under an annotation upstream deprecates since Kubernetes 1.32; it is no way to find or create a token. |
+| `resources.claims` | a container's `resources`, on every kind that reads them | An entry names one of the pod's `resourceClaims`, and a container's resources are read without them; upstream puts the field behind the `DynamicResourceAllocation` feature gate. One level down: see above. |
+
+### Read in another shape
+
+These upstream names are free on the kind and are refused too, with a reason
+that names the properties the field is authored as:
+
+| Upstream field | On | Authored as |
+|----------------|----|-------------|
+| the pod `template` | the five pod-building kinds | The component's own container and pod-level properties. Its metadata is not authored either: the kind's builder writes the `app: <component>` label and nothing else, the transform then adds the component label (`<domain>/component`, see [The `app` label](#the-app-label)), and a trait may add more. |
+| `jobTemplate` | `cronjob` | The component's own job-level, pod-level and container properties. |
+| `containers` | the five pod-building kinds | The main container is the component's container properties; further ones are `sidecars` entries on the kinds that have them. |
+| the main container's `name` | the five pod-building kinds | Not authored: the container is named after the component. |
+| `livenessProbe`, `readinessProbe`, `startupProbe` | the five pod-building kinds | `probes.liveness`, `probes.readiness`, `probes.startup`. |
+| `volumeMounts`, `volumeDevices` | the five pod-building kinds | A `volumes` entry's `mountPath`, or its `devicePath` for a `volumeMode: Block` claim. |
+| `resources` (the claim's) | `persistentvolumeclaim`, the `pvc` trait | `size`, the storage request. A claim's limits are not read. |
+
+Three pod fields are read under another name, because their upstream name is a
+property of the kind already: `securityContext` as `podSecurityContext` and
+`resources` as `podResources` (both names are the main container's), and on
+`job` and `cronjob` the pod's `activeDeadlineSeconds` as
+`podActiveDeadlineSeconds` (the name is the JobSpec's).
+
+### Not authorable, and not refusable by name
+
+Two cases have no key a refusal could sit on:
+
+- **Name taken on this kind by another upstream field of the same name.** On
+  `job` and `cronjob`, `restartPolicy` is the pod's, so the main container's
+  own `restartPolicy` cannot be authored and cannot be refused. On `cronjob`,
+  `suspend` is the CronJob's, so the job template's `suspend` cannot either
+  (see "One JobSpec field is deliberately not shared" above).
+- **The property of the upstream name has the launcher's own shape.** On
+  `statefulset` (and on `webservice` and `worker`), `affinity` is the
+  four-key shorthand, not a Kubernetes `Affinity`. `nodeAffinity`,
+  `podAffinity` and `podAntiAffinity` under it are refused, each with what the
+  shorthand has for the field. So the pod's affinity is **not authorable in
+  full on `statefulset`**: the full pod spec that `deployment`, `daemonset`,
+  `job` and `cronjob` take stops there for this kind.
+
+### Outside the properties
+
+The object's envelope is not a property of the kind's own schema: its
+`apiVersion` and `kind` are the component's type, its `metadata` is the
+component's name and the `objectName`, `labels` and `annotations` properties
+every kind takes, and `status` is the cluster's. `spec` is the level whose
+fields the properties are, and has no key of its own.
+
+### An explicit null on a refused key
+
+A null carries no content, and the kinds differ on what the parser makes of it
+on a key they refuse. This is each kind's behavior from before
+go-kure/launcher#790, left as it was:
+
+- **Read as unauthored:** `service` and `persistentvolumeclaim` on every key
+  they refuse, and `deployment` on the pod-level and container-level keys (not
+  on `selector` and `template`).
+- **Refused, as any value is:** `statefulset`, `daemonset`, `job`, `cronjob`,
+  `serviceaccount`, and `webservice` and `worker`; and every kind on
+  `resources.claims` and on the keys refused under the `affinity` shorthand.
+
+In a document the difference does not show: the authored-property check
+refuses an undeclared key whatever its value, null included.
+
+### What holds this
+
+- `TestHandParsedKinds_CoverEveryUpstreamField` walks the upstream type of
+  each of the nine kinds, from the object down every level whose fields are
+  the component's properties, and fails on a field that is neither read, nor
+  refused, nor placed in one of the classes above — so a field a later
+  `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
+  what a property holds inside is held to the upstream type only for
+  `affinity` on `statefulset` and for a container's `resources`.
+- `TestRefusedKeys_BothPathsGiveTheReason` holds every entry of every refusal
+  map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
+  refusals inside a declared property.
+- `TestHandParsedKinds_MatchExpressionsAtEverySelector` runs a match
+  expression through each of the 39 label selectors these kinds read, to the
+  generated object, and five defective ones to their refusal.
+- `TestHandParsedKinds_TemplateMetadataAndContainerName` and
+  `TestHandParsedKinds_ServicePortFieldsReachTheObject` pin the template's
+  metadata, the main container's name and the six fields of a Service port.
 
 ## Extending
 
