@@ -6900,7 +6900,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   present, and the operator adds its `pgbouncer` container either way.
   `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
   <Pooler object name>` on port `5432`: the component name unless
-  `objectName` names the Pooler), byte-identical to `postgresql`'s pooler
+  `objectName` or the naming hook names the Pooler), byte-identical to `postgresql`'s pooler
   endpoint for a pooler of that name (`<component-name>-pooler` by default,
   of the `postgresql` component), and
   only for a component the parse accepts: what `ToApplicationConfig` refuses
