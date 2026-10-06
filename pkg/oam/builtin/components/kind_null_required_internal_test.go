@@ -95,8 +95,9 @@ func (v crdValidation) refusals(obj map[string]any) []string {
 
 // pruneNullsAsAPIServer stands in for two functions of the API server
 // (k8s.io/apiextensions-apiserver v0.37.1), which it runs on a custom resource
-// before the schema validation, and whose package depends on modules this
-// one does not require (k8s.io/apiserver among them):
+// before the schema validation. crdCreate (crd_create_internal_test.go) runs
+// the two functions themselves; this test reads the schema with the validator
+// of k8s.io/kube-openapi alone and keeps the stand-in:
 //
 //   - structuraldefaulting.PruneNonNullableNullsWithoutDefaults, called at
 //     pkg/apiserver/customresource_handler.go:1435, drops a null of a field

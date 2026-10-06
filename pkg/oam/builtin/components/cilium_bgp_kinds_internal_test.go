@@ -25,10 +25,14 @@ const ciliumBGPModulePath = "github.com/cilium/cilium"
 const ciliumBGPVersion = "v2"
 
 // ciliumBGPRule is one expression rule of a CRD a kind checks: properties that
-// break it, and the refusal.
+// break it, the refusal, and the properties next to them that keep the rule,
+// which differ in what the rule reads. Where the rule reads whether a field is
+// set, the field authored as null is among them: an absent field to the API
+// server, which drops the null before it evaluates the rule, and to the kind.
 type ciliumBGPRule struct {
-	props map[string]any
-	want  string
+	breaks []map[string]any
+	want   string
+	keeps  []map[string]any
 }
 
 // ciliumBGPKinds lists the kind components of Cilium's BGP control plane with
@@ -59,24 +63,55 @@ var ciliumBGPKinds = []struct {
 		refused:  []string{"advertisements[].interface.name", "advertisements[].service.addresses"},
 		checked: map[string]ciliumBGPRule{
 			"spec.advertisements[]: self.advertisementType != 'Service' || has(self.service)": {
-				ciliumBGPAdvertisement(map[string]any{"advertisementType": "Service"}),
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "Service"},
+					map[string]any{"advertisementType": "Service", "service": nil},
+				),
 				`advertisements[0].service: required with advertisementType "Service"`,
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "Service", "service": map[string]any{"addresses": []any{"ClusterIP"}}},
+				),
 			},
 			"spec.advertisements[]: self.advertisementType == 'Service' || !has(self.service)": {
-				ciliumBGPAdvertisement(map[string]any{"advertisementType": "PodCIDR", "service": map[string]any{"addresses": []any{"ClusterIP"}}}),
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "PodCIDR", "service": map[string]any{"addresses": []any{"ClusterIP"}}},
+				),
 				`advertisements[0].service: not allowed with advertisementType "PodCIDR", only with "Service"`,
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "PodCIDR"},
+					map[string]any{"advertisementType": "PodCIDR", "service": nil},
+				),
 			},
 			"spec.advertisements[]: self.advertisementType != 'Interface' || has(self.interface)": {
-				ciliumBGPAdvertisement(map[string]any{"advertisementType": "Interface"}),
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "Interface"},
+					map[string]any{"advertisementType": "Interface", "interface": nil},
+				),
 				`advertisements[0].interface: required with advertisementType "Interface"`,
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "Interface", "interface": map[string]any{"name": "lo"}},
+				),
 			},
 			"spec.advertisements[]: self.advertisementType == 'Interface' || !has(self.interface)": {
-				ciliumBGPAdvertisement(map[string]any{"advertisementType": "CiliumPodIPPool", "interface": map[string]any{"name": "lo"}}),
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "CiliumPodIPPool", "interface": map[string]any{"name": "lo"}},
+				),
 				`advertisements[0].interface: not allowed with advertisementType "CiliumPodIPPool", only with "Interface"`,
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "CiliumPodIPPool"},
+					map[string]any{"advertisementType": "CiliumPodIPPool", "interface": nil},
+				),
 			},
 			"spec.advertisements[]: self.advertisementType != 'PodCIDR' || !has(self.selector)": {
-				ciliumBGPAdvertisement(map[string]any{"advertisementType": "PodCIDR", "selector": map[string]any{}}),
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "PodCIDR", "selector": map[string]any{}},
+				),
 				`advertisements[0].selector: not allowed with advertisementType "PodCIDR"`,
+				ciliumBGPAdvertisements(
+					map[string]any{"advertisementType": "CiliumPodIPPool", "selector": map[string]any{}},
+					map[string]any{"advertisementType": "PodCIDR"},
+					map[string]any{"advertisementType": "PodCIDR", "selector": nil},
+				),
 			},
 		},
 	},
@@ -100,17 +135,22 @@ var ciliumBGPKinds = []struct {
 		// one.
 		checked: map[string]ciliumBGPRule{
 			"spec.timers: self.keepAliveTimeSeconds <= self.holdTimeSeconds": {
-				map[string]any{"timers": map[string]any{"keepAliveTimeSeconds": 31, "holdTimeSeconds": 30}},
+				[]map[string]any{{"timers": map[string]any{"keepAliveTimeSeconds": 31, "holdTimeSeconds": 30}}},
 				"timers.keepAliveTimeSeconds: 31 is larger than timers.holdTimeSeconds (30)",
+				[]map[string]any{{"timers": map[string]any{"keepAliveTimeSeconds": 30, "holdTimeSeconds": 30}}},
 			},
 		},
 	},
 }
 
-// ciliumBGPAdvertisement is the properties of a cilium-bgpadvertisement with
-// one entry.
-func ciliumBGPAdvertisement(entry map[string]any) map[string]any {
-	return map[string]any{"advertisements": []any{entry}}
+// ciliumBGPAdvertisements is, for each entry, the properties of a
+// cilium-bgpadvertisement with that one entry.
+func ciliumBGPAdvertisements(entries ...map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, entry := range entries {
+		out = append(out, map[string]any{"advertisements": []any{entry}})
+	}
+	return out
 }
 
 // ciliumBGPCRD reads one CRD of the linked module and returns it with the
@@ -321,23 +361,62 @@ func TestCiliumBGPKinds_ExpressionRules(t *testing.T) {
 			if !slices.Equal(declared, classified) {
 				t.Errorf("the CRD declares the rules %q\nthe kind classifies   %q", declared, classified)
 			}
-			for rule, breaks := range kind.checked {
-				_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: breaks.props}, "apps")
-				if err == nil || !strings.Contains(err.Error(), breaks.want) {
-					t.Errorf("rule %q: err = %v, want one mentioning %q", rule, err, breaks.want)
-				}
+			if len(kind.checked) == 0 {
+				return
+			}
+			// A checked rule is the API server's: see checkedRules.show.
+			shown := ciliumCheckedRules(t, kind.component, kind.handler, kind.crd)
+			for rule, checked := range kind.checked {
+				t.Run(rule, func(t *testing.T) {
+					shown.show(t, crdRuleOf(t, rule), checked.want, checked.breaks, checked.keeps)
+				})
 			}
 		})
 	}
 
 	// The timers rule compares two fields the CRD defaults, so the API server
 	// evaluates it on a timers block that authors one of them. That case is
-	// the one cilium-bgppeerconfig leaves to it.
-	spec := ciliumBGPSpec(t, "ciliumbgppeerconfigs.yaml")
+	// the one cilium-bgppeerconfig leaves to it: the API server refuses each of
+	// these by the rule, against the default it fills, and the kind builds
+	// them.
+	const peerCRD = "ciliumbgppeerconfigs.yaml"
+	spec := ciliumBGPSpec(t, peerCRD)
 	timers := spec.Properties["timers"]
 	for _, name := range []string{"keepAliveTimeSeconds", "holdTimeSeconds"} {
 		if timers.Properties[name].Default == nil {
 			t.Errorf("timers.%s has no CRD default: with one of the two authored the rule no longer compares it with a default, and the kind can check it", name)
 		}
+	}
+	peer := ciliumCheckedRules(t, "cilium-bgppeerconfig", &CiliumBGPPeerConfigHandler{}, peerCRD)
+	only, says := peer.create.only(t, crdRule{path: "spec.timers", rule: "self.keepAliveTimeSeconds <= self.holdTimeSeconds"})
+	for name, authored := range map[string]map[string]any{
+		"a keepalive above the default hold time":   {"keepAliveTimeSeconds": 91},
+		"a hold time under the default keepalive":   {"holdTimeSeconds": 29},
+		"a keepalive that is the default hold time": {"keepAliveTimeSeconds": 90},
+		"a hold time that is the default keepalive": {"holdTimeSeconds": 30},
+	} {
+		props := map[string]any{"timers": authored}
+		answer := only.create(t, peer.document(props))
+		if strings.Contains(name, " that is ") {
+			answer.accepted(t, name)
+		} else {
+			answer.refusedByRule(t, name, says)
+		}
+		if _, err := peer.build(t, props); err != nil {
+			t.Errorf("%s: the kind refuses it (%v); a timers block with one field authored is left to the API server", name, err)
+		}
+	}
+}
+
+// ciliumCheckedRules prepares the CRD in file as the API server serves it, for
+// a kind whose properties are the object's spec.
+func ciliumCheckedRules(t *testing.T, component string, handler oam.ComponentHandler, file string) checkedRules {
+	t.Helper()
+	crd, _ := ciliumBGPCRD(t, file)
+	return checkedRules{
+		create: crdCreateOf(t, crd, ciliumBGPVersion), component: component, handler: handler,
+		document: func(props map[string]any) map[string]any {
+			return crdDocument(crd, ciliumBGPVersion, map[string]any{"spec": props})
+		},
 	}
 }

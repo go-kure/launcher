@@ -3740,7 +3740,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **The CRDs' expression rules.** A rule is checked where it is one
   comparison of authored fields and the refusal can name both; every rule the
   four CRDs declare is classified in `TestCiliumBGPKinds_ExpressionRules`,
-  which fails on one that is added or reworded. **Checked:**
+  which fails on one that is added or reworded. The same test holds each
+  checked rule to the API server's own expression validator, run over the
+  linked CRD after the defaults the API server fills: it refuses the
+  properties that break the rule, by that rule alone, and accepts the ones
+  next to them, and the kind answers the same on both. **Checked:**
   - the five rules on an advertisement, each the entry's `advertisementType`
     against the presence of one sibling: `service` is required with `Service`
     and refused with another type, `interface` is required with `Interface`
@@ -3757,7 +3761,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - the `timers` rule where one of the two is authored. The API server
     compares it with the default it fills for the other (a keepalive of 30, a
     hold time of 90, in the linked CRD), and that default is the installed
-    CRD's to say: `keepAliveTimeSeconds: 100` alone builds here;
+    CRD's to say: `keepAliveTimeSeconds: 100` alone builds here, and the test
+    shows the validator refusing a keepalive above that default hold time;
   - an authored empty value in a required field (`bgpInstances: []`, an
     instance's `name: ""`). It is a value. The two fields above are the
     exception: the type leaves an empty one out;
@@ -3965,7 +3970,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   fields:
   - no rule at all, neither `spec` nor an entry in `specs` (the object's
     expression rule `has(self.spec) || has(self.specs)`). An empty `specs` is
-    not emitted, so it holds none; beside a `spec` it is accepted;
+    not emitted, so it holds none; beside a `spec` it is accepted.
+    `TestCiliumClusterwideNetworkPolicy_ObjectRule` holds the refusal to the
+    API server's own expression validator, which accepts an authored
+    `specs: []` and would refuse the object written without it;
   - a rule that authors both `endpointSelector` and `nodeSelector`, or
     neither: the schema takes exactly one. None is filled in.
     `endpointSelector: {}` selects every endpoint of the cluster and
