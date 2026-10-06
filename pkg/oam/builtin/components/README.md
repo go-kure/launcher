@@ -2024,1635 +2024,303 @@ type for every field it reads, so an out-of-range `replicas` or
 reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
 go-kure/launcher#512 (see the `postgresql` entry below).
 
-- **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
-  plus the full `DeploymentSpec`-level surface they share with `deployment` —
-  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
-  `progressDeadlineSeconds` (go-kure/launcher#341, see "Deployment-level
-  properties" above). What still separates them from `deployment` is launcher's
-  own opinions, which these two keep: `topologySpread` and the four-key
-  `affinity` shorthand, and on `webservice` the `port` that drives the Service.
-  Note the shorthand is what they keep — neither publishes the raw `corev1`
-  `affinity`/`topologySpreadConstraints` that `deployment` does.
-  The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
-  pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
-  the container port and the Service port), letting a downstream platform synthesize generic
-  app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
-  Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
-  - **`worker` is a component lowering rule, not a handler** (`WorkerRule`,
-    go-kure/launcher#280). It runs worker's own parse, then re-expresses the
-    component as a `deployment` of the same name: the authored properties are
-    forwarded, the four-key `affinity` shorthand is evaluated exactly as before
-    and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
-    nothing), and `topologySpread` becomes a synthesized `topology-spread`
-    trait placed before the authored traits (none when `topologySpread: false`).
-    Authored traits and annotations are forwarded unchanged. Worker's published
-    schema, its generated output and the `app: <component-name>` selector are
-    unchanged — every example and golden fixture builds byte-identically — and
-    the emitted component carries `Origin.Rule` `component/worker@v1alpha1`. Two
-    differences are deliberate. A worker refused by its own parse now reads
-    `component "w" (type "worker") in document …: <cause>` (the lowering
-    engine's prefix) where it read `component "w": <cause>`; the cause is
-    unchanged. A trait-lowering error on a worker's trait gains one chain line
-    naming the `component/worker@v1alpha1` step; a trait handler's error reads as before.
-    The former handler's affinity label-syntax check (see Common config) runs
-    in the rule, before the raw `affinity` is forwarded, with the same
-    `affinity: the shorthand evaluates to an affinity the API server would
-    refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
-    `deployment`; `kurel build` refuses them before lowering anyway.
-  - **Both rules emit the component's ServiceAccount as a `serviceaccount`
-    member** (go-kure/launcher#702) unless `serviceAccountName` is authored. A
-    `worker` therefore lowers to a same-name sibling group of a `deployment` and
-    a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
-    `serviceaccount`. The member carries `automountServiceAccountToken: false`,
-    the component's annotations, and the authored `prune-protection` and
-    `force-replace` traits. The `deployment` member is handed the account's
-    object name as `serviceAccountName` (the component name, unless
-    `serviceAccountObjectName` or the `Naming` hook names the account, below),
-    so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
-    in the same place, so every golden builds byte-identically. One consequence
-    for a library caller: a registry that lowers `webservice` or `worker` must
-    register a `serviceaccount` component handler too, or the build fails with
-    `member type "serviceaccount" has no component handler`.
-  - **Both rules turn each claim a `pvc` volume describes into a synthesized
-    `pvc` trait** on the `deployment` member (go-kure/launcher#702), named
-    `<component>-<volume>` as before, and rewrite the volume to reference it by
-    `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
-    The claims are generated as before, after the component's own objects. A
-    registry that lowers `webservice` or `worker` must register the `pvc` trait
-    handler too.
-  - **`webservice` is a component lowering rule, not a handler**
-    (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
-    then re-expresses the component as a same-name sibling group (see `pkg/oam`
-    "Same-name sibling groups"): a `deployment` and then a `service`, both named
-    after the component, deployed as one component — one tier, one
-    bundle. The `deployment` member gets the authored properties
-    webservice declares except `port`, `topologySpread` and `affinity`, plus
-    the main container's one port `{name: http, containerPort: <port>}`; the
-    `affinity` shorthand and `topologySpread` are handled as on `worker`. The
-    `service` member gets one port `{name: http, port: <port>}` and the default
-    selector `app: <component-name>`. Annotations go to both members. Each
-    authored trait is forwarded unchanged, in authored order, to the member it
-    acts on: `expose`, `ingress` and `httproute` go to the `service`;
-    `prune-protection` and `force-replace` go to both; every other trait goes
-    to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
-    (not built in; a consumer that delivers through Flux registers them) and any
-    trait type an extension registered, since the `deployment` member holds the
-    pods. Webservice's published schema and its generated objects are
-    unchanged, in the handler's order (Deployment, Service, ServiceAccount,
-    claims). Each emitted component carries `Origin.Rule`
-    `component/webservice@v1alpha1`. Four differences are deliberate. A refusal from
-    webservice's own parse gains the lowering engine's prefix, as on `worker`;
-    the cause is unchanged. The synthesized inbound NetworkPolicy opens an
-    ingress `portName: http` as the port's number, where the handler opened the
-    name `http`, which the container port also carried; the pods admitted are
-    the same. Likewise, an ingress path on another component whose `backend`
-    names a webservice's Service by `portName` opens that port's number on the
-    webservice's pods, translated as on a `service` component. A route on
-    another component whose `backend` names a webservice's Service on a port
-    that Service does not expose (`port: 9090` on a webservice whose `port` is
-    8080) no longer opens that port on the webservice's pods: the `service`
-    member opens only its own declared ports, as a `service` component does.
-    The route was already broken, since the Service has no such port to
-    forward. Webservice is no longer a handler a library caller converts with
-    directly, so the nameless-config fallback the handlers keep does not apply
-    to it: the engine only lowers a named component.
-  - **A `webservice` component name must be a valid Service name.** It always
-    emits a Service named after the component, and the API server validates
-    a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
-    lowercase letters, digits and `-`, starting with a letter and ending with
-    a letter or digit. That is stricter than the DNS-1123 subdomain every
-    component name already passes, so `api.v1`, a 64-character name and
-    `1api` are refused at conversion (`name: "1api" is not a valid Service
-    name, which must be a DNS-1035 label`) instead of building a manifest the
-    cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
-    same rule to the Application name it is handed. `worker` emits no Service
-    and keeps accepting such a name, within the container-name rule above.
-    The rule holds for the component name whatever the Service is named:
-    `serviceObjectName` (below) does not lift it.
-  - **`deploymentObjectName`, `serviceObjectName` and
-    `serviceAccountObjectName` name the objects the component generates**
-    (go-kure/launcher#787), each in place of the component name and each on its
-    own: the Deployment, the Service (`webservice` only; `worker` generates
-    none and does not declare the property) and the ServiceAccount. A name is
-    used as written, never shortened. The Deployment's and the ServiceAccount's
-    are DNS-1123 subdomains, the Service's a DNS-1035 label; anything else is
-    refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
-    for role "workload-service": not a valid DNS-1035 label: …`). Without the
-    property the `Naming` hook is asked (roles `workload-deployment`,
-    `workload-service`, `workload-serviceaccount`), and without an answer the
-    object keeps the component name, so a document that sets none builds
-    byte-identically. Each name is held against every other resolved name of
-    its kind and namespace: two components given one `serviceObjectName`, or a
-    `service` component whose object carries a `webservice`'s Service name, are
-    refused as a name collision with both named.
-    - *They name the objects alone.* The members keep the component's name, so
-      the `app` label, the pod template's labels, the Deployment's and the
-      Service's selectors, the main container, the claims (`<component>-<volume>`)
-      and every name a trait derives (`<component>-hpa`, `<component>-httproute`)
-      stay as they were.
-    - *What launcher writes to a renamed object follows it.* The `scaler`
-      trait's `scaleTargetRef` names the Deployment, whatever the Service and
-      the ServiceAccount are named. A routing trait's own backend (`expose`,
-      `ingress`, `httproute`) is the Service, and a route naming that Service
-      still resolves to the component for the synthesized NetworkPolicy. The
-      pods' `serviceAccountName` and the `rbac` trait's subject name the
-      ServiceAccount.
-    - **A renamed Service changes its DNS name: the Service's name is the name
-      it is reached at in the cluster. Launcher builds no such address, so every
-      address written with the component name (an `env` value, a URL in another
-      component's properties, a backend another component's route names) is the
-      author's to change.**
-    - *`serviceAccountObjectName` names the account the component generates,
-      `serviceAccountName` an account that exists.* With `serviceAccountName`
-      the component generates none, so the two together are refused
-      (`serviceAccountObjectName and serviceAccountName are both set: …`), and
-      the hook is not asked for an account.
-  - **An ingress `portName` on a `webservice` must be `http`.** The Service's
-    one port is named `http`, so an `ingress` path whose implicit backend is
-    this component's Service (no `backend`, or `backend` naming that Service)
-    and that addresses it by any other `portName` is refused at build time
-    (`cannot route implicit backend to port "name"`), just as a numbered
-    `port` other than the component's `port` is (go-kure/launcher#545).
-- **deployment** — the kind-named Deployment (see "Deployment-level
-  properties" above): the shared container-level, pod-level and
-  `DeploymentSpec`-level surface, the last of which it now shares with
-  `webservice` and `worker` rather than owning. What distinguishes it is mostly
-  what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
-  `port`; it declares no endpoint and emits no Service. It is not `worker` minus
-  a few things either — it reads nulls as omissions across its whole surface,
-  which the role kinds do not. The one thing it
-  adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
-  `tolerations` and `topologySpreadConstraints` as the API shapes
-  (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
-  same distinction in the other direction — the role kinds carry the opinion,
-  this kind carries the API.
-- **service** — the kind-named Service (go-kure/launcher#411), an independent
-  component rather than half of a workload: it emits the Service and nothing
-  else, and the workload component whose pods it selects owns their
-  ServiceAccount. `selector` defaults to `app: <component name>`, the label
-  every workload kind puts on its pods; set it when the Service fronts a
-  workload named differently (a `deployment` named `api-server` behind a
-  `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
-  least one entry unless the Service is headless or of type `ExternalName`: `port` (required), `targetPort` (a number or a container
-  port name, published as the `Types: [integer, string]` union
-  (go-kure/launcher#383), so a value of any other type is rejected by property
-  validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
-  to `TCP`), `name` (required once there is more than one port; names and
-  port/protocol pairs must be unique), `nodePort` (1-65535, only with `type`
-  `NodePort` or `LoadBalancer`, unique per protocol, as the API requires; two
-  refusals are launcher's own: `0`, which the API reads as "allocate one" —
-  leave the key out instead — and a node port on an `ExternalName` Service,
-  which the API accepts; the
-  cluster's own node port range is narrower and is checked on apply) and
-  `appProtocol` (a qualified name such as `http` or `kubernetes.io/h2c`).
-  `type` is `ClusterIP` (default), `NodePort`, `LoadBalancer` or
-  `ExternalName`. An empty `selector` is refused.
-  - **ExternalName.** `type: ExternalName` (go-kure/launcher#790) emits a DNS
-    alias for `externalName`, which is then required: a DNS-1123 subdomain,
-    with one trailing dot allowed. The Service selects no pods, so `selector`
-    is refused with it (launcher's own rule; the API accepts and ignores one),
-    and so are `clusterIP: None`, `ipFamilies` and `ipFamilyPolicy`; `ports`
-    is optional. On any other type `externalName` is refused (launcher's own
-    rule; the API ignores it there). Whatever ports it lists, an ExternalName
-    Service has no first port for a routing trait and no NetworkPolicy
-    endpoint: an `ingress` or `httproute` trait refuses it as an implicit
-    backend (`component "db" has no service port`), a trait-level
-    `servicePort` is refused, and it declares no endpoint. As on a port-less
-    headless Service, the refusal is of the component as a backend, not of
-    the trait: a trait on it that names another Service explicitly is carried
-    as on any component, and that route's policy is the routed Service's. It
-    still owns its name
-    (`BackendServiceName`): a route from another component naming it is a
-    route to a Service of this application, so that route's `backendSelector`
-    is not trusted, and **no inbound NetworkPolicy is synthesized for that
-    route**, in a same-name sibling group either: the Service leads to no pods
-    of the cluster, and the group's component label is on its workload's
-    pods, which the Service does not lead to. Named apart from its component
-    (`objectName`), it owns that name instead: a route naming the Service's
-    name gets no policy, and one naming the component's name is a route to a
-    Service from elsewhere.
-  - **Further `ServiceSpec` fields** (go-kure/launcher#790). Each is written
-    only when authored; unauthored, the API server's own default applies. The
-    rules are the API server's (`validateService`), except where marked as
-    launcher's own.
-
-    | Property | Rules |
-    |----------|-------|
-    | `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
-    | `internalTrafficPolicy` | `Cluster` or `Local`. |
-    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). |
-    | `sessionAffinity` | `None` or `ClientIP`. |
-    | `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
-    | `publishNotReadyAddresses` | A boolean; written only when `true`. |
-    | `ipFamilies` | `IPv4` and/or `IPv6`, each once, at most two. |
-    | `ipFamilyPolicy` | `SingleStack`, `PreferDualStack` or `RequireDualStack`; `SingleStack` is refused with two `ipFamilies` (the API server's allocator refuses it). |
-    | `loadBalancerClass` | A qualified name. Only with `type: LoadBalancer`. |
-    | `loadBalancerSourceRanges` | CIDRs in canonical form (launcher's own: the API tolerates surrounding spaces and some non-canonical forms). Only with `type: LoadBalancer`. |
-    | `loadBalancerIP` | Only with `type: LoadBalancer` (launcher's own: the API ignores it elsewhere). The value is not validated, as in the API. |
-    | `allocateLoadBalancerNodePorts` | A boolean. Only with `type: LoadBalancer`. |
-    | `healthCheckNodePort` | 1-65535. Only with `type: LoadBalancer` and `externalTrafficPolicy: Local`. `0` is refused (launcher's own: the API reads it as "allocate one"; leave the key out instead). |
-
-    `externalIPs` and `clusterIPs` are refused, and so is a literal
-    `clusterIP` address. `externalIPs` routes traffic for addresses the
-    cluster does not manage and is deprecated by the API; a Service's cluster
-    IPs are the cluster's to allocate. In a document all three are refused by
-    property validation before the parser's reason is reached.
-  - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
-    `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
-    the selected pods, as a StatefulSet's governing Service needs. It requires
-    `type: ClusterIP` (the default), since the API server refuses a headless
-    `NodePort` or `LoadBalancer` Service. `None` is the only value: a literal
-    address is refused, and so is an empty string, rather than read as
-    absence. A headless Service may have no `ports` at all; without
-    `clusterIP`, at least one port is still required (`ports: at least one
-    port is required`), except on an `ExternalName` Service (above). A
-    port-less Service has no first port, so routing
-    traits refuse it as an implicit backend, refuse a trait-level
-    `servicePort` on it, and it declares no NetworkPolicy endpoint. It still
-    owns its name (`BackendServiceName`): a route from another component
-    naming it is a route to a Service of this application, not an external
-    backend, so that route's `backendSelector` is not trusted and, with no
-    TCP port to translate, no allow is synthesized. Without `clusterIP` the
-    Service carries no `clusterIP`, as before.
-  - **The component name must be a valid Service name.** It becomes the
-    Service's `metadata.name`, which the API server validates as a DNS-1035
-    label: at most 63 characters, lowercase letters, digits and `-`, starting
-    with a letter and ending with a letter or digit. That is stricter than the
-    DNS-1123 subdomain every component name already passes, so `api.v1`, a
-    64-character name and `1api` are refused here (`name: "api.v1" is not a
-    valid Service name, which must be a DNS-1035 label`) instead of building a
-    manifest the cluster rejects on apply. `Generate` applies the same rule to
-    the Application name it is handed.
-  - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
-    (which lowers to one of the two) on a `service` component resolve their
-    implicit backend to `ports[0].port` and refuse any other port on it,
-    whether it is named by number (`cannot route implicit backend to port N`)
-    or by an ingress path's `portName` (`cannot route implicit backend to port
-    "name"`); a `portName` must be the first port's own name, so an unknown
-    name is refused too. Naming the component's own Service as the backend
-    (`backend: api` on an ingress path, `backendRefs: [{name: api, port:
-    9000}]` on an httproute) is still the implicit backend and is refused the
-    same way. To reach a later port, put the routing trait on another
-    component and name this Service there as an explicit backend, with that
-    port.
-  - **Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
-    policy for traffic routed to a `service` selects its `selector` pods — not
-    the component label, which no pod carries — and opens the `targetPort` of
-    each routed TCP port. A route that reaches only a UDP or SCTP port
-    synthesizes no policy, and neither does a route to an `ExternalName`
-    Service, which has no pods to open a port on (above). In a same-name
-    sibling group whose `selector`
-    picks a sibling's own pods, the policy selects the component label
-    instead, but only when `IdentityTargetPorts` is true: the Service has at
-    least one port and every port, whatever its protocol, has a numeric
-    `targetPort` equal to its own `port`. Otherwise it keeps the `selector`.
-    Either way the routed ports are translated to their `targetPort` and
-    only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
-  - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
-    every TCP `targetPort` (deduplicated). A Service with no TCP port declares
-    none, and neither does an `ExternalName` Service.
-  - **No policy check.** `service` has no `ApplyPolicy`, deliberately
-    (go-kure/launcher#794, item 2): none of its properties maps to an
-    environment-policy method, so there is nothing to enforce. The policy
-    makes no statement about a Service's `type`, so `NodePort` and
-    `LoadBalancer` build under every policy. **`type: ExternalName` has no
-    capability gate either: whoever may author a `service` component may give
-    an in-cluster name to any DNS name outside the cluster**, and workloads
-    that resolve the Service name are sent there. `nodePort`,
-    `loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
-    are accepted the same way. The open point "No capability gate on
-    component types" on go-kure/launcher#790 carries it.
-- **serviceaccount**, **persistentvolumeclaim**, **configmap**
-  (go-kure/launcher#702) are kind-named projections of one object each. Each
-  emits that object, named after the component, and nothing else, so another
-  component refers to it by the component name. They are the authorable forms
-  of the objects the workload kinds generate for themselves today, and they
-  carry no launcher opinions. Like every component, they are in no tier
-  unless a tier annotation or placement policy places them. `serviceaccount`
-  and `configmap` have no `ApplyPolicy`, deliberately (go-kure/launcher#794,
-  item 2): none of their properties maps to an environment-policy method
-  (`imagePullSecrets` names Secrets, not a registry), so there is nothing to
-  enforce. `persistentvolumeclaim` has one, for the storage default and
-  maximum.
-  - `serviceaccount` publishes `automountServiceAccountToken` and
-    `imagePullSecrets` (`[{name}]`). An unauthored
-    `automountServiceAccountToken` stays unset, which Kubernetes reads as
-    true. The account a role kind generates sets it to false, so a
-    `serviceaccount` replacing that account authors `false` to keep the same
-    posture. A workload runs as it through `serviceAccountName`, which also
-    stops a role kind from generating its own account.
-  - `persistentvolumeclaim` publishes `size`, `storageClassName`,
-    `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
-    built by the same `BuildPVC` as a `pvc` volume, so the two agree on every
-    field they share, including the explicit-empty `storageClassName: ""`,
-    which requests no class. The `pvc` trait is this kind's twin
-    (go-kure/launcher#741): it runs the kind's own `ParseClaimProperties`,
-    `ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
-    same claim. Only the ownership fields differ: the claim's name, its `app`
-    label, namespace and bundle. An unauthored `storageClassName` (absent or
-    `null`) comes from the ClusterProfile `pvc` capability's
-    `storageClassName`, as the trait's does (go-kure/launcher#742); with no
-    binding it stays unset, which is the cluster's default class. **Pre-GA
-    output change**: the kind used to ignore that binding, so an existing
-    claim built from it got the cluster's default class when it was created,
-    if the cluster had one. A claim's assigned `storageClassName` cannot
-    change: if the binding's class differs from it, the claim fails to apply
-    until it is recreated or the assigned class is authored. A claim created
-    with no class may take one later, so it applies. An unauthored `size`
-    comes from the EnvironmentPolicy storage default; with neither, the build
-    fails with `size: required …`. The policy's maximum storage size applies
-    either way. A workload mounts the claim through a `pvc` volume's
-    `claimName` (see "Referencing an existing claim" below). A claim name
-    another component also generates (for example a `pvc` trait of the same
-    name) is refused as a generated-object collision.
-
-    Four more claim-spec fields are read (go-kure/launcher#790), by the kind
-    and by the `pvc` trait alike (`claim_spec.go`). Each is written only when
-    authored, so a document that authors none builds the claim it built
-    before. A workload's `pvc` volume does not take them.
-
-    | Property | Rule |
-    |----------|------|
-    | `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
-    | `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under "StatefulSet-level and claim-template properties"). |
-    | `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
-    | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
-
-    **No policy check on `volumeName`.** It is accepted with no capability
-    gate and no EnvironmentPolicy method (go-kure/launcher#790, open point "No
-    capability gate on component types"). A claim that names a volume binds to
-    that PersistentVolume and to no other, with no dynamic provisioning, so
-    **whoever may author a claim may ask for any PersistentVolume of the
-    cluster by name**. The cluster still decides: the volume must be unbound
-    or reserved for this claim, and must satisfy the claim's size, access
-    modes, class, attributes class and volume mode (the PersistentVolume
-    controller's `checkVolumeSatisfyClaim`). The storage default and maximum
-    still apply to the claim's `size`.
-
-    `dataSource` is refused: it is the superseded spelling of `dataSourceRef`,
-    which the API server mirrors into it. The long `resources` spelling of
-    `size` is not read on a standalone claim.
-  - `configmap` publishes `data` (string values only: a number or a boolean
-    is refused rather than stringified), `binaryData` (base64; a key may not
-    also appear in `data`) and `immutable`. The `data` values and the decoded
-    `binaryData` values together may hold at most 1,048,576 bytes, the limit
-    the API server enforces; a larger ConfigMap is refused at build time. That
-    check is the exported `CheckConfigMapSize(data, binaryData)`. A key the API
-    server refuses in a ConfigMap is refused by the exported
-    `ValidateConfigMapKey(field, key)`. Keys are checked in sorted order, so
-    with several bad entries the one reported is the same on every build. It is
-    a different type from the `configmap` trait, which attaches a ConfigMap to
-    another component. The trait is this kind's twin (go-kure/launcher#741): it
-    reads `data`, `binaryData` and `immutable` through the exported
-    `ParseConfigMapProperties(props)` and builds the ConfigMap through
-    `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
-    give the same ConfigMap and the same refusals on both paths.
-- **secret** (go-kure/launcher#790) is the kind-named projection of a v1
-  Secret, on the recipe of `configmap`: it emits the Secret, named after
-  the component (or its `objectName`) and carrying the component's `app`
-  label, and nothing else, so a workload's `secret` volume, `envFrom` or
-  `secretKeyRef` names it by that name.
-  - It publishes `stringData` (plain string values: a number, a boolean or a
-    nested object is refused, not stringified), `data` (base64; a key may not
-    also appear in `stringData`, where the API server would let `stringData`
-    win silently), `type` and `immutable`. An unauthored `type` and
-    `immutable` stay unset (the API server stores `Opaque` for an unset
-    type), and the keys a type requires are left to the API server.
-  - Every entry is emitted under `data`, base64-encoded as the API serializes
-    it, and never under `stringData`: the object written is the object the
-    API server stores. **base64 is an encoding, not encryption**, so the
-    build output is as sensitive as the document, and so is every place that
-    output is committed or pushed to. Prefer a Secret created out of band (an
-    `external-secret` trait, a sealed or externally managed Secret) for
-    anything that must not be in the output.
-  - The decoded values together may hold at most 1,048,576 bytes, the limit
-    the API server enforces (the exported `CheckSecretSize(data)`); a key the
-    API server refuses is refused by the exported `ValidateSecretKey(field,
-    key)`. Keys are checked in sorted order. **No refusal carries a value**:
-    an entry is named by its key, a wrong value by its type, and a base64
-    error by its key alone.
-  - *Policy.* Unlike `configmap`, the kind has an `ApplyPolicy`: a policy
-    that forbids explicit secrets (`oam.ExplicitSecretPolicy`, see the
-    `pkg/oam` README) refuses the component with a violation naming it,
-    `secret: the environment policy forbids explicit secrets; reference a
-    Secret created out of band instead`, as it refuses the `secret` trait, a
-    `helm` component's `secretValues` and a Secret a `passthrough` or
-    `manifests` component carries. A policy that does not implement that
-    interface, and no policy, allow it.
-  - It is a different type from the `secret` trait, which attaches a Secret
-    to another component. The trait is this kind's twin: it reads the same
-    four properties through the exported `ParseSecretProperties(props)` and
-    builds the Secret through `GenerateSecret(config, name, namespace,
-    labels)`, and its schema is the kind's plus `name`, so the same
-    properties give the same Secret and the same refusals on both paths. Only
-    the ownership fields differ: the Secret's name, its labels, its namespace
-    and the bundle it is placed in.
-  - *Names.* The kind's Secret is claimed under role `object`. A `secret`
-    component and a `secret` trait naming one Secret are refused; the trait
-    itself claims no name. It names its own Secret under no role, so the two
-    meet among the generated objects (`generated-object collision: Secret
-    "shop/shared" is generated by both component "shared" and sub-application
-    "shared" of component "web"; …`), as a `configmap` component and trait
-    do. The Secret a `helm` component generates for
-    `secretValues` is claimed under role `values-secret`, as the same kind,
-    so a `secret` component under that name is refused as a name collision
-    with both named.
-- **namespace**, **limitrange**, **resourcequota** (go-kure/launcher#790) are
-  kind-named projections of one Kubernetes core object each, built on the
-  recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
-  one schema key per json field of the object's spec type, the whole property
-  map decoded strictly into that type under the null contract, and two
-  spellings of one field refused. `TestCoreKindSchemas_CoverSpec` holds each
-  schema to the linked type by reflection. Each emits its object, named after
-  the component,
-  with the authored spec and nothing else: the handler adds no annotation and
-  no label of its own, not an `app` label either. The transform then sets the component
-  label on the object, as on every object a component owns
-  (go-kure/launcher#788). None
-  runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
-  component, they are in no tier unless a tier annotation or placement policy
-  places them.
-  The properties are the spec fields, and `labels` and `annotations` for the
-  object's metadata ("The object's labels and annotations" below).
-  - `namespace` publishes `finalizers`, the one field of
-    `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
-    no namespace, whatever namespace the application is built for. The
-    component name is the Namespace's name, which the API holds to a DNS-1123
-    label (at most 63 characters, no dot), narrower than a component name;
-    any other name is refused, naming it. A Namespace that needs the Pod
-    Security Admission labels (`pod-security.kubernetes.io/enforce` and its
-    siblings) writes them under `labels`.
-  - `limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
-    and emits the LimitRange in the build namespace. `limits` is required: the
-    Go type cannot omit it, so an unauthored one (absent or `null`) would be
-    written as `limits: null` and is refused with `limits: required …`. An
-    authored `limits: []` is kept: a LimitRange that enforces nothing. Each
-    limit's `type` is required for the same reason (`limits[1].type: required
-    …`), and two limits of one type are refused by path, as the API refuses
-    them. The other value rules (which type names exist, `min` at most `max`,
-    what a `Pod` limit may not set) are left to the API server. A quantity
-    written as a number is emitted in its canonical string form (`cpu: 2`
-    becomes `cpu: "2"`). The limits constrain the pods and claims of the
-    namespace at admission; the environment policy is not applied to them.
-  - `resourcequota` publishes `hard`, `scopes` and `scopeSelector`, the
-    fields of `corev1.ResourceQuotaSpec`, and emits the ResourceQuota in the
-    build namespace. The API requires none of them, so a component with no
-    properties is a quota that limits nothing. Which resource names, scopes
-    and selector operators exist is left to the API server. A quantity written
-    as a number is emitted in its canonical string form
-    (`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
-    namespace may hold in total; the environment policy is not applied to it.
-- **persistentvolume** (go-kure/launcher#790) is the kind-named projection of
-  a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
-  `resourcequota`: one schema key per json field of
-  `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
-  type, two spellings of one field refused, and one object named after the
-  component, with the authored spec; the handler adds no label and no
-  annotation of its own, and the transform sets the component label. The spec
-  embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
-  `hostPath`, …) is a top-level property, as it is a top-level field of the
-  object's spec. A PersistentVolume is cluster-scoped: the object carries no
-  namespace, whatever namespace the application is built for. The API requires
-  `capacity`, `accessModes` and exactly one source; those and the other value
-  rules are left to the API server, so a component with no properties builds a
-  volume the server refuses. A quantity written as a number is emitted in its
-  canonical string form. The object's labels and annotations are the `labels`
-  and `annotations` properties.
-
-  **Policy.** Unlike `namespace`, `limitrange` and `resourcequota`, a
-  PersistentVolume is held to the
-  environment policy (`enforcePersistentVolumePolicy`):
-  - A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
-    allows it. Both name a path on the node (`local` a disk, partition or
-    directory there), and a pod that binds the volume through a claim reads
-    and writes that path, as it does through a `hostPath` volume of its own.
-  - `capacity.storage` is held to the storage maximum (`MaxStorageSize()`), as
-    the storage a claim requests is.
-
-  One check covers every path that can produce the object: this kind, and the
-  rendered-object check that template delivery (`helmtemplate`), `passthrough`
-  and `manifests` run, where the refusal names the object (`passthrough: object
-  PersistentVolume "data": spec.hostPath: …`). On those three paths a
-  PersistentVolume in an API version the build cannot read is refused, since
-  its source and capacity cannot be checked.
-
-  Of the other source types of `corev1.PersistentVolumeSource` (k8s.io/api
-  v0.37.1, `core/v1/types.go`), all but `csi` and `flexVolume` name a remote
-  endpoint or disk, not a path on the node, and are not gated. **Not covered:** a `csi` or
-  `flexVolume` source. Each names a driver and options only the driver
-  interprets, and no field says whether a node path is exposed; a pod's `csi`
-  and `flexVolume` volumes are unchecked for the same reason. A driver that
-  exposes a node path therefore passes the gate. This is a decided limit
-  (go-kure/launcher#794, item 12): the environment policy makes no statement
-  about driver-defined volumes, on pods or on PersistentVolumes. One (an
-  allowlist of driver names, for instance) would be a new part of the policy
-  every consumer implements, and no use case asked for it.
-
-  **Breaking:** before this kind, a PersistentVolume that a chart rendered, a
-  `passthrough` component held or a `manifests` source yielded reached the
-  output unchecked. One with a `hostPath` or `local` source, or with
-  `capacity.storage` over the storage maximum, is now refused where it built
-  before — and with no policy passed a `hostPath` or `local` one is always
-  refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
-  through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
-  component.
-- **pod** (go-kure/launcher#790) is the kind-named projection of a v1 Pod, on
-  the same recipe: one schema key per json field of `corev1.PodSpec`, the
-  property map decoded strictly into that type, two spellings of one field
-  refused, and one Pod named after the component in the build namespace, with
-  the authored spec. The handler adds the `app` label and nothing else: no
-  annotation, no ServiceAccount, no `automountServiceAccountToken`, no
-  resources, no probe. The `app` label (`app: <component>`, see "The `app`
-  label") is the one every workload kind gives its pods and the one launcher's
-  traits and Services select on: a `networkpolicy` trait's policy matches the
-  Pod by it, and a `service` component reaches it with `selector: {app:
-  <component>}`. The transform
-  then sets the component label, as on every object a component owns
-  (go-kure/launcher#788). It is a bare Pod: no controller recreates it, and it
-  is not the workload shape of `webservice`, `worker` or `deployment` — a
-  property of those (`image`, `ports`, `env` at the top level) is refused as
-  not a PodSpec field.
-
-  **Traits.** The pod is a trait target: `security-context`, a `configmap`
-  trait's `mountPath` and an `external-secret` trait's `envFrom`/`mountPath`
-  change its spec as they change a workload kind's pod template.
-  `topology-spread` is Deployment-only and refuses a `pod` component.
-
-  **Refused when the component is read**, with or without a policy:
-  - `ephemeralContainers`, `priority` and `overhead`, with the texts the
-    workload kinds give. A pod cannot be created with ephemeral containers,
-    and the Priority and RuntimeClass admission controllers set the other two
-    and reject a differing value; an author sets `priorityClassName` or
-    `runtimeClassName`. The three are not in the schema, so a caller that
-    validates the properties against it first, as `kurel build` does, refuses
-    each as an unsupported field whatever its value, an empty one included. A
-    caller that converts the component without that validation gets the texts
-    above, and there an empty `ephemeralContainers` or `overhead` is read as
-    unset. Cost: on a cluster that runs without those admission controllers
-    the two fields cannot be authored through this kind.
-  - An unauthored `containers`. The API's other value rules (an empty list, a
-    container without a name, …) are left to the API server.
-  - An image without a tag or digest, or tagged `:latest`, on every init and
-    regular container (`ValidateImageRef`), so a container without an image
-    too.
-  - The same on the `reference` of an image volume (`volumes[0] "ext"
-    image.reference: image "…" rejected: …`); a volume that names no
-    reference is not checked. See *Image volumes* below.
-  - A `timeoutSeconds`, `periodSeconds`, `successThreshold` or
-    `failureThreshold` written as `0` on a liveness, readiness or startup
-    probe of an init or regular container. The Go type omits a zero there and
-    the API server would apply its default (1, 10, 1, 3), so the authored
-    value cannot be carried. A test derives the list from the field comments
-    of the linked `k8s.io/api` types (every non-pointer `omitempty` number or
-    boolean under `PodSpec` whose comment states a non-zero default) and fails
-    when the two differ. It holds the list to the documented defaults, not to
-    the API server's defaulting code.
-
-  **Marked required upstream and not checked:** the `action` of a container
-  restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
-  and the `signerName` and `keyType` of a pod certificate source of a
-  projected volume. The Go type leaves each out when it is empty, so the Pod
-  would show the omission, and launcher does not refuse it: the built-in types
-  ship markers and no schema, so no linked module shows that the API server
-  refuses a Pod without one, and both fields are behind a feature gate of the
-  cluster. `TestKindComponents_OmittedRequiredAndWrittenDefaults` lists the
-  four with that reason.
-
-  **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
-  Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
-  storage maximum on a generic ephemeral volume's claim, the registry
-  allowlist on an image volume's reference, the pod-level cpu and
-  memory maxima, and for every init and regular container the registry
-  allowlist, the cpu and memory maxima and the privileged, HostProcess and
-  capability gates. It fills no policy default: a container without resources
-  stays without. The kind names a field as the property it is (`hostNetwork is
-  not allowed by environment policy`, `containers[0] "app": …`); the three
-  rendered paths name it under the object (`passthrough: object Pod "runner":
-  spec.containers[0] "app": …`).
-
-  **Image volumes** (go-kure/launcher#790). An image volume (`volumes[].image`)
-  mounts an OCI image the kubelet pulls as it pulls a container's, so its
-  `reference` is held to the allowed registries (`AllowedRegistries`), refused
-  with the registry class: `volume "ext" image.reference: image
-  "other.example/team/ext:1.0.0" is not from an allowed registry
-  [registry.example]`. The reference is read as a container image is: one
-  that names no registry host is Docker Hub's (`docker.io`), a tag or a digest
-  is not part of the host, and the host must equal a list entry exactly, a
-  trailing `/` on the entry aside (`registry.example:5000` is not
-  `registry.example`). A volume that names no
-  reference is not checked, and no list, or an empty one, allows every
-  registry. The one check holds it on every path by which a document brings
-  a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
-  `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
-  template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-  carries. The components with a volume schema of their own (`webservice`,
-  `worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
-  no image volume: their `volumes` has no such type. With the container images these
-  are every field of a pod spec that names an image the kubelet pulls today.
-  A test walks the linked `k8s.io/api` type and fails on a field whose name
-  holds `image`, or whose type is the image volume source, that is neither
-  held nor listed with a reason; an image field under another name and
-  another type is not found by it. **Not covered:** a custom
-  resource that `passthrough`, a `manifests` source or a chart carries passes
-  whatever it holds, the pod template of a CloudNativePG Pooler and the
-  extension images of a Cluster included; only the kind that builds the
-  object (`cnpg-pooler`, `cnpg-cluster`) holds its fields. **Breaking:** an
-  image volume naming a registry outside the list built before, on each of
-  those paths, and is refused now.
-
-  **The tag rule on an image the document names.** The reference of an image
-  volume is also held to `ValidateImageRef`, as a container's image is: one
-  without a tag or digest, or tagged `:latest` (with a digest too), or one
-  that is no image reference, is refused, on each of the paths above
-  (`volumes[0] "ext" image.reference: image "registry.example/team/ext"
-  rejected: no tag or digest specified; use an explicit version tag or
-  digest`; a rendered path names it under the object,
-  `spec.template.spec.volumes[0] "ext" …`). The rule is the library's, not the
-  environment's: the kinds apply it when the component is read and again at
-  generation, with or without a policy, and the refusal carries no policy
-  class. A reference by digest alone passes, and a volume that names no
-  reference is not checked. The kinds that name an image outside a pod spec
-  hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
-  of its template, `cnpg-cluster` its `imageName` and the reference of each
-  extension, `postgresql` the image it composes from `version` (each in its entry).
-  The test that walks the types fails on a field held to the registry rule
-  and not to this one. **Breaking** (go-kure/launcher#790): a document, a
-  chart or a source naming an untagged or `:latest` image in one of those
-  fields built before, and is refused now.
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
-  admission controllers decide there. They do refuse ephemeral containers and
-  an untagged or `:latest` image, an image volume's included.
-
-  The config implements `oam.ServiceAccountNamer`: the account is the authored
-  `serviceAccountName`, or the deprecated `serviceAccount` where that one is
-  unset, as the API server reads the two; with neither, the namespace's
-  `default` account. The Pod carries the `app` label and the component label,
-  and what `labels` and `annotations` author beside them.
-- **replicaset** (go-kure/launcher#790) is the kind-named projection of an
-  apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
-  `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
-  `template`), the property map decoded strictly into that type, and one
-  ReplicaSet named after the component in the build namespace, with the
-  authored spec. It is the bare controller: no rollout, which a `deployment`
-  component gives, and none of that kind's shorthand — a property of the
-  workload kinds (`image`, `ports`, `strategy`) is refused as not a
-  ReplicaSetSpec field.
-
-  **The `app` label.** The handler adds one thing: `app: <component>` on the
-  pod template's labels, beside the authored ones (see "The `app` label"). It
-  is the label every workload kind gives its pods and the one launcher's
-  traits and Services select on, so a `networkpolicy` trait's policy and a
-  `service` component with `selector: {app: <component>}` reach the pods. The
-  selector is emitted as authored, and the ReplicaSet itself gets no label of
-  the handler's; the transform then sets the component label on the object and
-  its template, as on every object a component owns (go-kure/launcher#788).
-  - An authored `template.metadata.labels.app` with the component's own label
-    value is kept. Any other value is refused, naming the component
-    (``template.metadata.labels.app: "frontend" is not the `app` label of
-    component "web" ("web")``): the label cannot say something else than what
-    the traits select.
-  - A selector that matches the authored template labels and would stop
-    matching once the label is added (`app` under `DoesNotExist`, or `NotIn`
-    the label value) is refused (``selector: rules out the label `app: web`
-    …``). A selector on `app: <component>` is satisfied by the added label, so
-    the template needs no label of its own for it. A selector that cannot be
-    read as one (an unknown operator, a key or value that is no label) cannot
-    be compared and is refused with apimachinery's reason.
-
-  **Traits.** A trait target as the `pod` kind is: `security-context`, a
-  `configmap` trait's `mountPath` and an `external-secret` trait's
-  `envFrom`/`mountPath` change its pod template. `topology-spread` and
-  `scaler` are not available on it.
-
-  **Refused when the component is read**, with or without a policy:
-  - An unauthored `selector`. The Go type cannot omit it, so it would be
-    written as `null`, and launcher derives none. Whether it matches the
-    template's labels, like the API's other value rules (an empty selector,
-    `restartPolicy` other than `Always`, a negative `replicas`), is left to
-    the API server.
-  - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
-    same checks and named by path (`template.spec.containers: required`,
-    `template.spec.priority: not authorable …`, the image rule, a probe timing
-    written as `0`). A test holds the probe list to every non-pointer
-    `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
-    states a non-zero default, the template's metadata included.
-  - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
-    ReplicaSet's pod template, whose pods are replaced for as long as the
-    controller exists; a `pod` or a Job may set it.
-
-  The two restart-rule fields and the two pod-certificate fields that are
-  marked required upstream are not checked under `template.spec` either, for
-  the reason the `pod` kind gives: no linked module shows that the API server
-  refuses the omission.
-
-  **Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
-  one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
-  maximum 3`), and the pod template to the check the `pod` kind runs
-  (`enforcePodTemplatePolicy`), naming a field by its path in the properties
-  (`template.spec: hostNetwork is not allowed by environment policy`,
-  `template.spec.containers[0] "app": …`). It fills no policy default: an
-  unset `replicas` stays unset and a container without resources stays
-  without. The three rendered paths run the same checks on a ReplicaSet they
-  emit and name the field under the object (`spec.replicas`,
-  `spec.template.spec…`).
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
-  on a ReplicaSet they emit, do not require a selector and add no `app` label;
-  the API server decides there. They do refuse ephemeral containers and an
-  untagged or `:latest` image, an image volume's included.
-
-  The config implements `oam.ServiceAccountNamer`, reading the template's
-  `serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
-  labels and annotations are the `labels` and `annotations` properties; the
-  template's metadata is carried as authored and takes neither.
-- **replicationcontroller** (go-kure/launcher#790) is the kind-named
-  projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
-  one schema key per json field of `corev1.ReplicationControllerSpec`
-  (`replicas`, `minReadySeconds`, `selector`, `template`), the property map
-  decoded strictly into that type, and one ReplicationController named after
-  the component in the build namespace, with the authored spec. What the
-  `replicaset` kind states holds here — the `app` label on the pod template
-  and the refusal of an authored one with another value, the three traits, the
-  refusals under `template.spec` (`activeDeadlineSeconds` included), the two
-  restart-rule fields and the two pod-certificate fields that are marked
-  required upstream and are not checked, because no linked module shows that
-  the API server refuses the omission, the
-  replica maximum and the pod-template policy check, no policy default, the
-  known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
-  `labels` and `annotations` for the object's own metadata — with these
-  differences:
-  - `selector` is a plain map of label to value, not a label selector: a
-    `matchLabels` or `matchExpressions` key is refused as not a
-    ReplicationControllerSpec field.
-  - `selector` is optional. An unset one stays unset, and the API server
-    defaults it to the pod template's labels, the `app` label included.
-  - `template` is required (`template: required`). The API type holds it by
-    pointer, so an unauthored one would be emitted without pods to create.
-  - No selector is refused against the `app` label: a map selector asks only
-    for labels to be present, which a further label on the pods cannot break.
-- **podtemplate** (go-kure/launcher#790) is the kind-named projection of a v1
-  PodTemplate. The object has no spec: beside its identity it holds one field,
-  `template`, and that is the component's one property, decoded strictly into
-  `corev1.PodTemplateSpec`. It emits one PodTemplate named after the component
-  in the build namespace, with the authored template. Any other property is
-  refused, the object's own `kind`, `apiVersion` and `metadata` included
-  (`properties do not decode into a v1 PodTemplate …`).
-
-  **It is stored, not run.** No controller creates pods from a PodTemplate, so
-  the handler adds no `app` label to the template (an authored `app` label is
-  carried as written), the config reports no ServiceAccount
-  (`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
-  component name), and it is not a trait target: a `configmap` trait's
-  `mountPath`, an `external-secret` trait's `envFrom`/`mountPath` and a
-  `security-context` trait's pod-spec properties (`runAsUser` and the five
-  others) are refused on it, naming the component and the kinds they apply
-  to. `security-context` with `psaLevel` alone is accepted, as a declaration
-  of the level, and writes nothing to the template
-  (go-kure/launcher#794, item 14; `pkg/oam/builtin/traits/README.md`,
-  "Pod-spec traits on a component without a workload"). The transform still sets the
-  component label on the object and its template, as on every object a
-  component owns (go-kure/launcher#788).
-
-  **Refused when the component is read**, with or without a policy: under
-  `template.spec`, what the `pod` kind refuses of its own spec, by the same
-  checks and named by path (`template.spec.containers: required`, which an
-  unauthored `template` also gives; `template.spec.priority: not authorable
-  …`; the image rule; a probe timing written as `0`).
-  `template.spec.activeDeadlineSeconds` is allowed, unlike on a
-  `replicaset` or `replicationcontroller`: the API server accepts it on a
-  PodTemplate. The two restart-rule fields and the two pod-certificate fields
-  that are marked required upstream are not checked, for the reason the `pod`
-  kind gives: no linked module shows that the API server refuses the
-  omission. The API's other value rules are left to the API server.
-
-  **Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
-  runs (`enforcePodTemplatePolicy`), naming a field by its path in the
-  properties (`template.spec: hostNetwork is not allowed by environment
-  policy`), since whatever reads the template creates pods from it. It fills
-  no policy default. The three rendered paths run the same check on a
-  PodTemplate they emit and name the field the same way (`template.spec…`).
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
-  emit; the API server decides there. They do refuse ephemeral containers and
-  an untagged or `:latest` image, an image volume's included. The PodTemplate's
-  own labels and annotations
-  are the `labels` and `annotations` properties; the template's metadata is
-  carried as authored and takes neither.
-- **storageclass**, **volumeattributesclass**, **priorityclass**,
-  **runtimeclass**, **ingressclass**, **csidriver** (go-kure/launcher#790) are
-  the kind-named projections of six cluster-scoped objects: a
-  `storage.k8s.io/v1` StorageClass, VolumeAttributesClass and CSIDriver, a
-  `scheduling.k8s.io/v1` PriorityClass, a `node.k8s.io/v1` RuntimeClass and a
-  `networking.k8s.io/v1` IngressClass. Each emits that one object, named after
-  the component unless `objectName` names it, with no namespace, holding
-  exactly what was authored: the handler adds no label, no annotation and no
-  default of its own, and the transform sets the component label, as on every
-  object a component owns (go-kure/launcher#788).
-
-  **One shared helper builds all six** (`policyFreeKind`, in
-  `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
-  the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
-  BGP control plane and the five kinds of the Gateway API's infrastructure
-  objects are built on it too. The three kinds
-  of cert-manager's API and the two of VolSync's are built on `policyHeldKind`
-  (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
-  asks one function of the kind whether the policy refuses the decoded value.
-  It refuses or passes; it fills no default. A kind is a value
-  of it naming the upstream type, an optional check of required fields, an
-  optional list of required fields the type writes whether or not they were
-  authored, and the base-library constructor; the
-  helper is the rest: the strict decode of the property map into the upstream
-  type under the package's null contract, which refuses a `null` list element
-  by its path (`decodeKindSpec`), the refusal of a key written in two
-  spellings (`refuseUncarriedSpecValues`), the refusal of a listed required
-  field that was not authored (`refuseUnauthoredRequired`, which reads the
-  authored properties, since the decoded value does not show the omission, and
-  follows a list to each of its items), a config whose `ApplyPolicy` does
-  nothing, and a `Generate` that returns the constructor's object, under the
-  object name the config carries, with a deep copy of what was decoded, so two
-  builds of one config share nothing. The config type is unexported: a
-  component is only built from properties that went through the decode. The
-  helper keeps no list of defaulted zeros, so it suits a type only when none
-  of its omit-when-zero numbers or booleans has a non-zero API default;
-  `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
-  Kubernetes type built on it and fails on one whose comment states such a
-  default in a form it recognises (`Defaults to 1`, `Default is true`). A
-  default the comment words otherwise, or does not state, is not found. The
-  types of the Prometheus operator's API publish no field comment;
-  `TestMonitoringKinds_NoDefaultedZeros` reads the default markers of their
-  source instead. Cilium's publish none either, and its module ships the CRDs:
-  `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
-  BGP CRDs to a field that is a pointer in the Go type.
-
-  **What is authored.**
-  - `ingressclass` and `csidriver` have a spec type, and the properties are
-    its json fields: `controller` and `parameters` (`IngressClassSpec`), and
-    the eleven fields of `CSIDriverSpec` (`attachRequired`, `podInfoOnMount`,
-    `volumeLifecycleModes`, `storageCapacity`, `fsGroupPolicy`,
-    `tokenRequests`, `requiresRepublish`, `seLinuxMount`,
-    `nodeAllocatableUpdatePeriodSeconds`, `serviceAccountTokenInSecrets`,
-    `preventPodSchedulingIfMissing`). A `csidriver` requires no property; an
-    `ingressclass` requires `controller` (see **Required** below).
-  - The four classes have none: their fields sit on the object, beside its
-    identity. The properties are those fields, decoded strictly into the
-    object type, and the object's own `kind`, `apiVersion` and `metadata` are
-    refused by name under any spelling the decoder would match (`metadata:
-    not authorable: launcher sets the object's kind, apiVersion and metadata
-    (its name is the component's, or the one objectName gives it; its labels
-    and annotations are the labels and annotations properties)`).
-    `storageclass`: `provisioner`,
-    `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
-    `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
-    `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
-    `description`, `preemptionPolicy`. `runtimeclass`: `handler`, `overhead`,
-    `scheduling`.
-  - **Required** is a top-level field the API server refuses an object
-    without: `provisioner` (`storageclass`), `handler` (`runtimeclass`),
-    `driverName` (`volumeattributesclass`) and `controller` (`ingressclass`)
-    must be a non-empty string (`provisioner: required …`), and a
-    `volumeattributesclass` must carry at least one of `parameters`
-    (`parameters: required …`). The upstream type marks `controller`
-    optional; the API server's validation requires it all the same. The API
-    does not require a PriorityClass `value`: the type always encodes one, so
-    a `priorityclass` that authors none is emitted with `value: 0`. Every
-    other value rule (which reclaim policies exist, a required field of a
-    nested object, the names a cluster-scoped object may carry) is left to
-    the API server.
-  - A quantity written as a number is emitted in its canonical string form.
-    An authored `false` or `0` is kept where the API tells it from an unset
-    field (`allowVolumeExpansion: false`, `attachRequired: false`,
-    `value: 0`). Where the API type omits a zero, the field is left out of
-    the object, which the API reads as the same value: `globalDefault: false`
-    and an empty `description`.
-
-  **The object's name** is the component's unless `objectName`, or the
-  `Naming` hook under role `object`, names it otherwise (see "The object name"
-  below). Each handler declares its object as cluster-scoped, so the name is
-  claimed in no namespace: two `storageclass` components given one object
-  name are refused, whatever namespace the application is built for. What
-  refers to the object names it by its object name: a claim's
-  `storageClassName`, a pod's `runtimeClassName` or `priorityClassName`. The
-  API identifies a CSI driver by the CSIDriver's name, so a `csidriver`
-  component's object name must be the driver's (`csi.example.com`), written as
-  the component name or as `objectName`. The build namespace does not apply to
-  these objects. The handlers check no name rule of their own on either name:
-  one the API server refuses for the kind builds here and is refused at
-  apply. **A CSIDriver's name is not held to the limit the API documents for
-  it.** The type's documentation gives a driver name at most 63 characters;
-  the API server does not hold the CSIDriver object to that, and accepts any
-  DNS subdomain name. It does refuse a PersistentVolume that names a driver
-  longer than 63 characters, so such a CSIDriver is created and no volume can
-  use it. The `csidriver` kind refuses what the API server refuses of the
-  object and no more, so it builds that name too.
-
-  **Policy.** None of the six has a field an `oam.Policy` method speaks to,
-  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
-  same under every policy and under none. A consumer that does not want an
-  author to create one of these objects does not register its handler; the
-  transform then refuses the component (`no handler for component type …`).
-
-  **Labels and annotations** are the `labels` and `annotations` properties,
-  on all six. That includes the annotations that mark a default class
-  (`storageclass.kubernetes.io/is-default-class`,
-  `ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
-  IngressClass writes its annotation there. Whether a second default exists
-  is the cluster's to decide.
-
-  **Not covered.**
-  - An `ingressclass` whose `parameters` leaves `scope` out is emitted with
-    `scope: null`: the API type always encodes the field, and documents
-    `Cluster` as its default. Author `scope` to emit a value.
-  - Whether a referenced object exists: the `runtimeclass` a pod names, the
-    `storageclass` a claim names, the parameters object of an `ingressclass`.
-- **ingress** (go-kure/launcher#790) is the kind-named projection of a
-  networking.k8s.io/v1 Ingress, on the recipe of `resourcequota`: one
-  schema key per json field of `networkingv1.IngressSpec` (`ingressClassName`,
-  `defaultBackend`, `tls`, `rules`), the property map decoded strictly into
-  that type under the null contract, two spellings of one field refused, and
-  `TestCoreKindSchemas_CoverSpec` holding the schema to the linked type. It
-  emits one Ingress named after the component in the build namespace, with the
-  authored spec and nothing else. No field is required by the decode and none
-  is filled: an Ingress with neither a `defaultBackend` nor a rule, a path
-  without a `pathType` and the API's other value rules are left to the API
-  server. A null list element (`rules: [null]`, a null path or TLS entry) is
-  refused by its path.
-
-  **It is an authored object, not the `ingress` trait**, although the two
-  share the type name. The trait attaches to a component and routes to that
-  component's Service; this kind is a component of its own, and a backend is a
-  Service reference carried as written. Three things the trait has do not
-  reach it:
-  - **No NetworkPolicy allow rule.** The NetworkPolicy synthesis opens a
-    backend's port to the ingress controller from what a routing trait reports
-    (the traffic sources capability rendering gives it, and the component it
-    targets). This kind reports neither, so the synthesis reads nothing from
-    it and allows nothing for it, whatever Service it names. An author who
-    wants the allow rule puts the `expose` or `ingress` trait on the backend
-    component, or authors the NetworkPolicy (the `networkpolicy` trait or
-    kind).
-  - **No hostname constraint.** The platform's `allowedHostnameWildcard`, which
-    the trait holds every hostname to, is a trait rendering input. A host
-    authored here is not checked against it.
-  - **No environment policy.** `ApplyPolicy` is a no-op: the policy has no rule
-    for an Ingress, and its capability lists (`AllowedCapabilities`,
-    `ForbiddenCapabilities`, `RequiredCapabilities`) gate trait types, so a
-    policy that forbids the `ingress` trait does not refuse an `ingress`
-    component. `passthrough`, `manifests` and template delivery emit an Ingress
-    under the same terms. A consumer that restricts routing restricts the
-    component types it registers.
-
-  **The name** is the component's, or its `objectName` ("The object name"
-  below). An `ingress` trait names its own Ingress (`<component>-ingress`, or
-  its `name`); a component and a trait whose Ingress would carry one name are
-  refused, with both named.
-
-  **Labels and annotations** are the `labels` and `annotations` properties, a
-  controller's `nginx.ingress.kubernetes.io/…` annotations among them.
-  **Not covered:** its `status`, which the controller writes.
-- **httproute** (go-kure/launcher#790) is the kind-named projection of a
-  gateway.networking.k8s.io/v1 HTTPRoute, on the same recipe as `ingress`: one
-  schema key per json field of `gatewayv1.HTTPRouteSpec`, those of the
-  `CommonRouteSpec` it inlines included (`parentRefs`, `useDefaultGateways`,
-  `hostnames`, `rules`), decoded strictly into that type. No type under
-  `HTTPRouteSpec` unmarshals itself, so an unknown key is refused at every
-  depth. It emits one HTTPRoute named after the component in the build
-  namespace, with the authored spec and nothing else. No field is required by
-  the decode and none is filled; the API's value rules (a filter's `type`
-  matching the member set, a rule's `matches` and `backendRefs` limits) are
-  left to the API server. A null list element (`rules: [null]`, a null parent
-  or backendRef) is refused by its path. `useDefaultGateways` is a field of the
-  Gateway API's experimental channel: a cluster whose HTTPRoute CRD is the
-  standard channel's refuses a route that sets it.
-
-  **It is an authored object, not the `httproute` trait**, although the two
-  share the type name. The trait attaches to a component and routes to that
-  component's Service; this kind is a component of its own, and a backendRef is
-  a reference carried as written, its `namespace` included. Three things the
-  trait has do not reach it:
-  - **No NetworkPolicy allow rule.** As for `ingress`: the NetworkPolicy
-    synthesis reads a routing trait's traffic sources and target component,
-    which this kind does not report, so it allows nothing for the route's
-    backends. An author who wants the allow rule puts the `expose` or
-    `httproute` trait on the backend component, or authors the NetworkPolicy.
-  - **No parent from a capability.** The trait builds `parentRefs` from the
-    Gateway its capability rendering names when the author writes none. Here
-    `parentRefs` is what the author wrote; unwritten, the route has no parent.
-  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
-    capability lists gate trait types, so a policy that forbids the
-    `httproute` trait does not refuse an `httproute` component. `passthrough`,
-    `manifests` and template delivery emit an HTTPRoute under the same terms.
-    A consumer that restricts routing restricts the component types it
-    registers.
-
-  **The name** is the component's, or its `objectName`. An `httproute` trait
-  names its own HTTPRoute (`<component>-httproute`, or its `name`); a
-  component and a trait whose HTTPRoute would carry one name are refused, with
-  both named.
-
-  **Labels and annotations** are the `labels` and `annotations` properties.
-  **Not covered:** its `status`, which the Gateway controller writes.
-- **networkpolicy** (go-kure/launcher#790) is the kind-named projection of a
-  networking.k8s.io/v1 NetworkPolicy, on the same recipe as `ingress`: one
-  schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
-  `ingress`, `egress`, `policyTypes`), decoded strictly into that type. It
-  emits one NetworkPolicy named after the component in the build namespace,
-  with the authored spec and nothing else. No field is required by the decode
-  and none is filled; the API's value rules (a peer naming at least one of
-  `podSelector`, `namespaceSelector` and `ipBlock`, an `ipBlock` beside no
-  selector, a valid CIDR) are left to the API server.
-
-  **The spec reads as the API reads it, which is not how the `networkpolicy`
-  trait reads the same keys.** The two share the type name; the trait attaches
-  to a component and scopes the policy to that component's pods, and this kind
-  is a component of its own that scopes nothing:
-  - **`podSelector` is not defaulted.** The trait has no such property: it
-    always selects its component's pods. Here an unwritten `podSelector`, like
-    `{}`, is the empty selector: **the policy applies to every pod of the
-    namespace**. An author moving a policy from the trait to the kind writes
-    the selector out.
-  - **`policyTypes` is not derived.** The trait has no such property either: it
-    lists a direction when that direction's key is present, so its `egress: []`
-    denies all egress. Here `policyTypes` is what the author wrote; unwritten,
-    the API server derives it: `Ingress` always, `Egress` only when `egress`
-    holds a rule. So on the kind `egress: []` alone isolates no egress; a
-    policy that denies all egress writes `policyTypes: [Egress]`.
-  - **An empty rule allows everything in its direction.** `ingress: [{}]` is
-    the API's allow-all, and is carried when written. It is never the result
-    of a null: a null rule, peer or port (`ingress: [null]`,
-    `from: [null]`) is refused by its path, since decoded it would be the
-    empty, allow-all one. An empty `ingress` or `egress` list is carried as an
-    unwritten one, which the API reads the same way.
-  - **A selector picks pods by label.** A peer's `podSelector` is not a
-    component reference and nothing resolves it; the label a workload
-    component's pods carry is described under "The `app` label" below.
-  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
-    capability lists gate trait types, so a policy that forbids the
-    `networkpolicy` trait does not refuse a `networkpolicy` component.
-    `passthrough`, `manifests` and template delivery emit a NetworkPolicy
-    under the same terms. A consumer that restricts network policy restricts
-    the component types it registers.
-
-  The transform's NetworkPolicy synthesis does not read this kind: it neither
-  counts an authored policy as covering a component nor merges into it, and
-  the policies it emits (`{comp}-allow-ingress-traffic` and the others) are
-  additive beside it. **The name** is the component's, or its `objectName`; a
-  component whose policy would carry the name of a `networkpolicy` trait's
-  (`<component>-allow`, or its `name`) or of a synthesized one is refused, with
-  both named. The NetworkPolicy's own labels and annotations are the `labels`
-  and `annotations` properties.
-- **cilium-networkpolicy** (go-kure/launcher#790) is the kind-named projection
-  of a cilium.io/v2 CiliumNetworkPolicy. The object has no spec type of its
-  own: it holds one rule under `spec`, a list of rules under `specs`, or both,
-  each a Cilium `api.Rule`. The component's properties are those two fields,
-  decoded strictly into that type under the null contract, and
-  `TestCoreKindSchemas_CoverSpec` holds the two keys to the linked
-  `CiliumNetworkPolicy` type. It emits one CiliumNetworkPolicy named after the
-  component in the build namespace, with the authored rules and nothing else.
-  The whole rule is authorable: `endpointSelector`, `ingress`, `ingressDeny`,
-  `egress`, `egressDeny`, `labels`, `enableDefaultDeny`, `description`, `log`.
-
-  **Refused at build, because Cilium rejects the policy.** Its CRD schema
-  refuses some of these at admission (a rule with no selector, or without any of
-  the four rule keys); the rest the API server stores and the agent rejects when
-  it reads the object, so that nothing enforces it. Launcher refuses all of them
-  instead of emitting the object:
-  - no rule at all: neither `spec` nor an entry in `specs`. An empty `specs`
-    holds none; beside a `spec` it is accepted and not emitted;
-  - a rule with no `endpointSelector`. None is filled in: `{}` selects every
-    endpoint of the namespace and is carried as written, and a null or absent
-    one is refused;
-  - a rule with a `nodeSelector`, which belongs to a
-    CiliumClusterwideNetworkPolicy and which Cilium rejects in a namespaced
-    policy;
-  - a rule with no entry in any of `ingress`, `ingressDeny`, `egress` and
-    `egressDeny`. A deny list counts as much as an allow list; a null or empty
-    list holds no entry.
-
-  These are the checks Cilium's own reader makes that need no agent
-  configuration; the code names the Cilium functions they mirror. The rest of
-  a rule's value rules (a port's range, an entity's name, which peers may be
-  combined) are left to Cilium. A null list element (`specs: [null]`, a null
-  ingress entry or peer) is refused by its path.
-
-  **Required.** Inside a rule the CRD requires 59 fields that the Cilium type
-  writes whether or not they were authored, so that the object would not show
-  the omission: a match expression without its `operator` was emitted as
-  `operator: ""`, an `authentication: {}` as `mode: ""`, a `terminatingTLS: {}`
-  as `secret: null`, each of which the API server refuses. Each is refused
-  where its parent is authored, by its path
-  (`spec.ingress[0].authentication.mode: required (…)`):
-  - the `key` and `operator` of a match expression, in every selector of a
-    rule (`endpointSelector`, `fromEndpoints`, `toEndpoints`, `fromNodes`,
-    `toNodes`, a CIDR entry's `cidrGroupSelector`, a `k8sServiceSelector`'s
-    `selector`), under the deny lists too;
-  - a `k8sServiceSelector`'s `selector`, the `key` of a rule label and the
-    `type` of an `icmps` field;
-  - under an allow list only: an `authentication`'s `mode`; a port's
-    `listener` `name`, its `envoyConfig` and that configuration's `name`; the
-    `secret` of a port's `terminatingTLS` and `originatingTLS` and that
-    Secret's `name`; an HTTP header match's `name`, and the `name` of its
-    `secret` where one is authored.
-
-  Two more are optional to the API and required here: a listener's `priority`
-  and the `kind` of its `envoyConfig`. The type writes an unauthored one as
-  `0` and as the empty string, and the API refuses both (a priority is 1 to
-  100, a kind is `CiliumEnvoyConfig` or `CiliumClusterwideEnvoyConfig`), so a
-  listener that leaves one out cannot be emitted.
-  `TestCiliumNetworkPolicy_RequiredMatchCRD` holds the whole list to the
-  CiliumNetworkPolicy CRD of the linked module, its own file and not the
-  cluster-wide policy's, and to the rule type, under `spec` and under `specs`,
-  so a dependency bump that adds, drops or moves one fails there. The CRD
-  names a `nodeSelector`'s match expressions as well, and so does the list: an
-  incomplete one is refused by this rule, a complete one by the rule above. A
-  rule label without its `key` is refused earlier, by Cilium's own decoding,
-  as an `icmps` field without its `type` is (below). An authored empty value
-  in a required field is not checked: it is the API server's to refuse. The
-  list of a rule is held in the internal `pkg/oam/internal/requiredfields`
-  (`CiliumRule`), since the `cilium-networkpolicy` trait reads it too, cut to
-  the three fields of a rule it publishes.
-
-  **An unknown key inside a selector is refused**, by its path
-  (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's
-  endpoint selector unmarshals itself and drops a key it does not know, which
-  the strict decode cannot see: `endpointSelector: {matchLabel: {...}}` would be
-  the empty selector, which selects every endpoint of the namespace, and a peer
-  misspelt the same way would match every endpoint. The check covers every
-  position that holds a selector (`endpointSelector`, `fromEndpoints`,
-  `toEndpoints`, `fromNodes`, `toNodes`, a CIDR entry's `cidrGroupSelector`,
-  under the deny lists too) and the two other types under a rule that unmarshal
-  themselves: an `icmps` field (`family`, `type`) and an entry of `labels` in
-  its object form (`key`, `value`, `source`). The positions are found from the
-  Cilium types, and a test fails when a Cilium bump adds a type that unmarshals
-  itself and is not checked.
-
-  **An `icmps` field needs its `type`.** Cilium's own decoding of the field
-  panics when `type` is absent or null; the component is refused with an error
-  that names the panic (`… the decoder of … panicked on this value: …`) and not
-  the field's position, so look for an `icmps` field without a `type`.
-
-  **It is an authored object, not the `cilium-networkpolicy` trait**, although
-  the two share the type name. The trait attaches to a component and publishes
-  one rule's `name`, `endpointSelector`, `ingress` and `egress`; this kind is a
-  component of its own, named after the component or by its `objectName`, and
-  publishes the whole rule and `specs`. A component and a trait whose policy
-  would carry one name (the trait's `name`) are refused, with both named.
-  Neither fills a selector. **No environment policy
-  applies:** `ApplyPolicy` is a no-op, and the policy's capability lists gate
-  trait types, so a policy that forbids the `cilium-networkpolicy` trait does
-  not refuse a `cilium-networkpolicy` component. `passthrough`, `manifests`
-  and template delivery emit a CiliumNetworkPolicy under the same terms. A
-  consumer that restricts network policy restricts the component types it
-  registers. **No literal secret is checked:** an HTTP header match's `value`
-  is written into the object as authored and is not refused, since a header
-  value cannot be told from a credential; a header match's `secret` refers to
-  a Secret by name and keeps the value out of the document. The object's own
-  labels and annotations are the top-level
-  `labels` and `annotations` properties; a `labels` under `spec` or a `specs`
-  entry is the rule's own field. **Not covered:** its `status`, which the
-  Cilium agent writes.
-- **servicecidr** (go-kure/launcher#790) is the kind-named projection of a
-  cluster-scoped `networking.k8s.io/v1` ServiceCIDR: a range the API server
-  assigns Service cluster IPs from, beside the one it was started with. It is
-  built on `policyFreeKind`, as the six kinds of the **storageclass** entry
-  are, and what that entry
-  says of them holds here: one object, named after the component unless
-  `objectName` names it, with no namespace, declared cluster-scoped, holding
-  exactly what was authored, the same under every policy and under none.
-  - **Authored:** the one field of `ServiceCIDRSpec`, `cidrs`, a list of IP
-    blocks in CIDR notation, decoded strictly. **Required:** at least one
-    block (`cidrs: required …`); the API server refuses a ServiceCIDR
-    without one. Every other value rule is left to the API server: that a
-    block is a valid CIDR, that there are at most two, and that two are of
-    different IP families.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Not covered.** The API server refuses a change to a block once the
-    object exists; a ServiceCIDR of one block may only gain a second.
-    Launcher does not compare a build with the cluster, so a changed block
-    builds here and is refused at apply. The object's status is the API
-    server's and is not written.
-- **poddisruptionbudget** (go-kure/launcher#790) is the kind-named projection
-  of a `policy/v1` PodDisruptionBudget, built on `policyFreeKind`. It emits
-  that one object in the build namespace, named after the component unless
-  `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default of its own. The handler declares its
-  object as namespaced, so the object name is claimed in the object's namespace.
-  - **Authored:** the four fields of `PodDisruptionBudgetSpec`, decoded
-    strictly: `minAvailable` and `maxUnavailable` (each a count or a
-    percentage string such as `"50%"`), `selector` (a label selector) and
-    `unhealthyPodEvictionPolicy`. A count is emitted as a number and a
-    percentage as a string, and an authored `0` is kept (`maxUnavailable: 0`
-    allows no voluntary eviction).
-  - **Required:** nothing. The API server accepts a budget with an empty
-    spec. Its value rules are left to it, the one that `minAvailable` and
-    `maxUnavailable` exclude each other included: a component that authors
-    both builds here and is refused at apply.
-  - **The selector is the author's.** Launcher points it at no component: an
-    unauthored `selector` selects no pod, and `selector: {}` selects every
-    pod of the namespace. To cover a workload component, select its `app`
-    label (`matchLabels: {app: <component>}`), which holds the component
-    name up to 63 characters and its label projection beyond.
-  - **Beside the `scaler` trait.** `scaler` with `enablePDB: true` derives a
-    budget for its own workload, selector included, and refuses one that
-    would block every eviction. This kind is the authored object and applies
-    none of that: it is for a budget the trait does not express (the trait
-    always writes `minAvailable: 50%`; here the count or percentage is the
-    author's, as are `maxUnavailable`, an eviction policy and pods launcher
-    does not own).
-  - **Policy.** No field of the spec is one an `oam.Policy` method speaks to,
-    so `ApplyPolicy` enforces nothing and fills nothing.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Not covered.** Whether the selector matches any pod. The object's
-    status is the disruption controller's and is not written.
-- **endpointslice** (go-kure/launcher#790) is the kind-named projection of a
-  `discovery.k8s.io/v1` EndpointSlice, built on `policyFreeKind`. It emits
-  that one object in the build namespace, named after the component unless
-  `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default of its own. The handler declares its
-  object as namespaced, so the object name is claimed in the object's namespace.
-  - **Authored:** an EndpointSlice has no spec, so the properties are the
-    object's own top-level fields, decoded strictly at every depth:
-    `addressType`, `endpoints` and `ports`. The object's `kind`, `apiVersion`
-    and `metadata` are launcher's and are refused under any spelling. An
-    authored `false` is kept (`conditions: {ready: false}`), and an
-    endpoint's `deprecatedTopology` is written as authored, though the type
-    documents that the v1 API ignores a write to it.
-  - **Its Service is a label, and the label is the author's literal.** A
-    slice belongs to a Service only through its `kubernetes.io/service-name`
-    label, authored under `labels`. Launcher derives the label from nothing
-    and points it at no component: it does not follow a `service` component's
-    `objectName`, so write the name the Service object takes. A slice without
-    the label builds and belongs to no Service. A `service` component of a
-    type other than `ExternalName` always carries a selector (the kind
-    refuses an empty one, and an `ExternalName` Service has no endpoints),
-    so a Service whose endpoints are all written by hand comes from
-    elsewhere: a `manifests` component, or outside the document.
-  - **Required** are the fields the API's source marks required and the Go
-    type writes whether or not they were authored, so that the built object
-    would not show the omission: `addressType` (`addressType: required …`),
-    an endpoint's `addresses` (`endpoints[0].addresses: required …`), and the
-    `name` of an entry of an endpoint's `hints.forZones` or `hints.forNodes`.
-    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives the list from the
-    `+required` and `+optional` markers of the linked `k8s.io/api` module and
-    fails on a dependency bump that changes it. The API marks no field of the
-    kind required that the type leaves out when unauthored; the same test
-    fails if one appears. `TestKindComponents_OmittedRequiredAndWrittenDefaults`
-    holds the kind in its table as well, from the same markers: to that, and
-    to no default marked on a field the type writes unauthored. The check is
-    one of presence: an authored empty value (`addressType: ""`,
-    `addresses: []`) builds and is the API server's to refuse.
-  - **Emitted empty.** The type writes three fields the API does not require
-    whether or not they were authored. A slice that authors no `endpoints` or
-    no `ports` carries `endpoints: null` or `ports: null`, an authored empty
-    list is written as `[]`, and an endpoint that authors no condition
-    carries `conditions: {}`. A port that authors no `protocol` or no `name`
-    is written without it, and the API server fills `TCP` and the empty
-    name.
-  - **Not artifact sources.** The addresses of an endpoint, FQDNs included,
-    are where traffic goes, not an artifact source, and none is held to the
-    policy's allowed registries.
-  - **Policy.** No field of the object is one an `oam.Policy` method speaks
-    to, so `ApplyPolicy` enforces nothing and fills nothing.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Not covered.** Every rule on the form of a value is left to the API
-    server: that an address is of the slice's `addressType`, the limits the
-    type documents on how many endpoints, addresses, ports and hints a slice
-    holds, and the names of ports. The type documents `addressType` as
-    immutable. Launcher does not compare a build with the cluster, so a
-    changed one builds here and is refused at apply. Whether a Service of
-    the labelled name exists is not checked.
-- **role**, **rolebinding**, **clusterrole**, **clusterrolebinding**
-  (go-kure/launcher#790) are the kind-named projections of the four objects
-  of the `rbac.authorization.k8s.io/v1` API, built on `policyFreeKind`. Each
-  emits that one object, named after the component unless `objectName` names
-  it, holding exactly what was authored: the handler adds no label, no
-  annotation and no default of its own. They are for the grants an
-  application needs that are not those of one workload's own ServiceAccount,
-  which is what the `rbac` trait (`pkg/oam/builtin/traits/README.md`)
-  writes: a role several bindings share, a binding to a role that already
-  exists, a grant to a user or a group, an aggregated ClusterRole. What the
-  four have in common is stated here once; each kind's entry below holds what
-  is its own.
-  - **Authored:** none of the four has a spec, so the properties are the
-    object's own top-level fields, decoded strictly at every depth. The
-    object's `kind`, `apiVersion` and `metadata` are launcher's and are
-    refused under any spelling.
-  - **Presence rules read by hand.** Beyond the `+required` markers of the
-    linked `k8s.io/api` module, these four kinds check presence rules read by
-    hand from the API server's validation at Kubernetes v1.37.1
-    (`pkg/apis/rbac/validation/validation.go` of `k8s.io/kubernetes`, which
-    no module launcher links holds). No test derives them, and a later
-    Kubernetes that changes one is not noticed by a dependency bump.
-  - **Required from the markers** are the fields the API's source marks
-    required and the Go type writes whether or not they were authored.
-    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives each kind's list
-    from the markers and fails on a dependency bump that changes it. The API
-    marks no field of the four required that the type leaves out when
-    unauthored; the same test fails if one appears.
-    `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds the four in
-    its table as well, from the same markers: to that, and to no default
-    marked on a field the type writes unauthored. These checks are of
-    presence: an authored empty value (`verbs: []`, `name: ""`) builds and is
-    the API server's to refuse.
-  - **A rule** (`rules[]` of a `role` or a `clusterrole`) must write its
-    `verbs` (`rules[0].verbs: required …`, from the markers). By hand: it
-    must name at least one of `apiGroups` and at least one of `resources`
-    (`rules[0].apiGroups: required …`; `""` is the core group), so a rule
-    that lost its resources and grants nothing is refused. A `clusterrole`
-    rule may instead name `nonResourceURLs`, and then names no `apiGroups`,
-    `resources` or `resourceNames`
-    (`rules[0].nonResourceURLs: not allowed beside …`). These two hand-read
-    checks count what was decoded, so an authored empty `apiGroups: []` or
-    `resources: []` is refused too.
-  - **A binding** (`rolebinding`, `clusterrolebinding`) must write `roleRef`
-    with its `kind` and `name`, and each subject's `kind` and `name`
-    (`roleRef: required …`, `subjects[0].name: required …`, from the
-    markers). `subjects` may be left out: the API server's validation
-    requires none, and the key is then not written.
-  - **`roleRef.apiGroup` may be left out.** The object then carries
-    `apiGroup: ""`, which the type always writes, and the API server fills
-    the RBAC group before it validates. An authored group that is not the
-    RBAC group is written as authored and is the API server's to refuse. A
-    User or Group subject may leave its `apiGroup` out too: the key is then
-    not written, and the API server fills the RBAC group the same way.
-  - **The names are the author's literals.** `roleRef.name` and a subject's
-    `name` and `namespace` are written as authored. Launcher points none of
-    them at a component: a `roleRef.name` does not follow the `objectName`
-    of a `role` or `clusterrole` component, and a ServiceAccount subject's
-    name does not follow a `serviceaccount` component's, so write the name
-    the object takes. Whether the role or the subject exists is not checked.
-  - **Policy.** No field of the four is one an `oam.Policy` method speaks
-    to, so `ApplyPolicy` enforces nothing and fills nothing.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Beside the `rbac` trait.** A trait's object and a component's of one
-    kind, name and namespace (or one cluster-scoped name) are refused: the
-    trait resolves the name of each object it generates, and the transform
-    reports a name collision that names both.
-  - **Not covered.** Every rule on the form of a value is left to the API
-    server: that a `roleRef` names the RBAC group and a kind the binding
-    may grant, the kind and API group of a subject, the form of its name,
-    and whether the `values` of a match expression of an aggregation
-    selector fit its `operator`. Whether a verb, a resource or an API group
-    exists, and the form of a non-resource URL, are checked by neither
-    launcher nor the API server's validation: a rule that names none that
-    exists builds and passes that validation. The API server refuses a change to the `roleRef` of an
-    existing binding. Launcher does not compare a build with the cluster, so
-    a changed one builds here and is refused at apply. Launcher does not
-    compare what a role grants with what its author, or whoever applies the
-    object, may grant.
-- **role** emits its Role in the build namespace; the handler declares its
-  object as namespaced, so the object name is claimed in the object's
-  namespace. **It is ungated: no capability and no environment-policy check
-  restricts what a role grants.** Its one property is `rules`.
-  `nonResourceURLs` are refused in a rule
-  (`rules[0].nonResourceURLs: not allowed in a Role …`): a non-resource URL
-  is not namespaced, and the API server refuses one in a Role. The API
-  requires no rule, and the type always writes the list: a role that authors
-  none carries `rules: null` and grants nothing, and an authored empty list
-  is written as `[]`.
-- **rolebinding** emits its RoleBinding in the build namespace; the handler
-  declares its object as namespaced, so the object name is claimed in the
-  object's namespace. **It is ungated: no capability and no
-  environment-policy check restricts what a role grants**, nor to whom: a
-  binding to any role the cluster holds, `cluster-admin` included, builds.
-  Its properties are `subjects` and `roleRef`, which names a Role of the
-  binding's namespace or a ClusterRole. A ServiceAccount subject may leave
-  its `namespace` out: the API server's validation takes it, the key is not
-  written, and the authorizer of that version reads the subject as one of
-  the binding's own namespace.
-- **clusterrole** emits its ClusterRole with no namespace; the handler
-  declares its object as cluster-scoped, so the object name is claimed
-  cluster-wide. **It is ungated: no capability and no environment-policy
-  check restricts what a role grants.** Its properties are `rules` and
-  `aggregationRule`. By hand: an authored `aggregationRule` must hold at
-  least one entry of `clusterRoleSelectors`
-  (`aggregationRule.clusterRoleSelectors: required …`); an empty selector
-  (`{}`) is an entry. From the markers, a selector's match expression must
-  write its `key` and `operator`. An aggregated ClusterRole builds: it is
-  emitted with `rules: null` when `rules` is not authored and with
-  `rules: []` when authored so, and the control plane fills the rules.
-- **clusterrolebinding** emits its ClusterRoleBinding with no namespace; the
-  handler declares its object as cluster-scoped, so the object name is
-  claimed cluster-wide. **It is ungated: no capability and no
-  environment-policy check restricts what a role grants**, nor to whom: a
-  binding of `cluster-admin` to any subject builds. Its properties are
-  `subjects` and `roleRef`, which names a ClusterRole. By hand: a
-  ServiceAccount subject must write its `namespace`
-  (`subjects[0].namespace: required …`), since the binding is in none.
-- **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
-  projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
-  one object in the build namespace, named after the component unless
-  `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default of its own. The handler declares its
-  object as namespaced, so the object name is claimed in the object's namespace.
-  - **Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
-    strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
-    `metrics` and `behavior`. An unknown key is refused wherever it sits (a
-    metric source, a scaling rule), a quantity written as a number is
-    emitted in its canonical string form, and an authored `0` is kept
-    (`stabilizationWindowSeconds: 0`). The type has no number or boolean
-    that is omitted when zero, which
-    `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
-  - **Required** are the two top-level fields the API server refuses an
-    autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
-    `maxReplicas` (`maxReplicas: required …`; an authored `0` is refused
-    the same way, since the type cannot tell it from an unset one). The
-    config is exported, so `Generate` repeats both. Every other value rule
-    is left to the API server: a negative `maxReplicas`, the `kind` and
-    `name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
-    which metric source goes with which `type`.
-  - **Policy.** `maxReplicas` is held to the environment policy's replica
-    maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
-    HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
-    or a `manifests` source yields is held: `component "web": maxReplicas:
-    replicas 4 exceeds enforced maximum 3`. Nothing else is held, and no
-    default is filled: the policy's `scalerMinReplicas` and
-    `scalerMaxReplicas` defaults belong to the `scaler` trait. A nil policy
-    checks nothing.
-  - **The target is the author's, and is not checked.** `scaleTargetRef`
-    names an object by `kind`, `name` and `apiVersion`; launcher points it
-    at no component and does not look for the object in the document. To
-    scale a workload component, name its object: the component name, or its
-    `objectName`. **The guards the `scaler` trait applies to its own
-    workload do not see this kind:** a `deployment`, `webservice` or
-    `worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
-    whose `maxReplicas` is above 1, and builds beside a
-    `horizontalpodautoscaler` component that scales it further. That is the
-    state of an autoscaler emitted through `passthrough`, `manifests` or
-    template delivery.
-  - **Beside the `scaler` trait.** The trait derives an autoscaler for the
-    workload it is attached to, from a target CPU or memory utilization.
-    This kind is the authored object, for what the trait does not express:
-    other metric sources, scaling behavior, a target launcher does not own.
-    The two name their objects apart (`<component>-hpa` for the trait), and
-    two that are given one name in one namespace are refused as a name
-    collision.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Not covered.** Whether the target exists or can be scaled. The
-    object's status is the controller's and is not written.
-- **servicemonitor**, **podmonitor**, **prometheus-probe**, **prometheusrule**
-  (go-kure/launcher#790) are the kind-named projections of four objects of the
-  Prometheus operator's `monitoring.coreos.com/v1` API: a ServiceMonitor, a
-  PodMonitor, a Probe and a PrometheusRule. Each is built on `policyFreeKind`
-  and emits that one object in the build namespace, named after the component
-  unless `objectName` names it; the handler adds no label, no annotation and no
-  default of its own. Each declares its object as namespaced, so the object name is
-  claimed in the object's namespace. The Probe's type name carries a prefix
-  because a probe, in this package, is a container's.
+- **gatewayclass**, **gateway**, **listenerset**, **referencegrant**,
+  **backendtlspolicy** (go-kure/launcher#790) are the kind-named projections
+  of the infrastructure objects of the Gateway API's
+  `gateway.networking.k8s.io/v1`: a GatewayClass, a Gateway, a ListenerSet, a
+  ReferenceGrant and a BackendTLSPolicy. Each is built on `policyFreeKind`
+  (see the **storageclass** entry) and emits that one object, named after the component unless
+  `objectName` names it; the handler adds no label, no annotation and no
+  default. A `gatewayclass` is emitted with no namespace and declares its
+  object as cluster-scoped, so its name is claimed in no namespace. The other
+  four are emitted in the build namespace and declare their object as
+  namespaced. The routes of the same API are their own kinds (`httproute`).
 
   **No capability is required, and nothing gates these kinds.** Launcher does
-  not ask whether the cluster serves `monitoring.coreos.com/v1`: where the
-  operator's CRDs are not installed the component builds, and the object is
-  refused at apply. Whoever may author a component may author these. The open
-  point "No capability gate on component types" on go-kure/launcher#790
-  carries it.
+  not ask whether the cluster serves `gateway.networking.k8s.io/v1`: where the
+  Gateway API's CRDs are not installed the component builds, and the object is
+  refused at apply. Whoever may author a component may author these: a
+  GatewayClass, which is cluster-scoped, and a ReferenceGrant, which lets
+  objects of another namespace refer to objects of the build namespace,
+  included. The open point "No capability gate on component types" on
+  go-kure/launcher#790 carries it. The `httproute` trait may take the Gateway
+  it attaches to from a capability (`gatewayName`, `gatewayNamespace`); the
+  `gateway` kind does not read it, and a `gateway` component is not what that
+  capability names unless the platform says so.
 
   **Authored.** The properties are the top-level json fields of the spec type,
   decoded strictly at every depth: an unknown key is refused wherever it sits
-  (an endpoint, a relabeling rule, a rule of a group).
-  - `servicemonitor` (`ServiceMonitorSpec`): `endpoints`, `selector`,
-    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `targetLabels`,
-    `podTargetLabels`, `attachMetadata`, `bodySizeLimit`,
-    `serviceDiscoveryRole`, and the scrape settings below.
-  - `podmonitor` (`PodMonitorSpec`): `podMetricsEndpoints`, `selector`,
-    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `podTargetLabels`,
-    `attachMetadata`, `bodySizeLimit`, and the scrape settings below.
-  - `prometheus-probe` (`ProbeSpec`): `prober`, `targets`, `module`,
-    `jobName`, `interval`, `scrapeTimeout`, `metricRelabelings`, `params`,
-    the HTTP client settings the type embeds (`authorization`, `basicAuth`,
-    `oauth2`, `bearerTokenSecret`, `followRedirects`, `enableHttp2`,
-    `tlsConfig`), and the scrape settings below.
-  - `prometheusrule` (`PrometheusRuleSpec`): `groups`, each with its `name`,
-    `rules` and evaluation settings. A rule's `expr` is a string or a number
-    and is emitted as the one authored.
-  - The scrape settings the three scrape kinds share: `sampleLimit`,
-    `targetLimit`, `labelLimit`, `labelNameLengthLimit`,
-    `labelValueLengthLimit`, `keepDroppedTargets`, `scrapeProtocols`,
-    `fallbackScrapeProtocol`, `scrapeClass`, `scrapeNativeHistograms`,
-    `scrapeClassicHistograms`, `nativeHistogramBucketLimit`,
-    `nativeHistogramMinBucketFactor` and `convertClassicHistogramsToNHCB`.
-  - An authored `0` or `false` is kept where the API tells it from an unset
-    field (`sampleLimit: 0`, `filterRunning: false`, a group's `limit: 0`), and
-    left out where the type omits a zero that means the same
-    (`honorLabels: false`). A quantity written as a number is emitted in its
-    canonical string form (`nativeHistogramMinBucketFactor: 1.1` as `1100m`).
-    The API's two defaults are strings (a prober's `path`, `/probe`, and a
-    relabeling rule's `action`, `replace`): an authored empty string there is
-    omitted and defaulted. `TestMonitoringKinds_NoDefaultedZeros` holds the
-    types to having no number or boolean that is omitted when zero and
-    defaulted to something else, from the default markers of the linked
-    module's source.
+  (a listener, a certificate reference, a validation).
+  - `gatewayclass` (`GatewayClassSpec`): `controllerName`, `parametersRef` and
+    `description`.
+  - `gateway` (`GatewaySpec`): `gatewayClassName`, `listeners`, `addresses`,
+    `infrastructure`, `allowedListeners`, `tls` and `defaultScope`.
+    **`defaultScope` is an experimental-channel field:** the Go type holds it
+    and the standard channel's Gateway CRD does not, so a cluster on that
+    channel does not keep it. It is the only such field of these five specs
+    at v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+  - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
+    entries take the fields of a Gateway's listener.
+  - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
+  - `backendtlspolicy` (`BackendTLSPolicySpec`): `targetRefs`, `validation`
+    and `options`.
+  - **No default is filled.** The defaults are the CRDs', and the API server
+    applies them to what the object leaves out: a listener's `allowedRoutes`
+    (routes of the Gateway's own namespace), a listener's `tls.mode`
+    (`Terminate`), an address's `type` (`IPAddress`), the `group` and `kind`
+    of a certificate reference (a core Secret) and of a parent reference (a
+    Gateway), the `group` of an allowed route kind (the Gateway API's),
+    `allowedListeners.namespaces.from` (`None`), a client certificate
+    validation's `mode` (`AllowValidOnly`).
+  - One number of these types is omitted when zero, a ListenerSet listener's
+    `port`, and the CRD gives it no default: an authored `port: 0` is left out
+    as an unset one is, the API accepts neither, and the kind refuses both
+    (below).
+    `TestGatewayKinds_NoDefaultedZeros` holds the types to having no number or
+    boolean that is omitted when zero and that a CRD of either channel
+    defaults to something else.
 
   **Required** is a field the API requires that the Go type writes whether or
-  not it was authored, so that the object would not show the omission. It is
-  the rule every kind follows, not a wider one: sent as it was authored, the
-  document is one the API server refuses, and only the Go type's zero value
-  hides that. Each must be authored (`selector: required (…)`,
-  `endpoints[1].oauth2.tokenUrl: required (…)`):
-  - a `servicemonitor`'s `endpoints` and `selector`, and a `podmonitor`'s
-    `selector`. No default selector is filled: unauthored, the type would
-    write `selector: {}`, which selects every Service or pod of the selected
-    namespaces. `selector: {}` and `endpoints: []` are authored values and
-    build.
-  - the `clientId`, `clientSecret` and `tokenUrl` of an `oauth2`, on an
-    endpoint of either monitor and on a Probe;
-  - a rule group's `name` and a rule's `expr` (unauthored, the type would
-    write `expr: 0`).
+  not it was authored, so that the object would not show the omission: the
+  rule every kind follows (see the Prometheus operator's kinds). Each
+  must be authored (`gatewayClassName: required (…)`,
+  `listeners[1].port: required (…)`); an authored empty value is a value, and
+  the API server's to refuse.
+  - A `gatewayclass`: `controllerName`.
+  - A `gateway`: `gatewayClassName` and `listeners`, and of each listener its
+    `name`, `port` and `protocol`. Of a Gateway-wide `tls.frontend` that is
+    authored: its `default` (`default: {}` asks for no client certificate),
+    and of a `perPort` entry its `port` and `tls`; of a `validation` that is
+    authored, its `caCertificateRefs`.
+  - A `listenerset`: `parentRef` with its `name`.
+  - A `referencegrant`: `from` and `to`; of a source its `group`, `kind` and
+    `namespace`, of a target its `group` and `kind`. The core group is
+    authored as `group: ""`.
+  - A `backendtlspolicy`: `validation` with its `hostname`; of a subject
+    alternative name that is authored, its `type`.
+  - Of a reference that is authored, on every kind, what the type would write
+    empty: the `name` of a certificate reference (a listener's
+    `tls.certificateRefs`, the Gateway's `tls.backend.clientCertificateRef`);
+    the `group`, `kind` and `name` of a parameters reference
+    (`parametersRef`, `infrastructure.parametersRef`), of a CA certificate
+    reference (`caCertificateRefs`) and of a policy target (`targetRefs`);
+    the `kind` of an allowed route kind (`allowedRoutes.kinds`).
+  - A required field under a parent the author left out is not asked for: the
+    list follows what was authored.
 
-  **A required field the type leaves out when it is empty is refused too:**
-  the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
-  or empty. The object would show the omission and the API server refuse it.
-  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives these fields
-  for every kind in its table, from the CRD the linked module ships or, where
-  it ships none, from the markers of its source. It holds each to a refusal,
-  shown on a document, or to a stated reason. The same test derives the
-  fields the API defaults and the type writes unauthored, where the default
-  would never apply, and holds each to one of three answers: refused, filled
-  by the kind with the API's default, or harmless with the reason.
+  **A required field the type omits is refused by the kind itself,** since no
+  required list can name it: the type leaves it out where it is not authored
+  and where it is authored empty alike, and the API server refuses the object
+  either way. There are five at v1.6.2:
+  - a `listenerset` with no `listeners` and a `backendtlspolicy` with no
+    `targetRefs`, absent or empty (`listeners: required (…)`), as a
+    `servicecidr` with no `cidrs` is;
+  - a ListenerSet listener without its `name`, its `port` or its `protocol`,
+    absent or empty, a `port: 0` included
+    (`listeners[1].port: required (…)`). A Gateway's listener must author the
+    same three, by the list above: the two listener types carry different
+    json tags, and the answer is the same on both kinds.
 
-  The table holds the kind components that decode their properties into an
-  upstream type, but for two groups. The `httproute` kind is not in it: the
-  experimental-channel CRD requires the `protocol` of an `externalAuth`
-  filter, of a rule and of a backend reference, the type leaves an empty one
-  out, and the kind does not refuse it. The Flux kinds (`helmrelease`,
-  `fluxcd-kustomization`, `helmrepository`, `ocirepository`, `gitrepository`,
-  `bucket`, `helmchart`) are not in it either: no row is written for them.
+  `TestGatewayKinds_RequiredMatchCRD` derives that set from the CRDs as it
+  derives the lists, at every depth of the five specs, and holds each member to
+  one of two answers: the kind's refusal, which it runs, or a stated reason
+  the decoded value cannot show the omission. None has the second answer.
+  `TestGatewayKinds_RefusedOmissions` holds each refused field to being
+  required in both channels.
 
-  **A Probe needs `prober.url` here, because the object always carries a
-  prober.** This is a limit of the Go type, not a rule of the API: the API
-  does not require `prober`, but the type writes one whether or not it was
-  authored, and the API server refuses a prober without a `url`. A Probe
-  without a prober cannot be emitted. An empty `url` is refused as an
-  unauthored one is.
+  `TestGatewayKinds_RequiredMatchCRD` holds the lists (4 paths for a
+  gatewayclass, 22 for a gateway, 4 for a listenerset, 7 for a referencegrant,
+  9 for a backendtlspolicy) to the CRDs the linked module ships. The module
+  ships two sets, one per channel of the API. The experimental one holds every
+  field the Go types do and is the one each path is read in; the standard one
+  must require the same wherever it holds the property. Every field of the
+  Gateway API's own types that the CRDs require and the type writes
+  unauthored is listed, and nothing else is; no field is written empty
+  unauthored beside those. A dependency bump that adds, drops or moves one
+  fails there. **Not refused:**
+  - a list the API wants at least one item of that is authored empty, where
+    the type writes it (`listeners: []` on a `gateway`, `from: []`): an
+    authored empty value is a value;
+  - a required field of a Kubernetes type these specs embed (the expressions
+    of a label selector). An omitted one is emitted empty;
+  - every other value rule of the CRDs: enumerations, lengths, patterns,
+    minima and item limits, and the rules the CRDs write as expressions (a
+    listener's `tls` and `hostname` against its `protocol`, the uniqueness of
+    a listener's name and of its port, protocol and hostname, of an address
+    and of a `perPort` port, one of `caCertificateRefs` and
+    `wellKnownCACertificates`, a subject alternative name's field against
+    its `type`, a target's `sectionName` among several targets, a
+    GatewayClass's `controllerName` not changing);
+  - what a Gateway API controller refuses when it reads the object, which
+    shows in the object's status, not at creation.
 
-  `TestMonitoringKinds_RequiredMatchMarkers` holds these lists to the fields
-  the linked module's source marks required and the type writes unauthored,
-  so a dependency bump that adds, drops or moves one fails there. **Not
-  refused:**
-  - a required field of a Kubernetes type these specs embed: the `key` of a
-    Secret or ConfigMap key reference, the `key` and `operator` of a selector
-    expression. An omitted one is emitted empty;
-  - an authored empty string in a required field (a group's `name: ""`),
-    `prober.url` and a parameter's `name` excepted. It is a value, and the
-    API server's to refuse;
-  - every other value rule of the API (formats, enumerations, lengths, that a
-    rule is a recording or an alerting one), and the operator's own checks of
-    an object the API server has admitted: that a Probe has targets, that a
-    scrape timeout is no longer than its interval, that an endpoint or a
-    Probe authenticates one way. Whether a rule's expression is valid PromQL
-    is not checked either.
+  **Policy.** No dimension of the environment policy reaches these objects:
+  they run no pod, hold no image, request no storage and have no replica
+  count. A nil policy and a strict one build the same object.
+  - **The pods of a Gateway are not sized here.** A controller may start a
+    proxy for a Gateway; the Gateway object holds no pod template and no
+    resources, so the policy's maxima and defaults have nothing to hold.
+    `infrastructure.labels` and `infrastructure.annotations` are written as
+    authored, and what a controller reads into them is its own.
+  - **No field holds a literal secret, and none is checked.** A certificate is
+    a reference: to a Secret on a listener and for the Gateway's client
+    certificate, to a ConfigMap or another object for CA certificates. The
+    free maps a controller defines, a listener's `tls.options` and a
+    BackendTLSPolicy's `options`, are written to the object as authored,
+    under a policy that forbids explicit secrets too.
+  - **Hosts are not checked.** A host these objects name is one a Gateway
+    serves or a backend is checked against, not an artifact source, and none
+    is held to the policy's allowed registries: a listener's `hostname`, an
+    address's `value`, a BackendTLSPolicy's `validation.hostname` and the
+    `hostname` and `uri` of its subject alternative names.
 
-  **What the type writes unauthored.** A `servicemonitor` or `podmonitor`
-  carries `namespaceSelector: {}`, which selects the object's own namespace.
-  A `podmonitor` without endpoints carries `podMetricsEndpoints: null`, which
-  the API server drops as it drops every null of a field that is not
-  nullable. A `prometheus-probe` carries `targets: {}`, and the operator
-  rejects a Probe with no target. A `tlsConfig` carries `ca: {}` and
-  `cert: {}` where they were not authored.
+  **References are the author's.** A Gateway names its class
+  (`gatewayClassName`), a ListenerSet its Gateway (`parentRef`), a
+  BackendTLSPolicy its backends (`targetRefs`), and each of them Secrets or
+  ConfigMaps; launcher points none at a component and does not look for the
+  target in the document. To refer to another component's object, name it:
+  the component name, or its `objectName`. A ListenerSet attaches only where
+  its Gateway's `allowedListeners` lets its namespace, and a reference across
+  namespaces works only where a ReferenceGrant of the target's namespace
+  allows it; launcher checks neither. A `referencegrant` allows references
+  into the namespace it is emitted in, so it belongs to the application of
+  the objects referred to.
 
-  **The selector, the prober and the targets are the author's.** Launcher
-  points none at a component and looks for none in the document. To scrape a
-  workload component's pods, select their `app` label
-  (`matchLabels: {app: <component>}`, valued as "The `app` label" below
-  describes); to scrape a `service` component's
-  Service, select a label its object carries (the component label, see
-  "Component label and ownership" in the OAM model). A Secret or ConfigMap an
-  object refers to is read by the operator in the object's namespace.
+  **Labels and annotations** are the `labels` and `annotations` properties. A
+  Gateway's `infrastructure.labels` and `infrastructure.annotations` are not
+  these: they are what the controller puts on the resources it creates for the
+  Gateway.
 
-  **Selected by a Prometheus through the object's labels.** A Prometheus
-  picks these objects up through its label selectors
-  (`serviceMonitorSelector`, `podMonitorSelector`, `probeSelector`,
-  `ruleSelector`). The handler writes no label, so the object carries the
-  component label, whose value is the component's, and what `labels` authors:
-  for a Prometheus that selects on a fixed label (`release: <name>`, say),
-  write that label there.
+  **Not covered.** Whether what is referred to exists (a class, a Gateway,
+  a Secret, a ConfigMap, a Service and its port), and whether a controller of
+  the cluster implements the class. The object's status is the controller's
+  and is not written.
+- **helmrepository / ocirepository / gitrepository / bucket / helmchart** — the kind-named
+  terminals for Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family
+  redesign go-kure/launcher#336) and for its `HelmChart` (go-kure/launcher#351), which builds a
+  chart artifact from one of them. Each component's properties are exactly the top-level JSON
+  keys of its source-controller spec type — `HelmRepositorySpec`, `OCIRepositorySpec`,
+  `GitRepositorySpec`, `BucketSpec`, `HelmChartSpec`, in the version `go.mod` links — and a test
+  ties each published schema to its struct, so a bump that adds or drops a spec field fails the
+  suite until the schema follows.
+  Each emits exactly one CR of its kind, named after the component, and nothing else: no
+  Kustomization (compare `oci`), no HelmRelease (compare `helmrelease`), no source for a
+  `helmchart` (its `sourceRef` names one that exists, as a `helmrelease`'s
+  `chart.spec.sourceRef` does), and no source dedup — two components naming the same URL emit
+  two CRs. A `helmrelease` consumes a `helmchart` through `chartRef` with `kind: HelmChart`.
 
-  **Policy.** No field of these specs is one an `oam.Policy` method speaks to,
-  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
-  same under every policy and under none.
-  - **Hosts are not checked.** A host these objects name is one Prometheus
-    reaches, not an artifact source, and none is held to the policy's allowed
-    registries: `prober.url`, a `proxyUrl` (of an endpoint, a prober or an
-    `oauth2`), an `oauth2`'s `tokenUrl`, and the static targets of a Probe.
-  - **No field holds a literal secret by design, and none is checked.** A
-    credential is a reference to a key of a Secret: `authorization.credentials`,
-    `basicAuth`, `bearerTokenSecret`, an `oauth2`'s `clientSecret`, a
-    `tlsConfig`'s `keySecret`, the values of `proxyConnectHeader`. Free text
-    that could hold one is written to the object as authored, under a policy
-    that forbids explicit secrets too: `params`, an `oauth2`'s
-    `endpointParams`, and a `proxyUrl` with credentials in it.
-  - **File paths are not checked.** A `servicemonitor` endpoint may name a
-    file in the Prometheus container (`bearerTokenFile`, and `caFile`,
-    `certFile` and `keyFile` under `tlsConfig`).
+  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into the spec
+  type, with no launcher-owned keys. A key the struct does not declare, at any depth
+  (`secretRef.namespace`, a stray key in a GitRepository `include` entry), is refused by name, and
+  so is a wrongly typed value (`suspend: "yes"`, an unparsable duration). The schema keeps the
+  nested Flux blocks as open objects; the strict decode is what checks them. A reflection test
+  asserts, per kind, that no spec field is unreachable through that decode, against an explicit
+  exclusion list that is empty. Keys match case-insensitively, as in `encoding/json`; schema
+  validation, which a `kurel build` runs first, is exact.
 
-  **Not covered.** Whether what is selected or referred to exists (a
-  Service, a pod, an Ingress, a named port, a Secret key), and whether a
-  Prometheus of the cluster selects the object. The object's status is the
-  operator's and is not written.
+  **Checks and defaults.** Required: `url` on `helmrepository`, `ocirepository` and
+  `gitrepository`; `bucketName` and `endpoint` on `bucket`; `chart`, `sourceRef.kind` and
+  `sourceRef.name` on `helmchart`. A `url` must start with a scheme the
+  CRD's own pattern admits: `http://`, `https://` or `oci://` for `helmrepository`, and only
+  `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
+  `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
+  `ssh://git@host/org/repo`. The CRD has no pattern for `endpoint`, so it is only required.
+  `interval` defaults to `60m` when unset (a zero duration counts as unset), matching the
+  `helmrelease` default; a `helmrepository` with `type: oci` gets no default, since Flux
+  does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
+  A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease`
+  (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
+  A set `timeout` (a `helmchart` has none) is checked the same way, against the source CRDs'
+  narrower pattern, which has
+  no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606), so an authored `1h` is
+  refused. A `timeout` of an hour or more authored in minutes or seconds (`90m`, `3600s`) is
+  accepted and emitted with its hours folded into minutes: `90m0s`, `60m0s`
+  (go-kure/launcher#619). A `metav1.Duration` would write `Duration.String()`, `1h30m0s`, which
+  the CRD rejects, so such a source is emitted as an unstructured object carrying that text; a
+  `timeout` below an hour, or none, leaves the source emitted exactly as before. A config built
+  directly gets the same minutes form.
+  Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
+  `verify.mode`, a HelmChart's `sourceRef.kind` and `reconcileStrategy`) and cross-field rules
+  (a Bucket's `sts` against its `provider`, `serviceAccountName` against `secretRef`, a
+  HelmChart's `verify` only with a HelmRepository source) are left to the CRD's own admission.
+  Nor is the source a `helmchart` names: whether it exists, or is of the kind `sourceRef.kind`
+  says, is known only on the cluster.
+
+  **Policy.** `ApplyPolicy` checks the host the source is fetched from against the policy's
+  allowed registries (`AllowedRegistries`), with the same exact match `oci`, `crd` and
+  `manifests` apply: the `url` host for the three repositories, the `endpoint` host for `bucket`.
+  A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
+  user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
+  userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
+  is refused. An empty allowlist permits every host, and none of the rules below applies. A
+  `helmchart` checks nothing: it fetches from the source its `sourceRef` names, whose host is
+  checked where that source is authored, as for a `helmrelease`.
+
+  No refusal prints the value it refused, since a URL or `endpoint` can carry a credential in
+  its userinfo (the user included), path, query or IPv6 zone (go-kure/launcher#699). An
+  allowlist refusal names the host as `displayHost` reduces the url's raw authority (an
+  `ssh://` user included, not the host the match used): without userinfo, query, fragment or
+  zone, port kept, saying when something was dropped; the matching itself is unchanged. It
+  names no host at all when the reduced text is not a plain host (a DNS name, IPv4 address or
+  bracketed IPv6 address, with an optional numeric port), or when a `[`, `]`, `?` or `#`, none
+  of which a userinfo may hold, precedes the last `@`, which may then sit inside IPv6 brackets
+  or a query instead. A scheme refusal (the four sources', `oci`'s, and `crd`'s and
+  `manifests`' `http`/`https` check) and the explicit-registry refusal below name only the
+  component, the field and the form expected, and the Amazon S3 refusal names the reduced host.
+
+  Some sources are not fetched from the host their field names, so the check follows Flux instead:
+
+  - *An `oci://` URL must name its registry explicitly.* Flux parses an OCIRepository `url`, and a
+    Helm OCI chart reference when it verifies the chart's signature, with go-containerregistry,
+    which takes the first path segment as the registry only when a `/` follows it and it is
+    `localhost` or contains `.` or `:`; anything else is a Docker Hub repository. So
+    `oci://ghcr.io` and `oci://registry/app` are pulled from Docker Hub, whichever entry their
+    first segment matched. Under a non-empty allowlist such a URL is refused, with an error
+    asking for a qualified registry (`oci://docker.io/library/app`,
+    `oci://registry.example:5000/org/app`). An `ocirepository` `url` also needs a repository
+    path after the registry; a `helmrepository` `oci://` URL, of either `type`, may stop at the
+    registry (`oci://ghcr.io`), since Flux appends the chart name to it.
+  - *A `bucket` with `provider: gcp` is checked against `storage.googleapis.com`.* Flux's GCP
+    client never reads `endpoint`; it uses Google Cloud Storage's own host. The `generic`, `aws`
+    and `azure` providers, and no provider, fetch from `endpoint`, which stays the host checked,
+    except as the next rule says.
+  - *A `bucket` with an Amazon S3 `endpoint` is refused, unless its provider is `azure` or
+    `gcp`.* The S3 client behind `generic`, `aws` and no provider does not fetch from an Amazon
+    S3 endpoint: it contacts the S3 host of `region`, which may name any AWS region or partition,
+    or of the bucket's own location when `region` is unset, chosen at runtime. That host cannot
+    be checked, so under a non-empty allowlist the build fails, even when the allowlist lists the
+    endpoint. The test errs broad, since it fails closed: any `endpoint` containing `amazonaws`,
+    in any case, counts, because the client's own host patterns also match look-alikes such as
+    `s3.x-amazonaws.com`.
+
+  Hosts a source reaches indirectly are not checked: the chart URLs a Helm repository index
+  advertises on other hosts (what `passCredentials` exists for), a Bucket's `sts.endpoint`, the
+  token endpoints a `provider` authenticates against, and a proxy. Apart from the two `bucket`
+  cases above, a `provider`, `region` or `insecure` setting changes how the source authenticates
+  or which scheme it uses, not which host it fetches from.
+
+  **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
+  the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,
+  `certSecretRef`, `proxySecretRef`, the Secret references under `verify` and `sts`,
+  `serviceAccountName`, a GitRepository `include`, a HelmChart's `sourceRef` — resolves in the
+  namespace the CR lands in, so under a Flux namespace the objects it names must live there. A
+  `helmchart` whose `sourceRef` names a source component in the same document finds it there:
+  both move to the Flux namespace. So does the Secret of an `external-secret` or `certificate`
+  trait (or the ConfigMap of a `configmap` trait) on the component when one of the Secret
+  references names it — a `certSecretRef` naming a `certificate` trait's `secretName` moves that
+  Certificate
+  (`FluxNamespaceReads`, go-kure/launcher#740); a trait object no reference names stays in the
+  application namespace.
+
+  **Generated by the `helm` rule.** An inline source on a `helm` component generates one of
+  these components: a `helmrepository` for an `http(s)://` URL; an `ocirepository` for an
+  `oci://` URL, with a `ref.tag` from `version` and a `layerSelector` copying the Helm chart
+  content layer; a `gitrepository` for `kind: GitRepository` with its URL and one `source.ref`
+  field; or a `bucket` for `kind: Bucket` with `endpoint` and `bucketName` and no URL. It is
+  named `<app>-source-<digest>` and shared by every `helm` component with the same source
+  identity (see **helm**). An authored source component exposes the whole spec
+  (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
+  generates a `helmchart`.
 - **issuer**, **clusterissuer**, **certificate** (go-kure/launcher#790) are
   the kind-named projections of three objects of cert-manager's
   `cert-manager.io/v1` API: an Issuer, a ClusterIssuer and a Certificate. Each
@@ -4255,177 +2923,116 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Not covered.** The object's metadata beyond its name, its labels and its
   annotations (`objectName`, `labels`, `annotations`), and its `status`, which
   the Cilium agent writes.
-- **gatewayclass**, **gateway**, **listenerset**, **referencegrant**,
-  **backendtlspolicy** (go-kure/launcher#790) are the kind-named projections
-  of the infrastructure objects of the Gateway API's
-  `gateway.networking.k8s.io/v1`: a GatewayClass, a Gateway, a ListenerSet, a
-  ReferenceGrant and a BackendTLSPolicy. Each is built on `policyFreeKind`
-  (see the **storageclass** entry) and emits that one object, named after the component unless
-  `objectName` names it; the handler adds no label, no annotation and no
-  default. A `gatewayclass` is emitted with no namespace and declares its
-  object as cluster-scoped, so its name is claimed in no namespace. The other
-  four are emitted in the build namespace and declare their object as
-  namespaced. The routes of the same API are their own kinds (`httproute`).
+- **cilium-networkpolicy** (go-kure/launcher#790) is the kind-named projection
+  of a cilium.io/v2 CiliumNetworkPolicy. The object has no spec type of its
+  own: it holds one rule under `spec`, a list of rules under `specs`, or both,
+  each a Cilium `api.Rule`. The component's properties are those two fields,
+  decoded strictly into that type under the null contract, and
+  `TestCoreKindSchemas_CoverSpec` holds the two keys to the linked
+  `CiliumNetworkPolicy` type. It emits one CiliumNetworkPolicy named after the
+  component in the build namespace, with the authored rules and nothing else.
+  The whole rule is authorable: `endpointSelector`, `ingress`, `ingressDeny`,
+  `egress`, `egressDeny`, `labels`, `enableDefaultDeny`, `description`, `log`.
 
-  **No capability is required, and nothing gates these kinds.** Launcher does
-  not ask whether the cluster serves `gateway.networking.k8s.io/v1`: where the
-  Gateway API's CRDs are not installed the component builds, and the object is
-  refused at apply. Whoever may author a component may author these: a
-  GatewayClass, which is cluster-scoped, and a ReferenceGrant, which lets
-  objects of another namespace refer to objects of the build namespace,
-  included. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it. The `httproute` trait may take the Gateway
-  it attaches to from a capability (`gatewayName`, `gatewayNamespace`); the
-  `gateway` kind does not read it, and a `gateway` component is not what that
-  capability names unless the platform says so.
+  **Refused at build, because Cilium rejects the policy.** Its CRD schema
+  refuses some of these at admission (a rule with no selector, or without any of
+  the four rule keys); the rest the API server stores and the agent rejects when
+  it reads the object, so that nothing enforces it. Launcher refuses all of them
+  instead of emitting the object:
+  - no rule at all: neither `spec` nor an entry in `specs`. An empty `specs`
+    holds none; beside a `spec` it is accepted and not emitted;
+  - a rule with no `endpointSelector`. None is filled in: `{}` selects every
+    endpoint of the namespace and is carried as written, and a null or absent
+    one is refused;
+  - a rule with a `nodeSelector`, which belongs to a
+    CiliumClusterwideNetworkPolicy and which Cilium rejects in a namespaced
+    policy;
+  - a rule with no entry in any of `ingress`, `ingressDeny`, `egress` and
+    `egressDeny`. A deny list counts as much as an allow list; a null or empty
+    list holds no entry.
 
-  **Authored.** The properties are the top-level json fields of the spec type,
-  decoded strictly at every depth: an unknown key is refused wherever it sits
-  (a listener, a certificate reference, a validation).
-  - `gatewayclass` (`GatewayClassSpec`): `controllerName`, `parametersRef` and
-    `description`.
-  - `gateway` (`GatewaySpec`): `gatewayClassName`, `listeners`, `addresses`,
-    `infrastructure`, `allowedListeners`, `tls` and `defaultScope`.
-    **`defaultScope` is an experimental-channel field:** the Go type holds it
-    and the standard channel's Gateway CRD does not, so a cluster on that
-    channel does not keep it. It is the only such field of these five specs
-    at v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
-  - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
-    entries take the fields of a Gateway's listener.
-  - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
-  - `backendtlspolicy` (`BackendTLSPolicySpec`): `targetRefs`, `validation`
-    and `options`.
-  - **No default is filled.** The defaults are the CRDs', and the API server
-    applies them to what the object leaves out: a listener's `allowedRoutes`
-    (routes of the Gateway's own namespace), a listener's `tls.mode`
-    (`Terminate`), an address's `type` (`IPAddress`), the `group` and `kind`
-    of a certificate reference (a core Secret) and of a parent reference (a
-    Gateway), the `group` of an allowed route kind (the Gateway API's),
-    `allowedListeners.namespaces.from` (`None`), a client certificate
-    validation's `mode` (`AllowValidOnly`).
-  - One number of these types is omitted when zero, a ListenerSet listener's
-    `port`, and the CRD gives it no default: an authored `port: 0` is left out
-    as an unset one is, the API accepts neither, and the kind refuses both
-    (below).
-    `TestGatewayKinds_NoDefaultedZeros` holds the types to having no number or
-    boolean that is omitted when zero and that a CRD of either channel
-    defaults to something else.
+  These are the checks Cilium's own reader makes that need no agent
+  configuration; the code names the Cilium functions they mirror. The rest of
+  a rule's value rules (a port's range, an entity's name, which peers may be
+  combined) are left to Cilium. A null list element (`specs: [null]`, a null
+  ingress entry or peer) is refused by its path.
 
-  **Required** is a field the API requires that the Go type writes whether or
-  not it was authored, so that the object would not show the omission: the
-  rule every kind follows (see the Prometheus operator's kinds). Each
-  must be authored (`gatewayClassName: required (…)`,
-  `listeners[1].port: required (…)`); an authored empty value is a value, and
-  the API server's to refuse.
-  - A `gatewayclass`: `controllerName`.
-  - A `gateway`: `gatewayClassName` and `listeners`, and of each listener its
-    `name`, `port` and `protocol`. Of a Gateway-wide `tls.frontend` that is
-    authored: its `default` (`default: {}` asks for no client certificate),
-    and of a `perPort` entry its `port` and `tls`; of a `validation` that is
-    authored, its `caCertificateRefs`.
-  - A `listenerset`: `parentRef` with its `name`.
-  - A `referencegrant`: `from` and `to`; of a source its `group`, `kind` and
-    `namespace`, of a target its `group` and `kind`. The core group is
-    authored as `group: ""`.
-  - A `backendtlspolicy`: `validation` with its `hostname`; of a subject
-    alternative name that is authored, its `type`.
-  - Of a reference that is authored, on every kind, what the type would write
-    empty: the `name` of a certificate reference (a listener's
-    `tls.certificateRefs`, the Gateway's `tls.backend.clientCertificateRef`);
-    the `group`, `kind` and `name` of a parameters reference
-    (`parametersRef`, `infrastructure.parametersRef`), of a CA certificate
-    reference (`caCertificateRefs`) and of a policy target (`targetRefs`);
-    the `kind` of an allowed route kind (`allowedRoutes.kinds`).
-  - A required field under a parent the author left out is not asked for: the
-    list follows what was authored.
+  **Required.** Inside a rule the CRD requires 59 fields that the Cilium type
+  writes whether or not they were authored, so that the object would not show
+  the omission: a match expression without its `operator` was emitted as
+  `operator: ""`, an `authentication: {}` as `mode: ""`, a `terminatingTLS: {}`
+  as `secret: null`, each of which the API server refuses. Each is refused
+  where its parent is authored, by its path
+  (`spec.ingress[0].authentication.mode: required (…)`):
+  - the `key` and `operator` of a match expression, in every selector of a
+    rule (`endpointSelector`, `fromEndpoints`, `toEndpoints`, `fromNodes`,
+    `toNodes`, a CIDR entry's `cidrGroupSelector`, a `k8sServiceSelector`'s
+    `selector`), under the deny lists too;
+  - a `k8sServiceSelector`'s `selector`, the `key` of a rule label and the
+    `type` of an `icmps` field;
+  - under an allow list only: an `authentication`'s `mode`; a port's
+    `listener` `name`, its `envoyConfig` and that configuration's `name`; the
+    `secret` of a port's `terminatingTLS` and `originatingTLS` and that
+    Secret's `name`; an HTTP header match's `name`, and the `name` of its
+    `secret` where one is authored.
 
-  **A required field the type omits is refused by the kind itself,** since no
-  required list can name it: the type leaves it out where it is not authored
-  and where it is authored empty alike, and the API server refuses the object
-  either way. There are five at v1.6.2:
-  - a `listenerset` with no `listeners` and a `backendtlspolicy` with no
-    `targetRefs`, absent or empty (`listeners: required (…)`), as a
-    `servicecidr` with no `cidrs` is;
-  - a ListenerSet listener without its `name`, its `port` or its `protocol`,
-    absent or empty, a `port: 0` included
-    (`listeners[1].port: required (…)`). A Gateway's listener must author the
-    same three, by the list above: the two listener types carry different
-    json tags, and the answer is the same on both kinds.
+  Two more are optional to the API and required here: a listener's `priority`
+  and the `kind` of its `envoyConfig`. The type writes an unauthored one as
+  `0` and as the empty string, and the API refuses both (a priority is 1 to
+  100, a kind is `CiliumEnvoyConfig` or `CiliumClusterwideEnvoyConfig`), so a
+  listener that leaves one out cannot be emitted.
+  `TestCiliumNetworkPolicy_RequiredMatchCRD` holds the whole list to the
+  CiliumNetworkPolicy CRD of the linked module, its own file and not the
+  cluster-wide policy's, and to the rule type, under `spec` and under `specs`,
+  so a dependency bump that adds, drops or moves one fails there. The CRD
+  names a `nodeSelector`'s match expressions as well, and so does the list: an
+  incomplete one is refused by this rule, a complete one by the rule above. A
+  rule label without its `key` is refused earlier, by Cilium's own decoding,
+  as an `icmps` field without its `type` is (below). An authored empty value
+  in a required field is not checked: it is the API server's to refuse. The
+  list of a rule is held in the internal `pkg/oam/internal/requiredfields`
+  (`CiliumRule`), since the `cilium-networkpolicy` trait reads it too, cut to
+  the three fields of a rule it publishes.
 
-  `TestGatewayKinds_RequiredMatchCRD` derives that set from the CRDs as it
-  derives the lists, at every depth of the five specs, and holds each member to
-  one of two answers: the kind's refusal, which it runs, or a stated reason
-  the decoded value cannot show the omission. None has the second answer.
-  `TestGatewayKinds_RefusedOmissions` holds each refused field to being
-  required in both channels.
+  **An unknown key inside a selector is refused**, by its path
+  (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's
+  endpoint selector unmarshals itself and drops a key it does not know, which
+  the strict decode cannot see: `endpointSelector: {matchLabel: {...}}` would be
+  the empty selector, which selects every endpoint of the namespace, and a peer
+  misspelt the same way would match every endpoint. The check covers every
+  position that holds a selector (`endpointSelector`, `fromEndpoints`,
+  `toEndpoints`, `fromNodes`, `toNodes`, a CIDR entry's `cidrGroupSelector`,
+  under the deny lists too) and the two other types under a rule that unmarshal
+  themselves: an `icmps` field (`family`, `type`) and an entry of `labels` in
+  its object form (`key`, `value`, `source`). The positions are found from the
+  Cilium types, and a test fails when a Cilium bump adds a type that unmarshals
+  itself and is not checked.
 
-  `TestGatewayKinds_RequiredMatchCRD` holds the lists (4 paths for a
-  gatewayclass, 22 for a gateway, 4 for a listenerset, 7 for a referencegrant,
-  9 for a backendtlspolicy) to the CRDs the linked module ships. The module
-  ships two sets, one per channel of the API. The experimental one holds every
-  field the Go types do and is the one each path is read in; the standard one
-  must require the same wherever it holds the property. Every field of the
-  Gateway API's own types that the CRDs require and the type writes
-  unauthored is listed, and nothing else is; no field is written empty
-  unauthored beside those. A dependency bump that adds, drops or moves one
-  fails there. **Not refused:**
-  - a list the API wants at least one item of that is authored empty, where
-    the type writes it (`listeners: []` on a `gateway`, `from: []`): an
-    authored empty value is a value;
-  - a required field of a Kubernetes type these specs embed (the expressions
-    of a label selector). An omitted one is emitted empty;
-  - every other value rule of the CRDs: enumerations, lengths, patterns,
-    minima and item limits, and the rules the CRDs write as expressions (a
-    listener's `tls` and `hostname` against its `protocol`, the uniqueness of
-    a listener's name and of its port, protocol and hostname, of an address
-    and of a `perPort` port, one of `caCertificateRefs` and
-    `wellKnownCACertificates`, a subject alternative name's field against
-    its `type`, a target's `sectionName` among several targets, a
-    GatewayClass's `controllerName` not changing);
-  - what a Gateway API controller refuses when it reads the object, which
-    shows in the object's status, not at creation.
+  **An `icmps` field needs its `type`.** Cilium's own decoding of the field
+  panics when `type` is absent or null; the component is refused with an error
+  that names the panic (`… the decoder of … panicked on this value: …`) and not
+  the field's position, so look for an `icmps` field without a `type`.
 
-  **Policy.** No dimension of the environment policy reaches these objects:
-  they run no pod, hold no image, request no storage and have no replica
-  count. A nil policy and a strict one build the same object.
-  - **The pods of a Gateway are not sized here.** A controller may start a
-    proxy for a Gateway; the Gateway object holds no pod template and no
-    resources, so the policy's maxima and defaults have nothing to hold.
-    `infrastructure.labels` and `infrastructure.annotations` are written as
-    authored, and what a controller reads into them is its own.
-  - **No field holds a literal secret, and none is checked.** A certificate is
-    a reference: to a Secret on a listener and for the Gateway's client
-    certificate, to a ConfigMap or another object for CA certificates. The
-    free maps a controller defines, a listener's `tls.options` and a
-    BackendTLSPolicy's `options`, are written to the object as authored,
-    under a policy that forbids explicit secrets too.
-  - **Hosts are not checked.** A host these objects name is one a Gateway
-    serves or a backend is checked against, not an artifact source, and none
-    is held to the policy's allowed registries: a listener's `hostname`, an
-    address's `value`, a BackendTLSPolicy's `validation.hostname` and the
-    `hostname` and `uri` of its subject alternative names.
-
-  **References are the author's.** A Gateway names its class
-  (`gatewayClassName`), a ListenerSet its Gateway (`parentRef`), a
-  BackendTLSPolicy its backends (`targetRefs`), and each of them Secrets or
-  ConfigMaps; launcher points none at a component and does not look for the
-  target in the document. To refer to another component's object, name it:
-  the component name, or its `objectName`. A ListenerSet attaches only where
-  its Gateway's `allowedListeners` lets its namespace, and a reference across
-  namespaces works only where a ReferenceGrant of the target's namespace
-  allows it; launcher checks neither. A `referencegrant` allows references
-  into the namespace it is emitted in, so it belongs to the application of
-  the objects referred to.
-
-  **Labels and annotations** are the `labels` and `annotations` properties. A
-  Gateway's `infrastructure.labels` and `infrastructure.annotations` are not
-  these: they are what the controller puts on the resources it creates for the
-  Gateway.
-
-  **Not covered.** Whether what is referred to exists (a class, a Gateway,
-  a Secret, a ConfigMap, a Service and its port), and whether a controller of
-  the cluster implements the class. The object's status is the controller's
-  and is not written.
+  **It is an authored object, not the `cilium-networkpolicy` trait**, although
+  the two share the type name. The trait attaches to a component and publishes
+  one rule's `name`, `endpointSelector`, `ingress` and `egress`; this kind is a
+  component of its own, named after the component or by its `objectName`, and
+  publishes the whole rule and `specs`. A component and a trait whose policy
+  would carry one name (the trait's `name`) are refused, with both named.
+  Neither fills a selector. **No environment policy
+  applies:** `ApplyPolicy` is a no-op, and the policy's capability lists gate
+  trait types, so a policy that forbids the `cilium-networkpolicy` trait does
+  not refuse a `cilium-networkpolicy` component. `passthrough`, `manifests`
+  and template delivery emit a CiliumNetworkPolicy under the same terms. A
+  consumer that restricts network policy restricts the component types it
+  registers. **No literal secret is checked:** an HTTP header match's `value`
+  is written into the object as authored and is not refused, since a header
+  value cannot be told from a credential; a header match's `secret` refers to
+  a Secret by name and keeps the value out of the document. The object's own
+  labels and annotations are the top-level
+  `labels` and `annotations` properties; a `labels` under `spec` or a `specs`
+  entry is the rule's own field. **Not covered:** its `status`, which the
+  Cilium agent writes.
 - **secretstore**, **clustersecretstore**, **externalsecret**,
   **clusterexternalsecret** (go-kure/launcher#790) are the kind-named
   projections of four objects of the External Secrets Operator, in its
@@ -4723,236 +3330,885 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   key, a ServiceAccount, a ConfigMap, a generator, a namespace), and whether
   the operator can reach what a store names. The objects' status is the
   operator's and is not written.
-- **replicationsource**, **replicationdestination** (go-kure/launcher#790)
-  are the kind-named projections of the two objects of VolSync's
-  `volsync.backube/v1alpha1` API: a ReplicationSource, which copies a volume
-  out, and a ReplicationDestination, which receives one. Each is built on
-  `policyHeldKind` (`policyFreeKind` with a policy check, see above) and
-  emits that one object in the build namespace, named after the component
-  unless `objectName` names it, and declares it as namespaced; the handler
-  adds no label, no annotation and no default. The two share their movers but
-  for Syncthing, and what is said of a mover below holds for both kinds.
+- **role**, **rolebinding**, **clusterrole**, **clusterrolebinding**
+  (go-kure/launcher#790) are the kind-named projections of the four objects
+  of the `rbac.authorization.k8s.io/v1` API, built on `policyFreeKind`. Each
+  emits that one object, named after the component unless `objectName` names
+  it, holding exactly what was authored: the handler adds no label, no
+  annotation and no default of its own. They are for the grants an
+  application needs that are not those of one workload's own ServiceAccount,
+  which is what the `rbac` trait (`pkg/oam/builtin/traits/README.md`)
+  writes: a role several bindings share, a binding to a role that already
+  exists, a grant to a user or a group, an aggregated ClusterRole. What the
+  four have in common is stated here once; each kind's entry below holds what
+  is its own.
+  - **Authored:** none of the four has a spec, so the properties are the
+    object's own top-level fields, decoded strictly at every depth. The
+    object's `kind`, `apiVersion` and `metadata` are launcher's and are
+    refused under any spelling.
+  - **Presence rules read by hand.** Beyond the `+required` markers of the
+    linked `k8s.io/api` module, these four kinds check presence rules read by
+    hand from the API server's validation at Kubernetes v1.37.1
+    (`pkg/apis/rbac/validation/validation.go` of `k8s.io/kubernetes`, which
+    no module launcher links holds). No test derives them, and a later
+    Kubernetes that changes one is not noticed by a dependency bump.
+  - **Required from the markers** are the fields the API's source marks
+    required and the Go type writes whether or not they were authored.
+    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives each kind's list
+    from the markers and fails on a dependency bump that changes it. The API
+    marks no field of the four required that the type leaves out when
+    unauthored; the same test fails if one appears.
+    `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds the four in
+    its table as well, from the same markers: to that, and to no default
+    marked on a field the type writes unauthored. These checks are of
+    presence: an authored empty value (`verbs: []`, `name: ""`) builds and is
+    the API server's to refuse.
+  - **A rule** (`rules[]` of a `role` or a `clusterrole`) must write its
+    `verbs` (`rules[0].verbs: required …`, from the markers). By hand: it
+    must name at least one of `apiGroups` and at least one of `resources`
+    (`rules[0].apiGroups: required …`; `""` is the core group), so a rule
+    that lost its resources and grants nothing is refused. A `clusterrole`
+    rule may instead name `nonResourceURLs`, and then names no `apiGroups`,
+    `resources` or `resourceNames`
+    (`rules[0].nonResourceURLs: not allowed beside …`). These two hand-read
+    checks count what was decoded, so an authored empty `apiGroups: []` or
+    `resources: []` is refused too.
+  - **A binding** (`rolebinding`, `clusterrolebinding`) must write `roleRef`
+    with its `kind` and `name`, and each subject's `kind` and `name`
+    (`roleRef: required …`, `subjects[0].name: required …`, from the
+    markers). `subjects` may be left out: the API server's validation
+    requires none, and the key is then not written.
+  - **`roleRef.apiGroup` may be left out.** The object then carries
+    `apiGroup: ""`, which the type always writes, and the API server fills
+    the RBAC group before it validates. An authored group that is not the
+    RBAC group is written as authored and is the API server's to refuse. A
+    User or Group subject may leave its `apiGroup` out too: the key is then
+    not written, and the API server fills the RBAC group the same way.
+  - **The names are the author's literals.** `roleRef.name` and a subject's
+    `name` and `namespace` are written as authored. Launcher points none of
+    them at a component: a `roleRef.name` does not follow the `objectName`
+    of a `role` or `clusterrole` component, and a ServiceAccount subject's
+    name does not follow a `serviceaccount` component's, so write the name
+    the object takes. Whether the role or the subject exists is not checked.
+  - **Policy.** No field of the four is one an `oam.Policy` method speaks
+    to, so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Beside the `rbac` trait.** A trait's object and a component's of one
+    kind, name and namespace (or one cluster-scoped name) are refused: the
+    trait resolves the name of each object it generates, and the transform
+    reports a name collision that names both.
+  - **Not covered.** Every rule on the form of a value is left to the API
+    server: that a `roleRef` names the RBAC group and a kind the binding
+    may grant, the kind and API group of a subject, the form of its name,
+    and whether the `values` of a match expression of an aggregation
+    selector fit its `operator`. Whether a verb, a resource or an API group
+    exists, and the form of a non-resource URL, are checked by neither
+    launcher nor the API server's validation: a rule that names none that
+    exists builds and passes that validation. The API server refuses a change to the `roleRef` of an
+    existing binding. Launcher does not compare a build with the cluster, so
+    a changed one builds here and is refused at apply. Launcher does not
+    compare what a role grants with what its author, or whoever applies the
+    object, may grant.
+- **role** emits its Role in the build namespace; the handler declares its
+  object as namespaced, so the object name is claimed in the object's
+  namespace. **It is ungated: no capability and no environment-policy check
+  restricts what a role grants.** Its one property is `rules`.
+  `nonResourceURLs` are refused in a rule
+  (`rules[0].nonResourceURLs: not allowed in a Role …`): a non-resource URL
+  is not namespaced, and the API server refuses one in a Role. The API
+  requires no rule, and the type always writes the list: a role that authors
+  none carries `rules: null` and grants nothing, and an authored empty list
+  is written as `[]`.
+- **rolebinding** emits its RoleBinding in the build namespace; the handler
+  declares its object as namespaced, so the object name is claimed in the
+  object's namespace. **It is ungated: no capability and no
+  environment-policy check restricts what a role grants**, nor to whom: a
+  binding to any role the cluster holds, `cluster-admin` included, builds.
+  Its properties are `subjects` and `roleRef`, which names a Role of the
+  binding's namespace or a ClusterRole. A ServiceAccount subject may leave
+  its `namespace` out: the API server's validation takes it, the key is not
+  written, and the authorizer of that version reads the subject as one of
+  the binding's own namespace.
+- **clusterrole** emits its ClusterRole with no namespace; the handler
+  declares its object as cluster-scoped, so the object name is claimed
+  cluster-wide. **It is ungated: no capability and no environment-policy
+  check restricts what a role grants.** Its properties are `rules` and
+  `aggregationRule`. By hand: an authored `aggregationRule` must hold at
+  least one entry of `clusterRoleSelectors`
+  (`aggregationRule.clusterRoleSelectors: required …`); an empty selector
+  (`{}`) is an entry. From the markers, a selector's match expression must
+  write its `key` and `operator`. An aggregated ClusterRole builds: it is
+  emitted with `rules: null` when `rules` is not authored and with
+  `rules: []` when authored so, and the control plane fills the rules.
+- **clusterrolebinding** emits its ClusterRoleBinding with no namespace; the
+  handler declares its object as cluster-scoped, so the object name is
+  claimed cluster-wide. **It is ungated: no capability and no
+  environment-policy check restricts what a role grants**, nor to whom: a
+  binding of `cluster-admin` to any subject builds. Its properties are
+  `subjects` and `roleRef`, which names a ClusterRole. By hand: a
+  ServiceAccount subject must write its `namespace`
+  (`subjects[0].namespace: required …`), since the binding is in none.
+- **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
+  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
+  component name becomes the Cluster's name and its `cnpg.io/cluster`
+  endpoint selector, so it must be what CloudNativePG's admission webhook
+  admits: a DNS-1035 label (no leading digit, no dot) of at most 50
+  characters. Any other name is refused at parse time, when endpoints are
+  collected and by `Generate` (`cnpg-cluster name "db.main": must be a
+  DNS-1035 label of at most 50 characters …`), although other kinds accept
+  DNS-1123 subdomains of up to 253. Its
+  properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
+  key per `ClusterSpec` json field: scalars are typed, and every structured
+  field is an open `object` or an `array` of open objects whose description
+  points at the upstream type. `ToApplicationConfig` decodes the whole property
+  map into `cnpgv1.ClusterSpec` with `builtin.DecodeStrictJSON`, so a key the
+  linked CNPG version does not declare, at any depth (`storage.sise`,
+  `bootstrap.initdb.databse`), and a value of the wrong type
+  (`storage.size: 5`) are refused rather than dropped. Two limits come from
+  `encoding/json` itself: the unknown-field error names the key but not its
+  path, and a key differing from a declared one only in letter case is
+  accepted as that field (two spellings of one field in the same object are
+  refused, since the decoder would keep only one: `storage.size: sets the
+  same field as storage.Size …`). The policy defaults below read what was authored
+  from the decoded spec as well as from the property map, where every
+  spelling the decoder accepts is consulted, so such a key still counts as
+  authored and is not overwritten by a default — including an empty
+  `storage.size`, which the decoded spec cannot tell from absence.
+  It carries **no launcher opinions**: `Generate` emits the Cluster named after
+  the component in the build namespace with exactly the authored spec, so an
+  unauthored field is left for the operator's own default. `postgresql`'s
+  choices — an image from `version`, `primaryUpdateStrategy: unsupervised`,
+  `enablePDB` from the replica count, a `1Gi` storage fallback, pod
+  anti-affinity — are not made here: its lowering rule writes them as this
+  kind's properties, and the trait it attaches sets the two that depend on
+  the policy (see `postgresql`). The one value it writes unasked is
+  `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
+  `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
+  appear even when unauthored, as they do for `postgresql`: `affinity` and
+  `resources` as empty objects, and `postgresql` as
+  `syncReplicaElectionConstraint: {enabled: false}`, because that nested
+  field's `enabled` has no `omitempty`.
+  Nulls follow "The null contract" below, and a null is whatever serializes
+  to JSON null: the properties are marshalled with `encoding/json` and read
+  back before anything else looks at them, so a null map value is left out
+  rather than decoded to an empty string, and a null array element is
+  refused by path (`env[0]: null is not a valid array element`). The
+  contract covers declared keys only: a key the CNPG type does not declare
+  is refused as an unknown field even when its value is null
+  (`storage: {sise: null}`), not dropped with the null. A lowering
+  rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
+  every component; that is the supported contract, and the engine's schema
+  check refuses a typed API struct where it checks an object or array item
+  (for example an `env` entry), though not inside an open object's
+  undeclared keys. Because the reading is the serialization itself, a
+  direct caller of the handler additionally has a value built in Go read
+  exactly as `encoding/json` writes it — a concrete collection type, a nil
+  behind a pointer, a `json.RawMessage` and a custom encoder included. A
+  value that does not serialize is refused. An `instances` below 1, in
+  any spelling, is refused before policy runs (`instances: must be >= 1,
+  got 0`): the CRD's minimum is 1, so the API server would refuse the
+  Cluster. A policy instance-count default below 1 is refused the same way.
+  `Generate` repeats the name and instance-count refusals on what it emits,
+  the count's upper bound (`instances: must be <= 2147483647, got …`)
+  included, so a `CnpgClusterConfig` built in Go without
+  `ToApplicationConfig` cannot produce a Cluster the operator or the API
+  server rejects for either. It also refuses any storage request the
+  Cluster carries that does not parse or is not positive, authored or from
+  a policy default, on every claim the storage maximum below covers
+  (`storage.size: quantity must be positive, got "0"`;
+  `walStorage.pvcTemplate.resources.requests.storage: …`): CloudNativePG's
+  webhook parses only `storage.size`, so such a Cluster was admitted and its
+  claims then failed the API server's positive storage-request check
+  (go-kure/launcher#623). An unset size is still left to the operator.
+  An authored `0` or `false` that the typed spec cannot carry, on a field
+  whose CRD default is not zero, is refused by path
+  (`managed.roles[0].connectionLimit: 0 cannot be carried by the
+  CloudNativePG API types (the field is omitted when zero, so the operator
+  would apply its default -1)`). These fields are non-pointer and
+  `omitempty`, so the value is omitted when the Cluster is encoded and the
+  operator applies its CRD default instead. For the linked CNPG version they
+  are `managed.roles[].connectionLimit` (default `-1`, unlimited),
+  `postgresUID` and `postgresGID` (`26`), `startDelay` (`3600`),
+  `stopDelay` (`1800`), `switchoverDelay` (`3600`),
+  `probes.liveness.isolationCheck.requestTimeout` and `.connectionTimeout`
+  (`1000`) and `replicationSlots.updateInterval` (`30`); a test derives the
+  set from the CNPG module's CRD and Go types, so a CNPG bump that changes it
+  fails CI. An explicit zero default on any other such field, such as
+  `managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0`
+  or `monitoring.enablePodMonitor: false`, is accepted: it is omitted too,
+  and the field's absence means the same value.
+  Two fields the Cluster CRD requires, which the Go type leaves out when they
+  are empty, are refused when unauthored or empty: the `signerName` and the
+  `keyType` of a pod certificate source of the projected volume template
+  (`projectedVolumeTemplate.sources[0].podCertificate.signerName: required
+  (…)`). The object would show the omission and the API server refuse it.
+  Two more that the CRD requires, which the Go type writes as `null` when
+  they are unauthored, are refused when unauthored: the `nodeSelectorTerms`
+  of a required node affinity
+  (`affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
+  required (…)`) and the `databases` of an import
+  (`bootstrap.initdb.import.databases: required (…)`). The API server drops a
+  null of a field that is not nullable before it validates, so the required
+  field is then missing. An authored empty list is written as one and is not
+  refused here. A third such field is not refused:
+  `replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so
+  the API server puts the default (`true`) in the place of the null.
+  `TestKindComponents_NullRequired` derives the three from the CRD and shows
+  each answer by running the CRD's schema validator on the object.
+  Eleven strings the CRD requires and bounds, with a minimum length or an
+  enumeration, which the Go type writes as `""` when they are unauthored, are
+  refused when unauthored, each where its parent is authored
+  (`replica.source: required (…)`):
+  `backup.barmanObjectStore.destinationPath`,
+  `bootstrap.initdb.import.type` (`microservice` or `monolith`),
+  `bootstrap.pg_basebackup.source`,
+  `externalClusters[].barmanObjectStore.destinationPath`,
+  `managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
+  `podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry
+  and the `name` and the `value` of its `env[]` entries,
+  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`.
+  The Cluster would carry an empty value the author did not write, and the
+  API server refuse it. An authored empty one is a value: it is written, and
+  refusing it is left to the API server. The refusal reads the authored
+  properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
+  in Go is not held to it. Nor is the component a `postgresql` component is
+  lowered to, whose properties are written from a typed spec, so that a
+  string left out there reaches the kind as an authored `""`: `postgresql`
+  refuses the two it could leave out itself, under the property its author
+  wrote (above). The same test
+  derives every field
+  the type writes unauthored as a zero value the CRD's own rule refuses, and
+  shows each answer with the validator; the twelfth of a Cluster is
+  `instances`, which is not refused (below).
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
+  the CRD and shows the refusals. It also holds the two fields the CRD
+  defaults and the type writes unauthored to a reason they are harmless:
+  `instances`, of which the kind always writes a count (the authored one, the
+  policy's default, or the CRD's own `1`), and
+  `backup.volumeSnapshot.onlineConfiguration`, written `{}` under an authored
+  `volumeSnapshot`. The CRD's default for the object is `waitForArchive: true`
+  and `immediateCheckpoint: false`; in a `{}` it fills `waitForArchive` with
+  the field's own default `true`, and an absent `immediateCheckpoint` is
+  `false`.
+  A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
+  a quantity `cpu: 0`) is emitted as authored. An authored
+  empty string is not refused — `storage.size: ""` keeps its meaning above —
+  so an empty string on a defaulted field such as `primaryUpdateStrategy` is
+  still omitted. The two pod-certificate fields above are the exception: an
+  empty `signerName` or `keyType` is refused as an unauthored one is.
+  `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
+  onto this kind, so it is the same code), in this order:
+  the instance-count default when `instances` is not authored (an authored
+  value wins even when it equals the fallback) and its maximum; the cpu and
+  memory request and limit defaults on `resources`, filling only unset
+  entries, and their maxima; and the storage-size default on `storage.size`
+  when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
+  authored. With no policy default the size is left to the operator; the
+  `1Gi` fallback is postgresql's, applied after the policy by the post-policy
+  step its rule attaches
+  (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
+  `enablePDB` is set from the instance count; a fallback over the maximum is the
+  component's `oam.ViolationError` of class `oam.RefusalStorageMaximum`, as a
+  refusal of `ApplyPolicy` is). That method is for that step,
+  not an authoring surface. A storage-size default that is
+  not a quantity is refused (`policy default for storage.size: invalid
+  quantity "lots"`), as an invalid cpu or memory default is, since with no
+  maximum set nothing else would parse it. So is a zero or negative one
+  (`quantity must be positive, got "0"`): CloudNativePG's webhook only
+  parses the size, and the claims it creates would then fail the API
+  server's positive storage-request check. The storage maximum applies to
+  every claim the Cluster creates — `storage`, `walStorage`, each
+  `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
+  `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one
+  that exceeds it. Because this kind exposes the two security contexts, it
+  also refuses `securityContext.privileged` and a `securityContext` or
+  `podSecurityContext` `windowsOptions.hostProcess` unless the policy allows
+  privileged workloads, and an added capability the policy forbids or leaves
+  off a non-empty allowlist. The registry allowlist the workload kinds apply
+  to their image applies to an authored `imageName`
+  (`imageName: image "…" is not from an allowed registry [...]`). When
+  `imageName` is unset, the operator takes the image from the catalog
+  `imageCatalogRef` names or, without one, runs its default image; neither is
+  checked by this kind. A `postgresql` component always writes `imageName` (its
+  derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
+  so the allowlist applies to its image too. The allowlist applies as well to
+  the image of each `postgresql.extensions[]` entry, which the operator mounts
+  into the instance pods as an image volume (**breaking**,
+  go-kure/launcher#790: an extension image from a registry outside the list
+  built before): `postgresql.extensions[0].image.reference: image "…" is not
+  from an allowed registry [...]`, with the registry class, the reference read
+  as `imageName` is (see *Image volumes* under **pod**). An entry
+  without a reference is not checked: the operator takes that image from the
+  catalog `imageCatalogRef` names (and refuses the Cluster without one), and
+  a catalog's images are not checked by this kind, as for an unset
+  `imageName`. A build reads the objects a document brings, not an object a
+  reference points at: a catalog's images are held where the catalog is
+  authored, by a kind that builds it. No kind here builds an image catalog
+  today, so nothing in this library holds a catalog's images: not for a raw
+  catalog on `manifests`, `passthrough` or a chart, and not for one that
+  already exists in the cluster. A `postgresql` component writes no
+  extension entry. `imageName` and the extension images are every image a
+  Cluster names today; the test that walks the pod spec for image fields
+  walks the Cluster and the Pooler spec the same way.
+  Both are also held to the tag rule (`ValidateImageRef`) when the component
+  is read and again at generation, with or without a policy (**breaking**,
+  go-kure/launcher#790: an untagged or `:latest` `imageName` or extension
+  reference built before): `imageName: image "…" rejected: no tag or digest
+  specified; use an explicit version tag or digest`,
+  `postgresql.extensions[0].image.reference: image "…" rejected: …`. An unset
+  `imageName` and an entry without a reference name no image and are not
+  checked, as for the allowlist. A digest without a tag passes, here as
+  everywhere the rule runs; on `imageName` CloudNativePG's webhook refuses
+  one, and a tag that is no PostgreSQL version, and those are the operator's
+  value rules, left to the operator.
+  Generation refuses `hugepages-<size>`
+  in `resources` without `cpu` or `memory` after policy defaults. It also
+  applies the shared parser's request/limit cross-check there
+  (`resources: cpu: request 2 must not exceed limit 1`; hugepages and
+  extended resources need a limit equal to the request), so a policy default
+  limit below an authored request is refused as well. The other
+  resource-name rules of the shared parser are left to the API server.
+  `Endpoints` declares the same primary endpoint as `postgresql`
+  (`cnpg.io/cluster: <Cluster name>` on port `5432`), and only for a
+  component the parse accepts: what `ToApplicationConfig` refuses of the
+  name or of the properties is refused where endpoints are collected, in the
+  same words (`instances: must be >= 1, got 0`). What `Generate` refuses
+  once the policy is applied is not repeated there.
+  `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
+  `ClusterSpec` by reflection: each json field is published with its type or
+  listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
+  schema key with no field or a stale exclusion also fails, so a CNPG bump
+  that adds, removes or retypes a field names it.
+- **cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR
+  kind components for a CloudNativePG `Pooler` and `Database` and a Barman
+  Cloud plugin `ObjectStore` (`barmancloud.cnpg.io/v1`), built on the
+  `cnpg-cluster` recipe: one schema key per json field of `PoolerSpec`,
+  `DatabaseSpec` or `ObjectStoreSpec`, the whole property map decoded strictly
+  into that type under the same null contract, the same refusal of an
+  authored `0` or `false` the type cannot carry (for the linked versions only
+  `instanceSidecarConfiguration.retentionPolicyIntervalSeconds`, default
+  `1800`, on the ObjectStore) and of two spellings of one field, and the same
+  reflection tests pinning the schema and both derived lists to the linked
+  modules. `Generate` emits one object named after the component in the build
+  namespace with the authored spec, and repeats the parse-time refusals made
+  on the decoded spec. The
+  fields each CRD requires are refused when
+  unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
+  (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
+  `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
+  A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
+  label of at most 50 characters).
+  `cnpg-pooler` writes no type or instance count of its own, so the operator's
+  defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
+  Service's, so it must be a DNS-1035 label of at most 63 characters, and a
+  pooler named like its cluster is refused, as CloudNativePG's webhook does:
+  by the build, and where its endpoint is collected in the same words
+  (`cluster.name "main": a pooler cannot have the same name as its cluster`).
+  `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
+  namespaces, hostPath volumes, privilege, host-process, capabilities, the
+  registry allowlist on each authored container image, cpu and memory maxima;
+  errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
+  limit "2" exceeds enforced maximum "1"`), caps a generic ephemeral volume's
+  claim at the policy storage maximum, holds an image volume's reference to the
+  registry allowlist (`template.spec: volume "ext" image.reference: image "…" is
+  not from an allowed registry [...]`; **breaking**, go-kure/launcher#790, see
+  *Image volumes* under **pod**), and applies the registry allowlist to an
+  authored `pgbouncer.image`. With or without a policy, when the component is
+  read and again at generation, an authored `pgbouncer.image`, the image of
+  each init and regular container of the template and the reference of each
+  of its image volumes are held to the tag rule (`ValidateImageRef`;
+  **breaking**, go-kure/launcher#790: an untagged or `:latest` one built
+  before): `pgbouncer.image: image "…" rejected: …`,
+  `template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
+  container that names no image is not checked: the operator supplies the
+  PgBouncer image, so that is the ordinary form here, where the pod kinds
+  refuse it. Generation runs the shared parser's
+  request/limit and hugepages checks on the template's pod and container
+  resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
+  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
+  other resource-name rules of the shared parser are left to the API server. A
+  template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
+  or `overhead` is refused, as the workload kinds refuse them: the operator
+  copies the template into a Deployment, whose pod template cannot carry the
+  first two and whose pods get the last two from the default Priority and
+  RuntimeClass admission controllers, which refuse an authored value that
+  differs from theirs. Four fields the Pooler CRD requires under
+  `template.spec`, which the pod spec's type leaves out when they are empty,
+  are refused when unauthored or empty: the `action` of a restart rule of a
+  container or an init container and the `operator` of its exit codes
+  (`template.spec.containers[0].restartPolicyRules[0].action: required (…)`),
+  and the `signerName` and `keyType` of a pod certificate source of a
+  projected volume
+  (`template.spec.volumes[0].projected.sources[0].podCertificate.signerName:
+  required (…)`). The object would show the omission and the API server
+  refuse it; the CRD of the linked module settles that, which is what the
+  built-in pod kinds lack.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
+  from the CRD and shows the refusals. Five more that the CRD requires under
+  `template.spec`, which the pod spec's type writes as `null` when they are
+  unauthored, are refused when unauthored: the `nodeSelectorTerms` of a
+  required node affinity, the `priority` of an eviction responder, the
+  `monitors` of a `cephfs` or an `rbd` volume, and the `secretRef` of a
+  `scaleIO` volume (`template.spec.volumes[0].cephfs.monitors: required (…)`).
+  The API server drops a null of a field that is not nullable before it
+  validates, so the required field is then missing. An authored empty list is
+  written as one and is not refused here. `template.spec.containers` is such
+  a field too and is not refused: the kind writes `containers: []` itself
+  (below). `TestKindComponents_NullRequired` derives these fields and
+  `pgbouncer` from the CRD and shows each answer by running the CRD's schema
+  validator on the object. One string the CRD requires and bounds with a
+  pattern, which the type writes as `""` when it is unauthored, is refused
+  when unauthored under an authored `pgbouncer.imageCatalogRef`: its `key`
+  (`pgbouncer.imageCatalogRef.key: required (…)`). An authored empty one is
+  written, and refusing it is left to the API server. The refusal reads the
+  authored properties, so `Generate` does not repeat it: a `CnpgPoolerConfig`
+  built in Go is not held to it. The same test derives
+  it, as the one field of a Pooler the type writes unauthored as a zero value
+  the CRD's own rule refuses. The instance count is deliberately not policed:
+  `postgresql`, which lowers its pooler onto this kind, never applied a
+  policy to the pooler's count, so a maximum here would refuse a document
+  that built before.
+  Pod-level errors name the template's own fields, as in `template.spec:
+  resources cpu limit "2" exceeds enforced maximum "1"`. A `template` that lists
+  no containers (labels only, say) is written with `containers: []`: the Go type
+  cannot omit the template's `spec`, the CRD requires `containers` once it is
+  present, and the operator adds its `pgbouncer` container either way.
+  `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
+  <Pooler object name>` on port `5432`: the component name unless
+  `objectName` or the naming hook names the Pooler), byte-identical to `postgresql`'s pooler
+  endpoint for a pooler of that name (`<component-name>-pooler` by default,
+  of the `postgresql` component), and
+  only for a component the parse accepts: what `ToApplicationConfig` refuses
+  is refused where endpoints are collected, in the same words (`pgbouncer:
+  required (an empty object selects PgBouncer's defaults)`).
+  `cnpg-database` also refuses the names the CRD reserves (`postgres`,
+  `template0`, `template1`). The `ensure` of each schema, extension, fdw and
+  server has no `omitempty` but a CRD default of `present`, so `Generate` writes
+  `present` where it is unauthored, as the API server would have; a
+  test derives that list from the CRD too. An authored `ensure: ""` there is
+  refused by its path (`schemas[0].ensure: "" is refused by the Database CRD,
+  …`) rather than written as `present`, since the CRD's enum refuses it as
+  written; an explicit null is absence and takes the default. A Database runs nothing, so it has
+  no policy and no endpoint.
+  `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
+  sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
+  at the policy maxima, filling no default, and declares no endpoint;
+  generation runs the same request/limit and hugepages checks on them, leaving
+  the other resource-name rules to the API server. It refuses
+  `configuration.serverName`, which the shared Barman type carries but the
+  plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
+  of the Cluster that uses the store.
+- **serviceaccount**, **persistentvolumeclaim**, **configmap**
+  (go-kure/launcher#702) are kind-named projections of one object each. Each
+  emits that object, named after the component, and nothing else, so another
+  component refers to it by the component name. They are the authorable forms
+  of the objects the workload kinds generate for themselves today, and they
+  carry no launcher opinions. Like every component, they are in no tier
+  unless a tier annotation or placement policy places them. `serviceaccount`
+  and `configmap` have no `ApplyPolicy`, deliberately (go-kure/launcher#794,
+  item 2): none of their properties maps to an environment-policy method
+  (`imagePullSecrets` names Secrets, not a registry), so there is nothing to
+  enforce. `persistentvolumeclaim` has one, for the storage default and
+  maximum.
+  - `serviceaccount` publishes `automountServiceAccountToken` and
+    `imagePullSecrets` (`[{name}]`). An unauthored
+    `automountServiceAccountToken` stays unset, which Kubernetes reads as
+    true. The account a role kind generates sets it to false, so a
+    `serviceaccount` replacing that account authors `false` to keep the same
+    posture. A workload runs as it through `serviceAccountName`, which also
+    stops a role kind from generating its own account.
+  - `persistentvolumeclaim` publishes `size`, `storageClassName`,
+    `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
+    built by the same `BuildPVC` as a `pvc` volume, so the two agree on every
+    field they share, including the explicit-empty `storageClassName: ""`,
+    which requests no class. The `pvc` trait is this kind's twin
+    (go-kure/launcher#741): it runs the kind's own `ParseClaimProperties`,
+    `ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
+    same claim. Only the ownership fields differ: the claim's name, its `app`
+    label, namespace and bundle. An unauthored `storageClassName` (absent or
+    `null`) comes from the ClusterProfile `pvc` capability's
+    `storageClassName`, as the trait's does (go-kure/launcher#742); with no
+    binding it stays unset, which is the cluster's default class. **Pre-GA
+    output change**: the kind used to ignore that binding, so an existing
+    claim built from it got the cluster's default class when it was created,
+    if the cluster had one. A claim's assigned `storageClassName` cannot
+    change: if the binding's class differs from it, the claim fails to apply
+    until it is recreated or the assigned class is authored. A claim created
+    with no class may take one later, so it applies. An unauthored `size`
+    comes from the EnvironmentPolicy storage default; with neither, the build
+    fails with `size: required …`. The policy's maximum storage size applies
+    either way. A workload mounts the claim through a `pvc` volume's
+    `claimName` (see "Referencing an existing claim" below). A claim name
+    another component also generates (for example a `pvc` trait of the same
+    name) is refused as a generated-object collision.
 
-  **No capability is required, and nothing gates these kinds.** Launcher does
-  not ask whether the cluster serves `volsync.backube/v1alpha1`: where
-  VolSync's CRDs are not installed the component builds, and the object is
-  refused at apply. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it. The kinds read nothing of the cluster
-  profile; the `volsync` trait still takes its class defaults from it.
+    Four more claim-spec fields are read (go-kure/launcher#790), by the kind
+    and by the `pvc` trait alike (`claim_spec.go`). Each is written only when
+    authored, so a document that authors none builds the claim it built
+    before. A workload's `pvc` volume does not take them.
 
-  **Authored.** The properties are the top-level json fields of the spec type,
-  decoded strictly at every depth: an unknown key is refused wherever it sits
-  (a mover, its security context, a volume mounted into it).
-  - `replicationsource` (`ReplicationSourceSpec`): `sourcePVC`, the claim to
-    copy; `trigger` (`schedule`, a cron expression, or `manual`); the movers
-    `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`; `external`, a
-    provider outside VolSync with its `parameters`; and `paused`.
-  - `replicationdestination` (`ReplicationDestinationSpec`): `trigger`, the
-    movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external` and
-    `paused`. A destination has no Syncthing mover and names no source claim:
-    `syncthing` and `sourcePVC` are refused there as unknown keys.
-  - `rsync` (rsync over SSH) has its own, shorter type: it takes
-    `moverResources`, `moverServiceAccount` and `moverPodLabels`, and has no
-    `moverSecurityContext`, `moverAffinity` or `moverVolumes`, which are
-    refused under it as unknown keys.
-  - A mover authored empty is in the object, empty but for what the type
-    writes unauthored (below); one left out is not.
-  - An authored `false` or `0` is kept where the API tells it from an unset
-    field (`restic.retain.monthly: 0`, a destination's `restic.previous: 0`,
-    a Syncthing peer's `introducer: false`, `moverSecurityContext.runAsUser:
-    0`), and left out where the type omits a zero (`paused: false`).
-    VolSync's CRDs default no field under `spec`, so no authored zero is
-    replaced by a default; `TestVolsyncKinds_NoDefaults` holds the linked
-    CRDs to that, and a dependency bump that adds a default fails there with
-    the field named.
+    | Property | Rule |
+    |----------|------|
+    | `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
+    | `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under "StatefulSet-level and claim-template properties"). |
+    | `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
+    | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
 
-  **Required** follows the rule of the Prometheus operator's kinds: a
-  field the API requires that the Go type writes whether or not it was
-  authored must be authored. Neither kind has one at the top level.
-  - Of a volume mounted into a mover (`moverVolumes`, on `rsyncTLS`,
-    `rclone`, `restic` and `syncthing`): `mountPath` and `volumeSource`
-    (`restic.moverVolumes[0].volumeSource: required (…)`).
-  - Of a Syncthing peer: `address`, `ID` and `introducer`. No default is
-    filled for `introducer`: an authored `false` is a value.
-  - Of a mover's affinity that authors a required node affinity
-    (`moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution`):
-    its `nodeSelectorTerms`, which the Kubernetes type would write as `null`
-    where the CRD requires them. `TestKindComponents_NullRequired` shows the
-    refusal with the validator of the linked CRDs.
-  - A required field under a parent the author left out is not asked for: the
-    list follows what was authored.
+    **No policy check on `volumeName`.** It is accepted with no capability
+    gate and no EnvironmentPolicy method (go-kure/launcher#790, open point "No
+    capability gate on component types"). A claim that names a volume binds to
+    that PersistentVolume and to no other, with no dynamic provisioning, so
+    **whoever may author a claim may ask for any PersistentVolume of the
+    cluster by name**. The cluster still decides: the volume must be unbound
+    or reserved for this claim, and must satisfy the claim's size, access
+    modes, class, attributes class and volume mode (the PersistentVolume
+    controller's `checkVolumeSatisfyClaim`). The storage default and maximum
+    still apply to the claim's `size`.
 
-  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (11 paths for a source,
-  6 for a destination) to the CRDs the linked module ships: every field of
-  VolSync's own types that a CRD requires and the type writes unauthored is
-  listed, and nothing else is. A dependency bump that adds, drops or moves
-  one fails there. **Not refused:**
-  - a required field the type omits when it is not authored: the object shows
-    the omission, and the API server refuses it;
-  - a required field of a Kubernetes type these specs embed, other than those
-    terms (the `key` of a selector requirement in an affinity, for one). An
-    omitted one is emitted empty;
-  - every other value rule of the CRDs (enumerations, patterns, minima).
+    `dataSource` is refused: it is the superseded spelling of `dataSourceRef`,
+    which the API server mirrors into it. The long `resources` spelling of
+    `size` is not read on a standalone claim.
+  - `configmap` publishes `data` (string values only: a number or a boolean
+    is refused rather than stringified), `binaryData` (base64; a key may not
+    also appear in `data`) and `immutable`. The `data` values and the decoded
+    `binaryData` values together may hold at most 1,048,576 bytes, the limit
+    the API server enforces; a larger ConfigMap is refused at build time. That
+    check is the exported `CheckConfigMapSize(data, binaryData)`. A key the API
+    server refuses in a ConfigMap is refused by the exported
+    `ValidateConfigMapKey(field, key)`. Keys are checked in sorted order, so
+    with several bad entries the one reported is the same on every build. It is
+    a different type from the `configmap` trait, which attaches a ConfigMap to
+    another component. The trait is this kind's twin (go-kure/launcher#741): it
+    reads `data`, `binaryData` and `immutable` through the exported
+    `ParseConfigMapProperties(props)` and builds the ConfigMap through
+    `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
+    give the same ConfigMap and the same refusals on both paths.
+- **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
+  (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
+  An override outranks kure's own non-API-governed scope-table entry — a kind
+  nothing else can scope, e.g. a cluster-scoped custom resource whose CRD is
+  installed out of band. It does **not** outrank a `CustomResourceDefinition`
+  bundled in the same source: that CRD is the definition being applied, so it
+  must agree with the override rather than be overridden by it — a disagreement
+  is rejected (`manifests.go`'s `stampManifestNamespaces`, an error naming both
+  the override's and the CRD's declared scope; the resolution itself is
+  `resolveObjectScope`, which the `helmtemplate` component's `scopeOverrides`
+  goes through too); an agreeing override still
+  applies, and a kind with no same-source CRD falls back to the non-API-governed
+  case above. It is also ignored
+  for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
+  `manifests.go`: a `CustomResourceDefinition` document; any kind whose kure
+  scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
+  upstream types, `PriorityClass`, `APIService` and the two webhook
+  configurations among them; and any cluster-scoped API built-in kure fixes the
+  scope of without registering it, a set that is empty at the kure version in
+  `go.mod`. Such a kind is detected by
+  asking `manifest.Scope` itself with no CRD context, not by copying kure's
+  list, so kure stays the single answer); a manifest cannot redefine those. A kind with no override and
+  no other scope source still fails closed when it carries no
+  `metadata.namespace`. Conversely, a cluster-scoped object (either component,
+  any scope source) that authors `metadata.namespace` is rejected rather than
+  emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
+  object, so letting it through would only defer the failure to apply time.
+  Both components decode a document of a registered kind into its Go type, with the
+  decode `helmtemplate` gives a rendered chart, and treat a field that type does not
+  declare — one a newer Kubernetes version added, say — as it does (`helmtemplate`'s
+  *Undeclared fields*): a workload or a claim that sets one is refused, under any policy
+  and with none (`manifest source: parse manifests: Deployment "demo/web": undeclared
+  field spec.template.spec.fieldOfALaterVersion: …`), an inline source when the component
+  is built and a url source when it is fetched; an object of any other registered kind is
+  emitted as written, unstructured, the field kept, and a `CustomResourceDefinition` kept
+  so still passes `crd` and still gives its scope to the resources beside it. **Breaking**
+  (go-kure/launcher#794, item 7), in the same two ways: a source with such a workload or
+  claim no longer builds, and the output of other kinds gains the fields that had been
+  dropped. The same known limit applies (a key inside a type that unmarshals itself, a
+  CRD's `items` schema for one, is still dropped). A document the decoder of its kind
+  panics on is a build error naming the object, as it is there (`manifest source: parse
+  manifests: parse error in Kubernetes object: failed to decode object: the decoder
+  panicked on CiliumNetworkPolicy "demo/p": …`), and so is malformed JSON the decoder
+  cannot read past, on which the build did not return before go-kure/kure#1012. A MetalLB
+  `BGPPeer` at `metallb.io/v1beta2` is a registered kind since go-kure/kure#1007 and is
+  read as one, with what that changes (`helmtemplate`'s *Rendered objects*).
+  An integer the object holds as one is written with its own digits, here as everywhere
+  (`9007199254740993` as `9007199254740993`; `helmtemplate`'s *Rendered objects*). In an
+  unstructured object an integer an int64 cannot hold is a float from the decode on, and is
+  written as that float.
 
-  **Two fields the linked Kubernetes type holds and the CRDs do not are
-  refused when authored:** `<mover>.moverVolumes[].volumeSource.secret.defaultUser`
-  and `<mover>.moverVolumes[].volumeSource.secret.items[].user`, an authored
-  `0` included (`rclone.moverVolumes[0].volumeSource.secret.defaultUser: no
-  field of the volsync.backube/v1alpha1 API: its CRD has no such property`).
-  The linked Kubernetes API is newer than the one VolSync's CRDs were
-  generated from: the Go type of a mounted Secret has the two fields, the
-  strict decode reads the Go type, and the CRDs have no property for either.
-  `TestVolsyncKinds_AbsentFromCRD` derives the fields the types reach that
-  the linked CRDs have no property for and holds the refusals to them, both
-  ways: a bump of either module that closes the gap, or widens it, fails
-  there with the field named. It also runs the API server's own create
-  sequence on the linked CRDs (`crdCreate`): the API server names each of the
-  two as an unknown field, for which a request made with strict field
-  validation is refused, and prunes it from the object it goes on with.
+  **Policy.** Every object a `manifests` or `crd` source yields is checked against the
+  environment policy with the check template delivery (`helmtemplate`) and `passthrough`
+  use: each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet,
+  ReplicaSet, Job and CronJob is checked as an authored workload is (host namespaces,
+  hostPath volumes, the cpu/memory maxima, the registry allowlist on every init and
+  regular container's image and on an image volume's reference, the privileged,
+  HostProcess and capability gates, `ValidateImageRef` on both, no ephemeral containers), a
+  PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
+  maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
+  replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds
+  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
+  `spec.capacity.storage` is held to the storage maximum (breaking for a source that
+  holds one; see **persistentvolume**). An image volume from a registry outside
+  the list is refused since go-kure/launcher#790 (**breaking** for a source that holds
+  one; see *Image volumes* under **pod**). The error names the object and the field (`manifest source: object
+  Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
+  holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
+  before.
 
-  **The CRDs declare no expression rule** (`x-kubernetes-validations`), so
-  the kinds check none; `TestVolsyncKinds_NoExpressionRules` holds the linked
-  CRDs to that, and a dependency bump that adds one fails there with the rule
-  named.
+  A core Secret a `manifests` source yields, `inline` or fetched, is refused under a policy
+  that forbids explicit secrets (`oam.ExplicitSecretPolicy`), as the `secret` trait and a
+  `passthrough` Secret are (go-kure/launcher#794, item 10): `manifest source: object Secret
+  "demo/creds": the object is a Secret, and the environment policy forbids explicit
+  secrets; …`. The check does not read what the Secret holds, and the message quotes
+  nothing of it. **Breaking** only under a policy that answers `false`. **Not covered:** a
+  Secret a chart renders under template delivery (`helmtemplate`, `helm` with
+  `delivery: template`), whose content comes from the chart and its values; the document's
+  own sensitive values are refused there where they are set (`secretValues`).
 
-  **What the type writes unauthored.** `customCA: {}` on an authored `rclone`
-  or `restic` mover, which holds it by value. The CRDs accept it empty, and
-  `TestVolsyncKinds_RequiredMatchCRD` holds every such field to its schema.
+  When the check runs depends on the source. An `inline` source is checked by
+  `ApplyPolicy`, the transform's policy step, and the refusal is that step's
+  `*oam.ViolationError`. A `url` source is checked in `Generate`, on the objects it is
+  about to emit: `ApplyPolicy` checks its host against the allowed registries and does
+  not fetch, so **a caller that runs the transform and never generates does not see an
+  object refusal for a `url` source**. A refusal in `Generate` is the same
+  `*oam.ViolationError`, naming the component; a fetch or parse failure there keeps its
+  own error and is not a policy violation. `Generate` also checks an `inline` source
+  again, on what it emits.
 
-  **Policy.**
-  - **An authored capacity is held to the storage maximum.** A mover's
-    `capacity` (on `rsync`, `rsyncTLS`, `rclone` and `restic`) sizes a volume
-    the operator provisions: on a source the point-in-time image of the
-    volume, on a destination the volume the data is received into.
-    `restic.cacheCapacity` sizes Restic's metadata cache volume and, on a
-    source, `syncthing.configCapacity` Syncthing's configuration volume. Each
-    is held to the environment policy's storage maximum: `component "web":
-    restic.capacity "20Gi" exceeds enforced maximum "10Gi"`. A capacity the
-    author left out is the operator's to choose and is not held; the policy's
-    default storage size is not filled.
-  - **A mover's cpu and memory are held to the maxima.** The limits and
-    requests of `moverResources` are held to the policy's cpu and memory
-    maxima, as a container's are, on every mover: `component "web":
-    rsync.moverResources: cpu limit "4" exceeds enforced maximum "2"`. No
-    default is filled: the policy's default requests and limits are a
-    workload's. A request above its limit is not refused here.
-  - **A mover's `hostProcess` switch is refused unless the policy allows
-    privileged workloads.** `moverSecurityContext.windowsOptions.hostProcess:
-    true` runs the mover's containers as Windows HostProcess containers:
-    `component "web": restic.moverSecurityContext.windowsOptions.hostProcess
-    is not allowed by environment policy`. An authored `false` builds. With
-    no policy passed it is refused too, since `NoopPolicy` allows nothing
-    privileged.
-  - **The `rsync` mover is held to the policy's container capabilities.**
-    Authoring the rsync-over-SSH mover is itself a choice of privilege: the
-    linked operator version (VolSync v0.16.0) runs its container as root
-    (`runAsUser: 0`), not privileged, with every capability dropped and seven
-    added (`AUDIT_WRITE`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`,
-    `SETUID`, `SYS_CHROOT`), on a source and on a destination alike, and its
-    builder does not take the namespace's answer on privileged movers. An
-    authored `rsync` mover, whatever it holds, is therefore held to the
-    policy's allowed and forbidden container capabilities for those seven,
-    as a container that adds them is on a pod kind: `component "web": rsync:
-    the mover's container as VolSync v0.16.0 writes it:
-    securityContext.capabilities.add: "SYS_CHROOT" is forbidden by
-    environment policy`. A policy that sets neither list, and no policy,
-    build it; allowing privileged workloads does not lift a forbidden
-    capability, as it does not on a pod kind. Two limits. The seven are what
-    the **linked** operator version writes
-    (`internal/controller/mover/rsync/mover.go` in its module): a cluster
-    that runs another version of the operator may add other capabilities, and
-    the kind does not know. `TestVolsyncKinds_RsyncCapabilities` reads that
-    literal and holds the non-test Go source of the two packages the
-    container is built in (`internal/controller/mover/rsync` and
-    `internal/controller/utils`) to a stated digest: a dependency bump that
-    changes either package fails, whatever the change, until a person has
-    re-read the mover and restated the digest. The test cannot check that the
-    re-reading was done; a bump that touches either package needs it even
-    when the container is untouched; and the module's other packages and the
-    functions of other modules that the mover calls are outside the digest.
-    And that the container runs as root is stated here, not held: the policy
-    has no dimension for it.
-  - **Not held:** the rest of `moverSecurityContext`. It is a pod security
-    context, and of it only `windowsOptions.hostProcess` is held: the user
-    and groups the mover runs as, its sysctls and its SELinux and seccomp
-    settings are written as authored, since the environment policy has no
-    dimension for them. The service account the mover runs under
-    (`moverServiceAccount`, on every mover) is an identity carried as
-    authored. Nor are held a mover's affinity; the volumes mounted into it
-    (`moverVolumes`: a Secret, a claim or an NFS export; the type holds no
-    host path); the type of the Service a mover is reached through
-    (`serviceType`); and whether an `rsyncTLS`, `rclone`, `restic` or
-    `syncthing` mover runs with elevated permissions, which is no field of
-    the object: an administrator sets it with an annotation on the namespace
-    (`volsync.backube/privileged-movers`), which the linked operator's
-    controllers read and hand to the builder of each of those four movers.
-    The `rsync` mover's builder drops that answer (above).
-  - **Hosts are not checked.** A host these objects name is one the mover
-    reaches, not an artifact source, and none is held to the policy's allowed
-    registries: `rsync.address`, `rsyncTLS.address`, a Syncthing peer's
-    `address`, and the `server` of an NFS export among `moverVolumes`.
-  - **No field holds a literal secret by design, and none is checked.** A
-    credential is the name of a Secret (`restic.repository`,
-    `rclone.rcloneConfig`, `rsync.sshKeys`, `rsyncTLS.keySecret`). The
-    `parameters` of an `external` provider are a map of strings the provider
-    reads: they are written as authored and not checked, under a policy that
-    forbids explicit secrets too.
+  What cannot be read is refused, not passed: a workload, claim or PersistentVolume in
+  an API version kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`),
+  inside a list as outside one. A list is replaced by its items, each decoded and checked
+  as a document of its own is, for a field its type does not declare too (`manifest
+  source: parse manifests: item 0 of List: Deployment "demo/web": undeclared field …`):
+  a `v1` `List`, a typed list (`DeploymentList`) and, since go-kure/kure#1014, a list of
+  a kind the scheme does not register (a kind ending in `List` that states `items`),
+  whose items of a registered kind are their Go types and are checked for real, a list
+  among them opened in turn. The list handling is the one `helmtemplate`'s *Rendered
+  objects* describes, with the same errors under `manifest source: parse manifests: …`:
+  a label or an annotation on a list's own metadata, a `Kind`, `apiversion` or `Items`
+  key, a `null` item, and an object of a kind that is no list with a top-level `items`
+  array, which is refused with a policy or with none and is no policy violation.
+  **Breaking** (go-kure/launcher#790): the table under `helmtemplate` lists what built
+  before and is refused now.
 
-  **The operator's own rule is not repeated.** When it reconciles, VolSync
-  refuses an object that configures no replication method or more than one
-  (`a replication method must be specified`, `only one replication method
-  can be supplied`). Launcher does not: such a component builds, and the
-  rule stays the operator's.
+  **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
+  reached the output unchecked. A document that relied on that no longer builds when its
+  source holds a workload with a privileged container, a host namespace, a hostPath
+  volume, an image outside the registry allowlist, an untagged or `:latest` image, or a
+  value over a maximum, or an object the check cannot read (above) — and with no policy
+  passed the first three are always refused, since `NoopPolicy` denies them. A consumer
+  allows what it wants allowed through its policy, not per component, exactly as for
+  `passthrough`. An untagged or `:latest` image has to be pinned in the source,
+  and a workload in an API version the build cannot read has to be authored in the one
+  it can (`batch/v1`, `apps/v1`).
 
-  **Beside the `volsync` trait.** The trait derives a ReplicationSource for a
-  claim of the workload it is attached to, a Restic backup on a schedule,
-  and names it `<sourcePVC>-backup`. The `replicationsource` kind is the
-  authored object, for what the trait does not express: the whole spec, any
-  mover, a source that belongs to no workload. No trait builds a
-  ReplicationDestination. The trait's object and a `replicationsource`
-  component's are one kind: given one name in one namespace they are refused
-  (`generated-object collision: ReplicationSource.volsync.backube
-  "default/data-backup" is generated by both …`).
+  Not checked: an object of a kind not named above; a custom resource, the pods its controller
+  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
+  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
+  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
+  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
 
-  **Labels and annotations** are the `labels` and `annotations` properties. A
-  mover's `moverPodLabels` are not these: they are labels the operator adds to
-  the mover pods.
+  A `url` that does not parse is refused without the URL or the parser's
+  error, and a fetch error names the URL by scheme and host only
+  (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
+  userinfo, path or query may carry a credential, and an IPv6 zone in the host is
+  dropped too. A refused redirect hop reads fixed text (`redirect to a url that is
+  not http(s) refused`, `redirect to a host not in allowed registries refused`,
+  `too many redirects`), since its target is the server's. A failed request or body read is
+  named by fixed text only (`failureCause`): a timeout, a failed host lookup,
+  or the failing network operation and its system error, such as
+  `dial failed: connection refused`; anything else reads `request failed` or
+  `response body could not be read`. The underlying error's own text is never
+  shown, since it can quote the URL, a server-sent header or trailer, or a TLS
+  certificate, but it stays the error's cause: `errors.Is` and `errors.As` still
+  find it, so a timeout matches `context.DeadlineExceeded`.
+- **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
+  `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
+  `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
+  `@midnight`, `@hourly`; `@reboot` is rejected, meaningless for a CronJob),
+  or `@every <duration>` (e.g. `@every 1h30m`, validated via Go's
+  `time.ParseDuration` — a malformed duration is rejected, not merely
+  regex-matched). `restartPolicy` (default `OnFailure`),
+  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. `ports` declares
+  container ports, and emits no Service (see "Main container ports"). No
+  `sidecars` schema key (init containers only): a plain sidecar keeps running
+  after the main container exits, so the Job's pod would never complete. The
+  container that fits is the restartable init container, which this package
+  does not model (see "Container fields"). Since go-kure/launcher#790 it
+  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
+  (see "Raw scheduling properties"), written onto the Job template's pod
+  template.
+  CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
+  own default is `Allow`, but this is only ever written when authored —
+  `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
+  add the key to every generated CronJob), `suspend`, `startingDeadlineSeconds`
+  (`>= 0`), `timeZone` (a real IANA zone name, e.g. `Europe/Brussels`; an
+  authored empty string is rejected outright, `Local` is rejected
+  case-insensitively even though Go's own `time.LoadLocation("Local")`
+  succeeds — Kubernetes' CronJob validation rejects it as server-dependent —
+  and any other value is checked via `time.LoadLocation`, which this binary
+  resolves from an embedded IANA database rather than the host's zoneinfo).
+  JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the `job`
+  component — the full table is under **job**, and the shared trio is
+  described in "Common config" above): `backoffLimit`, `completions`,
+  `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
+  `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
+  `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
+  `suspend` on a cronjob
+  is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
+  "Common config". Every CronJobSpec-level and JobSpec-level field above except
+  `restartPolicy` and the two history limits is presence-gated: omitting it
+  never adds a key to the generated output, even where the corresponding
+  Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
+  to have been authored. Those three are always written, taking `OnFailure`, 3
+  and 1 when omitted.
+  The CronJob's name is at most 52 characters, the longest the API server
+  creates one under (`ValidateCronJobCreate`: the controller names each Job
+  after the CronJob plus an 11-character suffix, and that Job's name is held to
+  63). The rule is held on the name the CronJob takes, the component name or
+  its `objectName` (or the `Naming` hook's answer), when the component is read
+  and again at `Generate`: `cronjob "<name>": the component name is the
+  CronJob's name, which must be at most 52 characters: it has 53`, or
+  `objectName (or the Naming hook's answer for role "object"): "<name>" is not
+  a valid CronJob name, which must be at most 52 characters: it has 53`. A
+  component named with 53 to 63 characters built before this rule and is
+  refused now (go-kure/launcher#787); a longer one was already refused by the
+  container-name rule. With an Indexed job template the name must also leave
+  room for the index in each pod's hostname, a limit that applies when the
+  controller creates the Job, not when the CronJob is admitted; the build does
+  not check it.
+  Known limitation: the plain 5-field `schedule` form accepts any 5
+  whitespace-separated tokens with no per-field semantic check (e.g.
+  `99 99 99 99 99` builds successfully here and is only rejected later, by
+  Kubernetes' own API server) — this is deliberate, not an oversight: tightening
+  it would reject documents that build successfully today, which is a breaking
+  change under this project's additive-compatibility rule (see
+  `docs/oam/design-gvk.md`).
+- **storageclass**, **volumeattributesclass**, **priorityclass**,
+  **runtimeclass**, **ingressclass**, **csidriver** (go-kure/launcher#790) are
+  the kind-named projections of six cluster-scoped objects: a
+  `storage.k8s.io/v1` StorageClass, VolumeAttributesClass and CSIDriver, a
+  `scheduling.k8s.io/v1` PriorityClass, a `node.k8s.io/v1` RuntimeClass and a
+  `networking.k8s.io/v1` IngressClass. Each emits that one object, named after
+  the component unless `objectName` names it, with no namespace, holding
+  exactly what was authored: the handler adds no label, no annotation and no
+  default of its own, and the transform sets the component label, as on every
+  object a component owns (go-kure/launcher#788).
 
-  **Not covered.** Whether what is referred to exists (the claim to copy, a
-  Secret, a storage or snapshot class, a ServiceAccount), and whether the
-  mover can reach what the object names. The object's status is the
-  operator's and is not written.
-- **statefulset** — `serviceName` and `volumeClaimTemplates`
-  (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
-  `size`, `storageClass`, `accessModes`, plus the rest of
-  `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
-  StatefulSetSpec-level and
-  claim-template field sets are classified in "StatefulSet-level and
-  claim-template properties" below. `ports` declares the main container's
-  ports (see "Main container ports"). It emits no Service
-  (go-kure/launcher#690). For scheduling it takes `tolerations` and
-  `topologySpreadConstraints` as the raw `corev1` shapes
-  (go-kure/launcher#790, see "Raw scheduling properties" above) beside the
-  four-key `affinity` shorthand; the raw `affinity` shape is not published on
-  this kind.
-  - **`serviceName` names the governing Service, which the component does
-    not emit.** Author it as a headless `service` component (`clusterIP:
-    None`, selecting `app: <component>`) and name it here. It has no default:
-    unset, the StatefulSet carries `serviceName: ""`. An authored value must be
-    a valid Service name, a DNS-1035 label (at most 63 characters, lowercase
-    letters, digits and `-`, starting with a letter and ending with a letter
-    or digit), and is refused at conversion otherwise (`serviceName: "api.v1"
-    is not a valid Service name, which must be a DNS-1035 label`,
-    go-kure/launcher#546); `Generate` applies the same rule to the config's
-    `ServiceName`. Before go-kure/launcher#690 `serviceName` defaulted to the
-    component name and the component emitted that headless Service itself;
-    "Main container ports" has the migration, including why an existing
-    StatefulSet must be recreated.
-  - **A route to the pods names the authored Service.** With no Service of
-    its own, the component is no implicit backend: an `ingress`, `httproute`
-    or `expose` without a `backend` on it is refused (`component "<name>"
-    has no service port`). Put the trait on the authored `service`, or name
-    that Service as the trait's `backend`.
+  **One shared helper builds all six** (`policyFreeKind`, in
+  `kind_policy_free.go`), for a kind to which no dimension of the environment
+  policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
+  the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
+  BGP control plane and the five kinds of the Gateway API's infrastructure
+  objects are built on it too. The three kinds
+  of cert-manager's API and the two of VolSync's are built on `policyHeldKind`
+  (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
+  asks one function of the kind whether the policy refuses the decoded value.
+  It refuses or passes; it fills no default. A kind is a value
+  of it naming the upstream type, an optional check of required fields, an
+  optional list of required fields the type writes whether or not they were
+  authored, and the base-library constructor; the
+  helper is the rest: the strict decode of the property map into the upstream
+  type under the package's null contract, which refuses a `null` list element
+  by its path (`decodeKindSpec`), the refusal of a key written in two
+  spellings (`refuseUncarriedSpecValues`), the refusal of a listed required
+  field that was not authored (`refuseUnauthoredRequired`, which reads the
+  authored properties, since the decoded value does not show the omission, and
+  follows a list to each of its items), a config whose `ApplyPolicy` does
+  nothing, and a `Generate` that returns the constructor's object, under the
+  object name the config carries, with a deep copy of what was decoded, so two
+  builds of one config share nothing. The config type is unexported: a
+  component is only built from properties that went through the decode. The
+  helper keeps no list of defaulted zeros, so it suits a type only when none
+  of its omit-when-zero numbers or booleans has a non-zero API default;
+  `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
+  Kubernetes type built on it and fails on one whose comment states such a
+  default in a form it recognises (`Defaults to 1`, `Default is true`). A
+  default the comment words otherwise, or does not state, is not found. The
+  types of the Prometheus operator's API publish no field comment;
+  `TestMonitoringKinds_NoDefaultedZeros` reads the default markers of their
+  source instead. Cilium's publish none either, and its module ships the CRDs:
+  `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
+  BGP CRDs to a field that is a pointer in the Go type.
+
+  **What is authored.**
+  - `ingressclass` and `csidriver` have a spec type, and the properties are
+    its json fields: `controller` and `parameters` (`IngressClassSpec`), and
+    the eleven fields of `CSIDriverSpec` (`attachRequired`, `podInfoOnMount`,
+    `volumeLifecycleModes`, `storageCapacity`, `fsGroupPolicy`,
+    `tokenRequests`, `requiresRepublish`, `seLinuxMount`,
+    `nodeAllocatableUpdatePeriodSeconds`, `serviceAccountTokenInSecrets`,
+    `preventPodSchedulingIfMissing`). A `csidriver` requires no property; an
+    `ingressclass` requires `controller` (see **Required** below).
+  - The four classes have none: their fields sit on the object, beside its
+    identity. The properties are those fields, decoded strictly into the
+    object type, and the object's own `kind`, `apiVersion` and `metadata` are
+    refused by name under any spelling the decoder would match (`metadata:
+    not authorable: launcher sets the object's kind, apiVersion and metadata
+    (its name is the component's, or the one objectName gives it; its labels
+    and annotations are the labels and annotations properties)`).
+    `storageclass`: `provisioner`,
+    `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
+    `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
+    `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
+    `description`, `preemptionPolicy`. `runtimeclass`: `handler`, `overhead`,
+    `scheduling`.
+  - **Required** is a top-level field the API server refuses an object
+    without: `provisioner` (`storageclass`), `handler` (`runtimeclass`),
+    `driverName` (`volumeattributesclass`) and `controller` (`ingressclass`)
+    must be a non-empty string (`provisioner: required …`), and a
+    `volumeattributesclass` must carry at least one of `parameters`
+    (`parameters: required …`). The upstream type marks `controller`
+    optional; the API server's validation requires it all the same. The API
+    does not require a PriorityClass `value`: the type always encodes one, so
+    a `priorityclass` that authors none is emitted with `value: 0`. Every
+    other value rule (which reclaim policies exist, a required field of a
+    nested object, the names a cluster-scoped object may carry) is left to
+    the API server.
+  - A quantity written as a number is emitted in its canonical string form.
+    An authored `false` or `0` is kept where the API tells it from an unset
+    field (`allowVolumeExpansion: false`, `attachRequired: false`,
+    `value: 0`). Where the API type omits a zero, the field is left out of
+    the object, which the API reads as the same value: `globalDefault: false`
+    and an empty `description`.
+
+  **The object's name** is the component's unless `objectName`, or the
+  `Naming` hook under role `object`, names it otherwise (see "The object name"
+  below). Each handler declares its object as cluster-scoped, so the name is
+  claimed in no namespace: two `storageclass` components given one object
+  name are refused, whatever namespace the application is built for. What
+  refers to the object names it by its object name: a claim's
+  `storageClassName`, a pod's `runtimeClassName` or `priorityClassName`. The
+  API identifies a CSI driver by the CSIDriver's name, so a `csidriver`
+  component's object name must be the driver's (`csi.example.com`), written as
+  the component name or as `objectName`. The build namespace does not apply to
+  these objects. The handlers check no name rule of their own on either name:
+  one the API server refuses for the kind builds here and is refused at
+  apply. **A CSIDriver's name is not held to the limit the API documents for
+  it.** The type's documentation gives a driver name at most 63 characters;
+  the API server does not hold the CSIDriver object to that, and accepts any
+  DNS subdomain name. It does refuse a PersistentVolume that names a driver
+  longer than 63 characters, so such a CSIDriver is created and no volume can
+  use it. The `csidriver` kind refuses what the API server refuses of the
+  object and no more, so it builds that name too.
+
+  **Policy.** None of the six has a field an `oam.Policy` method speaks to,
+  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
+  same under every policy and under none. A consumer that does not want an
+  author to create one of these objects does not register its handler; the
+  transform then refuses the component (`no handler for component type …`).
+
+  **Labels and annotations** are the `labels` and `annotations` properties,
+  on all six. That includes the annotations that mark a default class
+  (`storageclass.kubernetes.io/is-default-class`,
+  `ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
+  IngressClass writes its annotation there. Whether a second default exists
+  is the cluster's to decide.
+
+  **Not covered.**
+  - An `ingressclass` whose `parameters` leaves `scope` out is emitted with
+    `scope: null`: the API type always encodes the field, and documents
+    `Cluster` as its default. Author `scope` to emit a value.
+  - Whether a referenced object exists: the `runtimeclass` a pod names, the
+    `storageclass` a claim names, the parameters object of an `ingressclass`.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
   `tolerationSeconds` and the toleration cross-field rules arrived with
   go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
@@ -5045,297 +4301,124 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   unknown-key error. `6aed090` (`feat(format): enforce policy and support
   securityContext on init/sidecar containers`) is the in-repo precedent for
   shipping this class of tightening under an unchanged version string.
-- **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
-  `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
-  `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
-  `@midnight`, `@hourly`; `@reboot` is rejected, meaningless for a CronJob),
-  or `@every <duration>` (e.g. `@every 1h30m`, validated via Go's
-  `time.ParseDuration` — a malformed duration is rejected, not merely
-  regex-matched). `restartPolicy` (default `OnFailure`),
-  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. `ports` declares
-  container ports, and emits no Service (see "Main container ports"). No
-  `sidecars` schema key (init containers only): a plain sidecar keeps running
-  after the main container exits, so the Job's pod would never complete. The
-  container that fits is the restartable init container, which this package
-  does not model (see "Container fields"). Since go-kure/launcher#790 it
-  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
-  (see "Raw scheduling properties"), written onto the Job template's pod
-  template.
-  CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
-  own default is `Allow`, but this is only ever written when authored —
-  `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
-  add the key to every generated CronJob), `suspend`, `startingDeadlineSeconds`
-  (`>= 0`), `timeZone` (a real IANA zone name, e.g. `Europe/Brussels`; an
-  authored empty string is rejected outright, `Local` is rejected
-  case-insensitively even though Go's own `time.LoadLocation("Local")`
-  succeeds — Kubernetes' CronJob validation rejects it as server-dependent —
-  and any other value is checked via `time.LoadLocation`, which this binary
-  resolves from an embedded IANA database rather than the host's zoneinfo).
-  JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the `job`
-  component — the full table is under **job**, and the shared trio is
-  described in "Common config" above): `backoffLimit`, `completions`,
-  `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
-  `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
-  `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
-  `suspend` on a cronjob
-  is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
-  "Common config". Every CronJobSpec-level and JobSpec-level field above except
-  `restartPolicy` and the two history limits is presence-gated: omitting it
-  never adds a key to the generated output, even where the corresponding
-  Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
-  to have been authored. Those three are always written, taking `OnFailure`, 3
-  and 1 when omitted.
-  The CronJob's name is at most 52 characters, the longest the API server
-  creates one under (`ValidateCronJobCreate`: the controller names each Job
-  after the CronJob plus an 11-character suffix, and that Job's name is held to
-  63). The rule is held on the name the CronJob takes, the component name or
-  its `objectName` (or the `Naming` hook's answer), when the component is read
-  and again at `Generate`: `cronjob "<name>": the component name is the
-  CronJob's name, which must be at most 52 characters: it has 53`, or
-  `objectName (or the Naming hook's answer for role "object"): "<name>" is not
-  a valid CronJob name, which must be at most 52 characters: it has 53`. A
-  component named with 53 to 63 characters built before this rule and is
-  refused now (go-kure/launcher#787); a longer one was already refused by the
-  container-name rule. With an Indexed job template the name must also leave
-  room for the index in each pod's hostname, a limit that applies when the
-  controller creates the Job, not when the CronJob is admitted; the build does
-  not check it.
-  Known limitation: the plain 5-field `schedule` form accepts any 5
-  whitespace-separated tokens with no per-field semantic check (e.g.
-  `99 99 99 99 99` builds successfully here and is only rejected later, by
-  Kubernetes' own API server) — this is deliberate, not an oversight: tightening
-  it would reject documents that build successfully today, which is a breaking
-  change under this project's additive-compatibility rule (see
-  `docs/oam/design-gvk.md`).
-- **job** (go-kure/launcher#344, `job.go`) — a run-to-completion workload:
-  `image`, `restartPolicy` (default `OnFailure`; the Job API rejects `Always`,
-  which is what pod defaulting would otherwise supply, and a present-but-
-  non-string or empty value is refused rather than read as an omission that
-  would silently restore that default), and the shared container
-  and pod-level surface above. No `port` and no Service; `ports` declares
-  container ports (see "Main container ports"), and only then may a probe or
-  hook name a port; no `sidecars` schema key (init containers only), matching
-  `cronjob` and for the reason given there. Since go-kure/launcher#790 it
-  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
-  (see "Raw scheduling properties"), written onto the Job's pod template.
-  It emits a `Job` and nothing else (go-kure/launcher#702).
+- **deployment** — the kind-named Deployment (see "Deployment-level
+  properties" above): the shared container-level, pod-level and
+  `DeploymentSpec`-level surface, the last of which it now shares with
+  `webservice` and `worker` rather than owning. What distinguishes it is mostly
+  what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
+  `port`; it declares no endpoint and emits no Service. It is not `worker` minus
+  a few things either — it reads nulls as omissions across its whole surface,
+  which the role kinds do not. The one thing it
+  adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
+  `tolerations` and `topologySpreadConstraints` as the API shapes
+  (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
+  same distinction in the other direction — the role kinds carry the opinion,
+  this kind carries the API.
+- **endpointslice** (go-kure/launcher#790) is the kind-named projection of a
+  `discovery.k8s.io/v1` EndpointSlice, built on `policyFreeKind`. It emits
+  that one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** an EndpointSlice has no spec, so the properties are the
+    object's own top-level fields, decoded strictly at every depth:
+    `addressType`, `endpoints` and `ports`. The object's `kind`, `apiVersion`
+    and `metadata` are launcher's and are refused under any spelling. An
+    authored `false` is kept (`conditions: {ready: false}`), and an
+    endpoint's `deprecatedTopology` is written as authored, though the type
+    documents that the v1 API ignores a write to it.
+  - **Its Service is a label, and the label is the author's literal.** A
+    slice belongs to a Service only through its `kubernetes.io/service-name`
+    label, authored under `labels`. Launcher derives the label from nothing
+    and points it at no component: it does not follow a `service` component's
+    `objectName`, so write the name the Service object takes. A slice without
+    the label builds and belongs to no Service. A `service` component of a
+    type other than `ExternalName` always carries a selector (the kind
+    refuses an empty one, and an `ExternalName` Service has no endpoints),
+    so a Service whose endpoints are all written by hand comes from
+    elsewhere: a `manifests` component, or outside the document.
+  - **Required** are the fields the API's source marks required and the Go
+    type writes whether or not they were authored, so that the built object
+    would not show the omission: `addressType` (`addressType: required …`),
+    an endpoint's `addresses` (`endpoints[0].addresses: required …`), and the
+    `name` of an entry of an endpoint's `hints.forZones` or `hints.forNodes`.
+    `TestBuiltinMarkerKinds_RequiredMatchMarkers` derives the list from the
+    `+required` and `+optional` markers of the linked `k8s.io/api` module and
+    fails on a dependency bump that changes it. The API marks no field of the
+    kind required that the type leaves out when unauthored; the same test
+    fails if one appears. `TestKindComponents_OmittedRequiredAndWrittenDefaults`
+    holds the kind in its table as well, from the same markers: to that, and
+    to no default marked on a field the type writes unauthored. The check is
+    one of presence: an authored empty value (`addressType: ""`,
+    `addresses: []`) builds and is the API server's to refuse.
+  - **Emitted empty.** The type writes three fields the API does not require
+    whether or not they were authored. A slice that authors no `endpoints` or
+    no `ports` carries `endpoints: null` or `ports: null`, an authored empty
+    list is written as `[]`, and an endpoint that authors no condition
+    carries `conditions: {}`. A port that authors no `protocol` or no `name`
+    is written without it, and the API server fills `TCP` and the empty
+    name.
+  - **Not artifact sources.** The addresses of an endpoint, FQDNs included,
+    are where traffic goes, not an artifact source, and none is held to the
+    policy's allowed registries.
+  - **Policy.** No field of the object is one an `oam.Policy` method speaks
+    to, so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Every rule on the form of a value is left to the API
+    server: that an address is of the slice's `addressType`, the limits the
+    type documents on how many endpoints, addresses, ports and hints a slice
+    holds, and the names of ports. The type documents `addressType` as
+    immutable. Launcher does not compare a build with the cluster, so a
+    changed one builds here and is refused at apply. Whether a Service of
+    the labelled name exists is not checked.
+- **fluxcd-kustomization** — the kind-named terminal for Flux's `Kustomization`
+  (go-kure/launcher#784). Its properties are exactly the top-level JSON keys of
+  `KustomizationSpec` in the kustomize-controller API version `go.mod` links; a
+  test ties the published schema to that struct, so a bump that adds or drops a
+  spec field fails the suite until the schema follows. It is an authored Flux
+  object, like `helmrelease`: it does not deliver the application it is part
+  of, and it creates no source — `sourceRef` names one that exists, authored
+  beside it (`ocirepository`, `gitrepository`, `bucket`) or already on the
+  cluster. The type is `fluxcd-kustomization` rather than `kustomization`,
+  which would read as the `kustomization.yaml` file (go-kure/launcher#352).
 
-  The Job's name is at most 63 characters: the API server writes it as the
-  value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
-  labels (`generateSelector`), and a label value is at most 63. The rule is
-  held on the name the Job takes, the component name or its `objectName` (or
-  the `Naming` hook's answer), when the component is read and again at
-  `Generate`, in the words the `cronjob` rule uses. A component name over 63
-  characters was already refused at generation, by the container-name rule; it
-  is now refused when the component is read, by this one
-  (go-kure/launcher#787).
+  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON`
+  into `KustomizationSpec`, so `patches`, `postBuild`, `dependsOn`, `force`,
+  `timeout`, `serviceAccountName`, `decryption`, `kubeConfig` and every other
+  field are emitted as authored. A key the struct does not declare, at any
+  depth, is refused with its path from the property root
+  (`unknown field "patches[0].target.kinds"`,
+  `builtin.UnknownJSONFieldPath`): the spec declares `kind`, `name` and
+  `namespace` in several places, so the bare key would not say where. A
+  wrongly typed value is refused too. Keys match case-insensitively, as in
+  `encoding/json`; schema validation, which a `kurel build` runs first, is
+  exact.
 
-  On a job with `completionMode: Indexed` and `completions` above 0 the name is
-  held to one more rule of the API server's (`validateNameAllowsCompletions`):
-  the pod of each index takes the hostname `<name>-<index>`, so
-  `<name>-<completions-1>` must be a DNS-1123 label, at most 63 characters and
-  without a dot. It is held at the same two places, and refused as `job
-  "<name>": the component name is the Job's name, and with completionMode
-  Indexed and completions 11 the pod of the last index takes the hostname
-  "<name>-10", which must be a DNS-1123 label: …`. An Indexed job whose name
-  leaves no room for its last index built before this rule and is refused now.
-  A document cannot leave `completions` unset on an Indexed job, but a
-  `JobConfig` built in Go can: with `Parallelism` unset too the API server
-  reads both as 1, so `Generate` holds the name to `<name>-0` there.
+  **Defaults and checks.** `interval` defaults to `60m` when unset (a zero
+  duration counts as unset); Flux requires the field. `interval`,
+  `retryInterval` and `timeout`, when set, must be durations Flux accepts,
+  checked as on `helmrelease`. `sourceRef.kind` is required and one of
+  `OCIRepository`, `GitRepository`, `Bucket`, `ExternalArtifact`, the CRD's
+  enum; `sourceRef.name` is required. `prune` is a required field of the
+  spec with no default here: unset, `false` is emitted (`oci` passes `true`
+  unless told otherwise). `targetNamespace` is never defaulted, with or
+  without a Flux namespace, for the reason given under **oci**. Nothing else
+  is checked: the enums and the cross-field rules are left to the
+  Kustomization CRD's own admission, and `wait: true` beside `healthChecks`,
+  which `oci` refuses, is emitted as authored (kustomize-controller then
+  ignores the list). Whether the source exists is known only on the cluster. The checks run again in `Generate`,
+  for a config built directly.
 
-  The twelve JobSpec-level properties are the ones `cronjob` projects onto its
-  job template, projected here onto `spec` directly. Every one is
-  presence-gated, so a document authoring none of them emits no key for them.
-
-  | Property | Type | Effect | Compatibility |
-  |----------|------|--------|---------------|
-  | `backoffLimit` | int ≥ 0 | Retries before the job is marked failed. API default 6, or 2147483647 when `backoffLimitPerIndex` is set. | additive |
-  | `completions` | int ≥ 0 | Successful pods required. Required under `completionMode: Indexed`. | additive |
-  | `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. `0` runs no pods at all. | additive |
-  | `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. | additive |
-  | `ttlSecondsAfterFinished` | int ≥ 0 | Seconds after finishing before the job and its pods are deleted. | additive |
-  | `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
-  | `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
-  | `maxFailedIndexes` | int ≥ 0 | Failed indexes tolerated before the whole job fails. Requires `backoffLimitPerIndex` (and so `Indexed`); ≤ `completions` and ≤ 100000, or ≤ 10000 (and required) when `completions` > 100000. | additive |
-  | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
-  | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
-  | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
-  | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
-  | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
-  | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. | **Behavior-changing** (see below) |
-  | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
-
-  Every cross-field rule above is ported from `ValidateJobSpec`
-  (`k8s.io/kubernetes/pkg/apis/batch/validation`) at the pinned
-  `k8s.io/api` version, so a document this parser accepts is one the API server
-  accepts too — the rejections move an apply-time failure to build time. One
-  upstream constraint is deliberately **not** enforced: `BackoffLimitPerIndex`'s
-  field doc says per-index backoff only applies when the pod restart policy is
-  `Never`, but `ValidateJobSpec` does not check it and neither does this parser
-  — the schema description carries the constraint instead. Refusing a
-  combination the API server accepts would be this projection inventing a rule,
-  which is a different thing from the daemonset kind's `updateStrategy`
-  strictness, where upstream accepts a field and then provably never reads it.
-
-  Two rejections go the other way — stricter than `ValidateJobSpec`, because the
-  field's own documented contract in `k8s.io/api/batch/v1` is stricter than the
-  validator that is supposed to enforce it. `activeDeadlineSeconds: 0` is refused
-  although the validator only requires non-negative, because the field doc says
-  "value must be positive integer". An empty `successPolicy.rules[].succeededIndexes`
-  is refused although the validator's index parser returns "no indexes, no error"
-  for it, because the field doc says "At least one element is required". Both
-  follow the documented contract rather than the gap in its enforcement. A third,
-  `podFailurePolicy.rules[].onPodConditions[].status: ""`, is covered with
-  `podFailurePolicy` below. These three are called out here because they are the
-  only places a document this parser refuses would in fact have applied.
-
-  `podFailurePolicy` (go-kure/launcher#345) is published by both `job` and
-  `cronjob`, through the same shared parser as the rest of the table. Its rules
-  are ported from `validatePodFailurePolicy` / `validatePodFailurePolicyRule`,
-  with the differences below.
-
-  **Two checks run at emission rather than at parse time**, in
-  `validateJobPodFailurePolicyAgainstTemplate`, because both read the built pod
-  template rather than the property map: upstream requires
-  `restartPolicy: Never` alongside a `podFailurePolicy` (these components
-  default it to `OnFailure`, so a document authoring only the policy is refused
-  with a message naming the restart policy), and `onExitCodes.containerName`
-  must name a container the template actually carries — the component's own
-  container or one of its `initContainers`. Checking the emitted template rather
-  than the config is what keeps the check from drifting from what is written,
-  the same reason the component-name check in `createJob` reads the emitted
-  name.
-
-  **One place this parser is deliberately no stricter than upstream**: an empty
-  `rules` list is accepted. `validatePodFailurePolicy` has no "at least one
-  rule" check — unlike `validateSuccessPolicy`, which does — and
-  `PodFailurePolicy.Rules`' own field doc states only the cap, so unlike
-  `activeDeadlineSeconds` and `succeededIndexes` above there is no documented
-  contract to follow past the validator. An empty list is not inert either: a
-  non-nil policy pins `podReplacementPolicy` and `restartPolicy` whatever its
-  rules say.
-
-  **`onPodConditions[].status` defaults to `True`** (go-kure/launcher#410): a
-  pattern that omits the key, or sets it to null, compiles to an explicit
-  `status: "True"`, the value upstream's
-  `SetDefaults_PodFailurePolicyOnPodConditionsPattern` fills in before
-  validation. It is written out rather than left to the API server because the
-  field carries no `omitempty`, so an unset one would be emitted as
-  `status: ""`. An authored empty string is still refused, which is
-  deliberately **stricter than upstream** — its defaulter fills `""` too — on
-  the reading that an empty value is more likely a templating slip than a
-  request for `True`. The default is additive: it only makes previously
-  refused documents valid, and every previously valid document compiles
-  identically.
-
-  **Compatibility.** On `job` this is additive — the component type is newer
-  than the key. On `cronjob` it is **behavior-changing**, and the reason is
-  worth stating precisely: before this change an authored `podFailurePolicy` on
-  a cronjob was not refused, it was **ignored**. At the time, property-schema
-  validation ran on emitted elements only, never on authored documents, so a
-  key no handler read was dropped in silence. A cronjob document that was
-  already authoring `podFailurePolicy` therefore either compiles to a CronJob
-  that now carries the policy, or stops building — most likely on the
-  `restartPolicy: Never` requirement, since the component defaults to
-  `OnFailure`. Under the additive test in `docs/oam/design-gvk.md` ("every
-  previously valid document remains valid *and* compiles to the same output")
-  that was not additive. The gap that made this true of *every* property ever
-  added to an existing kind — the authored path not enforcing the Parser
-  Strictness that document promises — belonged to the repo rather than to this
-  change, and is fixed as go-kure/launcher#408 (closed): `kurel build` now
-  calls `ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`), which
-  checks declared keys and shapes on the authored document directly.
-
-  The `selector`/`manualSelector` rejection is the same class of change the
-  daemonset kind's `selector` rejection is, and rests on the same reasoning:
-  `docs/oam/design-gvk.md` § Parser Strictness already promises that unknown
-  fields in a launcher-native document are a build error, so neither key was
-  ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a
-  tightening — `job` is a new component type, so no document that built before
-  this change can carry either key. The explicit rejection exists only so the
-  message says *why* rather than emitting the generic unknown-key error.
-
-  The six CronJobSpec-only keys — `schedule`, `timeZone`, `concurrencyPolicy`,
-  `startingDeadlineSeconds`, `successfulJobsHistoryLimit` and
-  `failedJobsHistoryLimit` — are rejected for the same reason `selector` is, but
-  the case they guard is sharper. A `job` component and a `cronjob`
-  component differ by exactly these six properties, so retyping an existing
-  `cronjob` document to `job` leaves every one of them behind. Left undeclared
-  each would be dropped in silence, turning a schedule into a Job that runs
-  once, immediately, at apply time — not a missing field, but work executed at a
-  time nobody asked for. Each message names the job-level property that does the
-  nearest equivalent job where one exists (`activeDeadlineSeconds` for
-  `startingDeadlineSeconds`, `ttlSecondsAfterFinished` for both history limits),
-  so the refusal is a redirection rather than only a "no".
-
-  The properties this component introduces read an **explicit `null` as an
-  omission**: `backoffLimitPerIndex: null` means "leave this unset", not "this is
-  a value of the wrong type". That matches `pkg/oam`'s own
-  `validatePropertyValue`. So does `completionMode`, which the shared
-  `parseJobSpec` read with a bare lookup until go-kure/launcher#570, on
-  `cronjob` as well. Since go-kure/launcher#394 this is not special to this component: every
-  optional-field helper in `common.go` routes its presence check through
-  `authoredValue`, so each JobSpec field shared with `cronjob` that is read
-  through one of them reads a null the same way on both kinds, and so does a
-  field any other kind reads through one. The change was
-  one-directional — a null that used to be refused is now absence, and nothing
-  that parsed before parses differently — so no document that built before
-  stopped building.
-
-  **The component name must be a DNS-1123 *label*, not merely a subdomain** — a
-  rule this component shares with every workload kind; see "The main container
-  is named after the component" under "Common config" above.
-
-  **Updating a `job` in place needs it force-replaced, which the `force-replace`
-  trait asks for.** A Job's pod
-  template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`
-  on every update, and the only carve-out is for scheduling directives on a
-  suspended Job. By default, changing this component's `image`, `command`, `env`
-  or any other pod-level property therefore produces an apply failure on the
-  *second* delivery, not a re-run — the first apply creates the Job, and every
-  later one is rejected while the Job object still exists. That default is
-  deliberate and unchanged (go-kure/launcher#406): replacing a Job re-runs it, and
-  for long batch work a re-run should be the author's explicit choice.
-
-  To opt in, add the **`force-replace` trait** (no properties) to the component.
-  It sets the `ForceReplace` delivery intent on the component's application
-  (go-kure/launcher#782). kure's Flux workflow turns that into
-  `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
-  component emits — the Job — which kustomize-controller
-  reads as its apply `ForceSelector`: on an immutable-field error it deletes and
-  recreates the object, so an update re-runs the Job, **stopping any run in
-  progress**. The workflow annotates the Job once it is generated,
-  so the annotation is not lost when `createJob` clears the generated Job's annotations
-  wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
-  because kure's `Create<Kind>` constructors now return TypeMeta and identity
-  only; the assignment is kept so the field stays empty whatever a future
-  constructor does). **Annotating the component itself still does not reach the
-  Job**: a component's own annotations, the ones beside its `type` and
-  `properties`, are read only for the tier annotation. The `annotations`
-  property is another matter: it goes on the Job's own metadata, as on every
-  kind component ("The object's labels and annotations" below). The Flux force
-  annotation written there is on the Job as authored, and kustomize-controller
-  reads it as it reads the workflow's; the trait is the way that names no
-  delivery engine. See the
-  [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
-  catalogue.
-
-  Outside the package, `spec.force: true` on the enclosing Flux Kustomization
-  has the same effect for every resource it reconciles, and deleting the Job
-  before redelivering avoids the error without either. `cronjob` does not have
-  this problem: a CronJob's `jobTemplate` is mutable, and each run creates a
-  fresh Job.
-
-  The generated `Job` carries `app: <component>` as its own labels and its pod
-  template's, carries no annotations of the handler's, and leaves `spec.selector`
-  unset for the job controller to fill. What the `labels` and `annotations`
-  properties author is added to the Job's own metadata, not to its pod template.
-  The empty selector is deliberate and is the one workload kind where it stays
-  that way: the Job controller generates
-  `spec.selector` plus its matching `controller-uid`/`job-name` pod labels
-  server-side, so writing one here would fight it. Deployment, StatefulSet and
-  DaemonSet get no such server-side defaulting and so are written explicitly —
-  see Conventions.
+  **Identity and namespaces.** The Kustomization is named after the component
+  and lands in the Flux namespace when one is configured, else in the
+  application namespace (`SetFluxNamespace`). The ConfigMaps and Secrets it
+  reads from its own namespace — `decryption.secretRef`,
+  `kubeConfig.secretRef` / `configMapRef` and each `postBuild.substituteFrom`
+  entry — must live there too: a `configmap`, `external-secret` or
+  `certificate` trait on the component whose object one of them names moves
+  with the Kustomization (`FluxNamespaceReads`, go-kure/launcher#740).
+  `ApplyPolicy` checks nothing: a Kustomization fetches nothing itself, and
+  the registry allowlist applies where its source is authored.
 - **helm** (go-kure/launcher#349, `helm.go`) — the role-named Helm component: a
   component-position lowering rule (`HelmRule`), not a handler, that lowers to the
   kind-named terminals. Properties: `chart`, `version`, `delivery`
@@ -6370,6 +5453,467 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   way out (`pkg/oam/README.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
+- **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
+  projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
+  one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
+    strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
+    `metrics` and `behavior`. An unknown key is refused wherever it sits (a
+    metric source, a scaling rule), a quantity written as a number is
+    emitted in its canonical string form, and an authored `0` is kept
+    (`stabilizationWindowSeconds: 0`). The type has no number or boolean
+    that is omitted when zero, which
+    `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
+  - **Required** are the two top-level fields the API server refuses an
+    autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
+    `maxReplicas` (`maxReplicas: required …`; an authored `0` is refused
+    the same way, since the type cannot tell it from an unset one). The
+    config is exported, so `Generate` repeats both. Every other value rule
+    is left to the API server: a negative `maxReplicas`, the `kind` and
+    `name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
+    which metric source goes with which `type`.
+  - **Policy.** `maxReplicas` is held to the environment policy's replica
+    maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
+    HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
+    or a `manifests` source yields is held: `component "web": maxReplicas:
+    replicas 4 exceeds enforced maximum 3`. Nothing else is held, and no
+    default is filled: the policy's `scalerMinReplicas` and
+    `scalerMaxReplicas` defaults belong to the `scaler` trait. A nil policy
+    checks nothing.
+  - **The target is the author's, and is not checked.** `scaleTargetRef`
+    names an object by `kind`, `name` and `apiVersion`; launcher points it
+    at no component and does not look for the object in the document. To
+    scale a workload component, name its object: the component name, or its
+    `objectName`. **The guards the `scaler` trait applies to its own
+    workload do not see this kind:** a `deployment`, `webservice` or
+    `worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
+    whose `maxReplicas` is above 1, and builds beside a
+    `horizontalpodautoscaler` component that scales it further. That is the
+    state of an autoscaler emitted through `passthrough`, `manifests` or
+    template delivery.
+  - **Beside the `scaler` trait.** The trait derives an autoscaler for the
+    workload it is attached to, from a target CPU or memory utilization.
+    This kind is the authored object, for what the trait does not express:
+    other metric sources, scaling behavior, a target launcher does not own.
+    The two name their objects apart (`<component>-hpa` for the trait), and
+    two that are given one name in one namespace are refused as a name
+    collision.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Whether the target exists or can be scaled. The
+    object's status is the controller's and is not written.
+- **httproute** (go-kure/launcher#790) is the kind-named projection of a
+  gateway.networking.k8s.io/v1 HTTPRoute, on the same recipe as `ingress`: one
+  schema key per json field of `gatewayv1.HTTPRouteSpec`, those of the
+  `CommonRouteSpec` it inlines included (`parentRefs`, `useDefaultGateways`,
+  `hostnames`, `rules`), decoded strictly into that type. No type under
+  `HTTPRouteSpec` unmarshals itself, so an unknown key is refused at every
+  depth. It emits one HTTPRoute named after the component in the build
+  namespace, with the authored spec and nothing else. No field is required by
+  the decode and none is filled; the API's value rules (a filter's `type`
+  matching the member set, a rule's `matches` and `backendRefs` limits) are
+  left to the API server. A null list element (`rules: [null]`, a null parent
+  or backendRef) is refused by its path. `useDefaultGateways` is a field of the
+  Gateway API's experimental channel: a cluster whose HTTPRoute CRD is the
+  standard channel's refuses a route that sets it.
+
+  **It is an authored object, not the `httproute` trait**, although the two
+  share the type name. The trait attaches to a component and routes to that
+  component's Service; this kind is a component of its own, and a backendRef is
+  a reference carried as written, its `namespace` included. Three things the
+  trait has do not reach it:
+  - **No NetworkPolicy allow rule.** As for `ingress`: the NetworkPolicy
+    synthesis reads a routing trait's traffic sources and target component,
+    which this kind does not report, so it allows nothing for the route's
+    backends. An author who wants the allow rule puts the `expose` or
+    `httproute` trait on the backend component, or authors the NetworkPolicy.
+  - **No parent from a capability.** The trait builds `parentRefs` from the
+    Gateway its capability rendering names when the author writes none. Here
+    `parentRefs` is what the author wrote; unwritten, the route has no parent.
+  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
+    capability lists gate trait types, so a policy that forbids the
+    `httproute` trait does not refuse an `httproute` component. `passthrough`,
+    `manifests` and template delivery emit an HTTPRoute under the same terms.
+    A consumer that restricts routing restricts the component types it
+    registers.
+
+  **The name** is the component's, or its `objectName`. An `httproute` trait
+  names its own HTTPRoute (`<component>-httproute`, or its `name`); a
+  component and a trait whose HTTPRoute would carry one name are refused, with
+  both named.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **Not covered:** its `status`, which the Gateway controller writes.
+- **ingress** (go-kure/launcher#790) is the kind-named projection of a
+  networking.k8s.io/v1 Ingress, on the recipe of `resourcequota`: one
+  schema key per json field of `networkingv1.IngressSpec` (`ingressClassName`,
+  `defaultBackend`, `tls`, `rules`), the property map decoded strictly into
+  that type under the null contract, two spellings of one field refused, and
+  `TestCoreKindSchemas_CoverSpec` holding the schema to the linked type. It
+  emits one Ingress named after the component in the build namespace, with the
+  authored spec and nothing else. No field is required by the decode and none
+  is filled: an Ingress with neither a `defaultBackend` nor a rule, a path
+  without a `pathType` and the API's other value rules are left to the API
+  server. A null list element (`rules: [null]`, a null path or TLS entry) is
+  refused by its path.
+
+  **It is an authored object, not the `ingress` trait**, although the two
+  share the type name. The trait attaches to a component and routes to that
+  component's Service; this kind is a component of its own, and a backend is a
+  Service reference carried as written. Three things the trait has do not
+  reach it:
+  - **No NetworkPolicy allow rule.** The NetworkPolicy synthesis opens a
+    backend's port to the ingress controller from what a routing trait reports
+    (the traffic sources capability rendering gives it, and the component it
+    targets). This kind reports neither, so the synthesis reads nothing from
+    it and allows nothing for it, whatever Service it names. An author who
+    wants the allow rule puts the `expose` or `ingress` trait on the backend
+    component, or authors the NetworkPolicy (the `networkpolicy` trait or
+    kind).
+  - **No hostname constraint.** The platform's `allowedHostnameWildcard`, which
+    the trait holds every hostname to, is a trait rendering input. A host
+    authored here is not checked against it.
+  - **No environment policy.** `ApplyPolicy` is a no-op: the policy has no rule
+    for an Ingress, and its capability lists (`AllowedCapabilities`,
+    `ForbiddenCapabilities`, `RequiredCapabilities`) gate trait types, so a
+    policy that forbids the `ingress` trait does not refuse an `ingress`
+    component. `passthrough`, `manifests` and template delivery emit an Ingress
+    under the same terms. A consumer that restricts routing restricts the
+    component types it registers.
+
+  **The name** is the component's, or its `objectName` ("The object name"
+  below). An `ingress` trait names its own Ingress (`<component>-ingress`, or
+  its `name`); a component and a trait whose Ingress would carry one name are
+  refused, with both named.
+
+  **Labels and annotations** are the `labels` and `annotations` properties, a
+  controller's `nginx.ingress.kubernetes.io/…` annotations among them.
+  **Not covered:** its `status`, which the controller writes.
+- **job** (go-kure/launcher#344, `job.go`) — a run-to-completion workload:
+  `image`, `restartPolicy` (default `OnFailure`; the Job API rejects `Always`,
+  which is what pod defaulting would otherwise supply, and a present-but-
+  non-string or empty value is refused rather than read as an omission that
+  would silently restore that default), and the shared container
+  and pod-level surface above. No `port` and no Service; `ports` declares
+  container ports (see "Main container ports"), and only then may a probe or
+  hook name a port; no `sidecars` schema key (init containers only), matching
+  `cronjob` and for the reason given there. Since go-kure/launcher#790 it
+  publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
+  (see "Raw scheduling properties"), written onto the Job's pod template.
+  It emits a `Job` and nothing else (go-kure/launcher#702).
+
+  The Job's name is at most 63 characters: the API server writes it as the
+  value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
+  labels (`generateSelector`), and a label value is at most 63. The rule is
+  held on the name the Job takes, the component name or its `objectName` (or
+  the `Naming` hook's answer), when the component is read and again at
+  `Generate`, in the words the `cronjob` rule uses. A component name over 63
+  characters was already refused at generation, by the container-name rule; it
+  is now refused when the component is read, by this one
+  (go-kure/launcher#787).
+
+  On a job with `completionMode: Indexed` and `completions` above 0 the name is
+  held to one more rule of the API server's (`validateNameAllowsCompletions`):
+  the pod of each index takes the hostname `<name>-<index>`, so
+  `<name>-<completions-1>` must be a DNS-1123 label, at most 63 characters and
+  without a dot. It is held at the same two places, and refused as `job
+  "<name>": the component name is the Job's name, and with completionMode
+  Indexed and completions 11 the pod of the last index takes the hostname
+  "<name>-10", which must be a DNS-1123 label: …`. An Indexed job whose name
+  leaves no room for its last index built before this rule and is refused now.
+  A document cannot leave `completions` unset on an Indexed job, but a
+  `JobConfig` built in Go can: with `Parallelism` unset too the API server
+  reads both as 1, so `Generate` holds the name to `<name>-0` there.
+
+  The twelve JobSpec-level properties are the ones `cronjob` projects onto its
+  job template, projected here onto `spec` directly. Every one is
+  presence-gated, so a document authoring none of them emits no key for them.
+
+  | Property | Type | Effect | Compatibility |
+  |----------|------|--------|---------------|
+  | `backoffLimit` | int ≥ 0 | Retries before the job is marked failed. API default 6, or 2147483647 when `backoffLimitPerIndex` is set. | additive |
+  | `completions` | int ≥ 0 | Successful pods required. Required under `completionMode: Indexed`. | additive |
+  | `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. `0` runs no pods at all. | additive |
+  | `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. | additive |
+  | `ttlSecondsAfterFinished` | int ≥ 0 | Seconds after finishing before the job and its pods are deleted. | additive |
+  | `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
+  | `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
+  | `maxFailedIndexes` | int ≥ 0 | Failed indexes tolerated before the whole job fails. Requires `backoffLimitPerIndex` (and so `Indexed`); ≤ `completions` and ≤ 100000, or ≤ 10000 (and required) when `completions` > 100000. | additive |
+  | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
+  | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
+  | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
+  | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
+  | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
+  | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. | **Behavior-changing** (see below) |
+  | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
+
+  Every cross-field rule above is ported from `ValidateJobSpec`
+  (`k8s.io/kubernetes/pkg/apis/batch/validation`) at the pinned
+  `k8s.io/api` version, so a document this parser accepts is one the API server
+  accepts too — the rejections move an apply-time failure to build time. One
+  upstream constraint is deliberately **not** enforced: `BackoffLimitPerIndex`'s
+  field doc says per-index backoff only applies when the pod restart policy is
+  `Never`, but `ValidateJobSpec` does not check it and neither does this parser
+  — the schema description carries the constraint instead. Refusing a
+  combination the API server accepts would be this projection inventing a rule,
+  which is a different thing from the daemonset kind's `updateStrategy`
+  strictness, where upstream accepts a field and then provably never reads it.
+
+  Two rejections go the other way — stricter than `ValidateJobSpec`, because the
+  field's own documented contract in `k8s.io/api/batch/v1` is stricter than the
+  validator that is supposed to enforce it. `activeDeadlineSeconds: 0` is refused
+  although the validator only requires non-negative, because the field doc says
+  "value must be positive integer". An empty `successPolicy.rules[].succeededIndexes`
+  is refused although the validator's index parser returns "no indexes, no error"
+  for it, because the field doc says "At least one element is required". Both
+  follow the documented contract rather than the gap in its enforcement. A third,
+  `podFailurePolicy.rules[].onPodConditions[].status: ""`, is covered with
+  `podFailurePolicy` below. These three are called out here because they are the
+  only places a document this parser refuses would in fact have applied.
+
+  `podFailurePolicy` (go-kure/launcher#345) is published by both `job` and
+  `cronjob`, through the same shared parser as the rest of the table. Its rules
+  are ported from `validatePodFailurePolicy` / `validatePodFailurePolicyRule`,
+  with the differences below.
+
+  **Two checks run at emission rather than at parse time**, in
+  `validateJobPodFailurePolicyAgainstTemplate`, because both read the built pod
+  template rather than the property map: upstream requires
+  `restartPolicy: Never` alongside a `podFailurePolicy` (these components
+  default it to `OnFailure`, so a document authoring only the policy is refused
+  with a message naming the restart policy), and `onExitCodes.containerName`
+  must name a container the template actually carries — the component's own
+  container or one of its `initContainers`. Checking the emitted template rather
+  than the config is what keeps the check from drifting from what is written,
+  the same reason the component-name check in `createJob` reads the emitted
+  name.
+
+  **One place this parser is deliberately no stricter than upstream**: an empty
+  `rules` list is accepted. `validatePodFailurePolicy` has no "at least one
+  rule" check — unlike `validateSuccessPolicy`, which does — and
+  `PodFailurePolicy.Rules`' own field doc states only the cap, so unlike
+  `activeDeadlineSeconds` and `succeededIndexes` above there is no documented
+  contract to follow past the validator. An empty list is not inert either: a
+  non-nil policy pins `podReplacementPolicy` and `restartPolicy` whatever its
+  rules say.
+
+  **`onPodConditions[].status` defaults to `True`** (go-kure/launcher#410): a
+  pattern that omits the key, or sets it to null, compiles to an explicit
+  `status: "True"`, the value upstream's
+  `SetDefaults_PodFailurePolicyOnPodConditionsPattern` fills in before
+  validation. It is written out rather than left to the API server because the
+  field carries no `omitempty`, so an unset one would be emitted as
+  `status: ""`. An authored empty string is still refused, which is
+  deliberately **stricter than upstream** — its defaulter fills `""` too — on
+  the reading that an empty value is more likely a templating slip than a
+  request for `True`. The default is additive: it only makes previously
+  refused documents valid, and every previously valid document compiles
+  identically.
+
+  **Compatibility.** On `job` this is additive — the component type is newer
+  than the key. On `cronjob` it is **behavior-changing**, and the reason is
+  worth stating precisely: before this change an authored `podFailurePolicy` on
+  a cronjob was not refused, it was **ignored**. At the time, property-schema
+  validation ran on emitted elements only, never on authored documents, so a
+  key no handler read was dropped in silence. A cronjob document that was
+  already authoring `podFailurePolicy` therefore either compiles to a CronJob
+  that now carries the policy, or stops building — most likely on the
+  `restartPolicy: Never` requirement, since the component defaults to
+  `OnFailure`. Under the additive test in `docs/oam/design-gvk.md` ("every
+  previously valid document remains valid *and* compiles to the same output")
+  that was not additive. The gap that made this true of *every* property ever
+  added to an existing kind — the authored path not enforcing the Parser
+  Strictness that document promises — belonged to the repo rather than to this
+  change, and is fixed as go-kure/launcher#408 (closed): `kurel build` now
+  calls `ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`), which
+  checks declared keys and shapes on the authored document directly.
+
+  The `selector`/`manualSelector` rejection is the same class of change the
+  daemonset kind's `selector` rejection is, and rests on the same reasoning:
+  `docs/oam/design-gvk.md` § Parser Strictness already promises that unknown
+  fields in a launcher-native document are a build error, so neither key was
+  ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a
+  tightening — `job` is a new component type, so no document that built before
+  this change can carry either key. The explicit rejection exists only so the
+  message says *why* rather than emitting the generic unknown-key error.
+
+  The six CronJobSpec-only keys — `schedule`, `timeZone`, `concurrencyPolicy`,
+  `startingDeadlineSeconds`, `successfulJobsHistoryLimit` and
+  `failedJobsHistoryLimit` — are rejected for the same reason `selector` is, but
+  the case they guard is sharper. A `job` component and a `cronjob`
+  component differ by exactly these six properties, so retyping an existing
+  `cronjob` document to `job` leaves every one of them behind. Left undeclared
+  each would be dropped in silence, turning a schedule into a Job that runs
+  once, immediately, at apply time — not a missing field, but work executed at a
+  time nobody asked for. Each message names the job-level property that does the
+  nearest equivalent job where one exists (`activeDeadlineSeconds` for
+  `startingDeadlineSeconds`, `ttlSecondsAfterFinished` for both history limits),
+  so the refusal is a redirection rather than only a "no".
+
+  The properties this component introduces read an **explicit `null` as an
+  omission**: `backoffLimitPerIndex: null` means "leave this unset", not "this is
+  a value of the wrong type". That matches `pkg/oam`'s own
+  `validatePropertyValue`. So does `completionMode`, which the shared
+  `parseJobSpec` read with a bare lookup until go-kure/launcher#570, on
+  `cronjob` as well. Since go-kure/launcher#394 this is not special to this component: every
+  optional-field helper in `common.go` routes its presence check through
+  `authoredValue`, so each JobSpec field shared with `cronjob` that is read
+  through one of them reads a null the same way on both kinds, and so does a
+  field any other kind reads through one. The change was
+  one-directional — a null that used to be refused is now absence, and nothing
+  that parsed before parses differently — so no document that built before
+  stopped building.
+
+  **The component name must be a DNS-1123 *label*, not merely a subdomain** — a
+  rule this component shares with every workload kind; see "The main container
+  is named after the component" under "Common config" above.
+
+  **Updating a `job` in place needs it force-replaced, which the `force-replace`
+  trait asks for.** A Job's pod
+  template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`
+  on every update, and the only carve-out is for scheduling directives on a
+  suspended Job. By default, changing this component's `image`, `command`, `env`
+  or any other pod-level property therefore produces an apply failure on the
+  *second* delivery, not a re-run — the first apply creates the Job, and every
+  later one is rejected while the Job object still exists. That default is
+  deliberate and unchanged (go-kure/launcher#406): replacing a Job re-runs it, and
+  for long batch work a re-run should be the author's explicit choice.
+
+  To opt in, add the **`force-replace` trait** (no properties) to the component.
+  It sets the `ForceReplace` delivery intent on the component's application
+  (go-kure/launcher#782). kure's Flux workflow turns that into
+  `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
+  component emits — the Job — which kustomize-controller
+  reads as its apply `ForceSelector`: on an immutable-field error it deletes and
+  recreates the object, so an update re-runs the Job, **stopping any run in
+  progress**. The workflow annotates the Job once it is generated,
+  so the annotation is not lost when `createJob` clears the generated Job's annotations
+  wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
+  because kure's `Create<Kind>` constructors now return TypeMeta and identity
+  only; the assignment is kept so the field stays empty whatever a future
+  constructor does). **Annotating the component itself still does not reach the
+  Job**: a component's own annotations, the ones beside its `type` and
+  `properties`, are read only for the tier annotation. The `annotations`
+  property is another matter: it goes on the Job's own metadata, as on every
+  kind component ("The object's labels and annotations" below). The Flux force
+  annotation written there is on the Job as authored, and kustomize-controller
+  reads it as it reads the workflow's; the trait is the way that names no
+  delivery engine. See the
+  [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
+  catalogue.
+
+  Outside the package, `spec.force: true` on the enclosing Flux Kustomization
+  has the same effect for every resource it reconciles, and deleting the Job
+  before redelivering avoids the error without either. `cronjob` does not have
+  this problem: a CronJob's `jobTemplate` is mutable, and each run creates a
+  fresh Job.
+
+  The generated `Job` carries `app: <component>` as its own labels and its pod
+  template's, carries no annotations of the handler's, and leaves `spec.selector`
+  unset for the job controller to fill. What the `labels` and `annotations`
+  properties author is added to the Job's own metadata, not to its pod template.
+  The empty selector is deliberate and is the one workload kind where it stays
+  that way: the Job controller generates
+  `spec.selector` plus its matching `controller-uid`/`job-name` pod labels
+  server-side, so writing one here would fight it. Deployment, StatefulSet and
+  DaemonSet get no such server-side defaulting and so are written explicitly —
+  see Conventions.
+- **namespace**, **limitrange**, **resourcequota** (go-kure/launcher#790) are
+  kind-named projections of one Kubernetes core object each, built on the
+  recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
+  one schema key per json field of the object's spec type, the whole property
+  map decoded strictly into that type under the null contract, and two
+  spellings of one field refused. `TestCoreKindSchemas_CoverSpec` holds each
+  schema to the linked type by reflection. Each emits its object, named after
+  the component,
+  with the authored spec and nothing else: the handler adds no annotation and
+  no label of its own, not an `app` label either. The transform then sets the component
+  label on the object, as on every object a component owns
+  (go-kure/launcher#788). None
+  runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
+  component, they are in no tier unless a tier annotation or placement policy
+  places them.
+  The properties are the spec fields, and `labels` and `annotations` for the
+  object's metadata ("The object's labels and annotations" below).
+  - `namespace` publishes `finalizers`, the one field of
+    `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
+    no namespace, whatever namespace the application is built for. The
+    component name is the Namespace's name, which the API holds to a DNS-1123
+    label (at most 63 characters, no dot), narrower than a component name;
+    any other name is refused, naming it. A Namespace that needs the Pod
+    Security Admission labels (`pod-security.kubernetes.io/enforce` and its
+    siblings) writes them under `labels`.
+  - `limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
+    and emits the LimitRange in the build namespace. `limits` is required: the
+    Go type cannot omit it, so an unauthored one (absent or `null`) would be
+    written as `limits: null` and is refused with `limits: required …`. An
+    authored `limits: []` is kept: a LimitRange that enforces nothing. Each
+    limit's `type` is required for the same reason (`limits[1].type: required
+    …`), and two limits of one type are refused by path, as the API refuses
+    them. The other value rules (which type names exist, `min` at most `max`,
+    what a `Pod` limit may not set) are left to the API server. A quantity
+    written as a number is emitted in its canonical string form (`cpu: 2`
+    becomes `cpu: "2"`). The limits constrain the pods and claims of the
+    namespace at admission; the environment policy is not applied to them.
+  - `resourcequota` publishes `hard`, `scopes` and `scopeSelector`, the
+    fields of `corev1.ResourceQuotaSpec`, and emits the ResourceQuota in the
+    build namespace. The API requires none of them, so a component with no
+    properties is a quota that limits nothing. Which resource names, scopes
+    and selector operators exist is left to the API server. A quantity written
+    as a number is emitted in its canonical string form
+    (`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
+    namespace may hold in total; the environment policy is not applied to it.
+- **networkpolicy** (go-kure/launcher#790) is the kind-named projection of a
+  networking.k8s.io/v1 NetworkPolicy, on the same recipe as `ingress`: one
+  schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
+  `ingress`, `egress`, `policyTypes`), decoded strictly into that type. It
+  emits one NetworkPolicy named after the component in the build namespace,
+  with the authored spec and nothing else. No field is required by the decode
+  and none is filled; the API's value rules (a peer naming at least one of
+  `podSelector`, `namespaceSelector` and `ipBlock`, an `ipBlock` beside no
+  selector, a valid CIDR) are left to the API server.
+
+  **The spec reads as the API reads it, which is not how the `networkpolicy`
+  trait reads the same keys.** The two share the type name; the trait attaches
+  to a component and scopes the policy to that component's pods, and this kind
+  is a component of its own that scopes nothing:
+  - **`podSelector` is not defaulted.** The trait has no such property: it
+    always selects its component's pods. Here an unwritten `podSelector`, like
+    `{}`, is the empty selector: **the policy applies to every pod of the
+    namespace**. An author moving a policy from the trait to the kind writes
+    the selector out.
+  - **`policyTypes` is not derived.** The trait has no such property either: it
+    lists a direction when that direction's key is present, so its `egress: []`
+    denies all egress. Here `policyTypes` is what the author wrote; unwritten,
+    the API server derives it: `Ingress` always, `Egress` only when `egress`
+    holds a rule. So on the kind `egress: []` alone isolates no egress; a
+    policy that denies all egress writes `policyTypes: [Egress]`.
+  - **An empty rule allows everything in its direction.** `ingress: [{}]` is
+    the API's allow-all, and is carried when written. It is never the result
+    of a null: a null rule, peer or port (`ingress: [null]`,
+    `from: [null]`) is refused by its path, since decoded it would be the
+    empty, allow-all one. An empty `ingress` or `egress` list is carried as an
+    unwritten one, which the API reads the same way.
+  - **A selector picks pods by label.** A peer's `podSelector` is not a
+    component reference and nothing resolves it; the label a workload
+    component's pods carry is described under "The `app` label" below.
+  - **No environment policy.** `ApplyPolicy` is a no-op, and the policy's
+    capability lists gate trait types, so a policy that forbids the
+    `networkpolicy` trait does not refuse a `networkpolicy` component.
+    `passthrough`, `manifests` and template delivery emit a NetworkPolicy
+    under the same terms. A consumer that restricts network policy restricts
+    the component types it registers.
+
+  The transform's NetworkPolicy synthesis does not read this kind: it neither
+  counts an authored policy as covering a component nor merges into it, and
+  the policies it emits (`{comp}-allow-ingress-traffic` and the others) are
+  additive beside it. **The name** is the component's, or its `objectName`; a
+  component whose policy would carry the name of a `networkpolicy` trait's
+  (`<component>-allow`, or its `name`) or of a synthesized one is refused, with
+  both named. The NetworkPolicy's own labels and annotations are the `labels`
+  and `annotations` properties.
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
   OCIRepository, see below), `source.objectName` (a name for the OCIRepository
   the component keeps to itself, see below), `kustomizationName` (a name for
@@ -6530,180 +6074,644 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   allowlist, accepts every `oci://` url.
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
   for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph.
-- **fluxcd-kustomization** — the kind-named terminal for Flux's `Kustomization`
-  (go-kure/launcher#784). Its properties are exactly the top-level JSON keys of
-  `KustomizationSpec` in the kustomize-controller API version `go.mod` links; a
-  test ties the published schema to that struct, so a bump that adds or drops a
-  spec field fails the suite until the schema follows. It is an authored Flux
-  object, like `helmrelease`: it does not deliver the application it is part
-  of, and it creates no source — `sourceRef` names one that exists, authored
-  beside it (`ocirepository`, `gitrepository`, `bucket`) or already on the
-  cluster. The type is `fluxcd-kustomization` rather than `kustomization`,
-  which would read as the `kustomization.yaml` file (go-kure/launcher#352).
+- **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
+  Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
+  consumers can attribute the emitted resource to its owning OAM component.
+  **`object` must be a single object; a list is rejected.** `Generate` emits the map
+  verbatim as one resource and fills in metadata it finds missing: `metadata.name`
+  defaults to the component name when it is absent, empty, **or not a string**, and
+  on a namespaced object `metadata.namespace` likewise — so an inline *non-empty
+  string* namespace survives untouched, while a non-string one is replaced rather
+  than emitted.
 
-  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON`
-  into `KustomizationSpec`, so `patches`, `postBuild`, `dependsOn`, `force`,
-  `timeout`, `serviceAccountName`, `decryption`, `kubeConfig` and every other
-  field are emitted as authored. A key the struct does not declare, at any
-  depth, is refused with its path from the property root
-  (`unknown field "patches[0].target.kinds"`,
-  `builtin.UnknownJSONFieldPath`): the spec declares `kind`, `name` and
-  `namespace` in several places, so the bare key would not say where. A
-  wrongly typed value is refused too. Keys match case-insensitively, as in
-  `encoding/json`; schema validation, which a `kurel build` runs first, is
-  exact.
+  **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
+  resolved with the precedence `manifests` gives a `scopeOverrides` entry,
+  with `clusterScoped` in the entry's place (`resolveClusterScoped`,
+  `passthrough.go`):
 
-  **Defaults and checks.** `interval` defaults to `60m` when unset (a zero
-  duration counts as unset); Flux requires the field. `interval`,
-  `retryInterval` and `timeout`, when set, must be durations Flux accepts,
-  checked as on `helmrelease`. `sourceRef.kind` is required and one of
-  `OCIRepository`, `GitRepository`, `Bucket`, `ExternalArtifact`, the CRD's
-  enum; `sourceRef.name` is required. `prune` is a required field of the
-  spec with no default here: unset, `false` is emitted (`oci` passes `true`
-  unless told otherwise). `targetNamespace` is never defaulted, with or
-  without a Flux namespace, for the reason given under **oci**. Nothing else
-  is checked: the enums and the cross-field rules are left to the
-  Kustomization CRD's own admission, and `wait: true` beside `healthChecks`,
-  which `oci` refuses, is emitted as authored (kustomize-controller then
-  ignores the list). Whether the source exists is known only on the cluster. The checks run again in `Generate`,
-  for a config built directly.
+  - **A kind whose scope the Kubernetes API governs** (a built-in kind, a
+    `CustomResourceDefinition`; `isAPIGovernedScope`): kure's scope table decides. A
+    `PriorityClass`, a `ClusterRole` or a `Namespace` gets no namespace without the
+    property. A `clusterScoped` that contradicts the table is refused: `true` on a
+    namespaced built-in, an explicit `false` on a cluster-scoped one (`passthrough
+    component "batch-low": clusterScoped is false, but the Kubernetes API defines
+    scheduling.k8s.io/v1 PriorityClass as cluster-scoped; remove clusterScoped`).
+    **This is the one difference from `manifests`**, which ignores a `scopeOverrides`
+    entry for such a kind: its list may name kinds the source does not hold, while
+    `clusterScoped` is a statement about the one object, so a wrong one is an error
+    in the document and not a spare entry.
+  - **Any other kind:** an authored `clusterScoped` decides, `true` or `false`, also
+    against the table. A custom resource kure registers as cluster-scoped that the
+    target cluster serves namespaced takes `clusterScoped: false`.
+  - **Not authored** (absent or `null`): the table decides for a kind kure registers,
+    so a cert-manager `ClusterIssuer` gets no namespace. A kind nothing knows is
+    treated as namespaced, the default this component always had. `manifests` fails
+    closed on an unknown scope; `passthrough` does not, since every custom resource
+    passed through without the property relies on that default.
 
-  **Identity and namespaces.** The Kustomization is named after the component
-  and lands in the Flux namespace when one is configured, else in the
-  application namespace (`SetFluxNamespace`). The ConfigMaps and Secrets it
-  reads from its own namespace — `decryption.secretRef`,
-  `kubeConfig.secretRef` / `configMapRef` and each `postBuild.substituteFrom`
-  entry — must live there too: a `configmap`, `external-secret` or
-  `certificate` trait on the component whose object one of them names moves
-  with the Kustomization (`FluxNamespaceReads`, go-kure/launcher#740).
-  `ApplyPolicy` checks nothing: a Kustomization fetches nothing itself, and
-  the registry allowlist applies where its source is authored.
-- **helmrepository / ocirepository / gitrepository / bucket / helmchart** — the kind-named
-  terminals for Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family
-  redesign go-kure/launcher#336) and for its `HelmChart` (go-kure/launcher#351), which builds a
-  chart artifact from one of them. Each component's properties are exactly the top-level JSON
-  keys of its source-controller spec type — `HelmRepositorySpec`, `OCIRepositorySpec`,
-  `GitRepositorySpec`, `BucketSpec`, `HelmChartSpec`, in the version `go.mod` links — and a test
-  ties each published schema to its struct, so a bump that adds or drops a spec field fails the
-  suite until the schema follows.
-  Each emits exactly one CR of its kind, named after the component, and nothing else: no
-  Kustomization (compare `oci`), no HelmRelease (compare `helmrelease`), no source for a
-  `helmchart` (its `sourceRef` names one that exists, as a `helmrelease`'s
-  `chart.spec.sourceRef` does), and no source dedup — two components naming the same URL emit
-  two CRs. A `helmrelease` consumes a `helmchart` through `chartRef` with `kind: HelmChart`.
+  No `CustomResourceDefinition` is consulted: the component holds one object. A
+  cluster-scoped object, however it was resolved, gets no namespace default, and an
+  inline namespace on it is refused with the reason named (`passthrough component
+  "ca": object.metadata.namespace must not be set ("other"): cert-manager.io/v1
+  ClusterIssuer is registered as cluster-scoped (set clusterScoped: false if the
+  cluster serves it namespaced); the Kubernetes API rejects a namespace on a
+  cluster-scoped object`). That rejection is keyed on a non-empty string, so a
+  non-string `namespace` on a cluster-scoped object is neither rejected nor
+  defaulted and reaches the output as authored. The resolution runs in `Generate`
+  too, on the object about to be emitted, so a `PassthroughConfig` built directly is
+  held to it; its `ClusterScoped` field states `true` or nothing, since an explicit
+  `false` exists only for an authored property.
 
-  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into the spec
-  type, with no launcher-owned keys. A key the struct does not declare, at any depth
-  (`secretRef.namespace`, a stray key in a GitRepository `include` entry), is refused by name, and
-  so is a wrongly typed value (`suspend: "yes"`, an unparsable duration). The schema keeps the
-  nested Flux blocks as open objects; the strict decode is what checks them. A reflection test
-  asserts, per kind, that no spec field is unreachable through that decode, against an explicit
-  exclusion list that is empty. Keys match case-insensitively, as in `encoding/json`; schema
-  validation, which a `kurel build` runs first, is exact.
+  **Breaking** (pre-GA): an object of a cluster-scoped kind the table knows loses the
+  application namespace it was stamped with when `clusterScoped` was not set;
+  `clusterScoped: true` on a built-in namespaced kind and `clusterScoped: false` on a
+  built-in cluster-scoped kind stop building; and an inline namespace on a
+  cluster-scoped kind the table knows is refused without the property too, where it
+  was emitted as authored.
 
-  **Checks and defaults.** Required: `url` on `helmrepository`, `ocirepository` and
-  `gitrepository`; `bucketName` and `endpoint` on `bucket`; `chart`, `sourceRef.kind` and
-  `sourceRef.name` on `helmchart`. A `url` must start with a scheme the
-  CRD's own pattern admits: `http://`, `https://` or `oci://` for `helmrepository`, and only
-  `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
-  `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
-  `ssh://git@host/org/repo`. The CRD has no pattern for `endpoint`, so it is only required.
-  `interval` defaults to `60m` when unset (a zero duration counts as unset), matching the
-  `helmrelease` default; a `helmrepository` with `type: oci` gets no default, since Flux
-  does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
-  A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease`
-  (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
-  A set `timeout` (a `helmchart` has none) is checked the same way, against the source CRDs'
-  narrower pattern, which has
-  no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606), so an authored `1h` is
-  refused. A `timeout` of an hour or more authored in minutes or seconds (`90m`, `3600s`) is
-  accepted and emitted with its hours folded into minutes: `90m0s`, `60m0s`
-  (go-kure/launcher#619). A `metav1.Duration` would write `Duration.String()`, `1h30m0s`, which
-  the CRD rejects, so such a source is emitted as an unstructured object carrying that text; a
-  `timeout` below an hour, or none, leaves the source emitted exactly as before. A config built
-  directly gets the same minutes form.
-  Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
-  `verify.mode`, a HelmChart's `sourceRef.kind` and `reconcileStrategy`) and cross-field rules
-  (a Bucket's `sts` against its `provider`, `serviceAccountName` against `secretRef`, a
-  HelmChart's `verify` only with a HelmRepository source) are left to the CRD's own admission.
-  Nor is the source a `helmchart` names: whether it exists, or is of the kind `sourceRef.kind`
-  says, is known only on the cluster.
+  **Lists.** `Generate` emits the map as one resource, so a list would arrive
+  downstream as one *named*
+  envelope whose `items` never see per-object label mutation, namespace stamping or
+  ownership checks — while Flux unwraps it at apply time into N objects that
+  do reach the cluster. One envelope bypasses every per-object rule at once, which is why
+  the rejection lives here and not in each consumer. Declare one component per object.
+  The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
+  sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
+  kind merely *ends* in `List` with no `items` still compiles.
 
-  **Policy.** `ApplyPolicy` checks the host the source is fetched from against the policy's
-  allowed registries (`AllowedRegistries`), with the same exact match `oci`, `crd` and
-  `manifests` apply: the `url` host for the three repositories, the `endpoint` host for `bucket`.
-  A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
-  user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
-  userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
-  is refused. An empty allowlist permits every host, and none of the rules below applies. A
-  `helmchart` checks nothing: it fetches from the source its `sourceRef` names, whose host is
-  checked where that source is authored, as for a `helmrelease`.
+  This arm is **deliberately stricter than Kustomize** for a kind that does *not* end in
+  `List` but carries a top-level `items` array, such as `{kind: Widget, items: [...]}`.
+  Kustomize's build keeps that as one resource, because it consults `items` only on a
+  `List`-suffixed kind. Flux's kustomize-controller then decodes the build output with
+  the same `IsList` predicate and no kind check, and applies the array's members *instead
+  of* the object: a `Widget` whose `items` holds a `ConfigMap` puts that `ConfigMap` on
+  the cluster, in whatever namespace it names, and never applies the `Widget`. With
+  scalar members the Flux apply fails outright. Either way it is not one object, so it is
+  rejected.
 
-  No refusal prints the value it refused, since a URL or `endpoint` can carry a credential in
-  its userinfo (the user included), path, query or IPv6 zone (go-kure/launcher#699). An
-  allowlist refusal names the host as `displayHost` reduces the url's raw authority (an
-  `ssh://` user included, not the host the match used): without userinfo, query, fragment or
-  zone, port kept, saying when something was dropped; the matching itself is unchanged. It
-  names no host at all when the reduced text is not a plain host (a DNS name, IPv4 address or
-  bracketed IPv6 address, with an optional numeric port), or when a `[`, `]`, `?` or `#`, none
-  of which a userinfo may hold, precedes the last `@`, which may then sit inside IPv6 brackets
-  or a query instead. A scheme refusal (the four sources', `oci`'s, and `crd`'s and
-  `manifests`' `http`/`https` check) and the explicit-registry refusal below name only the
-  component, the field and the form expected, and the Amazon S3 refusal names the reduced host.
+  A second arm catches what `IsList` structurally cannot. It requires `items` to be
+  exactly a `[]interface{}`, so an authored `items: null` — an untyped nil — passed
+  every check and then expanded to **zero** objects at apply time with no error at
+  all; with pruning enabled an empty desired result also removes whatever the previous
+  inventory held. That case is rejected on its own diagnostic ("expands to zero
+  objects"), and it is keyed on a **null** `items` **on a kind ending in `List`**
+  rather than a present one — a CRD may legitimately carry an object-valued `items`
+  field that must keep compiling, and an ordinary, non-`List` kind may equally carry
+  a null-valued `items` field (a plausible spec-field collision) without being an
+  envelope at all. Matches Kustomize's own `inlineAnyEmbeddedLists`, which checks the
+  kind suffix before ever consulting `items`; Flux agrees, since a null `items` is not
+  a list to `IsList` and the object is applied as one.
 
-  Some sources are not fetched from the host their field names, so the check follows Flux instead:
+  The validated object is deep-copied when the config is built, not aliased, so a
+  caller that keeps mutating the map it passed in cannot change what was validated.
+  The copy detaches nested maps and slices whatever their concrete type — the authored
+  path only ever yields `map[string]any` and `[]any`, but a Go-assembled body can hold
+  a `map[string]string` or a `[]string`, and those used to alias straight through. A
+  null survives as a null rather than becoming an empty `{}`/`[]`. Two things it
+  deliberately does not do: it does not chase pointers (a `*Location` inside a
+  `time.Time`, `resource.Quantity`'s `*inf.Dec`), and it does not reject the shapes it
+  cannot fully detach.
 
-  - *An `oci://` URL must name its registry explicitly.* Flux parses an OCIRepository `url`, and a
-    Helm OCI chart reference when it verifies the chart's signature, with go-containerregistry,
-    which takes the first path segment as the registry only when a `/` follows it and it is
-    `localhost` or contains `.` or `:`; anything else is a Docker Hub repository. So
-    `oci://ghcr.io` and `oci://registry/app` are pulled from Docker Hub, whichever entry their
-    first segment matched. Under a non-empty allowlist such a URL is refused, with an error
-    asking for a qualified registry (`oci://docker.io/library/app`,
-    `oci://registry.example:5000/org/app`). An `ocirepository` `url` also needs a repository
-    path after the registry; a `helmrepository` `oci://` URL, of either `type`, may stop at the
-    registry (`oci://ghcr.io`), since Flux appends the chart name to it.
-  - *A `bucket` with `provider: gcp` is checked against `storage.googleapis.com`.* Flux's GCP
-    client never reads `endpoint`; it uses Google Cloud Storage's own host. The `generic`, `aws`
-    and `azure` providers, and no provider, fetch from `endpoint`, which stays the host checked,
-    except as the next rule says.
-  - *A `bucket` with an Amazon S3 `endpoint` is refused, unless its provider is `azure` or
-    `gcp`.* The S3 client behind `generic`, `aws` and no provider does not fetch from an Amazon
-    S3 endpoint: it contacts the S3 host of `region`, which may name any AWS region or partition,
-    or of the bucket's own location when `region` is unset, chosen at runtime. That host cannot
-    be checked, so under a non-empty allowlist the build fails, even when the allowlist lists the
-    endpoint. The test errs broad, since it fails closed: any `endpoint` containing `amazonaws`,
-    in any case, counts, because the client's own host patterns also match look-alikes such as
-    `s3.x-amazonaws.com`.
+  The copy is **not** what makes the rejection binding, and this section used to claim
+  it was. `Object` is an exported field, so a caller holding the config can assign a
+  fresh map over it, and a struct literal or a JSON decode never runs
+  `ToApplicationConfig` at all — three routes reaching `Generate` with a body the arms
+  never saw. `Generate` therefore re-runs, on the map it is about to emit, every check
+  that must hold of an emitted body: a non-empty `apiVersion` and `kind`, and both list
+  arms. Checking the bytes being emitted, rather than trusting a check that ran on some
+  earlier map, is what closes those routes.
 
-  Hosts a source reaches indirectly are not checked: the chart URLs a Helm repository index
-  advertises on other hosts (what `passCredentials` exists for), a Bucket's `sts.endpoint`, the
-  token endpoints a `provider` authenticates against, and a proxy. Apart from the two `bucket`
-  cases above, a `provider`, `region` or `insecure` setting changes how the source authenticates
-  or which scheme it uses, not which host it fetches from.
+  Those checks live in one function precisely so the two call sites cannot disagree
+  about what a valid body is. While they were split — the constructor checking identity,
+  `Generate` checking only list shape — a `PassthroughConfig` holding an *empty* map
+  passed both: non-nil, so it cleared the no-object guard, and carrying no `items`, so
+  it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
+  the metadata it had just stamped on.
 
-  **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
-  the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,
-  `certSecretRef`, `proxySecretRef`, the Secret references under `verify` and `sts`,
-  `serviceAccountName`, a GitRepository `include`, a HelmChart's `sourceRef` — resolves in the
-  namespace the CR lands in, so under a Flux namespace the objects it names must live there. A
-  `helmchart` whose `sourceRef` names a source component in the same document finds it there:
-  both move to the Flux namespace. So does the Secret of an `external-secret` or `certificate`
-  trait (or the ConfigMap of a `configmap` trait) on the component when one of the Secret
-  references names it — a `certSecretRef` naming a `certificate` trait's `secretName` moves that
-  Certificate
-  (`FluxNamespaceReads`, go-kure/launcher#740); a trait object no reference names stays in the
-  application namespace.
+  **Policy.** `ApplyPolicy` holds the object to the environment policy
+  (go-kure/launcher#794), with the check template delivery runs on the objects a chart
+  renders (`helmtemplate`'s *Every emitted workload*); the transform calls it with
+  `NoopPolicy` when no policy is passed. A Pod, PodTemplate, ReplicationController,
+  Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob is checked as an authored
+  workload is: host namespaces, hostPath volumes, the cpu/memory maxima, the storage
+  maximum on a generic ephemeral volume's claim, the registry allowlist on an image
+  volume's reference (**breaking**, go-kure/launcher#790: an object with one from a
+  registry outside the list built before; see *Image volumes* under **pod**), and
+  for every init and regular container
+  the registry allowlist, the privileged, HostProcess and capability gates, and
+  `ValidateImageRef` (no untagged image, no `:latest`), which holds the reference of an
+  image volume too (**breaking**, go-kure/launcher#790: an object with an untagged or
+  `:latest` one built before). Ephemeral containers are refused.
+  The storage a PersistentVolumeClaim, or a StatefulSet's claim template, requests is held
+  to the storage maximum (`MaxStorageSize`); the replica count of a Deployment,
+  StatefulSet, ReplicaSet or ReplicationController (one when the object sets none) and the
+  `maxReplicas` of a HorizontalPodAutoscaler, in any API version, to the replica maximum
+  (`MaxReplicas`). A PersistentVolume is held to what the `persistentvolume` kind holds
+  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
+  `spec.capacity.storage` is held to the storage maximum (breaking for a document that
+  holds one; see **persistentvolume**). The error is the component's policy violation and names the object and
+  the field (`passthrough: object Deployment "demo/web":
+  spec.template.spec.containers[0] "app": …`).
 
-  **Generated by the `helm` rule.** An inline source on a `helm` component generates one of
-  these components: a `helmrepository` for an `http(s)://` URL; an `ocirepository` for an
-  `oci://` URL, with a `ref.tag` from `version` and a `layerSelector` copying the Helm chart
-  content layer; a `gitrepository` for `kind: GitRepository` with its URL and one `source.ref`
-  field; or a `bucket` for `kind: Bucket` with `endpoint` and `bucketName` and no URL. It is
-  named `<app>-source-<digest>` and shared by every `helm` component with the same source
-  identity (see **helm**). An authored source component exposes the whole spec
-  (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
-  generates a `helmchart`.
+  A core Secret is refused under a policy that forbids explicit secrets
+  (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README), as the `secret` trait is
+  (go-kure/launcher#794, item 2): `passthrough: object Secret "demo/creds": the object is a
+  Secret, and the environment policy forbids explicit secrets; …`. The check does not read
+  what the Secret holds, so one with no entry is refused too, and the message quotes nothing
+  of the object. A policy that does not implement the interface, and no policy, allow it.
+  **Breaking** only under a policy that answers `false`: a `passthrough` Secret built under
+  it before.
+
+  The object is authored as a map and the check reads Go types, so an object whose group,
+  version and kind kure's scheme registers is decoded as that kind **for the check only**.
+  What is emitted stays the authored map, so a field the Go type does not declare is
+  emitted with it, and a large integer is emitted as authored, which kure's manifest writer
+  writes with its own digits (`helmtemplate`'s *Rendered objects*). The check
+  cannot read such a field, so a workload or a claim that sets one is refused, as template
+  delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
+  component is built and again by `Generate`, under any policy and with none
+  (`passthrough component "web": object Deployment "demo/web": undeclared field
+  spec.template.spec.fieldOfALaterVersion: …`). A workload or a claim in which a value
+  that serializes itself (a Go caller's `json.RawMessage`) repeats enough keys to fill the
+  strict decode's record is refused on the same ground. An object of any other kind is
+  emitted as authored, the field with it, whatever the strict decode says of it: nothing
+  it sets is dropped, so the full-record refusal of `manifests` has no part here.
+  **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
+  undeclared field was emitted unchecked before and no longer builds.
+  `Generate` runs the check again on the object it is about to emit, once
+  `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map
+  checked need not be the map emitted; a refusal there is the same
+  `*oam.ViolationError`, naming the component.
+
+  What cannot be read is refused, not passed: an object of a registered kind that does not
+  decode as that kind (`replicas: three`), a workload kind, a claim or a PersistentVolume
+  in an API version the scheme does not register (`batch/v1beta1`, `apps/v1beta2`), a
+  HorizontalPodAutoscaler in such a
+  version whose `maxReplicas` is not an integer, and an object that does not serialize.
+  So is an object the decoder of its kind panics on, which crashed the build before: a
+  `CiliumNetworkPolicy` or `CiliumClusterwideNetworkPolicy` whose `icmps` field leaves its
+  `type` out, for one (`passthrough: object CiliumNetworkPolicy "demo/p": the object cannot
+  be read, …: the decoder panicked on CiliumNetworkPolicy "demo/p": …`, the parse error kure
+  gives such an object since go-kure/kure#1009). A MetalLB `BGPPeer` at `metallb.io/v1beta2`
+  is a registered kind since go-kure/kure#1007, so one that does not decode as that kind
+  (`holdTime: [1]`) is refused here too; it was emitted unread. Since go-kure/kure#1014 an
+  object of a registered kind that states `Kind` or `apiversion` beside the exact key is
+  refused here as well, with the parser's text for the cause (`the key "Kind" equals "kind"
+  only after case folding; …`). **Breaking**: the `Kind` case was read as its Go type and
+  checked, and so was the `apiversion` case where that key states a version the kind is
+  registered in (`apiversion: v1` beside `apiVersion: v1`); with another version there it
+  was unreadable before, for another cause. Every build
+  decodes the object, since the transform applies `NoopPolicy` when no policy is passed;
+  only a config no policy was applied to, one a Go caller builds
+  outside the transform, emits the object undecoded, as authored.
+
+  **Behaviour change:** before go-kure/launcher#794 a `passthrough` object reached the
+  output unchecked. A document that relied on that no longer builds when its object is a
+  workload with a privileged container, a host namespace, a hostPath volume, an image
+  outside the registry allowlist, an untagged or `:latest` image, or a value over a
+  maximum — and with no policy passed the first three are always refused, since
+  `NoopPolicy` denies them. A consumer allows what it wants allowed through its policy,
+  not per component: `AllowPrivileged()`, `AllowHostNetwork()`, `AllowHostPID()`,
+  `AllowHostIPC()` and `AllowHostPathVolumes()` for the security flags, the registry in
+  `AllowedRegistries()` (or no allowlist), the capability lists, and the maxima
+  (`MaxReplicas()`, `MaxCPU()`, `MaxMemory()`, `MaxStorageSize()`). An untagged or
+  `:latest` image has to be pinned in the object, and a workload in an API version the
+  build cannot read has to be authored in the one it can (`batch/v1`, `apps/v1`).
+
+  Not checked: an object of a kind not named above; a custom resource, the pods its controller
+  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
+  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
+  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
+  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
+- **persistentvolume** (go-kure/launcher#790) is the kind-named projection of
+  a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
+  `resourcequota`: one schema key per json field of
+  `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
+  type, two spellings of one field refused, and one object named after the
+  component, with the authored spec; the handler adds no label and no
+  annotation of its own, and the transform sets the component label. The spec
+  embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
+  `hostPath`, …) is a top-level property, as it is a top-level field of the
+  object's spec. A PersistentVolume is cluster-scoped: the object carries no
+  namespace, whatever namespace the application is built for. The API requires
+  `capacity`, `accessModes` and exactly one source; those and the other value
+  rules are left to the API server, so a component with no properties builds a
+  volume the server refuses. A quantity written as a number is emitted in its
+  canonical string form. The object's labels and annotations are the `labels`
+  and `annotations` properties.
+
+  **Policy.** Unlike `namespace`, `limitrange` and `resourcequota`, a
+  PersistentVolume is held to the
+  environment policy (`enforcePersistentVolumePolicy`):
+  - A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
+    allows it. Both name a path on the node (`local` a disk, partition or
+    directory there), and a pod that binds the volume through a claim reads
+    and writes that path, as it does through a `hostPath` volume of its own.
+  - `capacity.storage` is held to the storage maximum (`MaxStorageSize()`), as
+    the storage a claim requests is.
+
+  One check covers every path that can produce the object: this kind, and the
+  rendered-object check that template delivery (`helmtemplate`), `passthrough`
+  and `manifests` run, where the refusal names the object (`passthrough: object
+  PersistentVolume "data": spec.hostPath: …`). On those three paths a
+  PersistentVolume in an API version the build cannot read is refused, since
+  its source and capacity cannot be checked.
+
+  Of the other source types of `corev1.PersistentVolumeSource` (k8s.io/api
+  v0.37.1, `core/v1/types.go`), all but `csi` and `flexVolume` name a remote
+  endpoint or disk, not a path on the node, and are not gated. **Not covered:** a `csi` or
+  `flexVolume` source. Each names a driver and options only the driver
+  interprets, and no field says whether a node path is exposed; a pod's `csi`
+  and `flexVolume` volumes are unchecked for the same reason. A driver that
+  exposes a node path therefore passes the gate. This is a decided limit
+  (go-kure/launcher#794, item 12): the environment policy makes no statement
+  about driver-defined volumes, on pods or on PersistentVolumes. One (an
+  allowlist of driver names, for instance) would be a new part of the policy
+  every consumer implements, and no use case asked for it.
+
+  **Breaking:** before this kind, a PersistentVolume that a chart rendered, a
+  `passthrough` component held or a `manifests` source yielded reached the
+  output unchecked. One with a `hostPath` or `local` source, or with
+  `capacity.storage` over the storage maximum, is now refused where it built
+  before — and with no policy passed a `hostPath` or `local` one is always
+  refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
+  through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
+  component.
+- **pod** (go-kure/launcher#790) is the kind-named projection of a v1 Pod, on
+  the same recipe: one schema key per json field of `corev1.PodSpec`, the
+  property map decoded strictly into that type, two spellings of one field
+  refused, and one Pod named after the component in the build namespace, with
+  the authored spec. The handler adds the `app` label and nothing else: no
+  annotation, no ServiceAccount, no `automountServiceAccountToken`, no
+  resources, no probe. The `app` label (`app: <component>`, see "The `app`
+  label") is the one every workload kind gives its pods and the one launcher's
+  traits and Services select on: a `networkpolicy` trait's policy matches the
+  Pod by it, and a `service` component reaches it with `selector: {app:
+  <component>}`. The transform
+  then sets the component label, as on every object a component owns
+  (go-kure/launcher#788). It is a bare Pod: no controller recreates it, and it
+  is not the workload shape of `webservice`, `worker` or `deployment` — a
+  property of those (`image`, `ports`, `env` at the top level) is refused as
+  not a PodSpec field.
+
+  **Traits.** The pod is a trait target: `security-context`, a `configmap`
+  trait's `mountPath` and an `external-secret` trait's `envFrom`/`mountPath`
+  change its spec as they change a workload kind's pod template.
+  `topology-spread` is Deployment-only and refuses a `pod` component.
+
+  **Refused when the component is read**, with or without a policy:
+  - `ephemeralContainers`, `priority` and `overhead`, with the texts the
+    workload kinds give. A pod cannot be created with ephemeral containers,
+    and the Priority and RuntimeClass admission controllers set the other two
+    and reject a differing value; an author sets `priorityClassName` or
+    `runtimeClassName`. The three are not in the schema, so a caller that
+    validates the properties against it first, as `kurel build` does, refuses
+    each as an unsupported field whatever its value, an empty one included. A
+    caller that converts the component without that validation gets the texts
+    above, and there an empty `ephemeralContainers` or `overhead` is read as
+    unset. Cost: on a cluster that runs without those admission controllers
+    the two fields cannot be authored through this kind.
+  - An unauthored `containers`. The API's other value rules (an empty list, a
+    container without a name, …) are left to the API server.
+  - An image without a tag or digest, or tagged `:latest`, on every init and
+    regular container (`ValidateImageRef`), so a container without an image
+    too.
+  - The same on the `reference` of an image volume (`volumes[0] "ext"
+    image.reference: image "…" rejected: …`); a volume that names no
+    reference is not checked. See *Image volumes* below.
+  - A `timeoutSeconds`, `periodSeconds`, `successThreshold` or
+    `failureThreshold` written as `0` on a liveness, readiness or startup
+    probe of an init or regular container. The Go type omits a zero there and
+    the API server would apply its default (1, 10, 1, 3), so the authored
+    value cannot be carried. A test derives the list from the field comments
+    of the linked `k8s.io/api` types (every non-pointer `omitempty` number or
+    boolean under `PodSpec` whose comment states a non-zero default) and fails
+    when the two differ. It holds the list to the documented defaults, not to
+    the API server's defaulting code.
+
+  **Marked required upstream and not checked:** the `action` of a container
+  restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
+  and the `signerName` and `keyType` of a pod certificate source of a
+  projected volume. The Go type leaves each out when it is empty, so the Pod
+  would show the omission, and launcher does not refuse it: the built-in types
+  ship markers and no schema, so no linked module shows that the API server
+  refuses a Pod without one, and both fields are behind a feature gate of the
+  cluster. `TestKindComponents_OmittedRequiredAndWrittenDefaults` lists the
+  four with that reason.
+
+  **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
+  Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
+  storage maximum on a generic ephemeral volume's claim, the registry
+  allowlist on an image volume's reference, the pod-level cpu and
+  memory maxima, and for every init and regular container the registry
+  allowlist, the cpu and memory maxima and the privileged, HostProcess and
+  capability gates. It fills no policy default: a container without resources
+  stays without. The kind names a field as the property it is (`hostNetwork is
+  not allowed by environment policy`, `containers[0] "app": …`); the three
+  rendered paths name it under the object (`passthrough: object Pod "runner":
+  spec.containers[0] "app": …`).
+
+  **Image volumes** (go-kure/launcher#790). An image volume (`volumes[].image`)
+  mounts an OCI image the kubelet pulls as it pulls a container's, so its
+  `reference` is held to the allowed registries (`AllowedRegistries`), refused
+  with the registry class: `volume "ext" image.reference: image
+  "other.example/team/ext:1.0.0" is not from an allowed registry
+  [registry.example]`. The reference is read as a container image is: one
+  that names no registry host is Docker Hub's (`docker.io`), a tag or a digest
+  is not part of the host, and the host must equal a list entry exactly, a
+  trailing `/` on the entry aside (`registry.example:5000` is not
+  `registry.example`). A volume that names no
+  reference is not checked, and no list, or an empty one, allows every
+  registry. The one check holds it on every path by which a document brings
+  a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
+  `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
+  template delivery (`helmtemplate`), `passthrough` or a `manifests` source
+  carries. The components with a volume schema of their own (`webservice`,
+  `worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
+  no image volume: their `volumes` has no such type. With the container images these
+  are every field of a pod spec that names an image the kubelet pulls today.
+  A test walks the linked `k8s.io/api` type and fails on a field whose name
+  holds `image`, or whose type is the image volume source, that is neither
+  held nor listed with a reason; an image field under another name and
+  another type is not found by it. **Not covered:** a custom
+  resource that `passthrough`, a `manifests` source or a chart carries passes
+  whatever it holds, the pod template of a CloudNativePG Pooler and the
+  extension images of a Cluster included; only the kind that builds the
+  object (`cnpg-pooler`, `cnpg-cluster`) holds its fields. **Breaking:** an
+  image volume naming a registry outside the list built before, on each of
+  those paths, and is refused now.
+
+  **The tag rule on an image the document names.** The reference of an image
+  volume is also held to `ValidateImageRef`, as a container's image is: one
+  without a tag or digest, or tagged `:latest` (with a digest too), or one
+  that is no image reference, is refused, on each of the paths above
+  (`volumes[0] "ext" image.reference: image "registry.example/team/ext"
+  rejected: no tag or digest specified; use an explicit version tag or
+  digest`; a rendered path names it under the object,
+  `spec.template.spec.volumes[0] "ext" …`). The rule is the library's, not the
+  environment's: the kinds apply it when the component is read and again at
+  generation, with or without a policy, and the refusal carries no policy
+  class. A reference by digest alone passes, and a volume that names no
+  reference is not checked. The kinds that name an image outside a pod spec
+  hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
+  of its template, `cnpg-cluster` its `imageName` and the reference of each
+  extension, `postgresql` the image it composes from `version` (each in its entry).
+  The test that walks the types fails on a field held to the registry rule
+  and not to this one. **Breaking** (go-kure/launcher#790): a document, a
+  chart or a source naming an untagged or `:latest` image in one of those
+  fields built before, and is refused now.
+
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
+  admission controllers decide there. They do refuse ephemeral containers and
+  an untagged or `:latest` image, an image volume's included.
+
+  The config implements `oam.ServiceAccountNamer`: the account is the authored
+  `serviceAccountName`, or the deprecated `serviceAccount` where that one is
+  unset, as the API server reads the two; with neither, the namespace's
+  `default` account. The Pod carries the `app` label and the component label,
+  and what `labels` and `annotations` author beside them.
+- **poddisruptionbudget** (go-kure/launcher#790) is the kind-named projection
+  of a `policy/v1` PodDisruptionBudget, built on `policyFreeKind`. It emits
+  that one object in the build namespace, named after the component unless
+  `objectName` names it, holding exactly what was authored: the handler adds
+  no label, no annotation and no default of its own. The handler declares its
+  object as namespaced, so the object name is claimed in the object's namespace.
+  - **Authored:** the four fields of `PodDisruptionBudgetSpec`, decoded
+    strictly: `minAvailable` and `maxUnavailable` (each a count or a
+    percentage string such as `"50%"`), `selector` (a label selector) and
+    `unhealthyPodEvictionPolicy`. A count is emitted as a number and a
+    percentage as a string, and an authored `0` is kept (`maxUnavailable: 0`
+    allows no voluntary eviction).
+  - **Required:** nothing. The API server accepts a budget with an empty
+    spec. Its value rules are left to it, the one that `minAvailable` and
+    `maxUnavailable` exclude each other included: a component that authors
+    both builds here and is refused at apply.
+  - **The selector is the author's.** Launcher points it at no component: an
+    unauthored `selector` selects no pod, and `selector: {}` selects every
+    pod of the namespace. To cover a workload component, select its `app`
+    label (`matchLabels: {app: <component>}`), which holds the component
+    name up to 63 characters and its label projection beyond.
+  - **Beside the `scaler` trait.** `scaler` with `enablePDB: true` derives a
+    budget for its own workload, selector included, and refuses one that
+    would block every eviction. This kind is the authored object and applies
+    none of that: it is for a budget the trait does not express (the trait
+    always writes `minAvailable: 50%`; here the count or percentage is the
+    author's, as are `maxUnavailable`, an eviction policy and pods launcher
+    does not own).
+  - **Policy.** No field of the spec is one an `oam.Policy` method speaks to,
+    so `ApplyPolicy` enforces nothing and fills nothing.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** Whether the selector matches any pod. The object's
+    status is the disruption controller's and is not written.
+- **servicemonitor**, **podmonitor**, **prometheus-probe**, **prometheusrule**
+  (go-kure/launcher#790) are the kind-named projections of four objects of the
+  Prometheus operator's `monitoring.coreos.com/v1` API: a ServiceMonitor, a
+  PodMonitor, a Probe and a PrometheusRule. Each is built on `policyFreeKind`
+  and emits that one object in the build namespace, named after the component
+  unless `objectName` names it; the handler adds no label, no annotation and no
+  default of its own. Each declares its object as namespaced, so the object name is
+  claimed in the object's namespace. The Probe's type name carries a prefix
+  because a probe, in this package, is a container's.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `monitoring.coreos.com/v1`: where the
+  operator's CRDs are not installed the component builds, and the object is
+  refused at apply. Whoever may author a component may author these. The open
+  point "No capability gate on component types" on go-kure/launcher#790
+  carries it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (an endpoint, a relabeling rule, a rule of a group).
+  - `servicemonitor` (`ServiceMonitorSpec`): `endpoints`, `selector`,
+    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `targetLabels`,
+    `podTargetLabels`, `attachMetadata`, `bodySizeLimit`,
+    `serviceDiscoveryRole`, and the scrape settings below.
+  - `podmonitor` (`PodMonitorSpec`): `podMetricsEndpoints`, `selector`,
+    `namespaceSelector`, `selectorMechanism`, `jobLabel`, `podTargetLabels`,
+    `attachMetadata`, `bodySizeLimit`, and the scrape settings below.
+  - `prometheus-probe` (`ProbeSpec`): `prober`, `targets`, `module`,
+    `jobName`, `interval`, `scrapeTimeout`, `metricRelabelings`, `params`,
+    the HTTP client settings the type embeds (`authorization`, `basicAuth`,
+    `oauth2`, `bearerTokenSecret`, `followRedirects`, `enableHttp2`,
+    `tlsConfig`), and the scrape settings below.
+  - `prometheusrule` (`PrometheusRuleSpec`): `groups`, each with its `name`,
+    `rules` and evaluation settings. A rule's `expr` is a string or a number
+    and is emitted as the one authored.
+  - The scrape settings the three scrape kinds share: `sampleLimit`,
+    `targetLimit`, `labelLimit`, `labelNameLengthLimit`,
+    `labelValueLengthLimit`, `keepDroppedTargets`, `scrapeProtocols`,
+    `fallbackScrapeProtocol`, `scrapeClass`, `scrapeNativeHistograms`,
+    `scrapeClassicHistograms`, `nativeHistogramBucketLimit`,
+    `nativeHistogramMinBucketFactor` and `convertClassicHistogramsToNHCB`.
+  - An authored `0` or `false` is kept where the API tells it from an unset
+    field (`sampleLimit: 0`, `filterRunning: false`, a group's `limit: 0`), and
+    left out where the type omits a zero that means the same
+    (`honorLabels: false`). A quantity written as a number is emitted in its
+    canonical string form (`nativeHistogramMinBucketFactor: 1.1` as `1100m`).
+    The API's two defaults are strings (a prober's `path`, `/probe`, and a
+    relabeling rule's `action`, `replace`): an authored empty string there is
+    omitted and defaulted. `TestMonitoringKinds_NoDefaultedZeros` holds the
+    types to having no number or boolean that is omitted when zero and
+    defaulted to something else, from the default markers of the linked
+    module's source.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, so that the object would not show the omission. It is
+  the rule every kind follows, not a wider one: sent as it was authored, the
+  document is one the API server refuses, and only the Go type's zero value
+  hides that. Each must be authored (`selector: required (…)`,
+  `endpoints[1].oauth2.tokenUrl: required (…)`):
+  - a `servicemonitor`'s `endpoints` and `selector`, and a `podmonitor`'s
+    `selector`. No default selector is filled: unauthored, the type would
+    write `selector: {}`, which selects every Service or pod of the selected
+    namespaces. `selector: {}` and `endpoints: []` are authored values and
+    build.
+  - the `clientId`, `clientSecret` and `tokenUrl` of an `oauth2`, on an
+    endpoint of either monitor and on a Probe;
+  - a rule group's `name` and a rule's `expr` (unauthored, the type would
+    write `expr: 0`).
+
+  **A required field the type leaves out when it is empty is refused too:**
+  the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
+  or empty. The object would show the omission and the API server refuse it.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives these fields
+  for every kind in its table, from the CRD the linked module ships or, where
+  it ships none, from the markers of its source. It holds each to a refusal,
+  shown on a document, or to a stated reason. The same test derives the
+  fields the API defaults and the type writes unauthored, where the default
+  would never apply, and holds each to one of three answers: refused, filled
+  by the kind with the API's default, or harmless with the reason.
+
+  The table holds the kind components that decode their properties into an
+  upstream type, but for two groups. The `httproute` kind is not in it: the
+  experimental-channel CRD requires the `protocol` of an `externalAuth`
+  filter, of a rule and of a backend reference, the type leaves an empty one
+  out, and the kind does not refuse it. The Flux kinds (`helmrelease`,
+  `fluxcd-kustomization`, `helmrepository`, `ocirepository`, `gitrepository`,
+  `bucket`, `helmchart`) are not in it either: no row is written for them.
+
+  **A Probe needs `prober.url` here, because the object always carries a
+  prober.** This is a limit of the Go type, not a rule of the API: the API
+  does not require `prober`, but the type writes one whether or not it was
+  authored, and the API server refuses a prober without a `url`. A Probe
+  without a prober cannot be emitted. An empty `url` is refused as an
+  unauthored one is.
+
+  `TestMonitoringKinds_RequiredMatchMarkers` holds these lists to the fields
+  the linked module's source marks required and the type writes unauthored,
+  so a dependency bump that adds, drops or moves one fails there. **Not
+  refused:**
+  - a required field of a Kubernetes type these specs embed: the `key` of a
+    Secret or ConfigMap key reference, the `key` and `operator` of a selector
+    expression. An omitted one is emitted empty;
+  - an authored empty string in a required field (a group's `name: ""`),
+    `prober.url` and a parameter's `name` excepted. It is a value, and the
+    API server's to refuse;
+  - every other value rule of the API (formats, enumerations, lengths, that a
+    rule is a recording or an alerting one), and the operator's own checks of
+    an object the API server has admitted: that a Probe has targets, that a
+    scrape timeout is no longer than its interval, that an endpoint or a
+    Probe authenticates one way. Whether a rule's expression is valid PromQL
+    is not checked either.
+
+  **What the type writes unauthored.** A `servicemonitor` or `podmonitor`
+  carries `namespaceSelector: {}`, which selects the object's own namespace.
+  A `podmonitor` without endpoints carries `podMetricsEndpoints: null`, which
+  the API server drops as it drops every null of a field that is not
+  nullable. A `prometheus-probe` carries `targets: {}`, and the operator
+  rejects a Probe with no target. A `tlsConfig` carries `ca: {}` and
+  `cert: {}` where they were not authored.
+
+  **The selector, the prober and the targets are the author's.** Launcher
+  points none at a component and looks for none in the document. To scrape a
+  workload component's pods, select their `app` label
+  (`matchLabels: {app: <component>}`, valued as "The `app` label" below
+  describes); to scrape a `service` component's
+  Service, select a label its object carries (the component label, see
+  "Component label and ownership" in the OAM model). A Secret or ConfigMap an
+  object refers to is read by the operator in the object's namespace.
+
+  **Selected by a Prometheus through the object's labels.** A Prometheus
+  picks these objects up through its label selectors
+  (`serviceMonitorSelector`, `podMonitorSelector`, `probeSelector`,
+  `ruleSelector`). The handler writes no label, so the object carries the
+  component label, whose value is the component's, and what `labels` authors:
+  for a Prometheus that selects on a fixed label (`release: <name>`, say),
+  write that label there.
+
+  **Policy.** No field of these specs is one an `oam.Policy` method speaks to,
+  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
+  same under every policy and under none.
+  - **Hosts are not checked.** A host these objects name is one Prometheus
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: `prober.url`, a `proxyUrl` (of an endpoint, a prober or an
+    `oauth2`), an `oauth2`'s `tokenUrl`, and the static targets of a Probe.
+  - **No field holds a literal secret by design, and none is checked.** A
+    credential is a reference to a key of a Secret: `authorization.credentials`,
+    `basicAuth`, `bearerTokenSecret`, an `oauth2`'s `clientSecret`, a
+    `tlsConfig`'s `keySecret`, the values of `proxyConnectHeader`. Free text
+    that could hold one is written to the object as authored, under a policy
+    that forbids explicit secrets too: `params`, an `oauth2`'s
+    `endpointParams`, and a `proxyUrl` with credentials in it.
+  - **File paths are not checked.** A `servicemonitor` endpoint may name a
+    file in the Prometheus container (`bearerTokenFile`, and `caFile`,
+    `certFile` and `keyFile` under `tlsConfig`).
+
+  **Not covered.** Whether what is selected or referred to exists (a
+  Service, a pod, an Ingress, a named port, a Secret key), and whether a
+  Prometheus of the cluster selects the object. The object's status is the
+  operator's and is not written.
+- **podtemplate** (go-kure/launcher#790) is the kind-named projection of a v1
+  PodTemplate. The object has no spec: beside its identity it holds one field,
+  `template`, and that is the component's one property, decoded strictly into
+  `corev1.PodTemplateSpec`. It emits one PodTemplate named after the component
+  in the build namespace, with the authored template. Any other property is
+  refused, the object's own `kind`, `apiVersion` and `metadata` included
+  (`properties do not decode into a v1 PodTemplate …`).
+
+  **It is stored, not run.** No controller creates pods from a PodTemplate, so
+  the handler adds no `app` label to the template (an authored `app` label is
+  carried as written), the config reports no ServiceAccount
+  (`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
+  component name), and it is not a trait target: a `configmap` trait's
+  `mountPath`, an `external-secret` trait's `envFrom`/`mountPath` and a
+  `security-context` trait's pod-spec properties (`runAsUser` and the five
+  others) are refused on it, naming the component and the kinds they apply
+  to. `security-context` with `psaLevel` alone is accepted, as a declaration
+  of the level, and writes nothing to the template
+  (go-kure/launcher#794, item 14; `pkg/oam/builtin/traits/README.md`,
+  "Pod-spec traits on a component without a workload"). The transform still sets the
+  component label on the object and its template, as on every object a
+  component owns (go-kure/launcher#788).
+
+  **Refused when the component is read**, with or without a policy: under
+  `template.spec`, what the `pod` kind refuses of its own spec, by the same
+  checks and named by path (`template.spec.containers: required`, which an
+  unauthored `template` also gives; `template.spec.priority: not authorable
+  …`; the image rule; a probe timing written as `0`).
+  `template.spec.activeDeadlineSeconds` is allowed, unlike on a
+  `replicaset` or `replicationcontroller`: the API server accepts it on a
+  PodTemplate. The two restart-rule fields and the two pod-certificate fields
+  that are marked required upstream are not checked, for the reason the `pod`
+  kind gives: no linked module shows that the API server refuses the
+  omission. The API's other value rules are left to the API server.
+
+  **Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
+  runs (`enforcePodTemplatePolicy`), naming a field by its path in the
+  properties (`template.spec: hostNetwork is not allowed by environment
+  policy`), since whatever reads the template creates pods from it. It fills
+  no policy default. The three rendered paths run the same check on a
+  PodTemplate they emit and name the field the same way (`template.spec…`).
+
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
+  emit; the API server decides there. They do refuse ephemeral containers and
+  an untagged or `:latest` image, an image volume's included. The PodTemplate's
+  own labels and annotations
+  are the `labels` and `annotations` properties; the template's metadata is
+  carried as authored and takes neither.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `poolerName`, `managedRoles`,
@@ -7091,702 +7099,694 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed` resolves each
   name with the consumer's hook, asked the request the transform asks, so a consumer that
   names the Pooler or the Cluster through the hook gets a selector for the name the object has.
-- **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
-  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
-  component name becomes the Cluster's name and its `cnpg.io/cluster`
-  endpoint selector, so it must be what CloudNativePG's admission webhook
-  admits: a DNS-1035 label (no leading digit, no dot) of at most 50
-  characters. Any other name is refused at parse time, when endpoints are
-  collected and by `Generate` (`cnpg-cluster name "db.main": must be a
-  DNS-1035 label of at most 50 characters …`), although other kinds accept
-  DNS-1123 subdomains of up to 253. Its
-  properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
-  key per `ClusterSpec` json field: scalars are typed, and every structured
-  field is an open `object` or an `array` of open objects whose description
-  points at the upstream type. `ToApplicationConfig` decodes the whole property
-  map into `cnpgv1.ClusterSpec` with `builtin.DecodeStrictJSON`, so a key the
-  linked CNPG version does not declare, at any depth (`storage.sise`,
-  `bootstrap.initdb.databse`), and a value of the wrong type
-  (`storage.size: 5`) are refused rather than dropped. Two limits come from
-  `encoding/json` itself: the unknown-field error names the key but not its
-  path, and a key differing from a declared one only in letter case is
-  accepted as that field (two spellings of one field in the same object are
-  refused, since the decoder would keep only one: `storage.size: sets the
-  same field as storage.Size …`). The policy defaults below read what was authored
-  from the decoded spec as well as from the property map, where every
-  spelling the decoder accepts is consulted, so such a key still counts as
-  authored and is not overwritten by a default — including an empty
-  `storage.size`, which the decoded spec cannot tell from absence.
-  It carries **no launcher opinions**: `Generate` emits the Cluster named after
-  the component in the build namespace with exactly the authored spec, so an
-  unauthored field is left for the operator's own default. `postgresql`'s
-  choices — an image from `version`, `primaryUpdateStrategy: unsupervised`,
-  `enablePDB` from the replica count, a `1Gi` storage fallback, pod
-  anti-affinity — are not made here: its lowering rule writes them as this
-  kind's properties, and the trait it attaches sets the two that depend on
-  the policy (see `postgresql`). The one value it writes unasked is
-  `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
-  `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
-  appear even when unauthored, as they do for `postgresql`: `affinity` and
-  `resources` as empty objects, and `postgresql` as
-  `syncReplicaElectionConstraint: {enabled: false}`, because that nested
-  field's `enabled` has no `omitempty`.
-  Nulls follow "The null contract" below, and a null is whatever serializes
-  to JSON null: the properties are marshalled with `encoding/json` and read
-  back before anything else looks at them, so a null map value is left out
-  rather than decoded to an empty string, and a null array element is
-  refused by path (`env[0]: null is not a valid array element`). The
-  contract covers declared keys only: a key the CNPG type does not declare
-  is refused as an unknown field even when its value is null
-  (`storage: {sise: null}`), not dropped with the null. A lowering
-  rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
-  every component; that is the supported contract, and the engine's schema
-  check refuses a typed API struct where it checks an object or array item
-  (for example an `env` entry), though not inside an open object's
-  undeclared keys. Because the reading is the serialization itself, a
-  direct caller of the handler additionally has a value built in Go read
-  exactly as `encoding/json` writes it — a concrete collection type, a nil
-  behind a pointer, a `json.RawMessage` and a custom encoder included. A
-  value that does not serialize is refused. An `instances` below 1, in
-  any spelling, is refused before policy runs (`instances: must be >= 1,
-  got 0`): the CRD's minimum is 1, so the API server would refuse the
-  Cluster. A policy instance-count default below 1 is refused the same way.
-  `Generate` repeats the name and instance-count refusals on what it emits,
-  the count's upper bound (`instances: must be <= 2147483647, got …`)
-  included, so a `CnpgClusterConfig` built in Go without
-  `ToApplicationConfig` cannot produce a Cluster the operator or the API
-  server rejects for either. It also refuses any storage request the
-  Cluster carries that does not parse or is not positive, authored or from
-  a policy default, on every claim the storage maximum below covers
-  (`storage.size: quantity must be positive, got "0"`;
-  `walStorage.pvcTemplate.resources.requests.storage: …`): CloudNativePG's
-  webhook parses only `storage.size`, so such a Cluster was admitted and its
-  claims then failed the API server's positive storage-request check
-  (go-kure/launcher#623). An unset size is still left to the operator.
-  An authored `0` or `false` that the typed spec cannot carry, on a field
-  whose CRD default is not zero, is refused by path
-  (`managed.roles[0].connectionLimit: 0 cannot be carried by the
-  CloudNativePG API types (the field is omitted when zero, so the operator
-  would apply its default -1)`). These fields are non-pointer and
-  `omitempty`, so the value is omitted when the Cluster is encoded and the
-  operator applies its CRD default instead. For the linked CNPG version they
-  are `managed.roles[].connectionLimit` (default `-1`, unlimited),
-  `postgresUID` and `postgresGID` (`26`), `startDelay` (`3600`),
-  `stopDelay` (`1800`), `switchoverDelay` (`3600`),
-  `probes.liveness.isolationCheck.requestTimeout` and `.connectionTimeout`
-  (`1000`) and `replicationSlots.updateInterval` (`30`); a test derives the
-  set from the CNPG module's CRD and Go types, so a CNPG bump that changes it
-  fails CI. An explicit zero default on any other such field, such as
-  `managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0`
-  or `monitoring.enablePodMonitor: false`, is accepted: it is omitted too,
-  and the field's absence means the same value.
-  Two fields the Cluster CRD requires, which the Go type leaves out when they
-  are empty, are refused when unauthored or empty: the `signerName` and the
-  `keyType` of a pod certificate source of the projected volume template
-  (`projectedVolumeTemplate.sources[0].podCertificate.signerName: required
-  (…)`). The object would show the omission and the API server refuse it.
-  Two more that the CRD requires, which the Go type writes as `null` when
-  they are unauthored, are refused when unauthored: the `nodeSelectorTerms`
-  of a required node affinity
-  (`affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
-  required (…)`) and the `databases` of an import
-  (`bootstrap.initdb.import.databases: required (…)`). The API server drops a
-  null of a field that is not nullable before it validates, so the required
-  field is then missing. An authored empty list is written as one and is not
-  refused here. A third such field is not refused:
-  `replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so
-  the API server puts the default (`true`) in the place of the null.
-  `TestKindComponents_NullRequired` derives the three from the CRD and shows
-  each answer by running the CRD's schema validator on the object.
-  Eleven strings the CRD requires and bounds, with a minimum length or an
-  enumeration, which the Go type writes as `""` when they are unauthored, are
-  refused when unauthored, each where its parent is authored
-  (`replica.source: required (…)`):
-  `backup.barmanObjectStore.destinationPath`,
-  `bootstrap.initdb.import.type` (`microservice` or `monolith`),
-  `bootstrap.pg_basebackup.source`,
-  `externalClusters[].barmanObjectStore.destinationPath`,
-  `managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
-  `podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry
-  and the `name` and the `value` of its `env[]` entries,
-  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`.
-  The Cluster would carry an empty value the author did not write, and the
-  API server refuse it. An authored empty one is a value: it is written, and
-  refusing it is left to the API server. The refusal reads the authored
-  properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
-  in Go is not held to it. Nor is the component a `postgresql` component is
-  lowered to, whose properties are written from a typed spec, so that a
-  string left out there reaches the kind as an authored `""`: `postgresql`
-  refuses the two it could leave out itself, under the property its author
-  wrote (above). The same test
-  derives every field
-  the type writes unauthored as a zero value the CRD's own rule refuses, and
-  shows each answer with the validator; the twelfth of a Cluster is
-  `instances`, which is not refused (below).
-  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
-  the CRD and shows the refusals. It also holds the two fields the CRD
-  defaults and the type writes unauthored to a reason they are harmless:
-  `instances`, of which the kind always writes a count (the authored one, the
-  policy's default, or the CRD's own `1`), and
-  `backup.volumeSnapshot.onlineConfiguration`, written `{}` under an authored
-  `volumeSnapshot`. The CRD's default for the object is `waitForArchive: true`
-  and `immediateCheckpoint: false`; in a `{}` it fills `waitForArchive` with
-  the field's own default `true`, and an absent `immediateCheckpoint` is
-  `false`.
-  A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
-  a quantity `cpu: 0`) is emitted as authored. An authored
-  empty string is not refused — `storage.size: ""` keeps its meaning above —
-  so an empty string on a defaulted field such as `primaryUpdateStrategy` is
-  still omitted. The two pod-certificate fields above are the exception: an
-  empty `signerName` or `keyType` is refused as an unauthored one is.
-  `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
-  onto this kind, so it is the same code), in this order:
-  the instance-count default when `instances` is not authored (an authored
-  value wins even when it equals the fallback) and its maximum; the cpu and
-  memory request and limit defaults on `resources`, filling only unset
-  entries, and their maxima; and the storage-size default on `storage.size`
-  when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
-  authored. With no policy default the size is left to the operator; the
-  `1Gi` fallback is postgresql's, applied after the policy by the post-policy
-  step its rule attaches
-  (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
-  `enablePDB` is set from the instance count; a fallback over the maximum is the
-  component's `oam.ViolationError` of class `oam.RefusalStorageMaximum`, as a
-  refusal of `ApplyPolicy` is). That method is for that step,
-  not an authoring surface. A storage-size default that is
-  not a quantity is refused (`policy default for storage.size: invalid
-  quantity "lots"`), as an invalid cpu or memory default is, since with no
-  maximum set nothing else would parse it. So is a zero or negative one
-  (`quantity must be positive, got "0"`): CloudNativePG's webhook only
-  parses the size, and the claims it creates would then fail the API
-  server's positive storage-request check. The storage maximum applies to
-  every claim the Cluster creates — `storage`, `walStorage`, each
-  `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
-  `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one
-  that exceeds it. Because this kind exposes the two security contexts, it
-  also refuses `securityContext.privileged` and a `securityContext` or
-  `podSecurityContext` `windowsOptions.hostProcess` unless the policy allows
-  privileged workloads, and an added capability the policy forbids or leaves
-  off a non-empty allowlist. The registry allowlist the workload kinds apply
-  to their image applies to an authored `imageName`
-  (`imageName: image "…" is not from an allowed registry [...]`). When
-  `imageName` is unset, the operator takes the image from the catalog
-  `imageCatalogRef` names or, without one, runs its default image; neither is
-  checked by this kind. A `postgresql` component always writes `imageName` (its
-  derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
-  so the allowlist applies to its image too. The allowlist applies as well to
-  the image of each `postgresql.extensions[]` entry, which the operator mounts
-  into the instance pods as an image volume (**breaking**,
-  go-kure/launcher#790: an extension image from a registry outside the list
-  built before): `postgresql.extensions[0].image.reference: image "…" is not
-  from an allowed registry [...]`, with the registry class, the reference read
-  as `imageName` is (see *Image volumes* under **pod**). An entry
-  without a reference is not checked: the operator takes that image from the
-  catalog `imageCatalogRef` names (and refuses the Cluster without one), and
-  a catalog's images are not checked by this kind, as for an unset
-  `imageName`. A build reads the objects a document brings, not an object a
-  reference points at: a catalog's images are held where the catalog is
-  authored, by a kind that builds it. No kind here builds an image catalog
-  today, so nothing in this library holds a catalog's images: not for a raw
-  catalog on `manifests`, `passthrough` or a chart, and not for one that
-  already exists in the cluster. A `postgresql` component writes no
-  extension entry. `imageName` and the extension images are every image a
-  Cluster names today; the test that walks the pod spec for image fields
-  walks the Cluster and the Pooler spec the same way.
-  Both are also held to the tag rule (`ValidateImageRef`) when the component
-  is read and again at generation, with or without a policy (**breaking**,
-  go-kure/launcher#790: an untagged or `:latest` `imageName` or extension
-  reference built before): `imageName: image "…" rejected: no tag or digest
-  specified; use an explicit version tag or digest`,
-  `postgresql.extensions[0].image.reference: image "…" rejected: …`. An unset
-  `imageName` and an entry without a reference name no image and are not
-  checked, as for the allowlist. A digest without a tag passes, here as
-  everywhere the rule runs; on `imageName` CloudNativePG's webhook refuses
-  one, and a tag that is no PostgreSQL version, and those are the operator's
-  value rules, left to the operator.
-  Generation refuses `hugepages-<size>`
-  in `resources` without `cpu` or `memory` after policy defaults. It also
-  applies the shared parser's request/limit cross-check there
-  (`resources: cpu: request 2 must not exceed limit 1`; hugepages and
-  extended resources need a limit equal to the request), so a policy default
-  limit below an authored request is refused as well. The other
-  resource-name rules of the shared parser are left to the API server.
-  `Endpoints` declares the same primary endpoint as `postgresql`
-  (`cnpg.io/cluster: <Cluster name>` on port `5432`), and only for a
-  component the parse accepts: what `ToApplicationConfig` refuses of the
-  name or of the properties is refused where endpoints are collected, in the
-  same words (`instances: must be >= 1, got 0`). What `Generate` refuses
-  once the policy is applied is not repeated there.
-  `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
-  `ClusterSpec` by reflection: each json field is published with its type or
-  listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
-  schema key with no field or a stale exclusion also fails, so a CNPG bump
-  that adds, removes or retypes a field names it.
-- **cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR
-  kind components for a CloudNativePG `Pooler` and `Database` and a Barman
-  Cloud plugin `ObjectStore` (`barmancloud.cnpg.io/v1`), built on the
-  `cnpg-cluster` recipe: one schema key per json field of `PoolerSpec`,
-  `DatabaseSpec` or `ObjectStoreSpec`, the whole property map decoded strictly
-  into that type under the same null contract, the same refusal of an
-  authored `0` or `false` the type cannot carry (for the linked versions only
-  `instanceSidecarConfiguration.retentionPolicyIntervalSeconds`, default
-  `1800`, on the ObjectStore) and of two spellings of one field, and the same
-  reflection tests pinning the schema and both derived lists to the linked
-  modules. `Generate` emits one object named after the component in the build
-  namespace with the authored spec, and repeats the parse-time refusals made
-  on the decoded spec. The
-  fields each CRD requires are refused when
-  unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
-  (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
-  `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
-  A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
-  label of at most 50 characters).
-  `cnpg-pooler` writes no type or instance count of its own, so the operator's
-  defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
-  Service's, so it must be a DNS-1035 label of at most 63 characters, and a
-  pooler named like its cluster is refused, as CloudNativePG's webhook does:
-  by the build, and where its endpoint is collected in the same words
-  (`cluster.name "main": a pooler cannot have the same name as its cluster`).
-  `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
-  namespaces, hostPath volumes, privilege, host-process, capabilities, the
-  registry allowlist on each authored container image, cpu and memory maxima;
-  errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
-  limit "2" exceeds enforced maximum "1"`), caps a generic ephemeral volume's
-  claim at the policy storage maximum, holds an image volume's reference to the
-  registry allowlist (`template.spec: volume "ext" image.reference: image "…" is
-  not from an allowed registry [...]`; **breaking**, go-kure/launcher#790, see
-  *Image volumes* under **pod**), and applies the registry allowlist to an
-  authored `pgbouncer.image`. With or without a policy, when the component is
-  read and again at generation, an authored `pgbouncer.image`, the image of
-  each init and regular container of the template and the reference of each
-  of its image volumes are held to the tag rule (`ValidateImageRef`;
-  **breaking**, go-kure/launcher#790: an untagged or `:latest` one built
-  before): `pgbouncer.image: image "…" rejected: …`,
-  `template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
-  container that names no image is not checked: the operator supplies the
-  PgBouncer image, so that is the ordinary form here, where the pod kinds
-  refuse it. Generation runs the shared parser's
-  request/limit and hugepages checks on the template's pod and container
-  resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
-  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
-  other resource-name rules of the shared parser are left to the API server. A
-  template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
-  or `overhead` is refused, as the workload kinds refuse them: the operator
-  copies the template into a Deployment, whose pod template cannot carry the
-  first two and whose pods get the last two from the default Priority and
-  RuntimeClass admission controllers, which refuse an authored value that
-  differs from theirs. Four fields the Pooler CRD requires under
-  `template.spec`, which the pod spec's type leaves out when they are empty,
-  are refused when unauthored or empty: the `action` of a restart rule of a
-  container or an init container and the `operator` of its exit codes
-  (`template.spec.containers[0].restartPolicyRules[0].action: required (…)`),
-  and the `signerName` and `keyType` of a pod certificate source of a
-  projected volume
-  (`template.spec.volumes[0].projected.sources[0].podCertificate.signerName:
-  required (…)`). The object would show the omission and the API server
-  refuse it; the CRD of the linked module settles that, which is what the
-  built-in pod kinds lack.
-  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
-  from the CRD and shows the refusals. Five more that the CRD requires under
-  `template.spec`, which the pod spec's type writes as `null` when they are
-  unauthored, are refused when unauthored: the `nodeSelectorTerms` of a
-  required node affinity, the `priority` of an eviction responder, the
-  `monitors` of a `cephfs` or an `rbd` volume, and the `secretRef` of a
-  `scaleIO` volume (`template.spec.volumes[0].cephfs.monitors: required (…)`).
-  The API server drops a null of a field that is not nullable before it
-  validates, so the required field is then missing. An authored empty list is
-  written as one and is not refused here. `template.spec.containers` is such
-  a field too and is not refused: the kind writes `containers: []` itself
-  (below). `TestKindComponents_NullRequired` derives these fields and
-  `pgbouncer` from the CRD and shows each answer by running the CRD's schema
-  validator on the object. One string the CRD requires and bounds with a
-  pattern, which the type writes as `""` when it is unauthored, is refused
-  when unauthored under an authored `pgbouncer.imageCatalogRef`: its `key`
-  (`pgbouncer.imageCatalogRef.key: required (…)`). An authored empty one is
-  written, and refusing it is left to the API server. The refusal reads the
-  authored properties, so `Generate` does not repeat it: a `CnpgPoolerConfig`
-  built in Go is not held to it. The same test derives
-  it, as the one field of a Pooler the type writes unauthored as a zero value
-  the CRD's own rule refuses. The instance count is deliberately not policed:
-  `postgresql`, which lowers its pooler onto this kind, never applied a
-  policy to the pooler's count, so a maximum here would refuse a document
-  that built before.
-  Pod-level errors name the template's own fields, as in `template.spec:
-  resources cpu limit "2" exceeds enforced maximum "1"`. A `template` that lists
-  no containers (labels only, say) is written with `containers: []`: the Go type
-  cannot omit the template's `spec`, the CRD requires `containers` once it is
-  present, and the operator adds its `pgbouncer` container either way.
-  `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
-  <Pooler object name>` on port `5432`: the component name unless
-  `objectName` or the naming hook names the Pooler), byte-identical to `postgresql`'s pooler
-  endpoint for a pooler of that name (`<component-name>-pooler` by default,
-  of the `postgresql` component), and
-  only for a component the parse accepts: what `ToApplicationConfig` refuses
-  is refused where endpoints are collected, in the same words (`pgbouncer:
-  required (an empty object selects PgBouncer's defaults)`).
-  `cnpg-database` also refuses the names the CRD reserves (`postgres`,
-  `template0`, `template1`). The `ensure` of each schema, extension, fdw and
-  server has no `omitempty` but a CRD default of `present`, so `Generate` writes
-  `present` where it is unauthored, as the API server would have; a
-  test derives that list from the CRD too. An authored `ensure: ""` there is
-  refused by its path (`schemas[0].ensure: "" is refused by the Database CRD,
-  …`) rather than written as `present`, since the CRD's enum refuses it as
-  written; an explicit null is absence and takes the default. A Database runs nothing, so it has
-  no policy and no endpoint.
-  `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
-  sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
-  at the policy maxima, filling no default, and declares no endpoint;
-  generation runs the same request/limit and hugepages checks on them, leaving
-  the other resource-name rules to the API server. It refuses
-  `configuration.serverName`, which the shared Barman type carries but the
-  plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
-  of the Cluster that uses the store.
-- **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
-  Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
-  consumers can attribute the emitted resource to its owning OAM component.
-  **`object` must be a single object; a list is rejected.** `Generate` emits the map
-  verbatim as one resource and fills in metadata it finds missing: `metadata.name`
-  defaults to the component name when it is absent, empty, **or not a string**, and
-  on a namespaced object `metadata.namespace` likewise — so an inline *non-empty
-  string* namespace survives untouched, while a non-string one is replaced rather
-  than emitted.
+- **replicaset** (go-kure/launcher#790) is the kind-named projection of an
+  apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
+  `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
+  `template`), the property map decoded strictly into that type, and one
+  ReplicaSet named after the component in the build namespace, with the
+  authored spec. It is the bare controller: no rollout, which a `deployment`
+  component gives, and none of that kind's shorthand — a property of the
+  workload kinds (`image`, `ports`, `strategy`) is refused as not a
+  ReplicaSetSpec field.
 
-  **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
-  resolved with the precedence `manifests` gives a `scopeOverrides` entry,
-  with `clusterScoped` in the entry's place (`resolveClusterScoped`,
-  `passthrough.go`):
+  **The `app` label.** The handler adds one thing: `app: <component>` on the
+  pod template's labels, beside the authored ones (see "The `app` label"). It
+  is the label every workload kind gives its pods and the one launcher's
+  traits and Services select on, so a `networkpolicy` trait's policy and a
+  `service` component with `selector: {app: <component>}` reach the pods. The
+  selector is emitted as authored, and the ReplicaSet itself gets no label of
+  the handler's; the transform then sets the component label on the object and
+  its template, as on every object a component owns (go-kure/launcher#788).
+  - An authored `template.metadata.labels.app` with the component's own label
+    value is kept. Any other value is refused, naming the component
+    (``template.metadata.labels.app: "frontend" is not the `app` label of
+    component "web" ("web")``): the label cannot say something else than what
+    the traits select.
+  - A selector that matches the authored template labels and would stop
+    matching once the label is added (`app` under `DoesNotExist`, or `NotIn`
+    the label value) is refused (``selector: rules out the label `app: web`
+    …``). A selector on `app: <component>` is satisfied by the added label, so
+    the template needs no label of its own for it. A selector that cannot be
+    read as one (an unknown operator, a key or value that is no label) cannot
+    be compared and is refused with apimachinery's reason.
 
-  - **A kind whose scope the Kubernetes API governs** (a built-in kind, a
-    `CustomResourceDefinition`; `isAPIGovernedScope`): kure's scope table decides. A
-    `PriorityClass`, a `ClusterRole` or a `Namespace` gets no namespace without the
-    property. A `clusterScoped` that contradicts the table is refused: `true` on a
-    namespaced built-in, an explicit `false` on a cluster-scoped one (`passthrough
-    component "batch-low": clusterScoped is false, but the Kubernetes API defines
-    scheduling.k8s.io/v1 PriorityClass as cluster-scoped; remove clusterScoped`).
-    **This is the one difference from `manifests`**, which ignores a `scopeOverrides`
-    entry for such a kind: its list may name kinds the source does not hold, while
-    `clusterScoped` is a statement about the one object, so a wrong one is an error
-    in the document and not a spare entry.
-  - **Any other kind:** an authored `clusterScoped` decides, `true` or `false`, also
-    against the table. A custom resource kure registers as cluster-scoped that the
-    target cluster serves namespaced takes `clusterScoped: false`.
-  - **Not authored** (absent or `null`): the table decides for a kind kure registers,
-    so a cert-manager `ClusterIssuer` gets no namespace. A kind nothing knows is
-    treated as namespaced, the default this component always had. `manifests` fails
-    closed on an unknown scope; `passthrough` does not, since every custom resource
-    passed through without the property relies on that default.
+  **Traits.** A trait target as the `pod` kind is: `security-context`, a
+  `configmap` trait's `mountPath` and an `external-secret` trait's
+  `envFrom`/`mountPath` change its pod template. `topology-spread` and
+  `scaler` are not available on it.
 
-  No `CustomResourceDefinition` is consulted: the component holds one object. A
-  cluster-scoped object, however it was resolved, gets no namespace default, and an
-  inline namespace on it is refused with the reason named (`passthrough component
-  "ca": object.metadata.namespace must not be set ("other"): cert-manager.io/v1
-  ClusterIssuer is registered as cluster-scoped (set clusterScoped: false if the
-  cluster serves it namespaced); the Kubernetes API rejects a namespace on a
-  cluster-scoped object`). That rejection is keyed on a non-empty string, so a
-  non-string `namespace` on a cluster-scoped object is neither rejected nor
-  defaulted and reaches the output as authored. The resolution runs in `Generate`
-  too, on the object about to be emitted, so a `PassthroughConfig` built directly is
-  held to it; its `ClusterScoped` field states `true` or nothing, since an explicit
-  `false` exists only for an authored property.
+  **Refused when the component is read**, with or without a policy:
+  - An unauthored `selector`. The Go type cannot omit it, so it would be
+    written as `null`, and launcher derives none. Whether it matches the
+    template's labels, like the API's other value rules (an empty selector,
+    `restartPolicy` other than `Always`, a negative `replicas`), is left to
+    the API server.
+  - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+    same checks and named by path (`template.spec.containers: required`,
+    `template.spec.priority: not authorable …`, the image rule, a probe timing
+    written as `0`). A test holds the probe list to every non-pointer
+    `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
+    states a non-zero default, the template's metadata included.
+  - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
+    ReplicaSet's pod template, whose pods are replaced for as long as the
+    controller exists; a `pod` or a Job may set it.
 
-  **Breaking** (pre-GA): an object of a cluster-scoped kind the table knows loses the
-  application namespace it was stamped with when `clusterScoped` was not set;
-  `clusterScoped: true` on a built-in namespaced kind and `clusterScoped: false` on a
-  built-in cluster-scoped kind stop building; and an inline namespace on a
-  cluster-scoped kind the table knows is refused without the property too, where it
-  was emitted as authored.
+  The two restart-rule fields and the two pod-certificate fields that are
+  marked required upstream are not checked under `template.spec` either, for
+  the reason the `pod` kind gives: no linked module shows that the API server
+  refuses the omission.
 
-  **Lists.** `Generate` emits the map as one resource, so a list would arrive
-  downstream as one *named*
-  envelope whose `items` never see per-object label mutation, namespace stamping or
-  ownership checks — while Flux unwraps it at apply time into N objects that
-  do reach the cluster. One envelope bypasses every per-object rule at once, which is why
-  the rejection lives here and not in each consumer. Declare one component per object.
-  The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
-  sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
-  kind merely *ends* in `List` with no `items` still compiles.
+  **Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
+  one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
+  maximum 3`), and the pod template to the check the `pod` kind runs
+  (`enforcePodTemplatePolicy`), naming a field by its path in the properties
+  (`template.spec: hostNetwork is not allowed by environment policy`,
+  `template.spec.containers[0] "app": …`). It fills no policy default: an
+  unset `replicas` stays unset and a container without resources stays
+  without. The three rendered paths run the same checks on a ReplicaSet they
+  emit and name the field under the object (`spec.replicas`,
+  `spec.template.spec…`).
 
-  This arm is **deliberately stricter than Kustomize** for a kind that does *not* end in
-  `List` but carries a top-level `items` array, such as `{kind: Widget, items: [...]}`.
-  Kustomize's build keeps that as one resource, because it consults `items` only on a
-  `List`-suffixed kind. Flux's kustomize-controller then decodes the build output with
-  the same `IsList` predicate and no kind check, and applies the array's members *instead
-  of* the object: a `Widget` whose `items` holds a `ConfigMap` puts that `ConfigMap` on
-  the cluster, in whatever namespace it names, and never applies the `Widget`. With
-  scalar members the Flux apply fails outright. Either way it is not one object, so it is
-  rejected.
+  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
+  `manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
+  on a ReplicaSet they emit, do not require a selector and add no `app` label;
+  the API server decides there. They do refuse ephemeral containers and an
+  untagged or `:latest` image, an image volume's included.
 
-  A second arm catches what `IsList` structurally cannot. It requires `items` to be
-  exactly a `[]interface{}`, so an authored `items: null` — an untyped nil — passed
-  every check and then expanded to **zero** objects at apply time with no error at
-  all; with pruning enabled an empty desired result also removes whatever the previous
-  inventory held. That case is rejected on its own diagnostic ("expands to zero
-  objects"), and it is keyed on a **null** `items` **on a kind ending in `List`**
-  rather than a present one — a CRD may legitimately carry an object-valued `items`
-  field that must keep compiling, and an ordinary, non-`List` kind may equally carry
-  a null-valued `items` field (a plausible spec-field collision) without being an
-  envelope at all. Matches Kustomize's own `inlineAnyEmbeddedLists`, which checks the
-  kind suffix before ever consulting `items`; Flux agrees, since a null `items` is not
-  a list to `IsList` and the object is applied as one.
+  The config implements `oam.ServiceAccountNamer`, reading the template's
+  `serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
+  labels and annotations are the `labels` and `annotations` properties; the
+  template's metadata is carried as authored and takes neither.
+- **replicationcontroller** (go-kure/launcher#790) is the kind-named
+  projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
+  one schema key per json field of `corev1.ReplicationControllerSpec`
+  (`replicas`, `minReadySeconds`, `selector`, `template`), the property map
+  decoded strictly into that type, and one ReplicationController named after
+  the component in the build namespace, with the authored spec. What the
+  `replicaset` kind states holds here — the `app` label on the pod template
+  and the refusal of an authored one with another value, the three traits, the
+  refusals under `template.spec` (`activeDeadlineSeconds` included), the two
+  restart-rule fields and the two pod-certificate fields that are marked
+  required upstream and are not checked, because no linked module shows that
+  the API server refuses the omission, the
+  replica maximum and the pod-template policy check, no policy default, the
+  known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
+  `labels` and `annotations` for the object's own metadata — with these
+  differences:
+  - `selector` is a plain map of label to value, not a label selector: a
+    `matchLabels` or `matchExpressions` key is refused as not a
+    ReplicationControllerSpec field.
+  - `selector` is optional. An unset one stays unset, and the API server
+    defaults it to the pod template's labels, the `app` label included.
+  - `template` is required (`template: required`). The API type holds it by
+    pointer, so an unauthored one would be emitted without pods to create.
+  - No selector is refused against the `app` label: a map selector asks only
+    for labels to be present, which a further label on the pods cannot break.
+- **replicationsource**, **replicationdestination** (go-kure/launcher#790)
+  are the kind-named projections of the two objects of VolSync's
+  `volsync.backube/v1alpha1` API: a ReplicationSource, which copies a volume
+  out, and a ReplicationDestination, which receives one. Each is built on
+  `policyHeldKind` (`policyFreeKind` with a policy check, see above) and
+  emits that one object in the build namespace, named after the component
+  unless `objectName` names it, and declares it as namespaced; the handler
+  adds no label, no annotation and no default. The two share their movers but
+  for Syncthing, and what is said of a mover below holds for both kinds.
 
-  The validated object is deep-copied when the config is built, not aliased, so a
-  caller that keeps mutating the map it passed in cannot change what was validated.
-  The copy detaches nested maps and slices whatever their concrete type — the authored
-  path only ever yields `map[string]any` and `[]any`, but a Go-assembled body can hold
-  a `map[string]string` or a `[]string`, and those used to alias straight through. A
-  null survives as a null rather than becoming an empty `{}`/`[]`. Two things it
-  deliberately does not do: it does not chase pointers (a `*Location` inside a
-  `time.Time`, `resource.Quantity`'s `*inf.Dec`), and it does not reject the shapes it
-  cannot fully detach.
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `volsync.backube/v1alpha1`: where
+  VolSync's CRDs are not installed the component builds, and the object is
+  refused at apply. The open point "No capability gate on component types" on
+  go-kure/launcher#790 carries it. The kinds read nothing of the cluster
+  profile; the `volsync` trait still takes its class defaults from it.
 
-  The copy is **not** what makes the rejection binding, and this section used to claim
-  it was. `Object` is an exported field, so a caller holding the config can assign a
-  fresh map over it, and a struct literal or a JSON decode never runs
-  `ToApplicationConfig` at all — three routes reaching `Generate` with a body the arms
-  never saw. `Generate` therefore re-runs, on the map it is about to emit, every check
-  that must hold of an emitted body: a non-empty `apiVersion` and `kind`, and both list
-  arms. Checking the bytes being emitted, rather than trusting a check that ran on some
-  earlier map, is what closes those routes.
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (a mover, its security context, a volume mounted into it).
+  - `replicationsource` (`ReplicationSourceSpec`): `sourcePVC`, the claim to
+    copy; `trigger` (`schedule`, a cron expression, or `manual`); the movers
+    `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`; `external`, a
+    provider outside VolSync with its `parameters`; and `paused`.
+  - `replicationdestination` (`ReplicationDestinationSpec`): `trigger`, the
+    movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external` and
+    `paused`. A destination has no Syncthing mover and names no source claim:
+    `syncthing` and `sourcePVC` are refused there as unknown keys.
+  - `rsync` (rsync over SSH) has its own, shorter type: it takes
+    `moverResources`, `moverServiceAccount` and `moverPodLabels`, and has no
+    `moverSecurityContext`, `moverAffinity` or `moverVolumes`, which are
+    refused under it as unknown keys.
+  - A mover authored empty is in the object, empty but for what the type
+    writes unauthored (below); one left out is not.
+  - An authored `false` or `0` is kept where the API tells it from an unset
+    field (`restic.retain.monthly: 0`, a destination's `restic.previous: 0`,
+    a Syncthing peer's `introducer: false`, `moverSecurityContext.runAsUser:
+    0`), and left out where the type omits a zero (`paused: false`).
+    VolSync's CRDs default no field under `spec`, so no authored zero is
+    replaced by a default; `TestVolsyncKinds_NoDefaults` holds the linked
+    CRDs to that, and a dependency bump that adds a default fails there with
+    the field named.
 
-  Those checks live in one function precisely so the two call sites cannot disagree
-  about what a valid body is. While they were split — the constructor checking identity,
-  `Generate` checking only list shape — a `PassthroughConfig` holding an *empty* map
-  passed both: non-nil, so it cleared the no-object guard, and carrying no `items`, so
-  it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
-  the metadata it had just stamped on.
+  **Required** follows the rule of the Prometheus operator's kinds: a
+  field the API requires that the Go type writes whether or not it was
+  authored must be authored. Neither kind has one at the top level.
+  - Of a volume mounted into a mover (`moverVolumes`, on `rsyncTLS`,
+    `rclone`, `restic` and `syncthing`): `mountPath` and `volumeSource`
+    (`restic.moverVolumes[0].volumeSource: required (…)`).
+  - Of a Syncthing peer: `address`, `ID` and `introducer`. No default is
+    filled for `introducer`: an authored `false` is a value.
+  - Of a mover's affinity that authors a required node affinity
+    (`moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution`):
+    its `nodeSelectorTerms`, which the Kubernetes type would write as `null`
+    where the CRD requires them. `TestKindComponents_NullRequired` shows the
+    refusal with the validator of the linked CRDs.
+  - A required field under a parent the author left out is not asked for: the
+    list follows what was authored.
 
-  **Policy.** `ApplyPolicy` holds the object to the environment policy
-  (go-kure/launcher#794), with the check template delivery runs on the objects a chart
-  renders (`helmtemplate`'s *Every emitted workload*); the transform calls it with
-  `NoopPolicy` when no policy is passed. A Pod, PodTemplate, ReplicationController,
-  Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob is checked as an authored
-  workload is: host namespaces, hostPath volumes, the cpu/memory maxima, the storage
-  maximum on a generic ephemeral volume's claim, the registry allowlist on an image
-  volume's reference (**breaking**, go-kure/launcher#790: an object with one from a
-  registry outside the list built before; see *Image volumes* under **pod**), and
-  for every init and regular container
-  the registry allowlist, the privileged, HostProcess and capability gates, and
-  `ValidateImageRef` (no untagged image, no `:latest`), which holds the reference of an
-  image volume too (**breaking**, go-kure/launcher#790: an object with an untagged or
-  `:latest` one built before). Ephemeral containers are refused.
-  The storage a PersistentVolumeClaim, or a StatefulSet's claim template, requests is held
-  to the storage maximum (`MaxStorageSize`); the replica count of a Deployment,
-  StatefulSet, ReplicaSet or ReplicationController (one when the object sets none) and the
-  `maxReplicas` of a HorizontalPodAutoscaler, in any API version, to the replica maximum
-  (`MaxReplicas`). A PersistentVolume is held to what the `persistentvolume` kind holds
-  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
-  `spec.capacity.storage` is held to the storage maximum (breaking for a document that
-  holds one; see **persistentvolume**). The error is the component's policy violation and names the object and
-  the field (`passthrough: object Deployment "demo/web":
-  spec.template.spec.containers[0] "app": …`).
+  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (11 paths for a source,
+  6 for a destination) to the CRDs the linked module ships: every field of
+  VolSync's own types that a CRD requires and the type writes unauthored is
+  listed, and nothing else is. A dependency bump that adds, drops or moves
+  one fails there. **Not refused:**
+  - a required field the type omits when it is not authored: the object shows
+    the omission, and the API server refuses it;
+  - a required field of a Kubernetes type these specs embed, other than those
+    terms (the `key` of a selector requirement in an affinity, for one). An
+    omitted one is emitted empty;
+  - every other value rule of the CRDs (enumerations, patterns, minima).
 
-  A core Secret is refused under a policy that forbids explicit secrets
-  (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README), as the `secret` trait is
-  (go-kure/launcher#794, item 2): `passthrough: object Secret "demo/creds": the object is a
-  Secret, and the environment policy forbids explicit secrets; …`. The check does not read
-  what the Secret holds, so one with no entry is refused too, and the message quotes nothing
-  of the object. A policy that does not implement the interface, and no policy, allow it.
-  **Breaking** only under a policy that answers `false`: a `passthrough` Secret built under
-  it before.
+  **Two fields the linked Kubernetes type holds and the CRDs do not are
+  refused when authored:** `<mover>.moverVolumes[].volumeSource.secret.defaultUser`
+  and `<mover>.moverVolumes[].volumeSource.secret.items[].user`, an authored
+  `0` included (`rclone.moverVolumes[0].volumeSource.secret.defaultUser: no
+  field of the volsync.backube/v1alpha1 API: its CRD has no such property`).
+  The linked Kubernetes API is newer than the one VolSync's CRDs were
+  generated from: the Go type of a mounted Secret has the two fields, the
+  strict decode reads the Go type, and the CRDs have no property for either.
+  `TestVolsyncKinds_AbsentFromCRD` derives the fields the types reach that
+  the linked CRDs have no property for and holds the refusals to them, both
+  ways: a bump of either module that closes the gap, or widens it, fails
+  there with the field named. It also runs the API server's own create
+  sequence on the linked CRDs (`crdCreate`): the API server names each of the
+  two as an unknown field, for which a request made with strict field
+  validation is refused, and prunes it from the object it goes on with.
 
-  The object is authored as a map and the check reads Go types, so an object whose group,
-  version and kind kure's scheme registers is decoded as that kind **for the check only**.
-  What is emitted stays the authored map, so a field the Go type does not declare is
-  emitted with it, and a large integer is emitted as authored, which kure's manifest writer
-  writes with its own digits (`helmtemplate`'s *Rendered objects*). The check
-  cannot read such a field, so a workload or a claim that sets one is refused, as template
-  delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
-  component is built and again by `Generate`, under any policy and with none
-  (`passthrough component "web": object Deployment "demo/web": undeclared field
-  spec.template.spec.fieldOfALaterVersion: …`). A workload or a claim in which a value
-  that serializes itself (a Go caller's `json.RawMessage`) repeats enough keys to fill the
-  strict decode's record is refused on the same ground. An object of any other kind is
-  emitted as authored, the field with it, whatever the strict decode says of it: nothing
-  it sets is dropped, so the full-record refusal of `manifests` has no part here.
-  **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
-  undeclared field was emitted unchecked before and no longer builds.
-  `Generate` runs the check again on the object it is about to emit, once
-  `ApplyPolicy` has supplied a policy, because `Object` is an exported field and the map
-  checked need not be the map emitted; a refusal there is the same
-  `*oam.ViolationError`, naming the component.
+  **The CRDs declare no expression rule** (`x-kubernetes-validations`), so
+  the kinds check none; `TestVolsyncKinds_NoExpressionRules` holds the linked
+  CRDs to that, and a dependency bump that adds one fails there with the rule
+  named.
 
-  What cannot be read is refused, not passed: an object of a registered kind that does not
-  decode as that kind (`replicas: three`), a workload kind, a claim or a PersistentVolume
-  in an API version the scheme does not register (`batch/v1beta1`, `apps/v1beta2`), a
-  HorizontalPodAutoscaler in such a
-  version whose `maxReplicas` is not an integer, and an object that does not serialize.
-  So is an object the decoder of its kind panics on, which crashed the build before: a
-  `CiliumNetworkPolicy` or `CiliumClusterwideNetworkPolicy` whose `icmps` field leaves its
-  `type` out, for one (`passthrough: object CiliumNetworkPolicy "demo/p": the object cannot
-  be read, …: the decoder panicked on CiliumNetworkPolicy "demo/p": …`, the parse error kure
-  gives such an object since go-kure/kure#1009). A MetalLB `BGPPeer` at `metallb.io/v1beta2`
-  is a registered kind since go-kure/kure#1007, so one that does not decode as that kind
-  (`holdTime: [1]`) is refused here too; it was emitted unread. Since go-kure/kure#1014 an
-  object of a registered kind that states `Kind` or `apiversion` beside the exact key is
-  refused here as well, with the parser's text for the cause (`the key "Kind" equals "kind"
-  only after case folding; …`). **Breaking**: the `Kind` case was read as its Go type and
-  checked, and so was the `apiversion` case where that key states a version the kind is
-  registered in (`apiversion: v1` beside `apiVersion: v1`); with another version there it
-  was unreadable before, for another cause. Every build
-  decodes the object, since the transform applies `NoopPolicy` when no policy is passed;
-  only a config no policy was applied to, one a Go caller builds
-  outside the transform, emits the object undecoded, as authored.
+  **What the type writes unauthored.** `customCA: {}` on an authored `rclone`
+  or `restic` mover, which holds it by value. The CRDs accept it empty, and
+  `TestVolsyncKinds_RequiredMatchCRD` holds every such field to its schema.
 
-  **Behaviour change:** before go-kure/launcher#794 a `passthrough` object reached the
-  output unchecked. A document that relied on that no longer builds when its object is a
-  workload with a privileged container, a host namespace, a hostPath volume, an image
-  outside the registry allowlist, an untagged or `:latest` image, or a value over a
-  maximum — and with no policy passed the first three are always refused, since
-  `NoopPolicy` denies them. A consumer allows what it wants allowed through its policy,
-  not per component: `AllowPrivileged()`, `AllowHostNetwork()`, `AllowHostPID()`,
-  `AllowHostIPC()` and `AllowHostPathVolumes()` for the security flags, the registry in
-  `AllowedRegistries()` (or no allowlist), the capability lists, and the maxima
-  (`MaxReplicas()`, `MaxCPU()`, `MaxMemory()`, `MaxStorageSize()`). An untagged or
-  `:latest` image has to be pinned in the object, and a workload in an API version the
-  build cannot read has to be authored in the one it can (`batch/v1`, `apps/v1`).
+  **Policy.**
+  - **An authored capacity is held to the storage maximum.** A mover's
+    `capacity` (on `rsync`, `rsyncTLS`, `rclone` and `restic`) sizes a volume
+    the operator provisions: on a source the point-in-time image of the
+    volume, on a destination the volume the data is received into.
+    `restic.cacheCapacity` sizes Restic's metadata cache volume and, on a
+    source, `syncthing.configCapacity` Syncthing's configuration volume. Each
+    is held to the environment policy's storage maximum: `component "web":
+    restic.capacity "20Gi" exceeds enforced maximum "10Gi"`. A capacity the
+    author left out is the operator's to choose and is not held; the policy's
+    default storage size is not filled.
+  - **A mover's cpu and memory are held to the maxima.** The limits and
+    requests of `moverResources` are held to the policy's cpu and memory
+    maxima, as a container's are, on every mover: `component "web":
+    rsync.moverResources: cpu limit "4" exceeds enforced maximum "2"`. No
+    default is filled: the policy's default requests and limits are a
+    workload's. A request above its limit is not refused here.
+  - **A mover's `hostProcess` switch is refused unless the policy allows
+    privileged workloads.** `moverSecurityContext.windowsOptions.hostProcess:
+    true` runs the mover's containers as Windows HostProcess containers:
+    `component "web": restic.moverSecurityContext.windowsOptions.hostProcess
+    is not allowed by environment policy`. An authored `false` builds. With
+    no policy passed it is refused too, since `NoopPolicy` allows nothing
+    privileged.
+  - **The `rsync` mover is held to the policy's container capabilities.**
+    Authoring the rsync-over-SSH mover is itself a choice of privilege: the
+    linked operator version (VolSync v0.16.0) runs its container as root
+    (`runAsUser: 0`), not privileged, with every capability dropped and seven
+    added (`AUDIT_WRITE`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`,
+    `SETUID`, `SYS_CHROOT`), on a source and on a destination alike, and its
+    builder does not take the namespace's answer on privileged movers. An
+    authored `rsync` mover, whatever it holds, is therefore held to the
+    policy's allowed and forbidden container capabilities for those seven,
+    as a container that adds them is on a pod kind: `component "web": rsync:
+    the mover's container as VolSync v0.16.0 writes it:
+    securityContext.capabilities.add: "SYS_CHROOT" is forbidden by
+    environment policy`. A policy that sets neither list, and no policy,
+    build it; allowing privileged workloads does not lift a forbidden
+    capability, as it does not on a pod kind. Two limits. The seven are what
+    the **linked** operator version writes
+    (`internal/controller/mover/rsync/mover.go` in its module): a cluster
+    that runs another version of the operator may add other capabilities, and
+    the kind does not know. `TestVolsyncKinds_RsyncCapabilities` reads that
+    literal and holds the non-test Go source of the two packages the
+    container is built in (`internal/controller/mover/rsync` and
+    `internal/controller/utils`) to a stated digest: a dependency bump that
+    changes either package fails, whatever the change, until a person has
+    re-read the mover and restated the digest. The test cannot check that the
+    re-reading was done; a bump that touches either package needs it even
+    when the container is untouched; and the module's other packages and the
+    functions of other modules that the mover calls are outside the digest.
+    And that the container runs as root is stated here, not held: the policy
+    has no dimension for it.
+  - **Not held:** the rest of `moverSecurityContext`. It is a pod security
+    context, and of it only `windowsOptions.hostProcess` is held: the user
+    and groups the mover runs as, its sysctls and its SELinux and seccomp
+    settings are written as authored, since the environment policy has no
+    dimension for them. The service account the mover runs under
+    (`moverServiceAccount`, on every mover) is an identity carried as
+    authored. Nor are held a mover's affinity; the volumes mounted into it
+    (`moverVolumes`: a Secret, a claim or an NFS export; the type holds no
+    host path); the type of the Service a mover is reached through
+    (`serviceType`); and whether an `rsyncTLS`, `rclone`, `restic` or
+    `syncthing` mover runs with elevated permissions, which is no field of
+    the object: an administrator sets it with an annotation on the namespace
+    (`volsync.backube/privileged-movers`), which the linked operator's
+    controllers read and hand to the builder of each of those four movers.
+    The `rsync` mover's builder drops that answer (above).
+  - **Hosts are not checked.** A host these objects name is one the mover
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: `rsync.address`, `rsyncTLS.address`, a Syncthing peer's
+    `address`, and the `server` of an NFS export among `moverVolumes`.
+  - **No field holds a literal secret by design, and none is checked.** A
+    credential is the name of a Secret (`restic.repository`,
+    `rclone.rcloneConfig`, `rsync.sshKeys`, `rsyncTLS.keySecret`). The
+    `parameters` of an `external` provider are a map of strings the provider
+    reads: they are written as authored and not checked, under a policy that
+    forbids explicit secrets too.
 
-  Not checked: an object of a kind not named above; a custom resource, the pods its controller
-  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
-  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
-  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
-  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
-- **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
-  (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
-  An override outranks kure's own non-API-governed scope-table entry — a kind
-  nothing else can scope, e.g. a cluster-scoped custom resource whose CRD is
-  installed out of band. It does **not** outrank a `CustomResourceDefinition`
-  bundled in the same source: that CRD is the definition being applied, so it
-  must agree with the override rather than be overridden by it — a disagreement
-  is rejected (`manifests.go`'s `stampManifestNamespaces`, an error naming both
-  the override's and the CRD's declared scope; the resolution itself is
-  `resolveObjectScope`, which the `helmtemplate` component's `scopeOverrides`
-  goes through too); an agreeing override still
-  applies, and a kind with no same-source CRD falls back to the non-API-governed
-  case above. It is also ignored
-  for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
-  `manifests.go`: a `CustomResourceDefinition` document; any kind whose kure
-  scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
-  upstream types, `PriorityClass`, `APIService` and the two webhook
-  configurations among them; and any cluster-scoped API built-in kure fixes the
-  scope of without registering it, a set that is empty at the kure version in
-  `go.mod`. Such a kind is detected by
-  asking `manifest.Scope` itself with no CRD context, not by copying kure's
-  list, so kure stays the single answer); a manifest cannot redefine those. A kind with no override and
-  no other scope source still fails closed when it carries no
-  `metadata.namespace`. Conversely, a cluster-scoped object (either component,
-  any scope source) that authors `metadata.namespace` is rejected rather than
-  emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
-  object, so letting it through would only defer the failure to apply time.
-  Both components decode a document of a registered kind into its Go type, with the
-  decode `helmtemplate` gives a rendered chart, and treat a field that type does not
-  declare — one a newer Kubernetes version added, say — as it does (`helmtemplate`'s
-  *Undeclared fields*): a workload or a claim that sets one is refused, under any policy
-  and with none (`manifest source: parse manifests: Deployment "demo/web": undeclared
-  field spec.template.spec.fieldOfALaterVersion: …`), an inline source when the component
-  is built and a url source when it is fetched; an object of any other registered kind is
-  emitted as written, unstructured, the field kept, and a `CustomResourceDefinition` kept
-  so still passes `crd` and still gives its scope to the resources beside it. **Breaking**
-  (go-kure/launcher#794, item 7), in the same two ways: a source with such a workload or
-  claim no longer builds, and the output of other kinds gains the fields that had been
-  dropped. The same known limit applies (a key inside a type that unmarshals itself, a
-  CRD's `items` schema for one, is still dropped). A document the decoder of its kind
-  panics on is a build error naming the object, as it is there (`manifest source: parse
-  manifests: parse error in Kubernetes object: failed to decode object: the decoder
-  panicked on CiliumNetworkPolicy "demo/p": …`), and so is malformed JSON the decoder
-  cannot read past, on which the build did not return before go-kure/kure#1012. A MetalLB
-  `BGPPeer` at `metallb.io/v1beta2` is a registered kind since go-kure/kure#1007 and is
-  read as one, with what that changes (`helmtemplate`'s *Rendered objects*).
-  An integer the object holds as one is written with its own digits, here as everywhere
-  (`9007199254740993` as `9007199254740993`; `helmtemplate`'s *Rendered objects*). In an
-  unstructured object an integer an int64 cannot hold is a float from the decode on, and is
-  written as that float.
+  **The operator's own rule is not repeated.** When it reconciles, VolSync
+  refuses an object that configures no replication method or more than one
+  (`a replication method must be specified`, `only one replication method
+  can be supplied`). Launcher does not: such a component builds, and the
+  rule stays the operator's.
 
-  **Policy.** Every object a `manifests` or `crd` source yields is checked against the
-  environment policy with the check template delivery (`helmtemplate`) and `passthrough`
-  use: each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet,
-  ReplicaSet, Job and CronJob is checked as an authored workload is (host namespaces,
-  hostPath volumes, the cpu/memory maxima, the registry allowlist on every init and
-  regular container's image and on an image volume's reference, the privileged,
-  HostProcess and capability gates, `ValidateImageRef` on both, no ephemeral containers), a
-  PersistentVolumeClaim and a StatefulSet's claim template are held to the storage
-  maximum, and a replica count and a HorizontalPodAutoscaler's `maxReplicas` to the
-  replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds
-  its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
-  `spec.capacity.storage` is held to the storage maximum (breaking for a source that
-  holds one; see **persistentvolume**). An image volume from a registry outside
-  the list is refused since go-kure/launcher#790 (**breaking** for a source that holds
-  one; see *Image volumes* under **pod**). The error names the object and the field (`manifest source: object
-  Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
-  holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
-  before.
+  **Beside the `volsync` trait.** The trait derives a ReplicationSource for a
+  claim of the workload it is attached to, a Restic backup on a schedule,
+  and names it `<sourcePVC>-backup`. The `replicationsource` kind is the
+  authored object, for what the trait does not express: the whole spec, any
+  mover, a source that belongs to no workload. No trait builds a
+  ReplicationDestination. The trait's object and a `replicationsource`
+  component's are one kind: given one name in one namespace they are refused
+  (`generated-object collision: ReplicationSource.volsync.backube
+  "default/data-backup" is generated by both …`).
 
-  A core Secret a `manifests` source yields, `inline` or fetched, is refused under a policy
-  that forbids explicit secrets (`oam.ExplicitSecretPolicy`), as the `secret` trait and a
-  `passthrough` Secret are (go-kure/launcher#794, item 10): `manifest source: object Secret
-  "demo/creds": the object is a Secret, and the environment policy forbids explicit
-  secrets; …`. The check does not read what the Secret holds, and the message quotes
-  nothing of it. **Breaking** only under a policy that answers `false`. **Not covered:** a
-  Secret a chart renders under template delivery (`helmtemplate`, `helm` with
-  `delivery: template`), whose content comes from the chart and its values; the document's
-  own sensitive values are refused there where they are set (`secretValues`).
+  **Labels and annotations** are the `labels` and `annotations` properties. A
+  mover's `moverPodLabels` are not these: they are labels the operator adds to
+  the mover pods.
 
-  When the check runs depends on the source. An `inline` source is checked by
-  `ApplyPolicy`, the transform's policy step, and the refusal is that step's
-  `*oam.ViolationError`. A `url` source is checked in `Generate`, on the objects it is
-  about to emit: `ApplyPolicy` checks its host against the allowed registries and does
-  not fetch, so **a caller that runs the transform and never generates does not see an
-  object refusal for a `url` source**. A refusal in `Generate` is the same
-  `*oam.ViolationError`, naming the component; a fetch or parse failure there keeps its
-  own error and is not a policy violation. `Generate` also checks an `inline` source
-  again, on what it emits.
+  **Not covered.** Whether what is referred to exists (the claim to copy, a
+  Secret, a storage or snapshot class, a ServiceAccount), and whether the
+  mover can reach what the object names. The object's status is the
+  operator's and is not written.
+- **secret** (go-kure/launcher#790) is the kind-named projection of a v1
+  Secret, on the recipe of `configmap`: it emits the Secret, named after
+  the component (or its `objectName`) and carrying the component's `app`
+  label, and nothing else, so a workload's `secret` volume, `envFrom` or
+  `secretKeyRef` names it by that name.
+  - It publishes `stringData` (plain string values: a number, a boolean or a
+    nested object is refused, not stringified), `data` (base64; a key may not
+    also appear in `stringData`, where the API server would let `stringData`
+    win silently), `type` and `immutable`. An unauthored `type` and
+    `immutable` stay unset (the API server stores `Opaque` for an unset
+    type), and the keys a type requires are left to the API server.
+  - Every entry is emitted under `data`, base64-encoded as the API serializes
+    it, and never under `stringData`: the object written is the object the
+    API server stores. **base64 is an encoding, not encryption**, so the
+    build output is as sensitive as the document, and so is every place that
+    output is committed or pushed to. Prefer a Secret created out of band (an
+    `external-secret` trait, a sealed or externally managed Secret) for
+    anything that must not be in the output.
+  - The decoded values together may hold at most 1,048,576 bytes, the limit
+    the API server enforces (the exported `CheckSecretSize(data)`); a key the
+    API server refuses is refused by the exported `ValidateSecretKey(field,
+    key)`. Keys are checked in sorted order. **No refusal carries a value**:
+    an entry is named by its key, a wrong value by its type, and a base64
+    error by its key alone.
+  - *Policy.* Unlike `configmap`, the kind has an `ApplyPolicy`: a policy
+    that forbids explicit secrets (`oam.ExplicitSecretPolicy`, see the
+    `pkg/oam` README) refuses the component with a violation naming it,
+    `secret: the environment policy forbids explicit secrets; reference a
+    Secret created out of band instead`, as it refuses the `secret` trait, a
+    `helm` component's `secretValues` and a Secret a `passthrough` or
+    `manifests` component carries. A policy that does not implement that
+    interface, and no policy, allow it.
+  - It is a different type from the `secret` trait, which attaches a Secret
+    to another component. The trait is this kind's twin: it reads the same
+    four properties through the exported `ParseSecretProperties(props)` and
+    builds the Secret through `GenerateSecret(config, name, namespace,
+    labels)`, and its schema is the kind's plus `name`, so the same
+    properties give the same Secret and the same refusals on both paths. Only
+    the ownership fields differ: the Secret's name, its labels, its namespace
+    and the bundle it is placed in.
+  - *Names.* The kind's Secret is claimed under role `object`. A `secret`
+    component and a `secret` trait naming one Secret are refused; the trait
+    itself claims no name. It names its own Secret under no role, so the two
+    meet among the generated objects (`generated-object collision: Secret
+    "shop/shared" is generated by both component "shared" and sub-application
+    "shared" of component "web"; …`), as a `configmap` component and trait
+    do. The Secret a `helm` component generates for
+    `secretValues` is claimed under role `values-secret`, as the same kind,
+    so a `secret` component under that name is refused as a name collision
+    with both named.
+- **service** — the kind-named Service (go-kure/launcher#411), an independent
+  component rather than half of a workload: it emits the Service and nothing
+  else, and the workload component whose pods it selects owns their
+  ServiceAccount. `selector` defaults to `app: <component name>`, the label
+  every workload kind puts on its pods; set it when the Service fronts a
+  workload named differently (a `deployment` named `api-server` behind a
+  `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
+  least one entry unless the Service is headless or of type `ExternalName`: `port` (required), `targetPort` (a number or a container
+  port name, published as the `Types: [integer, string]` union
+  (go-kure/launcher#383), so a value of any other type is rejected by property
+  validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
+  to `TCP`), `name` (required once there is more than one port; names and
+  port/protocol pairs must be unique), `nodePort` (1-65535, only with `type`
+  `NodePort` or `LoadBalancer`, unique per protocol, as the API requires; two
+  refusals are launcher's own: `0`, which the API reads as "allocate one" —
+  leave the key out instead — and a node port on an `ExternalName` Service,
+  which the API accepts; the
+  cluster's own node port range is narrower and is checked on apply) and
+  `appProtocol` (a qualified name such as `http` or `kubernetes.io/h2c`).
+  `type` is `ClusterIP` (default), `NodePort`, `LoadBalancer` or
+  `ExternalName`. An empty `selector` is refused.
+  - **ExternalName.** `type: ExternalName` (go-kure/launcher#790) emits a DNS
+    alias for `externalName`, which is then required: a DNS-1123 subdomain,
+    with one trailing dot allowed. The Service selects no pods, so `selector`
+    is refused with it (launcher's own rule; the API accepts and ignores one),
+    and so are `clusterIP: None`, `ipFamilies` and `ipFamilyPolicy`; `ports`
+    is optional. On any other type `externalName` is refused (launcher's own
+    rule; the API ignores it there). Whatever ports it lists, an ExternalName
+    Service has no first port for a routing trait and no NetworkPolicy
+    endpoint: an `ingress` or `httproute` trait refuses it as an implicit
+    backend (`component "db" has no service port`), a trait-level
+    `servicePort` is refused, and it declares no endpoint. As on a port-less
+    headless Service, the refusal is of the component as a backend, not of
+    the trait: a trait on it that names another Service explicitly is carried
+    as on any component, and that route's policy is the routed Service's. It
+    still owns its name
+    (`BackendServiceName`): a route from another component naming it is a
+    route to a Service of this application, so that route's `backendSelector`
+    is not trusted, and **no inbound NetworkPolicy is synthesized for that
+    route**, in a same-name sibling group either: the Service leads to no pods
+    of the cluster, and the group's component label is on its workload's
+    pods, which the Service does not lead to. Named apart from its component
+    (`objectName`), it owns that name instead: a route naming the Service's
+    name gets no policy, and one naming the component's name is a route to a
+    Service from elsewhere.
+  - **Further `ServiceSpec` fields** (go-kure/launcher#790). Each is written
+    only when authored; unauthored, the API server's own default applies. The
+    rules are the API server's (`validateService`), except where marked as
+    launcher's own.
 
-  What cannot be read is refused, not passed: a workload, claim or PersistentVolume in
-  an API version kure's scheme does not register (`batch/v1beta1`, `apps/v1beta2`),
-  inside a list as outside one. A list is replaced by its items, each decoded and checked
-  as a document of its own is, for a field its type does not declare too (`manifest
-  source: parse manifests: item 0 of List: Deployment "demo/web": undeclared field …`):
-  a `v1` `List`, a typed list (`DeploymentList`) and, since go-kure/kure#1014, a list of
-  a kind the scheme does not register (a kind ending in `List` that states `items`),
-  whose items of a registered kind are their Go types and are checked for real, a list
-  among them opened in turn. The list handling is the one `helmtemplate`'s *Rendered
-  objects* describes, with the same errors under `manifest source: parse manifests: …`:
-  a label or an annotation on a list's own metadata, a `Kind`, `apiversion` or `Items`
-  key, a `null` item, and an object of a kind that is no list with a top-level `items`
-  array, which is refused with a policy or with none and is no policy violation.
-  **Breaking** (go-kure/launcher#790): the table under `helmtemplate` lists what built
-  before and is refused now.
+    | Property | Rules |
+    |----------|-------|
+    | `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
+    | `internalTrafficPolicy` | `Cluster` or `Local`. |
+    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). |
+    | `sessionAffinity` | `None` or `ClientIP`. |
+    | `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
+    | `publishNotReadyAddresses` | A boolean; written only when `true`. |
+    | `ipFamilies` | `IPv4` and/or `IPv6`, each once, at most two. |
+    | `ipFamilyPolicy` | `SingleStack`, `PreferDualStack` or `RequireDualStack`; `SingleStack` is refused with two `ipFamilies` (the API server's allocator refuses it). |
+    | `loadBalancerClass` | A qualified name. Only with `type: LoadBalancer`. |
+    | `loadBalancerSourceRanges` | CIDRs in canonical form (launcher's own: the API tolerates surrounding spaces and some non-canonical forms). Only with `type: LoadBalancer`. |
+    | `loadBalancerIP` | Only with `type: LoadBalancer` (launcher's own: the API ignores it elsewhere). The value is not validated, as in the API. |
+    | `allocateLoadBalancerNodePorts` | A boolean. Only with `type: LoadBalancer`. |
+    | `healthCheckNodePort` | 1-65535. Only with `type: LoadBalancer` and `externalTrafficPolicy: Local`. `0` is refused (launcher's own: the API reads it as "allocate one"; leave the key out instead). |
 
-  **Behaviour change:** before go-kure/launcher#794 the objects of a `manifests` source
-  reached the output unchecked. A document that relied on that no longer builds when its
-  source holds a workload with a privileged container, a host namespace, a hostPath
-  volume, an image outside the registry allowlist, an untagged or `:latest` image, or a
-  value over a maximum, or an object the check cannot read (above) — and with no policy
-  passed the first three are always refused, since `NoopPolicy` denies them. A consumer
-  allows what it wants allowed through its policy, not per component, exactly as for
-  `passthrough`. An untagged or `:latest` image has to be pinned in the source,
-  and a workload in an API version the build cannot read has to be authored in the one
-  it can (`batch/v1`, `apps/v1`).
-
-  Not checked: an object of a kind not named above; a custom resource, the pods its controller
-  creates and the replica count it sets; what a `Secret` holds (a core Secret is told by its
-  group and kind alone, and refused only under a policy that forbids explicit secrets). A nil
-  policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied
-  to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied before.
-
-  A `url` that does not parse is refused without the URL or the parser's
-  error, and a fetch error names the URL by scheme and host only
-  (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
-  userinfo, path or query may carry a credential, and an IPv6 zone in the host is
-  dropped too. A refused redirect hop reads fixed text (`redirect to a url that is
-  not http(s) refused`, `redirect to a host not in allowed registries refused`,
-  `too many redirects`), since its target is the server's. A failed request or body read is
-  named by fixed text only (`failureCause`): a timeout, a failed host lookup,
-  or the failing network operation and its system error, such as
-  `dial failed: connection refused`; anything else reads `request failed` or
-  `response body could not be read`. The underlying error's own text is never
-  shown, since it can quote the URL, a server-sent header or trailer, or a TLS
-  certificate, but it stays the error's cause: `errors.Is` and `errors.As` still
-  find it, so a timeout matches `context.DeadlineExceeded`.
+    `externalIPs` and `clusterIPs` are refused, and so is a literal
+    `clusterIP` address. `externalIPs` routes traffic for addresses the
+    cluster does not manage and is deprecated by the API; a Service's cluster
+    IPs are the cluster's to allocate. In a document all three are refused by
+    property validation before the parser's reason is reached.
+  - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
+    `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
+    the selected pods, as a StatefulSet's governing Service needs. It requires
+    `type: ClusterIP` (the default), since the API server refuses a headless
+    `NodePort` or `LoadBalancer` Service. `None` is the only value: a literal
+    address is refused, and so is an empty string, rather than read as
+    absence. A headless Service may have no `ports` at all; without
+    `clusterIP`, at least one port is still required (`ports: at least one
+    port is required`), except on an `ExternalName` Service (above). A
+    port-less Service has no first port, so routing
+    traits refuse it as an implicit backend, refuse a trait-level
+    `servicePort` on it, and it declares no NetworkPolicy endpoint. It still
+    owns its name (`BackendServiceName`): a route from another component
+    naming it is a route to a Service of this application, not an external
+    backend, so that route's `backendSelector` is not trusted and, with no
+    TCP port to translate, no allow is synthesized. Without `clusterIP` the
+    Service carries no `clusterIP`, as before.
+  - **The component name must be a valid Service name.** It becomes the
+    Service's `metadata.name`, which the API server validates as a DNS-1035
+    label: at most 63 characters, lowercase letters, digits and `-`, starting
+    with a letter and ending with a letter or digit. That is stricter than the
+    DNS-1123 subdomain every component name already passes, so `api.v1`, a
+    64-character name and `1api` are refused here (`name: "api.v1" is not a
+    valid Service name, which must be a DNS-1035 label`) instead of building a
+    manifest the cluster rejects on apply. `Generate` applies the same rule to
+    the Application name it is handed.
+  - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
+    (which lowers to one of the two) on a `service` component resolve their
+    implicit backend to `ports[0].port` and refuse any other port on it,
+    whether it is named by number (`cannot route implicit backend to port N`)
+    or by an ingress path's `portName` (`cannot route implicit backend to port
+    "name"`); a `portName` must be the first port's own name, so an unknown
+    name is refused too. Naming the component's own Service as the backend
+    (`backend: api` on an ingress path, `backendRefs: [{name: api, port:
+    9000}]` on an httproute) is still the implicit backend and is refused the
+    same way. To reach a later port, put the routing trait on another
+    component and name this Service there as an explicit backend, with that
+    port.
+  - **Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
+    policy for traffic routed to a `service` selects its `selector` pods — not
+    the component label, which no pod carries — and opens the `targetPort` of
+    each routed TCP port. A route that reaches only a UDP or SCTP port
+    synthesizes no policy, and neither does a route to an `ExternalName`
+    Service, which has no pods to open a port on (above). In a same-name
+    sibling group whose `selector`
+    picks a sibling's own pods, the policy selects the component label
+    instead, but only when `IdentityTargetPorts` is true: the Service has at
+    least one port and every port, whatever its protocol, has a numeric
+    `targetPort` equal to its own `port`. Otherwise it keeps the `selector`.
+    Either way the routed ports are translated to their `targetPort` and
+    only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
+  - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
+    every TCP `targetPort` (deduplicated). A Service with no TCP port declares
+    none, and neither does an `ExternalName` Service.
+  - **No policy check.** `service` has no `ApplyPolicy`, deliberately
+    (go-kure/launcher#794, item 2): none of its properties maps to an
+    environment-policy method, so there is nothing to enforce. The policy
+    makes no statement about a Service's `type`, so `NodePort` and
+    `LoadBalancer` build under every policy. **`type: ExternalName` has no
+    capability gate either: whoever may author a `service` component may give
+    an in-cluster name to any DNS name outside the cluster**, and workloads
+    that resolve the Service name are sent there. `nodePort`,
+    `loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
+    are accepted the same way. The open point "No capability gate on
+    component types" on go-kure/launcher#790 carries it.
+- **servicecidr** (go-kure/launcher#790) is the kind-named projection of a
+  cluster-scoped `networking.k8s.io/v1` ServiceCIDR: a range the API server
+  assigns Service cluster IPs from, beside the one it was started with. It is
+  built on `policyFreeKind`, as the six kinds of the **storageclass** entry
+  are, and what that entry
+  says of them holds here: one object, named after the component unless
+  `objectName` names it, with no namespace, declared cluster-scoped, holding
+  exactly what was authored, the same under every policy and under none.
+  - **Authored:** the one field of `ServiceCIDRSpec`, `cidrs`, a list of IP
+    blocks in CIDR notation, decoded strictly. **Required:** at least one
+    block (`cidrs: required …`); the API server refuses a ServiceCIDR
+    without one. Every other value rule is left to the API server: that a
+    block is a valid CIDR, that there are at most two, and that two are of
+    different IP families.
+  - **Labels and annotations** are the `labels` and `annotations` properties.
+  - **Not covered.** The API server refuses a change to a block once the
+    object exists; a ServiceCIDR of one block may only gain a second.
+    Launcher does not compare a build with the cluster, so a changed block
+    builds here and is refused at apply. The object's status is the API
+    server's and is not written.
+- **statefulset** — `serviceName` and `volumeClaimTemplates`
+  (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
+  `size`, `storageClass`, `accessModes`, plus the rest of
+  `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
+  StatefulSetSpec-level and
+  claim-template field sets are classified in "StatefulSet-level and
+  claim-template properties" below. `ports` declares the main container's
+  ports (see "Main container ports"). It emits no Service
+  (go-kure/launcher#690). For scheduling it takes `tolerations` and
+  `topologySpreadConstraints` as the raw `corev1` shapes
+  (go-kure/launcher#790, see "Raw scheduling properties" above) beside the
+  four-key `affinity` shorthand; the raw `affinity` shape is not published on
+  this kind.
+  - **`serviceName` names the governing Service, which the component does
+    not emit.** Author it as a headless `service` component (`clusterIP:
+    None`, selecting `app: <component>`) and name it here. It has no default:
+    unset, the StatefulSet carries `serviceName: ""`. An authored value must be
+    a valid Service name, a DNS-1035 label (at most 63 characters, lowercase
+    letters, digits and `-`, starting with a letter and ending with a letter
+    or digit), and is refused at conversion otherwise (`serviceName: "api.v1"
+    is not a valid Service name, which must be a DNS-1035 label`,
+    go-kure/launcher#546); `Generate` applies the same rule to the config's
+    `ServiceName`. Before go-kure/launcher#690 `serviceName` defaulted to the
+    component name and the component emitted that headless Service itself;
+    "Main container ports" has the migration, including why an existing
+    StatefulSet must be recreated.
+  - **A route to the pods names the authored Service.** With no Service of
+    its own, the component is no implicit backend: an `ingress`, `httproute`
+    or `expose` without a `backend` on it is refused (`component "<name>"
+    has no service port`). Put the trait on the authored `service`, or name
+    that Service as the trait's `backend`.
+- **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
+  plus the full `DeploymentSpec`-level surface they share with `deployment` —
+  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
+  `progressDeadlineSeconds` (go-kure/launcher#341, see "Deployment-level
+  properties" above). What still separates them from `deployment` is launcher's
+  own opinions, which these two keep: `topologySpread` and the four-key
+  `affinity` shorthand, and on `webservice` the `port` that drives the Service.
+  Note the shorthand is what they keep — neither publishes the raw `corev1`
+  `affinity`/`topologySpreadConstraints` that `deployment` does.
+  The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
+  pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
+  the container port and the Service port), letting a downstream platform synthesize generic
+  app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
+  Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
+  - **`worker` is a component lowering rule, not a handler** (`WorkerRule`,
+    go-kure/launcher#280). It runs worker's own parse, then re-expresses the
+    component as a `deployment` of the same name: the authored properties are
+    forwarded, the four-key `affinity` shorthand is evaluated exactly as before
+    and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
+    nothing), and `topologySpread` becomes a synthesized `topology-spread`
+    trait placed before the authored traits (none when `topologySpread: false`).
+    Authored traits and annotations are forwarded unchanged. Worker's published
+    schema, its generated output and the `app: <component-name>` selector are
+    unchanged — every example and golden fixture builds byte-identically — and
+    the emitted component carries `Origin.Rule` `component/worker@v1alpha1`. Two
+    differences are deliberate. A worker refused by its own parse now reads
+    `component "w" (type "worker") in document …: <cause>` (the lowering
+    engine's prefix) where it read `component "w": <cause>`; the cause is
+    unchanged. A trait-lowering error on a worker's trait gains one chain line
+    naming the `component/worker@v1alpha1` step; a trait handler's error reads as before.
+    The former handler's affinity label-syntax check (see Common config) runs
+    in the rule, before the raw `affinity` is forwarded, with the same
+    `affinity: the shorthand evaluates to an affinity the API server would
+    refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
+    `deployment`; `kurel build` refuses them before lowering anyway.
+  - **Both rules emit the component's ServiceAccount as a `serviceaccount`
+    member** (go-kure/launcher#702) unless `serviceAccountName` is authored. A
+    `worker` therefore lowers to a same-name sibling group of a `deployment` and
+    a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
+    `serviceaccount`. The member carries `automountServiceAccountToken: false`,
+    the component's annotations, and the authored `prune-protection` and
+    `force-replace` traits. The `deployment` member is handed the account's
+    object name as `serviceAccountName` (the component name, unless
+    `serviceAccountObjectName` or the `Naming` hook names the account, below),
+    so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
+    in the same place, so every golden builds byte-identically. One consequence
+    for a library caller: a registry that lowers `webservice` or `worker` must
+    register a `serviceaccount` component handler too, or the build fails with
+    `member type "serviceaccount" has no component handler`.
+  - **Both rules turn each claim a `pvc` volume describes into a synthesized
+    `pvc` trait** on the `deployment` member (go-kure/launcher#702), named
+    `<component>-<volume>` as before, and rewrite the volume to reference it by
+    `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
+    The claims are generated as before, after the component's own objects. A
+    registry that lowers `webservice` or `worker` must register the `pvc` trait
+    handler too.
+  - **`webservice` is a component lowering rule, not a handler**
+    (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
+    then re-expresses the component as a same-name sibling group (see `pkg/oam`
+    "Same-name sibling groups"): a `deployment` and then a `service`, both named
+    after the component, deployed as one component — one tier, one
+    bundle. The `deployment` member gets the authored properties
+    webservice declares except `port`, `topologySpread` and `affinity`, plus
+    the main container's one port `{name: http, containerPort: <port>}`; the
+    `affinity` shorthand and `topologySpread` are handled as on `worker`. The
+    `service` member gets one port `{name: http, port: <port>}` and the default
+    selector `app: <component-name>`. Annotations go to both members. Each
+    authored trait is forwarded unchanged, in authored order, to the member it
+    acts on: `expose`, `ingress` and `httproute` go to the `service`;
+    `prune-protection` and `force-replace` go to both; every other trait goes
+    to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
+    (not built in; a consumer that delivers through Flux registers them) and any
+    trait type an extension registered, since the `deployment` member holds the
+    pods. Webservice's published schema and its generated objects are
+    unchanged, in the handler's order (Deployment, Service, ServiceAccount,
+    claims). Each emitted component carries `Origin.Rule`
+    `component/webservice@v1alpha1`. Four differences are deliberate. A refusal from
+    webservice's own parse gains the lowering engine's prefix, as on `worker`;
+    the cause is unchanged. The synthesized inbound NetworkPolicy opens an
+    ingress `portName: http` as the port's number, where the handler opened the
+    name `http`, which the container port also carried; the pods admitted are
+    the same. Likewise, an ingress path on another component whose `backend`
+    names a webservice's Service by `portName` opens that port's number on the
+    webservice's pods, translated as on a `service` component. A route on
+    another component whose `backend` names a webservice's Service on a port
+    that Service does not expose (`port: 9090` on a webservice whose `port` is
+    8080) no longer opens that port on the webservice's pods: the `service`
+    member opens only its own declared ports, as a `service` component does.
+    The route was already broken, since the Service has no such port to
+    forward. Webservice is no longer a handler a library caller converts with
+    directly, so the nameless-config fallback the handlers keep does not apply
+    to it: the engine only lowers a named component.
+  - **A `webservice` component name must be a valid Service name.** It always
+    emits a Service named after the component, and the API server validates
+    a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
+    lowercase letters, digits and `-`, starting with a letter and ending with
+    a letter or digit. That is stricter than the DNS-1123 subdomain every
+    component name already passes, so `api.v1`, a 64-character name and
+    `1api` are refused at conversion (`name: "1api" is not a valid Service
+    name, which must be a DNS-1035 label`) instead of building a manifest the
+    cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
+    same rule to the Application name it is handed. `worker` emits no Service
+    and keeps accepting such a name, within the container-name rule above.
+    The rule holds for the component name whatever the Service is named:
+    `serviceObjectName` (below) does not lift it.
+  - **`deploymentObjectName`, `serviceObjectName` and
+    `serviceAccountObjectName` name the objects the component generates**
+    (go-kure/launcher#787), each in place of the component name and each on its
+    own: the Deployment, the Service (`webservice` only; `worker` generates
+    none and does not declare the property) and the ServiceAccount. A name is
+    used as written, never shortened. The Deployment's and the ServiceAccount's
+    are DNS-1123 subdomains, the Service's a DNS-1035 label; anything else is
+    refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
+    for role "workload-service": not a valid DNS-1035 label: …`). Without the
+    property the `Naming` hook is asked (roles `workload-deployment`,
+    `workload-service`, `workload-serviceaccount`), and without an answer the
+    object keeps the component name, so a document that sets none builds
+    byte-identically. Each name is held against every other resolved name of
+    its kind and namespace: two components given one `serviceObjectName`, or a
+    `service` component whose object carries a `webservice`'s Service name, are
+    refused as a name collision with both named.
+    - *They name the objects alone.* The members keep the component's name, so
+      the `app` label, the pod template's labels, the Deployment's and the
+      Service's selectors, the main container, the claims (`<component>-<volume>`)
+      and every name a trait derives (`<component>-hpa`, `<component>-httproute`)
+      stay as they were.
+    - *What launcher writes to a renamed object follows it.* The `scaler`
+      trait's `scaleTargetRef` names the Deployment, whatever the Service and
+      the ServiceAccount are named. A routing trait's own backend (`expose`,
+      `ingress`, `httproute`) is the Service, and a route naming that Service
+      still resolves to the component for the synthesized NetworkPolicy. The
+      pods' `serviceAccountName` and the `rbac` trait's subject name the
+      ServiceAccount.
+    - **A renamed Service changes its DNS name: the Service's name is the name
+      it is reached at in the cluster. Launcher builds no such address, so every
+      address written with the component name (an `env` value, a URL in another
+      component's properties, a backend another component's route names) is the
+      author's to change.**
+    - *`serviceAccountObjectName` names the account the component generates,
+      `serviceAccountName` an account that exists.* With `serviceAccountName`
+      the component generates none, so the two together are refused
+      (`serviceAccountObjectName and serviceAccountName are both set: …`), and
+      the hook is not asked for an account.
+  - **An ingress `portName` on a `webservice` must be `http`.** The Service's
+    one port is named `http`, so an `ingress` path whose implicit backend is
+    this component's Service (no `backend`, or `backend` naming that Service)
+    and that addresses it by any other `portName` is refused at build time
+    (`cannot route implicit backend to port "name"`), just as a numbered
+    `port` other than the component's `port` is (go-kure/launcher#545).
 
 ## StatefulSet-level and claim-template properties
 
