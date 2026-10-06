@@ -1,0 +1,46 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: manifests
+      type: artifactgenerator
+      properties:
+        sources:
+          - alias: app
+            kind: GitRepository
+            name: app
+        artifacts:
+          - name: app-manifests
+            copy:
+              - from: "@app/deploy/**"
+                to: "@artifact/"
+    - name: shop-apps
+      type: artifactgenerator
+      properties:
+        objectName: shop-app-artifacts
+        commonMetadata:
+          labels:
+            team: shop
+        sources:
+          - alias: apps
+            kind: GitRepository
+            name: fleet
+          - alias: base
+            kind: OCIRepository
+            name: base-manifests
+            namespace: platform
+        pathPattern: "@apps/apps/{app}"
+        artifacts:
+          - name: "{app}"
+            originRevision: "@apps"
+            copy:
+              - from: "@base/**"
+                to: "@artifact/"
+                exclude:
+                  - "*.md"
+              - from: "@apps/apps/{app}/values.yaml"
+                to: "@artifact/values.yaml"
+                strategy: Merge

@@ -465,6 +465,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	// One type to a line, in the order sort.Strings gives; a new type goes at
 	// its position (TestKindLists_InOrder).
 	wantHandlers := []string{
+		"artifactgenerator",
 		"backendtlspolicy",
 		"bucket",
 		"certificate",

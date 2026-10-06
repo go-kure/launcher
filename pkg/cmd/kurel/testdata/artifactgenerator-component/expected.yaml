@@ -1,0 +1,49 @@
+apiVersion: source.extensions.fluxcd.io/v1beta1
+kind: ArtifactGenerator
+metadata:
+  labels:
+    launcher.gokure.dev/component: manifests
+  name: manifests
+  namespace: default
+spec:
+  artifacts:
+  - copy:
+    - from: '@app/deploy/**'
+      to: '@artifact/'
+    name: app-manifests
+  sources:
+  - alias: app
+    kind: GitRepository
+    name: app
+---
+apiVersion: source.extensions.fluxcd.io/v1beta1
+kind: ArtifactGenerator
+metadata:
+  labels:
+    launcher.gokure.dev/component: shop-apps
+  name: shop-app-artifacts
+  namespace: default
+spec:
+  artifacts:
+  - copy:
+    - exclude:
+      - '*.md'
+      from: '@base/**'
+      to: '@artifact/'
+    - from: '@apps/apps/{app}/values.yaml'
+      strategy: Merge
+      to: '@artifact/values.yaml'
+    name: '{app}'
+    originRevision: '@apps'
+  commonMetadata:
+    labels:
+      team: shop
+  pathPattern: '@apps/apps/{app}'
+  sources:
+  - alias: apps
+    kind: GitRepository
+    name: fleet
+  - alias: base
+    kind: OCIRepository
+    name: base-manifests
+    namespace: platform

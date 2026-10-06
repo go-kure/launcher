@@ -320,7 +320,7 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 		}
 	}
 	want := []string{
-		"bucket", "fluxcd-alert", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository",
+		"artifactgenerator", "bucket", "fluxcd-alert", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository",
 		"imagepolicy", "imageupdateautomation", "ocirepository",
 	}
 	for _, typ := range want {
