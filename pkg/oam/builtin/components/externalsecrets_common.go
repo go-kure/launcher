@@ -287,7 +287,7 @@ func externalSecretSchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"secretStoreRef": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
-			Description: spec + "secretStoreRef: the store the values are read from: name, and kind (SecretStore or ClusterSecretStore; unset, the API fills SecretStore). No store is created or looked up: the name is the author's.",
+			Description: spec + "secretStoreRef: the store the values are read from: name, and kind (SecretStore or ClusterSecretStore; unset, it stays unset and is read as SecretStore). No store is created or looked up: the name is the author's.",
 		},
 		"target": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
@@ -310,7 +310,7 @@ func externalSecretSchema() map[string]oam.PropertySchema {
 			Description: spec + "data: the keys of the Secret, each with the provider entry it is read from.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
-				Description: "One key: secretKey (required: the key in the Secret), remoteRef (required: key, which is required, and the optional property, version, metadataPolicy, conversionStrategy, decodingStrategy and nullBytePolicy) and sourceRef (another store or a generator to read from)." + decoded + "ExternalSecretData in its API reference.",
+				Description: "One key: secretKey (required: the key in the Secret), remoteRef (required: key, which is required, and the optional property, version, metadataPolicy, conversionStrategy, decodingStrategy and nullBytePolicy) and sourceRef (another store to read from; a generator is refused here and is named under dataFrom[].sourceRef.generatorRef)." + decoded + "ExternalSecretData in its API reference.",
 			},
 		},
 		"dataFrom": {

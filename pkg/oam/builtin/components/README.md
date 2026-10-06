@@ -4459,9 +4459,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `refreshInterval: 1h` is emitted as `1h0m0s`, and so are a sync window's
     `duration` and a `clusterexternalsecret`'s `refreshTime`.
   - **No default is filled.** The API's defaults (an external secret's
-    `refreshInterval`, a target's `creationPolicy` and `deletionPolicy`, the
-    `kind` of a `secretStoreRef`) are the API server's to fill where the field
-    was not authored.
+    `refreshInterval`, a target's `creationPolicy` and `deletionPolicy`) are
+    the API server's to fill where the field was not authored. The `kind` of a
+    `secretStoreRef` has no default in the API: unset, it stays unset in the
+    object, and is read as a SecretStore.
   - **An authored `0` or `false` is kept, with three exceptions on a store,
     which are refused.** The type omits a zero in
     `provider.beyondtrust.server.decrypt`,
