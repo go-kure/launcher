@@ -410,6 +410,54 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | kind | `replicationdestination` | strict decode of `ReplicationDestinationSpec` | As `replicationsource`, without a Syncthing mover. Its labels and annotations are the `labels` and `annotations` properties. |
 | `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, and of a Syncthing peer its `address`, `ID` and `introducer`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
 
+## Adding a kind component: where its lines go
+
+A change that adds a kind component adds one entry to each of the lists below. Such changes
+are written side by side, and two of them merge without a conflict only where their new
+lines land between different neighbours. So a new entry goes **at the position of its
+component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
+`clusterissuer`, `pod` before `poddisruptionbudget`), and never at the end of the list.
+
+| List | Where | Held in order by |
+|---|---|---|
+| `builtinComponentHandlers` | `pkg/cmd/kurel/build.go` | `TestKindLists_InOrder` (`pkg/cmd/kurel`) |
+| `validComponentTypes` | `pkg/oam/validate.go` | `TestKindLists_InOrder` |
+| `wantHandlers`, `componentLabelFixtures` | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder` |
+| `coreKindSchemas`, `apiSetKinds` | the tests of this package | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a registered type with no row and no reason in `kindListExceptions` |
+| `policyFreeKinds` and the two maps of its tests, for a kind built on `policyFreeKind` | the tests of this package | `TestKindLists_InOrder` |
+| `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
+| "Component types" | this file | `TestKindLists_InOrder` |
+| Table 4.2 | `docs/oam/design-kurel-package.md` | `TestKindLists_InOrder` |
+| The table of kind components under "`kurel build`" | `pkg/cmd/kurel/README.md` | `TestKindLists_InOrder` |
+| "Per-type highlights" | this file | no test: an entry stands at the position of the alphabetically first type its head names |
+| The "Shipped" entries of §6.2 that ship kinds | `docs/delivery-scope.md` | no test: the same position, before the entries that are not "Shipped" |
+
+In the Go lists an entry names its component type by a string literal, not by a constant:
+`TestKindLists_InOrder` reads the source file, and stops on an entry whose type it cannot read.
+
+What belongs to one kind goes in that kind's own files, not at the end of a shared one: the
+handler, its `ContractMetadata` and `ComponentObject` methods (not `contract.go`,
+`object_name.go`), and its tests.
+
+No text names every kind. A sentence that needs the set points at the "Kind inventory", which
+its tests hold complete.
+
+Six places still conflict, and there the change that lands second is rebased on the first
+before it is published:
+
+- `policyFreeTypes`, where two changes each add a row at the end;
+- two changes that add kinds at the same position of a list, with no existing entry between
+  them (two more `cilium-*` kinds, say);
+- a map whose values `gofmt` aligns (`builtinComponentHandlers`, `validComponentTypes`,
+  `kindListExceptions`), when a new type is longer than every type the map holds: every
+  entry is realigned, which conflicts with any other change to that map;
+- the "Kind inventory", where a new kind edits its row in place (`missing` to `kind`): two
+  changes that edit neighbouring rows;
+- the entries of §6.2 of `docs/delivery-scope.md` that are not "Shipped" (a "Held" entry,
+  "Missing kinds"), which have no order: two changes that each add one at the same place,
+  or that edit the same one;
+- the import block of a file both changes add an import to.
+
 ## Common config
 
 `env`, `command`, `args`, `initContainers`, `sidecars` and `affinity` each read
@@ -8058,7 +8106,8 @@ a kind component" in the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
 The property is not in any handler's `PropertySchema`: the engine adds it to the schema of
-every type whose handler declares its object (`ComponentObject`, all in `object_name.go`),
+every type whose handler declares its object (`ComponentObject`, in `object_name.go` or, for
+a kind added since, in the kind's own file),
 reads it, and hands `ToApplicationConfig` the resolved name as `Component.ObjectName()`. A
 handler's config carries it as `ObjectName`, empty when it is the component's name, and
 `Generate` names the object with it. Everything else the handler writes keeps the component
