@@ -358,6 +358,10 @@ spec:
 	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
 		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
 	"fluxcd-provider": {props: map[string]any{"type": "slack", "channel": "releases", "secretRef": map[string]any{"name": "slack-webhook"}}},
+	"fluxcd-receiver": {props: map[string]any{
+		"type":      "github",
+		"resources": []any{map[string]any{"kind": "GitRepository", "name": "fleet"}},
+		"secretRef": map[string]any{"name": "webhook-token"}}},
 	"gateway": {props: map[string]any{
 		"gatewayClassName": "public",
 		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},

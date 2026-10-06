@@ -16,6 +16,7 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
@@ -441,6 +442,13 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), namespaced: true, flux: true,
 		minimal: fluxProviderMinimal(),
 		full:    fluxProviderFull(),
+	},
+	{
+		component: "fluxcd-receiver", handler: &components.FluxcdReceiverHandler{},
+		gvk: notificationv1.GroupVersion.WithKind(notificationv1.ReceiverKind),
+		typ: reflect.TypeFor[notificationv1.ReceiverSpec](), namespaced: true, flux: true,
+		minimal: fluxReceiverMinimal(),
+		full:    fluxReceiverFull(),
 	},
 	{
 		component: "gateway", handler: &components.GatewayHandler{},
@@ -1338,6 +1346,10 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		"fluxcd-provider": {
 			".Spec.Interval", ".Spec.Timeout", ".Spec.ProxySecretRef", ".Spec.SecretRef", ".Spec.CertSecretRef",
 		},
+		"fluxcd-receiver": {
+			".Spec.Interval", ".Spec.Events", ".Spec.Resources", ".Spec.Resources[0].CrossNamespaceObjectReference.MatchLabels", ".Spec.SecretRef",
+			".Spec.OIDCProviders", ".Spec.OIDCProviders[0].Variables", ".Spec.OIDCProviders[0].Validations",
+		},
 		"gateway": {
 			".Spec.Listeners", ".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS", ".Spec.Listeners[1].TLS.Mode",
 			".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.CertificateRefs[1].Namespace",
@@ -2067,6 +2079,28 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"a user in the address", withProperty(fluxProviderMinimal(), "address", "https://flux:s3cr3t@hooks.example/notify"), "fluxcd-provider: address must not carry a user or password"},
 			{"a user in the proxy", withProperty(fluxProviderMinimal(), "proxy", "http://flux:s3cr3t@proxy.example:3128"), "fluxcd-provider: proxy must not carry a user or password"},
 			{"two spellings", withProperty(fluxProviderMinimal(), "Type", "msteams"), "sets the same field as"},
+		},
+		"fluxcd-receiver": {
+			{"no properties", nil, ": required"},
+			{"no type", map[string]any{"resources": []any{map[string]any{"kind": "GitRepository", "name": "fleet"}}}, "type: required"},
+			{"no resources", map[string]any{"type": "github"}, "resources: required"},
+			{"null resources", map[string]any{"type": "github", "resources": nil}, "resources: required"},
+			{"resource without a kind", withProperty(fluxReceiverMinimal(), "resources", []any{map[string]any{"name": "fleet"}}), "resources[0].kind: required"},
+			{"a later resource without a name", withProperty(fluxReceiverMinimal(), "resources", []any{fluxReceiverResource(), map[string]any{"kind": "OCIRepository"}}), "resources[1].name: required"},
+			{"secret without a name", withProperty(fluxReceiverMinimal(), "secretRef", map[string]any{}), "secretRef.name: required"},
+			{"OIDC provider without an issuer", withProperty(fluxReceiverMinimal(), "oidcProviders", []any{map[string]any{"validations": []any{map[string]any{"expression": "true", "message": "no"}}}}), "oidcProviders[0].issuerURL: required"},
+			{"OIDC provider without validations", withProperty(fluxReceiverMinimal(), "oidcProviders", []any{map[string]any{"issuerURL": "https://token.actions.example"}}), "oidcProviders[0].validations: required"},
+			{"validation without a message", withProperty(fluxReceiverMinimal(), "oidcProviders", []any{map[string]any{"issuerURL": "https://token.actions.example", "validations": []any{map[string]any{"expression": "true"}}}}), "oidcProviders[0].validations[0].message: required"},
+			{"variable without an expression", withProperty(fluxReceiverMinimal(), "oidcProviders", []any{map[string]any{"issuerURL": "https://token.actions.example", "variables": []any{map[string]any{"name": "owner"}}, "validations": []any{map[string]any{"expression": "true", "message": "no"}}}}), "oidcProviders[0].variables[0].expression: required"},
+			{"unknown key", withProperty(fluxReceiverMinimal(), "token", "s3cr3t"), notA + "notification.toolkit.fluxcd.io/v1 ReceiverSpec"},
+			{"the object's spec", map[string]any{"spec": fluxReceiverMinimal()}, notA},
+			{"resource sub-key", withProperty(fluxReceiverMinimal(), "resources", []any{withProperty(fluxReceiverResource(), "labels", map[string]any{"team": "shop"})}), notA},
+			{"secret sub-key", withProperty(fluxReceiverMinimal(), "secretRef", map[string]any{"name": "webhook-token", "namespace": "shop"}), notA},
+			{"suspend a string", withProperty(fluxReceiverMinimal(), "suspend", "yes"), notA},
+			{"interval not a duration", withProperty(fluxReceiverMinimal(), "interval", "soon"), notA},
+			{"interval in a unit the API refuses", withProperty(fluxReceiverMinimal(), "interval", "500us"), `fluxcd-receiver: interval "500us" is invalid: must be a Flux duration`},
+			{"interval emitted below a millisecond", withProperty(fluxReceiverMinimal(), "Interval", "0.5ms"), `fluxcd-receiver: interval "0.5ms" is invalid: it would be emitted as "500µs"`},
+			{"two spellings", withProperty(fluxReceiverMinimal(), "Type", "gitlab"), "sets the same field as"},
 		},
 		"gateway": {
 			{"no properties", nil, ": required"},

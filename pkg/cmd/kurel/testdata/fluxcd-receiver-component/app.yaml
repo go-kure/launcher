@@ -1,0 +1,41 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: push
+      type: fluxcd-receiver
+      properties:
+        type: github
+        events:
+          - push
+        resources:
+          - kind: GitRepository
+            name: fleet
+        secretRef:
+          name: github-webhook-token
+    - name: actions
+      type: fluxcd-receiver
+      properties:
+        objectName: actions-oidc
+        type: generic-oidc
+        interval: 2h
+        resources:
+          - kind: OCIRepository
+            name: "*"
+            namespace: fleet
+            matchLabels:
+              team: shop
+            filter: "res.metadata.name.startsWith('shop-')"
+        resourceFilter: "req.ref == 'refs/heads/main'"
+        oidcProviders:
+          - issuerURL: https://token.actions.example
+            audience: fleet
+            variables:
+              - name: owner
+                expression: claims.repository_owner
+            validations:
+              - expression: "vars.owner == 'shop'"
+                message: not the shop's repository

@@ -500,6 +500,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"fluxcd-alert",
 		"fluxcd-kustomization",
 		"fluxcd-provider",
+		"fluxcd-receiver",
 		"gateway",
 		"gatewayclass",
 		"gitrepository",

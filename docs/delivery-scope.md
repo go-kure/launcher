@@ -857,7 +857,7 @@ its text:
   table has its row.
 - **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
   Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `fluxcd-provider`
-  (`fluxcd_provider.go`), `imagepolicy`
+  (`fluxcd_provider.go`), `fluxcd-receiver` (`fluxcd_receiver.go`), `imagepolicy`
   (`imagepolicy.go`), `imagerepository` (`imagerepository.go`),
   `imageupdateautomation` (`imageupdateautomation.go`) and
   `artifactgenerator` (`artifactgenerator.go`), with
@@ -866,9 +866,10 @@ its text:
   two additions. The Flux namespace: the object lands there when one is set, as the
   Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
   an Alert, an ImagePolicy and an ArtifactGenerator read nothing, a Provider and an
-  ImageRepository the Secrets of their credentials, their proxy and their certificates, an
+  ImageRepository the Secrets of their credentials, their proxy and their certificates, a
+  Receiver the Secret of its token, an
   ImageUpdateAutomation the Secret of its signing key). And its durations, held to the pattern their fields declare as on the
-  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation,
+  Flux kinds above (the `interval` of a Receiver, of an ImagePolicy and of an ImageUpdateAutomation,
   the `interval` and the `timeout` of a Provider and of an ImageRepository; that `timeout` takes no `h`,
   and one of an hour or more is written in minutes).
   - **A user or a password in a Provider's `address` or `proxy` is refused,** under
@@ -882,8 +883,12 @@ its text:
     image of a pod. No tag rule applies, since the field names a repository. Its
     `accessFrom`, which opens the scanned tags to other namespaces,
     `serviceAccountName` and `insecure` are written as authored.
+  - **A Receiver opens an inbound path on the notification controller:** a request
+    there that the Receiver validates makes the controller reconcile the objects its
+    `resources` name. Nothing gates that the object opens it.
   - **Nothing gates what such an object reaches outside its namespace:** a source's
-    `namespace` on an Alert, the repository's on an ImagePolicy, the GitRepository's
+    `namespace` on an Alert, a resource's on a Receiver, which a webhook makes the
+    controller reconcile, the repository's on an ImagePolicy, the GitRepository's
     on an ImageUpdateAutomation, which commits and pushes through it, and a source's on
     an ArtifactGenerator, which copies that source's content into its artifacts, are
     written as authored, as the references and the accounts of a `helmrelease` and a

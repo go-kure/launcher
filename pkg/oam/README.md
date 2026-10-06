@@ -303,7 +303,7 @@ the transform, after the Phase-4 synthesis below, applies it to each of them. Th
 that synthesis adds are no component's sub-applications and stay undecorated.
 
 Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxNamespace`: the
-`helmrelease`, `fluxcd-kustomization`, Flux source, `fluxcd-alert`, `fluxcd-provider`, `imagepolicy`,
+`helmrelease`, `fluxcd-kustomization`, Flux source, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation` and `artifactgenerator` kinds) moves its Flux objects there, and a trait
 sub-application of that component follows only when the Flux object reads it by name from its own
 namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespaceReads`: a
@@ -1713,6 +1713,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `fluxcd-alert` |
 | `fluxcd-kustomization` |
 | `fluxcd-provider` |
+| `fluxcd-receiver` |
 | `gateway` |
 | `gatewayclass` |
 | `gitrepository` |

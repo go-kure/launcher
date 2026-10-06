@@ -13,6 +13,7 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
@@ -109,6 +110,7 @@ var coreKindSchemas = []struct {
 	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
 	{"fluxcd-alert", reflect.TypeFor[notificationv1beta3.AlertSpec](), &components.FluxcdAlertHandler{}, nil},
 	{"fluxcd-provider", reflect.TypeFor[notificationv1beta3.ProviderSpec](), &components.FluxcdProviderHandler{}, nil},
+	{"fluxcd-receiver", reflect.TypeFor[notificationv1.ReceiverSpec](), &components.FluxcdReceiverHandler{}, nil},
 	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
 	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
