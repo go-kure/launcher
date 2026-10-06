@@ -1497,8 +1497,11 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"graceful restart without enabled", map[string]any{"gracefulRestart": map[string]any{"restartTimeSeconds": 60}}, "gracefulRestart.enabled: required"},
 			{"an empty graceful restart", map[string]any{"gracefulRestart": map[string]any{}}, "gracefulRestart.enabled: required"},
 			{"null enabled", map[string]any{"gracefulRestart": map[string]any{"enabled": nil}}, "gracefulRestart.enabled: required"},
-			// The CRD's expression rule, with both of its fields authored.
+			// The CRD's expression rule, with both of its fields authored, and
+			// with one authored against the default the API fills for the other.
 			{"keepalive over hold", map[string]any{"timers": map[string]any{"keepAliveTimeSeconds": 90, "holdTimeSeconds": 30}}, "timers.keepAliveTimeSeconds: 90 is larger than timers.holdTimeSeconds (30)"},
+			{"keepalive over the default hold", map[string]any{"timers": map[string]any{"keepAliveTimeSeconds": 100}}, "timers.keepAliveTimeSeconds: 100 is larger than the hold time the API fills where timers.holdTimeSeconds is not set (90)"},
+			{"hold under the default keepalive", map[string]any{"timers": map[string]any{"holdTimeSeconds": 3}}, "timers.holdTimeSeconds: 3 is smaller than the keepalive time the API fills where timers.keepAliveTimeSeconds is not set (30)"},
 			{"unknown key", map[string]any{"peerPort": 179}, notA + "cilium.io/v2 CiliumBGPPeerConfigSpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"ebgpMultihop": 2}}, notA},
 			{"timers sub-key", map[string]any{"timers": map[string]any{"holdTime": 90}}, notA},
@@ -1989,14 +1992,14 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	if none := build("cilium-bgppeerconfig", map[string]any{}).(*ciliumv2.CiliumBGPPeerConfig); !reflect.DeepEqual(none.Spec, ciliumv2.CiliumBGPPeerConfigSpec{}) {
 		t.Errorf("spec = %+v, want none of it set on a peer config that authors nothing", none.Spec)
 	}
-	// The timers rule is checked with both fields authored, and equal times
-	// pass it. With one authored the other is the default the installed CRD
-	// fills, and the comparison is the API server's: 100 alone is over the
-	// default hold time of the linked CRD and is not refused here.
+	// The timers rule is checked on the two fields as authored or as the CRD
+	// defaults them, and equal times pass it: a keepalive alone may be the
+	// default hold time, and a hold time alone the default keepalive.
 	for name, timers := range map[string]map[string]any{
 		"equal":           {"keepAliveTimeSeconds": 30, "holdTimeSeconds": 30},
-		"keepalive alone": {"keepAliveTimeSeconds": 100},
-		"hold alone":      {"holdTimeSeconds": 3},
+		"keepalive alone": {"keepAliveTimeSeconds": 90},
+		"hold alone":      {"holdTimeSeconds": 30},
+		"neither":         {"connectRetryTimeSeconds": 5},
 	} {
 		if err := coreKindErr(kinds["cilium-bgppeerconfig"].handler, "cilium-bgppeerconfig", "fast", map[string]any{"timers": timers}); err != nil {
 			t.Errorf("timers %s: %v, want it accepted", name, err)
