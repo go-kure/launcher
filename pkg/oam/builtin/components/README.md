@@ -6233,12 +6233,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
   **Two object store paths are required** (go-kure/launcher#790):
-  `backup.destinationPath` where `backup.retentionPolicy` is set, and
+  `backup.destinationPath` where another value of `backup` is set
+  (`retentionPolicy`, `endpointURL` or `secretName`), and
   `barmanObjectStore.destinationPath` of an `externalClusters` entry that has
   a `barmanObjectStore` (`backup.destinationPath: required (…)`,
   `externalClusters[0].barmanObjectStore.destinationPath: required (…)`). The
-  Cluster's CRD requires both, and the lowering used to write `""` where the
-  author wrote nothing, which the API server refuses. An authored empty path
+  Cluster's CRD requires both. Under a `retentionPolicy` that is not empty,
+  and in an external cluster's `barmanObjectStore`, the lowering used to
+  write `""` where the author wrote nothing, which the API server refuses.
+  An `endpointURL`, a `secretName` or an empty `retentionPolicy` without the
+  path used to build no backup at all, and is refused as a block that would
+  not be built (below). An authored empty path
   is a value: it is written, and refusing it is left to the API server. These
   are two of the strings `cnpg-cluster` refuses unauthored (below); the
   lowering fills the parent of two more, `bootstrap.pg_basebackup.source` and
@@ -6249,6 +6254,47 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   is decoded into the upstream type, which reads a key in any spelling, so
   its path counts as authored in any spelling. The refusal is made on the authored
   properties, so a `PostgresqlConfig` built in Go is not held to it.
+  **A block that would not be built is refused, not dropped**
+  (go-kure/launcher#790). Five blocks are built only when one field of
+  theirs is set, and a document that authored other values of such a block
+  without that field used to build with none of them in the result. It is
+  refused by the name of the missing field:
+  - `backup`: the Cluster's backup is built from `destinationPath`, so
+    `endpointURL`, `secretName` or an empty `retentionPolicy` without one is
+    refused, as a `retentionPolicy` that is not empty already was
+    (`backup.destinationPath: required (…)`, above). An authored empty path
+    builds the backup and is written, also without a retention policy.
+  - `bootstrap.recovery` and `bootstrap.pg_basebackup`: the bootstrap is
+    built from a non-empty `source`, so either block without one is refused
+    (`bootstrap.pg_basebackup.source: required (…)`, or `must not be empty
+    (…)` for an authored `""`).
+  - `replication.synchronous`: built from `method`, so the block without one
+    is refused (`replication.synchronous.method: required (any or first)`),
+    after a wrongly typed `number` or `dataDurability`, which is still
+    refused by its own path.
+  - `monitoring`: built when `enabled` is true, so `customQueries` beside an
+    `enabled` that is not authored is refused (`monitoring.enabled: required
+    where monitoring.customQueries is set (…)`).
+  - `pooler`: the Pooler is emitted when `enabled` is true, so `instances`,
+    `type`, `poolMode` or `parameters` beside an `enabled` that is not
+    authored is refused (`pooler.enabled: required where pooler.instances is
+    set (…)`).
+
+  **An authored `enabled: false` keeps building**, in `pooler` and in
+  `monitoring`: `enabled` is the block's own switch, the author wrote "off",
+  and the settings beside it are kept in the document for when it is
+  switched on. `poolerName` differs (refused whenever `pooler.enabled` is not
+  true, an authored false included) because it is a property outside the
+  block that names an object which does not exist while the pooler is off.
+  A block with nothing in it (`backup: {}`, `bootstrap: {}`, `replication:
+  {}`, `monitoring: {}`, `pooler: {}`), or with an empty `customQueries` list
+  or `parameters` map only, authors no value and builds as before.
+  `TestPostgresqlRule_BlockNotBuilt` holds each case. Breaking for a
+  document that authored one of these blocks without its field, among them
+  a `backup` with an `endpointURL` or an empty `retentionPolicy` and no
+  path, a `bootstrap.pg_basebackup: {}` and a `replication.synchronous`
+  with a `number` only. Such a document built,
+  without what the author wrote.
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
   hook" in `pkg/oam/README.md`): the author's property, else the consumer's

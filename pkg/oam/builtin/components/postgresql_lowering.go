@@ -525,7 +525,10 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		Limits:   cnpgResourceList(c.Resources.Limits),
 	}
 
-	if c.BackupRetentionPolicy != "" || c.BackupDestinationPath != "" {
+	// An authored destinationPath builds the backup even when empty: it is a
+	// value, written as authored (Parse refuses the block's other values
+	// without one).
+	if c.BackupRetentionPolicy != "" || c.BackupDestinationPath != "" || c.explicitBackupDestinationPath {
 		bos := &barmanapi.BarmanObjectStoreConfiguration{
 			DestinationPath: c.BackupDestinationPath,
 			EndpointURL:     c.BackupEndpointURL,
