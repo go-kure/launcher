@@ -192,6 +192,12 @@ build namespace, and a ClusterSecretStore and a ClusterExternalSecret with no
 namespace. No capability is required of the cluster profile to build them
 either, and they do not read its `external-secret` capability, which gives
 the `external-secret` trait its store.
+The kind components of VolSync's API, `replicationsource` and
+`replicationdestination` (go-kure/launcher#790), are registered the same way,
+with a `<type>-component` fixture each: two ReplicationSource objects in the
+build namespace, a Restic backup on a schedule and a Syncthing source, and two
+ReplicationDestination objects, a Restic restore and an rsync-over-TLS
+receiver. No capability is required of the cluster profile to build them.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

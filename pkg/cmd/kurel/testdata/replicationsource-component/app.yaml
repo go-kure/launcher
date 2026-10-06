@@ -1,0 +1,44 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: data-nightly
+      type: replicationsource
+      properties:
+        sourcePVC: data
+        trigger:
+          schedule: "0 3 * * *"
+        restic:
+          repository: restic-repo
+          copyMethod: Snapshot
+          volumeSnapshotClassName: csi-snapshots
+          pruneIntervalDays: 14
+          retain:
+            daily: 7
+            weekly: 4
+            monthly: 0
+          cacheCapacity: 1Gi
+          moverSecurityContext:
+            runAsUser: 1000
+            fsGroup: 1000
+          moverResources:
+            limits:
+              memory: 512Mi
+          moverVolumes:
+            - mountPath: ca
+              volumeSource:
+                secret:
+                  secretName: backup-ca
+    - name: media-sync
+      type: replicationsource
+      properties:
+        sourcePVC: media
+        syncthing:
+          serviceType: ClusterIP
+          peers:
+            - address: tcp://peer.example.com:22000
+              ID: MFZWI3D-BONSGYC-YLTMRWG-C43ENR5-QXGZDMM-FZWI3DP-BONSGYY-LTMRWAD
+              introducer: false

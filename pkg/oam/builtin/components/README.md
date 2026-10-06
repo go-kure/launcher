@@ -194,6 +194,8 @@ reads it.
 | `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the same `SecretStoreSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
 | `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires and what it refuses of a `target.manifest` under the environment policy. Cluster-scoped; no capability is required — see below. |
+| `replicationsource` | ReplicationSource | Kind-named VolSync ReplicationSource: the whole `ReplicationSourceSpec` (`sourcePVC`, `trigger`, the movers `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`, `external`, `paused`), strictly decoded; no top-level field is required. An authored capacity is held to the environment policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. No capability is required. Its object is of the kind the `volsync` trait builds — see below. |
+| `replicationdestination` | ReplicationDestination | Kind-named VolSync ReplicationDestination: the whole `ReplicationDestinationSpec` (`trigger`, the movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external`, `paused`), strictly decoded, with the same policy checks. No top-level field is required and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -405,8 +407,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `prometheus.CreatePrometheusRule` | monitoring.coreos.com/v1 PrometheusRule | kind | `prometheusrule` | strict decode of `PrometheusRuleSpec` | A group's `name` and a rule's `expr` must be written. No environment policy applies, and no capability is required. |
 | `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | kind | `servicemonitor` | strict decode of `ServiceMonitorSpec` | `endpoints` and `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | missing | - | - | - |
-| `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | missing | - | - | - |
-| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | trait | `volsync` | hand-written parser | - |
+| `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | kind | `replicationdestination` | strict decode of `ReplicationDestinationSpec` | As `replicationsource`, without a Syncthing mover. Its labels and annotations are the `labels` and `annotations` properties. |
+| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, and of a Syncthing peer its `address`, `ID` and `introducer`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
 
 ## Common config
 
@@ -2854,7 +2856,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
   BGP control plane and the five kinds of the Gateway API's infrastructure
   objects, below, are built on it too. The three kinds
-  of cert-manager's API, below, are built on `policyHeldKind`
+  of cert-manager's API and the two of VolSync's, below, are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
   It refuses or passes; it fills no default. A kind is a value
@@ -4716,6 +4718,167 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   PushSecret. Whether what is referred to exists (a store, a Secret and its
   key, a ServiceAccount, a ConfigMap, a generator, a namespace), and whether
   the operator can reach what a store names. The objects' status is the
+  operator's and is not written.
+- **replicationsource**, **replicationdestination** (go-kure/launcher#790)
+  are the kind-named projections of the two objects of VolSync's
+  `volsync.backube/v1alpha1` API: a ReplicationSource, which copies a volume
+  out, and a ReplicationDestination, which receives one. Each is built on
+  `policyHeldKind` (`policyFreeKind` with a policy check, see above) and
+  emits that one object in the build namespace, named after the component
+  unless `objectName` names it, and declares it as namespaced; the handler
+  adds no label, no annotation and no default. The two share their movers but
+  for Syncthing, and what is said of a mover below holds for both kinds.
+
+  **No capability is required, and nothing gates these kinds.** Launcher does
+  not ask whether the cluster serves `volsync.backube/v1alpha1`: where
+  VolSync's CRDs are not installed the component builds, and the object is
+  refused at apply. The open point "No capability gate on component types" on
+  go-kure/launcher#790 carries it. The kinds read nothing of the cluster
+  profile; the `volsync` trait still takes its class defaults from it.
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  decoded strictly at every depth: an unknown key is refused wherever it sits
+  (a mover, its security context, a volume mounted into it).
+  - `replicationsource` (`ReplicationSourceSpec`): `sourcePVC`, the claim to
+    copy; `trigger` (`schedule`, a cron expression, or `manual`); the movers
+    `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`; `external`, a
+    provider outside VolSync with its `parameters`; and `paused`.
+  - `replicationdestination` (`ReplicationDestinationSpec`): `trigger`, the
+    movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external` and
+    `paused`. A destination has no Syncthing mover and names no source claim:
+    `syncthing` and `sourcePVC` are refused there as unknown keys.
+  - `rsync` (rsync over SSH) has its own, shorter type: it takes
+    `moverResources`, `moverServiceAccount` and `moverPodLabels`, and has no
+    `moverSecurityContext`, `moverAffinity` or `moverVolumes`, which are
+    refused under it as unknown keys.
+  - A mover authored empty is in the object, empty but for what the type
+    writes unauthored (below); one left out is not.
+  - An authored `false` or `0` is kept where the API tells it from an unset
+    field (`restic.retain.monthly: 0`, a destination's `restic.previous: 0`,
+    a Syncthing peer's `introducer: false`, `moverSecurityContext.runAsUser:
+    0`), and left out where the type omits a zero (`paused: false`).
+    VolSync's CRDs default no field under `spec`, so no authored zero is
+    replaced by a default; `TestVolsyncKinds_NoDefaults` holds the linked
+    CRDs to that, and a dependency bump that adds a default fails there with
+    the field named.
+
+  **Required** follows the rule of the Prometheus operator's kinds above: a
+  field the API requires that the Go type writes whether or not it was
+  authored must be authored. Neither kind has one at the top level.
+  - Of a volume mounted into a mover (`moverVolumes`, on `rsyncTLS`,
+    `rclone`, `restic` and `syncthing`): `mountPath` and `volumeSource`
+    (`restic.moverVolumes[0].volumeSource: required (…)`).
+  - Of a Syncthing peer: `address`, `ID` and `introducer`. No default is
+    filled for `introducer`: an authored `false` is a value.
+  - Of a mover's affinity that authors a required node affinity
+    (`moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution`):
+    its `nodeSelectorTerms`, which the Kubernetes type would write as `null`
+    where the CRD requires them. `TestKindComponents_NullRequired` shows the
+    refusal with the validator of the linked CRDs.
+  - A required field under a parent the author left out is not asked for: the
+    list follows what was authored.
+
+  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (11 paths for a source,
+  6 for a destination) to the CRDs the linked module ships: every field of
+  VolSync's own types that a CRD requires and the type writes unauthored is
+  listed, and nothing else is. A dependency bump that adds, drops or moves
+  one fails there. **Not refused:**
+  - a required field the type omits when it is not authored: the object shows
+    the omission, and the API server refuses it;
+  - a required field of a Kubernetes type these specs embed, other than those
+    terms (the `key` of a selector requirement in an affinity, for one). An
+    omitted one is emitted empty;
+  - every other value rule of the CRDs (enumerations, patterns, minima).
+
+  **Two fields the linked Kubernetes type holds and the CRDs do not are
+  refused when authored:** `<mover>.moverVolumes[].volumeSource.secret.defaultUser`
+  and `<mover>.moverVolumes[].volumeSource.secret.items[].user`, an authored
+  `0` included (`rclone.moverVolumes[0].volumeSource.secret.defaultUser: no
+  field of the volsync.backube/v1alpha1 API: its CRD has no such property`).
+  The linked Kubernetes API is newer than the one VolSync's CRDs were
+  generated from: the Go type of a mounted Secret has the two fields, the
+  strict decode reads the Go type, and the CRDs have no property for either.
+  `TestVolsyncKinds_AbsentFromCRD` derives the fields the types reach that
+  the linked CRDs have no property for and holds the refusals to them, both
+  ways: a bump of either module that closes the gap, or widens it, fails
+  there with the field named. It also runs the API server's own create
+  sequence on the linked CRDs (`crdCreate`): the API server names each of the
+  two as an unknown field, for which a request made with strict field
+  validation is refused, and prunes it from the object it goes on with.
+
+  **The CRDs declare no expression rule** (`x-kubernetes-validations`), so
+  the kinds check none; `TestVolsyncKinds_NoExpressionRules` holds the linked
+  CRDs to that, and a dependency bump that adds one fails there with the rule
+  named.
+
+  **What the type writes unauthored.** `customCA: {}` on an authored `rclone`
+  or `restic` mover, which holds it by value. The CRDs accept it empty, and
+  `TestVolsyncKinds_RequiredMatchCRD` holds every such field to its schema.
+
+  **Policy.**
+  - **An authored capacity is held to the storage maximum.** A mover's
+    `capacity` (on `rsync`, `rsyncTLS`, `rclone` and `restic`) sizes a volume
+    the operator provisions: on a source the point-in-time image of the
+    volume, on a destination the volume the data is received into.
+    `restic.cacheCapacity` sizes Restic's metadata cache volume and, on a
+    source, `syncthing.configCapacity` Syncthing's configuration volume. Each
+    is held to the environment policy's storage maximum: `component "web":
+    restic.capacity "20Gi" exceeds enforced maximum "10Gi"`. A capacity the
+    author left out is the operator's to choose and is not held; the policy's
+    default storage size is not filled.
+  - **A mover's cpu and memory are held to the maxima.** The limits and
+    requests of `moverResources` are held to the policy's cpu and memory
+    maxima, as a container's are, on every mover: `component "web":
+    rsync.moverResources: cpu limit "4" exceeds enforced maximum "2"`. No
+    default is filled: the policy's default requests and limits are a
+    workload's. A request above its limit is not refused here.
+  - **A mover's `hostProcess` switch is refused unless the policy allows
+    privileged workloads.** `moverSecurityContext.windowsOptions.hostProcess:
+    true` runs the mover's containers as Windows HostProcess containers:
+    `component "web": restic.moverSecurityContext.windowsOptions.hostProcess
+    is not allowed by environment policy`. An authored `false` builds. With
+    no policy passed it is refused too, since `NoopPolicy` allows nothing
+    privileged.
+  - **Not held:** a mover's affinity; the volumes mounted into it
+    (`moverVolumes`: a Secret, a claim or an NFS export; the type holds no
+    host path); the type of the Service a mover is reached through
+    (`serviceType`); and whether a mover runs with elevated permissions at
+    all, which is no field of the object: an administrator sets it with an
+    annotation on the namespace (`volsync.backube/privileged-movers`).
+  - **Hosts are not checked.** A host these objects name is one the mover
+    reaches, not an artifact source, and none is held to the policy's allowed
+    registries: `rsync.address`, `rsyncTLS.address`, a Syncthing peer's
+    `address`, and the `server` of an NFS export among `moverVolumes`.
+  - **No field holds a literal secret by design, and none is checked.** A
+    credential is the name of a Secret (`restic.repository`,
+    `rclone.rcloneConfig`, `rsync.sshKeys`, `rsyncTLS.keySecret`). The
+    `parameters` of an `external` provider are a map of strings the provider
+    reads: they are written as authored and not checked, under a policy that
+    forbids explicit secrets too.
+
+  **The operator's own rule is not repeated.** When it reconciles, VolSync
+  refuses an object that configures no replication method or more than one
+  (`a replication method must be specified`, `only one replication method
+  can be supplied`). Launcher does not: such a component builds, and the
+  rule stays the operator's.
+
+  **Beside the `volsync` trait.** The trait derives a ReplicationSource for a
+  claim of the workload it is attached to, a Restic backup on a schedule,
+  and names it `<sourcePVC>-backup`. The `replicationsource` kind is the
+  authored object, for what the trait does not express: the whole spec, any
+  mover, a source that belongs to no workload. No trait builds a
+  ReplicationDestination. The trait's object and a `replicationsource`
+  component's are one kind: given one name in one namespace they are refused
+  (`generated-object collision: ReplicationSource.volsync.backube
+  "default/data-backup" is generated by both …`).
+
+  **Labels and annotations** are the `labels` and `annotations` properties. A
+  mover's `moverPodLabels` are not these: they are labels the operator adds to
+  the mover pods.
+
+  **Not covered.** Whether what is referred to exists (the claim to copy, a
+  Secret, a storage or snapshot class, a ServiceAccount), and whether the
+  mover can reach what the object names. The object's status is the
   operator's and is not written.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
@@ -7840,6 +8003,7 @@ the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gat
 `listenerset`, `referencegrant`, `backendtlspolicy`),
 the four kinds of the External Secrets Operator's API (`secretstore`,
 `clustersecretstore`, `externalsecret`, `clusterexternalsecret`),
+the two kinds of VolSync's API (`replicationsource`, `replicationdestination`),
 the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
 `fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
