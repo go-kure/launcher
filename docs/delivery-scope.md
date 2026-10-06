@@ -861,6 +861,21 @@ its text:
     of an `externalClusters` entry that has a `barmanObjectStore`
     (`TestPostgresqlRule_UnauthoredRequiredStrings`). Breaking for a document that
     leaves either out.
+  - A `postgresql` component refuses a block that would not be built, where it used to
+    drop what the author wrote in it. Five blocks are built only when one field is set:
+    `backup` (`destinationPath`), `bootstrap.recovery` and `bootstrap.pg_basebackup`
+    (a non-empty `source`), `replication.synchronous` (`method`), `monitoring` and
+    `pooler` (`enabled`). Other values of the block without that field are refused by the
+    field's name (`replication.synchronous.method: required (any or first)`,
+    `pooler.enabled: required where pooler.instances is set (…)`); under `backup` that
+    adds `endpointURL`, `secretName` and an empty `retentionPolicy` to the refusal
+    above, which a `retentionPolicy` that is not empty already got. An authored
+    `enabled: false` is the block's own switch and keeps building, with the settings
+    beside it kept in the document; an empty outer block (`bootstrap: {}`, `pooler: {}`)
+    builds as before, an empty `bootstrap.pg_basebackup` or `replication.synchronous`
+    does not
+    (`TestPostgresqlRule_BlockNotBuilt`). Breaking for a document that authored such a
+    block without its field: it built, without those values.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`

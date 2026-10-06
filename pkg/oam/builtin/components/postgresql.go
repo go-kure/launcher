@@ -400,13 +400,23 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				*f.dst = v
 			}
 		}
-		// A retention policy is what makes the lowering build the Cluster's
-		// backup.barmanObjectStore, whose destinationPath the CRD requires and
-		// bounds. Left out, the Cluster would carry "" there, a value the author
-		// did not write and the API server refuses. An authored empty one is a
-		// value, and refusing it is left to the API server.
-		if _, authored := authoredValue(backup, "destinationPath"); !authored && config.BackupRetentionPolicy != "" {
-			return nil, errors.New("backup.destinationPath: required (the object store path backups and WAL are written to)")
+		// The lowering builds the Cluster's backup with a barmanObjectStore,
+		// whose destinationPath the CRD requires and bounds; the block's
+		// other values are carried by that backup. Without the path a
+		// retention policy that is not empty would build a store that carries
+		// "" there, a value the author did not write and the API server
+		// refuses, and the other values, an empty retention policy among
+		// them, would build nothing and be dropped. An authored empty path is
+		// a value: the backup is built from it, and refusing it is left to
+		// the API server.
+		if _, authored := authoredValue(backup, "destinationPath"); authored {
+			config.explicitBackupDestinationPath = true
+		} else {
+			for _, key := range []string{"retentionPolicy", "endpointURL", "secretName"} {
+				if _, set := authoredValue(backup, key); set {
+					return nil, errors.New("backup.destinationPath: required (the object store path backups and WAL are written to)")
+				}
+			}
 		}
 	}
 
@@ -440,6 +450,13 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, errors.Errorf("%s: both 'name' and 'key' are required", label)
 			}
 			config.MonitoringCustomQueries = append(config.MonitoringCustomQueries, CustomQueryRef{Name: name, Key: key})
+		}
+		// The lowering builds the Cluster's monitoring only when enabled is
+		// true, so queries beside an enabled nobody wrote would be dropped. An
+		// authored false is the author's own switch: the queries are kept in
+		// the document for when it is switched on.
+		if enabled == nil && len(config.MonitoringCustomQueries) > 0 {
+			return nil, errors.New("monitoring.enabled: required where monitoring.customQueries is set (the Cluster's monitoring is built only when it is true)")
 		}
 	}
 
@@ -492,6 +509,20 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, err
 			}
 		}
+		// The Pooler is emitted only when enabled is true, so a setting
+		// beside an enabled nobody wrote would be dropped. An authored false
+		// is the author's own switch: the settings are kept in the document
+		// for when it is switched on.
+		if enabled == nil {
+			for _, key := range []string{"instances", "type", "poolMode"} {
+				if _, set := authoredValue(pooler, key); set {
+					return nil, postgresqlPoolerNotEnabled(key)
+				}
+			}
+			if len(config.PoolerParameters) > 0 {
+				return nil, postgresqlPoolerNotEnabled("parameters")
+			}
+		}
 	}
 	// The name itself is read and resolved by postgresqlPoolerName; here only
 	// its type, and that there is a Pooler to name.
@@ -518,12 +549,12 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, errors.New("bootstrap: recovery and pg_basebackup are mutually exclusive")
 		}
 		if hasRecovery {
-			if config.BootstrapRecoverySource, _, err = parseRawStringField(recovery, "source", "bootstrap.recovery.source"); err != nil {
+			if config.BootstrapRecoverySource, err = bootstrapSource(recovery, "bootstrap.recovery.source", "the externalClusters entry the cluster is recovered from"); err != nil {
 				return nil, err
 			}
 		}
 		if hasPgBasebackup {
-			if config.BootstrapPgBasebackupSource, _, err = parseRawStringField(pgbb, "source", "bootstrap.pg_basebackup.source"); err != nil {
+			if config.BootstrapPgBasebackupSource, err = bootstrapSource(pgbb, "bootstrap.pg_basebackup.source", "the externalClusters entry the cluster is copied from"); err != nil {
 				return nil, err
 			}
 		}
@@ -608,6 +639,14 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				default:
 					return nil, errors.Errorf("unsupported replication synchronous dataDurability %q, supported: required, preferred", dd)
 				}
+			}
+			// The lowering builds the Cluster's synchronous replication from
+			// the method only: without one the block, and the number and the
+			// durability authored in it, would be dropped. Checked last, so a
+			// wrongly typed value of the block is still refused by its own
+			// path.
+			if config.SynchronousMethod == "" {
+				return nil, errors.New("replication.synchronous.method: required (any or first)")
 			}
 		}
 	}
@@ -1053,6 +1092,33 @@ type PostgresqlConfig struct {
 
 	explicitReplicas    bool
 	explicitStorageSize bool
+	// explicitBackupDestinationPath is set when backup.destinationPath was
+	// authored, an empty one included: the backup is then built from it.
+	explicitBackupDestinationPath bool
+}
+
+// bootstrapSource reads the source of one bootstrap method's block. The
+// lowering builds the Cluster's bootstrap from a non-empty source only, so a
+// block without one, or with an empty one, would be dropped whole. role says
+// what the source names.
+func bootstrapSource(block map[string]any, path, role string) (string, error) {
+	source, present, err := parseRawStringField(block, "source", path)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", errors.Errorf("%s: required (%s)", path, role)
+	}
+	if source == "" {
+		return "", errors.Errorf("%s: must not be empty (%s)", path, role)
+	}
+	return source, nil
+}
+
+// postgresqlPoolerNotEnabled refuses a pooler setting authored beside an
+// enabled nobody wrote.
+func postgresqlPoolerNotEnabled(key string) error {
+	return errors.Errorf("pooler.enabled: required where pooler.%s is set (the Pooler is emitted only when it is true)", key)
 }
 
 // postgresqlZeroConnectionLimit refuses a managed role's connectionLimit of 0.

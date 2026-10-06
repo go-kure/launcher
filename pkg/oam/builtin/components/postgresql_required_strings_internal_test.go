@@ -16,8 +16,9 @@ import (
 // backup's source and the synchronous method. The first two it builds from
 // other authored settings, so postgresql refuses them unauthored, under the
 // property the author wrote; the last two it builds only from the string
-// itself. Each case reads every path of cnpgClusterRequired in the lowered
-// component.
+// itself, and postgresql refuses their block without it
+// (TestPostgresqlRule_BlockNotBuilt). Each case reads every path of
+// cnpgClusterRequired in the lowered component.
 func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 	const (
 		backupPath   = "backup.barmanObjectStore.destinationPath"
@@ -72,18 +73,23 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 			carried: map[string][]any{externalPath: {"s3://bucket/a"}},
 		},
 		{
-			name:    "backup without a retention policy builds no object store",
+			name:    "backup with an endpoint, an empty retention policy and no path",
 			props:   map[string]any{"backup": map[string]any{"endpointURL": "https://s3.example", "retentionPolicy": ""}},
-			carried: map[string][]any{},
+			refused: "backup.destinationPath: required (",
 		},
 		{
-			name:    "base backup without a source builds no bootstrap",
+			name:    "base backup without a source",
 			props:   map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{}}},
-			carried: map[string][]any{},
+			refused: "bootstrap.pg_basebackup.source: required (",
 		},
 		{
-			name:    "synchronous replication without a method builds none",
+			name:    "synchronous replication without a method",
 			props:   map[string]any{"replication": map[string]any{"synchronous": map[string]any{"number": 1}}},
+			refused: "replication.synchronous.method: required (",
+		},
+		{
+			name:    "no block at all",
+			props:   map[string]any{},
 			carried: map[string][]any{},
 		},
 		{
