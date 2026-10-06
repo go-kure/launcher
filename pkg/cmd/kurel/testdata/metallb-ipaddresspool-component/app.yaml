@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: metallb-system
+spec:
+  components:
+    - name: edge
+      type: metallb-ipaddresspool
+      properties:
+        addresses:
+          - 192.0.2.0/24
+          - 198.51.100.10-198.51.100.20
+          - 2001:db8::/64
+        autoAssign: false
+        avoidBuggyIPs: true
+        serviceAllocation:
+          priority: 10
+          namespaces: [shop, payments]
+          namespaceSelectors:
+            - matchLabels:
+                tier: edge
+          serviceSelectors:
+            - matchLabels:
+                exposure: public
+              matchExpressions:
+                - key: tier
+                  operator: In
+                  values: [edge, dmz]
+    - name: shared
+      type: metallb-ipaddresspool
+      properties:
+        objectName: every-service
+        addresses:
+          - 203.0.113.0/24

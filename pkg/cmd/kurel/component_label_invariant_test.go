@@ -411,6 +411,15 @@ spec:
 		"parentRef": map[string]any{"name": "public"},
 		"listeners": []any{map[string]any{"name": "http", "port": 8080, "protocol": "HTTP"}}}},
 	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
+	// The kinds of MetalLB's API emit identity and the authored spec too, with
+	// no `app` label and no pods, all namespaced. A selector in one is the
+	// author's label query over Services, namespaces, nodes or pools, so the
+	// rows select on `role`, as the Cilium rows above. None checks a name rule
+	// of its own.
+	"metallb-ipaddresspool": {props: map[string]any{
+		"addresses": []any{"192.0.2.0/24"},
+		"serviceAllocation": map[string]any{"serviceSelectors": []any{
+			map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}}},
 	// The namespace, limitrange, resourcequota and persistentvolume kinds of
 	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
 	// label and no pods. The component name is the Namespace's name, which the

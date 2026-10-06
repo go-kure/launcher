@@ -23,6 +23,7 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -524,6 +525,8 @@ var apiSetKinds = []apiSetKind{
 		}},
 		refused: []string{"listeners", "listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
+	// MetalLB's API, from the CRDs its module ships.
+	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
 	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
 	{

@@ -28,6 +28,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
+	go.universe.tf/metallb v0.16.1
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v4 v4.3.0
 	k8s.io/api v0.37.1
@@ -173,7 +174,6 @@ require (
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	go.universe.tf/metallb v0.16.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect

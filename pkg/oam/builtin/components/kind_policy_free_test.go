@@ -20,6 +20,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -45,10 +46,11 @@ import (
 // four of Cilium's BGP control plane, five more of Cilium's API (a CIDR
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
 // policy and a node configuration), the five kinds of the Gateway API's
-// infrastructure objects, and the EndpointSlice, the first of them that is a
-// whole object in a namespace. The three kinds of cert-manager's API and the
-// four of the External Secrets Operator's are held here too: the policy
-// reaches one part of each (held), and everything else of them is the helper's.
+// infrastructure objects, the EndpointSlice, the first of them that is a
+// whole object in a namespace, and one of MetalLB's API (an address pool). The
+// three kinds of cert-manager's API and the four of the External Secrets
+// Operator's are held here too: the policy reaches one part of each (held),
+// and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -490,6 +492,25 @@ var policyFreeKinds = []policyFreeKind{
 		full:    listenerSetFull(),
 	},
 	{
+		component: "metallb-ipaddresspool", handler: &components.MetalLBIPAddressPoolHandler{},
+		gvk: metallbv1beta1.GroupVersion.WithKind("IPAddressPool"),
+		typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), namespaced: true,
+		minimal: metallbPool(nil),
+		full: withProperty(withProperty(metallbPool(map[string]any{
+			"priority":           10,
+			"namespaces":         []any{"shop", "payments"},
+			"namespaceSelectors": []any{map[string]any{"matchLabels": map[string]any{"tier": "edge"}}},
+			"serviceSelectors": []any{map[string]any{
+				"matchLabels":      map[string]any{"exposure": "public"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"edge", "dmz"}}},
+			}},
+		}),
+			// A false is not the API's default here, and the pointer keeps it.
+			"autoAssign", false),
+			// The type omits a false, which is also the API's default.
+			"avoidBuggyIPs", true),
+	},
+	{
 		component: "poddisruptionbudget", handler: &components.PodDisruptionBudgetHandler{},
 		gvk: policyv1.SchemeGroupVersion.WithKind("PodDisruptionBudget"),
 		typ: reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), namespaced: true,
@@ -782,6 +803,17 @@ func bindingTo(kind string, subjects ...any) map[string]any {
 // endpointSlice is an IPv4 endpointslice of the given endpoints.
 func endpointSlice(endpoints ...any) map[string]any {
 	return map[string]any{"addressType": "IPv4", "endpoints": endpoints}
+}
+
+// metallbPool is the properties of a metallb-ipaddresspool with one range of
+// addresses, which is the least the kind takes, and with the allocation where
+// one is given.
+func metallbPool(allocation map[string]any) map[string]any {
+	pool := map[string]any{"addresses": []any{"192.0.2.0/24"}}
+	if allocation != nil {
+		pool["serviceAllocation"] = allocation
+	}
+	return pool
 }
 
 // egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
@@ -1251,6 +1283,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.ParentRef.Group", ".Spec.ParentRef.Kind", ".Spec.ParentRef.Namespace", ".Spec.Listeners",
 			".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.Options",
 			".Spec.Listeners[1].AllowedRoutes.Namespaces.Selector", ".Spec.Listeners[1].AllowedRoutes.Kinds[1].Group",
+		},
+		"metallb-ipaddresspool": {
+			".Spec.Addresses", ".Spec.AutoAssign", ".Spec.AllocateTo", ".Spec.AllocateTo.Namespaces",
+			".Spec.AllocateTo.NamespaceSelectors", ".Spec.AllocateTo.NamespaceSelectors[0].MatchLabels",
+			".Spec.AllocateTo.ServiceSelectors", ".Spec.AllocateTo.ServiceSelectors[0].MatchExpressions",
+			".Spec.AllocateTo.ServiceSelectors[0].MatchExpressions[0].Values",
 		},
 		"poddisruptionbudget": {
 			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
@@ -2026,6 +2064,27 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null listener", listenerSetWith(gatewayListener(), nil), "listeners[1]"},
 			{"two spellings", withProperty(listenerSetWith(gatewayListener()), "ParentRef", map[string]any{"name": "other"}), "sets the same field as"},
 		},
+		"metallb-ipaddresspool": {
+			{"no properties", nil, "addresses: required"},
+			{"null addresses", map[string]any{"addresses": nil}, "addresses: required"},
+			{"allocation without addresses", map[string]any{"serviceAllocation": map[string]any{"namespaces": []any{"shop"}}}, "addresses: required"},
+			{"namespace expression without an operator", metallbPool(map[string]any{
+				"namespaceSelectors": []any{ciliumExpression(map[string]any{"key": "team"})},
+			}), "serviceAllocation.namespaceSelectors[0].matchExpressions[0].operator: required"},
+			{"a later service selector's expression without a key", metallbPool(map[string]any{
+				"serviceSelectors": []any{map[string]any{}, ciliumExpression(map[string]any{"operator": "Exists"})},
+			}), "serviceAllocation.serviceSelectors[1].matchExpressions[0].key: required"},
+			{"unknown key", withProperty(metallbPool(nil), "pools", []any{}), notA + "metallb.io/v1beta1 IPAddressPoolSpec"},
+			{"the object's spec", map[string]any{"spec": metallbPool(nil)}, notA},
+			// The pool's status is MetalLB's, and no field of the spec.
+			{"the object's status", withProperty(metallbPool(nil), "status", map[string]any{"assignedIPv4": 1}), notA},
+			{"allocation sub-key", metallbPool(map[string]any{"services": []any{"shop/web"}}), notA},
+			{"addresses a string", map[string]any{"addresses": "192.0.2.0/24"}, notA},
+			{"autoAssign a string", withProperty(metallbPool(nil), "autoAssign", "false"), notA},
+			{"priority a string", metallbPool(map[string]any{"priority": "high"}), notA},
+			{"null selector", metallbPool(map[string]any{"serviceSelectors": []any{map[string]any{}, nil}}), "serviceAllocation.serviceSelectors[1]"},
+			{"two spellings", withProperty(metallbPool(nil), "Addresses", []any{"198.51.100.0/24"}), "sets the same field as"},
+		},
 		"poddisruptionbudget": {
 			{"unknown key", map[string]any{"minAvailable": 1, "minReady": 1}, notA + "policy/v1 PodDisruptionBudgetSpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"minAvailable": 1}}, notA},
@@ -2645,6 +2704,38 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		"addressType": "", "endpoints": []any{map[string]any{"addresses": []any{}}},
 	}); err != nil {
 		t.Errorf("an empty address type and an empty address list: %v, want them accepted", err)
+	}
+
+	addresses := build("metallb-ipaddresspool", full["metallb-ipaddresspool"]).(*metallbv1beta1.IPAddressPool)
+	if got := addresses.Spec; !slices.Equal(got.Addresses, []string{"192.0.2.0/24"}) || got.AutoAssign == nil || *got.AutoAssign || !got.AvoidBuggyIPs {
+		t.Errorf("spec = %+v, want the authored range, the authored autoAssign false and avoidBuggyIPs", got)
+	}
+	if got := addresses.Spec.AllocateTo; got == nil || got.Priority != 10 || !slices.Equal(got.Namespaces, []string{"shop", "payments"}) ||
+		len(got.NamespaceSelectors) != 1 || len(got.ServiceSelectors) != 1 {
+		t.Errorf("serviceAllocation = %+v, want the authored priority, the two namespaces in order and a selector of each kind", got)
+	}
+	// A pool that authors its addresses alone carries them alone, and MetalLB's
+	// API fills `autoAssign: true` into it. An authored `avoidBuggyIPs: false`,
+	// the API's default, is left out as an unauthored one is.
+	for name, props := range map[string]map[string]any{
+		"its addresses alone": metallbPool(nil), "avoidBuggyIPs false": withProperty(metallbPool(nil), "avoidBuggyIPs", false),
+	} {
+		if got, want := spec("metallb-ipaddresspool", props), "map[addresses:[192.0.2.0/24]]"; got != want {
+			t.Errorf("a pool that authors %s: spec = %s, want %s", name, got, want)
+		}
+	}
+	// An allocation's priority is a number the type omits at 0: an authored 0
+	// is an allocation with no priority, and is left out.
+	if got, want := spec("metallb-ipaddresspool", metallbPool(map[string]any{"priority": 0, "namespaces": []any{"shop"}})), "map[addresses:[192.0.2.0/24] serviceAllocation:map[namespaces:[shop]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// An authored empty list is written as one: a pool with no address.
+	if got, want := spec("metallb-ipaddresspool", map[string]any{"addresses": []any{}}), "map[addresses:[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// An address is not read: one that is no range builds.
+	if err := coreKindErr(kinds["metallb-ipaddresspool"].handler, "metallb-ipaddresspool", "fast", map[string]any{"addresses": []any{"not-a-range"}}); err != nil {
+		t.Errorf("an address that is no range: %v, want it accepted", err)
 	}
 }
 

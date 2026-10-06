@@ -186,6 +186,7 @@ reads it.
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
+| `metallb-ipaddresspool` | IPAddressPool | Kind-named MetalLB address pool: the whole `IPAddressPoolSpec` (`addresses`, required, `autoAssign`, `avoidBuggyIPs` and `serviceAllocation`), strictly decoded. It says which Services, in which namespaces, MetalLB gives an address of which range. Namespaced; no environment policy applies and no capability is required — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are the `labels` property — see below. |
 | `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; a defective match expression of a selector is refused; no environment policy applies — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
@@ -401,7 +402,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | missing | - | - | - |
 | `metallb.CreateCommunity` | metallb.io/v1beta1 Community | missing | - | - | - |
 | `metallb.CreateConfigurationState` | metallb.io/v1beta1 ConfigurationState | not authorable | - | - | Status MetalLB writes. |
-| `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | missing | - | - | - |
+| `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | kind | `metallb-ipaddresspool` | strict decode of `IPAddressPoolSpec` | The object is named after the component unless `objectName` names it, and a MetalLB advertisement refers to it by that name or selects it by its labels, the `labels` property. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The addresses are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateL2Advertisement` | metallb.io/v1beta1 L2Advertisement | missing | - | - | - |
 | `metallb.CreateServiceBGPStatus` | metallb.io/v1beta1 ServiceBGPStatus | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateServiceL2Status` | metallb.io/v1beta1 ServiceL2Status | not authorable | - | - | Status MetalLB writes. |
@@ -2376,6 +2377,102 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
+- **metallb-ipaddresspool** (go-kure/launcher#790) is the kind-named
+  projection of an object of MetalLB's `metallb.io/v1beta1` API: an
+  IPAddressPool. It is built on `policyFreeKind` and emits that one object,
+  named after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default of its own. The type name carries the
+  `metallb-` prefix as the kinds of Cilium's API carry theirs: both APIs have
+  a pool of addresses and an advertisement for BGP.
+
+  **What it changes for others.** A pool is the address ranges MetalLB has
+  authority over and gives to Services of type LoadBalancer. With no
+  `serviceAllocation` the pool is limited to no namespace and no Service: a
+  Service of any namespace of the cluster may be given one of its addresses.
+  `serviceAllocation` limits it to the namespaces it lists or selects and to
+  the Services it selects. `autoAssign: false` keeps MetalLB from allocating
+  from the pool on its own.
+
+  **The object is namespaced, and MetalLB reads it in one namespace only.** It
+  is written in the build namespace. MetalLB reads the objects of its API in
+  one namespace and in no other: the one it is configured to watch, by its
+  `--namespace` flag or the `METALLB_NAMESPACE` variable, and by default the
+  one it runs in. A pool of an application built for another namespace is an
+  object MetalLB does not read. Launcher does not know that namespace and
+  checks nothing of it.
+
+  **No capability is required, and nothing gates the kind**: where MetalLB's
+  CRDs are not installed the component builds, and the object is refused at
+  apply. Whoever may author a component of an application built for MetalLB's
+  namespace may author a pool, and with it which Services of the cluster get
+  an address of which range. The open point "No capability gate on component
+  types" on go-kure/launcher#790 carries it.
+
+  **Authored.** The properties are the top-level json fields of
+  `IPAddressPoolSpec`, decoded strictly at every depth: an unknown key is
+  refused wherever it sits (the spec, the allocation, a selector).
+  - `addresses`, each a CIDR prefix or a first and a last address joined by a
+    dash; `autoAssign`; `avoidBuggyIPs`; `serviceAllocation`, with its
+    `priority`, `namespaces`, `namespaceSelectors` and `serviceSelectors`.
+  - **No default is filled, and an authored value that is the API's default is
+    not written where the Go type cannot hold it.** `autoAssign` is a pointer:
+    an authored `false` is written, and an unauthored one is left out, which
+    the API fills with `true`. `avoidBuggyIPs` is no pointer and is omitted
+    when false: an authored `false` is left out of the object, and the API
+    fills the same `false` back. `TestMetalLBKinds_NoDefaultIsLost` holds the
+    defaults of the linked CRD to that: one that is not the field's empty
+    value, on a field that is no pointer, fails there. An allocation's
+    `priority` is a number the type omits at 0, with no default in the CRD:
+    an authored `priority: 0` is an allocation with no priority, as MetalLB's
+    own type reads it.
+
+  **Required**: a field the API requires that the Go type writes whether or
+  not it was authored must be authored (`addresses: required (…)`):
+  - `addresses`;
+  - the `key` and the `operator` of a match expression, in every selector of
+    `serviceAllocation.namespaceSelectors` and
+    `serviceAllocation.serviceSelectors`.
+
+  An authored empty value satisfies the rule: `addresses: []` is a pool with
+  no address, which the CRD's schema takes. `TestMetalLBKinds_RequiredMatchCRD`
+  holds the list to the fields the linked module's `v1beta1` CRD requires and
+  the type writes unauthored, so a dependency bump that adds, drops or moves
+  one fails there.
+
+  **The CRD's expression rules.** The CRD declares none;
+  `TestMetalLBKinds_ExpressionRules` fails on one that is added.
+
+  **Not checked**, and MetalLB's or the API server's to refuse:
+  - **MetalLB's validating webhook was not read, and nothing it refuses is
+    repeated here.** An object the CRD's schema takes may still be refused at
+    apply by the webhook MetalLB installs;
+  - an address: no entry of `addresses` is read, and a string that is no
+    range builds;
+  - an authored empty value in a required field (a `key: ""`). It is a value.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **A pool is referred to by its name, or selected by its labels.** A MetalLB
+  advertisement names the pools it announces (`ipAddressPools`): name the
+  component so, or set `objectName`. Its `ipAddressPoolSelectors` is a label
+  query over pools: write the labels it names under the `labels` of the
+  `metallb-ipaddresspool`. The object also carries the component label, whose
+  value is the component's (see "Component label and ownership" in the OAM
+  model). The selectors of `serviceAllocation` query objects launcher does
+  not write the labels of here (namespaces, Services) and are the author's.
+
+  **Policy.** No field of the spec is one an `oam.Policy` method speaks to, so
+  `ApplyPolicy` enforces nothing and fills nothing, and the kind builds the
+  same under every policy and under none.
+  - **Hosts are not checked.** No field names a host. An address or a range a
+    pool holds is a network's, not an artifact source, and none is held to
+    the policy's allowed registries.
+  - **No field holds a literal secret or refers to a Secret, and none is
+    checked.**
+
+  **Not covered.** Whether what is selected exists (a namespace, a Service).
+  The pool's status is MetalLB's and is not written: the Go type always
+  encodes its four counters, at zero, and the YAML the library writes leaves
+  a status that holds nothing else out.
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
