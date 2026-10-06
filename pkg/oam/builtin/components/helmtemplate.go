@@ -151,8 +151,9 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	cfg.SourceKind = src.Kind
 	cfg.ReleaseName = src.ReleaseName
 	// As authored: the transform checks it when it resolves the prefix
-	// (oam.HookGroupNamePrefixSetter), and AugmentLayout checks every name built
-	// from it.
+	// (oam.HookGroupNamePrefixSetter), and every name built from it once the
+	// policy step has rendered the chart (CheckHookGroupNames). AugmentLayout
+	// checks them again.
 	if props.HookGroupNamePrefix != nil {
 		cfg.HookGroupNamePrefix, cfg.prefixAuthored = *props.HookGroupNamePrefix, true
 	}
@@ -207,8 +208,9 @@ type HelmTemplateConfig struct {
 	// config set. Each child is then named "<prefix>-<NN>-<phase>", directory and
 	// Flux Kustomization alike. It is never shortened: AugmentLayout refuses a
 	// child name built from it that is no DNS-1123 subdomain of at most 63
-	// characters. Empty means the default, whose Kustomization name is shortened
-	// to 63 characters.
+	// characters, and the transform refuses it before that
+	// (CheckHookGroupNames). Empty means the default, whose Kustomization name
+	// is shortened to 63 characters.
 	HookGroupNamePrefix string
 	// Namespace is the application namespace: the render's .Release.Namespace,
 	// and the namespace given to a namespaced rendered object that carries none
@@ -350,12 +352,34 @@ func (c *HelmTemplateConfig) SetHookGroupNamePrefix(prefix string) { c.HookGroup
 // (chartRender.partition) and named after c.HookGroupNamePrefix, or by default
 // after c.Application and ml. A chart with at most one hook group leaves ml
 // unchanged. A child name built from c.HookGroupNamePrefix that cannot be a
-// Flux Kustomization's is refused, and ml is then left as it was.
+// Flux Kustomization's is refused, and ml is then left as it was: one over 63
+// characters with an *oam.HookGroupNameError. A transform returns that refusal
+// before any layout is built (CheckHookGroupNames), so this one is met by a
+// config built directly, or one whose prefix was set after its transform.
 func (c *HelmTemplateConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err
 	}
-	return c.partition(hookGroupNaming{component: c.Name, application: c.Application, prefix: c.HookGroupNamePrefix}, ml)
+	return c.partition(c.hookGroupNaming(), ml)
+}
+
+// hookGroupNaming is what c names its hook-group child layouts by.
+func (c *HelmTemplateConfig) hookGroupNaming() hookGroupNaming {
+	return hookGroupNaming{component: c.Name, application: c.Application, prefix: c.HookGroupNamePrefix}
+}
+
+// CheckHookGroupNames implements oam.HookGroupNameChecker: the refusal
+// AugmentLayout would return for a child name built from
+// c.HookGroupNamePrefix, once the chart is rendered. It renders nothing, and
+// returns nil while nothing is rendered. The transform calls it after
+// ApplyPolicy, which has rendered the chart: the transform's policy is never
+// nil. A caller that applied a nil policy itself, which renders nothing, gets
+// nil here and the refusal from AugmentLayout.
+func (c *HelmTemplateConfig) CheckHookGroupNames() error {
+	if !c.rendered {
+		return nil
+	}
+	return c.hookGroupNaming().check(c.childSuffixes())
 }
 
 // GenerateCoversAugmentLayout implements oam.LayoutAugmentationCoverage and is
@@ -370,4 +394,5 @@ var (
 	_ oam.LayoutAugmentationCoverage = (*HelmTemplateConfig)(nil)
 	_ oam.ApplicationNameSetter      = (*HelmTemplateConfig)(nil)
 	_ oam.HookGroupNamePrefixSetter  = (*HelmTemplateConfig)(nil)
+	_ oam.HookGroupNameChecker       = (*HelmTemplateConfig)(nil)
 )

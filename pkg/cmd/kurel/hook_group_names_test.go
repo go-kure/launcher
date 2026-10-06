@@ -15,6 +15,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/fluxcd"
 	"github.com/go-kure/kure/pkg/stack/layout"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -504,6 +505,64 @@ func TestHookGroupNames_Refusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A prefix that makes a hook-group name too long fails the transform itself,
+// before any layout is walked (go-kure/launcher#787): the transform applies a
+// policy to every config, its default when it is given none, and the config
+// renders its chart for it, so the names are known there. The refusal is found
+// through the transform's own prefix with errors.Is and errors.As, with the
+// component, the role, the name, its length and the limit, and its text is
+// unchanged.
+func TestHookGroupNames_TooLongIsRefusedByTheTransform(t *testing.T) {
+	url := serveHookChart(t)
+	// 48 characters: with the 16 of "-02-post-install" the longest name is 64.
+	long := strings.Repeat("p", 48)
+	wantRefusal := oam.HookGroupNameError{
+		ComponentType: "helmtemplate", Component: "db", Role: oam.NameRoleHookGroup,
+		Name: long + "-02-post-install", Length: 64, Limit: 63, Prefix: long,
+	}
+	wantText := `component "db": helmtemplate: component "db": hook-group name "` + long + `-02-post-install" (role "hook-group") is 64 characters, and a Flux Kustomization name has at most 63; ` +
+		`its prefix "` + long + `" was set by hookGroupNamePrefix or returned by the Naming hook and is never shortened: use a prefix of at most 47 characters, or none for the default, which is shortened`
+	authored := "        hookGroupNamePrefix: " + long + "\n"
+	for _, tc := range []struct {
+		name       string
+		components string
+		answer     string // the hook's, "" to decline
+	}{
+		{name: "the author's prefix", components: hookComponent("db", "helmtemplate", url, authored)},
+		{name: "the hook's prefix", components: hookComponent("db", "helmtemplate", url, ""), answer: long},
+		{name: "the author's prefix on a helm component under delivery: template",
+			components: hookComponent("db", "helm", url, "        delivery: template\n"+authored)},
+	} {
+		for policyName, policy := range map[string]oam.Policy{"no policy": nil, "a policy": permissivePolicy{&oam.NoopPolicy{}}} {
+			t.Run(tc.name+", "+policyName, func(t *testing.T) {
+				ctx := oam.TransformContext{Policy: policy, Naming: func(req oam.NameRequest) (string, bool) {
+					return tc.answer, tc.answer != "" && req.Role == oam.NameRoleHookGroup
+				}}
+				_, err := hookGroupCluster(t, hookApp("shop", tc.components, ""), ctx)
+				if err == nil || err.Error() != wantText {
+					t.Fatalf("the transform: err = %v\nwant %s", err, wantText)
+				}
+				if !errors.Is(err, oam.ErrHookGroupNameTooLong) {
+					t.Error("errors.Is(err, oam.ErrHookGroupNameTooLong) = false")
+				}
+				var refusal *oam.HookGroupNameError
+				if !errors.As(err, &refusal) || *refusal != wantRefusal {
+					t.Errorf("errors.As found %+v, want %+v", refusal, wantRefusal)
+				}
+				var violation *oam.ViolationError
+				if errors.As(err, &violation) {
+					t.Error("the refusal is reported as a policy violation")
+				}
+			})
+		}
+	}
+
+	// One character less and every name fits: the transform passes and the tree
+	// is built.
+	fits := hookComponent("db", "helmtemplate", url, "        hookGroupNamePrefix: "+long[:47]+"\n")
+	mustHookGroupTree(t, hookApp("shop", fits, ""), oam.TransformContext{})
 }
 
 // The limit the README states: the transform holds the prefixes apart, not the

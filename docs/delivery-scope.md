@@ -388,7 +388,12 @@ Decided in the ticket:
     (`ManifestLayout.KustomizationName`). The default is shortened to 63 characters by the
     one shortening rule, while the directory keeps its 253-character name, so the two differ
     for a long default. An authored or hook-given prefix is never shortened, and a child
-    name over 63 characters built from it is refused.
+    name over 63 characters built from it is refused: by the transform, which has the chart
+    rendered by its policy step, and by `AugmentLayout` for a config no transform checked.
+    A caller recognises the refusal from either with
+    `errors.Is(err, ErrHookGroupNameTooLong)`, and `errors.As` finds a
+    `*HookGroupNameError` with the component, the role, the name, its length and the limit
+    (`pkg/oam/hook_group_name.go`).
   - **Breaking:** under per-layout placement a child's Kustomization was named
     `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`), and refused over 63
     characters; it is now `shop-db-01-main`.
