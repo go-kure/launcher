@@ -207,6 +207,15 @@ func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Lowering
 		if err != nil {
 			return nil, errors.Wrapf(err, "pooler")
 		}
+		// The Pooler is a component the rule emits beside the Cluster, and the
+		// lowering refuses one that carries the name of a component of the
+		// document (postgresqlReserveMember), ahead of the Pooler's own rules.
+		// This is given one component, so it repeats that for the postgresql
+		// component itself, in the same words and the same order; a Pooler
+		// named like another component of the document is not seen here.
+		if poolerName == component.Name {
+			return nil, postgresqlMemberNameTaken("pooler", poolerName, component)
+		}
 		// The Pooler refers to the Cluster by the name resolved above, and a
 		// Pooler that carries that name itself is refused where it is built
 		// (CnpgPoolerConfig.validate): refused here in the same words.

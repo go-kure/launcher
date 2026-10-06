@@ -6851,7 +6851,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Cluster named apart the two can meet (a `clusterObjectName` of `db-pooler`
   on component `db`): it is refused where the Pooler is built, and where
   endpoints are collected in the same words (`cluster.name "db-pooler": a
-  pooler cannot have the same name as its cluster`).
+  pooler cannot have the same name as its cluster`). A Pooler named like
+  the `postgresql` component itself (a `poolerName` of `db` on component
+  `db`, or the hook's answer) is a name the document already holds: it is
+  refused by the lowering, and where endpoints are collected in the same
+  words (`pooler: generates component "db", which is already the name of
+  component "db" (type "postgresql") in the document; rename one of them`).
+  One named like another component of the document is refused by the
+  lowering only: endpoints are collected for one component (`pkg/oam`,
+  "Name roles and the `Naming` hook").
   **CloudNativePG derives the Cluster's Services (`<cluster>-rw`,
   `<cluster>-ro`, `<cluster>-r`) and Secrets (`<cluster>-app` and the others)
   from the Cluster's name, and the default backup path moves with it: the
