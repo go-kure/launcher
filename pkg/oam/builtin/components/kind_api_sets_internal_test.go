@@ -18,6 +18,7 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -342,6 +343,7 @@ var objectIdentity = []string{"kind", "apiVersion", "metadata"}
 // needs build and a document that holds the field, on which the test shows
 // the refusal.
 var apiSetKinds = []apiSetKind{
+	{component: "artifactgenerator", typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), source: markerAPISource},
 	// The Gateway API's infrastructure objects (backendtlspolicy, gateway,
 	// gatewayclass, listenerset, referencegrant) are read from the experimental
 	// channel's CRDs its module ships, which hold every field the Go types do.

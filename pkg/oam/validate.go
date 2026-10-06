@@ -24,6 +24,7 @@ const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 // The entries stand in the order of their type, as sort.Strings gives it; a
 // new type goes at its position (TestKindLists_InOrder, pkg/cmd/kurel).
 var validComponentTypes = map[string]bool{
+	"artifactgenerator":               true,
 	"backendtlspolicy":                true,
 	"bucket":                          true,
 	"certificate":                     true,

@@ -16,6 +16,7 @@ import (
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -670,4 +671,10 @@ func (h *ImagePolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // ImageUpdateAutomation, which lands in the Flux namespace when one is set.
 func (h *ImageUpdateAutomationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: autov1.GroupVersion.Group, Kind: autov1.ImageUpdateAutomationKind}, oam.ObjectScopeFlux
+}
+
+// ComponentObject declares the artifactgenerator kind's ArtifactGenerator,
+// which lands in the Flux namespace when one is set.
+func (h *ArtifactGeneratorHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: swv1beta1.GroupVersion.Group, Kind: swv1beta1.ArtifactGeneratorKind}, oam.ObjectScopeFlux
 }

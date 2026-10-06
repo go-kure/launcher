@@ -145,6 +145,59 @@ func imageUpdateAutomationFull() map[string]any {
 	}
 }
 
+// artifactGeneratorSource is one source of an artifactgenerator: a
+// GitRepository of the object's namespace, under the alias `app`.
+func artifactGeneratorSource() map[string]any {
+	return map[string]any{"alias": "app", "kind": "GitRepository", "name": "app"}
+}
+
+// artifactGeneratorCopy copies the deploy directory of the source `app` to the
+// root of the artifact.
+func artifactGeneratorCopy() map[string]any {
+	return map[string]any{"from": "@app/deploy/**", "to": "@artifact/"}
+}
+
+// artifactGeneratorArtifact is the least an artifact may author.
+func artifactGeneratorArtifact() map[string]any {
+	return map[string]any{"name": "app", "copy": []any{artifactGeneratorCopy()}}
+}
+
+// artifactGeneratorWith is the properties of an artifactgenerator with the
+// sources and one artifact.
+func artifactGeneratorWith(sources ...any) map[string]any {
+	return map[string]any{"sources": append([]any{}, sources...), "artifacts": []any{artifactGeneratorArtifact()}}
+}
+
+// artifactGeneratorMinimal is the least an artifactgenerator may author.
+func artifactGeneratorMinimal() map[string]any {
+	return artifactGeneratorWith(artifactGeneratorSource())
+}
+
+// artifactGeneratorFull sets every field of an ArtifactGeneratorSpec. Its
+// second source is an OCIRepository of another namespace.
+func artifactGeneratorFull() map[string]any {
+	return map[string]any{
+		"commonMetadata": map[string]any{
+			"labels":      map[string]any{"team": "shop"},
+			"annotations": map[string]any{"example.com/owner": "shop"},
+		},
+		"sources": []any{
+			map[string]any{"alias": "apps", "kind": "GitRepository", "name": "fleet"},
+			map[string]any{"alias": "base", "kind": "OCIRepository", "name": "base-manifests", "namespace": "platform"},
+		},
+		"pathPattern": "@apps/apps/{app}",
+		"artifacts": []any{
+			map[string]any{
+				"name": "{app}", "revision": "@apps", "originRevision": "@apps",
+				"copy": []any{
+					map[string]any{"from": "@base/**", "to": "@artifact/", "exclude": []any{"*.md"}, "strategy": "Overwrite"},
+					map[string]any{"from": "@apps/apps/{app}/values.yaml", "to": "@artifact/values.yaml", "strategy": "Merge"},
+				},
+			},
+		},
+	}
+}
+
 // fluxKinds returns the rows of policyFreeKinds that move to the Flux
 // namespace.
 func fluxKinds(t *testing.T) []policyFreeKind {
@@ -262,6 +315,9 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 			{props: imageUpdateAutomationMinimal()},
 			{props: withProperty(imageUpdateAutomationMinimal(), "git", imageUpdateAutomationGit(imageUpdateAutomationCommit()))},
 		},
+		// An ArtifactGenerator names Flux sources, which are the objects that
+		// hold the addresses and the credentials.
+		"artifactgenerator": {{props: artifactGeneratorFull()}},
 	}
 	for _, kind := range fluxKinds(t) {
 		if len(cases[kind.component]) == 0 {

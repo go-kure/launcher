@@ -133,6 +133,7 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
+| `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and nothing gates it. The API's expression rule is not checked. No environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `certificate` | Certificate | Kind-named cert-manager Certificate: the whole `CertificateSpec`, strictly decoded; `secretName` and `issuerRef` with its `name` are required. A keystore password written into the object is refused under an environment policy that forbids explicit secrets. The issuer is the author's, and no capability is required. Shares its name with the `certificate` trait — see below. |
@@ -377,7 +378,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
-| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | missing | - | - | - |
+| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
 | `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | missing | - | - | - |
@@ -6926,11 +6927,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
-- **fluxcd-alert, imagepolicy, imageupdateautomation**
+- **fluxcd-alert, imagepolicy, imageupdateautomation, artifactgenerator**
   (go-kure/launcher#790) are the kind-named projections of objects of the
   Flux APIs beside the sources, the HelmRelease and the Kustomization: a
-  notification.toolkit.fluxcd.io/v1beta3 Alert, and an
-  image.toolkit.fluxcd.io/v1 ImagePolicy and ImageUpdateAutomation. Each is
+  notification.toolkit.fluxcd.io/v1beta3 Alert, an
+  image.toolkit.fluxcd.io/v1 ImagePolicy and ImageUpdateAutomation, and a
+  source.extensions.fluxcd.io/v1beta1 ArtifactGenerator. Each is
   built on
   `policyFreeKind` (above) with two additions, the Flux namespace and the
   check of its durations (`fluxKind`), and emits that one object, named
@@ -6981,6 +6983,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     whose selections it applies are those of the namespace it lands in
     (`policySelector` narrows them; it names no other namespace), and the
     Secret of `git.commit.signingKey` is one of that namespace too.
+  - `artifactgenerator`: `sources[].namespace` names the namespace of a
+    Flux source (a Bucket, GitRepository, OCIRepository, HelmChart or
+    ExternalArtifact); left out, the API takes "the same namespace as the
+    ArtifactGenerator". **An ArtifactGenerator copies files out of the
+    sources it names into the artifacts it generates**, which the API
+    describes as ExternalArtifacts, so one that names another namespace's
+    source republishes that source's content as an artifact its author
+    named. It names no account.
 
   **Authored.** The properties are the top-level json fields of the spec
   type, decoded strictly at every depth: an unknown key is refused wherever
@@ -6998,6 +7008,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `update` and `suspend`. `git.commit.messageTemplate` is a template the
     controller renders; launcher writes it as authored and does not parse
     it.
+  - `artifactgenerator` (`ArtifactGeneratorSpec`): `commonMetadata`,
+    `sources`, `pathPattern` and `artifacts` (each a `name`, `revision`,
+    `originRevision` and `copy`; a copy a `from`, `to`, `exclude` and
+    `strategy`). **`commonMetadata` is not the object's own metadata:** its
+    `labels` and `annotations` are written into the spec, where the API says
+    they are "applied to all resources"; the ArtifactGenerator's own labels
+    and annotations are the `labels` and `annotations` properties. The
+    aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
+    written as authored: launcher resolves none of them.
   - **No default is filled.** The API's own (`eventSeverity: info`,
     `digestReflectionPolicy: Never`, a policy's `order: asc`,
     `update: {strategy: Setters}`) is applied by the API server to what the
@@ -7017,7 +7036,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
     of durations to its type and to the pattern markers of the linked
     source: the `interval` of an ImagePolicy and of an
-    ImageUpdateAutomation; an Alert has none.
+    ImageUpdateAutomation; an Alert and an ArtifactGenerator have none.
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, the rule every kind follows (see the Prometheus
@@ -7032,6 +7051,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `interval`. Of an authored `git`, `commit` with its `author` and the
     author's `email`; of an authored `git.checkout`, its `ref`; of an
     authored `git.commit.signingKey`, its `secretRef` with its `name`.
+  - An `artifactgenerator`: `sources` and `artifacts`; of each source its
+    `alias`, `kind` and `name`; of each artifact its `name` and `copy`; of
+    each copy its `from` and `to`.
 
   **The lists are read from the markers of the Go source, not from a CRD.**
   The API modules of the Flux controllers hold the Go types and ship no CRD,
@@ -7042,7 +7064,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   adds, drops or moves one fails there. Nothing here is held to the API
   server's own validator, which answers from a CRD. **Not refused:**
   - a list the API wants an item of that is authored empty
-    (`eventSources: []`);
+    (`eventSources: []`, the `sources`, `artifacts` and `copy` of an
+    `artifactgenerator`), and one longer than the API allows;
   - every value rule of the API but the pattern of a duration: enumerations
     (`eventSeverity`, a source's `kind`, `digestReflectionPolicy`, a
     policy's `order`), lengths (a source's `name` and `namespace`,
@@ -7055,6 +7078,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     "technically optional, but in practice mandatory" and no marker
     requires; the pattern of `git.push.refspec` and the enumerations
     (`sourceRef.kind`, `update.strategy`, a signing key's `type`);
+  - of an `artifactgenerator`, the patterns (a source's `alias`, `name` and
+    `namespace`, `pathPattern`, an artifact's `revision` and
+    `originRevision`, a copy's `from` and `to`), the lengths and the
+    enumerations (a source's `kind`, a copy's `strategy`); that an alias is
+    unique and that a path, a `revision` or an `originRevision` names an
+    alias that is declared, which the type documents and no marker states;
   - the `key` and the `operator` of a `policySelector.matchExpressions`
     entry: they are fields of a Kubernetes type, whose source carries no
     marker for them and is not read for these lists, and each left out is
@@ -7072,6 +7101,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
     and `digestReflectionPolicy: Always` without `interval`. Each builds and
     is refused at apply.
+  - An `artifactgenerator`: where no `pathPattern` is set, every artifact's
+    `name` must be a Kubernetes object name (lower case letters, digits,
+    `-` and `.`). One that is not, `App_Manifests` for one, builds and is
+    refused at apply.
 
   **Policy.** No dimension of the environment policy reaches these objects:
   they run no pod, request no storage and have no replica count.
@@ -7092,6 +7125,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the repository are not held to the allowed registries or the tag
     rule:** they are what the ImagePolicies select at run time, and no
     build sees them.
+  - **No field of an ArtifactGenerator holds a secret or a host.** The
+    addresses and the credentials are those of the sources it names.
+    `commonMetadata` holds two free maps, written to the object as authored
+    under a policy that forbids explicit secrets too. **What an artifact
+    carries is not checked:** the copy is the controller's to perform, and no
+    build sees the files, so the rules a policy holds a workload or a Secret to
+    do not reach manifests that travel inside an artifact.
 
   **Namespace.** The object lands in the Flux namespace when one is
   configured, else in the build namespace (`SetFluxNamespace`), as the Flux
@@ -7101,7 +7141,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`helmrelease`, `fluxcd-kustomization`, the sources) land in the Flux
   namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
   a kind reads by name from the namespace it lands in, so that a trait's
-  object one of them names moves with it; an Alert and an ImagePolicy read
+  object one of them names moves with it; an Alert, an ImagePolicy and an ArtifactGenerator read
   none, and an ImageUpdateAutomation reads the Secret of
   `git.commit.signingKey.secretRef`.
 
@@ -7109,8 +7149,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Not covered.** Whether what is referred to exists (the Provider, the
   objects of a source, the ImageRepository, the GitRepository, the signing
-  key's Secret), whether a `filterTags` pattern, a `semver` range or a
-  commit message template parses, and whether the cluster serves the API: the
+  key's Secret, the sources of an ArtifactGenerator), whether a `filterTags`
+  pattern, a `semver` range, a commit message template or a `pathPattern`
+  parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`

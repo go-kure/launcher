@@ -199,6 +199,11 @@ func helmtemplateLabelProps(t *testing.T) map[string]any {
 // of the types: a new type's entry goes at its position
 // (TestKindLists_InOrder).
 var componentLabelFixtures = map[string]componentLabelFixture{
+	"artifactgenerator": {props: map[string]any{
+		"sources": []any{map[string]any{"alias": "app", "kind": "GitRepository", "name": "app"}},
+		"artifacts": []any{map[string]any{
+			"name": "app",
+			"copy": []any{map[string]any{"from": "@app/deploy/**", "to": "@artifact/"}}}}}},
 	// The five kinds of the Gateway API's infrastructure objects emit identity
 	// and the authored fields too, with no `app` label and no pods: a
 	// GatewayClass cluster-scoped, the other four namespaced. None checks a
