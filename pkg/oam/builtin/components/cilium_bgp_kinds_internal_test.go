@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,10 +130,11 @@ var ciliumBGPKinds = []struct {
 		component: "cilium-bgppeerconfig", handler: &CiliumBGPPeerConfigHandler{},
 		crd: "ciliumbgppeerconfigs.yaml", typ: reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](),
 		required: ciliumBGPPeerConfigKind.required,
-		// Checked where both of its fields are authored. With one authored the
-		// API server compares it with the default the installed CRD fills for
-		// the other; TestCiliumBGPKinds_ExpressionRules holds that both have
-		// one.
+		// Shown here with both of its fields authored. With one authored the
+		// API server compares it with the default it fills for the other, and
+		// so does the kind: TestCiliumBGPKinds_ExpressionRules shows those
+		// cases, each with its own refusal, and holds the kind's two defaults
+		// to the CRD's.
 		checked: map[string]ciliumBGPRule{
 			"spec.timers: self.keepAliveTimeSeconds <= self.holdTimeSeconds": {
 				[]map[string]any{{"timers": map[string]any{"keepAliveTimeSeconds": 31, "holdTimeSeconds": 30}}},
@@ -375,37 +377,60 @@ func TestCiliumBGPKinds_ExpressionRules(t *testing.T) {
 	}
 
 	// The timers rule compares two fields the CRD defaults, so the API server
-	// evaluates it on a timers block that authors one of them. That case is
-	// the one cilium-bgppeerconfig leaves to it: the API server refuses each of
-	// these by the rule, against the default it fills, and the kind builds
-	// them.
+	// evaluates it on a timers block that authors one of them, or neither,
+	// against the default it fills. cilium-bgppeerconfig compares with the
+	// same two defaults, which it states: they are held to the linked CRD's
+	// here, and the kind's answer to the API server's on each side of both.
 	const peerCRD = "ciliumbgppeerconfigs.yaml"
 	spec := ciliumBGPSpec(t, peerCRD)
-	timers := spec.Properties["timers"]
-	for _, name := range []string{"keepAliveTimeSeconds", "holdTimeSeconds"} {
-		if timers.Properties[name].Default == nil {
-			t.Errorf("timers.%s has no CRD default: with one of the two authored the rule no longer compares it with a default, and the kind can check it", name)
+	for name, stated := range map[string]int32{
+		"keepAliveTimeSeconds": ciliumBGPDefaultKeepAliveTimeSeconds,
+		"holdTimeSeconds":      ciliumBGPDefaultHoldTimeSeconds,
+	} {
+		filled := spec.Properties["timers"].Properties[name].Default
+		if filled == nil {
+			t.Errorf("timers.%s has no CRD default, and the kind compares the other timer with %d", name, stated)
+			continue
+		}
+		if got, want := strings.TrimSpace(string(filled.Raw)), strconv.Itoa(int(stated)); got != want {
+			t.Errorf("timers.%s: the CRD fills %s, and the kind compares the other timer with %s", name, got, want)
 		}
 	}
 	peer := ciliumCheckedRules(t, "cilium-bgppeerconfig", &CiliumBGPPeerConfigHandler{}, peerCRD)
-	only, says := peer.create.only(t, crdRule{path: "spec.timers", rule: "self.keepAliveTimeSeconds <= self.holdTimeSeconds"})
-	for name, authored := range map[string]map[string]any{
-		"a keepalive above the default hold time":   {"keepAliveTimeSeconds": 91},
-		"a hold time under the default keepalive":   {"holdTimeSeconds": 29},
-		"a keepalive that is the default hold time": {"keepAliveTimeSeconds": 90},
-		"a hold time that is the default keepalive": {"holdTimeSeconds": 30},
-	} {
-		props := map[string]any{"timers": authored}
-		answer := only.create(t, peer.document(props))
-		if strings.Contains(name, " that is ") {
-			answer.accepted(t, name)
-		} else {
-			answer.refusedByRule(t, name, says)
+	rule := crdRule{path: "spec.timers", rule: "self.keepAliveTimeSeconds <= self.holdTimeSeconds"}
+	timers := func(authored ...map[string]any) []map[string]any {
+		var out []map[string]any
+		for _, block := range authored {
+			out = append(out, map[string]any{"timers": block})
 		}
-		if _, err := peer.build(t, props); err != nil {
-			t.Errorf("%s: the kind refuses it (%v); a timers block with one field authored is left to the API server", name, err)
-		}
+		return out
 	}
+	t.Run("a keepalive against the default hold time", func(t *testing.T) {
+		peer.show(t, rule, "timers.keepAliveTimeSeconds: 91 is larger than the hold time the API fills where timers.holdTimeSeconds is not set (90)",
+			timers(
+				map[string]any{"keepAliveTimeSeconds": 91},
+				map[string]any{"keepAliveTimeSeconds": 91, "holdTimeSeconds": nil},
+			),
+			timers(
+				map[string]any{"keepAliveTimeSeconds": 90},
+				map[string]any{"keepAliveTimeSeconds": 90, "holdTimeSeconds": nil},
+				map[string]any{},
+				map[string]any{"connectRetryTimeSeconds": 5},
+			),
+		)
+	})
+	t.Run("a hold time against the default keepalive", func(t *testing.T) {
+		peer.show(t, rule, "timers.holdTimeSeconds: 29 is smaller than the keepalive time the API fills where timers.keepAliveTimeSeconds is not set (30)",
+			timers(
+				map[string]any{"holdTimeSeconds": 29},
+				map[string]any{"holdTimeSeconds": 29, "keepAliveTimeSeconds": nil},
+			),
+			timers(
+				map[string]any{"holdTimeSeconds": 30},
+				map[string]any{"holdTimeSeconds": 30, "keepAliveTimeSeconds": nil},
+			),
+		)
+	})
 }
 
 // ciliumCheckedRules prepares the CRD in file as the API server serves it, for

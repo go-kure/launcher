@@ -1042,9 +1042,10 @@ its text:
     with type `Service` and only with it, `interface` with type `Interface` and only
     with it, no `selector` with type `PodCIDR`) are checked: each compares authored
     fields. The one on a peer configuration's `timers` (`keepAliveTimeSeconds` not
-    larger than `holdTimeSeconds`) is checked where both were authored; with one
-    authored, the other is a default the installed CRD fills, and the comparison is
-    left to the API server. A test fails on a rule of the linked CRDs that is neither
+    larger than `holdTimeSeconds`) is checked too; with one authored, the other is
+    the default the API server fills before it evaluates the rule, and the kind
+    compares with that default (30 and 90, the linked CRD's, held to it by a test)
+    and names it in the refusal. A test fails on a rule of the linked CRDs that is neither
     listed as checked nor as left, and holds each checked rule to the API server's own
     expression validator, run over the linked CRD after its defaults: the validator
     refuses what breaks the rule and accepts what is next to it, and the kind agrees on

@@ -39,7 +39,7 @@ func (h *CiliumBGPPeerConfigHandler) PropertySchema() map[string]oam.PropertySch
 		},
 		"timers": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
-			Description: "CiliumBGPPeerConfig spec.timers: connectRetryTimeSeconds, holdTimeSeconds and keepAliveTimeSeconds; unset, the API fills 120, 90 and 30. keepAliveTimeSeconds may not be larger than holdTimeSeconds.",
+			Description: "CiliumBGPPeerConfig spec.timers: connectRetryTimeSeconds, holdTimeSeconds and keepAliveTimeSeconds; unset, the API fills 120, 90 and 30. keepAliveTimeSeconds may not be larger than holdTimeSeconds, each as authored or as filled.",
 		},
 		"authSecretRef": {
 			Type:        oam.PropertyTypeString,
@@ -65,9 +65,9 @@ func (h *CiliumBGPPeerConfigHandler) PropertySchema() map[string]oam.PropertySch
 }
 
 // ciliumBGPPeerConfigKind is the cilium-bgppeerconfig kind: see
-// policyFreeKind. validate holds the CRD's one expression rule where both of
-// its fields were authored. The API's other value rules are left to the API
-// server.
+// policyFreeKind. validate holds the CRD's one expression rule, on the two
+// fields as authored or as the CRD defaults them. The API's other value rules
+// are left to the API server.
 var ciliumBGPPeerConfigKind = &policyFreeKind[ciliumv2.CiliumBGPPeerConfigSpec]{
 	upstream: "cilium.io/v2 CiliumBGPPeerConfigSpec",
 	required: requiredFields(map[string]string{
@@ -83,18 +83,41 @@ var ciliumBGPPeerConfigKind = &policyFreeKind[ciliumv2.CiliumBGPPeerConfigSpec]{
 	},
 }
 
+// The defaults the linked CRD fills for the two timers its expression rule
+// compares, in a `timers` block that leaves one out.
+// TestCiliumBGPKinds_ExpressionRules holds both to the CRD, so a change of
+// either in the linked module fails there.
+const (
+	ciliumBGPDefaultKeepAliveTimeSeconds int32 = 30
+	ciliumBGPDefaultHoldTimeSeconds      int32 = 90
+)
+
 // validateCiliumBGPPeerConfig refuses a keepalive time larger than the hold
-// time, the CRD's expression rule on `timers`, where both were authored. With
-// one of the two authored the API server compares it with the default it
-// fills for the other, which is the installed CRD's to say; that comparison is
-// left to it.
+// time, the CRD's expression rule on `timers`. The API server evaluates the
+// rule after it has filled the defaults, so with one of the two authored it
+// compares that one with the default of the other, and so does this: the
+// refusal then names the authored field and the default it was compared
+// with. A `timers` block that authors neither holds the two defaults, which
+// keep the rule.
 func validateCiliumBGPPeerConfig(spec *ciliumv2.CiliumBGPPeerConfigSpec) error {
 	timers := spec.Timers
-	if timers == nil || timers.KeepAliveTimeSeconds == nil || timers.HoldTimeSeconds == nil {
+	if timers == nil {
 		return nil
 	}
-	if keepAlive, hold := *timers.KeepAliveTimeSeconds, *timers.HoldTimeSeconds; keepAlive > hold {
-		return errors.Errorf("timers.keepAliveTimeSeconds: %d is larger than timers.holdTimeSeconds (%d)", keepAlive, hold)
+	keepAlive, hold := timers.KeepAliveTimeSeconds, timers.HoldTimeSeconds
+	switch {
+	case keepAlive != nil && hold != nil:
+		if *keepAlive > *hold {
+			return errors.Errorf("timers.keepAliveTimeSeconds: %d is larger than timers.holdTimeSeconds (%d)", *keepAlive, *hold)
+		}
+	case keepAlive != nil:
+		if *keepAlive > ciliumBGPDefaultHoldTimeSeconds {
+			return errors.Errorf("timers.keepAliveTimeSeconds: %d is larger than the hold time the API fills where timers.holdTimeSeconds is not set (%d)", *keepAlive, ciliumBGPDefaultHoldTimeSeconds)
+		}
+	case hold != nil:
+		if *hold < ciliumBGPDefaultKeepAliveTimeSeconds {
+			return errors.Errorf("timers.holdTimeSeconds: %d is smaller than the keepalive time the API fills where timers.keepAliveTimeSeconds is not set (%d)", *hold, ciliumBGPDefaultKeepAliveTimeSeconds)
+		}
 	}
 	return nil
 }
