@@ -876,6 +876,11 @@ its text:
     does not
     (`TestPostgresqlRule_BlockNotBuilt`). Breaking for a document that authored such a
     block without its field: it built, without those values.
+  - A `postgresql` component writes an authored `pooler.instances` as authored, a 0 or
+    a negative count included, where it left a count of 0 or less out and the Pooler
+    CRD's default of 1 applied. The CRD sets no minimum, so nothing is refused
+    (`TestPostgresqlRule_PoolerInstances`). Behavior-changing for a document with such a
+    count: with `instances: 0` it got one pod before and gets none now.
   - A Pod carries the `app` label; a controller's pod template gains it beside the
     authored labels, and an authored `app` with another value is refused. These three
     are targets of `security-context`, a `configmap` mount and an `external-secret`

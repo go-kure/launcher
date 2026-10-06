@@ -6278,6 +6278,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   path, a `bootstrap.pg_basebackup: {}` and a `replication.synchronous`
   with a `number` only. Such a document built,
   without what the author wrote.
+  **An authored `pooler.instances` is written as authored**
+  (go-kure/launcher#790), a 0 or a negative count included. The Pooler CRD
+  gives `instances` a default of 1 and no minimum, and a count of 0 or less
+  used to be left out of the Pooler, so the operator ran the one pod the
+  author had switched off. The upstream type carries a 0, so it is written;
+  the CRD does not bound the count, so a negative one is written too and
+  refusing it is left to the cluster. A count that is not authored is still
+  3 (`TestPostgresqlRule_PoolerInstances`). Behavior-changing for a document
+  with `pooler.instances: 0` or less: its Pooler now holds that count. A
+  document with `instances: 0` got one pod before and gets none now (the
+  `postgresql-bootstrap-external` fixture shows it).
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
   hook" in `pkg/oam/README.md`): the author's property, else the consumer's
@@ -7479,6 +7490,7 @@ the pooler `type` (`rw` unless `ro` was authored) and its always-present
 `pgbouncer` block, and `ensure: present` on every extension not authored `absent`.
 The layer's guards are kept too: `inheritedMetadata`, `managed`, `bootstrap`,
 `postgresql.synchronous` and the credential references are omitted when their input
-is empty, a pooler `instances` of zero or less is omitted, and a role's or
-database's `ensure` / `databaseReclaimPolicy` is written only for `absent` /
-`delete`.
+is empty, a pooler `instances` of zero or less is omitted when nobody authored
+it (an authored count is written as authored since go-kure/launcher#790, see
+the postgresql entry), and a role's or database's `ensure` /
+`databaseReclaimPolicy` is written only for `absent` / `delete`.

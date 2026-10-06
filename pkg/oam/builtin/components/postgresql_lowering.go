@@ -695,8 +695,12 @@ func (c *PostgresqlConfig) poolerSpec(cluster string) cnpgv1.PoolerSpec {
 		Type:      poolerType,
 		PgBouncer: pgBouncer,
 	}
-	// A non-positive count is omitted so the operator default applies.
-	if c.PoolerInstances > 0 {
+	// An authored count is written as authored, 0 included: the Pooler CRD
+	// gives instances a default of 1 and no minimum, so leaving a 0 out would
+	// run the one pod the author switched off. A count nobody authored (a
+	// config built without Parse) is omitted when not positive, so the
+	// operator default applies.
+	if c.PoolerInstances > 0 || c.explicitPoolerInstances {
 		instances := c.PoolerInstances
 		spec.Instances = &instances
 	}
