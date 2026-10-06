@@ -208,9 +208,17 @@ func fluxKinds(t *testing.T) []policyFreeKind {
 			kinds = append(kinds, kind)
 		}
 	}
-	// Vacuity guard: the fluxcd-alert kind is one.
-	if !slices.ContainsFunc(kinds, func(k policyFreeKind) bool { return k.component == "fluxcd-alert" }) {
-		t.Fatalf("policyFreeKinds marks no fluxcd-alert as a Flux kind; it marks %d kinds", len(kinds))
+	// Vacuity guard: the Flux kinds are these, each once. A row dropped from
+	// policyFreeKinds would otherwise take the kind's tests with it, here and
+	// in the tests every policy-free kind shares.
+	want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imageupdateautomation"}
+	got := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		got = append(got, kind.component)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("policyFreeKinds marks %v as Flux kinds, want %v", got, want)
 	}
 	return kinds
 }
