@@ -432,17 +432,25 @@ func markdownTableKeys(t *testing.T, file, heading string) []string {
 // types in the first cell of the body rows of the tables under a heading of a
 // Markdown text, up to the next heading.
 //
-// It reads one way of writing a table and names a defect for every other, so
-// that no row is passed over: every row starts with "|" after at most three
-// blanks, and the rows end at a blank line, a code block or a heading. A table
-// written another way is known by its row of dashes, which every table has. A
-// defect is also a body row whose first cell is not one type in backquotes,
-// and a heading with no row, which is what a heading or a table inside a code
-// block comes to.
+// It reads one form of table and accounts for every line of the section that
+// holds a "|" outside a code block. Such a line is the header row of a table,
+// the row of dashes under it, or a body row whose first cell is one type in
+// backquotes, and each starts with "|" after at most three blanks; any other
+// line with a "|" is a defect, whatever its form. The rows of a table end at
+// a blank line, a code block or a heading, and a line with no "|" under them
+// is a defect too. A heading is, after at most three blanks, one to six "#"
+// and then a blank or the end of the line. A heading with no row is a defect,
+// which is what a heading or a table inside a code block comes to.
 func markdownTableTypes(text, heading string) (keys []string, defect string) {
-	inSection, inBody, header := false, false, false
+	lines := strings.Split(text, "\n")
+	bad := func(n int, why string) ([]string, string) {
+		return nil, fmt.Sprintf("line %d: %s: %s", n, why, strings.TrimSpace(lines[n-1]))
+	}
+	const noTable = "a line with a | that is no row of a table: no row of dashes follows it"
+	inSection, inBody := false, false
+	header := 0 // the line of a header row that waits for its row of dashes
 	fence := "" // the run that opened the code block a line stands in
-	for n, line := range strings.Split(text, "\n") {
+	for n, line := range lines {
 		run, rest := markdownFence(line)
 		if fence != "" {
 			// A block ends at a run of its own character, at least as long, alone on its line.
@@ -451,13 +459,18 @@ func markdownTableTypes(text, heading string) (keys []string, defect string) {
 			}
 			continue
 		}
-		if run != "" {
-			fence, inBody, header = run, false, false
-			continue
-		}
 		row := strings.TrimSpace(line)
 		shallow := len(line)-len(strings.TrimLeft(line, " ")) <= 3 && !strings.HasPrefix(line, "\t")
-		if shallow && strings.HasPrefix(row, "#") {
+		bar := run == "" && strings.Contains(row, "|")
+		rule := bar && markdownRule.MatchString(row)
+		if header != 0 && !rule {
+			return bad(header, noTable)
+		}
+		if run != "" {
+			fence, inBody = run, false
+			continue
+		}
+		if shallow && markdownHeading.MatchString(row) {
 			if inSection {
 				break
 			}
@@ -467,34 +480,44 @@ func markdownTableTypes(text, heading string) (keys []string, defect string) {
 		if !inSection {
 			continue
 		}
-		readable := shallow && strings.HasPrefix(row, "|")
 		switch {
-		case inBody && row == "":
-			inBody, header = false, false
-		case inBody && !readable:
-			return nil, fmt.Sprintf("line %d: a line under the rows of a table does not start with |, or is indented: %s", n+1, row)
+		case row == "":
+			inBody = false
+		case !bar:
+			if inBody {
+				return bad(n+1, "a line under the rows of a table has no |")
+			}
+		case !shallow || !strings.HasPrefix(row, "|"):
+			return bad(n+1, "a line with a | does not start with it, or is indented")
 		case inBody:
-			first := strings.TrimSpace(strings.Split(strings.Trim(row, "|"), "|")[0])
+			// One bar opens the row: a second one is an empty first cell.
+			first := strings.TrimSpace(strings.Split(strings.TrimPrefix(row, "|"), "|")[0])
 			m := markdownType.FindStringSubmatch(first)
 			if m == nil {
-				return nil, fmt.Sprintf("line %d: the first cell of a row is not one component type in backquotes: %s", n+1, row)
+				return bad(n+1, "the first cell of a row is not one component type in backquotes")
 			}
 			keys = append(keys, m[1])
-		case strings.Contains(row, "|") && markdownRule.MatchString(row):
-			// The row of dashes under the header opens the body.
-			if !readable || !header {
-				return nil, fmt.Sprintf("line %d: a table this test cannot read: its rows do not start with |, or are indented: %s", n+1, row)
+		case rule:
+			if header == 0 {
+				return bad(n+1, "a row of dashes with no header row over it")
 			}
-			inBody = true
+			header, inBody = 0, true
 		default:
-			header = readable
+			header = n + 1
 		}
+	}
+	if header != 0 {
+		return bad(header, noTable)
 	}
 	if len(keys) == 0 {
 		return nil, "no row with a component type"
 	}
 	return keys, ""
 }
+
+// markdownHeading is a heading line without its indent: one to six "#", then
+// a blank or the end of the line.
+var markdownHeading = regexp.MustCompile(`^#{1,6}([ \t]|$)`)
 
 // markdownRule is the row of dashes between the header and the body of a
 // table, with or without the bars at its ends. A line of dashes with no bar
@@ -516,8 +539,9 @@ func markdownFence(line string) (run, rest string) {
 }
 
 // TestKindLists_MarkdownReader holds the reader of the Markdown tables to what
-// it must not pass over: a row it cannot read, a table written another way
-// than it reads, a table in a code block, a heading that is not there.
+// it must not pass over: a row it cannot read, a line with a bar that is no
+// row of a table it reads, a table in a code block, a heading that is not
+// there.
 func TestKindLists_MarkdownReader(t *testing.T) {
 	const table = "| `type` | text |\n|---|---|\n"
 	tests := []struct {
@@ -536,10 +560,17 @@ func TestKindLists_MarkdownReader(t *testing.T) {
 		{"heading that is not there", "## Other\n" + table + "| `a` | x |\n", nil, "no row"},
 		{"row without its first bar", "## H\n" + table + "| `b` | x |\n`a` | y |\n| `c` | z |\n", nil, "line 5"},
 		{"indented heading ends the section", "## H\n\n  ## Next\n" + table + "| `a` | x |\n", nil, "no row"},
-		{"indented table", "## H\n\n    | `type` | text |\n    |---|---|\n    | `a` | x |\n", nil, "line 4"},
-		{"table without the bars at the ends", "## H\n\n`type` | text\n---|---\n`a` | x\n", nil, "line 4"},
+		{"indented table", "## H\n\n    | `type` | text |\n    |---|---|\n    | `a` | x |\n", nil, "line 3"},
+		{"table without the bars at the ends", "## H\n\n`type` | text\n---|---\n`a` | x\n", nil, "line 3"},
 		{"rule row with no header", "## H\n\n|---|---|\n| `a` | x |\n", nil, "line 3"},
 		{"line of dashes is no table", "## H\n\n---\n\n" + table + "| `a` | x |\n", []string{"a"}, ""},
+		{"line with a hash and a bar under the rows", "## H\n" + table + "| `b` | x |\n#note | y |\n| `a` | z |\n", nil, "line 5"},
+		{"row with an empty first cell", "## H\n" + table + "|| `a` | x |\n", nil, "line 4"},
+		{"row with a bar and no table", "## H\n\n| `a` | x |\n\n" + table + "| `b` | x |\n", nil, "line 3"},
+		{"text with a bar", "## H\n\none | two\n\n" + table + "| `a` | x |\n", nil, "line 3"},
+		{"header row at the end", "## H\n" + table + "| `a` | x |\n\n| `type` | text |", nil, "line 6"},
+		{"hashes alone end the section", "## H\n" + table + "| `b` | x |\n\n##\n\n" + table + "| `a` | x |\n", []string{"b"}, ""},
+		{"seven hashes are no heading", "## H\n" + table + "| `b` | x |\n\n####### Next\n\n" + table + "| `a` | x |\n", []string{"b", "a"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
