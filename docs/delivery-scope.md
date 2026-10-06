@@ -1067,7 +1067,10 @@ its text:
     larger than `holdTimeSeconds`) is checked where both were authored; with one
     authored, the other is a default the installed CRD fills, and the comparison is
     left to the API server. A test fails on a rule of the linked CRDs that is neither
-    listed as checked nor as left.
+    listed as checked nor as left, and holds each checked rule to the API server's own
+    expression validator, run over the linked CRD after its defaults: the validator
+    refuses what breaks the rule and accepts what is next to it, and the kind agrees on
+    both.
   - **No host these objects name is held to the allowed registries** (a peer's
     address, a session's local address, a router ID): none is an artifact source. **No
     field is checked for a literal secret:** `authSecretRef` is the name of a Secret,
@@ -1113,7 +1116,8 @@ its text:
     lists. The choices deeper in a rule (how a CIDR entry names its addresses, a DNS
     entry's name or pattern, a port's layer 7 protocol) and every value rule are left to
     the API server. A test lists every choice and expression rule of the linked CRD as
-    checked or left.
+    checked or left, and another holds the refusal of an object with no rule to the API
+    server's own expression validator.
   - The required list of a rule is read from the CRD and held to it by a test: 59
     fields the Cilium type writes whether or not they were authored. Two optional
     fields are required as well, a listener's `priority` and the `kind` of its Envoy

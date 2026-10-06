@@ -1,12 +1,14 @@
 package components
 
 import (
+	"encoding/json"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
@@ -313,6 +315,48 @@ func TestCiliumClusterwideNetworkPolicy_SchemaChoices(t *testing.T) {
 		if strings.TrimSpace(why) == "" {
 			t.Errorf("%s is left without a reason", choice)
 		}
+	}
+}
+
+// TestCiliumClusterwideNetworkPolicy_ObjectRule holds the kind's refusal of a
+// policy without a rule to the API server's own answer for the object's
+// expression rule (crdCreate), on a rule under `spec` and on one under `specs`.
+//
+// An authored empty `specs` is where the two differ, and the reason is in what
+// the kind would write: the API server accepts the document, since `specs` is
+// set, and the type leaves an empty list out, so the object would hold neither
+// and be the one the API server refuses.
+func TestCiliumClusterwideNetworkPolicy_ObjectRule(t *testing.T) {
+	crd, _ := ciliumBGPCRD(t, ciliumClusterwidePolicyCRD)
+	shown := ciliumCheckedRules(t, "cilium-clusterwidenetworkpolicy", &CiliumClusterwideNetworkPolicyHandler{}, ciliumClusterwidePolicyCRD)
+	// The component authors the object's `spec` and `specs`.
+	shown.document = func(props map[string]any) map[string]any { return crdDocument(crd, ciliumBGPVersion, props) }
+	rule := crdRule{rule: "has(self.spec) || has(self.specs)"}
+	const want = "at least one of 'spec' and 'specs' is required"
+	nodes := map[string]any{
+		"nodeSelector": map[string]any{"matchLabels": map[string]any{"node-role": "edge"}},
+		"ingress":      []any{map[string]any{"fromEntities": []any{"cluster"}}},
+	}
+	shown.show(t, rule, want,
+		[]map[string]any{{}, {"spec": nil, "specs": nil}},
+		[]map[string]any{{"spec": nodes}, {"specs": []any{nodes}}, {"spec": nodes, "specs": []any{}}},
+	)
+
+	empty := map[string]any{"specs": []any{}}
+	shown.create.create(t, shown.document(empty)).accepted(t, "an empty specs, as authored")
+	if _, err := shown.build(t, empty); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("an empty specs: the kind answers %v, want a refusal mentioning %q", err, want)
+	}
+	raw, err := json.Marshal(ciliumv2.CiliumClusterwideNetworkPolicy{Specs: ciliumapi.Rules{}})
+	if err != nil {
+		t.Fatalf("encode a policy with an empty specs: %v", err)
+	}
+	var written map[string]any
+	if err := json.Unmarshal(raw, &written); err != nil {
+		t.Fatalf("decode it: %v", err)
+	}
+	if _, held := written["specs"]; held {
+		t.Errorf("the type writes an empty specs (%s); the object would then hold it, and the API server accept it", raw)
 	}
 }
 
