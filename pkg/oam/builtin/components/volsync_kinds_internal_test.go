@@ -130,33 +130,78 @@ func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
 	}
 }
 
-// TestVolsyncKinds_NoDefaults: the CRDs of the linked module default no field
-// under spec. policyFreeKind.config carries no defaulted-zero list, so a
-// number or a boolean that the type omits when zero must have no default an
-// authored 0 or false would be replaced by; these CRDs have no default at all,
-// and the test holds them to that, which is more than the kinds need and
-// simpler to read. A dependency bump that adds a default fails here, naming
-// the field: it is then answered where its kind is (a defaulted-zero list for
-// a field omitted when zero, apiSetKinds for one the type writes).
+// schemaDefaults returns, sorted, every default a schema declares, on itself
+// or anywhere under it, as its json path, " = " and the default: a property
+// under its name, the schema of a list's elements under [], of a map's values
+// under {}. It also returns the number of schemas it visited.
+func schemaDefaults(s apiextensionsv1.JSONSchemaProps) ([]string, int) {
+	var found []string
+	visited := 0
+	walkCiliumBGPSchema(s, "", func(path string, s apiextensionsv1.JSONSchemaProps) {
+		visited++
+		if s.Default != nil {
+			found = append(found, path+" = "+strings.TrimSpace(string(s.Default.Raw)))
+		}
+	})
+	slices.Sort(found)
+	return found, visited
+}
+
+// TestVolsyncKinds_NoDefaults: the CRDs of the linked module default nothing
+// under spec, on a property, on the elements of a list or on the values of a
+// map. policyFreeKind.config carries no defaulted-zero list, so a number or a
+// boolean that the type omits when zero must have no default an authored 0 or
+// false would be replaced by; these CRDs have no default at all, and the test
+// holds them to that, which is more than the kinds need and simpler to read. A
+// dependency bump that adds a default fails here, naming the field: it is then
+// answered where its kind is (a defaulted-zero list for a field omitted when
+// zero, apiSetKinds for one the type writes).
 func TestVolsyncKinds_NoDefaults(t *testing.T) {
-	// Vacuity guard: a default is read where a CRD has one.
-	issuer, _ := crdSpecProperties(t, certManagerCRD(t, "cert-manager.io_issuers.yaml"), "v1")
-	const group = "acme.solvers[].http01.gatewayHTTPRoute.parentRefs[].group"
-	if issuer[group].Default == nil {
-		t.Fatalf("%s of cert-manager's Issuer CRD reads as having no default; the CRD's defaults are not being read", group)
+	// Vacuity guards: a default is read where a schema has one, on a property,
+	// on a list's elements and on a map's values; and where a linked CRD has
+	// one.
+	one := &apiextensionsv1.JSON{Raw: []byte("1")}
+	made, _ := schemaDefaults(apiextensionsv1.JSONSchemaProps{Properties: map[string]apiextensionsv1.JSONSchemaProps{
+		"count":  {Default: one},
+		"groups": {Items: &apiextensionsv1.JSONSchemaPropsOrArray{Schema: &apiextensionsv1.JSONSchemaProps{Default: one}}},
+		"labels": {AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{Schema: &apiextensionsv1.JSONSchemaProps{Default: one}}},
+	}})
+	if want := []string{"count = 1", "groups[] = 1", "labels{} = 1"}; !slices.Equal(made, want) {
+		t.Fatalf("the defaults read of a schema that declares three = %v, want %v", made, want)
+	}
+	if peer, _ := schemaDefaults(ciliumBGPSpec(t, "ciliumbgppeerconfigs.yaml")); !slices.Contains(peer, "timers.holdTimeSeconds = 90") {
+		t.Fatalf("the defaults read of Cilium's CiliumBGPPeerConfig CRD = %v, without its hold time; the CRDs' defaults are not being read", peer)
 	}
 	for _, kind := range volsyncKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			props, _ := crdSpecProperties(t, volsyncCRD(t, kind.crd), "v1alpha1")
-			// Vacuity guard: the walk reaches depth, under a mover's embedded
-			// Kubernetes type.
-			const deep = "restic.moverSecurityContext.windowsOptions.hostProcess"
-			if _, ok := props[deep]; !ok {
-				t.Fatalf("the CRD walk did not reach %s; it found %d properties", deep, len(props))
-			}
-			for _, path := range slices.Sorted(maps.Keys(props)) {
-				if def := props[path].Default; def != nil {
-					t.Errorf("%s has the default %s; the kinds are written for an API that defaults nothing under spec", path, strings.TrimSpace(string(def.Raw)))
+			crd := volsyncCRDObject(t, kind.crd)
+			for _, version := range crd.Spec.Versions {
+				if version.Schema == nil || version.Schema.OpenAPIV3Schema == nil {
+					t.Fatalf("version %s has no schema", version.Name)
+				}
+				spec, ok := version.Schema.OpenAPIV3Schema.Properties["spec"]
+				if !ok {
+					t.Fatalf("version %s has no spec property", version.Name)
+				}
+				// Vacuity guard: the walk reaches depth, under a mover's
+				// embedded Kubernetes type, and the elements of a list there.
+				reached := map[string]bool{
+					"restic.moverSecurityContext.windowsOptions.hostProcess": false,
+					"restic.moverSecurityContext.supplementalGroups[]":       false,
+				}
+				walkCiliumBGPSchema(spec, "", func(path string, _ apiextensionsv1.JSONSchemaProps) {
+					if _, asked := reached[path]; asked {
+						reached[path] = true
+					}
+				})
+				defaults, visited := schemaDefaults(spec)
+				for path, ok := range reached {
+					if !ok {
+						t.Fatalf("the walk of version %s did not reach %s; it visited %d schemas", version.Name, path, visited)
+					}
+				}
+				for _, found := range defaults {
+					t.Errorf("version %s has the default %s; the kinds are written for an API that defaults nothing under spec", version.Name, found)
 				}
 			}
 		})
