@@ -135,12 +135,15 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //   - what an operator hands on (operatorMetadataKinds), which is not metadata
 //     of an object launcher writes: a CloudNativePG Cluster's
 //     spec.inheritedMetadata, a Pooler's pod template, spec.podMetadata of the
-//     Prometheus operator's pod-running kinds.
+//     Prometheus operator's pod-running kinds, the moverPodLabels of a VolSync
+//     mover, the pod template of a cert-manager issuer's HTTP01 solvers, a
+//     Gateway's spec.infrastructure.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
 // read: not the metadata a Flux object hands on to what it applies
-// (spec.commonMetadata), not a volume claim template's or a job template's, and
-// not what a chart that Flux installs renders in the cluster.
+// (spec.commonMetadata), not a volume claim template's or a job template's, not
+// metadata an operator copies onto objects it creates that are no pods, and not
+// what a chart that Flux installs renders in the cluster.
 func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
@@ -152,20 +155,19 @@ func (o *ownedConfig) checkReserved(g generatedObject) error {
 		Object:    g.where,
 	}
 	for _, h := range metadataHolders(g.group, g.kind) {
-		holder, found, err := nestedObject(g.content, h.path...)
+		all, err := h.held(g.content)
 		if err != nil {
 			return errors.Errorf("reserved metadata keys: %s: %w", g.where, err)
-		}
-		if !found {
-			continue
 		}
 		// The platform's own annotations are exempt on the object's metadata only.
 		var exempt []map[string]string
 		if h.in == ReservedKeyInObjectMetadata {
 			exempt = platform
 		}
-		if err := o.checkReservedHolder(holder, refusal, h.in, exempt); err != nil {
-			return err
+		for _, held := range all {
+			if err := o.checkReservedHolder(held, refusal, h.in, exempt); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -203,15 +205,15 @@ func platformAnnotationsUnder(cfg stack.ApplicationConfig) []map[string]string {
 	return platform
 }
 
-// checkReservedHolder checks the labels and annotations holder holds, which is
+// checkReservedHolder checks the labels and annotations held holds, which is
 // an object's metadata, a pod template's, or metadata an operator hands on: in
 // says which. refusal says the owner and the object, and is returned with the
-// key and the entry that reserves it filled in (a *ReservedMetadataKeyError).
-// platform holds the annotation pairs that are exempt, on an object's own
-// metadata only: a pair any of its layers states.
-func (o *ownedConfig) checkReservedHolder(holder map[string]any, refusal ReservedMetadataKeyError, in ReservedKeyHolder, platform []map[string]string) error {
+// key, where it is and the entry that reserves it filled in (a
+// *ReservedMetadataKeyError). platform holds the annotation pairs that are
+// exempt, on an object's own metadata only: a pair any of its layers states.
+func (o *ownedConfig) checkReservedHolder(held heldMetadata, refusal ReservedMetadataKeyError, in ReservedKeyHolder, platform []map[string]string) error {
 	refusal.Holder = in
-	labels, _, err := objectField(holder, "labels")
+	labels, _, err := objectField(held.metadata, "labels")
 	if err != nil {
 		return errors.Errorf("reserved metadata keys: %s: %s%w", refusal.Object, in.prefix(), err)
 	}
@@ -220,11 +222,11 @@ func (o *ownedConfig) checkReservedHolder(holder map[string]any, refusal Reserve
 			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
-			refusal.Key, refusal.Entry = key, entry
+			refusal.Path, refusal.Key, refusal.Entry = held.labels, key, entry
 			return &refusal
 		}
 	}
-	annotations, _, err := objectField(holder, "annotations")
+	annotations, _, err := objectField(held.metadata, "annotations")
 	if err != nil {
 		return errors.Errorf("reserved metadata keys: %s: %s%w", refusal.Object, in.prefix(), err)
 	}
@@ -236,7 +238,7 @@ func (o *ownedConfig) checkReservedHolder(holder map[string]any, refusal Reserve
 			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
-			refusal.Annotation, refusal.Key, refusal.Entry = true, key, entry
+			refusal.Annotation, refusal.Path, refusal.Key, refusal.Entry = true, held.path+".annotations", key, entry
 			return &refusal
 		}
 	}
@@ -270,6 +272,12 @@ type ReservedMetadataKeyError struct {
 	Object string
 	// Holder says which metadata of the object holds the key.
 	Holder ReservedKeyHolder
+	// Path is where the labels or the annotations that hold the key are on the
+	// object ("metadata.labels", "spec.template.metadata.annotations"), with
+	// the element's index where they are in a list
+	// ("spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels"). The
+	// text prints it only there, where Holder alone does not say which.
+	Path string
 	// Annotation says the key is an annotation's. It is a label's otherwise.
 	Annotation bool
 	// Key is the key that may not be set.
@@ -300,6 +308,21 @@ const (
 	// PrometheusAgent, an Alertmanager or a ThanosRuler, which the operator
 	// puts on the pods it creates for the object.
 	ReservedKeyInPodMetadata ReservedKeyHolder = "spec.podMetadata"
+	// ReservedKeyInMoverPodLabels is moverPodLabels of a mover of a VolSync
+	// ReplicationSource or ReplicationDestination (spec.restic.moverPodLabels
+	// and its like), which the operator puts on the pods that move the data.
+	// It holds labels only.
+	ReservedKeyInMoverPodLabels ReservedKeyHolder = "mover pod"
+	// ReservedKeyInSolverPodTemplate is podTemplate.metadata of an HTTP01
+	// solver of a cert-manager Issuer or ClusterIssuer
+	// (spec.acme.solvers[].http01.ingress.podTemplate.metadata, and the same
+	// under gatewayHTTPRoute), which cert-manager puts on the pods that answer
+	// the challenge.
+	ReservedKeyInSolverPodTemplate ReservedKeyHolder = "solver pod template"
+	// ReservedKeyInInfrastructure is spec.infrastructure of a Gateway, whose
+	// labels and annotations the controller applies to what it creates for the
+	// Gateway, which may be pods.
+	ReservedKeyInInfrastructure ReservedKeyHolder = "spec.infrastructure"
 )
 
 // prefix is the holder as a text puts it before what it holds: "" for the
@@ -329,8 +352,12 @@ func (e *ReservedMetadataKeyError) Error() string {
 	if e.Entry != e.Key {
 		reason = fmt.Sprintf("the prefix %q is reserved for the platform", e.Entry)
 	}
-	return fmt.Sprintf("%s: %s: %s%s %q may not be set: %s: %s",
-		owner, e.Object, e.Holder.prefix(), what, e.Key, reason, ErrReservedMetadataKey)
+	at := ""
+	if strings.Contains(e.Path, "[") {
+		at = " (" + e.Path + ")"
+	}
+	return fmt.Sprintf("%s: %s: %s%s %q%s may not be set: %s: %s",
+		owner, e.Object, e.Holder.prefix(), what, e.Key, at, reason, ErrReservedMetadataKey)
 }
 
 // Unwrap makes the error answer to ErrReservedMetadataKey under errors.Is.
@@ -364,8 +391,9 @@ func nestedObject(m map[string]any, path ...string) (map[string]any, bool, error
 // for a typed object that states none and is of a kind the checks read more
 // than the metadata of (a pod template, a Cluster's inheritedMetadata), its Go
 // type's, as stampComponentLabel tells the pod template kinds. The Prometheus
-// operator's kinds are not among them: this package does not import their
-// types, so a typed one is recognized only when it states its kind.
+// operator's kinds, VolSync's, cert-manager's issuers and the Gateway are not
+// among them: this package does not import their types, so a typed one is
+// recognized only when it states its kind.
 func statedOrTypedKind(obj client.Object) (group, kind string) {
 	if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
 		return gvk.Group, gvk.Kind

@@ -758,21 +758,26 @@ its text:
   component type or trait carries it (`pkg/oam/README.md` "Reserved metadata keys";
   `reserved_metadata.go`). The refusal is a `*ReservedMetadataKeyError`, found with
   `errors.As` and answering to `ErrReservedMetadataKey`: it says the owning component, the
-  object, the key and the entry that reserves it, and its text names no Go field.
+  object, where on it the key is, the key and the entry that reserves it, and its text names
+  no Go field.
   - It is one check in one place, the ownership wrapper of go-kure/launcher#788 (§3.4),
     so it reads what each config generated: `passthrough`, `manifests`, template delivery,
     the `annotations` of `ingress`, `httproute` and `expose`, and `inheritedMetadata` of a
     CloudNativePG Cluster. A test runs each of these carriers
     (`TestReservedMetadataKeys_EveryCarrier`).
   - Read: an object's own labels and annotations, the pod template's on the kinds that have
-    one, a Cluster's `spec.inheritedMetadata`, a Pooler's pod template and
-    `spec.podMetadata` of the Prometheus operator kinds (the last two since
-    go-kure/launcher#790, with the component label's check). Exempt: the `app` label and the component
+    one, a Cluster's `spec.inheritedMetadata`, a Pooler's pod template,
+    `spec.podMetadata` of the Prometheus operator kinds, the `moverPodLabels` of a VolSync
+    mover, the pod template of a cert-manager issuer's HTTP01 solvers and a Gateway's
+    `spec.infrastructure` (all but the first three since go-kure/launcher#790, with the
+    component label's check). Exempt: the `app` label and the component
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
-    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own), and what a
-    controller adds.
+    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own), metadata an
+    operator copies onto objects it creates that are no pods (a test derives these fields
+    from the kinds' API types and lists each: `TestLabelReach_EveryFieldIsHeldOrListed`),
+    and what a controller adds.
   - Not read either: what a config that a consumer wraps around an application's config
     after the transform adds. On a layout a config augments, the check reads the objects the
     config's `AugmentLayout` added and leaves what was on the layout before, so a consumer may

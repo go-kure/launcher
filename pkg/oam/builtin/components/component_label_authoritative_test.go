@@ -220,6 +220,44 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 			refused: refusedAt(`Pooler "web"`, "spec.template.metadata.labels"),
 		},
 		{
+			name: "replicationsource kind, a mover's pod labels", typ: "replicationsource", handler: &components.ReplicationSourceHandler{},
+			props: func(t *testing.T) map[string]any {
+				return ptObject(t, "sourcePVC: data\ntrigger:\n  schedule: \"0 3 * * *\"\nrestic:\n  repository: restic-repo\n  copyMethod: Snapshot\n  moverPodLabels:\n    "+foreign)
+			},
+			refused: refusedAt(`ReplicationSource "web"`, "spec.restic.moverPodLabels"),
+		},
+		{
+			name: "replicationdestination kind, a mover's pod labels", typ: "replicationdestination", handler: &components.ReplicationDestinationHandler{},
+			props: func(t *testing.T) map[string]any {
+				return ptObject(t, "trigger:\n  manual: restore-1\nrestic:\n  repository: restic-repo\n  copyMethod: Direct\n  destinationPVC: data\n  moverPodLabels:\n    "+foreign)
+			},
+			refused: refusedAt(`ReplicationDestination "web"`, "spec.restic.moverPodLabels"),
+		},
+		{
+			name: "issuer kind, the pod template of a later solver", typ: "issuer", handler: &components.IssuerHandler{},
+			props: func(t *testing.T) map[string]any {
+				return ptObject(t, "acme:\n  server: https://acme-v02.api.letsencrypt.org/directory\n  privateKeySecretRef:\n    name: account\n  solvers:\n"+
+					"  - http01:\n      ingress:\n        ingressClassName: nginx\n"+
+					"  - http01:\n      gatewayHTTPRoute:\n        parentRefs:\n        - name: public\n        podTemplate:\n          metadata:\n            labels:\n              "+foreign)
+			},
+			refused: refusedAt(`Issuer "web"`, "spec.acme.solvers[1].http01.gatewayHTTPRoute.podTemplate.metadata.labels"),
+		},
+		{
+			name: "clusterissuer kind, a solver's pod template", typ: "clusterissuer", handler: &components.ClusterIssuerHandler{},
+			props: func(t *testing.T) map[string]any {
+				return ptObject(t, "acme:\n  server: https://acme-v02.api.letsencrypt.org/directory\n  privateKeySecretRef:\n    name: account\n  solvers:\n"+
+					"  - http01:\n      ingress:\n        ingressClassName: nginx\n        podTemplate:\n          metadata:\n            labels:\n              "+foreign)
+			},
+			refused: refusedAt(`ClusterIssuer "web"`, "spec.acme.solvers[0].http01.ingress.podTemplate.metadata.labels"),
+		},
+		{
+			name: "gateway kind, infrastructure", typ: "gateway", handler: &components.GatewayHandler{},
+			props: func(*testing.T) map[string]any {
+				return withProperty(gatewayMinimal(), "infrastructure", map[string]any{"labels": map[string]any{key: "db"}})
+			},
+			refused: refusedAt(`Gateway "web"`, "spec.infrastructure.labels"),
+		},
+		{
 			name: "helmtemplate, a chart's Deployment", typ: "helmtemplate", handler: &components.HelmTemplateHandler{},
 			props: func(t *testing.T) map[string]any {
 				srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", map[string]string{

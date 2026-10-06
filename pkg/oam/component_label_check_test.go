@@ -22,6 +22,13 @@ import (
 // annotations there. Nil labels leave base as it is.
 func holding(t *testing.T, base *unstructured.Unstructured, labels map[string]string, path ...string) *unstructured.Unstructured {
 	t.Helper()
+	return holdingLabelMap(t, base, labels, append(slices.Clone(path), "labels")...)
+}
+
+// holdingLabelMap returns base with labels as the map at path. Nil labels leave
+// base as it is.
+func holdingLabelMap(t *testing.T, base *unstructured.Unstructured, labels map[string]string, path ...string) *unstructured.Unstructured {
+	t.Helper()
 	if labels == nil {
 		return base
 	}
@@ -29,7 +36,7 @@ func holding(t *testing.T, base *unstructured.Unstructured, labels map[string]st
 	for k, v := range labels {
 		raw[k] = v
 	}
-	if err := unstructured.SetNestedField(base.Object, raw, append(slices.Clone(path), "labels")...); err != nil {
+	if err := unstructured.SetNestedField(base.Object, raw, path...); err != nil {
 		t.Fatal(err)
 	}
 	return base
@@ -44,22 +51,36 @@ func unstructuredObject(apiVersion, kind string) *unstructured.Unstructured {
 	}}
 }
 
+// solverIssuer is a cert-manager issuer of kind named w, with the ACME solvers
+// given.
+func solverIssuer(kind string, solvers ...any) *unstructured.Unstructured {
+	u := unstructuredObject("cert-manager.io/v1", kind)
+	u.Object["spec"] = map[string]any{"acme": map[string]any{"solvers": solvers}}
+	return u
+}
+
+// solverPod is an HTTP01 solver whose pod template, under http01.<via>, has
+// the metadata given.
+func solverPod(via string, metadata map[string]any) map[string]any {
+	return map[string]any{"http01": map[string]any{via: map[string]any{"podTemplate": map[string]any{"metadata": metadata}}}}
+}
+
 // labelHeldAt returns the value obj holds for key in the labels at path, and
 // whether it holds one.
 func labelHeldAt(t *testing.T, obj client.Object, key string, path ...string) (string, bool) {
+	t.Helper()
+	return labelInMapAt(t, obj, key, append(slices.Clone(path), "labels")...)
+}
+
+// labelInMapAt returns the value obj holds for key in the label map at path,
+// and whether it holds one.
+func labelInMapAt(t *testing.T, obj client.Object, key string, path ...string) (string, bool) {
 	t.Helper()
 	content, err := objectContent(obj)
 	if err != nil {
 		t.Fatal(err)
 	}
-	holder, found, err := nestedObject(content, path...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !found {
-		return "", false
-	}
-	labels, _, err := objectField(holder, "labels")
+	labels, _, err := nestedObject(content, path...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,9 +93,11 @@ func labelHeldAt(t *testing.T, obj client.Object, key string, path ...string) (s
 type labelHolderRow struct {
 	name string
 	// where is the object as a refusal names it, and path where it holds the
-	// labels.
-	where string
-	path  []string
+	// labels: the object with the `labels`, or, of a label map (labelMap), the
+	// map itself.
+	where    string
+	path     []string
+	labelMap bool
 	// filled says the wrapper writes the label there when the key is absent. It
 	// reads the other places and writes nothing into them.
 	filled bool
@@ -82,6 +105,14 @@ type labelHolderRow struct {
 	// the object that holds them: the object itself, or a member of the list it
 	// is.
 	build func(t *testing.T, labels map[string]string) (obj, holder client.Object)
+}
+
+// labels is the path of the row's labels.
+func (r labelHolderRow) labels() []string {
+	if r.labelMap {
+		return r.path
+	}
+	return append(slices.Clone(r.path), "labels")
 }
 
 func labelHolderRows() []labelHolderRow {
@@ -121,6 +152,7 @@ func labelHolderRows() []labelHolderRow {
 	bareTemplate := []string{"template", "metadata"}
 	inherited := []string{"spec", "inheritedMetadata"}
 	podMetadata := []string{"spec", "podMetadata"}
+	infrastructure := []string{"spec", "infrastructure"}
 	named := metav1.ObjectMeta{Name: "w"}
 
 	rows := []labelHolderRow{
@@ -206,6 +238,23 @@ func labelHolderRows() []labelHolderRow {
 		{name: "PrometheusAgent", where: `PrometheusAgent "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1alpha1", "PrometheusAgent"), podMetadata...)},
 		{name: "Alertmanager", where: `Alertmanager "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "Alertmanager"), podMetadata...)},
 		{name: "ThanosRuler", where: `ThanosRuler "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "ThanosRuler"), podMetadata...)},
+		{name: "Gateway", where: `Gateway "w"`, path: infrastructure, build: unstructuredAt(object("gateway.networking.k8s.io/v1", "Gateway"), infrastructure...)},
+	}
+	// The labels of a VolSync mover's pods: a label map, of every mover of the
+	// two kinds.
+	for kind, movers := range map[string][]string{
+		"ReplicationSource":      {"rsync", "rsyncTLS", "rclone", "restic", "syncthing"},
+		"ReplicationDestination": {"rsync", "rsyncTLS", "rclone", "restic"},
+	} {
+		for _, mover := range movers {
+			path := []string{"spec", mover, "moverPodLabels"}
+			rows = append(rows, labelHolderRow{
+				name: kind + " " + mover, where: kind + ` "w"`, path: path, labelMap: true,
+				build: own(func(t *testing.T, labels map[string]string) client.Object {
+					return holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", kind), labels, path...)
+				}),
+			})
+		}
 	}
 	return rows
 }
@@ -222,7 +271,11 @@ func TestOwnedConfig_ComponentLabelIsAuthoritative(t *testing.T) {
 		return stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
 	}
 	for _, row := range labelHolderRows() {
-		labelsPath := strings.Join(row.path, ".") + ".labels"
+		labelsPath := strings.Join(row.labels(), ".")
+		held := func(t *testing.T, holder client.Object, key string) (string, bool) {
+			t.Helper()
+			return labelInMapAt(t, holder, key, row.labels()...)
+		}
 
 		t.Run(row.name+"/another component's value is refused", func(t *testing.T) {
 			obj, holder := row.build(t, map[string]string{"tier": "front", ownershipKey: "db"})
@@ -239,7 +292,7 @@ func TestOwnedConfig_ComponentLabelIsAuthoritative(t *testing.T) {
 				}
 			}
 			// Refused before the stamp: the object is as its config made it.
-			if got, _ := labelHeldAt(t, holder, ownershipKey, row.path...); got != "db" {
+			if got, _ := held(t, holder, ownershipKey); got != "db" {
 				t.Errorf("%s[%s] = %q after the refusal, want it as written", labelsPath, ownershipKey, got)
 			}
 			if len(row.path) > 1 {
@@ -256,10 +309,10 @@ func TestOwnedConfig_ComponentLabelIsAuthoritative(t *testing.T) {
 					t.Fatalf("Generate: %v", err)
 				}
 			}
-			if got, _ := labelHeldAt(t, holder, ownershipKey, row.path...); got != "web" {
+			if got, _ := held(t, holder, ownershipKey); got != "web" {
 				t.Errorf("%s[%s] = %q, want web", labelsPath, ownershipKey, got)
 			}
-			if got, _ := labelHeldAt(t, holder, "tier", row.path...); got != "front" {
+			if got, _ := held(t, holder, "tier"); got != "front" {
 				t.Errorf("%s[tier] = %q, want it as written", labelsPath, got)
 			}
 		})
@@ -274,12 +327,90 @@ func TestOwnedConfig_ComponentLabelIsAuthoritative(t *testing.T) {
 			if got, _ := labelHeldAt(t, holder, ownershipKey, "metadata"); got != "web" {
 				t.Errorf("object label = %q, want web", got)
 			}
-			got, held := labelHeldAt(t, holder, ownershipKey, row.path...)
+			got, written := held(t, holder, ownershipKey)
 			if row.filled && got != "web" {
 				t.Errorf("%s[%s] = %q, want the wrapper's web", labelsPath, ownershipKey, got)
 			}
-			if !row.filled && held {
+			if !row.filled && written {
 				t.Errorf("%s[%s] = %q, want nothing written there", labelsPath, ownershipKey, got)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_ComponentLabelInASolverPodTemplate: the pod template of an
+// HTTP01 solver of a cert-manager issuer is held as any other, in every solver
+// of the list and under both ways a solver answers (ingress, gatewayHTTPRoute).
+// The refusal names the solver by its index. A solver with no pod template, and
+// a null one, hold nothing; nothing is written into any.
+func TestOwnedConfig_ComponentLabelInASolverPodTemplate(t *testing.T) {
+	generate := func(obj client.Object) error {
+		inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+		_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+		return err
+	}
+	for _, kind := range []string{"Issuer", "ClusterIssuer"} {
+		for _, via := range []string{"ingress", "gatewayHTTPRoute"} {
+			t.Run(kind+"/"+via, func(t *testing.T) {
+				own := solverPod(via, map[string]any{"labels": map[string]any{"tier": "front", ownershipKey: "web"}})
+				bare := solverPod(via, map[string]any{"annotations": map[string]any{ownershipKey: "db"}})
+				others := []any{map[string]any{"dns01": map[string]any{}}, nil, own, bare}
+
+				issuer := solverIssuer(kind, others...)
+				if err := generate(issuer); err != nil {
+					t.Fatalf("Generate, with the component's own value: %v", err)
+				}
+				if got := issuer.GetLabels()[ownershipKey]; got != "web" {
+					t.Errorf("object label = %q, want web", got)
+				}
+				want := solverIssuer(kind, map[string]any{"dns01": map[string]any{}}, nil,
+					solverPod(via, map[string]any{"labels": map[string]any{"tier": "front", ownershipKey: "web"}}),
+					solverPod(via, map[string]any{"annotations": map[string]any{ownershipKey: "db"}}))
+				if !reflect.DeepEqual(issuer.Object["spec"], want.Object["spec"]) {
+					t.Errorf("spec = %v\nwant it as written: %v", issuer.Object["spec"], want.Object["spec"])
+				}
+
+				foreign := solverPod(via, map[string]any{"labels": map[string]any{ownershipKey: "db"}})
+				err := generate(solverIssuer(kind, append(slices.Clone(others), foreign)...))
+				var got *ComponentLabelError
+				if !errors.As(err, &got) {
+					t.Fatalf("Generate = %v, want a *ComponentLabelError", err)
+				}
+				path := "spec.acme.solvers[4].http01." + via + ".podTemplate.metadata.labels"
+				wantRefusal := ComponentLabelError{
+					Refused: ComponentLabelForeignValue, Component: "web",
+					Kind: schema.GroupKind{Group: "cert-manager.io", Kind: kind}, Name: "w", Object: kind + ` "w"`,
+					Path: path, Key: ownershipKey, Value: "db", Want: "web",
+				}
+				if !reflect.DeepEqual(*got, wantRefusal) {
+					t.Errorf("refusal = %+v\nwant      %+v", *got, wantRefusal)
+				}
+				if text := kind + ` "w": ` + path + `["` + ownershipKey + `"]: "db" is not the component label of component "web" ("web")`; !strings.Contains(err.Error(), text) {
+					t.Errorf("refusal %q does not say %s", err, text)
+				}
+			})
+		}
+	}
+
+	// A list the check cannot read fails generation: it is not read as holding
+	// no key.
+	for name, tc := range map[string]struct {
+		solvers any
+		want    string
+	}{
+		"solvers that are an object":  {map[string]any{"http01": map[string]any{}}, "solvers is a map[string]interface {}, not a list"},
+		"a solver that is a text":     {[]any{map[string]any{}, "oops"}, "solvers[1] is a string, not an object"},
+		"a pod template that is text": {[]any{map[string]any{"http01": map[string]any{"ingress": map[string]any{"podTemplate": "oops"}}}}, "podTemplate is a string, not an object"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := unstructuredObject("cert-manager.io/v1", "Issuer")
+			u.Object["spec"] = map[string]any{"acme": map[string]any{"solvers": tc.solvers}}
+			err := generate(u)
+			if err == nil || !strings.Contains(err.Error(), `component label: Issuer "w"`) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Generate = %v, want an error naming the Issuer and %s", err, tc.want)
+			}
+			if errors.Is(err, ErrComponentLabelValue) {
+				t.Errorf("error %q is ErrComponentLabelValue, want it told apart from a foreign value", err)
 			}
 		})
 	}
@@ -368,6 +499,26 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 			foreign, "spec", "podMetadata"),
 		"inheritedMetadata of a Pooler": holding(t, unstructuredObject("postgresql.cnpg.io/v1", "Pooler"),
 			foreign, "spec", "inheritedMetadata"),
+		"moverPodLabels of a ReplicationSource of another group": holdingLabelMap(t, unstructuredObject("example.com/v1", "ReplicationSource"),
+			foreign, "spec", "restic", "moverPodLabels"),
+		"moverPodLabels of a mover the kind has none of": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationDestination"),
+			foreign, "spec", "syncthing", "moverPodLabels"),
+		// Metadata an operator copies onto objects it creates that are no pods.
+		"the ingress template of a solver": solverIssuer("Issuer", map[string]any{"http01": map[string]any{"ingress": map[string]any{
+			"ingressTemplate": map[string]any{"metadata": map[string]any{"labels": map[string]any{ownershipKey: "db"}}}}}}),
+		"the labels of a solver's HTTPRoutes": solverIssuer("ClusterIssuer", map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{
+			"labels": map[string]any{ownershipKey: "db"}}}}),
+		"a solver pod template of an issuer of another group": func() client.Object {
+			u := solverIssuer("Issuer", solverPod("ingress", map[string]any{"labels": map[string]any{ownershipKey: "db"}}))
+			u.SetAPIVersion("example.com/v1")
+			return u
+		}(),
+		"a solver pod template of another kind of the group": solverIssuer("Certificate",
+			solverPod("ingress", map[string]any{"labels": map[string]any{ownershipKey: "db"}})),
+		"infrastructure of a Gateway of another group": holding(t, unstructuredObject("example.com/v1", "Gateway"),
+			foreign, "spec", "infrastructure"),
+		"infrastructure of another kind of the group": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "HTTPRoute"),
+			foreign, "spec", "infrastructure"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			inner := &ownershipObjectsConfig{objects: []client.Object{obj}}

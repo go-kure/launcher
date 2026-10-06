@@ -3871,6 +3871,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     signs.
   - A nil policy checks nothing.
 
+  **Labels and annotations** are the `labels` and `annotations` properties. A
+  solver's `podTemplate.metadata` is not these: it becomes the metadata of the
+  pod cert-manager starts to answer an HTTP01 challenge. It is held as a pod's
+  is, with or without a policy: on both ways a solver answers and on every
+  solver, the component label's key holds the component's value there or the
+  build is refused (`Issuer "web":
+  spec.acme.solvers[0].http01.ingress.podTemplate.metadata.labels[…]: "db" is
+  not the component label of component "web"`), and a key the consumer
+  reserved is refused (`solver pod template label "…"
+  (spec.acme.solvers[0].http01.ingress.podTemplate.metadata.labels) may not be
+  set`); see "Component label and ownership" and "Reserved metadata keys" in
+  the OAM model. Launcher writes nothing there. A solver's
+  `ingressTemplate.metadata` and the `labels` of its HTTPRoutes reach an
+  Ingress and HTTPRoutes, and are not read.
+
   **The issuer of a certificate is the author's.** `issuerRef` names an
   issuer by `name`, `kind` and `group`; launcher points it at no component
   and does not look for the issuer in the document. To have an `issuer` or
@@ -4440,7 +4455,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     proxy for a Gateway; the Gateway object holds no pod template and no
     resources, so the policy's maxima and defaults have nothing to hold.
     `infrastructure.labels` and `infrastructure.annotations` are written as
-    authored, and what a controller reads into them is its own.
+    authored, and what a controller reads into them is its own; they are held
+    to the component label and the reserved keys with or without a policy
+    (see "Labels and annotations" below).
   - **No field holds a literal secret, and none is checked.** A certificate is
     a reference: to a Secret on a listener and for the Gateway's client
     certificate, to a ConfigMap or another object for CA certificates. The
@@ -4468,7 +4485,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Labels and annotations** are the `labels` and `annotations` properties. A
   Gateway's `infrastructure.labels` and `infrastructure.annotations` are not
   these: they are what the controller puts on the resources it creates for the
-  Gateway.
+  Gateway, which may be pods. They are held as a pod's are: the component
+  label's key holds the component's value there or the build is refused, and a
+  key the consumer reserved is refused (`spec.infrastructure label "…" may not
+  be set`); see "Component label and ownership" and "Reserved metadata keys"
+  in the OAM model. Launcher writes nothing there.
 
   **Not covered.** Whether what is referred to exists (a class, a Gateway,
   a Secret, a ConfigMap, a Service and its port), and whether a controller of
@@ -4964,7 +4985,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Labels and annotations** are the `labels` and `annotations` properties. A
   mover's `moverPodLabels` are not these: they are labels the operator adds to
-  the mover pods.
+  the mover pods. They are held as a pod's labels are: the component label's
+  key holds the component's value there or the build is refused, and a key the
+  consumer reserved is refused (`mover pod label "…" may not be set`); see
+  "Component label and ownership" and "Reserved metadata keys" in the OAM
+  model. Launcher writes nothing there. A destination's `serviceAnnotations`
+  reach a Service and are not read.
 
   **Not covered.** Whether what is referred to exists (the claim to copy, a
   Secret, a storage or snapshot class, a ServiceAccount), and whether the

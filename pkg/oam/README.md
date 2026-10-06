@@ -482,12 +482,26 @@ The value is read, on every object and on each member of an unstructured list en
 | `spec.inheritedMetadata.labels` | a `postgresql.cnpg.io` `Cluster` | no |
 | `spec.template.metadata.labels` | a `postgresql.cnpg.io` `Pooler` | no |
 | `spec.podMetadata.labels` | a `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`, `Alertmanager` or `ThanosRuler` | no |
+| `spec.<mover>.moverPodLabels` | a `volsync.backube` `ReplicationSource` (`rsync`, `rsyncTLS`, `rclone`, `restic`, `syncthing`) or `ReplicationDestination` (`rsync`, `rsyncTLS`, `rclone`, `restic`) | no |
+| `spec.acme.solvers[].http01.ingress.podTemplate.metadata.labels`, and the same under `http01.gatewayHTTPRoute`, in every solver | a `cert-manager.io` `Issuer` or `ClusterIssuer` | no |
+| `spec.infrastructure.labels` | a `gateway.networking.k8s.io` `Gateway` | no |
 
-The last three rows are metadata an operator puts on the pods it creates. Launcher reads them
-and writes nothing there: such pods carry the component label only where the document or a
-kind puts it. A typed object of one of the `monitoring.coreos.com` kinds is recognized when
-it states its kind. Not read: a job template's own labels, a volume claim template's, and
-what a Flux object hands on to what it applies (`spec.commonMetadata`).
+The last six rows are metadata an operator puts on the pods it creates (a Gateway's
+`spec.infrastructure` on whatever the controller creates for it, which may be pods). Launcher
+reads them and writes nothing there: such pods carry the component label only where the
+document or a kind puts it. A typed object of a kind of the last four rows is recognized
+when it states its kind. A refusal names the labels by their path, with the index of the
+solver where they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`).
+Not read: a job template's own labels, a volume claim template's, and what a Flux object
+hands on to what it applies (`spec.commonMetadata`).
+
+The label and the reserved metadata keys are held wherever an object holds labels that reach
+pods; metadata an operator copies onto other objects it creates (the Ingress of a solver, the
+Secret of a Certificate, the Services of a Cluster) is not read yet, and `labelReachNotRead`
+in `pkg/cmd/kurel/label_reach_test.go` names each such field with what it reaches.
+`TestLabelReach_EveryFieldIsHeldOrListed` derives these fields from the API types of the
+registered kind components, so a field a dependency adds fails the test until it is held or
+listed.
 
 A workload whose own selector **requires** another value for the key is refused too: a
 `matchLabels` entry, an `In` expression that does not hold the component's value, or the
@@ -657,9 +671,11 @@ generates. The case is reached only through a consumer's own lowering rule.
 
 - A document that built before is refused at generation when an object it generates holds
   the component label's key with a value that is not its component's: on the object, on a
-  pod template, in a `Cluster`'s `spec.inheritedMetadata`, a `Pooler`'s pod template or
-  `spec.podMetadata` of a Prometheus operator kind, or as the value a workload's selector
-  requires. Before, such a value stayed as written. The key must be one nothing else writes:
+  pod template, in a `Cluster`'s `spec.inheritedMetadata`, a `Pooler`'s pod template,
+  `spec.podMetadata` of a Prometheus operator kind, the `moverPodLabels` of a VolSync mover,
+  the pod template of a cert-manager issuer's HTTP01 solver or a Gateway's
+  `spec.infrastructure`, or as the value a workload's selector requires. Before, such a
+  value stayed as written. The key must be one nothing else writes:
   a consumer that set `ComponentLabelKey` to a key its documents or charts also set (`app`,
   `app.kubernetes.io/name`) moves to a key of its own, such as the default.
 - With `ComponentLabelKey: "app"`, what the built-in kinds and traits write still builds
@@ -667,18 +683,25 @@ generates. The case is reached only through a consumer's own lowering rule.
   that sets `app` to anything but its component's value, or on a renamed entry that entry's,
   does not. Nor does a document in which a lowering rule emits, for one component, an entry
   whose label value is another component's: the transform refuses it.
-- The reserved metadata keys are read in two more places, which the two checks share: a
-  `Pooler`'s pod template and `spec.podMetadata` of a `Prometheus`, `PrometheusAgent`,
-  `Alertmanager` or `ThanosRuler` ([Reserved metadata keys](#reserved-metadata-keys)). A
-  document that set a reserved key there built before and is refused now.
+- The reserved metadata keys are read in five more places, which the two checks share: a
+  `Pooler`'s pod template, `spec.podMetadata` of a `Prometheus`, `PrometheusAgent`,
+  `Alertmanager` or `ThanosRuler`, the `moverPodLabels` of each mover of a VolSync
+  `ReplicationSource` or `ReplicationDestination`, the pod template of each HTTP01 solver of
+  a cert-manager `Issuer` or `ClusterIssuer`, and a Gateway's `spec.infrastructure`
+  ([Reserved metadata keys](#reserved-metadata-keys)). A document that set a reserved key
+  there built before and is refused now.
 
 **New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
-`ErrComponentLabelValue`, the error type `ComponentLabelError`, and the type
+`ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
 `ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
 `ComponentLabelSelectorRequiresAnother`, `ComponentLabelInLabelsProperty` and
-`ComponentLabelOfAnotherComponent`. The refusal of a kind component's `labels` property
-that holds another value under the key, which the transform returned before as an error of
-no type, is a `*ComponentLabelError` now, with the same text.
+`ComponentLabelOfAnotherComponent`, three values of `ReservedKeyHolder`:
+`ReservedKeyInMoverPodLabels`, `ReservedKeyInSolverPodTemplate` and
+`ReservedKeyInInfrastructure`, and the field `ReservedMetadataKeyError.Path`. The refusal of
+a kind component's `labels` property that holds another value under the key, which the
+transform returned before as an error of no type, is a `*ComponentLabelError` now, with the
+same text. Under the key `app` the kinds' own `app` check refused such a value first, with a
+text of its own; that refusal is the component label's now, text included.
 
 ## Reserved metadata keys
 
@@ -724,7 +747,7 @@ checked too, and the refusal names `the document` in place of a component.
 var refused *oam.ReservedMetadataKeyError
 if errors.As(err, &refused) {
     // refused.Component, refused.Kind, refused.Namespace, refused.Name,
-    // refused.Holder, refused.Annotation, refused.Key, refused.Entry
+    // refused.Holder, refused.Path, refused.Annotation, refused.Key, refused.Entry
 }
 ```
 
@@ -734,8 +757,13 @@ object states none, and the kind is zero for a typed object that states none and
 check reads only the metadata of, which `Object` (the object as the text names it) then names
 by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
 the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`,
-`ReservedKeyInInheritedMetadata` or `ReservedKeyInPodMetadata`. `Annotation` is false for a
-label. `Entry` is the entry that reserves `Key`: the key itself, or the prefix it is under.
+`ReservedKeyInInheritedMetadata`, `ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
+`ReservedKeyInSolverPodTemplate` or `ReservedKeyInInfrastructure`. `Path` is where the labels
+or the annotations that hold the key are on the object (`metadata.labels`,
+`spec.template.metadata.annotations`), with the index of the element where they are in a list
+(`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`); the text prints it only
+there, in parentheses after the key. `Annotation` is false for a label. `Entry` is the entry
+that reserves `Key`: the key itself, or the prefix it is under.
 Metadata the check cannot read fails generation with another error, which is neither.
 
 **What is read.** On every object, and on each member of an unstructured list envelope as
@@ -750,12 +778,21 @@ Flux applies it (a `List`, or an envelope with `items`):
 - the pod template's labels and annotations of a `postgresql.cnpg.io` `Pooler`
   (`spec.template.metadata`), named as a pod template's;
 - `spec.podMetadata` of a `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`,
-  `Alertmanager` or `ThanosRuler`, which the operator puts on the pods it creates.
+  `Alertmanager` or `ThanosRuler`, which the operator puts on the pods it creates;
+- `moverPodLabels` of each mover of a `volsync.backube` `ReplicationSource` or
+  `ReplicationDestination` (`spec.restic.moverPodLabels` and its like), labels of the pods
+  that move the data: `mover pod label "…"`;
+- the pod template's labels and annotations of each HTTP01 solver of a `cert-manager.io`
+  `Issuer` or `ClusterIssuer` (`spec.acme.solvers[].http01.ingress.podTemplate.metadata`,
+  and the same under `gatewayHTTPRoute`), in every solver of the list: `solver pod template
+  label "…"`;
+- the labels and annotations of `spec.infrastructure` of a `gateway.networking.k8s.io`
+  `Gateway`, which the controller applies to what it creates for the Gateway.
 
 These are the places the component label is held to its value in
 ([Component label and ownership](#component-label-and-ownership)): one list serves both
-checks. A typed object of one of the `monitoring.coreos.com` kinds is recognized when it
-states its kind.
+checks. A typed object of a `monitoring.coreos.com`, `volsync.backube`, `cert-manager.io` or
+`gateway.networking.k8s.io` kind is recognized when it states its kind.
 
 A key is read whatever its value: a value the API server would refuse, or a null, does not
 hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the
@@ -792,6 +829,12 @@ object named, and is not read as holding no key.
 - Metadata an object hands on to others in a field of its own: `spec.commonMetadata` of a
   Flux `Kustomization` or `HelmRelease`, a StatefulSet's `volumeClaimTemplates`, a CronJob's
   `jobTemplate` metadata (its pod template is read).
+- Metadata an operator copies onto objects it creates that are no pods: the Ingress and the
+  HTTPRoutes of an issuer's solver, a Certificate's `secretTemplate`, the Service and
+  ServiceAccount templates and the snapshot metadata of a CloudNativePG `Cluster`, a
+  `Pooler`'s `serviceTemplate`, the Secret template of an ExternalSecret, the HelmChart
+  template of a `HelmRelease`, a VolSync destination's `serviceAnnotations`.
+  `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the full list.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.

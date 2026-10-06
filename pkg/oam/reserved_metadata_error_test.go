@@ -44,7 +44,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			}},
 			want: ReservedMetadataKeyError{
 				Component: "web", Kind: configMap, Namespace: "shop", Name: "c", Object: `ConfigMap "c"`,
-				Key: "example.org/tenant", Entry: "example.org/tenant",
+				Path: "metadata.labels", Key: "example.org/tenant", Entry: "example.org/tenant",
 			},
 			text: `component "web": ConfigMap "c": label "example.org/tenant"` + byKey,
 		},
@@ -56,7 +56,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			},
 			want: ReservedMetadataKeyError{
 				Component: "web", Kind: schema.GroupKind{Group: "networking.k8s.io", Kind: "Ingress"}, Name: "i", Object: `Ingress "i"`,
-				Annotation: true, Key: "platform.example/zone", Entry: "platform.example/",
+				Annotation: true, Path: "metadata.annotations", Key: "platform.example/zone", Entry: "platform.example/",
 			},
 			text: `component "web": Ingress "i": annotation "platform.example/zone"` + byPrefix,
 		},
@@ -66,7 +66,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			obj:       deployment,
 			want: ReservedMetadataKeyError{
 				Component: "web", Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Namespace: "shop", Name: "w", Object: `Deployment "w"`,
-				Holder: ReservedKeyInPodTemplate, Key: "platform.example/zone", Entry: "platform.example/",
+				Holder: ReservedKeyInPodTemplate, Path: "spec.template.metadata.labels", Key: "platform.example/zone", Entry: "platform.example/",
 			},
 			text: `component "web": Deployment "w": pod template label "platform.example/zone"` + byPrefix,
 		},
@@ -75,7 +75,8 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			obj:       reservedWorkload(t, "batch/v1", "CronJob", "annotations", "example.org/tenant"),
 			want: ReservedMetadataKeyError{
 				Component: "web", Kind: schema.GroupKind{Group: "batch", Kind: "CronJob"}, Name: "w", Object: `CronJob "w"`,
-				Holder: ReservedKeyInPodTemplate, Annotation: true, Key: "example.org/tenant", Entry: "example.org/tenant",
+				Holder: ReservedKeyInPodTemplate, Annotation: true, Path: "spec.jobTemplate.spec.template.metadata.annotations",
+				Key: "example.org/tenant", Entry: "example.org/tenant",
 			},
 			text: `component "web": CronJob "w": pod template annotation "example.org/tenant"` + byKey,
 		},
@@ -84,9 +85,44 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			obj:       cnpgCluster("postgresql.cnpg.io/v1", "Cluster", map[string]any{"annotations": map[string]any{"platform.example/zone": "a"}}),
 			want: ReservedMetadataKeyError{
 				Component: "db", Kind: schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Cluster"}, Name: "db", Object: `Cluster "db"`,
-				Holder: ReservedKeyInInheritedMetadata, Annotation: true, Key: "platform.example/zone", Entry: "platform.example/",
+				Holder: ReservedKeyInInheritedMetadata, Annotation: true, Path: "spec.inheritedMetadata.annotations",
+				Key: "platform.example/zone", Entry: "platform.example/",
 			},
 			text: `component "db": Cluster "db": spec.inheritedMetadata annotation "platform.example/zone"` + byPrefix,
+		},
+		"a mover's pod label": {
+			component: "backup",
+			obj: holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"),
+				map[string]string{"platform.example/zone": "a"}, "spec", "restic", "moverPodLabels"),
+			want: ReservedMetadataKeyError{
+				Component: "backup", Kind: schema.GroupKind{Group: "volsync.backube", Kind: "ReplicationSource"}, Name: "w", Object: `ReplicationSource "w"`,
+				Holder: ReservedKeyInMoverPodLabels, Path: "spec.restic.moverPodLabels", Key: "platform.example/zone", Entry: "platform.example/",
+			},
+			text: `component "backup": ReplicationSource "w": mover pod label "platform.example/zone"` + byPrefix,
+		},
+		// The holder is in a list: the text names the solver by its index.
+		"a later solver's pod annotation": {
+			component: "tls",
+			obj: solverIssuer("ClusterIssuer",
+				solverPod("ingress", map[string]any{"labels": map[string]any{"acme": "solver"}}),
+				solverPod("gatewayHTTPRoute", map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}})),
+			want: ReservedMetadataKeyError{
+				Component: "tls", Kind: schema.GroupKind{Group: "cert-manager.io", Kind: "ClusterIssuer"}, Name: "w", Object: `ClusterIssuer "w"`,
+				Holder: ReservedKeyInSolverPodTemplate, Annotation: true, Path: "spec.acme.solvers[1].http01.gatewayHTTPRoute.podTemplate.metadata.annotations",
+				Key: "example.org/tenant", Entry: "example.org/tenant",
+			},
+			text: `component "tls": ClusterIssuer "w": solver pod template annotation "example.org/tenant"` +
+				` (spec.acme.solvers[1].http01.gatewayHTTPRoute.podTemplate.metadata.annotations)` + byKey,
+		},
+		"a Gateway's infrastructure label": {
+			component: "edge",
+			obj: holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "Gateway"),
+				map[string]string{"platform.example/zone": "a"}, "spec", "infrastructure"),
+			want: ReservedMetadataKeyError{
+				Component: "edge", Kind: schema.GroupKind{Group: "gateway.networking.k8s.io", Kind: "Gateway"}, Name: "w", Object: `Gateway "w"`,
+				Holder: ReservedKeyInInfrastructure, Path: "spec.infrastructure.labels", Key: "platform.example/zone", Entry: "platform.example/",
+			},
+			text: `component "edge": Gateway "w": spec.infrastructure label "platform.example/zone"` + byPrefix,
 		},
 		// Named by its Go type in the text, and with no Kind.
 		"a typed object that states no kind": {
@@ -94,7 +130,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			obj:       &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c", Labels: map[string]string{"example.org/tenant": "a"}}},
 			want: ReservedMetadataKeyError{
 				Component: "web", Name: "c", Object: `*v1.ConfigMap "c"`,
-				Key: "example.org/tenant", Entry: "example.org/tenant",
+				Path: "metadata.labels", Key: "example.org/tenant", Entry: "example.org/tenant",
 			},
 			text: `component "web": *v1.ConfigMap "c": label "example.org/tenant"` + byKey,
 		},
@@ -108,7 +144,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			}}},
 			want: ReservedMetadataKeyError{
 				Component: "web", Kind: configMap, Namespace: "shop", Name: "member", Object: `ConfigMap "member"`,
-				Key: "platform.example/zone", Entry: "platform.example/",
+				Path: "metadata.labels", Key: "platform.example/zone", Entry: "platform.example/",
 			},
 			text: `component "web": ConfigMap "member": label "platform.example/zone"` + byPrefix,
 		},
@@ -116,7 +152,7 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			obj: &corev1.ConfigMap{TypeMeta: typedMeta, ObjectMeta: metav1.ObjectMeta{Name: "c", Labels: map[string]string{"example.org/tenant": "a"}}},
 			want: ReservedMetadataKeyError{
 				Kind: configMap, Name: "c", Object: `ConfigMap "c"`,
-				Key: "example.org/tenant", Entry: "example.org/tenant",
+				Path: "metadata.labels", Key: "example.org/tenant", Entry: "example.org/tenant",
 			},
 			text: `the document: ConfigMap "c": label "example.org/tenant"` + byKey,
 		},

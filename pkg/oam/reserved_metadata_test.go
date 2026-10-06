@@ -262,6 +262,33 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 			holding(t, unstructuredObject("monitoring.coreos.com/v1", "ThanosRuler"), map[string]string{"platform.example/zone": "a"}, "spec", "podMetadata"),
 			[]string{`ThanosRuler "w"`, `spec.podMetadata label "platform.example/zone"`, prefix},
 		},
+		"a ReplicationSource's mover pod label": {
+			holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"), map[string]string{"platform.example/zone": "a"}, "spec", "restic", "moverPodLabels"),
+			[]string{`ReplicationSource "w"`, `mover pod label "platform.example/zone"`, prefix},
+		},
+		"a ReplicationDestination's mover pod label": {
+			holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationDestination"), map[string]string{"example.org/tenant": "a"}, "spec", "rsyncTLS", "moverPodLabels"),
+			[]string{`ReplicationDestination "w"`, `mover pod label "example.org/tenant"`, exact},
+		},
+		// Every solver of the list is read, under both ways a solver answers.
+		"an Issuer's solver pod label, in a later solver": {
+			solverIssuer("Issuer", map[string]any{"dns01": map[string]any{}}, nil,
+				solverPod("ingress", map[string]any{"labels": map[string]any{"platform.example/zone": "a"}})),
+			[]string{`Issuer "w"`, `solver pod template label "platform.example/zone"`, prefix},
+		},
+		"a ClusterIssuer's solver pod annotation, of a solver on a Gateway": {
+			solverIssuer("ClusterIssuer", solverPod("gatewayHTTPRoute", map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}})),
+			[]string{`ClusterIssuer "w"`, `solver pod template annotation "example.org/tenant"`, exact},
+		},
+		"a Gateway's infrastructure label": {
+			holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "Gateway"), map[string]string{"platform.example/zone": "a"}, "spec", "infrastructure"),
+			[]string{`Gateway "w"`, `spec.infrastructure label "platform.example/zone"`, prefix},
+		},
+		"a Gateway's infrastructure annotation": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "gateway.networking.k8s.io/v1", "kind": "Gateway", "metadata": map[string]any{"name": "w"},
+				"spec": map[string]any{"infrastructure": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}},
+			[]string{`Gateway "w"`, `spec.infrastructure annotation "example.org/tenant"`, exact},
+		},
 		"a List member's label": {
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{
 				map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "plain"}},
@@ -349,6 +376,26 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
 		"podMetadata of another kind of the group": holding(t, unstructuredObject("monitoring.coreos.com/v1", "ServiceMonitor"),
 			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
+		"the two labels in a mover's pod labels": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"),
+			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "restic", "moverPodLabels"),
+		"moverPodLabels of a ReplicationSource of another group": holdingLabelMap(t, unstructuredObject("example.com/v1", "ReplicationSource"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "restic", "moverPodLabels"),
+		"moverPodLabels of a mover the kind has none of": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationDestination"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "syncthing", "moverPodLabels"),
+		"the two labels in a solver's pod template": solverIssuer("Issuer",
+			solverPod("ingress", map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "web"}})),
+		"the two labels in a Gateway's infrastructure": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "Gateway"),
+			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "infrastructure"),
+		// Metadata an operator copies onto objects it creates that are no pods.
+		"the ingress template of a solver": solverIssuer("Issuer", map[string]any{"http01": map[string]any{"ingress": map[string]any{
+			"ingressTemplate": map[string]any{"metadata": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}}}),
+		"the labels of a solver's HTTPRoutes": solverIssuer("ClusterIssuer", map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{
+			"labels": map[string]any{"example.org/tenant": "a"}}}}),
+		"a solver pod template of another kind of the group": solverIssuer("Certificate",
+			solverPod("ingress", map[string]any{"labels": map[string]any{"example.org/tenant": "a"}})),
+		"infrastructure of another kind of the group": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "HTTPRoute"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "infrastructure"),
+		"a null solver": solverIssuer("Issuer", nil),
 		"commonMetadata a Flux object hands on": &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": map[string]any{"name": "k"},
 			"spec": map[string]any{"commonMetadata": map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}},
@@ -853,6 +900,12 @@ func TestOwnedConfig_ReservedKeysMalformedMetadata(t *testing.T) {
 			"metadata": map[string]any{"name": "c"}, "spec": map[string]any{"template": []any{}}}, "template is a"},
 		"inheritedMetadata that is a text": {map[string]any{"apiVersion": "postgresql.cnpg.io/v1", "kind": "Cluster",
 			"metadata": map[string]any{"name": "c"}, "spec": map[string]any{"inheritedMetadata": "oops"}}, "inheritedMetadata is a"},
+		"solvers that are an object": {map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "Issuer",
+			"metadata": map[string]any{"name": "c"}, "spec": map[string]any{"acme": map[string]any{"solvers": map[string]any{}}}}, "solvers is a map[string]interface {}, not a list"},
+		"a solver that is a text": {map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "ClusterIssuer",
+			"metadata": map[string]any{"name": "c"}, "spec": map[string]any{"acme": map[string]any{"solvers": []any{"oops"}}}}, "solvers[0] is a string, not an object"},
+		"infrastructure that is a list": {map[string]any{"apiVersion": "gateway.networking.k8s.io/v1", "kind": "Gateway",
+			"metadata": map[string]any{"name": "c"}, "spec": map[string]any{"infrastructure": []any{}}}, "infrastructure is a"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			u := &unstructured.Unstructured{Object: tc.object}
