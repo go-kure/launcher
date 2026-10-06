@@ -1,6 +1,7 @@
 package components
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,12 +14,15 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
@@ -549,6 +553,90 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 	if reached == 0 {
 		t.Fatal("the walk reached no duration field of a Flux kind")
 	}
+}
+
+// TestEmitFluxKind holds the writer of a Flux kind's object to two things.
+// Under a form with h the object goes out as the typed one, untouched, as it
+// did before the writer: every duration of the four kinds written before it
+// takes h, so their output is unchanged. Under a form without h a duration of
+// an hour or more goes out in the form's text, as emitFluxSource writes a
+// source's timeout.
+func TestEmitFluxKind(t *testing.T) {
+	const long = 90 * time.Minute
+	t.Run("a form with h emits the typed object", func(t *testing.T) {
+		durations := 0
+		for component, forms := range map[string]map[string]fluxduration.Form{
+			fluxcdAlertType:           durationForms(fluxcdAlertKind.durations),
+			imagePolicyType:           durationForms(imagePolicyKind.durations),
+			imageUpdateAutomationType: durationForms(imageUpdateAutomationKind.durations),
+			artifactGeneratorType:     durationForms(artifactGeneratorKind.durations),
+		} {
+			for path, form := range forms {
+				durations++
+				if got := form.Format(long); got != long.String() {
+					t.Errorf("%s: %s of %s is written as %q, not as the type writes it (%q): the kind's output changed", component, path, long, got, long)
+				}
+			}
+		}
+		// Vacuity guard: an ImagePolicy and an ImageUpdateAutomation each have an
+		// interval.
+		if durations < 2 {
+			t.Fatalf("the four kinds list %d durations, want at least 2", durations)
+		}
+
+		policy := &imagev1.ImagePolicy{Spec: imagev1.ImagePolicySpec{Interval: &metav1.Duration{Duration: long}}}
+		objs, err := emitFluxKind(imagePolicyType, policy, &policy.Spec, imagePolicyKind.durations, oam.ObjectMetadata{})
+		if err != nil || len(objs) != 1 {
+			t.Fatalf("emitFluxKind = %d objects, %v; want one", len(objs), err)
+		}
+		if got, ok := (*objs[0]).(*imagev1.ImagePolicy); !ok || got != policy {
+			t.Errorf("an imagepolicy with an interval of %s goes out as a %T, want the typed object it was given", long, *objs[0])
+		}
+
+		automation := &autov1.ImageUpdateAutomation{Spec: autov1.ImageUpdateAutomationSpec{Interval: metav1.Duration{Duration: long}}}
+		objs, err = emitFluxKind(imageUpdateAutomationType, automation, &automation.Spec, imageUpdateAutomationKind.durations, oam.ObjectMetadata{})
+		if err != nil || len(objs) != 1 {
+			t.Fatalf("emitFluxKind = %d objects, %v; want one", len(objs), err)
+		}
+		if got, ok := (*objs[0]).(*autov1.ImageUpdateAutomation); !ok || got != automation {
+			t.Errorf("an imageupdateautomation with an interval of %s goes out as a %T, want the typed object it was given", long, *objs[0])
+		}
+	})
+
+	t.Run("a form without h emits the form's text", func(t *testing.T) {
+		for _, timeout := range []time.Duration{30 * time.Second, long} {
+			repo := func() *sourcev1.OCIRepository {
+				return &sourcev1.OCIRepository{Spec: sourcev1.OCIRepositorySpec{
+					Interval: metav1.Duration{Duration: 10 * time.Minute},
+					Timeout:  &metav1.Duration{Duration: timeout},
+				}}
+			}
+			encode := func(objs []*client.Object, err error) string {
+				t.Helper()
+				if err != nil || len(objs) != 1 {
+					t.Fatalf("timeout %s: %d objects, %v; want one", timeout, len(objs), err)
+				}
+				data, err := json.Marshal(*objs[0])
+				if err != nil {
+					t.Fatalf("timeout %s: encode: %v", timeout, err)
+				}
+				return string(data)
+			}
+			source, kind := repo(), repo()
+			want := encode(emitFluxSource("ocirepository", source, source.Spec.Timeout, oam.ObjectMetadata{}))
+			got := encode(emitFluxKind("ocirepository", kind, &kind.Spec, ociRepositoryDurations, oam.ObjectMetadata{}))
+			if got != want {
+				t.Errorf("timeout %s:\n got %s\nwant %s (as emitFluxSource writes it)", timeout, got, want)
+			}
+			if text := fluxduration.SourceTimeout.Format(timeout); !strings.Contains(got, `"timeout":"`+text+`"`) {
+				t.Errorf("timeout %s: the object does not carry spec.timeout %q: %s", timeout, text, got)
+			}
+		}
+		// Vacuity guard: the long timeout is one the type would write with an h.
+		if fluxduration.SourceTimeout.Format(long) == long.String() {
+			t.Fatalf("%s is written the same under both forms; the case shows nothing", long)
+		}
+	})
 }
 
 // TestFluxKinds_UnheldHaveNoEnforce: the kinds no dimension of the environment
