@@ -875,3 +875,34 @@ func TestExternalSecretsKinds_DefaultedZeros(t *testing.T) {
 		}
 	}
 }
+
+// TestIsAPIVersion: what target.manifest.apiVersion may be. A version, or a
+// group and a version separated by one slash, each part a name the API can
+// have (the version a DNS-1035 label, the group a DNS-1123 subdomain). The
+// core group is written without a slash; a slash with nothing before it names
+// no group.
+func TestIsAPIVersion(t *testing.T) {
+	for _, value := range []string{
+		"v1", "v1beta1", "v2alpha1",
+		"apps/v1", "apps/v1beta2", "batch/v1", "autoscaling/v2", "policy/v1", "extensions/v1beta1",
+		"rbac.authorization.k8s.io/v1", "flowcontrol.apiserver.k8s.io/v1beta3", "apiextensions.k8s.io/v1",
+		"external-secrets.io/v1", "argoproj.io/v1alpha1", "example.io/v1",
+	} {
+		if !isAPIVersion(value) {
+			t.Errorf("%q is refused, want an API version", value)
+		}
+	}
+	for _, value := range []string{
+		// What schema.ParseGroupVersion refuses.
+		"apps/v1/x", "a/b/c", "//",
+		// What it takes: an empty part.
+		"", "/", "apps/", "/v1",
+		// What it takes: a part that is no name.
+		"Apps/v1", "apps/V1", "V1", "apps/v 1", "ap ps/v1", " v1", "v1 ", "apps /v1",
+		"apps/1", "1", "apps_x/v1", "apps/v1.1", ".io/v1", "example..io/v1", "-apps/v1", "apps/v1-",
+	} {
+		if isAPIVersion(value) {
+			t.Errorf("%q passes, want it refused as no API version", value)
+		}
+	}
+}

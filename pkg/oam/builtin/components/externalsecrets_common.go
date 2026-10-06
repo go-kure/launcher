@@ -9,6 +9,7 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -403,20 +404,46 @@ func validateExternalSecretSpec(spec *esv1.ExternalSecretSpec, at string) error 
 }
 
 // refuseManifestAPIVersion refuses a target.manifest whose apiVersion is no
-// API version: neither a version nor a group and a version separated by one
-// slash (schema.ParseGroupVersion). No object can be written under such a
-// value, and it names no group: the kind beside it then reads as no kind at
-// all, so neither check of enforceTargetManifest would see a Deployment or a
-// Secret there. The API bounds the field by a minimum length only.
+// API version (isAPIVersion). No object can be written under such a value,
+// and one that does not split names no group: the kind beside it then reads
+// as no kind at all, so neither check of enforceTargetManifest would see a
+// Deployment or a Secret there. The API bounds the field by a minimum length
+// only.
 func refuseManifestAPIVersion(spec *esv1.ExternalSecretSpec, at string) error {
 	manifest := spec.Target.Manifest
 	if manifest == nil {
 		return nil
 	}
-	if _, err := schema.ParseGroupVersion(manifest.APIVersion); err != nil {
+	if !isAPIVersion(manifest.APIVersion) {
 		return errors.Errorf("%starget.manifest.apiVersion: %q is no API version: want a version (v1) or a group and a version (apps/v1)", at, manifest.APIVersion)
 	}
 	return nil
+}
+
+// isAPIVersion reports whether the value is an API version: a version (v1,
+// the core group) or a group and a version separated by one slash (apps/v1).
+// schema.ParseGroupVersion splits it so and refuses a second slash, but takes
+// either part empty and any text in them ("/", "apps/", "/v1"). The parts are
+// therefore held to what a group and a version can be named at all: the
+// version a DNS-1035 label and, where a slash is written, the group a
+// DNS-1123 subdomain. Those are the bounds the API server holds the group and
+// each version name of a CustomResourceDefinition to
+// (ValidateCustomResourceDefinition in
+// k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/validation), and the
+// built-in API versions are named within them. The core group is the form
+// without a slash only: "/v1" is none.
+func isAPIVersion(value string) bool {
+	gv, err := schema.ParseGroupVersion(value)
+	if err != nil {
+		return false
+	}
+	if len(validation.IsDNS1035Label(gv.Version)) > 0 {
+		return false
+	}
+	if strings.Contains(value, "/") && len(validation.IsDNS1123Subdomain(gv.Group)) > 0 {
+		return false
+	}
+	return true
 }
 
 // refuseDataGeneratorRef refuses a generator named as the source of one key of

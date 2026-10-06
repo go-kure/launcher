@@ -4639,12 +4639,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `apiVersion` and a `kind`) the operator writes an object of that kind
     instead of a Secret, from template text it renders in the cluster. The
     `apiVersion` has to be an API version, a version (`v1`) or a group and a
-    version (`apps/v1`): the API bounds the field by a minimum length only,
-    nothing can write an object of a version that is none, and its kind
-    would read as no kind at all to the check below. One that is none is
-    refused under every policy, and not as a policy refusal
-    (`target.manifest.apiVersion: "apps/v1/x" is no API version: want a
-    version (v1) or a group and a version (apps/v1)`). **That
+    version (`apps/v1`), each part a name the API can have: the version a
+    DNS-1035 label and the group a DNS-1123 subdomain, the bounds a
+    CustomResourceDefinition's group and version names have. The core group
+    is written without a slash, so `/v1`, `apps/` and `Apps/v1` are none.
+    The API bounds the field by a minimum length only, nothing can write an
+    object of a version that is none, and where the value does not split
+    into the two its kind would read as no kind at all to the check below.
+    One that is none is refused under every policy, and not as a policy
+    refusal (`target.manifest.apiVersion: "apps/v1/x" is no API version:
+    want a version (v1) or a group and a version (apps/v1)`). **That
     object gets no more than the same policy gives the same kind on
     `passthrough`.** What `passthrough` would read cannot be read at build,
     so a kind the rendered-object check reads anything from is refused, in
