@@ -380,7 +380,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
-| `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | missing | - | - | - |
+| `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | held | - | - | A FluxInstance is the installation of Flux itself, not an application's object: its spec lists "the controllers to install", and the API accepts one name for it, `flux`. A component type would let an application author the cluster's Flux (go-kure/launcher#790). |
 | `fluxcd.CreateFluxReport` | fluxcd.controlplane.io/v1 FluxReport | not authorable | - | - | Written by the Flux operator. |
 | `fluxcd.CreateGitRepository` | source.toolkit.fluxcd.io/v1 GitRepository | kind | `gitrepository` | strict decode of `GitRepositorySpec` | - |
 | `fluxcd.CreateHelmChart` | source.toolkit.fluxcd.io/v1 HelmChart | kind | `helmchart` | strict decode of `HelmChartSpec` | - |
@@ -393,7 +393,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` lowers onto it. |
 | `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | missing | - | - | - |
 | `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | missing | - | - | - |
-| `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | missing | - | - | - |
+| `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | held | - | - | Its `resourcesTemplate` is, in the API's words, "a Go template that generates the list of Kubernetes resources to reconcile". The operator renders it on the cluster, so no build sees the objects and none can be held to a rule: the kind would be a way round every rule a policy holds a workload or a Secret to (go-kure/launcher#790). |
 | `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
 | `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | missing | - | - | - |
 | `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | missing | - | - | - |
