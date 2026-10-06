@@ -1303,8 +1303,18 @@ its text:
     as, sysctls, SELinux and seccomp settings), for which the policy has no dimension,
     the service account it runs under (`moverServiceAccount`), which is carried as
     authored, a mover's affinity, the volumes mounted into it, the type of its Service,
-    and the namespace annotation by which an administrator lets movers run privileged,
-    which is no field of the object.
+    and the namespace annotation by which an administrator lets an `rsyncTLS`, `rclone`,
+    `restic` or `syncthing` mover run privileged, which is no field of the object.
+  - **The `rsync` mover is held to the policy's container capabilities.** For the
+    rsync-over-SSH mover, authoring it is the choice: the linked operator version
+    (VolSync v0.16.0) runs its container as root with seven added capabilities, and
+    its builder drops the namespace's answer. An authored `rsync` mover is held to the policy's
+    allowed and forbidden container capabilities for those seven, as a container that
+    adds them is on a pod kind, and refused with the capability named; it builds where
+    the policy sets neither list. A test reads the seven from the operator's source in
+    the linked module. A cluster that runs another version of the operator may add
+    others, which the kind does not know, and that the container runs as root is not
+    held: the policy has no dimension for it.
   - Required fields follow the rule of the Prometheus operator's kinds. A test holds
     each list to the CRDs the linked module ships (11 paths for a source, 6 for a
     destination): of a volume mounted into a mover its `mountPath` and `volumeSource`,

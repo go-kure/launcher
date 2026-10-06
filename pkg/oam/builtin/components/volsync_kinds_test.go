@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"testing"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
@@ -188,6 +189,11 @@ func replicationDestinationFull() map[string]any {
 // and the field. Inside the maxima, with no maximum set and with no policy
 // given a capacity and the resources build, and a capacity left out is the
 // operator's to choose. hostProcess is refused with no policy given too.
+//
+// And what an author chooses with the rsync-over-SSH mover: the capabilities
+// the linked operator version adds to its container are held to the policy's
+// container-capability lists, whatever the mover authors, and to nothing where
+// the policy sets none or none is given. No other mover is held to them.
 func TestVolsyncKinds_Policy(t *testing.T) {
 	type policyCase struct {
 		props  map[string]any
@@ -201,6 +207,12 @@ func TestVolsyncKinds_Policy(t *testing.T) {
 		return moverWith(mover, "moverResources", map[string]any{list: map[string]any{name: value}})
 	}
 	const refused = ".moverSecurityContext.windowsOptions.hostProcess is not allowed by environment policy"
+	const rsyncContainer = "rsync: the mover's container as VolSync v0.16.0 writes it: securityContext.capabilities.add: "
+	rsyncMover := moverWith("rsync", "sshKeys", "rsync-keys")
+	rsyncCapabilities := []string{"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "SYS_CHROOT"}
+	withoutString := func(list []string, drop string) []string {
+		return slices.DeleteFunc(slices.Clone(list), func(s string) bool { return s == drop })
+	}
 	for _, kind := range volsyncMoverKinds {
 		cases := map[string]policyCase{
 			"restic, cache capacity": {moverWith("restic", "cacheCapacity", "11Gi"), ptStrictPolicy(),
@@ -231,6 +243,39 @@ func TestVolsyncKinds_Policy(t *testing.T) {
 			"external parameters under a policy that forbids explicit secrets": {map[string]any{"external": map[string]any{
 				"provider": "example.com/replicator", "parameters": map[string]any{"password": "not-a-reference"},
 			}}, esForbidding(), ""},
+			// The rsync-over-SSH mover: the seven capabilities the linked
+			// operator version adds to its container are held to the policy's
+			// container-capability lists, as a container that adds them is on a
+			// pod kind. The first of the seven the policy does not take is named.
+			"rsync, one of its capabilities forbidden": {rsyncMover, &stubPolicy{forbiddenContainerCaps: []string{"SYS_CHROOT"}},
+				rsyncContainer + `"SYS_CHROOT" is forbidden by environment policy`},
+			"rsync, a forbidden capability spelled as the kernel does": {rsyncMover, &stubPolicy{forbiddenContainerCaps: []string{"cap_dac_override"}},
+				rsyncContainer + `"DAC_OVERRIDE" is forbidden by environment policy`},
+			"rsync, every capability forbidden": {rsyncMover, &stubPolicy{forbiddenContainerCaps: []string{"ALL"}},
+				rsyncContainer + `"AUDIT_WRITE" is forbidden by environment policy (forbidden list contains ALL)`},
+			"rsync, an allowed list without its capabilities": {rsyncMover, &stubPolicy{allowedContainerCaps: []string{"NET_BIND_SERVICE"}},
+				rsyncContainer + `"AUDIT_WRITE" is not allowed by environment policy`},
+			"rsync, an allowed list that lacks one": {rsyncMover, &stubPolicy{allowedContainerCaps: withoutString(rsyncCapabilities, "SETUID")},
+				rsyncContainer + `"SETUID" is not allowed by environment policy`},
+			"rsync, forbidden where privileged is allowed": {rsyncMover, &stubPolicy{allowPrivileged: true, forbiddenContainerCaps: []string{"CHOWN"}},
+				rsyncContainer + `"CHOWN" is forbidden by environment policy`},
+			"rsync, a later mover after it": {map[string]any{"restic": map[string]any{"repository": "restic-repo"}, "rsync": map[string]any{"sshKeys": "rsync-keys"}},
+				&stubPolicy{forbiddenContainerCaps: []string{"FOWNER"}}, rsyncContainer + `"FOWNER" is forbidden by environment policy`},
+			"rsync, an allowed list with its capabilities": {rsyncMover, &stubPolicy{allowedContainerCaps: rsyncCapabilities}, ""},
+			"rsync, another capability forbidden":          {rsyncMover, ptStrictPolicy(), ""},
+			"rsync under a policy that sets nothing":       {rsyncMover, &stubPolicy{}, ""},
+			"rsync with no policy given":                   {rsyncMover, nil, ""},
+			"rsync authored empty, a capability forbidden": {map[string]any{"rsync": map[string]any{}}, &stubPolicy{forbiddenContainerCaps: []string{"SETGID"}},
+				rsyncContainer + `"SETGID" is forbidden by environment policy`},
+		}
+		// The other movers are not held to those lists: the linked operator
+		// version runs them with added capabilities only where the namespace's
+		// administrator allows it.
+		for _, mover := range append(slices.Clone(kind.config), "external") {
+			cases[mover+", every capability forbidden"] = policyCase{map[string]any{mover: map[string]any{}},
+				&stubPolicy{forbiddenContainerCaps: []string{"ALL"}}, ""}
+			cases[mover+", an allowed list of one"] = policyCase{map[string]any{mover: map[string]any{}},
+				&stubPolicy{allowedContainerCaps: []string{"NET_BIND_SERVICE"}}, ""}
 		}
 		for _, mover := range kind.sized {
 			cases[mover+", capacity"] = policyCase{moverWith(mover, "capacity", "20Gi"), ptStrictPolicy(),

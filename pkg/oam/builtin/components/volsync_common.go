@@ -27,9 +27,25 @@ import (
 // (moverServiceAccount), an identity carried as authored; the mover's
 // affinity and the volumes mounted into it (moverVolumes: a Secret, a claim
 // or an NFS export, never a host path); the type of the Service a mover is
-// reached through; and whether the mover runs with elevated permissions at
-// all, which is an annotation an administrator puts on the namespace
-// (volsync.backube/privileged-movers), not a field of the object.
+// reached through; and whether an rsyncTLS, rclone, restic or syncthing mover
+// runs with elevated permissions, which is an annotation an administrator
+// puts on the namespace (volsync.backube/privileged-movers), not a field of
+// the object: the linked operator's two controllers read it and hand the
+// answer to each of those movers' builders.
+//
+// The rsync-over-SSH mover is the exception: authoring it is the choice. The
+// linked operator version's builder for it drops the namespace's answer, and
+// its container is written, on a source and on a destination alike, as root
+// (runAsUser: 0) with every capability dropped and seven added
+// (volsyncRsyncCapabilities). An authored rsync mover is therefore held to
+// the environment policy's container-capability lists for those seven, as a
+// container that adds them is on a pod kind (enforceContainerCapabilities),
+// and refused with the capability named. Two limits. The list is what the
+// LINKED operator version writes, held to its source by
+// TestVolsyncKinds_RsyncCapabilities: a cluster that runs another version of
+// the operator may add other capabilities, and the kind does not know. And
+// that the container runs as root is said here, not held: the policy has no
+// dimension for it.
 //
 // The module ships its CRDs. TestVolsyncKinds_RequiredMatchCRD holds each
 // kind's required list to them, TestVolsyncKinds_NoDefaults the claim that
@@ -65,6 +81,29 @@ type volsyncMover struct {
 	// rsync over SSH, whose type has neither a security context, an affinity
 	// nor volumes.
 	config *volsyncv1alpha1.MoverConfig
+	// addedCapabilities are the Linux capabilities the linked operator version
+	// adds to the mover's container whenever the mover is authored. Set for
+	// rsync over SSH only.
+	addedCapabilities []corev1.Capability
+}
+
+// volsyncOperatorVersion is the version of the linked VolSync module, whose
+// operator source volsyncRsyncCapabilities is read from.
+// TestVolsyncKinds_RsyncCapabilities holds it to the module this one links.
+const volsyncOperatorVersion = "v0.16.0"
+
+// volsyncRsyncCapabilities are the Linux capabilities the linked operator
+// version adds to the container of an rsync-over-SSH mover: at v0.16.0,
+// internal/controller/mover/rsync/mover.go, lines 409 to 432, the one
+// container of the Job the mover runs, the same for a source and a
+// destination. The literal there drops ALL, sets privileged and
+// allowPrivilegeEscalation to false and runAsUser to 0. The mover's builder
+// (builder.go in that directory, lines 97 and 156) takes the namespace's
+// answer on privileged movers as a parameter it does not name.
+// TestVolsyncKinds_RsyncCapabilities reads that source from the module cache
+// and fails when this list and it differ.
+var volsyncRsyncCapabilities = []corev1.Capability{
+	"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "SYS_CHROOT",
 }
 
 // volsyncCapacity is one capacity field of a mover; quantity is nil when it
@@ -83,6 +122,7 @@ func replicationSourceMovers(spec *volsyncv1alpha1.ReplicationSourceSpec) []vols
 	if m := spec.Rsync; m != nil {
 		movers = append(movers, volsyncMover{
 			name: "rsync", capacities: []volsyncCapacity{{"capacity", m.Capacity}}, resources: m.MoverResources,
+			addedCapabilities: volsyncRsyncCapabilities,
 		})
 	}
 	if m := spec.RsyncTLS; m != nil {
@@ -121,6 +161,7 @@ func replicationDestinationMovers(spec *volsyncv1alpha1.ReplicationDestinationSp
 	if m := spec.Rsync; m != nil {
 		movers = append(movers, volsyncMover{
 			name: "rsync", capacities: []volsyncCapacity{{"capacity", m.Capacity}}, resources: m.MoverResources,
+			addedCapabilities: volsyncRsyncCapabilities,
 		})
 	}
 	if m := spec.RsyncTLS; m != nil {
@@ -243,6 +284,11 @@ func validateVolsyncMovers(movers []volsyncMover) error {
 //   - the cpu and memory limits and requests of moverResources to the maxima,
 //     as a container's are. The request is not held to the limit: that is the
 //     API server's on the pod the operator creates;
+//   - the capabilities the linked operator version adds to the container of
+//     an rsync-over-SSH mover (volsyncRsyncCapabilities) to the allowed and
+//     forbidden container capabilities, as a container that adds them is on a
+//     pod kind. Allowing privileged workloads does not lift it, as it does
+//     not there;
 //   - moverSecurityContext.windowsOptions.hostProcess, the pod-level switch
 //     that runs the mover's containers as Windows HostProcess containers, is
 //     refused unless the policy allows privileged workloads.
@@ -261,6 +307,12 @@ func enforceVolsyncMovers(movers []volsyncMover, p oam.Policy) error {
 		if mover.resources != nil {
 			if err := enforceMaxContainerResources(*mover.resources, p); err != nil {
 				return errors.Wrap(err, mover.name+".moverResources")
+			}
+		}
+		if len(mover.addedCapabilities) > 0 {
+			container := &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: mover.addedCapabilities}}
+			if err := enforceContainerCapabilities(container, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
+				return errors.Wrap(err, mover.name+": the mover's container as VolSync "+volsyncOperatorVersion+" writes it")
 			}
 		}
 		if mover.config == nil || p.AllowPrivileged() {
@@ -284,10 +336,13 @@ func volsyncSchema(kind, capacity string) map[string]oam.PropertySchema {
 		decoded = " Decoded strictly into VolSync's API type: see "
 		held    = " An authored capacity is held to the EnvironmentPolicy storage maximum, and the cpu and memory of moverResources to its maxima."
 		config  = " moverSecurityContext.windowsOptions.hostProcess is refused unless the policy allows privileged workloads; of a moverVolumes entry, mountPath and volumeSource are required."
+		rsync   = " The operator runs this mover as root with added Linux capabilities whenever it is authored: the seven VolSync " + volsyncOperatorVersion + " adds are held to the policy's allowed and forbidden container capabilities."
 	)
 	mover := func(name, what, typ string) oam.PropertySchema {
 		rule := held
-		if name != "rsync" {
+		if name == "rsync" {
+			rule += rsync
+		} else {
 			rule += config
 		}
 		return oam.PropertySchema{
