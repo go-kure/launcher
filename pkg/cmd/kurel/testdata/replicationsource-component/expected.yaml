@@ -1,0 +1,49 @@
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  labels:
+    launcher.gokure.dev/component: data-nightly
+  name: data-nightly
+  namespace: default
+spec:
+  restic:
+    cacheCapacity: 1Gi
+    copyMethod: Snapshot
+    customCA: {}
+    moverResources:
+      limits:
+        memory: 512Mi
+    moverSecurityContext:
+      fsGroup: 1000
+      runAsUser: 1000
+    moverVolumes:
+    - mountPath: ca
+      volumeSource:
+        secret:
+          secretName: backup-ca
+    pruneIntervalDays: 14
+    repository: restic-repo
+    retain:
+      daily: 7
+      monthly: 0
+      weekly: 4
+    volumeSnapshotClassName: csi-snapshots
+  sourcePVC: data
+  trigger:
+    schedule: 0 3 * * *
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  labels:
+    launcher.gokure.dev/component: media-sync
+  name: media-sync
+  namespace: default
+spec:
+  sourcePVC: media
+  syncthing:
+    peers:
+    - ID: MFZWI3D-BONSGYC-YLTMRWG-C43ENR5-QXGZDMM-FZWI3DP-BONSGYY-LTMRWAD
+      address: tcp://peer.example.com:22000
+      introducer: false
+    serviceType: ClusterIP

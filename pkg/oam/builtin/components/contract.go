@@ -233,6 +233,16 @@ func (h *CertificateHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ReplicationSourceHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("replicationsource")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ReplicationDestinationHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("replicationdestination")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *CiliumBGPAdvertisementHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("cilium-bgpadvertisement")
 }

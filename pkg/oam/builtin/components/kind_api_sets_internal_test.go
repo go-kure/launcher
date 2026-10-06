@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
@@ -261,6 +262,12 @@ type apiSetKind struct {
 	defaultRefused []string
 	filled         map[string]string
 	harmless       map[string]string
+
+	// absent lists the fields the type reaches that the source does not
+	// describe, each of which the kind refuses when it is authored: the linked
+	// Go type is newer than the API the source is of. The kind's own tests
+	// show the refusals.
+	absent []string
 }
 
 // podFieldsNotChecked is the answer of the kinds of the built-in pod types
@@ -291,6 +298,7 @@ const (
 	certManagerCRDs = "deploy/crds/cert-manager.io_"
 	ciliumCRDs      = "pkg/k8s/apis/cilium.io/client/crds/v2/"
 	cnpgCRDs        = "config/crd/bases/postgresql.cnpg.io_"
+	volsyncCRDs     = "config/crd/bases/volsync.backube_"
 )
 
 // objectIdentity is the top-level fields of a whole-object kind's type that a
@@ -341,6 +349,19 @@ var apiSetKinds = []apiSetKind{
 			}
 		}},
 		refused: []string{"renewal.windows[].cron", "renewal.windows[].windowDuration"},
+	},
+
+	// VolSync's API, from the CRDs its module ships.
+	// TestVolsyncKinds_AbsentFromCRD shows the refusal of each absent field.
+	{
+		component: "replicationsource", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
+		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationsources.yaml", "v1alpha1"),
+		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS", "syncthing"),
+	},
+	{
+		component: "replicationdestination", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
+		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationdestinations.yaml", "v1alpha1"),
+		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS"),
 	},
 
 	// Cilium's API, from the CRDs its module ships.
@@ -548,10 +569,16 @@ func TestKindComponents_OmittedRequiredAndWrittenDefaults(t *testing.T) {
 			}
 			// A CRD gives the metadata of an embedded object no properties:
 			// its schema is the API server's own. Nothing else may be
-			// missing from a source, or a member of either set could be.
+			// missing from a source, or a member of either set could be,
+			// but a field the kind lists as absent and refuses.
 			for _, path := range sets.undescribed {
-				if !strings.Contains(path, ".metadata.") {
+				if !strings.Contains(path, ".metadata.") && !slices.Contains(kind.absent, path) {
 					t.Errorf("the source does not describe %s of %s", path, kind.typ)
+				}
+			}
+			for _, path := range kind.absent {
+				if !slices.Contains(sets.undescribed, path) {
+					t.Errorf("%s is listed as absent from the source, which describes it or which the type does not reach", path)
 				}
 			}
 

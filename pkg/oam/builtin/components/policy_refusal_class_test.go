@@ -401,6 +401,29 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			})
 		}
 	}
+	// A VolSync mover is held on both kinds: the volume a capacity sizes to the
+	// storage maximum, its container to the workload maxima, and its pod-level
+	// hostProcess switch to the privileged rule.
+	for _, kind := range volsyncMoverKinds {
+		cases = append(cases,
+			componentCase{
+				name: kind.component + ", capacity over the maximum", class: oam.RefusalStorageMaximum, typ: kind.component, handler: kind.handler,
+				props: props(moverWith("restic", "capacity", "20Gi")),
+			},
+			componentCase{
+				name: kind.component + ", cache capacity over the maximum", class: oam.RefusalStorageMaximum, typ: kind.component, handler: kind.handler,
+				props: props(moverWith("restic", "cacheCapacity", "20Gi")),
+			},
+			componentCase{
+				name: kind.component + ", mover over the memory maximum", class: oam.RefusalResourceMaximum, typ: kind.component, handler: kind.handler,
+				props: props(moverWith("rsync", "moverResources", map[string]any{"requests": map[string]any{"memory": "2Gi"}})),
+			},
+			componentCase{
+				name: kind.component + ", mover hostProcess", class: oam.RefusalPrivileged, typ: kind.component, handler: kind.handler,
+				props: props(moverWith("rclone", "moverSecurityContext", map[string]any{"windowsOptions": map[string]any{"hostProcess": true}})),
+			},
+		)
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := tc.policy

@@ -169,6 +169,12 @@ The kind components of the Gateway API's infrastructure objects,
 `<type>-component` fixture each: a GatewayClass with no namespace, and a
 Gateway, a ListenerSet, a ReferenceGrant and a BackendTLSPolicy in the build
 namespace. No capability is required of the cluster profile to build them.
+The kind components of VolSync's API, `replicationsource` and
+`replicationdestination` (go-kure/launcher#790), are registered the same way,
+with a `<type>-component` fixture each: two ReplicationSource objects in the
+build namespace, a Restic backup on a schedule and a Syncthing source, and two
+ReplicationDestination objects, a Restic restore and an rsync-over-TLS
+receiver. No capability is required of the cluster profile to build them.
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member

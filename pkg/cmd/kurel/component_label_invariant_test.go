@@ -404,6 +404,15 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"backendtlspolicy": {props: map[string]any{
 		"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
 		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
+	// The two kinds of VolSync's API emit identity and the authored fields too,
+	// namespaced, with no `app` label and no pods of their own: the mover pod
+	// is the operator's. Neither checks a name rule of its own.
+	"replicationsource": {props: map[string]any{
+		"sourcePVC": "data", "trigger": map[string]any{"schedule": "0 3 * * *"},
+		"restic": map[string]any{"repository": "restic-repo", "copyMethod": "Snapshot"}}},
+	"replicationdestination": {props: map[string]any{
+		"trigger": map[string]any{"manual": "restore-1"},
+		"restic":  map[string]any{"repository": "restic-repo", "copyMethod": "Direct", "destinationPVC": "data"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

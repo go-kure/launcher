@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
@@ -362,6 +363,22 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[certv1.CertificateSpec](), namespaced: true, held: true,
 		minimal: certificateMinimal(),
 		full:    certificateFull(),
+	},
+	{
+		component: "replicationsource", handler: &components.ReplicationSourceHandler{},
+		gvk: volsyncv1alpha1.GroupVersion.WithKind("ReplicationSource"),
+		typ: reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), namespaced: true, held: true,
+		// The API's schema requires no field at the top level; the operator
+		// wants one mover when it reconciles, and the kind leaves that to it.
+		minimal: map[string]any{},
+		full:    replicationSourceFull(),
+	},
+	{
+		component: "replicationdestination", handler: &components.ReplicationDestinationHandler{},
+		gvk: volsyncv1alpha1.GroupVersion.WithKind("ReplicationDestination"),
+		typ: reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), namespaced: true, held: true,
+		minimal: map[string]any{},
+		full:    replicationDestinationFull(),
 	},
 	{
 		component: "cilium-bgpadvertisement", handler: &components.CiliumBGPAdvertisementHandler{},
@@ -962,6 +979,23 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.EncodeUsagesInRequest", ".Spec.RevisionHistoryLimit", ".Spec.AdditionalOutputFormats",
 			".Spec.NameConstraints", ".Spec.NameConstraints.Permitted.DNSDomains",
 		},
+		"replicationsource": {
+			".Spec.Trigger", ".Spec.Trigger.Schedule", ".Spec.Rsync", ".Spec.Rsync.ReplicationSourceVolumeOptions.Capacity",
+			".Spec.Rsync.ReplicationSourceVolumeOptions.AccessModes", ".Spec.Rsync.MoverPodLabels", ".Spec.Rsync.MoverResources",
+			".Spec.RsyncTLS", ".Spec.RsyncTLS.MoverConfig.MoverSecurityContext", ".Spec.RsyncTLS.MoverConfig.MoverSecurityContext.RunAsUser",
+			".Spec.Rclone", ".Spec.Rclone.MoverConfig.MoverAffinity", ".Spec.Rclone.MoverConfig.MoverVolumes",
+			".Spec.Rclone.MoverConfig.MoverVolumes[0].VolumeSource.Secret", ".Spec.Restic", ".Spec.Restic.Retain",
+			".Spec.Restic.Retain.Hourly", ".Spec.Restic.CacheCapacity", ".Spec.Restic.MoverConfig.MoverResources.Limits",
+			".Spec.Syncthing", ".Spec.Syncthing.Peers", ".Spec.Syncthing.ConfigCapacity", ".Spec.External", ".Spec.External.Parameters",
+		},
+		"replicationdestination": {
+			".Spec.Trigger", ".Spec.Trigger.Schedule", ".Spec.Rsync", ".Spec.Rsync.ReplicationDestinationVolumeOptions.Capacity",
+			".Spec.Rsync.ReplicationDestinationVolumeOptions.DestinationPVC", ".Spec.Rsync.ServiceAnnotations", ".Spec.Rsync.MoverResources",
+			".Spec.RsyncTLS", ".Spec.RsyncTLS.VolumeMode", ".Spec.RsyncTLS.MoverConfig.MoverSecurityContext",
+			".Spec.Rclone", ".Spec.Rclone.MoverConfig.MoverAffinity", ".Spec.Rclone.MoverConfig.MoverVolumes",
+			".Spec.Restic", ".Spec.Restic.CacheCapacity", ".Spec.Restic.Previous", ".Spec.Restic.MoverConfig.MoverPodLabels",
+			".Spec.External", ".Spec.External.Parameters",
+		},
 		"cilium-bgpadvertisement": {
 			".Spec.Advertisements", ".Spec.Advertisements[0].Attributes", ".Spec.Advertisements[0].Attributes.Communities",
 			".Spec.Advertisements[0].Attributes.Communities.Standard", ".Spec.Advertisements[0].Attributes.LocalPreference",
@@ -1191,6 +1225,42 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 	vault := func(auth map[string]any) map[string]any {
 		return map[string]any{"vault": map[string]any{"server": "https://vault.example.com", "path": "pki/sign/web", "auth": auth}}
 	}
+	// A ReplicationSource and a ReplicationDestination share their movers but
+	// for Syncthing. None of their fields is required at the top level: of a
+	// mover that is authored the API requires some. foreign is a field the
+	// other kind's movers hold and this one's do not.
+	volsyncCases := func(upstream, foreign string) []refusal {
+		volume := func(fields map[string]any) []any { return []any{fields} }
+		secret := map[string]any{"secret": map[string]any{"secretName": "creds"}}
+		return []refusal{
+			{"volume without a mount path", moverWith("rclone", "moverVolumes", volume(map[string]any{"volumeSource": secret})), "rclone.moverVolumes[0].mountPath: required"},
+			{"volume with a null mount path", moverWith("rclone", "moverVolumes", volume(map[string]any{"mountPath": nil, "volumeSource": secret})), "rclone.moverVolumes[0].mountPath: required"},
+			{"volume without a source", moverWith("restic", "moverVolumes", volume(map[string]any{"mountPath": "creds"})), "restic.moverVolumes[0].volumeSource: required"},
+			{"a later volume without a source", moverWith("rsyncTLS", "moverVolumes", []any{
+				map[string]any{"mountPath": "creds", "volumeSource": secret}, map[string]any{"mountPath": "more"},
+			}), "rsyncTLS.moverVolumes[1].volumeSource: required"},
+			{"required node affinity without its terms", moverWith("restic", "moverAffinity", map[string]any{
+				"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{}},
+			}), "restic.moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: required"},
+			{"a field of a mounted Secret the CRD does not hold", moverWith("rclone", "moverVolumes", volume(map[string]any{
+				"mountPath": "creds", "volumeSource": map[string]any{"secret": map[string]any{"secretName": "creds", "defaultUser": 1000}},
+			})), "rclone.moverVolumes[0].volumeSource.secret.defaultUser: no field of the volsync.backube/v1alpha1 API"},
+			{"unknown key", map[string]any{"mover": "restic"}, notA + upstream},
+			{"the other kind's field", moverWith("restic", foreign, "data"), notA + upstream},
+			{"the object's spec", map[string]any{"spec": map[string]any{"paused": true}}, notA},
+			{"mover sub-key", moverWith("restic", "repo", "restic-repo"), notA},
+			// rsync over SSH shares no MoverConfig with the other movers.
+			{"rsync with mover volumes", moverWith("rsync", "moverVolumes", []any{}), notA},
+			{"rsync with a security context", moverWith("rsync", "moverSecurityContext", map[string]any{}), notA},
+			{"a host path among the mover volumes", moverWith("restic", "moverVolumes", volume(map[string]any{
+				"mountPath": "host", "volumeSource": map[string]any{"hostPath": map[string]any{"path": "/var/lib"}},
+			})), notA},
+			{"capacity not a quantity", moverWith("restic", "capacity", "plenty"), notA},
+			{"paused a string", map[string]any{"paused": "yes"}, notA},
+			{"trigger a string", map[string]any{"trigger": "0 * * * *"}, notA},
+			{"null volume", moverWith("rclone", "moverVolumes", []any{map[string]any{"mountPath": "creds", "volumeSource": secret}, nil}), "rclone.moverVolumes[1]"},
+		}
+	}
 	issuerCases := []refusal{
 		{"acme without a server", map[string]any{"acme": map[string]any{"privateKeySecretRef": map[string]any{"name": "acme-account"}}}, "acme.server: required"},
 		{"acme without an account key", map[string]any{"acme": map[string]any{"server": "https://acme.example.com/directory"}}, "acme.privateKeySecretRef: required"},
@@ -1398,6 +1468,23 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null dns name", certificateWith("dnsNames", []any{"shop.example.com", nil}), "dnsNames[1]"},
 			{"two spellings", certificateWith("SecretName", "other-tls"), "sets the same field as"},
 		},
+		"replicationsource": append(volsyncCases("volsync.backube/v1alpha1 ReplicationSourceSpec", "destinationPVC"),
+			refusal{"peer without an address", syncthingPeers(withoutProperty(syncthingPeer(), "address")), "syncthing.peers[0].address: required"},
+			refusal{"peer without an ID", syncthingPeers(withoutProperty(syncthingPeer(), "ID")), "syncthing.peers[0].ID: required"},
+			refusal{"peer without introducer", syncthingPeers(withoutProperty(syncthingPeer(), "introducer")), "syncthing.peers[0].introducer: required"},
+			refusal{"peer with a null introducer", syncthingPeers(withProperty(syncthingPeer(), "introducer", nil)), "syncthing.peers[0].introducer: required"},
+			refusal{"a later peer, empty", syncthingPeers(syncthingPeer(), map[string]any{}), "syncthing.peers[1]."},
+			refusal{"syncthing volume without a source", moverWith("syncthing", "moverVolumes", []any{map[string]any{"mountPath": "creds"}}), "syncthing.moverVolumes[0].volumeSource: required"},
+			refusal{"syncthing has no capacity", moverWith("syncthing", "capacity", "1Gi"), notA},
+			refusal{"null peer", syncthingPeers(syncthingPeer(), nil), "syncthing.peers[1]"},
+			refusal{"two spellings", map[string]any{"sourcePVC": "data", "SourcePVC": "other"}, "sets the same field as"},
+		),
+		"replicationdestination": append(volsyncCases("volsync.backube/v1alpha1 ReplicationDestinationSpec", "sourcePVC"),
+			// A destination has no Syncthing mover and names no source claim.
+			refusal{"syncthing", map[string]any{"syncthing": map[string]any{}}, notA},
+			refusal{"a source claim", map[string]any{"sourcePVC": "data"}, notA},
+			refusal{"two spellings", map[string]any{"paused": true, "Paused": false}, "sets the same field as"},
+		),
 		"cilium-bgpadvertisement": {
 			{"no properties", nil, "advertisements: required"},
 			{"null advertisements", map[string]any{"advertisements": nil}, "advertisements: required"},

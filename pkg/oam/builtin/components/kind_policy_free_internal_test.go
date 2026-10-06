@@ -25,6 +25,8 @@ func policyFreeTypeOf[T any](k *policyFreeKind[T]) policyFreeType {
 // from the markers of their source. The kinds of cert-manager publish none
 // either and are held by TestCertManagerKinds_NoDefaultedZeros, from their
 // CRDs, as those of the Gateway API are by TestGatewayKinds_NoDefaultedZeros.
+// The kinds of VolSync's API are held by TestVolsyncKinds_NoDefaults, which
+// holds their CRDs to defaulting nothing under spec.
 var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(storageClassKind),
 	policyFreeTypeOf(volumeAttributesClassKind),

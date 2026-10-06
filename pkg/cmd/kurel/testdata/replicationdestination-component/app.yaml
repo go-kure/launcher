@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: data-restore
+      type: replicationdestination
+      properties:
+        trigger:
+          manual: restore-1
+        restic:
+          repository: restic-repo
+          copyMethod: Direct
+          destinationPVC: data
+          previous: 0
+          enableFileDeletion: true
+          cacheCapacity: 1Gi
+          moverSecurityContext:
+            runAsUser: 1000
+            fsGroup: 1000
+    - name: data-replica
+      type: replicationdestination
+      properties:
+        rsyncTLS:
+          copyMethod: Snapshot
+          capacity: 10Gi
+          accessModes:
+            - ReadWriteOnce
+          serviceType: ClusterIP
+          keySecret: replica-key

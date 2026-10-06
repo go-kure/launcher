@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -204,6 +205,10 @@ func monitoringKind(kind string) schema.GroupKind {
 
 func certManagerKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: certv1.SchemeGroupVersion.Group, Kind: kind}
+}
+
+func volsyncKind(kind string) schema.GroupKind {
+	return schema.GroupKind{Group: volsyncv1alpha1.GroupVersion.Group, Kind: kind}
 }
 
 func gatewayAPIKind(kind string) schema.GroupKind {
@@ -428,6 +433,17 @@ func (h *ClusterIssuerHandler) ComponentObject() (schema.GroupKind, oam.ObjectSc
 // ComponentObject declares the certificate kind's Certificate.
 func (h *CertificateHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return certManagerKind(certv1.CertificateKind), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the replicationsource kind's ReplicationSource.
+func (h *ReplicationSourceHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return volsyncKind("ReplicationSource"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the replicationdestination kind's
+// ReplicationDestination.
+func (h *ReplicationDestinationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return volsyncKind("ReplicationDestination"), oam.ObjectScopeNamespaced
 }
 
 // ComponentObject declares the cilium-bgpadvertisement kind's

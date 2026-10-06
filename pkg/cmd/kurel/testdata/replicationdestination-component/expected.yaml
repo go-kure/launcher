@@ -1,0 +1,37 @@
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  labels:
+    launcher.gokure.dev/component: data-restore
+  name: data-restore
+  namespace: default
+spec:
+  restic:
+    cacheCapacity: 1Gi
+    copyMethod: Direct
+    customCA: {}
+    destinationPVC: data
+    enableFileDeletion: true
+    moverSecurityContext:
+      fsGroup: 1000
+      runAsUser: 1000
+    previous: 0
+    repository: restic-repo
+  trigger:
+    manual: restore-1
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  labels:
+    launcher.gokure.dev/component: data-replica
+  name: data-replica
+  namespace: default
+spec:
+  rsyncTLS:
+    accessModes:
+    - ReadWriteOnce
+    capacity: 10Gi
+    copyMethod: Snapshot
+    keySecret: replica-key
+    serviceType: ClusterIP

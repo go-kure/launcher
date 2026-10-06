@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
@@ -96,6 +97,9 @@ var coreKindSchemas = []struct {
 	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
 	{"clusterissuer", reflect.TypeFor[certv1.IssuerSpec](), &components.ClusterIssuerHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
+	// And the kinds of VolSync's API.
+	{"replicationsource", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), &components.ReplicationSourceHandler{}, nil},
+	{"replicationdestination", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), &components.ReplicationDestinationHandler{}, nil},
 	// So are the kinds of Cilium's BGP control plane.
 	{"cilium-bgpadvertisement", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](), &components.CiliumBGPAdvertisementHandler{}, nil},
 	{"cilium-bgpclusterconfig", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), &components.CiliumBGPClusterConfigHandler{}, nil},
