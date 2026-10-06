@@ -10,6 +10,7 @@ require (
 	github.com/cloudnative-pg/cloudnative-pg v1.30.1
 	github.com/cloudnative-pg/machinery v0.6.0
 	github.com/cloudnative-pg/plugin-barman-cloud v0.15.1
+	github.com/controlplaneio-fluxcd/flux-operator v0.58.1
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260918141056-e8f12e1f1646
 	github.com/fluxcd/helm-controller/api v1.6.4
@@ -65,7 +66,6 @@ require (
 	github.com/cilium/stream v0.0.1 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cloudnative-pg/cnpg-i v0.6.0 // indirect
-	github.com/controlplaneio-fluxcd/flux-operator v0.58.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect

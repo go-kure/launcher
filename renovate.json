@@ -51,6 +51,7 @@
         "github.com/cloudnative-pg/cloudnative-pg",
         "github.com/cloudnative-pg/machinery",
         "github.com/cloudnative-pg/plugin-barman-cloud",
+        "github.com/controlplaneio-fluxcd/flux-operator",
         "github.com/external-secrets/external-secrets/apis",
         "github.com/fluxcd/helm-controller/api",
         "github.com/fluxcd/image-automation-controller/api",
