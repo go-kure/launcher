@@ -9513,6 +9513,80 @@ The walk covers the kinds that decode a type. The hand-parsed kinds (`deployment
 parser (`parseLabelSelectorOpts`), which refuses the same and more, so their absence from the
 test's list is not a gap.
 
+### Required fields a kind writes unauthored and does not refuse
+
+A field the API requires can still reach the object unauthored. Where the Go type writes the
+field whatever was authored (`""`, `0`, `{}`, `null`), the object carries a value the author
+did not write and does not show the omission. A kind refuses the omission of such a field only
+where its required list names it; every other one is written and left to the API server and to
+the operator. The section above and each kind's entry list the ones that are refused. This
+section states the ones that are not, as they are at this pin.
+
+**Families.** The test names each field by the type that holds it:
+
+| Family | Owner type | Typical fields |
+|---|---|---|
+| `AFF` | the `core/v1` affinity terms: `NodeSelectorRequirement`, `PodAffinityTerm`, `PreferredSchedulingTerm`, `WeightedPodAffinityTerm` | a node selector requirement's `key` and `operator`; a pod affinity term's `topologyKey`; a weighted or preferred term's `weight`, `podAffinityTerm` and `preference` |
+| `SEC` | `SeccompProfile`, `AppArmorProfile`, `Sysctl` | a profile's `type`; a sysctl's `name` and `value` |
+| `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; an `imageCatalogRef`'s `kind` and `name` |
+| `KIND` | a type of the kind's own API | an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a CloudNativePG secret reference's `name` and `key`; a Database's `schemas[].name` |
+
+A fifth family of the test, `SEL` (the `key` and `operator` of a `metav1` label selector's
+match expression), has no member: those are refused on every kind
+([A label selector's match expressions](#a-label-selectors-match-expressions)).
+
+**Per kind.**
+
+| Kind | Not refused | AFF | SEC | POD | KIND |
+|---|---|---|---|---|---|
+| `issuer`, `clusterissuer` | 42 each | 36 | 6 | | |
+| `replicationsource` | 113 | 72 | 16 | 25 | |
+| `replicationdestination` | 85 | 54 | 12 | 19 | |
+| `cnpg-cluster` | 157 | 18 | 7 | 52 | 80 |
+| `cnpg-pooler` | 178 | 18 | 8 | 147 | 5 |
+| `cnpg-database` | 11 | | | | 11 |
+| `cnpg-objectstore` | 29 | | | 9 | 20 |
+| `httproute` | 44 | | | | 44 |
+| `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
+
+None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
+`listenerset`, `referencegrant`, `backendtlspolicy`, `prometheusrule`, `secretstore`,
+`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Most members are written
+`""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `null` or an
+object of such values.
+
+**What the API server makes of them** is a value rule of each field, not read here. One case is
+shown: `imageCatalogRef` of `cnpg-cluster` and `pgbouncer.imageCatalogRef` of `cnpg-pooler`.
+Its `kind` written `""` is refused by the CRD's own rule on the reference. Its `name` written
+`""`, and on `cnpg-cluster` its `major` written `0`, are accepted by the API server and reach
+the operator.
+
+**Excluded as valid values.** A member whose written value the API takes as authored is not
+listed: `cnpg-cluster`'s `instances` (`1`, the CRD's default) and
+`postgresql.syncReplicaElectionConstraint.enabled` (`false`, which the CRD requires and gives
+no default; the Go type's zero value is a valid one). The test names the two and checks that
+their omission builds and writes exactly that value.
+
+**Method.** For each field the kind's API requires and its Go type writes unauthored,
+`TestKindComponents_RequiredWrittenNotRefused` builds the kind with the field authored, with
+the required fields around it filled, then builds it again with the field taken out. The field
+is a member when the second build succeeds and the object still holds the field. A field under
+a path the kind refuses whatever is authored there is skipped, and the test names those paths
+with their reason: a `cilium-networkpolicy`'s `nodeSelector`, a `cnpg-pooler`'s
+`template.spec.ephemeralContainers`, and the `generatorRef` of an `externalsecret`'s or a
+`clusterexternalsecret`'s `data[].sourceRef`. Any other field that cannot be measured fails the
+test. The
+required lists are those of the CRDs of the linked modules. The Prometheus operator and
+External Secrets kinds are read through the schema markers of their linked sources, by the same
+reader as their own required-list tests. The Flux kinds are not measured: no linked module ships
+their CRDs, and no reader of this package reads their markers. The members are pinned in
+`testdata/required-written-not-refused.txt`, one line per field (kind, path, family, written
+value). The test fails on any difference, a new member or one that is gone, so a dependency
+bump or a kind change that moves the set fails CI; `UPDATE_REQUIRED_WRITTEN_PIN=1` rewrites
+the file, and is refused where `CI` is set.
+
+go-kure/launcher#883 (deferred) tracks a mechanism for this class.
+
 ### Every spec field is this package's to write
 
 Since go-kure/launcher#361 this package builds against kure's release-1 builder
