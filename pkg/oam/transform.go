@@ -58,7 +58,11 @@ type TransformContext struct {
 	// value besides the component's passes, under the key "app" only: the one the
 	// kinds write for an entry a lowering rule emitted under a name of its own,
 	// whose pods then carry that entry's value and are not selected by the
-	// component's policies.
+	// component's policies. Under that key the transform refuses a document in
+	// which such an entry's value is another component's. Each of these refusals,
+	// and the one of a kind component's `labels` property that holds another
+	// value under the key, is a *ComponentLabelError and answers to
+	// ErrComponentLabelValue.
 	//
 	// A workload whose own selector rules the
 	// label out (DoesNotExist on the key, NotIn with the component's value) keeps its pod

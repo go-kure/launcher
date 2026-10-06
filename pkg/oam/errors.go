@@ -22,6 +22,17 @@ var ErrPlatformReserved = errors.New("oam: property is platform-reserved")
 // the object, the key and the entry that reserves it.
 var ErrReservedMetadataKey = errors.New("oam: metadata key is reserved")
 
+// ErrComponentLabelValue is returned when what a component generates holds the
+// component label's key (TransformContext.ComponentLabelKey) with a value that
+// is not the component's, or could not carry the component's. Generation
+// returns it for a value on an object and for a workload selector that requires
+// another value; the transform returns it for a kind component's `labels`
+// property that holds such a value, and for an entry a lowering rule emitted
+// whose `app` label value is another component's. The error that answers to it
+// is a *ComponentLabelError, which errors.As finds and which says which of the
+// four it is, the component, the object, the path, the key and the value.
+var ErrComponentLabelValue = errors.New("oam: label value is not the component's")
+
 // TransformError represents a failure in the OAM-to-kure transformation pipeline.
 type TransformError struct {
 	Message string

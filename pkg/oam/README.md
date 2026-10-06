@@ -502,9 +502,40 @@ Deployment "web": spec.template.metadata.labels["launcher.gokure.dev/component"]
 ```
 
 It comes from generation (`GenerateApplications`, or `Generate` on an application), as the
-reserved-key refusal does, and it is a plain error: there is no sentinel or type for it. An
-application the document as a whole owns has no component, and its objects are not held to
-any value.
+reserved-key refusal does. An application the document as a whole owns has no component, and
+its objects are not held to any value.
+
+**Recognising it.** The error is a `*ComponentLabelError`, and answers to the sentinel
+`ErrComponentLabelValue`, which it unwraps to:
+
+```go
+var refused *oam.ComponentLabelError
+if errors.As(err, &refused) {
+    // refused.Refused, refused.Component, refused.Kind, refused.Namespace,
+    // refused.Name, refused.Object, refused.Path, refused.Key, refused.Value,
+    // refused.Required, refused.Want, refused.Entry, refused.Other
+}
+```
+
+`Refused` says which of four refusals it is, and all four answer to `ErrComponentLabelValue`:
+
+| `Refused` | What is refused | Returned by | Fields beside `Component`, `Key` and `Want` |
+|-----------|-----------------|-------------|----------------------------------------------|
+| `ComponentLabelForeignValue` | a value an object holds under the key | generation | the object, `Path` (the labels, `spec.template.metadata.labels`), `Value` |
+| `ComponentLabelSelectorRequiresAnother` | the values a workload's selector requires | generation | the object, `Path` (the selector, `spec.selector`), `Required` |
+| `ComponentLabelInLabelsProperty` | a value a kind component's `labels` property holds under the key | the transform | `Path` (`labels`), `Value` |
+| `ComponentLabelOfAnotherComponent` | an entry whose `app` value is another component's (below) | the transform | `Entry`, `Other`, `Value` |
+
+`Component` is the owning component, `Key` the component label's key and `Want` the
+component's value for it. The object is `Kind` (group and kind), `Namespace`, `Name` and
+`Object` (the object as the text names it), read as the reserved-key refusal's are: the
+namespace is empty when the object states none, and on a list envelope they are the
+member's. They are empty where the transform refuses, which has no object yet: for a
+property and for an entry. A reserved-key refusal is not one, and neither is metadata the
+check cannot read or a label value that is no string, which fail generation with another
+error. Under the key `app`, a `labels` property is held to the `app` value the kinds write, the
+name of the component after lowering: a refused value there is `ComponentLabelInLabelsProperty`
+too, with that name as `Component` and its value as `Want`.
 
 **One value besides the owner's, under the key `app` only.** `app` is the label the built-in
 kinds and traits write themselves, valued with the name of the component after lowering they
@@ -514,9 +545,12 @@ which launcher wrote and no document can change, so the wrapper accepts it on th
 objects (and on what the entry's traits and policies generate), and nowhere else. It admits
 no other component's value: under this key the transform refuses a document in which a rule
 emitted, for one component, an entry whose label value is another component's (the refusal
-names both components and the entry, and says to rename one of the two). Lowering's own name
-checks do not see that case where the other component
-is itself lowered into entries under other names.
+names both components and the entry, and says to rename one of the two; it is a
+`*ComponentLabelError` too, `Refused: ComponentLabelOfAnotherComponent`). The check compares
+label values, not names: a name over 63 characters is projected onto a shorter value
+(`ComponentLabelValue`), and an entry named as that projection carries the component's
+label. Lowering's own name checks do not see either case where the other component is itself
+lowered into entries under other names.
 What it leaves: under such a key a renamed entry's pods carry the entry's value, and the
 component's NetworkPolicies, which select the owner's, do not select them. That is a gap of
 its own (a pod of a component left unselected by its policies, go-kure/launcher#790), not
@@ -573,8 +607,8 @@ the default.
 A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
 are held to the label and labelled like any other. So one chart is treated two ways: a value
-it sets under the key is **refused under template delivery, overwritten when Flux installs**.
-Either way the key is one no chart may set.
+it sets under the key that is not the component's is **refused under template delivery,
+overwritten when Flux installs**. Either way the key is one no chart should set.
 
 **What a synthesized policy selects.** A synthesized inbound or egress policy selects the
 value its entry's objects carry: the authored component's, also for an entry a lowering rule
@@ -637,6 +671,14 @@ generates. The case is reached only through a consumer's own lowering rule.
   `Pooler`'s pod template and `spec.podMetadata` of a `Prometheus`, `PrometheusAgent`,
   `Alertmanager` or `ThanosRuler` ([Reserved metadata keys](#reserved-metadata-keys)). A
   document that set a reserved key there built before and is refused now.
+
+**New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
+`ErrComponentLabelValue`, the error type `ComponentLabelError`, and the type
+`ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
+`ComponentLabelSelectorRequiresAnother`, `ComponentLabelInLabelsProperty` and
+`ComponentLabelOfAnotherComponent`. The refusal of a kind component's `labels` property
+that holds another value under the key, which the transform returned before as an error of
+no type, is a `*ComponentLabelError` now, with the same text.
 
 ## Reserved metadata keys
 
@@ -2511,7 +2553,8 @@ cause is not a refusal by the policy. No class is guessed from text. It covers:
 - a `ViolationError` literal that leaves `Class` out.
 
 Not violations, and so without a class: `ErrPlatformReserved` and `ErrReservedMetadataKey`,
-which stay the sentinels they were, and a `manifests` `url` source that cannot be fetched. One
+which stay the sentinels they were, `ErrComponentLabelValue`, which is a sentinel of the same
+kind, and a `manifests` `url` source that cannot be fetched. One
 fetch failure is a refusal by the policy all the same, a redirect to a host outside the allowed
 registries: its error holds a `PolicyRefusal` of class `RefusalRegistry`, which `errors.As`
 reaches, under no `ViolationError`.

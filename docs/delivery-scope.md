@@ -453,7 +453,12 @@ Decided in the ticket:
   labels, a pod template's, the labels a CloudNativePG Cluster or Pooler and the Prometheus
   operator kinds hand on to their pods, and the value a workload's selector requires. The
   key must be one nothing else writes. With `app` as the key, the value the built-in kinds
-  write for an entry a lowering rule named differently from its component is accepted too.
+  write for an entry a lowering rule named differently from its component is accepted too,
+  and the transform refuses a document in which such an entry's value is another
+  component's. Each refusal, and the one of a kind component's `labels` property that
+  holds another value under the key, is a `*ComponentLabelError`, found with `errors.As`
+  and answering to `ErrComponentLabelValue`: it says which of the four it is, the
+  component, the object, the path, the key and the value.
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per kind with a pod template
     (Deployment, StatefulSet, DaemonSet, Job, CronJob, ReplicaSet, ReplicationController,
@@ -464,8 +469,8 @@ Decided in the ticket:
     to use is one no chart sets, such as the default. Whether a chart's hook and test Pods
     pass through a post-renderer is not verified.
   - Chart output under template delivery: labels added to the rendered objects, where the
-    key is absent. A value the chart set under the key is refused under template delivery,
-    overwritten when Flux installs.
+    key is absent. A value the chart set under the key that is not the component's is
+    refused under template delivery, overwritten when Flux installs.
   - A generated workload whose own selector rules the label out keeps its pod template as
     written, and its pods carry no component label.
   - `GeneratedApplication.Component` is the authored component for the pooler, a database,

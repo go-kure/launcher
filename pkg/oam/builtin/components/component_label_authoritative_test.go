@@ -1,6 +1,8 @@
 package components_test
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -93,6 +95,8 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 		props   func(t *testing.T) map[string]any
 		// refused is what the refusal says; nil when the document builds.
 		refused []string
+		// kind is which refusal it is; empty for a value an object holds.
+		kind oam.ComponentLabelRefusal
 		// built checks the objects of a document that builds.
 		built func(t *testing.T, objs []client.Object)
 	}{
@@ -116,6 +120,7 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 				return map[string]any{"object": ptObject(t, deployment(foreign, "tier: front\n"))}
 			},
 			refused: []string{`Deployment "web"`, `spec.selector requires "db" for the label "` + key + `"`, `component "web" ("web")`},
+			kind:    oam.ComponentLabelSelectorRequiresAnother,
 		},
 		{
 			name: "passthrough Deployment, the component's own value", typ: "passthrough", handler: &components.PassthroughHandler{},
@@ -174,8 +179,9 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 			refused: refusedAt(`PodTemplate "web"`, "template.metadata.labels"),
 		},
 		{
-			// The kinds' own property refuses the value in the transform.
-			name: "pod kind, labels property", typ: "pod", handler: &components.PodHandler{},
+			// The kinds' own property refuses the value in the transform, before
+			// there is an object to name.
+			name: "pod kind, labels property", typ: "pod", handler: &components.PodHandler{}, kind: oam.ComponentLabelInLabelsProperty,
 			props: func(t *testing.T) map[string]any {
 				props := ptObject(t, htPlainPod)
 				props["labels"] = map[string]any{key: "db"}
@@ -236,6 +242,20 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 			if err == nil {
 				t.Fatal("the document built with another component's value for the component label")
 			}
+			kind := tc.kind
+			if kind == "" {
+				kind = oam.ComponentLabelForeignValue
+			}
+			got := clRefused(t, err, kind)
+			if got.Component != "web" || got.Key != key || got.Want != "web" {
+				t.Errorf("refusal = %+v, want component web, the key %s and the value web it should hold", *got, key)
+			}
+			if kind == oam.ComponentLabelInLabelsProperty {
+				want := oam.ComponentLabelError{Refused: kind, Component: "web", Path: "labels", Key: key, Value: "db", Want: "web"}
+				if !reflect.DeepEqual(*got, want) {
+					t.Errorf("refusal = %+v\nwant      %+v", *got, want)
+				}
+			}
 			for _, want := range tc.refused {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not say %s", err, want)
@@ -243,6 +263,21 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// clRefused checks err is the component label's refusal of the kind refused: it
+// answers to the sentinel and holds the typed error, through whatever the build
+// wrapped it in.
+func clRefused(t *testing.T, err error, refused oam.ComponentLabelRefusal) *oam.ComponentLabelError {
+	t.Helper()
+	var got *oam.ComponentLabelError
+	if !errors.Is(err, oam.ErrComponentLabelValue) || !errors.As(err, &got) {
+		t.Fatalf("the refusal %v is no *ComponentLabelError answering to ErrComponentLabelValue", err)
+	}
+	if got.Refused != refused {
+		t.Errorf("the refusal %v is of the kind %q, want %q", err, got.Refused, refused)
+	}
+	return got
 }
 
 // clRenameRule lowers a component to a deployment and a service entry, each
@@ -313,6 +348,9 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build = %v, want a refusal saying %s", err, want)
 		}
+		if got := clRefused(t, err, oam.ComponentLabelOfAnotherComponent); got.Component != "web" || got.Entry != "web-renamed" || got.Other != "web-renamed" {
+			t.Errorf("refusal = %+v, want component web, entry and other component web-renamed", *got)
+		}
 	})
 
 	t.Run("a chart's Deployment", func(t *testing.T) {
@@ -322,6 +360,9 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 		want := `Deployment "charted": spec.template.metadata.labels["app"]: "db" is not the component label of component "web" ("web")`
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build = %v, want a refusal saying %s", err, want)
+		}
+		if got := clRefused(t, err, oam.ComponentLabelForeignValue); got.Name != "charted" || got.Path != "spec.template.metadata.labels" || got.Key != "app" || got.Value != "db" {
+			t.Errorf("refusal = %+v, want the Deployment charted, its pod template's labels, app and db", *got)
 		}
 	})
 
@@ -336,6 +377,22 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 		want := `Deployment "web": spec.template.metadata.labels["app"]: "db" is not the component label of component "web" ("web")`
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build = %v, want a refusal saying %s", err, want)
+		}
+	})
+
+	// The kinds' own `app` check refuses the property first; under this key its
+	// refusal is the component label's.
+	t.Run("the labels property of a kind", func(t *testing.T) {
+		tr := oam.NewTransformer(map[string]oam.ComponentHandler{"pod": &components.PodHandler{}}, nil)
+		props := ptObject(t, htPlainPod)
+		props["labels"] = map[string]any{"app": "db"}
+		_, err := clGenerate(tr, mfApp("pod", props), ctx)
+		want := `labels["app"]: "db" is not the component label of component "web" ("web")`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want a refusal saying %s", err, want)
+		}
+		if got := clRefused(t, err, oam.ComponentLabelInLabelsProperty); got.Component != "web" || got.Path != "labels" || got.Key != "app" || got.Value != "db" || got.Want != "web" {
+			t.Errorf("refusal = %+v, want component web, the labels property, app, db and web", *got)
 		}
 	})
 }
