@@ -252,7 +252,7 @@ func TestCnpgPoolerHandler_EndpointMatchesPostgresqlPooler(t *testing.T) {
 	if len(pg) != 2 {
 		t.Fatalf("postgresql endpoints = %+v, want the cluster and the pooler", pg)
 	}
-	got, err := (&components.CnpgPoolerHandler{}).Endpoints(&oam.Component{Name: "orders-db-pooler", Type: "cnpg-pooler"})
+	got, err := (&components.CnpgPoolerHandler{}).Endpoints(&oam.Component{Name: "orders-db-pooler", Type: "cnpg-pooler", Properties: minimalPooler()})
 	if err != nil {
 		t.Fatalf("Endpoints: %v", err)
 	}
@@ -278,8 +278,8 @@ func TestCnpgPoolerHandler_EndpointMatchesPostgresqlPooler(t *testing.T) {
 // TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster: a pooler
 // whose cluster reference is its own name is refused by the build, and its
 // endpoint in the same words, so no selector is answered for a pooler that
-// cannot be built. Only that relation is checked there: a cluster reference the
-// decode refuses for another reason is still the decode's to refuse.
+// cannot be built. The endpoint runs the whole of the build's parse, so a
+// cluster reference the build refuses for another reason has none either.
 func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing.T) {
 	h := &components.CnpgPoolerHandler{}
 	pooler := func(cluster any) *oam.Component {
@@ -321,15 +321,23 @@ func TestCnpgPoolerHandler_EndpointsRefusesAPoolerNamedLikeItsCluster(t *testing
 		t.Errorf("unserializable properties: ToApplicationConfig err = %v, Endpoints err = %v; want one refusal from both", buildErr, endpointsErr)
 	}
 
+	eps, err := h.Endpoints(pooler(map[string]any{"name": "db"}))
+	if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/poolerName"] != "main" {
+		t.Errorf("another cluster: Endpoints = %+v, %v; want the pooler's own endpoint", eps, err)
+	}
+
+	// A cluster reference the build refuses for another reason: no endpoint,
+	// in the build's words.
 	for name, cluster := range map[string]any{
-		"another cluster": map[string]any{"name": "db"},
-		"no name":         map[string]any{},
-		"null":            nil,
-		"no object":       "main",
+		"no name":   map[string]any{},
+		"null":      nil,
+		"no object": "main",
 	} {
-		eps, err := h.Endpoints(pooler(cluster))
-		if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/poolerName"] != "main" {
-			t.Errorf("%s: Endpoints = %+v, %v; want the pooler's own endpoint", name, eps, err)
+		comp := pooler(cluster)
+		_, buildErr := h.ToApplicationConfig(comp, "data")
+		eps, endpointsErr := h.Endpoints(comp)
+		if buildErr == nil || endpointsErr == nil || buildErr.Error() != endpointsErr.Error() || eps != nil {
+			t.Errorf("%s: ToApplicationConfig err = %v, Endpoints = %+v, %v; want one refusal from both and no endpoint", name, buildErr, eps, endpointsErr)
 		}
 	}
 }
