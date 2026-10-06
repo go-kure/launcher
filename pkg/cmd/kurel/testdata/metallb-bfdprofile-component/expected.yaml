@@ -1,0 +1,24 @@
+apiVersion: metallb.io/v1beta1
+kind: BFDProfile
+metadata:
+  labels:
+    launcher.gokure.dev/component: fast
+  name: fast
+  namespace: metallb-system
+spec:
+  detectMultiplier: 3
+  echoInterval: 50
+  echoMode: false
+  minimumTtl: 254
+  passiveMode: true
+  receiveInterval: 300
+  transmitInterval: 300
+---
+apiVersion: metallb.io/v1beta1
+kind: BFDProfile
+metadata:
+  labels:
+    launcher.gokure.dev/component: defaults
+  name: unset
+  namespace: metallb-system
+spec: {}

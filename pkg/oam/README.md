@@ -1646,6 +1646,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `limitrange` |
 | `listenerset` |
 | `manifests` |
+| `metallb-bfdprofile` |
 | `metallb-bgpadvertisement` |
 | `metallb-ipaddresspool` |
 | `metallb-l2advertisement` |

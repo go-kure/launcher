@@ -1259,11 +1259,11 @@ its text:
     §7).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
-- **Shipped: three kinds of MetalLB's `metallb.io/v1beta1` API,**
-  `metallb-ipaddresspool`, `metallb-l2advertisement` and `metallb-bgpadvertisement`
-  (`metallb_ipaddresspool.go`, `metallb_l2advertisement.go`,
-  `metallb_bgpadvertisement.go`, with what the kinds of this API share in
-  `metallb_common.go`), each the strict projection of its spec type, built on
+- **Shipped: four kinds of MetalLB's `metallb.io/v1beta1` API,**
+  `metallb-ipaddresspool`, `metallb-l2advertisement`, `metallb-bgpadvertisement` and
+  `metallb-bfdprofile` (`metallb_ipaddresspool.go`, `metallb_l2advertisement.go`,
+  `metallb_bgpadvertisement.go`, `metallb_bfdprofile.go`, with what the kinds of this
+  API share in `metallb_common.go`), each the strict projection of its spec type, built on
   `policyFreeKind`, declaring its object and taking `objectName`. The type names carry
   the `metallb-` prefix as the kinds of Cilium's API carry theirs: both APIs have a pool
   of addresses and an advertisement for BGP.
@@ -1276,6 +1276,10 @@ its text:
     peers, for which Services, rolled up into which prefix length and with which
     LOCAL_PREF and communities. No field of it is required either, and one that authors
     nothing announces every pool to every peer.
+  - A BFD profile is the timers of the BFD session of the BGP peers that name it, and
+    so how fast the loss of such a peer is noticed. No field of it is required. Every
+    field is a pointer, so an authored 0 or false is written; the bounds the CRD sets
+    on the numbers are the API server's.
   - They are namespaced and written in the build namespace. MetalLB reads its objects
     in one namespace and in no other: the one it is configured to watch (its
     `--namespace` flag or `METALLB_NAMESPACE`), by default the one it runs in;
@@ -1283,11 +1287,11 @@ its text:
   - **No capability is required and nothing gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
     a test: a pool's `addresses`, and the key and the operator of a selector's match
-    expression in all three kinds.
+    expression in the three kinds that hold selectors.
   - The defaults the CRDs declare are carried: a pool's `autoAssign` and a BGP
     advertisement's two aggregation lengths sit on pointers, and `avoidBuggyIPs`
     defaults to the `false` the Go type omits; a test holds the defaults to that. The
-    L2 advertisement's CRD has none.
+    CRDs of the L2 advertisement and of the BFD profile have none.
   - **The one expression rule these CRDs declare is checked:** a BGP advertisement's
     `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or
     128 (IPv6). A test holds the kind's answer to the API server's, after the defaults

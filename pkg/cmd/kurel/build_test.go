@@ -517,6 +517,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"limitrange",
 		"listenerset",
 		"manifests",
+		"metallb-bfdprofile",
 		"metallb-bgpadvertisement",
 		"metallb-ipaddresspool",
 		"metallb-l2advertisement",
