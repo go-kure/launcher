@@ -177,6 +177,7 @@ reads it.
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `imagepolicy` | ImagePolicy | Kind-named Flux ImagePolicy: the whole `ImagePolicySpec`, strictly decoded; `imageRepositoryRef` with its `name` and `policy` are required, and of a `semver` policy its `range`. The policy may name the ImageRepository of another namespace, and nothing gates it. The API's expression rules are not checked. No environment policy applies — see below. |
+| `imageupdateautomation` | ImageUpdateAutomation | Kind-named Flux ImageUpdateAutomation: the whole `ImageUpdateAutomationSpec`, strictly decoded; `sourceRef` with its `kind` and `name` and `interval` are required, and of an authored `git` its `commit` with the author's `email`. The automation commits and pushes to the repository of the GitRepository it names, which may be one of another namespace, and nothing gates it. No environment policy applies — see below. |
 | `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, required, and `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `issuer` | Issuer | Kind-named cert-manager Issuer: the whole `IssuerSpec` (`acme`, `ca`, `vault`, `selfSigned`, `venafi`), strictly decoded; no top-level field is required. The cpu and memory of an ACME HTTP01 solver's pod template are held to the environment policy's maxima. No capability is required — see below. |
@@ -387,7 +388,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateHelmRepository` | source.toolkit.fluxcd.io/v1 HelmRepository | kind | `helmrepository` | strict decode of `HelmRepositorySpec` | - |
 | `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | kind | `imagepolicy` | strict decode of `ImagePolicySpec` | `imageRepositoryRef` with its `name` and `policy` must be written, and of a `semver` policy its `range`: the fields the linked Go source marks required, not held to a CRD. The repository's `namespace` is written as authored. `interval` is held to the pattern of a Flux duration; the API's two expression rules, which tie it to `digestReflectionPolicy: Always`, are not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateImageRepository` | image.toolkit.fluxcd.io/v1 ImageRepository | missing | - | - | - |
-| `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | missing | - | - | - |
+| `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | kind | `imageupdateautomation` | strict decode of `ImageUpdateAutomationSpec` | `sourceRef` with its `kind` and `name` and `interval` must be written, and of an authored `git` its `commit` with the author's `email`: the fields the linked Go source marks required, not held to a CRD. `sourceRef.kind` is defaulted by the API and required here, since the type writes it empty. The source's `namespace` is written as authored, and so is where the automation pushes. `interval` is held to the pattern of a Flux duration. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | kind | `fluxcd-kustomization` | strict decode of `KustomizationSpec` | `oci` lowers onto it. `targetNamespace` is never defaulted. |
 | `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` lowers onto it. |
 | `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | missing | - | - | - |
@@ -6910,10 +6911,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
-- **fluxcd-alert, imagepolicy** (go-kure/launcher#790) are the kind-named
-  projections of objects of the Flux APIs beside the sources, the HelmRelease
-  and the Kustomization: a notification.toolkit.fluxcd.io/v1beta3 Alert and
-  an image.toolkit.fluxcd.io/v1 ImagePolicy. Each is built on
+- **fluxcd-alert, imagepolicy, imageupdateautomation**
+  (go-kure/launcher#790) are the kind-named projections of objects of the
+  Flux APIs beside the sources, the HelmRelease and the Kustomization: a
+  notification.toolkit.fluxcd.io/v1beta3 Alert, and an
+  image.toolkit.fluxcd.io/v1 ImagePolicy and ImageUpdateAutomation. Each is
+  built on
   `policyFreeKind` (above) with two additions, the Flux namespace and the
   check of its durations (`fluxKind`), and emits that one object, named
   after the component unless `objectName` names it; the handler adds no
@@ -6951,6 +6954,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     references to the ImageRepository object based on the caller's namespace
     labels"; launcher reads no ImageRepository to see whether the one named
     allows it. An ImagePolicy names no account.
+  - `imageupdateautomation`: `sourceRef.namespace` names the namespace of
+    the GitRepository that, in the API's words, gives "access details to a
+    git repository". **An ImageUpdateAutomation makes its controller commit
+    to that repository and push**, to the branch the GitRepository or
+    `git.checkout.ref` names, or to `git.push.branch` and `git.push.refspec`;
+    so one that names another namespace's GitRepository writes to a
+    repository with the access details that GitRepository gives. Nothing
+    holds the
+    branch or the refspec either. It names no account. The ImagePolicies
+    whose selections it applies are those of the namespace it lands in
+    (`policySelector` narrows them; it names no other namespace), and the
+    Secret of `git.commit.signingKey` is one of that namespace too.
 
   **Authored.** The properties are the top-level json fields of the spec
   type, decoded strictly at every depth: an unknown key is refused wherever
@@ -6963,9 +6978,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `digestReflectionPolicy`, `interval` and `suspend`. An authored
     `filterTags` is written with both its `pattern` and its `extract`, the
     one left out as the empty string: the Go type omits neither.
+  - `imageupdateautomation` (`ImageUpdateAutomationSpec`): `sourceRef`,
+    `git` (`checkout`, `commit`, `push`), `interval`, `policySelector`,
+    `update` and `suspend`. `git.commit.messageTemplate` is a template the
+    controller renders; launcher writes it as authored and does not parse
+    it.
   - **No default is filled.** The API's own (`eventSeverity: info`,
-    `digestReflectionPolicy: Never`, a policy's `order: asc`) is applied by
-    the API server to what the object leaves out.
+    `digestReflectionPolicy: Never`, a policy's `order: asc`,
+    `update: {strategy: Setters}`) is applied by the API server to what the
+    object leaves out. One default cannot apply: `sourceRef.kind`, which
+    the API defaults to `GitRepository` and the Go type writes empty when
+    it is left out, an empty value being a value. It is required instead
+    (below).
     `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
     boolean that is omitted when zero and that the API defaults to something
     else.
@@ -6977,7 +7001,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`0.5ms` as `500µs`). It is written as Go formats it (`10m` as
     `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
     of durations to its type and to the pattern markers of the linked
-    source: an ImagePolicy's `interval`; an Alert has none.
+    source: the `interval` of an ImagePolicy and of an
+    ImageUpdateAutomation; an Alert has none.
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, the rule every kind follows (see the Prometheus
@@ -6988,6 +7013,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     each source its `kind` and `name`.
   - An `imagepolicy`: `imageRepositoryRef` with its `name`, and `policy`; of
     a `semver` policy its `range`.
+  - An `imageupdateautomation`: `sourceRef` with its `kind` and `name`, and
+    `interval`. Of an authored `git`, `commit` with its `author` and the
+    author's `email`; of an authored `git.checkout`, its `ref`; of an
+    authored `git.commit.signingKey`, its `secretRef` with its `name`.
 
   **The lists are read from the markers of the Go source, not from a CRD.**
   The API modules of the Flux controllers hold the Go types and ship no CRD,
@@ -7006,7 +7035,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the type documents and no marker states;
   - a `policy` that names none of `semver`, `alphabetical` and `numerical`,
     or more than one: the type calls it a union, and no marker holds it to
-    one.
+    one;
+  - an `imageupdateautomation` with no `git`, which the type documents as
+    "technically optional, but in practice mandatory" and no marker
+    requires; the pattern of `git.push.refspec` and the enumerations
+    (`sourceRef.kind`, `update.strategy`, a signing key's `type`);
+  - the `key` and the `operator` of a `policySelector.matchExpressions`
+    entry: they are fields of a Kubernetes type, whose source carries no
+    marker for them and is not read for these lists, and each left out is
+    written empty.
 
   **The APIs' expression rules are not checked.** A kind checks an
   expression rule only where the check is held to the API server's own
@@ -7016,7 +7053,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `TestFluxKinds_ExpressionRules` reads every such rule from the markers of
   the linked source and holds the list (`fluxRulesLeft`) to them, so a
   dependency bump that adds or rewords one fails there.
-  - An Alert's types declare none.
+  - The types of an Alert and of an ImageUpdateAutomation declare none.
   - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
     and `digestReflectionPolicy: Always` without `interval`. Each builds and
     is refused at apply.
@@ -7031,6 +7068,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     policy holds the rule by which one of that image's tags is selected.
     The allowed registries and the tag rule of the environment policy are
     not applied to it.
+  - **No field of an ImageUpdateAutomation holds a secret or a host.** The
+    address of the repository and its credentials are the GitRepository's,
+    and the signing key is a Secret named by `git.commit.signingKey`, not a
+    value. `git.commit.messageTemplateValues` and `git.push.options` are
+    free maps, written to the object as authored under a policy that
+    forbids explicit secrets too. **The images the automation writes into
+    the repository are not held to the allowed registries or the tag
+    rule:** they are what the ImagePolicies select at run time, and no
+    build sees them.
 
   **Namespace.** The object lands in the Flux namespace when one is
   configured, else in the build namespace (`SetFluxNamespace`), as the Flux
@@ -7041,13 +7087,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
   a kind reads by name from the namespace it lands in, so that a trait's
   object one of them names moves with it; an Alert and an ImagePolicy read
-  none.
+  none, and an ImageUpdateAutomation reads the Secret of
+  `git.commit.signingKey.secretRef`.
 
   **Labels and annotations** are the `labels` and `annotations` properties.
 
   **Not covered.** Whether what is referred to exists (the Provider, the
-  objects of a source, the ImageRepository), whether a `filterTags` pattern
-  or a `semver` range parses, and whether the cluster serves the API: the
+  objects of a source, the ImageRepository, the GitRepository, the signing
+  key's Secret), whether a `filterTags` pattern, a `semver` range or a
+  commit message template parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`

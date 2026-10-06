@@ -84,6 +84,11 @@ func (h *ImagePolicyHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ImageUpdateAutomationHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(imageUpdateAutomationType)
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *HelmRepositoryHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("helmrepository")
 }

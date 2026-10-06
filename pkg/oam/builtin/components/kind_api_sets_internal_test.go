@@ -15,6 +15,7 @@ import (
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -469,6 +470,16 @@ var apiSetKinds = []apiSetKind{
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
 	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
 	{component: "imagepolicy", typ: reflect.TypeFor[imagev1.ImagePolicySpec](), source: markerAPISource},
+	{
+		component: "imageupdateautomation", typ: reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), source: markerAPISource,
+		build: handlerBuild(&ImageUpdateAutomationHandler{}, "imageupdateautomation"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}, "interval": "30m"}
+		}},
+		// The API defaults the kind of the source and the type writes it
+		// empty, which is a value and not the default.
+		defaultRefused: []string{"sourceRef.kind"},
+	},
 	{component: "ingress", typ: reflect.TypeFor[networkingv1.IngressSpec](), source: markerAPISource},
 	{component: "ingressclass", typ: reflect.TypeFor[networkingv1.IngressClassSpec](), source: markerAPISource},
 	{component: "issuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1")},

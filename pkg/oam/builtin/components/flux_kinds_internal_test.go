@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +30,8 @@ import (
 var fluxMarkerModules = []string{
 	"github.com/fluxcd/notification-controller/api",
 	"github.com/fluxcd/image-reflector-controller/api",
+	"github.com/fluxcd/image-automation-controller/api",
+	"github.com/fluxcd/source-controller/api",
 	"github.com/fluxcd/pkg/apis/meta",
 }
 
@@ -45,6 +48,7 @@ var fluxKindRows = []struct {
 }{
 	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations)},
 	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations)},
+	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations)},
 }
 
 // durationForms is a kind's duration fields by path, each with its form.
@@ -197,7 +201,7 @@ func TestFluxKinds_NoDefaultedZeros(t *testing.T) {
 			}
 		})
 	}
-	for _, at := range []string{"AlertSpec: suspend", "ImagePolicySpec: suspend"} {
+	for _, at := range []string{"AlertSpec: suspend", "ImagePolicySpec: suspend", "ImageUpdateAutomationSpec: suspend"} {
 		if !walked[at] {
 			t.Errorf("the walk did not reach %s; it found %v", at, slices.Sorted(maps.Keys(walked)))
 		}
