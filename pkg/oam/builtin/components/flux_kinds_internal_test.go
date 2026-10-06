@@ -27,14 +27,20 @@ import (
 // API modules of the Flux controllers hold the Go types and ship no CRD, so
 // the markers the CRDs are generated from are the source, as for the kinds of
 // the Prometheus operator's API. Nothing here is held to the API server's own
-// validator (crdCreate), which answers from a CRD.
+// validator (crdCreate), which answers from a CRD. The shared type modules are
+// meta, the kustomize one a Kustomization's patches and images are declared
+// in, and the access-control one a HelmRepository's accessFrom is declared in.
 var fluxMarkerModules = []string{
 	"github.com/fluxcd/notification-controller/api",
 	"github.com/fluxcd/image-reflector-controller/api",
 	"github.com/fluxcd/image-automation-controller/api",
 	"github.com/fluxcd/source-controller/api",
 	"github.com/fluxcd/source-watcher/api/v2",
+	"github.com/fluxcd/helm-controller/api",
+	"github.com/fluxcd/kustomize-controller/api",
 	"github.com/fluxcd/pkg/apis/meta",
+	"github.com/fluxcd/pkg/apis/kustomize",
+	"github.com/fluxcd/pkg/apis/acl",
 }
 
 // fluxKindRows lists the kind components of those APIs with the spec type each

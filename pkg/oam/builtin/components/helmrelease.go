@@ -159,9 +159,10 @@ func (h *HelmReleaseHandler) UnsupportedFieldHint(key string) string {
 // ToApplicationConfig decodes the component's properties strictly into a
 // helmv2.HelmReleaseSpec. Any key HelmReleaseSpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: exactly one of chart
-// and chartRef, values a JSON object, each valuesFrom entry within the
-// ValuesReference CRD's constraints. Every other constraint is left to Flux's
-// own CRD admission.
+// and chartRef, the kind of a chart's source reference, values a JSON object,
+// each valuesFrom entry within the ValuesReference CRD's constraints, and
+// chart.spec.verify.provider not an authored "". Every other constraint is
+// left to Flux's own CRD admission.
 func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties)
 	if err != nil {
@@ -172,6 +173,9 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, errors.Errorf("helmrelease: properties do not decode as a HelmReleaseSpec: %w%s", err, hint)
 	}
 	if err := checkAuthoredFluxDurations("helmrelease", component.Properties, helmReleaseDurations); err != nil {
+		return nil, err
+	}
+	if err := refuseEmptyFluxVerifyProvider(component.Properties, "chart", "spec", "verify"); err != nil {
 		return nil, err
 	}
 	cfg := &HelmReleaseConfig{
@@ -204,8 +208,9 @@ type HelmReleaseConfig struct {
 	Namespace string
 
 	// Spec is the HelmRelease spec as authored. Generate copies it and
-	// applies the interval default, the releaseName default and the
-	// targetNamespace default under a Flux namespace to that copy.
+	// applies the interval default, the releaseName default, the
+	// chart.spec.verify.provider default and the targetNamespace default
+	// under a Flux namespace to that copy.
 	Spec helmv2.HelmReleaseSpec
 
 	// fluxNS overrides the HelmRelease's namespace. Set by
@@ -235,6 +240,12 @@ func (c *HelmReleaseConfig) fluxNamespace() string {
 func (c *HelmReleaseConfig) validate() error {
 	if (c.Spec.Chart == nil) == (c.Spec.ChartRef == nil) {
 		return errors.New("helmrelease: exactly one of chart and chartRef is required")
+	}
+	// The API marks the kind of a chart's source reference required, and the
+	// type leaves an empty one out of the object. A kind does not choose the
+	// source's kind for the author.
+	if c.Spec.Chart != nil && c.Spec.Chart.Spec.SourceRef.Kind == "" {
+		return errors.New("chart.spec.sourceRef.kind: required (the Flux API takes HelmRepository, GitRepository or Bucket)")
 	}
 	if err := checkFluxDurations("helmrelease", &c.Spec, helmReleaseDurations); err != nil {
 		return err
@@ -362,6 +373,9 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	}
 	// validate has already accepted it.
 	hr.Spec.ReleaseName, _ = c.releaseName()
+	if hr.Spec.Chart != nil && hr.Spec.Chart.Spec.Verify != nil {
+		fillFluxVerifyProvider(&hr.Spec.Chart.Spec.Verify.Provider)
+	}
 	// Under a Flux namespace the HelmRelease no longer sits in the
 	// application namespace, and Flux installs a release into the
 	// HelmRelease's own namespace unless targetNamespace says otherwise. So

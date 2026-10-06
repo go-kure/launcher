@@ -15,9 +15,12 @@ import (
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -361,6 +364,7 @@ var apiSetKinds = []apiSetKind{
 		}},
 		refused: []string{"targetRefs"},
 	},
+	{component: "bucket", typ: reflect.TypeFor[sourcev1.BucketSpec](), source: markerAPISource},
 	{
 		component: "certificate", typ: reflect.TypeFor[certv1.CertificateSpec](),
 		source: crdAPISource(certManagerModulePath, certManagerCRDs+"certificates.yaml", "v1"),
@@ -468,8 +472,30 @@ var apiSetKinds = []apiSetKind{
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
 	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), source: markerAPISource},
+	{component: "fluxcd-kustomization", typ: reflect.TypeFor[kustv1.KustomizationSpec](), source: markerAPISource},
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
+	{component: "gitrepository", typ: reflect.TypeFor[sourcev1.GitRepositorySpec](), source: markerAPISource},
+	{
+		component: "helmchart", typ: reflect.TypeFor[sourcev1.HelmChartSpec](), source: markerAPISource,
+		// The API defaults the provider of a verification and the type always
+		// writes it: the kind writes the default where none was authored, and
+		// refuses an authored empty one (TestFluxKinds_VerifyProviderDefault).
+		filled: map[string]string{"verify.provider": fluxVerifyProviderDefault},
+	},
+	{
+		component: "helmrelease", typ: reflect.TypeFor[helmv2.HelmReleaseSpec](), source: markerAPISource,
+		build: handlerBuild(&HelmReleaseHandler{}, "helmrelease"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"chart": map[string]any{"spec": map[string]any{
+				"chart": "app", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "charts"},
+			}}}
+		}},
+		refused: []string{"chart.spec.sourceRef.kind"},
+		// The provider of a verification, as on helmchart.
+		filled: map[string]string{"chart.spec.verify.provider": fluxVerifyProviderDefault},
+	},
+	{component: "helmrepository", typ: reflect.TypeFor[sourcev1.HelmRepositorySpec](), source: markerAPISource},
 	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
 	{component: "imagepolicy", typ: reflect.TypeFor[imagev1.ImagePolicySpec](), source: markerAPISource},
 	{
@@ -500,6 +526,11 @@ var apiSetKinds = []apiSetKind{
 	},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
 	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
+	{
+		component: "ocirepository", typ: reflect.TypeFor[sourcev1.OCIRepositorySpec](), source: markerAPISource,
+		// The provider of a verification, as on helmchart.
+		filled: map[string]string{"verify.provider": fluxVerifyProviderDefault},
+	},
 	{component: "persistentvolume", typ: reflect.TypeFor[corev1.PersistentVolumeSpec](), source: markerAPISource},
 	{component: "pod", typ: reflect.TypeFor[corev1.PodSpec](), source: markerAPISource, listed: podSpecOmitted("")},
 	{component: "poddisruptionbudget", typ: reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), source: markerAPISource},

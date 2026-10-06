@@ -54,13 +54,16 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig decodes the component's properties strictly into a
 // sourcev1.OCIRepositorySpec: any key OCIRepositorySpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: url is set and starts
-// with oci://.
+// with oci://, and verify.provider is not an authored "".
 func (h *OCIRepositoryHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[sourcev1.OCIRepositorySpec](component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("ocirepository: properties do not decode as an OCIRepositorySpec: %w", err)
 	}
 	if err := checkAuthoredFluxDurations("ocirepository", component.Properties, ociRepositoryDurations); err != nil {
+		return nil, err
+	}
+	if err := refuseEmptyFluxVerifyProvider(component.Properties, "verify"); err != nil {
 		return nil, err
 	}
 	cfg := &OCIRepositoryConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
@@ -86,7 +89,7 @@ type OCIRepositoryConfig struct {
 	// unless a Flux namespace is set (SetFluxNamespace).
 	Namespace string
 	// Spec is the OCIRepository spec as authored. Generate copies it and
-	// applies the interval default to the copy.
+	// applies the interval default and the verify.provider default to the copy.
 	Spec sourcev1.OCIRepositorySpec
 
 	// fluxNS overrides the OCIRepository's namespace. Set by
@@ -124,5 +127,8 @@ func (c *OCIRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&repo.Spec.Interval)
+	if repo.Spec.Verify != nil {
+		fillFluxVerifyProvider(&repo.Spec.Verify.Provider)
+	}
 	return emitFluxSource("ocirepository", repo, repo.Spec.Timeout, c.Metadata)
 }
