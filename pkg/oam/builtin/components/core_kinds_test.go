@@ -114,6 +114,7 @@ var coreKindSchemas = []struct {
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
 	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
 	{"imagepolicy", reflect.TypeFor[imagev1.ImagePolicySpec](), &components.ImagePolicyHandler{}, nil},
+	{"imagerepository", reflect.TypeFor[imagev1.ImageRepositorySpec](), &components.ImageRepositoryHandler{}, nil},
 	{"imageupdateautomation", reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), &components.ImageUpdateAutomationHandler{}, nil},
 	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},

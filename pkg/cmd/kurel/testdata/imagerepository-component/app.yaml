@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: imagerepository
+      properties:
+        image: ghcr.io/example/web
+        interval: 10m
+    - name: api
+      type: imagerepository
+      properties:
+        objectName: api-builds
+        image: registry.example.com/shop/api
+        interval: 1h
+        timeout: 90m
+        secretRef:
+          name: registry-credentials
+        proxySecretRef:
+          name: registry-proxy
+        certSecretRef:
+          name: registry-tls
+        serviceAccountName: scanner
+        accessFrom:
+          namespaceSelectors:
+            - matchLabels:
+                team: shop
+        exclusionList:
+          - "^.*\\.sig$"
+          - "^.*\\.att$"
+        provider: generic
