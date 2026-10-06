@@ -175,6 +175,7 @@ reads it.
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
+| `imagepolicy` | ImagePolicy | Kind-named Flux ImagePolicy: the whole `ImagePolicySpec`, strictly decoded; `imageRepositoryRef` with its `name` and `policy` are required, and of a `semver` policy its `range`. The policy may name the ImageRepository of another namespace, and nothing gates it. The API's expression rules are not checked. No environment policy applies — see below. |
 | `ingress` | Ingress | Kind-named Ingress: the whole `IngressSpec` (`ingressClassName`, `defaultBackend`, `tls`, `rules`), strictly decoded. An authored object, not the `ingress` trait: no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `ingressclass` | IngressClass | Kind-named IngressClass: the whole `IngressClassSpec` (`controller`, required, and `parameters`), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `issuer` | Issuer | Kind-named cert-manager Issuer: the whole `IssuerSpec` (`acme`, `ca`, `vault`, `selfSigned`, `venafi`), strictly decoded; no top-level field is required. The cpu and memory of an ACME HTTP01 solver's pod template are held to the environment policy's maxima. No capability is required — see below. |
@@ -383,7 +384,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateHelmChart` | source.toolkit.fluxcd.io/v1 HelmChart | kind | `helmchart` | strict decode of `HelmChartSpec` | - |
 | `fluxcd.CreateHelmRelease` | helm.toolkit.fluxcd.io/v2 HelmRelease | kind | `helmrelease` | strict decode of `HelmReleaseSpec` | `helm` lowers onto it. |
 | `fluxcd.CreateHelmRepository` | source.toolkit.fluxcd.io/v1 HelmRepository | kind | `helmrepository` | strict decode of `HelmRepositorySpec` | - |
-| `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | missing | - | - | - |
+| `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | kind | `imagepolicy` | strict decode of `ImagePolicySpec` | `imageRepositoryRef` with its `name` and `policy` must be written, and of a `semver` policy its `range`: the fields the linked Go source marks required, not held to a CRD. The repository's `namespace` is written as authored. `interval` is held to the pattern of a Flux duration; the API's two expression rules, which tie it to `digestReflectionPolicy: Always`, are not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateImageRepository` | image.toolkit.fluxcd.io/v1 ImageRepository | missing | - | - | - |
 | `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | missing | - | - | - |
 | `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | kind | `fluxcd-kustomization` | strict decode of `KustomizationSpec` | `oci` lowers onto it. `targetNamespace` is never defaulted. |
@@ -6753,14 +6754,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
-- **fluxcd-alert** (go-kure/launcher#790) is the kind-named projection of an
-  object of the Flux APIs beside the sources, the HelmRelease and the
-  Kustomization: a notification.toolkit.fluxcd.io/v1beta3 Alert. It is built
-  on `policyFreeKind` (above) with one addition, the Flux namespace
-  (`fluxKind`), and emits that one object, named after the component unless
-  `objectName` names it; the handler adds no label, no annotation and no
-  default. The type is `fluxcd-alert` rather than `alert`, which beside a
-  `prometheusrule` would read as an alerting rule.
+- **fluxcd-alert, imagepolicy** (go-kure/launcher#790) are the kind-named
+  projections of objects of the Flux APIs beside the sources, the HelmRelease
+  and the Kustomization: a notification.toolkit.fluxcd.io/v1beta3 Alert and
+  an image.toolkit.fluxcd.io/v1 ImagePolicy. Each is built on
+  `policyFreeKind` (above) with two additions, the Flux namespace and the
+  check of its durations (`fluxKind`), and emits that one object, named
+  after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default. The type is `fluxcd-alert` rather
+  than `alert`, which beside a `prometheusrule` would read as an alerting
+  rule.
 
   **Nothing gates what a Flux object reaches outside its namespace, or the
   identity it acts under.** A Flux object may name objects of another
@@ -6784,18 +6787,41 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     to another namespace's Flux objects to a receiver its author chose.
     `providerRef` holds a name and no namespace: the Provider is one of the
     namespace the Alert lands in. An Alert names no account.
+  - `imagepolicy`: `imageRepositoryRef.namespace` names the namespace of
+    the ImageRepository whose scanned tags the policy selects from, so an
+    ImagePolicy may name the ImageRepository of another namespace and read
+    the tags it scanned. The API documents, on the
+    ImageRepository, an `accessFrom` list "for allowing cross-namespace
+    references to the ImageRepository object based on the caller's namespace
+    labels"; launcher reads no ImageRepository to see whether the one named
+    allows it. An ImagePolicy names no account.
 
   **Authored.** The properties are the top-level json fields of the spec
   type, decoded strictly at every depth: an unknown key is refused wherever
-  it sits (a source, the provider reference).
+  it sits (a source, a reference, a policy).
   - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
     `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
     `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
-  - **No default is filled.** The API's own (`eventSeverity: info`) is
-    applied by the API server to what the object leaves out.
+  - `imagepolicy` (`ImagePolicySpec`): `imageRepositoryRef`, `policy`
+    (`semver`, `alphabetical`, `numerical`), `filterTags`,
+    `digestReflectionPolicy`, `interval` and `suspend`. An authored
+    `filterTags` is written with both its `pattern` and its `extract`, the
+    one left out as the empty string: the Go type omits neither.
+  - **No default is filled.** The API's own (`eventSeverity: info`,
+    `digestReflectionPolicy: Never`, a policy's `order: asc`) is applied by
+    the API server to what the object leaves out.
     `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
     boolean that is omitted when zero and that the API defaults to something
     else.
+  - **A duration is held to the pattern its field declares**, as on the Flux
+    kinds above (go-kure/launcher#601): unsigned, in the units `ms`, `s`,
+    `m` and `h`. A value outside it is refused (`imagepolicy: interval
+    "-5m" is invalid: must be a Flux duration (…)`), and so is one below a
+    millisecond, which would be written in a unit the pattern does not take
+    (`0.5ms` as `500µs`). It is written as Go formats it (`10m` as
+    `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
+    of durations to its type and to the pattern markers of the linked
+    source: an ImagePolicy's `interval`; an Alert has none.
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, the rule every kind follows (see the Prometheus
@@ -6804,6 +6830,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   value, and the API server's to refuse.
   - A `fluxcd-alert`: `providerRef` with its `name`, and `eventSources`; of
     each source its `kind` and `name`.
+  - An `imagepolicy`: `imageRepositoryRef` with its `name`, and `policy`; of
+    a `semver` policy its `range`.
 
   **The lists are read from the markers of the Go source, not from a CRD.**
   The API modules of the Flux controllers hold the Go types and ship no CRD,
@@ -6815,19 +6843,38 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   server's own validator, which answers from a CRD. **Not refused:**
   - a list the API wants an item of that is authored empty
     (`eventSources: []`);
-  - every value rule of the API: enumerations (`eventSeverity`, a source's
-    `kind`), lengths (a source's `name` and `namespace`, `summary`), and
-    that a source with `matchLabels` is named `*`, which the type documents
-    and no marker states.
+  - every value rule of the API but the pattern of a duration: enumerations
+    (`eventSeverity`, a source's `kind`, `digestReflectionPolicy`, a
+    policy's `order`), lengths (a source's `name` and `namespace`,
+    `summary`), and that a source with `matchLabels` is named `*`, which
+    the type documents and no marker states;
+  - a `policy` that names none of `semver`, `alphabetical` and `numerical`,
+    or more than one: the type calls it a union, and no marker holds it to
+    one.
 
-  **The APIs' expression rules.** An Alert's types declare none.
+  **The APIs' expression rules are not checked.** A kind checks an
+  expression rule only where the check is held to the API server's own
+  validator, which answers from a CRD (go-kure/launcher#874), and the linked
+  modules of these APIs ship none. A component that breaks one of the rules
+  below builds, and the API server refuses the object at apply.
+  `TestFluxKinds_ExpressionRules` reads every such rule from the markers of
+  the linked source and holds the list (`fluxRulesLeft`) to them, so a
+  dependency bump that adds or rewords one fails there.
+  - An Alert's types declare none.
+  - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
+    and `digestReflectionPolicy: Always` without `interval`. Each builds and
+    is refused at apply.
 
   **Policy.** No dimension of the environment policy reaches these objects:
-  they run no pod, hold no image, request no storage and have no replica
-  count.
+  they run no pod, request no storage and have no replica count.
   - **No field of an Alert holds a secret or a host.** The address and the
     credentials are the Provider's. `eventMetadata` is a free map, written to
     the object as authored under a policy that forbids explicit secrets too.
+  - **No field of an ImagePolicy holds an image, a secret or a host.** The
+    image and the credentials of its registry are the ImageRepository's; the
+    policy holds the rule by which one of that image's tags is selected.
+    The allowed registries and the tag rule of the environment policy are
+    not applied to it.
 
   **Namespace.** The object lands in the Flux namespace when one is
   configured, else in the build namespace (`SetFluxNamespace`), as the Flux
@@ -6837,12 +6884,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`helmrelease`, `fluxcd-kustomization`, the sources) land in the Flux
   namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
   a kind reads by name from the namespace it lands in, so that a trait's
-  object one of them names moves with it; an Alert reads none.
+  object one of them names moves with it; an Alert and an ImagePolicy read
+  none.
 
   **Labels and annotations** are the `labels` and `annotations` properties.
 
   **Not covered.** Whether what is referred to exists (the Provider, the
-  objects of a source), and whether the cluster serves the API: the
+  objects of a source, the ImageRepository), whether a `filterTags` pattern
+  or a `semver` range parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
   at apply. The object's status is the controller's and is not written.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`

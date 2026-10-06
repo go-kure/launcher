@@ -57,6 +57,35 @@ func fluxAlertFull() map[string]any {
 	}
 }
 
+// imagePolicySemver is the policy of an imagepolicy that selects the highest
+// tag of a semantic version range.
+func imagePolicySemver() map[string]any {
+	return map[string]any{"semver": map[string]any{"range": ">=1.0.0"}}
+}
+
+// imagePolicyMinimal is the least an imagepolicy may author.
+func imagePolicyMinimal() map[string]any {
+	return map[string]any{"imageRepositoryRef": map[string]any{"name": "web"}, "policy": imagePolicySemver()}
+}
+
+// imagePolicyFull sets every field of an ImagePolicySpec, the three policies
+// at once, which no marker of the API refuses. Its repository is one of
+// another namespace.
+func imagePolicyFull() map[string]any {
+	return map[string]any{
+		"imageRepositoryRef": map[string]any{"name": "web", "namespace": "registry"},
+		"policy": map[string]any{
+			"semver":       map[string]any{"range": "1.x"},
+			"alphabetical": map[string]any{"order": "asc"},
+			"numerical":    map[string]any{"order": "desc"},
+		},
+		"filterTags":             map[string]any{"pattern": "^main-[a-f0-9]+-(?P<ts>[0-9]+)", "extract": "$ts"},
+		"digestReflectionPolicy": "Always",
+		"interval":               "10m",
+		"suspend":                true,
+	}
+}
+
 // fluxKinds returns the rows of policyFreeKinds that move to the Flux
 // namespace.
 func fluxKinds(t *testing.T) []policyFreeKind {
@@ -164,6 +193,9 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		// An Alert names a Provider, which is the object that holds the
 		// address and the credentials.
 		"fluxcd-alert": {{props: fluxAlertFull()}},
+		// An ImagePolicy names an ImageRepository, which is the object that
+		// holds the credentials of the registry.
+		"imagepolicy": {{props: imagePolicyFull()}},
 	}
 	for _, kind := range fluxKinds(t) {
 		if len(cases[kind.component]) == 0 {
