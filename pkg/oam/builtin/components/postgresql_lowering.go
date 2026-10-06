@@ -236,11 +236,19 @@ func postgresqlReserveMember(lctx oam.LoweringContext, name, what string) error 
 	if lctx.Document != nil {
 		for _, other := range lctx.Document.Spec.Components {
 			if other.Name == name {
-				return errors.Errorf("%s: generates component %q, which is already the name of component %q (type %q) in the document; rename one of them", what, name, other.Name, other.Type)
+				return postgresqlMemberNameTaken(what, name, &other)
 			}
 		}
 	}
 	return nil
+}
+
+// postgresqlMemberNameTaken is the refusal of a member that would carry the
+// name of other, a component of the document. It is one text for the lowering
+// (postgresqlReserveMember) and for EndpointsNamed, which repeats it for the
+// one component it is given: the postgresql component itself.
+func postgresqlMemberNameTaken(what, name string, other *oam.Component) error {
+	return errors.Errorf("%s: generates component %q, which is already the name of component %q (type %q) in the document; rename one of them", what, name, other.Name, other.Type)
 }
 
 // postgresqlMemberPolicies returns the policies that keep the members (the

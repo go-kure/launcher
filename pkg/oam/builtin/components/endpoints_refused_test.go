@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,48 +85,62 @@ func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) 
 
 // TestPostgresqlRule_EndpointsForAPoolerNamedLikeItsComponent: the lowering
 // refuses a Pooler that would carry the name of the postgresql component it is
-// generated from. EndpointsNamed is handed that one component, so it can see
-// the same thing, and answers both endpoints where the Cluster is named apart,
-// or refuses in the words of another rule where it is not. (A name the consumer
-// hook gives the Pooler is shown where the hook is set, at the transformer's
-// endpoint entry.)
+// generated from. EndpointsNamed is handed that one component, so it sees the
+// same thing and refuses it in the lowering's words, ahead of the Pooler's own
+// rule against carrying its Cluster's name, as the lowering does. (A name the
+// consumer hook gives the Pooler is shown where the hook is set, at the
+// transformer's endpoint entry.)
+//
+// A Pooler named like another component of the document is refused by the
+// lowering alike, and not by EndpointsNamed, which is not given the document.
 func TestPostgresqlRule_EndpointsForAPoolerNamedLikeItsComponent(t *testing.T) {
-	const lowering = `pooler: generates component "db", which is already the name of component "db" (type "postgresql") in the document; rename one of them`
 	pooler := map[string]any{"enabled": true}
+	lower := func(comp oam.Component) error {
+		doc := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp, {Name: "api", Type: "webservice"}}}}
+		_, err := components.PostgresqlRule{}.LowerComponent(&comp, oam.LoweringContext{Document: doc, Namer: oam.NewNameAllocator()})
+		return err
+	}
+	endpoints := func(comp oam.Component) ([]string, error) {
+		eps, err := components.PostgresqlRule{}.EndpointsNamed(&comp, oam.LoweringContext{Component: &comp, Namer: oam.NewNameAllocator()})
+		var selected []string
+		for _, ep := range eps {
+			for key, value := range ep.PodSelector.MatchLabels {
+				selected = append(selected, key+"="+value)
+			}
+		}
+		return selected, err
+	}
+
+	const own = `pooler: generates component "db", which is already the name of component "db" (type "postgresql") in the document; rename one of them`
 	for _, tc := range []struct {
 		name  string
 		props map[string]any
-		// today is the entry's refusal today, "" where it answers two endpoints.
-		today string
 	}{
-		{
-			name:  "the Cluster named apart",
-			props: map[string]any{"pooler": pooler, "clusterObjectName": "pg", "poolerName": "db"},
-		},
-		{
-			name:  "the Cluster named like the component",
-			props: map[string]any{"pooler": pooler, "poolerName": "db"},
-			today: `cluster.name "db": a pooler cannot have the same name as its cluster`,
-		},
+		{"the Cluster named apart", map[string]any{"pooler": pooler, "clusterObjectName": "pg", "poolerName": "db"}},
+		{"the Cluster named like the component", map[string]any{"pooler": pooler, "poolerName": "db"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			comp := oam.Component{Name: "db", Type: "postgresql", Properties: tc.props}
-			doc := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
-			_, err := components.PostgresqlRule{}.LowerComponent(&comp, oam.LoweringContext{Document: doc, Namer: oam.NewNameAllocator()})
-			if err == nil || !strings.Contains(err.Error(), lowering) {
-				t.Fatalf("LowerComponent err = %v\nwant one containing %q", err, lowering)
+			lowerErr := lower(comp)
+			if lowerErr == nil || lowerErr.Error() != own {
+				t.Fatalf("LowerComponent err = %v\nwant %q", lowerErr, own)
 			}
-
-			eps, err := components.PostgresqlRule{}.EndpointsNamed(&comp, oam.LoweringContext{Component: &comp, Namer: oam.NewNameAllocator()})
-			if tc.today == "" {
-				if err != nil || len(eps) != 2 {
-					t.Errorf("EndpointsNamed = %+v, %v\nwant today's answer: two endpoints and no refusal", eps, err)
-				}
-				return
-			}
-			if err == nil || err.Error() != tc.today {
-				t.Errorf("EndpointsNamed err = %v\nwant today's refusal %q", err, tc.today)
+			selected, err := endpoints(comp)
+			if err == nil || err.Error() != own || selected != nil {
+				t.Errorf("EndpointsNamed = %v, %v\nwant no endpoint and the lowering's refusal %q", selected, err, own)
 			}
 		})
 	}
+
+	t.Run("another component's name is not seen", func(t *testing.T) {
+		comp := oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"pooler": pooler, "poolerName": "api"}}
+		const other = `pooler: generates component "api", which is already the name of component "api" (type "webservice") in the document; rename one of them`
+		if err := lower(comp); err == nil || err.Error() != other {
+			t.Fatalf("LowerComponent err = %v\nwant %q", err, other)
+		}
+		selected, err := endpoints(comp)
+		if want := []string{"cnpg.io/cluster=db", "cnpg.io/poolerName=api"}; err != nil || !slices.Equal(selected, want) {
+			t.Errorf("EndpointsNamed = %v, %v\nwant %v", selected, err, want)
+		}
+	})
 }
