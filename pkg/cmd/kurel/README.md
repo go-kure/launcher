@@ -135,6 +135,7 @@ at its position.
 | `csidriver` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 | `endpointslice` | A Service named by `objectName`, an EndpointSlice in the build namespace whose authored `kubernetes.io/service-name` label holds that name as a literal, and a slice that authors only its address type. |
 | `externalsecret` | An ExternalSecret in the build namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `fluxcd-alert` | Two Alerts in the build namespace, no Flux namespace being set for the build, one named by `objectName` and reading the events of another namespace's Kustomizations. No capability is required to build it. |
 | `gateway` | A Gateway in the build namespace. No capability is required of the cluster profile to build it. |
 | `gatewayclass` | A GatewayClass with no namespace. No capability is required of the cluster profile to build it. |
 | `horizontalpodautoscaler` | A HorizontalPodAutoscaler in the build namespace, holding what was authored. |

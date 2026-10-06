@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: releases
+      type: fluxcd-alert
+      properties:
+        providerRef:
+          name: slack
+        eventSources:
+          - kind: HelmRelease
+            name: "*"
+    - name: shop-failures
+      type: fluxcd-alert
+      properties:
+        objectName: shop-kustomization-failures
+        providerRef:
+          name: slack
+        eventSeverity: error
+        eventSources:
+          - kind: Kustomization
+            name: "*"
+            namespace: shop
+            matchLabels:
+              team: shop
+        exclusionList:
+          - "^Dependencies do not meet ready condition.*"
+        eventMetadata:
+          cluster: east

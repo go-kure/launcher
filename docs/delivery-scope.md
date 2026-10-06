@@ -1160,6 +1160,21 @@ its text:
     empty (`null`, `null`, `{}`).
   - **Hosts are not checked:** the addresses of an endpoint, FQDNs included, are not
     artifact sources and are not held to the allowed registries.
+- **Shipped: a kind of the Flux APIs beside the sources, the HelmRelease and the
+  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`, with what such kinds share in
+  `kind_flux.go`): the strict projection of its spec type, declaring its object and
+  taking `objectName`. It is built on `policyFreeKind` with one addition, the Flux
+  namespace: the object lands there when one is set, as the Flux kinds above do, and
+  reports what it reads there by name (`FluxNamespaceReads`; an Alert reads nothing).
+  - **Nothing gates what such an object reaches outside its namespace:** a source's
+    `namespace` on an Alert is written as authored, as the references and the accounts
+    of a `helmrelease` and a `fluxcd-kustomization` are. No environment policy applies
+    and no `Policy` method is added.
+  - Required fields follow the rule of the Prometheus operator's kinds, and are derived
+    as theirs are, from the `+required` markers of the linked modules' Go source: the
+    API modules of the Flux controllers ship no CRD, so no list is held to the API
+    server's validator.
+  - No default is filled, and the API's value rules are the API server's.
 - **Shipped: `servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`**
   (`servicecidr.go`, `poddisruptionbudget.go`, `horizontalpodautoscaler.go`), each the
   strict projection of its spec type, declaring its object and taking `objectName`.

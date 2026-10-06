@@ -11,6 +11,7 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -101,6 +102,7 @@ var coreKindSchemas = []struct {
 	// object, less its identity.
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
 	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
+	{"fluxcd-alert", reflect.TypeFor[notificationv1beta3.AlertSpec](), &components.FluxcdAlertHandler{}, nil},
 	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
 	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},

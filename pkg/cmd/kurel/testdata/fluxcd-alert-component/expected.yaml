@@ -1,0 +1,35 @@
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  labels:
+    launcher.gokure.dev/component: releases
+  name: releases
+  namespace: default
+spec:
+  eventSources:
+  - kind: HelmRelease
+    name: '*'
+  providerRef:
+    name: slack
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  labels:
+    launcher.gokure.dev/component: shop-failures
+  name: shop-kustomization-failures
+  namespace: default
+spec:
+  eventMetadata:
+    cluster: east
+  eventSeverity: error
+  eventSources:
+  - kind: Kustomization
+    matchLabels:
+      team: shop
+    name: '*'
+    namespace: shop
+  exclusionList:
+  - ^Dependencies do not meet ready condition.*
+  providerRef:
+    name: slack
