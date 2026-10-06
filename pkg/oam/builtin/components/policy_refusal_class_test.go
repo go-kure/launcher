@@ -355,6 +355,10 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			name: "imagerepository, image registry", class: oam.RefusalRegistry, typ: "imagerepository", handler: &components.ImageRepositoryHandler{},
 			props: props(map[string]any{"image": "registry.other.example/shop/web", "interval": "10m"}),
 		},
+		{
+			name: "resourcesetinputprovider, url host", class: oam.RefusalRegistry, typ: "resourcesetinputprovider", handler: &components.ResourceSetInputProviderHandler{},
+			props: props(map[string]any{"type": "GitHubPullRequest", "url": "https://git.other.example/shop/fleet"}),
+		},
 		{name: "pod, cpu limit", class: oam.RefusalResourceMaximum, typ: "pod", handler: &components.PodHandler{}, props: pod(rcCPULimit)},
 		{name: "persistentvolume, capacity", class: oam.RefusalStorageMaximum, typ: "persistentvolume", handler: &components.PersistentVolumeHandler{}, props: pod(pvOverMax)},
 		{

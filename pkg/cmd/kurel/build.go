@@ -354,6 +354,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"replicationdestination":          &components.ReplicationDestinationHandler{},
 		"replicationsource":               &components.ReplicationSourceHandler{},
 		"resourcequota":                   &components.ResourceQuotaHandler{},
+		"resourcesetinputprovider":        &components.ResourceSetInputProviderHandler{},
 		"role":                            &components.RoleHandler{},
 		"rolebinding":                     &components.RoleBindingHandler{},
 		"runtimeclass":                    &components.RuntimeClassHandler{},

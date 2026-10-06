@@ -107,6 +107,7 @@ var validComponentTypes = map[string]bool{
 	"replicationdestination":          true,
 	"replicationsource":               true,
 	"resourcequota":                   true,
+	"resourcesetinputprovider":        true,
 	"role":                            true,
 	"rolebinding":                     true,
 	"runtimeclass":                    true,

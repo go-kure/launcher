@@ -1,0 +1,36 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: previews
+      type: resourcesetinputprovider
+      properties:
+        type: GitHubPullRequest
+        url: https://github.example/shop/app
+        secretRef:
+          name: github-token
+        defaultValues:
+          env: preview
+        filter:
+          labels:
+            - deploy/preview
+          limit: 10
+        skip:
+          labels:
+            - "!ready"
+        schedule:
+          - cron: "0 8 * * 1-5"
+            timeZone: Europe/Brussels
+            window: 90m
+    - name: artifacts
+      type: resourcesetinputprovider
+      properties:
+        objectName: fleet-artifacts
+        type: ExternalArtifact
+        selectors:
+          - namespace: "*"
+            matchLabels:
+              team: shop
