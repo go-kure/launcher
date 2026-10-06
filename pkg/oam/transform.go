@@ -574,9 +574,17 @@ func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, er
 // the name the transform gives the object, the author's, else the one naming returns,
 // else the default. naming is asked the NameRequest the transform asks for that name,
 // and an answer that is no valid name for its role is refused here with the transform's
-// message. What the transform refuses for a reason only the document shows is not seen
-// here, which is given one component: a name that is already a component of the
-// document, or that another object of it has.
+// message.
+//
+// An endpoint answered here, or by ComponentEndpoints, is not the build's verdict on
+// the document. Both are given one component and hold to one rule: an endpoint entry
+// answers only for a component its type's own parse accepts, and refuses another in the
+// parse's words. Three things it cannot know: neither runs the schema check
+// (ValidateAuthoredProperties), neither is given the policy or what generation refuses
+// after it, and neither sees what only the document shows: a name that is already
+// another component of the document, a name another component generates in the same
+// run, or two objects that collide. The package README states the rule and the three
+// limits ("Name roles and the Naming hook").
 //
 // application is the name of the document comp is authored in, as the transform puts
 // it in that request (NameRequest.Application): the document's metadata.name, or,
