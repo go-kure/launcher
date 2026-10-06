@@ -1265,9 +1265,10 @@ its text:
     §7).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
-- **Shipped: two kinds of MetalLB's `metallb.io/v1beta1` API,** `metallb-ipaddresspool`
-  and `metallb-l2advertisement` (`metallb_ipaddresspool.go`,
-  `metallb_l2advertisement.go`, with what the kinds of this API share in
+- **Shipped: three kinds of MetalLB's `metallb.io/v1beta1` API,**
+  `metallb-ipaddresspool`, `metallb-l2advertisement` and `metallb-bgpadvertisement`
+  (`metallb_ipaddresspool.go`, `metallb_l2advertisement.go`,
+  `metallb_bgpadvertisement.go`, with what the kinds of this API share in
   `metallb_common.go`), each the strict projection of its spec type, built on
   `policyFreeKind`, declaring its object and taking `objectName`. The type names carry
   the `metallb-` prefix as the kinds of Cilium's API carry theirs: both APIs have a pool
@@ -1277,6 +1278,10 @@ its text:
   - An L2 advertisement says which pools' addresses MetalLB announces on the local
     network, from which nodes and interfaces, for which Services. No field of it is
     required and each narrows it: one that authors nothing limits none of them.
+  - A BGP advertisement says which pools' addresses MetalLB announces to which BGP
+    peers, for which Services, rolled up into which prefix length and with which
+    LOCAL_PREF and communities. No field of it is required either, and one that authors
+    nothing announces every pool to every peer.
   - They are namespaced and written in the build namespace. MetalLB reads its objects
     in one namespace and in no other: the one it is configured to watch (its
     `--namespace` flag or `METALLB_NAMESPACE`), by default the one it runs in;
@@ -1284,11 +1289,16 @@ its text:
   - **No capability is required and nothing gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
     a test: a pool's `addresses`, and the key and the operator of a selector's match
-    expression in both kinds.
-  - The pool CRD's two defaults are carried: `autoAssign` sits on a pointer, and
-    `avoidBuggyIPs` defaults to the `false` the Go type omits; a test holds the
-    defaults to that. The advertisement's CRD has none. Neither CRD declares an
-    expression rule, and a test fails on one that is added.
+    expression in all three kinds.
+  - The defaults the CRDs declare are carried: a pool's `autoAssign` and a BGP
+    advertisement's two aggregation lengths sit on pointers, and `avoidBuggyIPs`
+    defaults to the `false` the Go type omits; a test holds the defaults to that. The
+    L2 advertisement's CRD has none.
+  - **The one expression rule these CRDs declare is checked:** a BGP advertisement's
+    `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or
+    128 (IPv6). A test holds the kind's answer to the API server's, after the defaults
+    the API server fills, and fails on a rule that is added or reworded. The CRD's
+    other value rules (the minimum of `aggregationLength`) are the API server's.
   - **MetalLB's validating webhook was not read, and nothing it refuses is repeated.**
   - **No address a pool holds is held to the allowed registries:** none is an artifact
     source. **No field is checked for a literal secret:** none holds one, and none
