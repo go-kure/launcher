@@ -395,6 +395,7 @@ spec:
 	"imagepolicy": {props: map[string]any{
 		"imageRepositoryRef": map[string]any{"name": "web"},
 		"policy":             map[string]any{"semver": map[string]any{"range": ">=1.0.0"}}}},
+	"imagerepository": {props: map[string]any{"image": "registry.example.com/org/web", "interval": "10m"}},
 	"imageupdateautomation": {props: map[string]any{
 		"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"},
 		"interval":  "30m"}},
