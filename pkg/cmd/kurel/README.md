@@ -150,6 +150,7 @@ at its position.
 | `listenerset` | A ListenerSet in the build namespace. No capability is required of the cluster profile to build it. |
 | `metallb-bfdprofile` | Two BFDProfile objects in the build namespace, one with every field, an authored `echoMode: false` among them, and one that authors nothing but its `objectName`. No capability is required to build it. |
 | `metallb-bgpadvertisement` | Three BGPAdvertisement objects in the build namespace: one that rolls addresses up, one with a service selector alone, and one that authors nothing but its `objectName`. No capability is required to build it. |
+| `metallb-community` | Two Community objects in the build namespace, one with three aliases, one of them a value the writer quotes (`64512:10`, which YAML 1.1 reads as a base-60 number where it is not quoted), and one that authors nothing but its `objectName`. No capability is required to build it. |
 | `metallb-ipaddresspool` | Two IPAddressPool objects in the build namespace, one with every field, one named by `objectName` with its addresses alone. No capability is required to build it. |
 | `metallb-l2advertisement` | Two L2Advertisement objects in the build namespace, one with every field, one named by `objectName` that authors nothing else and is written with an empty spec. No capability is required to build it. |
 | `namespace` | |

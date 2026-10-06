@@ -1,0 +1,24 @@
+apiVersion: metallb.io/v1beta1
+kind: Community
+metadata:
+  labels:
+    launcher.gokure.dev/component: aliases
+  name: aliases
+  namespace: metallb-system
+spec:
+  communities:
+  - name: no-export
+    value: 65535:65281
+  - name: backup
+    value: "64512:10"
+  - name: transit
+    value: large:64512:100:1
+---
+apiVersion: metallb.io/v1beta1
+kind: Community
+metadata:
+  labels:
+    launcher.gokure.dev/component: none
+  name: no-alias
+  namespace: metallb-system
+spec: {}

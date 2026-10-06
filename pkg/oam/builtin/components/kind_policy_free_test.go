@@ -47,11 +47,11 @@ import (
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
 // policy and a node configuration), the five kinds of the Gateway API's
 // infrastructure objects, the EndpointSlice, the first of them that is a
-// whole object in a namespace, and four of MetalLB's API (an address pool, an
-// advertisement on the local network, one over BGP and a BFD profile). The
-// three kinds of cert-manager's API and the four of the External Secrets
-// Operator's are held here too: the policy reaches one part of each (held),
-// and everything else of them is the helper's.
+// whole object in a namespace, and five of MetalLB's API (an address pool, an
+// advertisement on the local network, one over BGP, a BFD profile and a set
+// of community aliases). The three kinds of cert-manager's API and the four of
+// the External Secrets Operator's are held here too: the policy reaches one
+// part of each (held), and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -528,6 +528,17 @@ var policyFreeKinds = []policyFreeKind{
 			"peers":            []any{"upstream-a", "upstream-b"},
 			"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}},
 		},
+	},
+	{
+		component: "metallb-community", handler: &components.MetalLBCommunityHandler{},
+		gvk: metallbv1beta1.GroupVersion.WithKind("Community"),
+		typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), namespaced: true,
+		// No field is required: a Community that defines no alias is one.
+		minimal: map[string]any{},
+		full: map[string]any{"communities": []any{
+			map[string]any{"name": "no-export", "value": "65535:65281"},
+			map[string]any{"name": "transit", "value": "large:64512:100:1"},
+		}},
 	},
 	{
 		component: "metallb-ipaddresspool", handler: &components.MetalLBIPAddressPoolHandler{},
@@ -1349,6 +1360,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.NodeSelectors[0].MatchExpressions", ".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Peers",
 			".Spec.ServiceSelectors", ".Spec.ServiceSelectors[0].MatchLabels",
 		},
+		"metallb-community": {".Spec.Communities"},
 		"metallb-ipaddresspool": {
 			".Spec.Addresses", ".Spec.AutoAssign", ".Spec.AllocateTo", ".Spec.AllocateTo.Namespaces",
 			".Spec.AllocateTo.NamespaceSelectors", ".Spec.AllocateTo.NamespaceSelectors[0].MatchLabels",
@@ -2177,6 +2189,19 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", map[string]any{"serviceSelectors": []any{map[string]any{}, nil}}, "serviceSelectors[1]"},
 			{"two spellings", map[string]any{"peers": []any{"upstream-a"}, "Peers": []any{"upstream-b"}}, "sets the same field as"},
 		},
+		"metallb-community": {
+			{"unknown key", map[string]any{"aliases": []any{}}, notA + "metallb.io/v1beta1 CommunitySpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"communities": []any{}}}, notA},
+			// MetalLB's Go type has a status, and no field of the spec is one.
+			{"the object's status", map[string]any{"status": map[string]any{}}, notA},
+			{"alias sub-key", map[string]any{"communities": []any{map[string]any{"name": "transit", "community": "64512:100"}}}, notA},
+			{"communities an object", map[string]any{"communities": map[string]any{"transit": "64512:100"}}, notA},
+			{"an alias a string", map[string]any{"communities": []any{"64512:100"}}, notA},
+			{"an alias's name a number", map[string]any{"communities": []any{map[string]any{"name": 1, "value": "64512:100"}}}, notA},
+			{"an alias's value a number", map[string]any{"communities": []any{map[string]any{"name": "transit", "value": 64512}}}, notA},
+			{"null alias", map[string]any{"communities": []any{map[string]any{"name": "transit"}, nil}}, "communities[1]"},
+			{"two spellings", map[string]any{"communities": []any{}, "Communities": []any{}}, "sets the same field as"},
+		},
 		"metallb-ipaddresspool": {
 			{"no properties", nil, "addresses: required"},
 			{"null addresses", map[string]any{"addresses": nil}, "addresses: required"},
@@ -2956,6 +2981,34 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	// multiplier under its minimum is.
 	if got, want := spec("metallb-bfdprofile", map[string]any{"passiveMode": false, "receiveInterval": 0, "detectMultiplier": 1}), "map[detectMultiplier:1 passiveMode:false receiveInterval:0]"; got != want {
 		t.Errorf("spec = %s, want %s", got, want)
+	}
+
+	aliases := build("metallb-community", full["metallb-community"]).(*metallbv1beta1.Community)
+	if got, want := aliases.Spec.Communities, []metallbv1beta1.CommunityAlias{
+		{Name: "no-export", Value: "65535:65281"}, {Name: "transit", Value: "large:64512:100:1"},
+	}; !slices.Equal(got, want) {
+		t.Errorf("communities = %+v, want %+v, in order", got, want)
+	}
+	// A Community that authors nothing, or an empty list, carries an empty spec:
+	// it defines no alias.
+	for name, props := range map[string]map[string]any{"nothing": {}, "an empty list": {"communities": []any{}}} {
+		if got, want := spec("metallb-community", props), "map[]"; got != want {
+			t.Errorf("a Community that authors %s: spec = %s, want %s", name, got, want)
+		}
+	}
+	// The name and the value of an alias are strings the type leaves out when
+	// empty, and the CRD requires neither: an empty one is not written, and an
+	// alias that authors nothing is written empty.
+	if got, want := spec("metallb-community", map[string]any{"communities": []any{
+		map[string]any{"name": "", "value": "64512:100"}, map[string]any{},
+	}}), "map[communities:[map[value:64512:100] map[]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// The form of a value is not read, and neither is a name used twice.
+	if err := coreKindErr(kinds["metallb-community"].handler, "metallb-community", "fast", map[string]any{"communities": []any{
+		map[string]any{"name": "transit", "value": "not-a-community"}, map[string]any{"name": "transit", "value": "64512:100"},
+	}}); err != nil {
+		t.Errorf("a value of no known form under a name used twice: %v, want it accepted", err)
 	}
 }
 

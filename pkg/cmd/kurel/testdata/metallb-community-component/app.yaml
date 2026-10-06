@@ -1,0 +1,21 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: metallb-system
+spec:
+  components:
+    - name: aliases
+      type: metallb-community
+      properties:
+        communities:
+          - name: no-export
+            value: "65535:65281"
+          - name: backup
+            value: "64512:10"
+          - name: transit
+            value: large:64512:100:1
+    - name: none
+      type: metallb-community
+      properties:
+        objectName: no-alias
