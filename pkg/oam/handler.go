@@ -175,14 +175,35 @@ const HookGroupNamePrefixProperty = "hookGroupNamePrefix"
 // with a prefix that is not the default, and not at all for the default, which
 // the config builds itself. A prefix it is handed is used as written: the
 // config never shortens it, and refuses a layout name built from it that
-// cannot be a Flux Kustomization's. A config built directly, outside a
-// transform, is never handed one.
+// cannot be a Flux Kustomization's (HookGroupNameChecker says where). A config
+// built directly, outside a transform, is never handed one.
 type HookGroupNamePrefixSetter interface {
 	// AuthoredHookGroupNamePrefix returns the prefix the author wrote and
 	// whether the author wrote one: a present empty string is an authored
 	// prefix, and refused.
 	AuthoredHookGroupNamePrefix() (prefix string, authored bool)
 	SetHookGroupNamePrefix(prefix string)
+}
+
+// HookGroupNameChecker is an optional interface for a HookGroupNamePrefixSetter
+// config that can say, before its layout is built, whether a hook-group name
+// built from its prefix is refused. The transform calls CheckHookGroupNames
+// once per component, after the environment policy (Enforceable.ApplyPolicy)
+// and the component's post-policy steps, and fails with what it returns.
+//
+// The names exist only once the chart is rendered, and the transform renders
+// nothing itself: a helmtemplate config renders in ApplyPolicy, to hold the
+// rendered objects to the policy. The transform always applies one, the
+// default NoopPolicy when TransformContext.Policy is nil, so in a transform the
+// chart is rendered by the time of the call and an over-long name fails the
+// transform. The config still refuses the name itself when its layout is built
+// (AugmentLayout), which is what a config built directly meets, and a prefix
+// set on a config after its transform.
+type HookGroupNameChecker interface {
+	// CheckHookGroupNames returns the refusal of a hook-group name built from
+	// the config's prefix, a *HookGroupNameError for one that is too long, and
+	// nil while the config has not rendered its chart. It renders nothing.
+	CheckHookGroupNames() error
 }
 
 // ServiceAccountNamer is an optional interface for component ApplicationConfig

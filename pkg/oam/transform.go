@@ -1004,6 +1004,16 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 		}
 
+		// A config that rendered its chart for the policy knows its hook-group
+		// names now, and one the prefix resolved above makes too long is refused
+		// here instead of when the layout is built (HookGroupNameChecker). The
+		// policy is never nil here, so a helmtemplate config has rendered.
+		if checked, ok := config.(HookGroupNameChecker); ok {
+			if err := checked.CheckHookGroupNames(); err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+		}
+
 		// ctx.Domain was validated + normalized at the top of TransformWithPolicy; the
 		// per-component re-validation inside ClassifyComponentWithDomain is idempotent.
 		tier, err := ClassifyComponentWithDomain(&component, ctx.Domain)

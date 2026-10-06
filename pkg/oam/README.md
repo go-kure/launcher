@@ -768,11 +768,41 @@ built after the render. With the default prefix the layout name is shortened to 
 characters and the Kustomization's name to 63, each with its `-<NN>-<phase>` suffix whole, so
 the two differ for a long default. A prefix the author or the hook set is used as written in
 both, and is never shortened: a prefix that is no DNS-1123 subdomain is refused in the
-transform, and a child name over 63 characters built from it is refused by `AugmentLayout`,
-in an error that carries the component, the role and the full name. A consumer that calls
-only `Generate` writes no hook-group layout and never sees that refusal. On a `helm`
-component under `delivery: flux` the property is refused: a HelmRelease installs the chart,
-no hook-group layout exists, and the prefix would name nothing.
+transform, and so is a child name over 63 characters built from it, in an error that carries
+the component, the role and the full name. On a `helm` component under `delivery: flux` the
+property is refused: a HelmRelease installs the chart, no hook-group layout exists, and the
+prefix would name nothing.
+
+**The over-long name fails the transform** (go-kure/launcher#787). It used to fail only when
+the layout was built, in `AugmentLayout`. The names exist once the chart is rendered, and the
+transform has it rendered: it holds every config to the environment policy, the default
+`NoopPolicy` when `TransformContext.Policy` is nil, and a `helmtemplate` config renders its
+chart for that step. Right after it the transform asks the config for the refusal
+(`HookGroupNameChecker`, an optional interface of a config that takes a prefix) and returns
+it behind its own prefix, `component "db": …`. So every transform refuses the name, whether
+or not it was given a policy, and a consumer that only calls `Generate`, which writes no
+hook-group layout, is refused as well. `AugmentLayout` still refuses the same name with the
+same error. That is the one a consumer meets outside a transform: on a `HelmTemplateConfig`
+it built directly, and on a config whose `HookGroupNamePrefix` it set after the transform.
+
+A caller tells the refusal from every other error without reading its text, from either
+place: `errors.Is(err, oam.ErrHookGroupNameTooLong)` is true, and `errors.As` finds the
+`*oam.HookGroupNameError`:
+
+```go
+var tooLong *oam.HookGroupNameError
+if errors.As(err, &tooLong) {
+	// tooLong.Component, tooLong.Role ("hook-group")
+	// tooLong.Name, tooLong.Length, tooLong.Limit (63), tooLong.Prefix
+}
+```
+
+`Name` is the longest of the component's hook-group names, so a prefix short enough for it
+fits every group; `Length` counts it as the text does; `Prefix` is what the author or the
+hook gave; `ComponentType` is `helmtemplate`, also for a `helm` component under
+`delivery: template`, which is lowered to one. The text is unchanged. The other refusal of
+a hook-group name, one that is no DNS-1123 subdomain, is not this error: a transform checks
+the prefix before any name is built, so only a prefix no transform resolved reaches it.
 
 **Limit: the transform holds the prefixes apart, not the names built from them.** Those
 exist only after the render, and two different prefixes can still give one Kustomization

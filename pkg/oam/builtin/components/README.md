@@ -5648,9 +5648,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `hookGroupNamePrefix` property, or the `Naming` hook's answer for the `hook-group` role
   (go-kure/launcher#787), replaces `<application>-<component>` in the name of every child,
   directory and Kustomization alike. Such a prefix is a DNS-1123 subdomain and is never
-  shortened: a child name over 63 characters built from it fails `AugmentLayout`, in an error
-  with the component, the role and the full name, and two components of one document that
-  resolve to one prefix fail the transform. Known limit: the transform holds the prefixes
+  shortened: a child name over 63 characters built from it fails the transform, in an error
+  with the component, the role and the full name (`*oam.HookGroupNameError`, which answers
+  to `oam.ErrHookGroupNameTooLong`), and two components of one document that
+  resolve to one prefix fail the transform. The transform has the chart rendered by its
+  policy step, with or without a policy of the caller's, and asks the config then
+  (`CheckHookGroupNames`); `AugmentLayout` returns the same error for a config built
+  directly or a prefix set after the transform. Known limit: the transform holds the prefixes
   apart, not the names built from them after the render, so two different prefixes can still
   give one Kustomization name (a shortened default that equals a written prefix; a prefix
   that ends as another chart's phase begins). kure refuses that name, used twice, when the

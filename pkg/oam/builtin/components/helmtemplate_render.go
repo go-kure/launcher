@@ -462,11 +462,7 @@ func (r *chartRender) partition(naming hookGroupNaming, ml *layout.ManifestLayou
 	if r.emitted == nil {
 		r.objects()
 	}
-	suffixes := make([]string, len(r.emitted))
-	for i, g := range r.emitted {
-		suffixes[i] = hookGroupSuffix(i, g)
-	}
-	names, err := naming.childNames(ml.Name, suffixes)
+	names, err := naming.childNames(ml.Name, r.childSuffixes())
 	if err != nil {
 		return err
 	}
@@ -493,6 +489,31 @@ func (r *chartRender) partition(naming hookGroupNaming, ml *layout.ManifestLayou
 		ml.Children = append(ml.Children, child)
 	}
 	return nil
+}
+
+// childSuffixes returns what ends the name of each hook-group child layout
+// partition creates (hookGroupSuffix), in order: none with at most one hook
+// group, which is not partitioned.
+//
+// It reads the render (hookGroups), while partition creates its children from
+// the copy (emitted) and names child i by suffix i. The two are the same list
+// of groups: render alone assigns hookGroups, once (it returns early when
+// rendered is set); objects alone assigns emitted, as one group per group of
+// hookGroups, at the same index, with its Phase and Weight and a copy of every
+// one of its objects. Nothing is left out between the two: an object of a phase
+// with no place in a GitOps lifecycle (a test hook, a delete or rollback hook)
+// is dropped by the split in parseChartManifests, before hookGroups exists, so
+// its group is in neither. That is also why the names can be checked as soon as
+// the chart is rendered, before any Generate.
+func (r *chartRender) childSuffixes() []string {
+	if len(r.hookGroups) <= 1 {
+		return nil
+	}
+	suffixes := make([]string, len(r.hookGroups))
+	for i, g := range r.hookGroups {
+		suffixes[i] = hookGroupSuffix(i, g)
+	}
+	return suffixes
 }
 
 // parseChartManifests decodes multi-doc YAML produced by renderChart and
@@ -992,10 +1013,7 @@ type hookGroupChildNames struct{ dir, kustomization string }
 // leaves every directory where it was (go-kure/launcher#787).
 //
 // A prefix is used as written, for both names, and never shortened: a child
-// name built from it that is over 63 characters, or no DNS-1123 subdomain, is
-// refused, naming the component, the role and the whole name. The longest
-// child name is the one refused for its length, so the prefix length the
-// message asks for fits every child.
+// name built from it that cannot be a Flux Kustomization's is refused (check).
 func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGroupChildNames, error) {
 	names := make([]hookGroupChildNames, len(suffixes))
 	if n.prefix == "" {
@@ -1008,6 +1026,29 @@ func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGro
 		}
 		return names, nil
 	}
+	if err := n.check(suffixes); err != nil {
+		return nil, err
+	}
+	for i, suffix := range suffixes {
+		names[i] = hookGroupChildNames{dir: n.prefix + suffix, kustomization: n.prefix + suffix}
+	}
+	return names, nil
+}
+
+// check refuses a child name built from n.prefix and one of suffixes that is
+// over 63 characters, or no DNS-1123 subdomain, naming the component, the role
+// and the whole name. With no prefix it refuses nothing: the default is
+// shortened. The longest child name is the one refused for its length, as an
+// *oam.HookGroupNameError, so the prefix length the message asks for fits every
+// child.
+//
+// It needs the suffixes and nothing of the layout, so it is the same refusal
+// wherever the render is known: when the layout is built (childNames), and in a
+// transform that rendered the chart (HelmTemplateConfig.CheckHookGroupNames).
+func (n hookGroupNaming) check(suffixes []string) error {
+	if n.prefix == "" {
+		return nil
+	}
 	longest := ""
 	for _, suffix := range suffixes {
 		if len(suffix) > len(longest) {
@@ -1015,16 +1056,22 @@ func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGro
 		}
 	}
 	if name := n.prefix + longest; len(name) > hookGroupKustomizationNameLimit {
-		return nil, errors.Errorf("%s: component %q: hook-group name %q (role %q) is %d characters, and a Flux Kustomization name has at most %d; its prefix %q was set by %s or returned by the Naming hook and is never shortened: use a prefix of at most %d characters, or none for the default, which is shortened",
-			helmTemplateType, n.component, name, oam.NameRoleHookGroup, len(name), hookGroupKustomizationNameLimit, n.prefix, oam.HookGroupNamePrefixProperty, hookGroupKustomizationNameLimit-len(longest))
+		return &oam.HookGroupNameError{
+			ComponentType: helmTemplateType,
+			Component:     n.component,
+			Role:          oam.NameRoleHookGroup,
+			Name:          name,
+			Length:        len(name),
+			Limit:         hookGroupKustomizationNameLimit,
+			Prefix:        n.prefix,
+		}
 	}
-	for i, suffix := range suffixes {
+	for _, suffix := range suffixes {
 		name := n.prefix + suffix
 		if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
-			return nil, errors.Errorf("%s: component %q: hook-group name %q (role %q) is not a valid DNS-1123 subdomain: %s; its prefix %q was set by %s or returned by the Naming hook",
+			return errors.Errorf("%s: component %q: hook-group name %q (role %q) is not a valid DNS-1123 subdomain: %s; its prefix %q was set by %s or returned by the Naming hook",
 				helmTemplateType, n.component, name, oam.NameRoleHookGroup, strings.Join(errs, "; "), n.prefix, oam.HookGroupNamePrefixProperty)
 		}
-		names[i] = hookGroupChildNames{dir: name, kustomization: name}
 	}
-	return names, nil
+	return nil
 }
