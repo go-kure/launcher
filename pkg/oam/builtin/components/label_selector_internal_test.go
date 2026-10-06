@@ -30,6 +30,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -180,6 +181,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"metallbv1beta1.CommunitySpec":               reflect.TypeFor[metallbv1beta1.CommunitySpec](),
 	"metallbv1beta1.IPAddressPoolSpec":           reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
 	"metallbv1beta1.L2AdvertisementSpec":         reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
+	"metallbv1beta2.BGPPeerSpec":                 reflect.TypeFor[metallbv1beta2.BGPPeerSpec](),
 	"monitoringv1.PodMonitorSpec":                reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 	"monitoringv1.ProbeSpec":                     reflect.TypeFor[monitoringv1.ProbeSpec](),
 	"monitoringv1.PrometheusRuleSpec":            reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
@@ -605,6 +607,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		component: "metallb-bgpadvertisement", typ: "metallbv1beta1.BGPAdvertisementSpec", config: kindConfig(&MetalLBBGPAdvertisementHandler{}),
 		base: map[string]any{},
 		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_bgpadvertisements.yaml", metallbVersion),
+	},
+	{
+		component: "metallb-bgppeer", typ: "metallbv1beta2.BGPPeerSpec", config: kindConfig(&MetalLBBGPPeerHandler{}),
+		base: map[string]any{"myASN": 64512},
+		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_bgppeers.yaml", metallbPeerVersion),
 	},
 }
 

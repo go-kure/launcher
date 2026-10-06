@@ -1312,6 +1312,34 @@ its text:
   - **No address a pool holds is held to the allowed registries:** none is an artifact
     source. **No field is checked for a literal secret:** none holds one, and none
     refers to a Secret.
+- **Shipped: MetalLB's BGP peer,** `metallb-bgppeer` (`metallb_bgppeer.go`), the strict
+  projection of `BGPPeerSpec` at `metallb.io/v1beta2`: the version the linked module's
+  CRD stores, and the one the base library's constructor builds. It is built on
+  `policyHeldKind`, declares its object and takes `objectName`.
+  - A peer is a router the cluster's nodes hold a BGP session with, from the nodes that
+    match one of the `nodeSelectors`, or from all of them where the list is unset or
+    empty. A BGP advertisement that names no peer
+    announces to every peer, so a new peer receives those announcements.
+  - Namespaced and written in the build namespace, which MetalLB reads only where it is
+    the one MetalLB watches. **No capability is required and nothing gates it.**
+  - Required, held to the CRD by a test: `myASN`, and the key and the operator of a
+    match expression in `nodeSelectors`.
+  - The CRD's three defaults: `peerPort` defaults to 179 and the Go type omits a 0, so
+    an authored `peerPort: 0` is refused; the other two default to the `false` the type
+    omits. A test holds the kind's list to the CRD.
+  - **Two of the CRD's three expression rules are checked:** a `connectTime` is from 1
+    to 65535 seconds and a whole number of seconds read in whole milliseconds (a part
+    under a millisecond is not seen, here or by the API server). A test holds the kind's answer to
+    the API server's. The third, that `enableGracefulRestart` does not change after
+    creation, compares with the stored object and is the API server's.
+  - **`password` is refused under a policy that forbids explicit secrets,** as a
+    certificate's keystore password is. `passwordSecret` names a Secret launcher does
+    not create; the type always encodes it, so `passwordSecret: {}` is written where
+    none is authored.
+  - **MetalLB's validating webhook was not read, and nothing it refuses is repeated.**
+    What MetalLB requires of a peer beyond its CRD (one of `peerASN` and `dynamicASN`,
+    one of `peerAddress` and `interface`) is not repeated either.
+  - No address is held to the allowed registries: none is an artifact source.
 - **Shipped: the `networkpolicy` kind** (`networkpolicy.go`), on the recipe of the four
   core kinds and ungated under the terms of the routing kinds.
   - It projects `NetworkPolicySpec`. No top-level field is required and none is

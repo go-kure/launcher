@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -21,6 +22,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -49,9 +51,10 @@ import (
 // infrastructure objects, the EndpointSlice, the first of them that is a
 // whole object in a namespace, and five of MetalLB's API (an address pool, an
 // advertisement on the local network, one over BGP, a BFD profile and a set
-// of community aliases). The three kinds of cert-manager's API and the four of
-// the External Secrets Operator's are held here too: the policy reaches one
-// part of each (held), and everything else of them is the helper's.
+// of community aliases). The three kinds of cert-manager's API, the four of the
+// External Secrets Operator's and MetalLB's BGP peer are held here too: the
+// policy reaches one part of each (held), and everything else of them is the
+// helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -63,8 +66,11 @@ import (
 // namespace when one is set, which none is here. held says the environment
 // policy reaches the
 // kind: its fixtures then stay inside ptStrictPolicy, and what the policy
-// refuses of it has its own tests. minimal is the least a component may
-// author, full a value of every top-level field.
+// refuses of it has its own tests. literal names the top-level field that
+// holds a credential in the clear, on a held kind that has one: the full
+// fixture must set it as it sets every field, and a policy that forbids
+// explicit secrets refuses it. minimal is the least a component may author,
+// full a value of every top-level field.
 type policyFreeKind struct {
 	component   string
 	handler     oam.ComponentHandler
@@ -74,6 +80,7 @@ type policyFreeKind struct {
 	namespaced  bool
 	flux        bool
 	held        bool
+	literal     string
 	minimal     map[string]any
 	full        map[string]any
 }
@@ -81,11 +88,17 @@ type policyFreeKind struct {
 // generate builds the kind's object from props, named name. A kind the policy
 // does not reach is built under a policy that allows next to nothing and under
 // none (generateCoreKind); a held one under ptStrictPolicy with explicit
-// secrets forbidden, and under none.
+// secrets forbidden, and under none. Properties that author the kind's literal
+// credential are built with explicit secrets allowed instead: what a policy
+// that forbids them refuses is the kind's own test.
 func (k policyFreeKind) generate(t *testing.T, name string, props map[string]any) client.Object {
 	t.Helper()
 	if k.held {
-		return generateCoreKindUnder(t, k.handler, k.component, name, props, esPolicy{stubPolicy: ptStrictPolicy()}, nil)
+		policy := esPolicy{stubPolicy: ptStrictPolicy()}
+		if value, authored := props[k.literal]; authored && value != nil {
+			policy.allow = true
+		}
+		return generateCoreKindUnder(t, k.handler, k.component, name, props, policy, nil)
 	}
 	return generateCoreKind(t, k.handler, k.component, name, props)
 }
@@ -530,6 +543,30 @@ var policyFreeKinds = []policyFreeKind{
 		},
 	},
 	{
+		component: "metallb-bgppeer", handler: &components.MetalLBBGPPeerHandler{},
+		gvk: metallbv1beta2.GroupVersion.WithKind("BGPPeer"),
+		typ: reflect.TypeFor[metallbv1beta2.BGPPeerSpec](), namespaced: true,
+		held: true, literal: "password",
+		minimal: map[string]any{"myASN": 64512},
+		// Every field of the type, which no one peer would set: MetalLB refuses
+		// some of them together when it reads its configuration (a peer AS number
+		// beside a dynamic one, an address beside an interface, a password beside
+		// its Secret). The kind does not repeat that, and builds them.
+		full: map[string]any{
+			"myASN": 64512, "peerASN": 64513, "localASN": 64999, "dynamicASN": "external",
+			"peerAddress": "192.0.2.1", "interface": "eth1", "sourceAddress": "192.0.2.10", "peerPort": 1179,
+			"holdTime": "1m30s", "keepaliveTime": "30s", "connectTime": "10s", "routerID": "192.0.2.10",
+			"nodeSelectors": []any{map[string]any{
+				"matchLabels":      map[string]any{"role": "edge"},
+				"matchExpressions": []any{map[string]any{"key": "zone", "operator": "In", "values": []any{"a", "b"}}},
+			}},
+			"password":       esSentinel,
+			"passwordSecret": map[string]any{"name": "upstream-session", "namespace": "metallb-system"},
+			"bfdProfile":     "fast", "enableGracefulRestart": true, "ebgpMultiHop": true, "vrf": "red",
+			"disableMP": true, "dualStackAddressFamily": true,
+		},
+	},
+	{
 		component: "metallb-community", handler: &components.MetalLBCommunityHandler{},
 		gvk: metallbv1beta1.GroupVersion.WithKind("Community"),
 		typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), namespaced: true,
@@ -880,6 +917,12 @@ func metallbPool(allocation map[string]any) map[string]any {
 		pool["serviceAllocation"] = allocation
 	}
 	return pool
+}
+
+// metallbPeerOf is the properties of a metallb-bgppeer with the one field the
+// API requires and the given one.
+func metallbPeerOf(field string, value any) map[string]any {
+	return map[string]any{"myASN": 64512, field: value}
 }
 
 // egressGatewayPolicy is the least a cilium-egressgatewaypolicy may author:
@@ -1359,6 +1402,11 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.IPAddressPoolSelectors", ".Spec.IPAddressPoolSelectors[0].MatchLabels", ".Spec.NodeSelectors",
 			".Spec.NodeSelectors[0].MatchExpressions", ".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Peers",
 			".Spec.ServiceSelectors", ".Spec.ServiceSelectors[0].MatchLabels",
+		},
+		"metallb-bgppeer": {
+			".Spec.HoldTime", ".Spec.KeepaliveTime", ".Spec.ConnectTime", ".Spec.NodeSelectors",
+			".Spec.NodeSelectors[0].MatchLabels", ".Spec.NodeSelectors[0].MatchExpressions",
+			".Spec.NodeSelectors[0].MatchExpressions[0].Values",
 		},
 		"metallb-community": {".Spec.Communities"},
 		"metallb-ipaddresspool": {
@@ -2189,6 +2237,39 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", map[string]any{"serviceSelectors": []any{map[string]any{}, nil}}, "serviceSelectors[1]"},
 			{"two spellings", map[string]any{"peers": []any{"upstream-a"}, "Peers": []any{"upstream-b"}}, "sets the same field as"},
 		},
+		"metallb-bgppeer": {
+			{"no properties", nil, "myASN: required"},
+			{"null myASN", map[string]any{"myASN": nil}, "myASN: required"},
+			{"a peer without its own AS number", map[string]any{"peerASN": 64513, "peerAddress": "192.0.2.1"}, "myASN: required"},
+			{"node expression without a key", metallbPeerOf("nodeSelectors", []any{ciliumExpression(map[string]any{"operator": "Exists"})}),
+				"nodeSelectors[0].matchExpressions[0].key: required"},
+			{"a later node selector's expression without an operator", metallbPeerOf("nodeSelectors", []any{
+				map[string]any{}, ciliumExpression(map[string]any{"key": "zone"}),
+			}), "nodeSelectors[1].matchExpressions[0].operator: required"},
+			// The API server fills 179 into a peer with no port, and the type
+			// leaves a 0 out.
+			{"peerPort 0", metallbPeerOf("peerPort", 0), "peerPort: 0 cannot be carried by the MetalLB API types"},
+			// The CRD's two expression rules, which the API server's own
+			// evaluation of them is held against in TestMetalLBKinds_ExpressionRules.
+			{"connectTime under a second", metallbPeerOf("connectTime", "0s"), "connectTime: 0s is not between 1 and 65535 seconds, which the API requires"},
+			{"connectTime over the range", metallbPeerOf("connectTime", "65536s"), "is not between 1 and 65535 seconds"},
+			{"connectTime with a fraction of a second", metallbPeerOf("connectTime", "1500ms"), "connectTime: 1.5s is not a whole number of seconds, which the API requires"},
+			{"unknown key", metallbPeerOf("asn", 64513), notA + "metallb.io/v1beta2 BGPPeerSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"myASN": 64512}}, notA},
+			// The peer's status is MetalLB's, and no field of the spec.
+			{"the object's status", metallbPeerOf("status", map[string]any{}), notA},
+			{"secret reference sub-key", metallbPeerOf("passwordSecret", map[string]any{"name": "session", "key": "password"}), notA},
+			{"selector sub-key", metallbPeerOf("nodeSelectors", []any{map[string]any{"nodeNames": []any{"edge-1"}}}), notA},
+			{"myASN a string", map[string]any{"myASN": "64512"}, notA},
+			{"myASN negative", map[string]any{"myASN": -1}, notA},
+			{"peerPort beyond the type", metallbPeerOf("peerPort", 70000), notA},
+			{"holdTime a number", metallbPeerOf("holdTime", 90), notA},
+			{"connectTime no duration", metallbPeerOf("connectTime", "soon"), notA},
+			{"ebgpMultiHop a string", metallbPeerOf("ebgpMultiHop", "true"), notA},
+			{"password a number", metallbPeerOf("password", 1234), notA},
+			{"null selector", metallbPeerOf("nodeSelectors", []any{map[string]any{}, nil}), "nodeSelectors[1]"},
+			{"two spellings", map[string]any{"myASN": 64512, "MyASN": 64513}, "sets the same field as"},
+		},
 		"metallb-community": {
 			{"unknown key", map[string]any{"aliases": []any{}}, notA + "metallb.io/v1beta1 CommunitySpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"communities": []any{}}}, notA},
@@ -3010,6 +3091,61 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		map[string]any{"name": "transit", "value": "not-a-community"}, map[string]any{"name": "transit", "value": "64512:100"},
 	}}); err != nil {
 		t.Errorf("a value of no known form under a name used twice: %v, want it accepted", err)
+	}
+
+	session := build("metallb-bgppeer", full["metallb-bgppeer"]).(*metallbv1beta2.BGPPeer).Spec
+	if got := session; got.MyASN != 64512 || got.ASN != 64513 || got.LocalASN != 64999 || got.DynamicASN != metallbv1beta2.ExternalASNMode || got.Port != 1179 {
+		t.Errorf("spec = %+v, want the three authored AS numbers, the authored dynamic mode and the authored port", got)
+	}
+	if got := session; got.HoldTime == nil || got.HoldTime.Duration != 90*time.Second || got.KeepaliveTime == nil || got.KeepaliveTime.Duration != 30*time.Second ||
+		got.ConnectTime == nil || got.ConnectTime.Duration != 10*time.Second {
+		t.Errorf("spec = %+v, want the three authored timers", got)
+	}
+	if got := session; got.Password != esSentinel || got.PasswordSecret != (corev1.SecretReference{Name: "upstream-session", Namespace: "metallb-system"}) {
+		t.Errorf("password and its Secret = %q, %+v; want the authored ones", got.Password, got.PasswordSecret)
+	}
+	if got := session; !got.EnableGracefulRestart || !got.EBGPMultiHop || !got.DisableMP || !got.DualStackAddressFamily || len(got.NodeSelectors) != 1 {
+		t.Errorf("spec = %+v, want the four authored switches on and the one node selector", got)
+	}
+	// The API requires the peer's own AS number alone. The type holds the
+	// reference to the password's Secret by value and always encodes it, so a
+	// peer that authors none carries passwordSecret: {}, which the API accepts.
+	const barePeer = "map[myASN:64512 passwordSecret:map[]]"
+	// An authored 0 or false on a field the type omits at its zero is the value
+	// the type holds for a peer that authors none, and the API fills nothing
+	// there (false is the default of the two switches the CRD gives one): it is
+	// left out. A localASN of 0 is under the CRD's minimum of 1, and is left out
+	// the same way, so the API server does not see it.
+	for name, props := range map[string]map[string]any{
+		"its own AS number alone": {"myASN": 64512},
+		"zeros and falses": {
+			"myASN": 64512, "peerASN": 0, "localASN": 0, "enableGracefulRestart": false, "ebgpMultiHop": false,
+			"disableMP": false, "dualStackAddressFamily": false,
+		},
+		"empty strings and lists":   {"myASN": 64512, "peerAddress": "", "dynamicASN": "", "vrf": "", "nodeSelectors": []any{}},
+		"an empty Secret reference": {"myASN": 64512, "passwordSecret": map[string]any{}},
+	} {
+		if got := spec("metallb-bgppeer", props); got != barePeer {
+			t.Errorf("a peer that authors %s: spec = %s, want %s", name, got, barePeer)
+		}
+	}
+	// The peer's own AS number is always encoded: an authored 0 is written. The
+	// CRD takes it, and it is MetalLB's to refuse.
+	if got, want := spec("metallb-bgppeer", map[string]any{"myASN": 0}), "map[myASN:0 passwordSecret:map[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// A timer sits on a pointer: an authored zero is written, in the form the
+	// type gives a duration.
+	if got, want := spec("metallb-bgppeer", map[string]any{"myASN": 64512, "holdTime": "0s", "keepaliveTime": "90s"}), "map[holdTime:0s keepaliveTime:1m30s myASN:64512 passwordSecret:map[]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// An address, a profile's name, a Secret's name and a value outside the
+	// CRD's enum or range are not read.
+	if err := coreKindErr(kinds["metallb-bgppeer"].handler, "metallb-bgppeer", "fast", map[string]any{
+		"myASN": 64512, "peerAddress": "not-an-address", "routerID": "not-an-address", "bfdProfile": "no-such-profile",
+		"passwordSecret": map[string]any{"name": "no-such-secret"}, "dynamicASN": "sideways", "peerPort": 65535,
+	}); err != nil {
+		t.Errorf("values the kind does not read: %v, want them accepted", err)
 	}
 }
 

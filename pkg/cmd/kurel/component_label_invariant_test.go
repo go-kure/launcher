@@ -422,7 +422,11 @@ spec:
 		"ipAddressPools":   []any{"edge"},
 		"peers":            []any{"upstream"},
 		"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
-	// A set of community aliases holds no selector either.
+	// A BGP peer selects nodes, as an advertisement does.
+	"metallb-bgppeer": {props: map[string]any{
+		"myASN": 64512, "peerASN": 64513, "peerAddress": "192.0.2.1",
+		"nodeSelectors": []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
+	// A set of community aliases holds no selector, as a BFD profile holds none.
 	"metallb-community": {props: map[string]any{
 		"communities": []any{map[string]any{"name": "no-export", "value": "65535:65281"}}}},
 	"metallb-ipaddresspool": {props: map[string]any{

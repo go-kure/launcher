@@ -188,6 +188,7 @@ reads it.
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 | `metallb-bfdprofile` | BFDProfile | Kind-named MetalLB BFD profile: the whole `BFDProfileSpec` (`receiveInterval`, `transmitInterval`, `echoInterval`, `detectMultiplier`, `echoMode`, `passiveMode` and `minimumTtl`, none required), strictly decoded. It is the timers of the BFD session of the BGP peers that name it, and so how fast the loss of such a peer is noticed. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-bgpadvertisement` | BGPAdvertisement | Kind-named MetalLB advertisement over BGP: the whole `BGPAdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `peers`, `nodeSelectors`, `serviceSelectors`, `aggregationLength`, `aggregationLengthV6`, `localPref` and `communities`, none required), strictly decoded. It says which pools' addresses MetalLB announces to which BGP peers, for which Services, and with which route attributes; one that authors nothing limits none of them. `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or 128 (IPv6), the CRD's expression rule. Namespaced; no environment policy applies and no capability is required — see below. |
+| `metallb-bgppeer` | BGPPeer | Kind-named MetalLB BGP peer, at `metallb.io/v1beta2`: the whole `BGPPeerSpec` (`myASN`, required; the peer's AS number, its address or interface, its port and timers, `nodeSelectors`, `password`, `passwordSecret`, `bfdProfile` and the switches of the session), strictly decoded. It is a router the cluster's nodes hold a BGP session with, and so one MetalLB announces addresses to. A `connectTime` outside 1 to 65535 seconds, or not a whole number of seconds read in whole milliseconds, is refused, the CRD's two expression rules on a create, and so is a `peerPort: 0`. A `password` written into the object is refused under an environment policy that forbids explicit secrets. Namespaced; no capability is required — see below. |
 | `metallb-community` | Community | Kind-named MetalLB Community: the whole `CommunitySpec` (`communities`, a list of aliases of a `name` and a `value`, none required), strictly decoded. It gives names to BGP community values; a BGP advertisement that names one attaches its value to what it announces. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-ipaddresspool` | IPAddressPool | Kind-named MetalLB address pool: the whole `IPAddressPoolSpec` (`addresses`, required, `autoAssign`, `avoidBuggyIPs` and `serviceAllocation`), strictly decoded. It says which Services, in which namespaces, MetalLB gives an address of which range. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-l2advertisement` | L2Advertisement | Kind-named MetalLB advertisement on the local network: the whole `L2AdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `nodeSelectors`, `interfaces` and `serviceSelectors`, none required), strictly decoded. It says which pools' addresses MetalLB announces on the local network, from which nodes and interfaces, for which Services; one that authors nothing limits none of them. Namespaced; no environment policy applies and no capability is required — see below. |
@@ -403,7 +404,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
 | `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | kind | `metallb-bfdprofile` | strict decode of `BFDProfileSpec` | The object is named after the component unless `objectName` names it, and a MetalLB BGPPeer refers to it by that name. No field is required. Every field is a pointer, so an authored 0 or false is written; the bounds of the numbers are not checked. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. No capability is required. No environment policy applies. |
 | `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | kind | `metallb-bgpadvertisement` | strict decode of `BGPAdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing is the widest advertisement, of every pool, to every peer, for every Service, with no node excluded. A service selector beside an aggregation length other than the API's default is refused, as the CRD's expression rule refuses it. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The communities and the pool and peer names are not read. No capability is required. No environment policy applies. |
-| `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | missing | - | - | - |
+| `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | kind | `metallb-bgppeer` | strict decode of `BGPPeerSpec` | The object is named after the component unless `objectName` names it, and a MetalLB BGPAdvertisement refers to it by that name. `myASN` must be written. A `peerPort: 0` is refused: the type would leave it out and the API server would fill 179. A `connectTime` is held to the CRD's two expression rules; the CRD's rule against a change of `enableGracefulRestart` is the API server's. A `password` is refused under a policy that forbids explicit secrets; `passwordSecret` names a Secret and holds no secret, and is written as `{}` where it is not authored. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The addresses and the profile's name are not read. No capability is required. |
 | `metallb.CreateCommunity` | metallb.io/v1beta1 Community | kind | `metallb-community` | strict decode of `CommunitySpec` | The object is named after the component unless `objectName` names it; a MetalLB BGPAdvertisement refers to an alias by the alias's own `name`, not the object's. No field is required, of the spec or of an alias. The form of a value is not read, and neither is a name defined twice. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. No capability is required. No environment policy applies. |
 | `metallb.CreateConfigurationState` | metallb.io/v1beta1 ConfigurationState | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | kind | `metallb-ipaddresspool` | strict decode of `IPAddressPoolSpec` | The object is named after the component unless `objectName` names it, and a MetalLB advertisement refers to it by that name or selects it by its labels, the `labels` property. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The addresses are not read. No capability is required. No environment policy applies. |
@@ -2561,6 +2562,146 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a community alias, a node, a Service). The object's status is MetalLB's
   and is not written: the type has no field in it, and the YAML the library
   writes leaves an empty status out.
+- **metallb-bgppeer** (go-kure/launcher#790) is the kind-named projection of
+  a sixth object of MetalLB's API: a BGPPeer. It is built at
+  `metallb.io/v1beta2`, not at the `v1beta1` of the five kinds above: that is
+  the version the linked module's CRD stores, `v1beta1` is served and marked
+  deprecated there, and the base library's constructor builds the peer at
+  `v1beta2`. `TestMetalLBKinds_EmitTheServedVersion` holds each kind to the
+  version its CRD serves and stores. The kind is built on `policyHeldKind`, the helper of
+  the kinds above with one check under the environment policy, and emits that
+  one object, named after the component unless `objectName` names it; the
+  handler adds no label, no annotation and no default of its own.
+
+  **What it changes for others.** A BGPPeer is a router MetalLB holds a BGP
+  session with, from the nodes that match one of the `nodeSelectors`, and
+  from every node where the list is unset or empty; selectors that match no
+  node leave the peer with no session. Over that session the cluster announces the
+  addresses its BGP advertisements cover: an advertisement that names no peer
+  announces to every peer, so a new peer receives those announcements without
+  any advertisement being changed. The fields say who the peer is and how the
+  session runs:
+  - `myASN` is the AS number of the cluster's end, `peerASN` the one expected
+    of the router, or `dynamicASN` (`internal` or `external`) where it is
+    detected; `localASN` announces another AS number to this peer;
+  - `peerAddress` is the address dialled, or `interface` the node's interface
+    of an unnumbered session; `peerPort`, `sourceAddress`, `routerID` and
+    `vrf` are the rest of the connection;
+  - `holdTime`, `keepaliveTime` and `connectTime` are the session's timers;
+  - `password` or `passwordSecret` authenticates the session (TCP MD5);
+  - `bfdProfile` names the BFDProfile of the session's BFD session, and a
+    peer that names none has no BFD session;
+  - `enableGracefulRestart`, `ebgpMultiHop`, `disableMP` (deprecated upstream
+    in favour of `dualStackAddressFamily`) and `dualStackAddressFamily` are
+    switches of the session.
+
+  **The object is namespaced, and MetalLB reads it in one namespace only**,
+  as it reads a pool: it is written in the build namespace, and a peer of an
+  application built for another namespace than the one MetalLB watches is an
+  object MetalLB does not read. Launcher does not know that namespace and
+  checks nothing of it.
+
+  **No capability is required, and nothing gates the kind**: where MetalLB's
+  CRDs are not installed the component builds, and the object is refused at
+  apply. Whoever may author a component of an application built for MetalLB's
+  namespace may author a peer, and with it a router that the cluster's nodes
+  connect to and that is told the addresses of the cluster's Services. The
+  open point "No capability gate on component types" on go-kure/launcher#790
+  carries it.
+
+  **Authored.** The properties are the twenty-one top-level json fields of
+  `BGPPeerSpec`, decoded strictly at every depth: an unknown key is refused
+  wherever it sits (the spec, the Secret reference, a selector, a match
+  expression).
+  - **No default is filled.** The CRD declares three. `disableMP` and
+    `dualStackAddressFamily` default to `false`, which is the value the type
+    leaves out: an authored `false` is left out, and the API fills the same
+    `false` back. `peerPort` defaults to 179 and the type leaves a 0 out, so
+    an authored `peerPort: 0` would become 179: it is refused (`peerPort: 0
+    cannot be carried by the MetalLB API types (…)`). An unauthored port is
+    left out, and the API fills 179. `TestMetalLBKinds_NoDefaultIsLost` holds
+    the kind's list of such fields to the linked CRD.
+  - **An authored 0, false or empty string on any other field the type omits
+    when empty is left out**, as the type holds one value for it and for a
+    peer that does not author the field: `peerASN`, `localASN`, the two other
+    switches, the addresses and names. For `localASN` that is a value under
+    the CRD's minimum of 1, which the API server therefore does not see.
+  - The three timers are pointers: an authored `holdTime: 0s` is written. A
+    duration is written in the form the type gives it (`90s` as `1m30s`).
+  - `myASN` is always encoded: an authored 0 is written.
+  - **`passwordSecret: {}` is written where no reference is authored.** The
+    type holds the reference by value and always encodes it. The CRD takes
+    it, and MetalLB v0.16.1 reads a reference with no name as none.
+
+  **Required**: `myASN`, and the `key` and the `operator` of a match
+  expression in every selector of `nodeSelectors`. The API requires nothing
+  else of the spec. `TestMetalLBKinds_RequiredMatchCRD` holds the list to the
+  linked module's `v1beta2` CRD.
+
+  **Two of the CRD's three expression rules are checked.** Both are on
+  `connectTime`: it is from 1 to 65535 seconds, and it is a whole number of
+  seconds. A `connectTime` that breaks one is refused (`connectTime: 1.5s is
+  not a whole number of seconds, which the API requires`). The kind reads a
+  duration as the API server's rules do, in whole seconds and whole
+  milliseconds with the rest dropped: `65535.5s` passes the first rule and
+  breaks the second, and a part smaller than a millisecond is seen by
+  neither, here or there. `TestMetalLBKinds_ExpressionRules` holds the kind's
+  answer to the API server's for the linked CRD, on properties that break
+  each rule and on properties that keep it, and fails on a rule that is added
+  or reworded. **The third rule is left**: `enableGracefulRestart` may not
+  change after creation. It compares the field with the stored object's,
+  which a build does not have, and the API server does not evaluate it on a
+  create.
+
+  **Not checked**, and MetalLB's or the API server's to refuse:
+  - **MetalLB's validating webhook was not read, and nothing it refuses is
+    repeated here.** An object the CRD's schema takes may still be refused at
+    apply by the webhook MetalLB installs;
+  - what MetalLB itself requires of a peer when it reads its configuration.
+    At v0.16.1 that is, among others: a `myASN` other than 0; exactly one of
+    `peerASN` and `dynamicASN`; exactly one of `peerAddress` and `interface`;
+    not both `password` and a named `passwordSecret`. A component that breaks
+    one of these builds;
+  - the CRD's other value rules: a `peerPort` above 16384 and a `dynamicASN`
+    that is neither `internal` nor `external` are written as authored;
+  - an address, a router ID and a VRF's or an interface's name: none is read;
+  - the profile `bfdProfile` names and the Secret `passwordSecret` names:
+    one that names no object of the application builds;
+  - an authored empty value in a required field (a `key: ""`). It is a value.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  A BGPAdvertisement names the peers it announces to (`peers`): name the
+  component so, or set `objectName`. The profile `bfdProfile` names is the
+  object name of a `metallb-bfdprofile` component (the component's name, or
+  its `objectName`). `nodeSelectors` queries nodes, whose labels launcher
+  does not write, and is the author's.
+
+  **Policy.** The environment policy reaches one field.
+  - **`password` is the session's password in the clear, and is refused under
+    a policy that forbids explicit secrets** (`password: holds the BGP session
+    password in the object, and the environment policy forbids explicit
+    secrets; name a Secret created out of band in passwordSecret instead`), as
+    the keystore password of a `certificate` is. The refusal does not carry
+    the value. Under a policy that allows explicit secrets, under one that
+    does not answer the question and under none the peer builds, with the
+    password in the object as authored. An empty `password` is none.
+    `TestMetalLBBGPPeerKind_SessionPassword` holds this.
+  - **`passwordSecret` names a Secret and holds no secret**, and builds under
+    every policy. Launcher does not create that Secret and does not check
+    that it exists. The upstream type's comment asks for one of type
+    `kubernetes.io/basic-auth`, in the namespace of the MetalLB deployment, with the
+    password under the key `password`; none of that is checked, and neither
+    is the reference's `namespace`.
+  - **Hosts are not checked.** The addresses a peer holds are a network's,
+    not an artifact source, and none is held to the policy's allowed
+    registries. No field names an image.
+  - No other `oam.Policy` method speaks to a field of the spec, and
+    `ApplyPolicy` fills nothing.
+
+  **Not covered.** Whether what is named or selected exists (a profile, a
+  Secret, a node), and whether the router is reachable. The object's status
+  is MetalLB's and is not written: the type has no field in it, and the YAML
+  the library writes leaves an empty status out.
 - **metallb-community** (go-kure/launcher#790) is the kind-named projection
   of a fifth object of MetalLB's `metallb.io/v1beta1` API: a Community. It is
   built on `policyFreeKind` as the kinds above are and emits that one object,

@@ -79,6 +79,7 @@ var validComponentTypes = map[string]bool{
 	"manifests":                       true,
 	"metallb-bfdprofile":              true,
 	"metallb-bgpadvertisement":        true,
+	"metallb-bgppeer":                 true,
 	"metallb-community":               true,
 	"metallb-ipaddresspool":           true,
 	"metallb-l2advertisement":         true,

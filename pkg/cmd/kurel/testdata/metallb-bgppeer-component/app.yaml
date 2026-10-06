@@ -1,0 +1,42 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: metallb-system
+spec:
+  components:
+    - name: upstream
+      type: metallb-bgppeer
+      properties:
+        myASN: 64512
+        peerASN: 64513
+        localASN: 64999
+        peerAddress: 192.0.2.1
+        sourceAddress: 192.0.2.10
+        peerPort: 1179
+        holdTime: 90s
+        keepaliveTime: 30s
+        connectTime: 10s
+        routerID: 192.0.2.10
+        nodeSelectors:
+          - matchLabels:
+              role: edge
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: [node-a, node-b]
+        passwordSecret:
+          name: upstream-session
+          namespace: metallb-system
+        bfdProfile: fast
+        enableGracefulRestart: true
+        ebgpMultiHop: true
+        vrf: red
+        dualStackAddressFamily: true
+    - name: unnumbered
+      type: metallb-bgppeer
+      properties:
+        objectName: leaf
+        myASN: 64512
+        dynamicASN: external
+        interface: eth1
