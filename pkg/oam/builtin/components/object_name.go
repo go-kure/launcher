@@ -11,6 +11,7 @@ import (
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
@@ -663,4 +664,10 @@ func (h *FluxcdAlertHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // the Flux namespace when one is set.
 func (h *ImagePolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: imagev1.GroupVersion.Group, Kind: imagev1.ImagePolicyKind}, oam.ObjectScopeFlux
+}
+
+// ComponentObject declares the imageupdateautomation kind's
+// ImageUpdateAutomation, which lands in the Flux namespace when one is set.
+func (h *ImageUpdateAutomationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: autov1.GroupVersion.Group, Kind: autov1.ImageUpdateAutomationKind}, oam.ObjectScopeFlux
 }

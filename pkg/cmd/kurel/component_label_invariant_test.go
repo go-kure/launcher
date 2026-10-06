@@ -390,6 +390,9 @@ spec:
 	"imagepolicy": {props: map[string]any{
 		"imageRepositoryRef": map[string]any{"name": "web"},
 		"policy":             map[string]any{"semver": map[string]any{"range": ">=1.0.0"}}}},
+	"imageupdateautomation": {props: map[string]any{
+		"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"},
+		"interval":  "30m"}},
 	// An Ingress name is a DNS-1123 subdomain. The object is authored: it runs
 	// no pods and selects none, and its backend is a Service by name.
 	"ingress": {props: map[string]any{"defaultBackend": map[string]any{

@@ -317,6 +317,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"horizontalpodautoscaler":         &components.HorizontalPodAutoscalerHandler{},
 		"httproute":                       &components.HTTPRouteHandler{},
 		"imagepolicy":                     &components.ImagePolicyHandler{},
+		"imageupdateautomation":           &components.ImageUpdateAutomationHandler{},
 		"ingress":                         &components.IngressHandler{},
 		"ingressclass":                    &components.IngressClassHandler{},
 		"issuer":                          &components.IssuerHandler{},

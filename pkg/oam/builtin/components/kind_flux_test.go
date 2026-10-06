@@ -86,6 +86,65 @@ func imagePolicyFull() map[string]any {
 	}
 }
 
+// imageUpdateAutomationSource is the source of an imageupdateautomation: a
+// GitRepository of the object's namespace.
+func imageUpdateAutomationSource() map[string]any {
+	return map[string]any{"kind": "GitRepository", "name": "fleet"}
+}
+
+// imageUpdateAutomationAuthor is the author of an automation's commits.
+func imageUpdateAutomationAuthor() map[string]any {
+	return map[string]any{"email": "fluxbot@example.com"}
+}
+
+// imageUpdateAutomationCommit is the least `git.commit` may author.
+func imageUpdateAutomationCommit() map[string]any {
+	return map[string]any{"author": imageUpdateAutomationAuthor()}
+}
+
+// imageUpdateAutomationGit is a `git` with the given commit and nothing else.
+func imageUpdateAutomationGit(commit map[string]any) map[string]any {
+	return map[string]any{"commit": commit}
+}
+
+// imageUpdateAutomationMinimal is the least an imageupdateautomation may
+// author: no `git`, which the type documents as mandatory in practice and no
+// marker requires.
+func imageUpdateAutomationMinimal() map[string]any {
+	return map[string]any{"sourceRef": imageUpdateAutomationSource(), "interval": "30m"}
+}
+
+// imageUpdateAutomationFull sets every field of an ImageUpdateAutomationSpec.
+// Its source is a GitRepository of another namespace, and its commits are
+// signed with the key of the Secret `signing-key`.
+func imageUpdateAutomationFull() map[string]any {
+	return map[string]any{
+		"sourceRef": map[string]any{
+			"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "GitRepository", "name": "fleet", "namespace": "platform",
+		},
+		"git": map[string]any{
+			"checkout": map[string]any{"ref": map[string]any{"branch": "main"}},
+			"commit": map[string]any{
+				"author":                map[string]any{"name": "fluxbot", "email": "fluxbot@example.com"},
+				"signingKey":            map[string]any{"secretRef": map[string]any{"name": "signing-key"}, "type": "ssh"},
+				"messageTemplate":       "Update images of {{ .AutomationObject }}",
+				"messageTemplateValues": map[string]any{"cluster": "east"},
+			},
+			"push": map[string]any{
+				"branch": "image-updates", "refspec": "refs/heads/image-updates:refs/heads/staging",
+				"options": map[string]any{"merge_request.create": ""},
+			},
+		},
+		"interval": "30m",
+		"policySelector": map[string]any{
+			"matchLabels":      map[string]any{"team": "shop"},
+			"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}},
+		},
+		"update":  map[string]any{"strategy": "Setters", "path": "./clusters/east"},
+		"suspend": true,
+	}
+}
+
 // fluxKinds returns the rows of policyFreeKinds that move to the Flux
 // namespace.
 func fluxKinds(t *testing.T) []policyFreeKind {
@@ -196,6 +255,13 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		// An ImagePolicy names an ImageRepository, which is the object that
 		// holds the credentials of the registry.
 		"imagepolicy": {{props: imagePolicyFull()}},
+		// An ImageUpdateAutomation reads the Secret of its signing key. The
+		// credentials of the repository are the GitRepository's.
+		"imageupdateautomation": {
+			{props: imageUpdateAutomationFull(), secrets: []string{"signing-key"}},
+			{props: imageUpdateAutomationMinimal()},
+			{props: withProperty(imageUpdateAutomationMinimal(), "git", imageUpdateAutomationGit(imageUpdateAutomationCommit()))},
+		},
 	}
 	for _, kind := range fluxKinds(t) {
 		if len(cases[kind.component]) == 0 {

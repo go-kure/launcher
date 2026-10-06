@@ -1106,16 +1106,18 @@ its text:
   - **Hosts are not checked:** the addresses of an endpoint, FQDNs included, are not
     artifact sources and are not held to the allowed registries.
 - **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
-  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`) and `imagepolicy`
-  (`imagepolicy.go`), with what such kinds share in `kind_flux.go`: the strict
-  projection of its spec type, declaring its object and taking `objectName`. Each is
-  built on `policyFreeKind` with two additions. The Flux namespace: the object lands
-  there when one is set, as the Flux kinds above do, and reports what it reads there by
-  name (`FluxNamespaceReads`; an Alert and an ImagePolicy read nothing). And its
-  durations, held to the pattern their fields declare as on the Flux kinds above (an
-  ImagePolicy's `interval`).
+  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `imagepolicy`
+  (`imagepolicy.go`) and `imageupdateautomation` (`imageupdateautomation.go`), with
+  what such kinds share in `kind_flux.go`: the strict projection of its spec type,
+  declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
+  two additions. The Flux namespace: the object lands there when one is set, as the
+  Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
+  an Alert and an ImagePolicy read nothing, an ImageUpdateAutomation the Secret of its
+  signing key). And its durations, held to the pattern their fields declare as on the
+  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation).
   - **Nothing gates what such an object reaches outside its namespace:** a source's
-    `namespace` on an Alert and the repository's on an ImagePolicy are written as
+    `namespace` on an Alert, the repository's on an ImagePolicy and the GitRepository's
+    on an ImageUpdateAutomation, which commits and pushes through it, are written as
     authored, as the references and the accounts of a `helmrelease` and a
     `fluxcd-kustomization` are. No environment policy applies and no `Policy` method is
     added.
