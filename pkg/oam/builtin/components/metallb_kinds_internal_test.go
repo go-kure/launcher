@@ -82,6 +82,12 @@ var metallbKinds = []struct {
 			},
 		},
 	},
+	{
+		// The CRD requires no field of a profile and declares no rule.
+		component: "metallb-bfdprofile", handler: &MetalLBBFDProfileHandler{},
+		crd: "metallb.io_bfdprofiles.yaml", typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
+		required: metallbBFDProfileKind.required,
+	},
 }
 
 // metallbCheckedRules prepares the CRD in file as the API server serves it,

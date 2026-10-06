@@ -416,6 +416,8 @@ spec:
 	// author's label query over Services, namespaces, nodes or pools, so the
 	// rows select on `role`, as the Cilium rows above. None checks a name rule
 	// of its own.
+	// A BFD profile holds no selector at all.
+	"metallb-bfdprofile": {props: map[string]any{"receiveInterval": 300, "detectMultiplier": 3}},
 	"metallb-bgpadvertisement": {props: map[string]any{
 		"ipAddressPools":   []any{"edge"},
 		"peers":            []any{"upstream"},

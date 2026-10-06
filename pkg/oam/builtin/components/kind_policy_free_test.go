@@ -47,11 +47,11 @@ import (
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
 // policy and a node configuration), the five kinds of the Gateway API's
 // infrastructure objects, the EndpointSlice, the first of them that is a
-// whole object in a namespace, and three of MetalLB's API (an address pool, an
-// advertisement on the local network and one over BGP). The three kinds of
-// cert-manager's API and the four of the External Secrets Operator's are held
-// here too: the policy reaches one part of each (held), and everything else of
-// them is the helper's.
+// whole object in a namespace, and four of MetalLB's API (an address pool, an
+// advertisement on the local network, one over BGP and a BFD profile). The
+// three kinds of cert-manager's API and the four of the External Secrets
+// Operator's are held here too: the policy reaches one part of each (held),
+// and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -491,6 +491,18 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), namespaced: true,
 		minimal: listenerSetWith(gatewayListener()),
 		full:    listenerSetFull(),
+	},
+	{
+		component: "metallb-bfdprofile", handler: &components.MetalLBBFDProfileHandler{},
+		gvk: metallbv1beta1.GroupVersion.WithKind("BFDProfile"),
+		typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), namespaced: true,
+		// No field is required: a profile that authors nothing is one.
+		minimal: map[string]any{},
+		full: map[string]any{
+			"receiveInterval": 300, "transmitInterval": 300, "echoInterval": 50, "detectMultiplier": 3,
+			// Both are pointers, which keep an authored false.
+			"echoMode": false, "passiveMode": true, "minimumTtl": 254,
+		},
 	},
 	{
 		component: "metallb-bgpadvertisement", handler: &components.MetalLBBGPAdvertisementHandler{},
@@ -1327,6 +1339,10 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.Options",
 			".Spec.Listeners[1].AllowedRoutes.Namespaces.Selector", ".Spec.Listeners[1].AllowedRoutes.Kinds[1].Group",
 		},
+		"metallb-bfdprofile": {
+			".Spec.ReceiveInterval", ".Spec.TransmitInterval", ".Spec.EchoInterval", ".Spec.DetectMultiplier",
+			".Spec.EchoMode", ".Spec.PassiveMode", ".Spec.MinimumTTL",
+		},
 		"metallb-bgpadvertisement": {
 			".Spec.AggregationLength", ".Spec.AggregationLengthV6", ".Spec.Communities", ".Spec.IPAddressPools",
 			".Spec.IPAddressPoolSelectors", ".Spec.IPAddressPoolSelectors[0].MatchLabels", ".Spec.NodeSelectors",
@@ -2119,6 +2135,18 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null listener", listenerSetWith(gatewayListener(), nil), "listeners[1]"},
 			{"two spellings", withProperty(listenerSetWith(gatewayListener()), "ParentRef", map[string]any{"name": "other"}), "sets the same field as"},
 		},
+		"metallb-bfdprofile": {
+			{"unknown key", map[string]any{"interval": 300}, notA + "metallb.io/v1beta1 BFDProfileSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"receiveInterval": 300}}, notA},
+			// MetalLB's Go type has a status, and no field of the spec is one.
+			{"the object's status", map[string]any{"status": map[string]any{}}, notA},
+			{"an interval a string", map[string]any{"receiveInterval": "300ms"}, notA},
+			{"an interval a fraction", map[string]any{"transmitInterval": 0.5}, notA},
+			{"an interval negative", map[string]any{"echoInterval": -1}, notA},
+			{"echoMode a string", map[string]any{"echoMode": "true"}, notA},
+			{"the multiplier an object", map[string]any{"detectMultiplier": map[string]any{"value": 3}}, notA},
+			{"two spellings", map[string]any{"minimumTtl": 254, "minimumTTL": 1}, "sets the same field as"},
+		},
 		"metallb-bgpadvertisement": {
 			// The CRD's one expression rule, each side of it with the length named.
 			{"a service selector with an IPv4 length that rolls up", map[string]any{
@@ -2908,6 +2936,26 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		"communities": []any{"not-a-community"}, "ipAddressPools": []any{"no-such-pool"}, "peers": []any{"no-such-peer"},
 	}); err != nil {
 		t.Errorf("a community of no known form and names no component declares: %v, want them accepted", err)
+	}
+
+	profile := build("metallb-bfdprofile", full["metallb-bfdprofile"]).(*metallbv1beta1.BFDProfile)
+	if got := profile.Spec; got.ReceiveInterval == nil || *got.ReceiveInterval != 300 || got.TransmitInterval == nil || *got.TransmitInterval != 300 ||
+		got.EchoInterval == nil || *got.EchoInterval != 50 || got.DetectMultiplier == nil || *got.DetectMultiplier != 3 || got.MinimumTTL == nil || *got.MinimumTTL != 254 {
+		t.Errorf("spec = %+v, want the five authored numbers", got)
+	}
+	if got := profile.Spec; got.EchoMode == nil || *got.EchoMode || got.PassiveMode == nil || !*got.PassiveMode {
+		t.Errorf("spec = %+v, want the authored echoMode false and passiveMode true", got)
+	}
+	// A profile that authors nothing carries an empty spec: the CRD fills no
+	// default into it, and the values of an unset field are MetalLB's.
+	if got, want := spec("metallb-bfdprofile", map[string]any{}), "map[]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// Every field is a pointer: an authored false and an authored 0 are written.
+	// The 0 is under the CRD's minimum, and the API server's to refuse, as a
+	// multiplier under its minimum is.
+	if got, want := spec("metallb-bfdprofile", map[string]any{"passiveMode": false, "receiveInterval": 0, "detectMultiplier": 1}), "map[detectMultiplier:1 passiveMode:false receiveInterval:0]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
 	}
 }
 

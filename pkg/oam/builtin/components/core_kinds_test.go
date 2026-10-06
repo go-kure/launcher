@@ -120,6 +120,7 @@ var coreKindSchemas = []struct {
 	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
 	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
 	// And the kinds of MetalLB's API.
+	{"metallb-bfdprofile", reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), &components.MetalLBBFDProfileHandler{}, nil},
 	{"metallb-bgpadvertisement", reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), &components.MetalLBBGPAdvertisementHandler{}, nil},
 	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
 	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, nil},

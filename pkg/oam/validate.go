@@ -77,6 +77,7 @@ var validComponentTypes = map[string]bool{
 	"limitrange":                      true,
 	"listenerset":                     true,
 	"manifests":                       true,
+	"metallb-bfdprofile":              true,
 	"metallb-bgpadvertisement":        true,
 	"metallb-ipaddresspool":           true,
 	"metallb-l2advertisement":         true,
