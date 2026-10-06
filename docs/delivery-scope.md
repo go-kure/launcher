@@ -1259,25 +1259,30 @@ its text:
     §7).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
-- **Shipped: a kind of MetalLB's `metallb.io/v1beta1` API,** `metallb-ipaddresspool`
-  (`metallb_ipaddresspool.go`, with what the kinds of this API share in
-  `metallb_common.go`), the strict projection of its spec type, built on
-  `policyFreeKind`, declaring its object and taking `objectName`. The type name carries
+- **Shipped: two kinds of MetalLB's `metallb.io/v1beta1` API,** `metallb-ipaddresspool`
+  and `metallb-l2advertisement` (`metallb_ipaddresspool.go`,
+  `metallb_l2advertisement.go`, with what the kinds of this API share in
+  `metallb_common.go`), each the strict projection of its spec type, built on
+  `policyFreeKind`, declaring its object and taking `objectName`. The type names carry
   the `metallb-` prefix as the kinds of Cilium's API carry theirs: both APIs have a pool
   of addresses and an advertisement for BGP.
   - A pool says which Services, in which namespaces, MetalLB gives an address of which
     range: with no `serviceAllocation`, a Service of any namespace.
-  - It is namespaced and written in the build namespace. MetalLB reads its objects in
-    one namespace and in no other: the one it is configured to watch (its
+  - An L2 advertisement says which pools' addresses MetalLB announces on the local
+    network, from which nodes and interfaces, for which Services. No field of it is
+    required and each narrows it: one that authors nothing limits none of them.
+  - They are namespaced and written in the build namespace. MetalLB reads its objects
+    in one namespace and in no other: the one it is configured to watch (its
     `--namespace` flag or `METALLB_NAMESPACE`), by default the one it runs in;
     launcher does not know that namespace.
-  - **No capability is required and nothing gates it.**
-  - The required list is read from the CRD of the linked module and held to it by a
-    test: `addresses`, and the key and the operator of a selector's match expression.
-  - The CRD's two defaults are carried: `autoAssign` sits on a pointer, and
+  - **No capability is required and nothing gates them.**
+  - The required lists are read from the CRDs of the linked module and held to them by
+    a test: a pool's `addresses`, and the key and the operator of a selector's match
+    expression in both kinds.
+  - The pool CRD's two defaults are carried: `autoAssign` sits on a pointer, and
     `avoidBuggyIPs` defaults to the `false` the Go type omits; a test holds the
-    defaults to that. The CRD declares no expression rule, and a test fails on one that
-    is added.
+    defaults to that. The advertisement's CRD has none. Neither CRD declares an
+    expression rule, and a test fails on one that is added.
   - **MetalLB's validating webhook was not read, and nothing it refuses is repeated.**
   - **No address a pool holds is held to the allowed registries:** none is an artifact
     source. **No field is checked for a literal secret:** none holds one, and none

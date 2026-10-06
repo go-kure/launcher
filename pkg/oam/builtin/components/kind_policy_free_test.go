@@ -47,10 +47,11 @@ import (
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
 // policy and a node configuration), the five kinds of the Gateway API's
 // infrastructure objects, the EndpointSlice, the first of them that is a
-// whole object in a namespace, and one of MetalLB's API (an address pool). The
-// three kinds of cert-manager's API and the four of the External Secrets
-// Operator's are held here too: the policy reaches one part of each (held),
-// and everything else of them is the helper's.
+// whole object in a namespace, and two of MetalLB's API (an address pool and
+// an advertisement on the local network). The three kinds of cert-manager's
+// API and the four of the External Secrets Operator's are held here too: the
+// policy reaches one part of each (held), and everything else of them is the
+// helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -509,6 +510,23 @@ var policyFreeKinds = []policyFreeKind{
 			"autoAssign", false),
 			// The type omits a false, which is also the API's default.
 			"avoidBuggyIPs", true),
+	},
+	{
+		component: "metallb-l2advertisement", handler: &components.MetalLBL2AdvertisementHandler{},
+		gvk: metallbv1beta1.GroupVersion.WithKind("L2Advertisement"),
+		typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), namespaced: true,
+		// No field is required: an advertisement that authors nothing is one.
+		minimal: map[string]any{},
+		full: map[string]any{
+			"ipAddressPools":         []any{"edge", "shared"},
+			"ipAddressPoolSelectors": []any{map[string]any{"matchLabels": map[string]any{"tier": "edge"}}},
+			"nodeSelectors": []any{map[string]any{
+				"matchLabels":      map[string]any{"role": "edge"},
+				"matchExpressions": []any{map[string]any{"key": "zone", "operator": "In", "values": []any{"a", "b"}}},
+			}},
+			"interfaces":       []any{"eth1", "eth2"},
+			"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}},
+		},
 	},
 	{
 		component: "poddisruptionbudget", handler: &components.PodDisruptionBudgetHandler{},
@@ -1289,6 +1307,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.AllocateTo.NamespaceSelectors", ".Spec.AllocateTo.NamespaceSelectors[0].MatchLabels",
 			".Spec.AllocateTo.ServiceSelectors", ".Spec.AllocateTo.ServiceSelectors[0].MatchExpressions",
 			".Spec.AllocateTo.ServiceSelectors[0].MatchExpressions[0].Values",
+		},
+		"metallb-l2advertisement": {
+			".Spec.IPAddressPools", ".Spec.IPAddressPoolSelectors", ".Spec.IPAddressPoolSelectors[0].MatchLabels",
+			".Spec.NodeSelectors", ".Spec.NodeSelectors[0].MatchLabels", ".Spec.NodeSelectors[0].MatchExpressions",
+			".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Interfaces", ".Spec.ServiceSelectors",
+			".Spec.ServiceSelectors[0].MatchLabels",
 		},
 		"poddisruptionbudget": {
 			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
@@ -2085,6 +2109,27 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", metallbPool(map[string]any{"serviceSelectors": []any{map[string]any{}, nil}}), "serviceAllocation.serviceSelectors[1]"},
 			{"two spellings", withProperty(metallbPool(nil), "Addresses", []any{"198.51.100.0/24"}), "sets the same field as"},
 		},
+		"metallb-l2advertisement": {
+			{"pool expression without an operator", map[string]any{
+				"ipAddressPoolSelectors": []any{ciliumExpression(map[string]any{"key": "tier"})},
+			}, "ipAddressPoolSelectors[0].matchExpressions[0].operator: required"},
+			{"a later node selector's expression without a key", map[string]any{
+				"nodeSelectors": []any{map[string]any{}, ciliumExpression(map[string]any{"operator": "Exists"})},
+			}, "nodeSelectors[1].matchExpressions[0].key: required"},
+			{"service expression without a key", map[string]any{
+				"serviceSelectors": []any{ciliumExpression(map[string]any{"operator": "Exists"})},
+			}, "serviceSelectors[0].matchExpressions[0].key: required"},
+			{"unknown key", map[string]any{"pools": []any{"edge"}}, notA + "metallb.io/v1beta1 L2AdvertisementSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"ipAddressPools": []any{"edge"}}}, notA},
+			// MetalLB's Go type has a status, and no field of the spec is one.
+			{"the object's status", map[string]any{"status": map[string]any{}}, notA},
+			{"selector sub-key", map[string]any{"nodeSelectors": []any{map[string]any{"nodeNames": []any{"edge-1"}}}}, notA},
+			{"pools a string", map[string]any{"ipAddressPools": "edge"}, notA},
+			{"interfaces a string", map[string]any{"interfaces": "eth1"}, notA},
+			{"a pool's name a number", map[string]any{"ipAddressPools": []any{1}}, notA},
+			{"null selector", map[string]any{"nodeSelectors": []any{map[string]any{}, nil}}, "nodeSelectors[1]"},
+			{"two spellings", map[string]any{"interfaces": []any{"eth1"}, "Interfaces": []any{"eth2"}}, "sets the same field as"},
+		},
 		"poddisruptionbudget": {
 			{"unknown key", map[string]any{"minAvailable": 1, "minReady": 1}, notA + "policy/v1 PodDisruptionBudgetSpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"minAvailable": 1}}, notA},
@@ -2736,6 +2781,30 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	// An address is not read: one that is no range builds.
 	if err := coreKindErr(kinds["metallb-ipaddresspool"].handler, "metallb-ipaddresspool", "fast", map[string]any{"addresses": []any{"not-a-range"}}); err != nil {
 		t.Errorf("an address that is no range: %v, want it accepted", err)
+	}
+
+	announced := build("metallb-l2advertisement", full["metallb-l2advertisement"]).(*metallbv1beta1.L2Advertisement)
+	if got := announced.Spec; !slices.Equal(got.IPAddressPools, []string{"edge", "shared"}) || !slices.Equal(got.Interfaces, []string{"eth1", "eth2"}) ||
+		len(got.IPAddressPoolSelectors) != 1 || len(got.NodeSelectors) != 1 || len(got.ServiceSelectors) != 1 {
+		t.Errorf("spec = %+v, want the two pools and the two interfaces in order and a selector of each kind", got)
+	}
+	// An advertisement that authors nothing carries an empty spec, which limits
+	// the announcement to no pool, node, interface or Service. An authored empty
+	// list is the same advertisement and is left out, as the type omits it.
+	for name, props := range map[string]map[string]any{
+		"nothing": {}, "an empty list of pools": {"ipAddressPools": []any{}}, "an empty list of node selectors": {"nodeSelectors": []any{}},
+	} {
+		if got, want := spec("metallb-l2advertisement", props), "map[]"; got != want {
+			t.Errorf("an advertisement that authors %s: spec = %s, want %s", name, got, want)
+		}
+	}
+	// An empty selector in a list is authored, and is written as one.
+	if got, want := spec("metallb-l2advertisement", map[string]any{"ipAddressPoolSelectors": []any{map[string]any{}}}), "map[ipAddressPoolSelectors:[map[]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// A pool's name is not read: one no pool of the application carries builds.
+	if err := coreKindErr(kinds["metallb-l2advertisement"].handler, "metallb-l2advertisement", "fast", map[string]any{"ipAddressPools": []any{"no-such-pool"}}); err != nil {
+		t.Errorf("a pool no component declares: %v, want it accepted", err)
 	}
 }
 

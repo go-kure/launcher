@@ -42,6 +42,11 @@ var metallbKinds = []struct {
 		crd: "metallb.io_ipaddresspools.yaml", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
 		required: metallbIPAddressPoolKind.required,
 	},
+	{
+		component: "metallb-l2advertisement", handler: &MetalLBL2AdvertisementHandler{},
+		crd: "metallb.io_l2advertisements.yaml", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
+		required: metallbL2AdvertisementKind.required,
+	},
 }
 
 // metallbCRD reads one CRD of the linked module and returns it with the schema
