@@ -1987,6 +1987,26 @@ and checks the shape of every key it does. `kurel build` calls it immediately af
 parsing — and, in package mode, necessarily *after* `ResolveParameters`, because a
 `${...}` placeholder is a bare string until substituted.
 
+**A reason on a refused key.** The refusal of an undeclared *top-level* key can
+carry the reason the type has for it. A component handler, a component lowering
+rule, a trait handler or a trait lowering rule that has the method
+`UnsupportedFieldHint(key string) string` is asked for the refused key, and a
+non-empty answer is appended to the refusal after `"; "`:
+
+```
+component "batch" (type "job"): properties: unsupported field "scheduling" (allowed: …); scheduling: not read by this component — alpha upstream, behind the WorkloadWithJob feature gate
+```
+
+The built-in hand-parsed kinds answer with the reason they refuse a field of the
+Kubernetes type they project, `webservice` and `worker` with their `deployment`'s,
+and the `pvc` trait with the `persistentvolumeclaim` kind's
+(`pkg/oam/builtin/components/README.md`, "Upstream fields a hand-parsed kind does
+not read"); `helmchart` and `helmrelease` point a removed key to its replacement.
+An empty answer adds nothing. A key refused *below* the top level gets no hint:
+the refusal there is the check's own text, and the type's reason for such a key
+reaches only a caller of the handler. The hint was asked of a terminal component
+handler alone before go-kure/launcher#790; the three other positions are new.
+
 Before any of that, it runs `Transform`'s own reservation check
 (`enforcePlatformReserved`) over the document, with the same schemas and the same
 error text `Transform` would report for it. It has to come first: validation drops an
