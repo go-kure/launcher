@@ -18,6 +18,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -122,6 +123,7 @@ var coreKindSchemas = []struct {
 	// And the kinds of MetalLB's API.
 	{"metallb-bfdprofile", reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), &components.MetalLBBFDProfileHandler{}, nil},
 	{"metallb-bgpadvertisement", reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), &components.MetalLBBGPAdvertisementHandler{}, nil},
+	{"metallb-bgppeer", reflect.TypeFor[metallbv1beta2.BGPPeerSpec](), &components.MetalLBBGPPeerHandler{}, nil},
 	{"metallb-community", reflect.TypeFor[metallbv1beta1.CommunitySpec](), &components.MetalLBCommunityHandler{}, nil},
 	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
 	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, nil},

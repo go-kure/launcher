@@ -390,6 +390,11 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			props:  props(certificateWith("keystores", map[string]any{"pkcs12": map[string]any{"create": true, "password": esSentinel}})),
 			policy: rcNoSecrets,
 		},
+		{
+			name: "metallb-bgppeer, session password", class: oam.RefusalExplicitSecret, typ: "metallb-bgppeer", handler: &components.MetalLBBGPPeerHandler{},
+			props:  props(metallbPeerOf("password", esSentinel)),
+			policy: rcNoSecrets,
+		},
 	}
 	// The pod of an ACME HTTP01 solver is held to the workload maxima on both
 	// kinds an Issuer's spec builds and on both ways a solver answers.

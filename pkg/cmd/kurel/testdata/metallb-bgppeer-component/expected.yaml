@@ -1,0 +1,48 @@
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  labels:
+    launcher.gokure.dev/component: upstream
+  name: upstream
+  namespace: metallb-system
+spec:
+  bfdProfile: fast
+  connectTime: 10s
+  dualStackAddressFamily: true
+  ebgpMultiHop: true
+  enableGracefulRestart: true
+  holdTime: 1m30s
+  keepaliveTime: 30s
+  localASN: 64999
+  myASN: 64512
+  nodeSelectors:
+  - matchLabels:
+      role: edge
+  - matchExpressions:
+    - key: kubernetes.io/hostname
+      operator: In
+      values:
+      - node-a
+      - node-b
+  passwordSecret:
+    name: upstream-session
+    namespace: metallb-system
+  peerASN: 64513
+  peerAddress: 192.0.2.1
+  peerPort: 1179
+  routerID: 192.0.2.10
+  sourceAddress: 192.0.2.10
+  vrf: red
+---
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  labels:
+    launcher.gokure.dev/component: unnumbered
+  name: leaf
+  namespace: metallb-system
+spec:
+  dynamicASN: external
+  interface: eth1
+  myASN: 64512
+  passwordSecret: {}

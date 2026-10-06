@@ -24,6 +24,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -528,6 +529,7 @@ var apiSetKinds = []apiSetKind{
 	// MetalLB's API, from the CRDs its module ships.
 	{component: "metallb-bfdprofile", typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bfdprofiles.yaml", metallbVersion)},
 	{component: "metallb-bgpadvertisement", typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bgpadvertisements.yaml", metallbVersion)},
+	{component: "metallb-bgppeer", typ: reflect.TypeFor[metallbv1beta2.BGPPeerSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bgppeers.yaml", metallbPeerVersion)},
 	{component: "metallb-community", typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_communities.yaml", metallbVersion)},
 	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "metallb-l2advertisement", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion)},
