@@ -514,9 +514,11 @@ var fluxDurationPatterns = map[string]fluxduration.Form{
 // TestFluxKinds_DurationsMatchMarkers holds each kind's duration list to its
 // type: every duration the encoding reaches is listed, by its json path, with
 // the form of the pattern its marker declares, and nothing else is. A duration
-// under a list or a map, which the list cannot name, and one whose pattern is
-// neither form's fail, so a dependency bump that adds a duration field fails
-// here until the kind checks it.
+// under a map, which the list cannot name, one under a list whose pattern
+// takes no h, whose decoded values the object would carry in another form than
+// the pattern's (fluxDurationField), and one whose pattern is neither form's
+// fail, so a dependency bump that adds a duration field fails here until the
+// kind checks it.
 func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 	// The two patterns are told apart by the hour unit, as the forms are.
 	if fluxduration.Interval.Validate("1h") != nil || fluxduration.SourceTimeout.Validate("1h") == nil {
@@ -533,8 +535,8 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 					return
 				}
 				reached++
-				if strings.ContainsAny(f.path, "[{") {
-					t.Errorf("%s is a duration under a list or a map, which the kind's duration list cannot name", f.path)
+				if strings.Contains(f.path, "{") {
+					t.Errorf("%s is a duration under a map, which the kind's duration list cannot name", f.path)
 					return
 				}
 				markers, read := lines(f.owner.PkgPath(), f.owner.Name()+"."+f.field.Name)
@@ -550,6 +552,10 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 					form, known := fluxDurationPatterns[pattern]
 					if !known {
 						t.Errorf("%s declares the pattern %q, which is neither duration form's", f.path, pattern)
+						return
+					}
+					if strings.Contains(f.path, "[") && form != fluxduration.Interval {
+						t.Errorf("%s is a duration under a list whose pattern takes no h, which the object would carry in another form than the pattern's", f.path)
 						return
 					}
 					want[f.path] = form
@@ -650,6 +656,51 @@ func TestEmitFluxKind(t *testing.T) {
 			t.Fatalf("%s is written the same under both forms; the case shows nothing", long)
 		}
 	})
+}
+
+// TestFluxDurations_ThroughAList holds a duration whose path names a list
+// element: the authored text of every item is checked, under every spelling of
+// the list's key, and the decoded values are passed over, by the check and by
+// the writer, which emits the typed object.
+func TestFluxDurations_ThroughAList(t *testing.T) {
+	type window struct {
+		Window metav1.Duration `json:"window"`
+	}
+	type spec struct {
+		Schedule []window `json:"schedule"`
+	}
+	fields := []fluxDurationField[spec]{{path: []string{"schedule[]", "window"}, form: fluxduration.Interval}}
+	for name, tc := range map[string]struct {
+		props   map[string]any
+		refused bool
+	}{
+		"every item valid":        {props: map[string]any{"schedule": []any{map[string]any{"window": "1h"}, map[string]any{"window": "30m"}}}},
+		"no window":               {props: map[string]any{"schedule": []any{map[string]any{"cron": "* * * * *"}}}},
+		"the second item invalid": {props: map[string]any{"schedule": []any{map[string]any{"window": "1h"}, map[string]any{"window": "1d"}}}, refused: true},
+		"another spelling":        {props: map[string]any{"Schedule": []any{map[string]any{"Window": "1d"}}}, refused: true},
+		"below a millisecond":     {props: map[string]any{"schedule": []any{map[string]any{"window": "500us"}}}, refused: true},
+	} {
+		err := checkAuthoredFluxDurations("kind", tc.props, fields)
+		switch {
+		case tc.refused && (err == nil || !strings.Contains(err.Error(), "schedule[].window")):
+			t.Errorf("%s: err = %v, want a refusal naming schedule[].window", name, err)
+		case !tc.refused && err != nil:
+			t.Errorf("%s: err = %v, want none", name, err)
+		}
+	}
+
+	decoded := &spec{Schedule: []window{{Window: metav1.Duration{Duration: -time.Hour}}}}
+	if err := checkFluxDurations("kind", decoded, fields); err != nil {
+		t.Errorf("checkFluxDurations = %v; a path through a list has no get and is passed over", err)
+	}
+	policy := &imagev1.ImagePolicy{}
+	objs, err := emitFluxKind("kind", policy, decoded, fields, oam.ObjectMetadata{})
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("emitFluxKind = %d objects, %v; want one", len(objs), err)
+	}
+	if got, ok := (*objs[0]).(*imagev1.ImagePolicy); !ok || got != policy {
+		t.Errorf("emitFluxKind wrote a %T, want the typed object it was given", *objs[0])
+	}
 }
 
 // TestFluxKinds_UnheldHaveNoEnforce: the kinds no dimension of the environment
