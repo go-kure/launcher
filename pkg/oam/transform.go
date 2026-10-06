@@ -579,12 +579,15 @@ func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, er
 // An endpoint answered here, or by ComponentEndpoints, is not the build's verdict on
 // the document. Both are given one component and hold to one rule: an endpoint entry
 // answers only for a component its type's own parse accepts, and refuses another in the
-// parse's words. Three things it cannot know: neither runs the schema check
-// (ValidateAuthoredProperties), neither is given the policy or what generation refuses
-// after it, and neither sees what only the document shows: a name that is already
-// another component of the document, a name another component generates in the same
-// run, or two objects that collide. The package README states the rule and the three
-// limits ("Name roles and the Naming hook").
+// parse's words. Four things it does not see: neither runs the schema check
+// (ValidateAuthoredProperties); neither sees what the transform refuses of the
+// component after its type's own parse where the entry does not run that step (what
+// webservice's lowering refuses, what a kind postgresql lowers into refuses of a
+// member); neither is given the policy or what generation refuses after it; and
+// neither sees what only the document shows: a name that is already another component
+// of the document, a name another component generates in the same run, or two objects
+// that collide. The package README states the rule and the four limits ("Name roles
+// and the Naming hook").
 //
 // application is the name of the document comp is authored in, as the transform puts
 // it in that request (NameRequest.Application): the document's metadata.name, or,

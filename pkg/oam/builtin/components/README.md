@@ -1994,7 +1994,9 @@ moved onto the presence-reporting helpers: `port` on `webservice`, `daemonset`
 and `statefulset` (the latter two have since dropped it, go-kure/launcher#690;
 `parseInt32Field`; on `webservice` the `Endpoints` declaration runs the
 rule's whole parse, so a wrong type is not declared as an endpoint on port 80
-either, and neither is a component without an `image`), `topologySpread` on `webservice` and
+either, and neither is a component without an `image`; what the rule's
+lowering refuses after the parse is one of the four things an endpoint entry
+does not see, `pkg/oam`, "Name roles and the `Naming` hook"), `topologySpread` on `webservice` and
 `worker` and `prune` on `oci` (`parseBoolField`), `serviceName` on
 `statefulset` and `path`, `interval` and `targetNamespace` on `oci`
 (`parseStringField`, so an authored `""` still reads as absent), and
@@ -6406,7 +6408,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   connect sets `login: false` instead. The lowering repeats the refusal for a
   `PostgresqlConfig` built directly rather than parsed. `Endpoints` runs the
   rule's lowering on the component, so what the lowering refuses of it has no
-  endpoint, in the same words (`pkg/oam`, "Name roles and the `Naming`
+  endpoint, in the same words. What a kind it lowers into refuses of a member
+  (a database named `postgres`) is not seen there: one of the four things an
+  endpoint entry does not see (`pkg/oam`, "Name roles and the `Naming`
   hook").
   **Two object store paths are required** (go-kure/launcher#790):
   `backup.destinationPath` where another value of `backup` is set
