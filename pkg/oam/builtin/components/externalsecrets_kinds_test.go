@@ -495,12 +495,15 @@ func TestExternalSecretKinds_TargetManifest(t *testing.T) {
 				htWantViolation(t, err, `component "web": `+kind.at+secretRefusal)
 				rcWantClass(t, err, oam.RefusalExplicitSecret)
 			})
-			// An apiVersion that is no API version names no group, and the
-			// kind beside it reads as no kind at all: neither the kind check
-			// nor the Secret check would see a Deployment or a Secret there.
-			// It is refused as the value it is, under every policy, and not
-			// as a policy refusal.
-			for _, apiVersion := range []string{"apps/v1/x", "a/b/c"} {
+			// An apiVersion that is no API version is refused as the value it
+			// is, under every policy, and not as a policy refusal: the value
+			// check comes before the policy is asked anything. One with a
+			// second slash names no group, and the kind beside it reads as no
+			// kind at all, so neither the kind check nor the Secret check
+			// would see a Deployment or a Secret there. One with an empty
+			// part, or a part that is no name the API has (a space, an
+			// upper-case letter), does split, and is none all the same.
+			for _, apiVersion := range []string{"apps/v1/x", "a/b/c", "/", "apps/", "/v1", "Apps/v1", "apps/v 1"} {
 				for _, written := range []string{"Deployment", "Secret"} {
 					t.Run(kind.component+"/"+policyName+"/"+apiVersion+" "+written, func(t *testing.T) {
 						_, err := pvTransform(kind.component, kind.handler, manifest(kind.at, apiVersion, written), policy)

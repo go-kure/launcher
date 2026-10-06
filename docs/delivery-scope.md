@@ -1279,8 +1279,10 @@ its text:
     setting and its RBAC). That is stricter than `passthrough` where the policy
     would pass the object it read (a claim under a policy with no storage maximum,
     an autoscaler under one with no replica maximum): here there is nothing to
-    read. An `apiVersion` there that is no API version is refused under every
-    policy, since nothing can write such an object and its kind cannot be read.
+    read. An `apiVersion` there that is no API version (a version, or a group and
+    a version, each a name the API can have) is refused under every policy, since
+    nothing can write such an object and, where the value does not split into the
+    two, its kind cannot be read.
   - A trait's ExternalSecret and an `externalsecret` component's are one kind: given
     one name in one namespace they are refused as a collision.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
