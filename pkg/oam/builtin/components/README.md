@@ -168,7 +168,7 @@ reads it.
 | `prometheus-probe` | Probe | Kind-named Prometheus operator Probe: the whole `ProbeSpec`, strictly decoded; `prober.url` is required. The prober and the targets are the author's. No environment policy applies and no capability is required — see below. |
 | `prometheusrule` | PrometheusRule | Kind-named Prometheus operator PrometheusRule: the whole `PrometheusRuleSpec` (`groups`), strictly decoded; a group's `name` and a rule's `expr` are required. No environment policy applies and no capability is required — see below. |
 | `issuer` | Issuer | Kind-named cert-manager Issuer: the whole `IssuerSpec` (`acme`, `ca`, `vault`, `selfSigned`, `venafi`), strictly decoded; no top-level field is required. The cpu and memory of an ACME HTTP01 solver's pod template are held to the environment policy's maxima. No capability is required — see below. |
-| `clusterissuer` | ClusterIssuer | Kind-named cert-manager ClusterIssuer: the same `IssuerSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
+| `clusterissuer` | ClusterIssuer | Kind-named cert-manager ClusterIssuer: the `IssuerSpec` of `issuer`, strictly decoded, and its policy check. Cluster-scoped. No capability is required — see below. |
 | `certificate` | Certificate | Kind-named cert-manager Certificate: the whole `CertificateSpec`, strictly decoded; `secretName` and `issuerRef` with its `name` are required. A keystore password written into the object is refused under an environment policy that forbids explicit secrets. The issuer is the author's, and no capability is required. Shares its name with the `certificate` trait — see below. |
 | `cilium-bgpadvertisement` | CiliumBGPAdvertisement | Kind-named Cilium BGP advertisement: the whole `CiliumBGPAdvertisementSpec` (`advertisements`, required), strictly decoded; an entry's `advertisementType` is required, and its `service`, `interface` and `selector` are held to the type. Cluster-scoped; no environment policy applies and no capability is required — see below. |
 | `cilium-bgpclusterconfig` | CiliumBGPClusterConfig | Kind-named Cilium BGP cluster configuration: the whole `CiliumBGPClusterConfigSpec` (`nodeSelector`, `bgpInstances`), strictly decoded; `bgpInstances`, an instance's `name` and a peer's `name` are required. The node selector is the author's. Cluster-scoped; no environment policy applies and no capability is required — see below. |
@@ -191,11 +191,11 @@ reads it.
 | `clusterrole` | ClusterRole | Kind-named RBAC ClusterRole: the object's own fields (`rules`, `aggregationRule`), strictly decoded; a rule's `verbs` are required, and either its `apiGroups` and `resources` or its `nonResourceURLs`; an `aggregationRule` needs a selector. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `clusterrolebinding` | ClusterRoleBinding | Kind-named RBAC ClusterRoleBinding: the object's own fields (`subjects`; `roleRef`, required with its `kind` and `name`), strictly decoded; a subject's `kind` and `name` are required, and a ServiceAccount subject's `namespace`. Cluster-scoped. **Ungated: no capability and no environment-policy check restricts what a role grants** — see below. |
 | `secretstore` | SecretStore | Kind-named External Secrets Operator SecretStore: the whole `SecretStoreSpec` (`provider`, `controller`, `retrySettings`, `refreshInterval`, `conditions`), strictly decoded; `provider` with exactly one provider is required, and of that provider what the API requires. A credential written into the object is refused under an environment policy that forbids explicit secrets. No capability is required — see below. |
-| `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the same `SecretStoreSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
+| `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the `SecretStoreSpec` of `secretstore`, strictly decoded, and its policy check. Cluster-scoped. No capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
 | `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires and what it refuses of a `target.manifest` under the environment policy. Cluster-scoped; no capability is required — see below. |
 | `replicationsource` | ReplicationSource | Kind-named VolSync ReplicationSource: the whole `ReplicationSourceSpec` (`sourcePVC`, `trigger`, the movers `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`, `external`, `paused`), strictly decoded; no top-level field is required. An authored capacity is held to the environment policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. Its object is of the kind the `volsync` trait builds — see below. |
-| `replicationdestination` | ReplicationDestination | Kind-named VolSync ReplicationDestination: the whole `ReplicationDestinationSpec` (`trigger`, the movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external`, `paused`), strictly decoded, with the same policy checks. No top-level field is required and no capability is required — see below. |
+| `replicationdestination` | ReplicationDestination | Kind-named VolSync ReplicationDestination: the whole `ReplicationDestinationSpec` (`trigger`, the movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external`, `paused`), strictly decoded, with the policy checks of `replicationsource`. No top-level field is required and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -2408,7 +2408,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
     give the same ConfigMap and the same refusals on both paths.
 - **secret** (go-kure/launcher#790) is the kind-named projection of a v1
-  Secret, on the recipe of `configmap` above: it emits the Secret, named after
+  Secret, on the recipe of `configmap`: it emits the Secret, named after
   the component (or its `objectName`) and carrying the component's `app`
   label, and nothing else, so a workload's `secret` volume, `envFrom` or
   `secretKeyRef` names it by that name.
@@ -2504,7 +2504,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     namespace may hold in total; the environment policy is not applied to it.
 - **persistentvolume** (go-kure/launcher#790) is the kind-named projection of
   a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
-  `resourcequota` above: one schema key per json field of
+  `resourcequota`: one schema key per json field of
   `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
   type, two spellings of one field refused, and one object named after the
   component, with the authored spec; the handler adds no label and no
@@ -2519,7 +2519,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   canonical string form. The object's labels and annotations are the `labels`
   and `annotations` properties.
 
-  **Policy.** Unlike the three kinds above, a PersistentVolume is held to the
+  **Policy.** Unlike `namespace`, `limitrange` and `resourcequota`, a
+  PersistentVolume is held to the
   environment policy (`enforcePersistentVolumePolicy`):
   - A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
     allows it. Both name a path on the node (`local` a disk, partition or
@@ -2673,7 +2674,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   reference is not checked. The kinds that name an image outside a pod spec
   hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
   of its template, `cnpg-cluster` its `imageName` and the reference of each
-  extension, `postgresql` the image it composes from `version` (each below).
+  extension, `postgresql` the image it composes from `version` (each in its entry).
   The test that walks the types fails on a field held to the registry rule
   and not to this one. **Breaking** (go-kure/launcher#790): a document, a
   chart or a source naming an untagged or `:latest` image in one of those
@@ -2857,8 +2858,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
   the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
   BGP control plane and the five kinds of the Gateway API's infrastructure
-  objects, below, are built on it too. The three kinds
-  of cert-manager's API and the two of VolSync's, below, are built on `policyHeldKind`
+  objects are built on it too. The three kinds
+  of cert-manager's API and the two of VolSync's are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
   It refuses or passes; it fills no default. A kind is a value
@@ -2969,7 +2970,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - Whether a referenced object exists: the `runtimeclass` a pod names, the
     `storageclass` a claim names, the parameters object of an `ingressclass`.
 - **ingress** (go-kure/launcher#790) is the kind-named projection of a
-  networking.k8s.io/v1 Ingress, on the recipe of `resourcequota` above: one
+  networking.k8s.io/v1 Ingress, on the recipe of `resourcequota`: one
   schema key per json field of `networkingv1.IngressSpec` (`ingressClassName`,
   `defaultBackend`, `tls`, `rules`), the property map decoded strictly into
   that type under the null contract, two spellings of one field refused, and
@@ -3033,7 +3034,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component's Service; this kind is a component of its own, and a backendRef is
   a reference carried as written, its `namespace` included. Three things the
   trait has do not reach it:
-  - **No NetworkPolicy allow rule.** As for `ingress` above: the NetworkPolicy
+  - **No NetworkPolicy allow rule.** As for `ingress`: the NetworkPolicy
     synthesis reads a routing trait's traffic sources and target component,
     which this kind does not report, so it allows nothing for the route's
     backends. An author who wants the allow rule puts the `expose` or
@@ -3217,7 +3218,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 - **servicecidr** (go-kure/launcher#790) is the kind-named projection of a
   cluster-scoped `networking.k8s.io/v1` ServiceCIDR: a range the API server
   assigns Service cluster IPs from, beside the one it was started with. It is
-  built on `policyFreeKind`, as the six kinds above are, and what that entry
+  built on `policyFreeKind`, as the six kinds of the **storageclass** entry
+  are, and what that entry
   says of them holds here: one object, named after the component unless
   `objectName` names it, with no namespace, declared cluster-scoped, holding
   exactly what was authored, the same under every policy and under none.
@@ -3655,7 +3657,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the kind-named projections of three objects of cert-manager's
   `cert-manager.io/v1` API: an Issuer, a ClusterIssuer and a Certificate. Each
   is built on `policyHeldKind` (`policyFreeKind` with a policy check, see
-  above) and emits that one object, named after the component unless
+  the **storageclass** entry) and emits that one object, named after the component unless
   `objectName` names it; the handler adds no label, no annotation and no
   default. An `issuer` and a `certificate` are emitted in the build namespace
   and declare their object as namespaced. A `clusterissuer` is emitted with no
@@ -3701,7 +3703,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, so that the object would not show the omission: the
-  rule every kind follows (see the Prometheus operator's kinds above). Each
+  rule every kind follows (see the Prometheus operator's kinds). Each
   must be authored (`secretName: required (…)`,
   `acme.solvers[1].dns01.webhook.groupName: required (…)`); an authored empty
   value is a value, and the API server's to refuse.
@@ -3900,7 +3902,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the field was not authored; `TestCiliumBGPKinds_DefaultsSitOnPointers`
     holds each to a pointer field, from the CRDs of the linked module.
 
-  **Required** follows the rule of the Prometheus operator's kinds above: a
+  **Required** follows the rule of the Prometheus operator's kinds: a
   field the API requires that the Go type writes whether or not it was
   authored. Each must be authored
   (`bgpInstances[0].peers[1].name: required (…)`):
@@ -4025,7 +4027,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   namespaced** and are written in the build namespace.
 
   **No capability is required, and nothing gates these kinds**, as for the
-  BGP kinds above: where the CRDs are not installed, or the feature the object
+  BGP kinds: where the CRDs are not installed, or the feature the object
   configures is not enabled in the cluster's Cilium (egress gateway, local
   redirect policies, load balancer address management), the component builds.
   Whoever may author a component may author these, and with them the address
@@ -4258,7 +4260,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of the infrastructure objects of the Gateway API's
   `gateway.networking.k8s.io/v1`: a GatewayClass, a Gateway, a ListenerSet, a
   ReferenceGrant and a BackendTLSPolicy. Each is built on `policyFreeKind`
-  (above) and emits that one object, named after the component unless
+  (see the **storageclass** entry) and emits that one object, named after the component unless
   `objectName` names it; the handler adds no label, no annotation and no
   default. A `gatewayclass` is emitted with no namespace and declares its
   object as cluster-scoped, so its name is claimed in no namespace. The other
@@ -4311,7 +4313,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, so that the object would not show the omission: the
-  rule every kind follows (see the Prometheus operator's kinds above). Each
+  rule every kind follows (see the Prometheus operator's kinds). Each
   must be authored (`gatewayClassName: required (…)`,
   `listeners[1].port: required (…)`); an authored empty value is a value, and
   the API server's to refuse.
@@ -4492,7 +4494,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     markers of the linked module's source in both directions: no other number
     or boolean of the four specs is of that shape.
 
-  **Required** follows the rule of the Prometheus operator's kinds above: a
+  **Required** follows the rule of the Prometheus operator's kinds: a
   field the API requires that the Go type writes whether or not it was
   authored. Each must be authored; an authored empty value is a value, and the
   API server's to refuse. A required field under a parent the author left out
@@ -4764,7 +4766,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     CRDs to that, and a dependency bump that adds a default fails there with
     the field named.
 
-  **Required** follows the rule of the Prometheus operator's kinds above: a
+  **Required** follows the rule of the Prometheus operator's kinds: a
   field the API requires that the Go type writes whether or not it was
   authored must be authored. Neither kind has one at the top level.
   - Of a volume mounted into a mover (`moverVolumes`, on `rsyncTLS`,
@@ -4972,7 +4974,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Before go-kure/launcher#690, `port > 0` added a ClusterIP Service named after
   the component, which held the component name to the Service-name rule and an
   ingress `portName` to `http` (go-kure/launcher#545, go-kure/launcher#546).
-  With no Service, only the container-name rule above applies.
+  With no Service, only the container-name rule applies (see
+  **webservice / worker**).
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|
@@ -5069,7 +5072,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and any other value is checked via `time.LoadLocation`, which this binary
   resolves from an embedded IANA database rather than the host's zoneinfo).
   JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the `job`
-  component — the full table is under **job** below, and the shared trio is
+  component — the full table is under **job**, and the shared trio is
   described in "Common config" above): `backoffLimit`, `completions`,
   `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
   `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
@@ -5335,7 +5338,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   see Conventions.
 - **helm** (go-kure/launcher#349, `helm.go`) — the role-named Helm component: a
   component-position lowering rule (`HelmRule`), not a handler, that lowers to the
-  kind-named terminals below. Properties: `chart`, `version`, `delivery`
+  kind-named terminals. Properties: `chart`, `version`, `delivery`
   (`flux` default | `template`), `source` (inline `url` with optional `kind` and,
   for a GitRepository, `ref`; an inline Bucket's `kind`, `endpoint`, `bucketName`,
   `provider`, `region`, `prefix`; beside any of these a `name` for the generated
@@ -5688,7 +5691,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (see **Naming the generated source**), and `pkg/oam` refuses it as a duplicate
   component name when another rule emits it in the same lowering round.
 - **helmchart** — since go-kure/launcher#351, the kind-named terminal for Flux's `HelmChart`:
-  see **helmrepository / ocirepository / gitrepository / bucket / helmchart** below. Until
+  see **helmrepository / ocirepository / gitrepository / bucket / helmchart**. Until
   go-kure/launcher#350 the name belonged to a role-level composite (a HelmRelease plus its source,
   or a client-side render), which is gone; use `helm`. A document written for the composite
   fails validation on a key `HelmChartSpec` does not declare. When that key is one of the
@@ -5821,7 +5824,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The Kustomization `oci` emits has no such default, deliberately (go-kure/launcher#794,
   item 1): a HelmRelease's `targetNamespace` only says where the release installs, while a
   Kustomization's overrides the namespace of every namespaced object in the artifact (see
-  `oci` below).
+  `oci`).
   The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
   `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
   helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
@@ -6176,7 +6179,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     volumes, the cpu/memory maxima, the storage maximum on a generic ephemeral volume's claim,
     the registry allowlist on an image volume's reference (**breaking**, go-kure/launcher#790:
     a chart that renders one from a registry outside the list built before; see *Image volumes*
-    under **pod** above),
+    under **pod**),
     and for every init and regular container the registry allowlist, the privileged, HostProcess
     and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`), which holds
     the reference of an image volume too (**breaking**, go-kure/launcher#790: a chart that
@@ -6190,7 +6193,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `scaler` trait hold theirs. A PersistentVolume is held to what the `persistentvolume`
     kind holds its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`,
     and `spec.capacity.storage` is held to the storage maximum (breaking for a chart that
-    renders one; see **persistentvolume** above). The error names the rendered
+    renders one; see **persistentvolume**). The error names the rendered
     object and the field (`helmtemplate: rendered Deployment "demo/web":
     spec.template.spec.containers[0] "app": …`).
 
@@ -6526,7 +6529,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   even when `ghcr.io` or `registry` is listed. No policy, or an empty
   allowlist, accepts every `oci://` url.
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
-  for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph above.
+  for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph.
 - **fluxcd-kustomization** — the kind-named terminal for Flux's `Kustomization`
   (go-kure/launcher#784). Its properties are exactly the top-level JSON keys of
   `KustomizationSpec` in the kustomize-controller API version `go.mod` links; a
@@ -6608,7 +6611,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `interval` defaults to `60m` when unset (a zero duration counts as unset), matching the
   `helmrelease` default; a `helmrepository` with `type: oci` gets no default, since Flux
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
-  A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
+  A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease`
   (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
   A set `timeout` (a `helmchart` has none) is checked the same way, against the source CRDs'
   narrower pattern, which has
@@ -6698,7 +6701,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   content layer; a `gitrepository` for `kind: GitRepository` with its URL and one `source.ref`
   field; or a `bucket` for `kind: Bucket` with `endpoint` and `bucketName` and no URL. It is
   named `<app>-source-<digest>` and shared by every `helm` component with the same source
-  identity (see **helm** above). An authored source component exposes the whole spec
+  identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
@@ -6940,7 +6943,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   path used to build no backup at all, and is refused as a block that would
   not be built (below). An authored empty path
   is a value: it is written, and refusing it is left to the API server. These
-  are two of the strings `cnpg-cluster` refuses unauthored (below); the
+  are two of the strings `cnpg-cluster` refuses unauthored; the
   lowering fills the parent of two more, `bootstrap.pg_basebackup.source` and
   the Cluster's `postgresql.synchronous.method` (authored here as
   `replication.synchronous.method`), only from the string itself, and of the
@@ -7121,7 +7124,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `enablePDB` from the replica count, a `1Gi` storage fallback, pod
   anti-affinity — are not made here: its lowering rule writes them as this
   kind's properties, and the trait it attaches sets the two that depend on
-  the policy (see `postgresql` above). The one value it writes unasked is
+  the policy (see `postgresql`). The one value it writes unasked is
   `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
   `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
   appear even when unauthored, as they do for `postgresql`: `affinity` and
@@ -7277,7 +7280,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   go-kure/launcher#790: an extension image from a registry outside the list
   built before): `postgresql.extensions[0].image.reference: image "…" is not
   from an allowed registry [...]`, with the registry class, the reference read
-  as `imageName` is (see *Image volumes* under **pod** above). An entry
+  as `imageName` is (see *Image volumes* under **pod**). An entry
   without a reference is not checked: the operator takes that image from the
   catalog `imageCatalogRef` names (and refuses the Cluster without one), and
   a catalog's images are not checked by this kind, as for an unset
@@ -7449,7 +7452,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   than emitted.
 
   **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
-  resolved with the precedence `manifests` gives a `scopeOverrides` entry (below),
+  resolved with the precedence `manifests` gives a `scopeOverrides` entry,
   with `clusterScoped` in the entry's place (`resolveClusterScoped`,
   `passthrough.go`):
 
@@ -7554,13 +7557,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Policy.** `ApplyPolicy` holds the object to the environment policy
   (go-kure/launcher#794), with the check template delivery runs on the objects a chart
-  renders (`helmtemplate`'s *Every emitted workload*, above); the transform calls it with
+  renders (`helmtemplate`'s *Every emitted workload*); the transform calls it with
   `NoopPolicy` when no policy is passed. A Pod, PodTemplate, ReplicationController,
   Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob is checked as an authored
   workload is: host namespaces, hostPath volumes, the cpu/memory maxima, the storage
   maximum on a generic ephemeral volume's claim, the registry allowlist on an image
   volume's reference (**breaking**, go-kure/launcher#790: an object with one from a
-  registry outside the list built before; see *Image volumes* under **pod** above), and
+  registry outside the list built before; see *Image volumes* under **pod**), and
   for every init and regular container
   the registry allowlist, the privileged, HostProcess and capability gates, and
   `ValidateImageRef` (no untagged image, no `:latest`), which holds the reference of an
@@ -7573,7 +7576,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`MaxReplicas`). A PersistentVolume is held to what the `persistentvolume` kind holds
   its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
   `spec.capacity.storage` is held to the storage maximum (breaking for a document that
-  holds one; see **persistentvolume** above). The error is the component's policy violation and names the object and
+  holds one; see **persistentvolume**). The error is the component's policy violation and names the object and
   the field (`passthrough: object Deployment "demo/web":
   spec.template.spec.containers[0] "app": …`).
 
@@ -7710,9 +7713,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   replica maximum. A PersistentVolume is held to what the `persistentvolume` kind holds
   its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`, and
   `spec.capacity.storage` is held to the storage maximum (breaking for a source that
-  holds one; see **persistentvolume** above). An image volume from a registry outside
+  holds one; see **persistentvolume**). An image volume from a registry outside
   the list is refused since go-kure/launcher#790 (**breaking** for a source that holds
-  one; see *Image volumes* under **pod** above). The error names the object and the field (`manifest source: object
+  one; see *Image volumes* under **pod**). The error names the object and the field (`manifest source: object
   Deployment "demo/web": spec.template.spec.containers[0] "app": …`). A `crd` source
   holds only CustomResourceDefinitions, none of which the check reads, so `crd` builds as
   before.
@@ -7760,7 +7763,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   value over a maximum, or an object the check cannot read (above) — and with no policy
   passed the first three are always refused, since `NoopPolicy` denies them. A consumer
   allows what it wants allowed through its policy, not per component, exactly as for
-  `passthrough` (above). An untagged or `:latest` image has to be pinned in the source,
+  `passthrough`. An untagged or `:latest` image has to be pinned in the source,
   and a workload in an API version the build cannot read has to be authored in the one
   it can (`batch/v1`, `apps/v1`).
 
