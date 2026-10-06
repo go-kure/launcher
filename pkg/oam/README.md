@@ -1149,15 +1149,9 @@ over it, the object keeping the component name (`configmap`, `service`, `deploym
 where the handler decodes its properties strictly, refuses it as a field it does not know
 (`namespace`, `helmrelease`, `cnpg-cluster`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
-kind (`namespace`, `persistentvolume`, `storageclass`, `volumeattributesclass`,
-`priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `servicecidr`,
-`clusterissuer`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`,
-`cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`,
-`cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`,
-`cilium-clusterwidenetworkpolicy`, `gatewayclass`, `clusterrole`,
-`clusterrolebinding`, `clustersecretstore`, `clusterexternalsecret`), and in
-the Flux namespace for a Flux kind when the
-transform has one, so it is held against every other resolved name:
+kind (the components README's "Kind inventory" gives the scope of each), and in the Flux
+namespace for a Flux kind when the transform has one, so it is held against every other
+resolved name:
 
 ```
 name collision: Pooler.postgresql.cnpg.io "default/db-pooler" is named by component "db" (role "pooler", its default) and by component "pgb" (role "object", set by properties.objectName); give one of them another name
@@ -1356,20 +1350,9 @@ registering a `ComponentHandler` in `pkg/cmd/kurel` does *not* by itself make it
 name authorable — the name must also be added here. A type registered on one side only
 is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
-The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
-`pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`,
-`volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`,
-`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`,
-`poddisruptionbudget`, `horizontalpodautoscaler`, `servicemonitor`, `podmonitor`,
-`prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`,
-`cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`,
-`cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`,
-`cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`,
-`cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`,
-`referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`,
-`clusterrole`, `clusterrolebinding`, `secretstore`, `clustersecretstore`,
-`externalsecret`, `clusterexternalsecret`, `replicationsource` and
-`replicationdestination` (go-kure/launcher#790) are on this list.
+Every kind component is on this list, those of go-kure/launcher#790 among them: the
+components README's "Kind inventory" (`pkg/oam/builtin/components/README.md`) names each
+beside its object.
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are
 also trait types: the two lists are separate, and a component of such a type is the
 authored object, not the trait.

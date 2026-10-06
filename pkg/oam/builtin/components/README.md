@@ -8048,28 +8048,10 @@ See "Component label and ownership" in the
 ### The object name (`objectName`)
 
 Every kind component takes `objectName`, which names its one object in place of the component
-name (go-kure/launcher#787): the workload kinds (`deployment`, `daemonset`, `statefulset`,
-`job`, `cronjob`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`), `service`,
-`ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `configmap`, `secret`, `serviceaccount`, `persistentvolumeclaim`, `persistentvolume`, `namespace`,
-`limitrange`, `resourcequota`, the six cluster-scoped kinds built on `policyFreeKind`
-(`storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`,
-`csidriver`), `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, the four
-kinds of the Prometheus operator's API (`servicemonitor`, `podmonitor`, `prometheus-probe`,
-`prometheusrule`), the three kinds of cert-manager's API (`issuer`, `clusterissuer`,
-`certificate`), the four kinds of Cilium's BGP control plane (`cilium-bgpadvertisement`,
-`cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`),
-five more kinds of Cilium's API (`cilium-cidrgroup`, `cilium-loadbalancerippool`,
-`cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`),
-`cilium-clusterwidenetworkpolicy`, `endpointslice`, the four kinds of the RBAC API (`role`,
-`rolebinding`, `clusterrole`, `clusterrolebinding`),
-the five kinds of the Gateway API's infrastructure objects (`gatewayclass`, `gateway`,
-`listenerset`, `referencegrant`, `backendtlspolicy`),
-the four kinds of the External Secrets Operator's API (`secretstore`,
-`clustersecretstore`, `externalsecret`, `clusterexternalsecret`),
-the two kinds of VolSync's API (`replicationsource`, `replicationdestination`),
-the four `cnpg-*` kinds and the Flux kinds (`helmrelease`,
-`helmrepository`, `ocirepository`, `gitrepository`, `bucket`, `helmchart`,
-`fluxcd-kustomization`). `helmtemplate`, `manifests`, `crd` and `passthrough` generate no
+name (go-kure/launcher#787): every component type with a handler
+(`builtinComponentHandlers`) but four, as `TestObjectName_EveryComponentTypeChooses`
+(`pkg/cmd/kurel`) holds; a type that is lowered to others has none. `helmtemplate`,
+`manifests`, `crd` and `passthrough` generate no
 single object named after the component and refuse it. The rules for the name, the `Naming`
 hook's role `object` and the references that follow it are under "`objectName`: the object of
 a kind component" in the
