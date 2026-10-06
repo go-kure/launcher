@@ -550,3 +550,21 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 		t.Fatal("the walk reached no duration field of a Flux kind")
 	}
 }
+
+// TestFluxKinds_UnheldHaveNoEnforce: the kinds no dimension of the environment
+// policy reaches have no enforce, so the ApplyPolicy of their config checks
+// nothing (TestFluxKinds_UnheldPassEveryPolicy shows it on their fixtures). A
+// kind that comes to name a host the policy holds leaves this list and says in
+// its own tests what the policy refuses of it.
+func TestFluxKinds_UnheldHaveNoEnforce(t *testing.T) {
+	for component, held := range map[string]bool{
+		fluxcdAlertType:           fluxcdAlertKind.enforce != nil,
+		imagePolicyType:           imagePolicyKind.enforce != nil,
+		imageUpdateAutomationType: imageUpdateAutomationKind.enforce != nil,
+		artifactGeneratorType:     artifactGeneratorKind.enforce != nil,
+	} {
+		if held {
+			t.Errorf("%s has an enforce: the environment policy now refuses something of it", component)
+		}
+	}
+}

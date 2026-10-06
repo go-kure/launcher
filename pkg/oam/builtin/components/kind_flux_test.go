@@ -300,6 +300,36 @@ func TestFluxKinds_ObjectNameIsClaimedInTheFluxNamespace(t *testing.T) {
 	}
 }
 
+// TestFluxKinds_UnheldPassEveryPolicy: a Flux kind the environment policy does
+// not reach passes a policy that allows one registry no fixture names and
+// forbids explicit secrets, on the least it may author and on every field.
+func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
+	policy := esPolicy{stubPolicy: &stubPolicy{allowedRegistries: []string{"registry.invalid"}}}
+	var unheld []string
+	for _, kind := range fluxKinds(t) {
+		if kind.held {
+			continue
+		}
+		unheld = append(unheld, kind.component)
+		for name, props := range map[string]map[string]any{"minimal": kind.minimal, "full": kind.full} {
+			t.Run(kind.component+"/"+name, func(t *testing.T) {
+				cfg, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "web", Type: kind.component, Properties: maps.Clone(props)}, coreKindNamespace)
+				if err != nil {
+					t.Fatalf("ToApplicationConfig: %v", err)
+				}
+				if err := cfg.(policyApplier).ApplyPolicy(policy); err != nil {
+					t.Errorf("ApplyPolicy refuses a kind the policy does not reach: %v", err)
+				}
+			})
+		}
+	}
+	// Vacuity guard: these four are the kinds the policy does not reach.
+	slices.Sort(unheld)
+	if want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
+		t.Fatalf("the Flux kinds the policy does not reach are %v, want %v", unheld, want)
+	}
+}
+
 // TestFluxKinds_ReportReads: each kind's config reports the ConfigMaps and
 // Secrets its object reads by name from the namespace it lands in, so the
 // objects of a trait that are named follow it to the Flux namespace. Every
