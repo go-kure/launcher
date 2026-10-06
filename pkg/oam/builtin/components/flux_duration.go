@@ -30,11 +30,19 @@ import (
 // properties decode strictly into the Flux spec S (go-kure/launcher#601,
 // go-kure/launcher#606): its JSON path in the component's properties, the form
 // its CRD pattern takes, and how to read the decoded value.
+//
+// A path element that ends in [] names a list, each of whose items holds the
+// rest of the path ("schedule[]", "window"). Such a field has no get: a list
+// holds many values, so only its authored text is checked
+// (checkAuthoredFluxDurations), and the object carries the decoded values as
+// the type writes them. That is right only under a form that takes h, which
+// writes what Duration.String() writes; TestFluxKinds_DurationsMatchMarkers
+// fails a list duration under another.
 type fluxDurationField[S any] struct {
 	path []string
 	form fluxduration.Form
 	// get returns the decoded duration, or nil when the field, or a struct
-	// that holds it, is unset.
+	// that holds it, is unset. Nil for a path through a list.
 	get func(*S) *metav1.Duration
 }
 
@@ -105,12 +113,25 @@ func checkAuthoredFluxDurations[S any](component string, props map[string]any, f
 }
 
 func checkAuthoredFluxDuration(component string, props map[string]any, path []string, field string, form fluxduration.Form) error {
+	key, list := strings.CutSuffix(path[0], "[]")
 	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if !strings.EqualFold(k, path[0]) {
+		if !strings.EqualFold(k, key) {
 			continue
 		}
 		raw, err := json.Marshal(props[k])
 		if err != nil {
+			continue
+		}
+		if list && len(path) > 1 {
+			var items []map[string]any
+			if json.Unmarshal(raw, &items) != nil {
+				continue
+			}
+			for _, item := range items {
+				if err := checkAuthoredFluxDuration(component, item, path[1:], field, form); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if len(path) > 1 {
@@ -138,9 +159,13 @@ func checkAuthoredFluxDuration(component string, props map[string]any, path []st
 // Form.Format. It covers a config built directly rather than parsed: a negative
 // or sub-millisecond duration is emitted outside the field's pattern. Unset and
 // zero are passed over: Generate defaults a zero interval, and a set zero is
-// emitted as 0s, which every form accepts.
+// emitted as 0s, which every form accepts. A path through a list has no get
+// and is passed over: its authored text is what is checked.
 func checkFluxDurations[S any](component string, spec *S, fields []fluxDurationField[S]) error {
 	for _, f := range fields {
+		if f.get == nil {
+			continue
+		}
 		d := f.get(spec)
 		if d == nil || d.Duration == 0 {
 			continue
@@ -183,14 +208,18 @@ func emitFluxSource(component string, obj client.Object, timeout *metav1.Duratio
 // in the spec: a duration of fields that its form writes otherwise than
 // Duration.String() does (a timeout of an hour or more, under a pattern that
 // takes no h) goes out in the form's text, in an unstructured copy of obj.
-// Every other object is emitted as the typed one. meta is the labels and
-// annotations authored for the object, set before the copy.
+// Every other object is emitted as the typed one; so is a duration of a path
+// through a list, which has no get and whose form takes h. meta is the labels
+// and annotations authored for the object, set before the copy.
 func emitFluxKind[S any](component string, obj client.Object, spec *S, fields []fluxDurationField[S], meta oam.ObjectMetadata) ([]*client.Object, error) {
 	if err := meta.ApplyTo(obj); err != nil {
 		return nil, err
 	}
 	var m map[string]any
 	for _, f := range fields {
+		if f.get == nil {
+			continue
+		}
 		d := f.get(spec)
 		if d == nil {
 			continue
