@@ -163,6 +163,7 @@ reads it.
 | `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `endpointslice` | EndpointSlice | Kind-named EndpointSlice: the object's own fields (`addressType`, required; `endpoints`; `ports`), strictly decoded; an endpoint's `addresses` are required. It belongs to a Service through the `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow a Service's `objectName`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
+| `fluxcd-alert` | Alert | Kind-named Flux Alert: the whole `AlertSpec`, strictly decoded; `providerRef` with its `name` and `eventSources`, each with its `kind` and `name`, are required. A source may name the objects of another namespace, and nothing gates it. No environment policy applies — see below. |
 | `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source; what `oci` lowers to beside an `ocirepository` (`OCIRule`, see below). An authored Flux object, not how an application is delivered. |
 | `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
@@ -372,7 +373,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | kind | `clustersecretstore` | strict decode of `SecretStoreSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `provider` must be written with exactly one provider; of that provider, the fields the API requires that the type would write empty, and the four it would default. A credential written as a `value`, and the data of the `fake` provider, are refused under a policy that forbids explicit secrets. No capability is required. |
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
-| `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | missing | - | - | - |
+| `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
 | `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | missing | - | - | - |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
@@ -6752,6 +6753,98 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
+- **fluxcd-alert** (go-kure/launcher#790) is the kind-named projection of an
+  object of the Flux APIs beside the sources, the HelmRelease and the
+  Kustomization: a notification.toolkit.fluxcd.io/v1beta3 Alert. It is built
+  on `policyFreeKind` (above) with one addition, the Flux namespace
+  (`fluxKind`), and emits that one object, named after the component unless
+  `objectName` names it; the handler adds no label, no annotation and no
+  default. The type is `fluxcd-alert` rather than `alert`, which beside a
+  `prometheusrule` would read as an alerting rule.
+
+  **Nothing gates what a Flux object reaches outside its namespace, or the
+  identity it acts under.** A Flux object may name objects of another
+  namespace, and some may act under an account that is not their
+  controller's. Launcher writes such a field as authored and refuses none,
+  under a nil policy and a strict one alike: the environment policy has no
+  rule for the namespace or the account a Flux object names, and
+  `ApplyPolicy` is a no-op here as it is on `helmrelease` (its
+  `chart.spec.sourceRef.namespace`, `chartRef.namespace`,
+  `serviceAccountName` and `kubeConfig`) and on `fluxcd-kustomization` (its
+  `sourceRef.namespace`, `serviceAccountName` and `kubeConfig`). Whoever may
+  author a component may author these fields, and a consumer that restricts
+  them restricts the component types it registers.
+  *Assumption, not read here:* a cluster's Flux controllers can be started so
+  that they refuse a reference into another namespace. Launcher reads no such
+  setting, and no build depends on it. The fields, per kind:
+  - `fluxcd-alert`: `eventSources[].namespace` names the namespace of the
+    objects whose events are sent, and a source's `name: "*"`, with or
+    without `matchLabels`, takes every object of its kind there. The events
+    go to the Provider `providerRef` names, so an Alert sends what happens
+    to another namespace's Flux objects to a receiver its author chose.
+    `providerRef` holds a name and no namespace: the Provider is one of the
+    namespace the Alert lands in. An Alert names no account.
+
+  **Authored.** The properties are the top-level json fields of the spec
+  type, decoded strictly at every depth: an unknown key is refused wherever
+  it sits (a source, the provider reference).
+  - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
+    `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
+    `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
+  - **No default is filled.** The API's own (`eventSeverity: info`) is
+    applied by the API server to what the object leaves out.
+    `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
+    boolean that is omitted when zero and that the API defaults to something
+    else.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, the rule every kind follows (see the Prometheus
+  operator's kinds above). Each must be authored (`providerRef: required
+  (…)`, `eventSources[1].name: required (…)`); an authored empty value is a
+  value, and the API server's to refuse.
+  - A `fluxcd-alert`: `providerRef` with its `name`, and `eventSources`; of
+    each source its `kind` and `name`.
+
+  **The lists are read from the markers of the Go source, not from a CRD.**
+  The API modules of the Flux controllers hold the Go types and ship no CRD,
+  so `TestFluxKinds_RequiredMatchMarkers` derives each list from the
+  `+required` markers of the linked modules' source, as the kinds of the
+  Prometheus operator's API are derived: every field so marked that the type
+  writes unauthored is listed, and nothing else is. A dependency bump that
+  adds, drops or moves one fails there. Nothing here is held to the API
+  server's own validator, which answers from a CRD. **Not refused:**
+  - a list the API wants an item of that is authored empty
+    (`eventSources: []`);
+  - every value rule of the API: enumerations (`eventSeverity`, a source's
+    `kind`), lengths (a source's `name` and `namespace`, `summary`), and
+    that a source with `matchLabels` is named `*`, which the type documents
+    and no marker states.
+
+  **The APIs' expression rules.** An Alert's types declare none.
+
+  **Policy.** No dimension of the environment policy reaches these objects:
+  they run no pod, hold no image, request no storage and have no replica
+  count.
+  - **No field of an Alert holds a secret or a host.** The address and the
+    credentials are the Provider's. `eventMetadata` is a free map, written to
+    the object as authored under a policy that forbids explicit secrets too.
+
+  **Namespace.** The object lands in the Flux namespace when one is
+  configured, else in the build namespace (`SetFluxNamespace`), as the Flux
+  kinds above do, and its name is claimed there. A reference without a
+  namespace of its own is written without one, under a Flux namespace too:
+  launcher fills none in. The Flux objects of the same document
+  (`helmrelease`, `fluxcd-kustomization`, the sources) land in the Flux
+  namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
+  a kind reads by name from the namespace it lands in, so that a trait's
+  object one of them names moves with it; an Alert reads none.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+
+  **Not covered.** Whether what is referred to exists (the Provider, the
+  objects of a source), and whether the cluster serves the API: the
+  component builds where the CRD is not installed, and the object is refused
+  at apply. The object's status is the controller's and is not written.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `poolerName`, `managedRoles`,

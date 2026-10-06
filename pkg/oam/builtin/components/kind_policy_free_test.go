@@ -14,6 +14,7 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -45,11 +46,16 @@ import (
 // whole object in a namespace. The three kinds of cert-manager's API and the
 // four of the External Secrets Operator's are held here too: the policy
 // reaches one part of each (held), and everything else of them is the helper's.
+// So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
+// Kustomization (flux): what they add to the helper, the Flux namespace, has its
+// own tests (kind_flux_test.go).
 
 // policyFreeKind is one of them. typ is the type the properties decode into:
 // the object itself for a kind with no spec type (wholeObject), its spec type
 // otherwise. namespaced says the object lands in the build namespace; the
-// others are cluster-scoped. held says the environment policy reaches the
+// others are cluster-scoped. flux says a namespaced object moves to the Flux
+// namespace when one is set, which none is here. held says the environment
+// policy reaches the
 // kind: its fixtures then stay inside ptStrictPolicy, and what the policy
 // refuses of it has its own tests. minimal is the least a component may
 // author, full a value of every top-level field.
@@ -60,6 +66,7 @@ type policyFreeKind struct {
 	typ         reflect.Type
 	wholeObject bool
 	namespaced  bool
+	flux        bool
 	held        bool
 	minimal     map[string]any
 	full        map[string]any
@@ -88,6 +95,9 @@ func (k policyFreeKind) namespace(build string) string {
 
 // scope is the scope the kind's handler declares for its object.
 func (k policyFreeKind) scope() oam.ObjectScope {
+	if k.flux {
+		return oam.ObjectScopeFlux
+	}
 	if k.namespaced {
 		return oam.ObjectScopeNamespaced
 	}
@@ -404,6 +414,13 @@ var policyFreeKinds = []policyFreeKind{
 		// The API requires no field of an ExternalSecret's spec.
 		minimal: map[string]any{},
 		full:    externalSecretFull(),
+	},
+	{
+		component: "fluxcd-alert", handler: &components.FluxcdAlertHandler{},
+		gvk: notificationv1beta3.GroupVersion.WithKind(notificationv1beta3.AlertKind),
+		typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), namespaced: true, flux: true,
+		minimal: fluxAlertMinimal(),
+		full:    fluxAlertFull(),
 	},
 	{
 		component: "gateway", handler: &components.GatewayHandler{},
@@ -1173,6 +1190,10 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Endpoints[1].Addresses", ".Ports", ".Ports[0].Name", ".Ports[0].Protocol", ".Ports[0].Port", ".Ports[0].AppProtocol",
 		},
 		"externalsecret": externalSecretReaches(".Spec"),
+		"fluxcd-alert": {
+			".Spec.EventSources", ".Spec.EventSources[1].MatchLabels", ".Spec.InclusionList", ".Spec.ExclusionList",
+			".Spec.EventMetadata",
+		},
 		"gateway": {
 			".Spec.Listeners", ".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS", ".Spec.Listeners[1].TLS.Mode",
 			".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.CertificateRefs[1].Namespace",
@@ -1807,6 +1828,22 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"port a name", map[string]any{"addressType": "IPv4", "ports": []any{map[string]any{"port": "http"}}}, notA},
 			{"null endpoint", endpointSlice(map[string]any{"addresses": []any{"192.0.2.10"}}, nil), "endpoints[1]"},
 			{"two spellings", map[string]any{"addressType": "IPv4", "AddressType": "IPv6"}, "sets the same field as"},
+		},
+		"fluxcd-alert": {
+			{"no properties", nil, ": required"},
+			{"no provider", map[string]any{"eventSources": []any{fluxAlertSource()}}, "providerRef: required"},
+			{"provider without a name", fluxAlertWith(map[string]any{}, fluxAlertSource()), "providerRef.name: required"},
+			{"no sources", map[string]any{"providerRef": map[string]any{"name": "slack"}}, "eventSources: required"},
+			{"null sources", map[string]any{"providerRef": map[string]any{"name": "slack"}, "eventSources": nil}, "eventSources: required"},
+			{"source without a kind", fluxAlertWith(map[string]any{"name": "slack"}, map[string]any{"name": "web"}), "eventSources[0].kind: required"},
+			{"a later source without a name", fluxAlertWith(map[string]any{"name": "slack"}, fluxAlertSource(), map[string]any{"kind": "HelmRelease"}), "eventSources[1].name: required"},
+			{"unknown key", withProperty(fluxAlertMinimal(), "provider", "slack"), notA + "notification.toolkit.fluxcd.io/v1beta3 AlertSpec"},
+			{"the object's spec", map[string]any{"spec": fluxAlertMinimal()}, notA},
+			{"source sub-key", fluxAlertWith(map[string]any{"name": "slack"}, withProperty(fluxAlertSource(), "labels", map[string]any{"team": "shop"})), notA},
+			{"provider sub-key", fluxAlertWith(map[string]any{"name": "slack", "namespace": "ops"}, fluxAlertSource()), notA},
+			{"suspend a string", withProperty(fluxAlertMinimal(), "suspend", "yes"), notA},
+			{"null source", fluxAlertWith(map[string]any{"name": "slack"}, fluxAlertSource(), nil), "eventSources[1]"},
+			{"two spellings", withProperty(fluxAlertMinimal(), "ProviderRef", map[string]any{"name": "other"}), "sets the same field as"},
 		},
 		"gateway": {
 			{"no properties", nil, ": required"},

@@ -305,6 +305,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"deployment":                      &components.DeploymentHandler{},
 		"endpointslice":                   &components.EndpointSliceHandler{},
 		"externalsecret":                  &components.ExternalSecretHandler{},
+		"fluxcd-alert":                    &components.FluxcdAlertHandler{},
 		"fluxcd-kustomization":            &components.FluxcdKustomizationHandler{},
 		"gateway":                         &components.GatewayHandler{},
 		"gatewayclass":                    &components.GatewayClassHandler{},

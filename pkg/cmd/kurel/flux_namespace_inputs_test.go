@@ -319,7 +319,10 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 			t.Errorf("%s: %T moves to the Flux namespace but does not report FluxNamespaceReads", typ, cfg)
 		}
 	}
-	want := []string{"bucket", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository", "ocirepository"}
+	want := []string{
+		"bucket", "fluxcd-alert", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository",
+		"ocirepository",
+	}
 	for _, typ := range want {
 		if !slices.Contains(moving, typ) {
 			t.Errorf("%s: config does not move to the Flux namespace; moving types: %v", typ, moving)
