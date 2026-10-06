@@ -198,7 +198,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	} else if present {
 		config.WorkingDir = workingDir
 	}
-	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+	if config.ContainerFields, err = parseMainContainerFields(props); err != nil {
 		return nil, err
 	}
 

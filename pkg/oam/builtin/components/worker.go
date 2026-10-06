@@ -240,7 +240,7 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
 		return out, err
 	}
-	if _, err := parseContainerFields(props, false); err != nil {
+	if _, err := parseMainContainerFields(props); err != nil {
 		return out, err
 	}
 

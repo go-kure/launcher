@@ -65,6 +65,9 @@ var claimSpecPropertyKeys = []string{"selector", "dataSourceRef", "volumeName", 
 // each with the reason given to the author.
 var claimRejectedKeys = map[string]string{
 	"dataSource": "dataSource: not authorable — " + volumeClaimTemplateRejectedKeys["dataSource"],
+	// Read in another shape: `size` is resources.requests.storage, the one
+	// entry a claim's requests take.
+	"resources": "resources: not authorable as a whole — the claim's storage request is authored as size, and a claim's limits are not read",
 }
 
 // schemaClaimSpec describes the keys of claimSpecPropertyKeys; the kind merges

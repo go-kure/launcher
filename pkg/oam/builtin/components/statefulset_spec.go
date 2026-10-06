@@ -57,6 +57,7 @@ var (
 // each maps to the error explaining why.
 var statefulSetSpecRejectedKeys = map[string]string{
 	"selector": "selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created",
+	"template": "template: not authorable as a whole; the pod template is projected from the component's own container and pod-level properties",
 }
 
 // parseStatefulSetSpec reads the StatefulSetSpec-level properties. Validation

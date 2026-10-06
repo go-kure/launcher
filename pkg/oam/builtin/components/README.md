@@ -2105,8 +2105,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     The former handler's affinity label-syntax check (see Common config) runs
     in the rule, before the raw `affinity` is forwarded, with the same
     `affinity: the shorthand evaluates to an affinity the API server would
-    refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
-    `deployment`; `kurel build` refuses them before lowering anyway.
+    refuse: …` text. A key worker's parse refuses with a reason is refused
+    there: an upstream field of its refusal maps, or `podActiveDeadlineSeconds`,
+    which only Job pods may set. Any other key worker does not declare is dropped
+    rather than forwarded to `deployment`; `kurel build` refuses both before
+    lowering anyway.
   - **Both rules emit the component's ServiceAccount as a `serviceaccount`
     member** (go-kure/launcher#702) unless `serviceAccountName` is authored. A
     `worker` therefore lowers to a same-name sibling group of a `deployment` and

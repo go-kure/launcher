@@ -887,13 +887,19 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // parse (validation that previously happened later, at build time, in
 // buildResourceRequirements).
 //
-// Deliberately NOT covered: corev1.ResourceRequirements.Claims (Dynamic
+// Deliberately NOT read: corev1.ResourceRequirements.Claims (Dynamic
 // Resource Allocation) — see schemaResources' doc comment for the rationale.
 // The pod-level PodSpec.ResourceClaims half of DRA is accepted since
 // go-kure/launcher#342 (parsePodSpec's `resourceClaims`); this container-side
-// list, which only references those claims by name, still is not.
+// list, which only references those claims by name, still is not. It is refused
+// by name, whatever its value (resourcesRejectedKeys, go-kure/launcher#790):
+// the schema does not declare it, so the document check refuses it too, and a
+// caller that drives Transform without that check had it dropped in silence.
 func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	var req ResourceRequirements
+	if err := refusedProperty(resources, resourcesRejectedKeys); err != nil {
+		return ResourceRequirements{}, err
+	}
 	// requests/limits go through parseObjectField, like the enclosing
 	// `resources` object at every call site: a bare comma-ok assertion read a
 	// wrongly typed value (`requests: "big"`) as absent and dropped it
@@ -3281,6 +3287,14 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 	return out, nil
 }
 
+// parseAffinity reads the `affinity` shorthand of `statefulset`, `webservice`
+// and `worker` (schemaAffinity). Its key set is closed (go-kure/launcher#790):
+// the shorthand is no corev1.Affinity, so an upstream field of that type is
+// refused with what the shorthand has for it (affinityShorthandRejectedKeys),
+// and any other key by name, each whatever its value, as the document check
+// refuses an undeclared key. Neither was read before, and a caller that drives
+// Transform without that check had both dropped in silence. The postgresql
+// handler's own affinity block reads the same four keys and stays open.
 func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	raw, present, err := parseObjectField(props, "affinity", "affinity")
 	if err != nil {
@@ -3288,6 +3302,12 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	}
 	if !present {
 		return AffinityConfig{}, nil
+	}
+	if err := refusedProperty(raw, affinityShorthandRejectedKeys); err != nil {
+		return AffinityConfig{}, err
+	}
+	if err := rejectUnknownKeys(raw, affinityShorthandKeys, "affinity"); err != nil {
+		return AffinityConfig{}, err
 	}
 	cfg := AffinityConfig{
 		TopologyKey:         "kubernetes.io/hostname",

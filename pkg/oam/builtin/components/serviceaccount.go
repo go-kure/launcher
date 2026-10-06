@@ -23,6 +23,25 @@ import (
 // `serviceaccount` component standing in for that account authors false.
 type ServiceAccountHandler struct{}
 
+// serviceAccountRejectedKeys are the corev1.ServiceAccount fields an author may
+// not set on a serviceaccount component; each maps to the error explaining why
+// (refusedKeys).
+var serviceAccountRejectedKeys = map[string]string{
+	// corev1.ServiceAccount.Secrets: "Pods are only limited to this list if
+	// this service account has a "kubernetes.io/enforce-mountable-secrets"
+	// annotation set to "true". The … annotation is deprecated since v1.32.
+	// Prefer separate namespaces to isolate access to mounted secrets. This
+	// field should not be used to find auto-generated service account token
+	// secrets for use outside of pods."
+	"secrets": "secrets: not read by this component — the list limits the Secrets a pod may mount only under the kubernetes.io/enforce-mountable-secrets annotation, which upstream deprecates since Kubernetes 1.32 in favour of separate namespaces; it is no way to find or create a token for the account",
+}
+
+// UnsupportedFieldHint gives the document check the reason this component
+// refuses key with (refusedKeyHint).
+func (h *ServiceAccountHandler) UnsupportedFieldHint(key string) string {
+	return refusedKeyHint("serviceaccount", key)
+}
+
 // CanHandle returns true for the serviceaccount component type.
 func (h *ServiceAccountHandler) CanHandle(componentType string) bool {
 	return componentType == "serviceaccount"
@@ -113,6 +132,9 @@ func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Objec
 // parseServiceAccount reads a serviceaccount component's properties.
 func parseServiceAccount(component *oam.Component) (*ServiceAccountConfig, error) {
 	props := component.Properties
+	if err := refusedProperty(props, serviceAccountRejectedKeys); err != nil {
+		return nil, err
+	}
 	c := &ServiceAccountConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata()}
 
 	automount, err := parseBoolField(props, "automountServiceAccountToken", "automountServiceAccountToken")

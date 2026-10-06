@@ -391,18 +391,20 @@ func TestWebserviceHandler_WithProbes(t *testing.T) {
 		Type: "webservice",
 		Properties: map[string]any{
 			"image": "ghcr.io/org/app:v1",
-			"livenessProbe": map[string]any{
-				"httpGet": map[string]any{
-					"path": "/healthz",
-					"port": 8080,
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{
+						"path": "/healthz",
+						"port": 8080,
+					},
+					"initialDelaySeconds": 10,
+					"periodSeconds":       5,
 				},
-				"initialDelaySeconds": 10,
-				"periodSeconds":       5,
-			},
-			"readinessProbe": map[string]any{
-				"httpGet": map[string]any{
-					"path": "/ready",
-					"port": 8080,
+				"readiness": map[string]any{
+					"httpGet": map[string]any{
+						"path": "/ready",
+						"port": 8080,
+					},
 				},
 			},
 		},
@@ -411,10 +413,41 @@ func TestWebserviceHandler_WithProbes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	app := stack.NewApplication("app", "default", cfg)
-	if _, err := cfg.Generate(app); err != nil {
+	main := webserviceMainContainer(t, cfg)
+	live := main.LivenessProbe
+	if live == nil || live.HTTPGet == nil {
+		t.Fatalf("liveness probe = %+v, want an httpGet probe", live)
+	}
+	if live.HTTPGet.Path != "/healthz" || live.HTTPGet.Port.IntValue() != 8080 || live.InitialDelaySeconds != 10 || live.PeriodSeconds != 5 {
+		t.Errorf("liveness probe = %+v (httpGet %+v), want /healthz on 8080, initialDelaySeconds 10, periodSeconds 5", live, live.HTTPGet)
+	}
+	ready := main.ReadinessProbe
+	if ready == nil || ready.HTTPGet == nil {
+		t.Fatalf("readiness probe = %+v, want an httpGet probe", ready)
+	}
+	if ready.HTTPGet.Path != "/ready" || ready.HTTPGet.Port.IntValue() != 8080 {
+		t.Errorf("readiness httpGet = %+v, want /ready on 8080", ready.HTTPGet)
+	}
+}
+
+// webserviceMainContainer generates cfg and returns the first container of the
+// Deployment it produces.
+func webserviceMainContainer(t *testing.T, cfg stack.ApplicationConfig) corev1.Container {
+	t.Helper()
+	objects, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
+	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			if len(dep.Spec.Template.Spec.Containers) == 0 {
+				t.Fatal("Deployment has no container")
+			}
+			return dep.Spec.Template.Spec.Containers[0]
+		}
+	}
+	t.Fatal("Deployment not found in output")
+	return corev1.Container{}
 }
 
 func TestWebserviceHandler_WithInitContainers(t *testing.T) {
@@ -548,18 +581,20 @@ func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 		Type: "webservice",
 		Properties: map[string]any{
 			"image": "ghcr.io/org/app:v1",
-			"livenessProbe": map[string]any{
-				"httpGet": map[string]any{
-					"path": "/healthz",
-					"port": 8080,
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{
+						"path": "/healthz",
+						"port": 8080,
+					},
+					"initialDelaySeconds": 10,
+					"periodSeconds":       5,
 				},
-				"initialDelaySeconds": 10,
-				"periodSeconds":       5,
-			},
-			"readinessProbe": map[string]any{
-				"httpGet": map[string]any{
-					"path": "/ready",
-					"port": "http",
+				"readiness": map[string]any{
+					"httpGet": map[string]any{
+						"path": "/ready",
+						"port": "http",
+					},
 				},
 			},
 		},
@@ -568,9 +603,16 @@ func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	app := stack.NewApplication("app", "default", cfg)
-	if _, err := cfg.Generate(app); err != nil {
-		t.Fatalf("Generate: %v", err)
+	main := webserviceMainContainer(t, cfg)
+	if live := main.LivenessProbe; live == nil || live.HTTPGet == nil || live.HTTPGet.Port.IntValue() != 8080 {
+		t.Errorf("liveness probe = %+v, want an httpGet probe on 8080", live)
+	}
+	ready := main.ReadinessProbe
+	if ready == nil || ready.HTTPGet == nil {
+		t.Fatalf("readiness probe = %+v, want an httpGet probe", ready)
+	}
+	if ready.HTTPGet.Path != "/ready" || ready.HTTPGet.Port.StrVal != "http" {
+		t.Errorf("readiness httpGet = %+v, want /ready on the port named http", ready.HTTPGet)
 	}
 }
 
