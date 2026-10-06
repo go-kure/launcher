@@ -14,6 +14,7 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/stack"
@@ -443,6 +444,13 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[imagev1.ImagePolicySpec](), namespaced: true, flux: true,
 		minimal: imagePolicyMinimal(),
 		full:    imagePolicyFull(),
+	},
+	{
+		component: "imageupdateautomation", handler: &components.ImageUpdateAutomationHandler{},
+		gvk: autov1.GroupVersion.WithKind(autov1.ImageUpdateAutomationKind),
+		typ: reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), namespaced: true, flux: true,
+		minimal: imageUpdateAutomationMinimal(),
+		full:    imageUpdateAutomationFull(),
 	},
 	{
 		component: "ingressclass", handler: &components.IngressClassHandler{},
@@ -1218,6 +1226,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Policy.SemVer", ".Spec.Policy.Alphabetical", ".Spec.Policy.Numerical", ".Spec.FilterTags",
 			".Spec.Interval",
 		},
+		"imageupdateautomation": {
+			".Spec.GitSpec", ".Spec.GitSpec.Checkout", ".Spec.GitSpec.Commit.SigningKey",
+			".Spec.GitSpec.Commit.MessageTemplateValues", ".Spec.GitSpec.Push", ".Spec.GitSpec.Push.Options",
+			".Spec.PolicySelector", ".Spec.PolicySelector.MatchLabels", ".Spec.PolicySelector.MatchExpressions",
+			".Spec.Update",
+		},
 		"ingressclass": {".Spec.Parameters", ".Spec.Parameters.APIGroup"},
 		"issuer":       issuerReaches,
 		"listenerset": {
@@ -1916,6 +1930,29 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"interval signed", withProperty(imagePolicyMinimal(), "interval", "-5m"), `imagepolicy: interval "-5m" is invalid: must be a Flux duration`},
 			{"interval emitted below a millisecond", withProperty(imagePolicyMinimal(), "Interval", "0.5ms"), `imagepolicy: interval "0.5ms" is invalid: it would be emitted as "500µs"`},
 			{"two spellings", withProperty(imagePolicyMinimal(), "Policy", imagePolicySemver()), "sets the same field as"},
+		},
+		"imageupdateautomation": {
+			{"no properties", nil, ": required"},
+			{"no source", map[string]any{"interval": "30m"}, "sourceRef: required"},
+			{"source without a kind", withProperty(imageUpdateAutomationMinimal(), "sourceRef", map[string]any{"name": "fleet"}), "sourceRef.kind: required"},
+			{"source without a name", withProperty(imageUpdateAutomationMinimal(), "sourceRef", map[string]any{"kind": "GitRepository"}), "sourceRef.name: required"},
+			{"no interval", map[string]any{"sourceRef": imageUpdateAutomationSource()}, "interval: required"},
+			{"git without a commit", withProperty(imageUpdateAutomationMinimal(), "git", map[string]any{}), "git.commit: required"},
+			{"commit without an author", withProperty(imageUpdateAutomationMinimal(), "git", map[string]any{"commit": map[string]any{}}), "git.commit.author: required"},
+			{"author without an email", withProperty(imageUpdateAutomationMinimal(), "git", imageUpdateAutomationGit(map[string]any{"author": map[string]any{"name": "fluxbot"}})), "git.commit.author.email: required"},
+			{"checkout without a ref", withProperty(imageUpdateAutomationMinimal(), "git", map[string]any{"checkout": map[string]any{}, "commit": imageUpdateAutomationCommit()}), "git.checkout.ref: required"},
+			{"signing key without a Secret", withProperty(imageUpdateAutomationMinimal(), "git", imageUpdateAutomationGit(map[string]any{"author": imageUpdateAutomationAuthor(), "signingKey": map[string]any{"type": "ssh"}})), "git.commit.signingKey.secretRef: required"},
+			{"signing key's Secret without a name", withProperty(imageUpdateAutomationMinimal(), "git", imageUpdateAutomationGit(map[string]any{"author": imageUpdateAutomationAuthor(), "signingKey": map[string]any{"secretRef": map[string]any{}}})), "git.commit.signingKey.secretRef.name: required"},
+			{"unknown key", withProperty(imageUpdateAutomationMinimal(), "gitRepositoryRef", map[string]any{"name": "fleet"}), notA + "image.toolkit.fluxcd.io/v1 ImageUpdateAutomationSpec"},
+			{"the object's spec", map[string]any{"spec": imageUpdateAutomationMinimal()}, notA},
+			{"source sub-key", withProperty(imageUpdateAutomationMinimal(), "sourceRef", map[string]any{"kind": "GitRepository", "name": "fleet", "branch": "main"}), notA},
+			{"push sub-key", withProperty(imageUpdateAutomationMinimal(), "git", map[string]any{"commit": imageUpdateAutomationCommit(), "push": map[string]any{"force": true}}), notA},
+			{"suspend a string", withProperty(imageUpdateAutomationMinimal(), "suspend", "yes"), notA},
+			{"interval not a duration", withProperty(imageUpdateAutomationMinimal(), "interval", "soon"), notA},
+			{"interval in a unit the API refuses", withProperty(imageUpdateAutomationMinimal(), "interval", "500us"), `imageupdateautomation: interval "500us" is invalid: must be a Flux duration`},
+			{"interval signed", withProperty(imageUpdateAutomationMinimal(), "interval", "-5m"), `imageupdateautomation: interval "-5m" is invalid: must be a Flux duration`},
+			{"interval emitted below a millisecond", withProperty(imageUpdateAutomationMinimal(), "interval", "0.5ms"), `imageupdateautomation: interval "0.5ms" is invalid: it would be emitted as "500µs"`},
+			{"two spellings", withProperty(imageUpdateAutomationMinimal(), "SourceRef", imageUpdateAutomationSource()), "sets the same field as"},
 		},
 		"ingressclass": {
 			{"no properties", nil, "controller: required"},

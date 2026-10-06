@@ -141,6 +141,7 @@ at its position.
 | `horizontalpodautoscaler` | A HorizontalPodAutoscaler in the build namespace, holding what was authored. |
 | `httproute` | The authored object and, unlike the trait of the same name, no NetworkPolicy allow rule. |
 | `imagepolicy` | Two ImagePolicies in the build namespace, no Flux namespace being set for the build, one named by `objectName` and selecting from the ImageRepository of another namespace. No capability is required to build it. |
+| `imageupdateautomation` | Two ImageUpdateAutomations in the build namespace, no Flux namespace being set for the build, one named by `objectName`, committing through the GitRepository of another namespace with a signing key and pushing to a branch of its own. No capability is required to build it. |
 | `ingress` | The authored object and, unlike the trait of the same name, no NetworkPolicy allow rule. |
 | `ingressclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 | `issuer` | An Issuer in the build namespace. No capability is required of the cluster profile to build it. |

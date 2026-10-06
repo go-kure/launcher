@@ -1,0 +1,48 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: images
+      type: imageupdateautomation
+      properties:
+        sourceRef:
+          kind: GitRepository
+          name: fleet
+        interval: 30m
+        git:
+          commit:
+            author:
+              email: fluxbot@example.com
+    - name: shop-images
+      type: imageupdateautomation
+      properties:
+        objectName: shop-image-updates
+        sourceRef:
+          kind: GitRepository
+          name: fleet
+          namespace: platform
+        interval: 1h
+        git:
+          checkout:
+            ref:
+              branch: main
+          commit:
+            author:
+              name: fluxbot
+              email: fluxbot@example.com
+            signingKey:
+              secretRef:
+                name: signing-key
+              type: ssh
+            messageTemplate: "Update the images of the shop"
+          push:
+            branch: image-updates
+        policySelector:
+          matchLabels:
+            team: shop
+        update:
+          strategy: Setters
+          path: ./clusters/east

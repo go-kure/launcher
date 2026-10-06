@@ -321,7 +321,7 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 	}
 	want := []string{
 		"bucket", "fluxcd-alert", "fluxcd-kustomization", "gitrepository", "helmchart", "helmrelease", "helmrepository",
-		"imagepolicy", "ocirepository",
+		"imagepolicy", "imageupdateautomation", "ocirepository",
 	}
 	for _, typ := range want {
 		if !slices.Contains(moving, typ) {

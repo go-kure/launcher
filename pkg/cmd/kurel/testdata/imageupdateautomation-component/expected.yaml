@@ -1,0 +1,51 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  labels:
+    launcher.gokure.dev/component: images
+  name: images
+  namespace: default
+spec:
+  git:
+    commit:
+      author:
+        email: fluxbot@example.com
+  interval: 30m0s
+  sourceRef:
+    kind: GitRepository
+    name: fleet
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  labels:
+    launcher.gokure.dev/component: shop-images
+  name: shop-image-updates
+  namespace: default
+spec:
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxbot@example.com
+        name: fluxbot
+      messageTemplate: Update the images of the shop
+      signingKey:
+        secretRef:
+          name: signing-key
+        type: ssh
+    push:
+      branch: image-updates
+  interval: 1h0m0s
+  policySelector:
+    matchLabels:
+      team: shop
+  sourceRef:
+    kind: GitRepository
+    name: fleet
+    namespace: platform
+  update:
+    path: ./clusters/east
+    strategy: Setters

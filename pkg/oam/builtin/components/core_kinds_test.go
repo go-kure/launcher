@@ -11,6 +11,7 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/stack"
@@ -109,6 +110,7 @@ var coreKindSchemas = []struct {
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
 	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
 	{"imagepolicy", reflect.TypeFor[imagev1.ImagePolicySpec](), &components.ImagePolicyHandler{}, nil},
+	{"imageupdateautomation", reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), &components.ImageUpdateAutomationHandler{}, nil},
 	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
 	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},

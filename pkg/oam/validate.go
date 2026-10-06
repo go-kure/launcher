@@ -68,6 +68,7 @@ var validComponentTypes = map[string]bool{
 	"horizontalpodautoscaler":         true,
 	"httproute":                       true,
 	"imagepolicy":                     true,
+	"imageupdateautomation":           true,
 	"ingress":                         true,
 	"ingressclass":                    true,
 	"issuer":                          true,
