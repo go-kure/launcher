@@ -14,7 +14,9 @@ import (
 // namespace when one is set (SetFluxNamespace), and it reports the ConfigMaps
 // and Secrets it reads by name from that namespace (FluxNamespaceReads, see
 // flux_namespace_reads.go). The decode and its refusals are policyFreeKind's,
-// unchanged, as for a policyHeldKind.
+// unchanged, as for a policyHeldKind. A kind whose object names a host the
+// environment policy holds is held to it as well (enforce), as the sources
+// are.
 //
 // The Flux kinds written before this file (the sources, helmrelease,
 // fluxcd-kustomization) keep their own configs.
@@ -31,6 +33,11 @@ type fluxKind[T any] struct {
 	// (go-kure/launcher#601). Nil for a kind with none.
 	// TestFluxKinds_DurationsMatchMarkers holds the list to the type.
 	durations []fluxDurationField[T]
+	// enforce holds decoded to the policy p, which is never nil, as a
+	// policyHeldKind's does: it refuses or passes, fills no default and must
+	// not change decoded. Nil for a kind no dimension of the environment policy
+	// reaches.
+	enforce func(decoded *T, p oam.Policy) error
 }
 
 // fluxDefaultedZeros is a Flux kind's defaulted-zero list for
@@ -59,15 +66,17 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 	if !ok {
 		return nil, errors.Errorf("internal: a policy-free kind's config is a %T", cfg)
 	}
-	return &fluxKindConfig[T]{policyFreeKindConfig: free, reads: k.reads}, nil
+	return &fluxKindConfig[T]{policyFreeKindConfig: free, reads: k.reads, enforce: k.enforce}, nil
 }
 
 // fluxKindConfig implements stack.ApplicationConfig for a fluxKind: a
-// policyFreeKindConfig, of which it keeps ApplyPolicy, that builds its object
-// in the Flux namespace when one is set.
+// policyFreeKindConfig that builds its object in the Flux namespace when one
+// is set, and that asks the kind's enforce, where it has one, about the
+// policy.
 type fluxKindConfig[T any] struct {
 	*policyFreeKindConfig[T]
-	reads func(decoded *T, r *fluxReads)
+	reads   func(decoded *T, r *fluxReads)
+	enforce func(decoded *T, p oam.Policy) error
 
 	// fluxNS overrides the object's namespace. Set by postProcessFluxNamespace
 	// via TransformContext.FluxNamespace. Empty means the application's.
@@ -86,6 +95,15 @@ func (c *fluxKindConfig[T]) FluxNamespaceReads() (configMaps, secrets []string) 
 		c.reads(c.decoded, &r)
 	}
 	return r.configMaps, r.secrets
+}
+
+// ApplyPolicy holds the decoded value to the policy, for a kind with an
+// enforce. A nil policy checks nothing, and so does a kind without one.
+func (c *fluxKindConfig[T]) ApplyPolicy(p oam.Policy) error {
+	if p == nil || c.enforce == nil {
+		return nil
+	}
+	return c.enforce(c.decoded, p)
 }
 
 // Generate is policyFreeKindConfig.Generate in the Flux namespace when one is
