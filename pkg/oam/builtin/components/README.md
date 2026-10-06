@@ -6243,7 +6243,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `uninstall.timeout`, and `install.strategy.retryInterval` and
   `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
   the decode does. Exactly one of
-  `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
+  `chart` and `chartRef` is required. Under an authored `chart`, `chart.spec.sourceRef.kind`
+  is required (go-kure/launcher#790): the API requires it and takes `HelmRepository`,
+  `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
+  kind does not choose a source's kind for the author, so a reference without one is
+  refused with `chart.spec.sourceRef.kind: required (…)`. Which of the three it is stays the
+  CRD's to check. An authored `chart.spec.verify` that names no `provider` is written with
+  `provider: cosign`, the API's default: the Go type writes the field whether or not it was
+  authored, so the API's default never applies, and the object is then what the API would
+  have made of the omitted field. An authored `provider: ""` is refused, since the type
+  cannot tell it from an unauthored one and the API's enum (`cosign`, `notation`) refuses it
+  as written. `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the
+  markers in the source of the linked Flux modules, which ship no CRD: the required field
+  to a refusal shown on a document, and the written value to the default the marker states,
+  so an upstream change of that default fails the test. "Required" there is what the
+  markers say; no API server was asked. `values` must be a JSON object; a non-finite number
   (`.nan`, `.inf`) is a build error, never a panic. Each `valuesFrom` entry is held to the
   `ValuesReference` CRD's own constraints, and a violation is a build error naming the
   entry's index: `kind` is `Secret` or `ConfigMap`, exactly as Flux's enum spells them
@@ -7107,6 +7121,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the CRD rejects, so such a source is emitted as an unstructured object carrying that text; a
   `timeout` below an hour, or none, leaves the source emitted exactly as before. A config built
   directly gets the same minutes form.
+  An authored `verify` that names no `provider`, on an `ocirepository` or a `helmchart`, is
+  written with `provider: cosign`, the API's default, and an authored `provider: ""` is
+  refused (go-kure/launcher#790), for the reason given on `helmrelease` above: the Go type
+  writes the field whether or not it was authored, so the API's default never applies. A
+  config built directly with an empty provider gets the default too.
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds the five source kinds, with
+  `helmrelease` and `fluxcd-kustomization`, to the required fields and the defaults the
+  markers of the linked Flux modules state, in the test's two sets only: a required field
+  the type leaves out when it is empty, and a default the type writes over unauthored. The
+  seven have four such fields: `chart.spec.sourceRef.kind` on `helmrelease`, refused, and
+  `verify.provider` on that kind's chart, on `ocirepository` and on `helmchart`, filled.
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
   `verify.mode`, a HelmChart's `sourceRef.kind` and `reconcileStrategy`) and cross-field rules
   (a Bucket's `sts` against its `provider`, `serviceAccountName` against `secretRef`, a

@@ -88,13 +88,16 @@ func (h *HelmChartHandler) UnsupportedFieldHint(key string) string {
 // ToApplicationConfig decodes the component's properties strictly into a
 // sourcev1.HelmChartSpec: any key HelmChartSpec does not declare, at any depth,
 // and any wrongly typed value is an error. Checks: chart, sourceRef.kind and
-// sourceRef.name are set.
+// sourceRef.name are set, and verify.provider is not an authored "".
 func (h *HelmChartHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[sourcev1.HelmChartSpec](component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("helmchart: properties do not decode as a HelmChartSpec: %w%s", err, h.decodeHint(component.Properties, err))
 	}
 	if err := checkAuthoredFluxDurations("helmchart", component.Properties, helmChartDurations); err != nil {
+		return nil, err
+	}
+	if err := refuseEmptyFluxVerifyProvider(component.Properties, "verify"); err != nil {
 		return nil, err
 	}
 	cfg := &HelmChartConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
@@ -135,7 +138,7 @@ type HelmChartConfig struct {
 	// a Flux namespace is set (SetFluxNamespace).
 	Namespace string
 	// Spec is the HelmChart spec as authored. Generate copies it and applies
-	// the interval default to the copy.
+	// the interval default and the verify.provider default to the copy.
 	Spec sourcev1.HelmChartSpec
 
 	// fluxNS overrides the HelmChart's namespace. Set by
@@ -180,5 +183,8 @@ func (c *HelmChartConfig) Generate(_ *stack.Application) ([]*client.Object, erro
 	// A deep copy, so no render shares a pointer or slice with the config.
 	hc.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&hc.Spec.Interval)
+	if hc.Spec.Verify != nil {
+		fillFluxVerifyProvider(&hc.Spec.Verify.Provider)
+	}
 	return emitFluxSource("helmchart", hc, nil, c.Metadata)
 }

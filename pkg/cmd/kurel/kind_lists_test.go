@@ -67,8 +67,6 @@ var allowlistTable = struct {
 const (
 	ownProperties = "it authors its own properties and reads them one by one: it decodes them into no upstream type"
 	wholeObjects  = "it carries whole objects the author writes, not the fields of one type"
-	fluxNotYet    = "not yet held: no CRD in the linked modules, and the marker source does not read those modules yet"
-	fluxNoRowYet  = "not yet held: no CRD in the linked module; the marker source reads it, and the kind has no row yet"
 	ownKindsTable = "it has its row in externalSecretsKinds, whose tests hold its required and defaulted fields to the source of the linked module"
 )
 
@@ -105,7 +103,6 @@ var kindListExceptions = map[string]map[string]string{
 		"statefulset":           ownProperties,
 	},
 	"apiSetKinds": {
-		"bucket":                fluxNoRowYet,
 		"clusterexternalsecret": ownKindsTable,
 		"clustersecretstore":    ownKindsTable,
 		"configmap":             ownProperties,
@@ -114,16 +111,10 @@ var kindListExceptions = map[string]map[string]string{
 		"daemonset":             ownProperties,
 		"deployment":            ownProperties,
 		"externalsecret":        ownKindsTable,
-		"fluxcd-kustomization":  fluxNotYet,
-		"gitrepository":         fluxNoRowYet,
-		"helmchart":             fluxNoRowYet,
-		"helmrelease":           fluxNotYet,
-		"helmrepository":        fluxNoRowYet,
 		"helmtemplate":          "it decodes its properties into a type of its own, not an upstream one",
 		"httproute":             "the experimental-channel CRD requires the protocol of an externalAuth filter, the type leaves an empty one out, and the kind does not refuse it",
 		"job":                   ownProperties,
 		"manifests":             wholeObjects,
-		"ocirepository":         fluxNoRowYet,
 		"passthrough":           wholeObjects,
 		"persistentvolumeclaim": ownProperties,
 		"secret":                ownProperties,
