@@ -330,6 +330,53 @@ func (a crdAnswer) refusedByRule(t *testing.T, what, says string) {
 	}
 }
 
+// crdRefusal holds the API server's answer for a document that breaks a rule
+// to the way it refuses it: what names the document, says is what the API
+// server says of the rule (only). crdAnswer.refusedByRule is the plain one, and
+// the two below are the ways an answer differs from it and is still the rule's.
+type crdRefusal func(a crdAnswer, t *testing.T, what, says string)
+
+// crdRefusedBesideSchema is the refusal of a document the schema refuses too,
+// for what the rule refuses it for: by errors of the one type beside and no
+// other (a key a list map holds twice, field.ErrorTypeDuplicate), past which
+// the API server evaluates the expression rules. The rule's refusal is its own.
+func crdRefusedBesideSchema(beside field.ErrorType) crdRefusal {
+	return func(a crdAnswer, t *testing.T, what, says string) {
+		t.Helper()
+		others := 0
+		for _, err := range a.schema {
+			if err.Type != beside {
+				others++
+			}
+		}
+		if len(a.schema) == 0 || others > 0 {
+			t.Errorf("%s: the API server answers %q, want the schema to refuse it too, by %s and nothing else", what, a, beside)
+			return
+		}
+		a.schema = nil
+		a.refusedByRule(t, what+", the schema's "+string(beside)+" set aside", says)
+	}
+}
+
+// crdRefusedUnevaluated is the refusal of a document the rule cannot be
+// evaluated on: it reads a field the document does not hold and no default
+// fills. The API server refuses that too, and says the error (failed) before
+// what it says of the rule (the aborted evaluation of
+// pkg/apiserver/schema/cel/validation.go).
+func crdRefusedUnevaluated(failed string) crdRefusal {
+	return func(a crdAnswer, t *testing.T, what, says string) {
+		t.Helper()
+		if len(a.unknown) > 0 || len(a.schema) > 0 || a.skipped || len(a.rules) != 1 {
+			t.Errorf("%s: the API server answers %q, want one refusal by the rule and nothing else", what, a)
+			return
+		}
+		detail := a.rules[0].Detail
+		if !strings.HasPrefix(detail, failed+" evaluating rule: ") || !strings.HasSuffix(detail, says) {
+			t.Errorf("%s: the API server answers %q, want the rule failing to evaluate: %q, then %q", what, a, failed+" evaluating rule: ", says)
+		}
+	}
+}
+
 // accepted fails the test unless the API server accepts the document.
 func (a crdAnswer) accepted(t *testing.T, what string) {
 	t.Helper()
@@ -412,13 +459,20 @@ func (c checkedRules) build(t *testing.T, props map[string]any) (map[string]any,
 // builds the properties; and the API server accepts the object the kind emits.
 func (c checkedRules) show(t *testing.T, rule crdRule, want string, breaks, keeps []map[string]any) {
 	t.Helper()
+	c.showRefused(t, rule, crdAnswer.refusedByRule, want, breaks, keeps)
+}
+
+// showRefused is show for breaking documents the API server refuses another
+// way than by the rule's own refusal and nothing else: refused says which.
+func (c checkedRules) showRefused(t *testing.T, rule crdRule, refused crdRefusal, want string, breaks, keeps []map[string]any) {
+	t.Helper()
 	if len(breaks) == 0 || len(keeps) == 0 {
 		t.Fatalf("rule %q is shown on %d documents that break it and %d that keep it, want some of each", rule, len(breaks), len(keeps))
 	}
 	only, says := c.create.only(t, rule)
 	for i, props := range breaks {
 		what := fmt.Sprintf("breaking document %d", i)
-		only.create(t, c.document(props)).refusedByRule(t, what, says)
+		refused(only.create(t, c.document(props)), t, what, says)
 		if _, err := c.build(t, props); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: the kind answers %v, want a refusal mentioning %q", what, err, want)
 		}

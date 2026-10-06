@@ -999,7 +999,12 @@ its text:
     tables and a list of objects, an object's between a schema's tables and one table,
     and a column list beside a schema's tables. The other eleven refuse a change of the
     stored object, which a build does not have. A test fails on a rule of the linked
-    CRDs that is neither listed as checked nor as left.
+    CRDs that is neither listed as checked nor as left, and holds each checked rule to
+    the API server's own expression validator, run over the linked CRD after its
+    defaults: the validator refuses what breaks the rule and accepts what is next to
+    it, and the kind answers the same. Two answers are not the rule's plain refusal: a
+    component image key held twice is refused by the schema too, and an enabled client
+    certificate with no `login` authored is refused as a rule that cannot be evaluated.
   - **Every image a catalog names is held to the allowed registries** (an image, a
     component image, the reference of an extension's image volume): a catalog runs no
     pod, but the operator runs what a Cluster takes from it. The same three fields are

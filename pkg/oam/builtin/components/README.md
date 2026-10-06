@@ -2887,7 +2887,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a catalog (two rules, on each of the two CRDs): no two images of one
     `major` (`images[1].major: 17 is also the major version of images[0]; the
     API takes each major version once`), and no two component images of one
-    `key`;
+    `key`. The component images are a list keyed on `key`, so the API server
+    refuses a key held twice by its schema as well as by the rule;
   - a role (eight): a `name` that is empty, `postgres` or
     `streaming_replica`, or that starts with `pg_` or `cnpg_` (`name
     "postgres": reserved, the DatabaseRole CRD refuses it`); `ensure:
@@ -2896,7 +2897,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `passwordSecret` beside `disablePassword: true`; and a client certificate
     that is enabled without `login: true`. A certificate is enabled where its
     block is authored and `enabled` is not `false`: the API fills `true` into
-    an omitted one before it evaluates the rule;
+    an omitted one before it evaluates the rule. It fills nothing into
+    `login`, which the rule reads without asking whether it is there: an
+    enabled certificate with no `login` authored is refused by the API server
+    as a rule it cannot evaluate (`no such key: login`), and one beside
+    `login: false` by the rule's own message. The build gives both the one
+    refusal;
   - a publication (three): a `target` that publishes neither or both of
     `allTables: true` and `objects` (`target: one of allTables: true and
     objects is required`); an object that is neither or both of
@@ -2904,7 +2910,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     another object publishes `tablesInSchema`. The Go type leaves out a false
     `allTables` and an empty `objects`, `tablesInSchema` or `columns`, so
     each is read as the object will hold it: `allTables: false` beside a list
-    of objects builds, and is a list of objects.
+    of objects builds, and is a list of objects. The API server reads the
+    document it is sent, so the two differ on a document that authors one of
+    the four, and agree on the object: sent as authored, `allTables: false`
+    beside a list of objects is refused, and the object the build writes for
+    it is accepted; `allTables: false` alone is accepted as authored and
+    refused by the build, since the object written holds neither.
+    `TestCnpgPublication_TargetAsWritten` shows the first for each of the
+    four, and the second for the three that can stand alone (an empty
+    `columns` alone is a table that lists none).
 
   The other eleven refuse a change of the stored object, which a build does
   not have, and stay the API server's: a Backup's whole `spec`; the `cluster`
@@ -2917,7 +2931,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   field is absent from the stored object or from the new one: a target moved
   from `allTables` to `objects`, or back, is not refused by it.
   `TestCnpgFurtherKinds_ExpressionRules` lists all 26 with what is
-  done with each, and fails on a rule that is added, dropped or reworded.
+  done with each, and fails on a rule that is added, dropped or reworded. It
+  holds each of the 15 to the API server's own expression validator, run
+  over the linked CRD after the defaults the API server fills: with every
+  other rule set aside, the validator refuses the properties that break the
+  rule, and with every rule it accepts the ones next to them and the object
+  the build writes for them; the build answers the same on both.
 
   **A Backup is a one-shot request.** The operator takes the backup once,
   when the object is created, and the API refuses every later change of its
