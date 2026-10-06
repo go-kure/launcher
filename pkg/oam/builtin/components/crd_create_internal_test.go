@@ -49,20 +49,27 @@ import (
 //     not know are pruned and named, a null of a field that is not nullable
 //     and has no default is dropped, embedded metadata is coerced.
 //  4. The defaults of the schema are filled (unstructuredDefaulter).
-//  5. The object is validated (pkg/registry/customresource/strategy.go,
+//  5. Where the version has the status subresource, the status the document
+//     holds is dropped: a create cannot set it (PrepareForCreate of
+//     pkg/registry/customresource/strategy.go). An object built from a Go type
+//     that always encodes its status holds an empty one. A version without
+//     the subresource keeps the status, and it is validated with the rest.
+//  6. The object is validated (pkg/registry/customresource/strategy.go,
 //     validator.go): the schema, embedded metadata, list sets and maps, then
 //     the expression rules, unless a schema error already stands that means
 //     the object has not the shape the rules were written for.
 //
 // What it leaves out, since no rule of a kind reads it: the rules of the
-// object's own metadata (its name, its namespace), the scale subresource and
-// the status. An admission webhook is not the API server's and is not run. A
-// transition rule, which reads the stored object, is not evaluated on a create
-// by the API server either.
+// object's own metadata (its name, its namespace) and the scale subresource.
+// An admission webhook is not the API server's and is not run. A transition
+// rule, which reads the stored object, is not evaluated on a create by the
+// API server either.
 type crdCreate struct {
 	name       string
 	structural *structuralschema.Structural
 	schema     apiservervalidation.SchemaValidator
+	// dropsStatus says the version has the status subresource.
+	dropsStatus bool
 }
 
 // crdCreateOf prepares the version of crd as the API server serves it. It
@@ -116,7 +123,14 @@ func crdCreateOf(t *testing.T, crd *apiextensionsv1.CustomResourceDefinition, ve
 	if err != nil {
 		t.Fatalf("%s %s: the schema validator: %v", crd.Name, version, err)
 	}
-	return &crdCreate{name: crd.Name + " " + version, structural: structural, schema: schema}
+	subresources, err := apihelpers.GetSubresourcesForVersion(crd, version)
+	if err != nil {
+		t.Fatalf("%s %s: the subresources: %v", crd.Name, version, err)
+	}
+	return &crdCreate{
+		name: crd.Name + " " + version, structural: structural, schema: schema,
+		dropsStatus: subresources != nil && subresources.Status != nil,
+	}
 }
 
 // crdRule names one expression rule of a CRD: the path of the value it is
@@ -140,7 +154,7 @@ func (c *crdCreate) only(t *testing.T, kept crdRule) (*crdCreate, string) {
 	if len(found) != 1 {
 		t.Fatalf("%s declares the rule %q %d times, want once", c.name, kept, len(found))
 	}
-	return &crdCreate{name: c.name + " with the one rule " + kept.String(), structural: structural, schema: c.schema}, found[0]
+	return &crdCreate{name: c.name + " with the one rule " + kept.String(), structural: structural, schema: c.schema, dropsStatus: c.dropsStatus}, found[0]
 }
 
 // keepOneRule removes every expression rule under s, at the path at, but kept,
@@ -281,6 +295,10 @@ func (c *crdCreate) create(t *testing.T, doc map[string]any) crdAnswer {
 	}
 
 	structuraldefaulting.Default(object, c.structural)
+
+	if c.dropsStatus {
+		delete(object, "status")
+	}
 
 	ctx := context.Background()
 	answer.schema = apiservervalidation.ValidateCustomResource(nil, object, c.schema)

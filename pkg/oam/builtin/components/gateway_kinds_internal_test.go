@@ -58,11 +58,12 @@ func gatewayAPICRDFile(channel, name string) string {
 	return "config/crd/" + channel + "/gateway.networking.k8s.io_" + name + ".yaml"
 }
 
-// gatewayAPICRDSpec reads one CRD of the linked module, in one channel, and
-// returns the schema of the spec of its v1 version: the one the Go types of
-// apis/v1 are. A CRD of this API may serve older versions beside it, so the
-// single-version readers (crdSpecProperties) do not fit.
-func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONSchemaProps {
+// gatewayAPICRD reads one CRD of the linked module, in one channel, and
+// returns it with the schema of its v1 version: the one the Go types of
+// apis/v1 are, which must be served. A CRD of this API may serve older
+// versions beside it, so the single-version readers (crdSpecProperties) do not
+// fit.
+func gatewayAPICRD(t *testing.T, channel, name string) (*apiextensionsv1.CustomResourceDefinition, apiextensionsv1.JSONSchemaProps) {
 	t.Helper()
 	file := filepath.Join(linkedModuleDir(t, gatewayAPIModulePath), filepath.FromSlash(gatewayAPICRDFile(channel, name)))
 	data, err := os.ReadFile(file)
@@ -80,14 +81,22 @@ func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONS
 		if !version.Served || version.Schema == nil || version.Schema.OpenAPIV3Schema == nil {
 			t.Fatalf("%s does not serve a schema-bearing v1 version; update this test", file)
 		}
-		spec, ok := version.Schema.OpenAPIV3Schema.Properties["spec"]
-		if !ok {
-			t.Fatalf("%s has no spec property in v1", file)
-		}
-		return spec
+		return &crd, *version.Schema.OpenAPIV3Schema
 	}
 	t.Fatalf("%s has no v1 version; update this test", file)
-	return apiextensionsv1.JSONSchemaProps{}
+	return nil, apiextensionsv1.JSONSchemaProps{}
+}
+
+// gatewayAPICRDSpec is the schema of the spec of the v1 version of one CRD of
+// the linked module, in one channel.
+func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	_, root := gatewayAPICRD(t, channel, name)
+	spec, ok := root.Properties["spec"]
+	if !ok {
+		t.Fatalf("%s has no spec property in v1", gatewayAPICRDFile(channel, name))
+	}
+	return spec
 }
 
 // TestGatewayKinds_RequiredMatchCRD is TestCertManagerKinds_RequiredMatchCRD
