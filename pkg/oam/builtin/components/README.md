@@ -7213,8 +7213,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   cannot omit the template's `spec`, the CRD requires `containers` once it is
   present, and the operator adds its `pgbouncer` container either way.
   `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
-  <component-name>` on port `5432`), byte-identical to `postgresql`'s pooler
-  endpoint for a pooler of that name (`<cluster>-pooler` by default), and
+  <Pooler object name>` on port `5432`: the component name unless
+  `objectName` names the Pooler), byte-identical to `postgresql`'s pooler
+  endpoint for a pooler of that name (`<component-name>-pooler` by default,
+  of the `postgresql` component), and
   only for a component the parse accepts: what `ToApplicationConfig` refuses
   is refused where endpoints are collected, in the same words (`pgbouncer:
   required (an empty object selects PgBouncer's defaults)`).
