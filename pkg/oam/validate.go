@@ -59,6 +59,7 @@ var validComponentTypes = map[string]bool{
 	"fluxcd-alert":                    true,
 	"fluxcd-kustomization":            true,
 	"fluxcd-provider":                 true,
+	"fluxcd-receiver":                 true,
 	"gateway":                         true,
 	"gatewayclass":                    true,
 	"gitrepository":                   true,

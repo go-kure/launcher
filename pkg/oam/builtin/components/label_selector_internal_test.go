@@ -24,6 +24,7 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
@@ -192,6 +193,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"networkingv1.NetworkPolicySpec":             reflect.TypeFor[networkingv1.NetworkPolicySpec](),
 	"networkingv1.ServiceCIDRSpec":               reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
 	"nodev1.RuntimeClass":                        reflect.TypeFor[nodev1.RuntimeClass](),
+	"notificationv1.ReceiverSpec":                reflect.TypeFor[notificationv1.ReceiverSpec](),
 	"notificationv1beta3.AlertSpec":              reflect.TypeFor[notificationv1beta3.AlertSpec](),
 	"notificationv1beta3.ProviderSpec":           reflect.TypeFor[notificationv1beta3.ProviderSpec](),
 	"podTemplateProperties":                      reflect.TypeFor[podTemplateProperties](),

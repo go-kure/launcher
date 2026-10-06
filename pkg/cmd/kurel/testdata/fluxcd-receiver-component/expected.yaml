@@ -1,0 +1,44 @@
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Receiver
+metadata:
+  labels:
+    launcher.gokure.dev/component: push
+  name: push
+  namespace: default
+spec:
+  events:
+  - push
+  resources:
+  - kind: GitRepository
+    name: fleet
+  secretRef:
+    name: github-webhook-token
+  type: github
+---
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Receiver
+metadata:
+  labels:
+    launcher.gokure.dev/component: actions
+  name: actions-oidc
+  namespace: default
+spec:
+  interval: 2h0m0s
+  oidcProviders:
+  - audience: fleet
+    issuerURL: https://token.actions.example
+    validations:
+    - expression: vars.owner == 'shop'
+      message: not the shop's repository
+    variables:
+    - expression: claims.repository_owner
+      name: owner
+  resourceFilter: req.ref == 'refs/heads/main'
+  resources:
+  - filter: res.metadata.name.startsWith('shop-')
+    kind: OCIRepository
+    matchLabels:
+      team: shop
+    name: '*'
+    namespace: fleet
+  type: generic-oidc
