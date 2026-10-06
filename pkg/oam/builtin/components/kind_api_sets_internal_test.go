@@ -500,6 +500,15 @@ var apiSetKinds = []apiSetKind{
 	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
 	{component: "imagepolicy", typ: reflect.TypeFor[imagev1.ImagePolicySpec](), source: markerAPISource},
 	{
+		component: "imagerepository", typ: reflect.TypeFor[imagev1.ImageRepositorySpec](), source: markerAPISource,
+		build: handlerBuild(&ImageRepositoryHandler{}, "imagerepository"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"image": "registry.example/shop/web", "interval": "10m"}
+		}},
+		// The API requires the image and the type leaves an empty one out.
+		refused: []string{"image"},
+	},
+	{
 		component: "imageupdateautomation", typ: reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), source: markerAPISource,
 		build: handlerBuild(&ImageUpdateAutomationHandler{}, "imageupdateautomation"),
 		documents: []func() map[string]any{func() map[string]any {

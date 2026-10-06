@@ -857,22 +857,31 @@ its text:
   table has its row.
 - **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
   Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `imagepolicy`
-  (`imagepolicy.go`), `imageupdateautomation` (`imageupdateautomation.go`) and
+  (`imagepolicy.go`), `imagerepository` (`imagerepository.go`),
+  `imageupdateautomation` (`imageupdateautomation.go`) and
   `artifactgenerator` (`artifactgenerator.go`), with
   what such kinds share in `kind_flux.go`: the strict projection of its spec type,
   declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
   two additions. The Flux namespace: the object lands there when one is set, as the
   Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
   an Alert, an ImagePolicy and an ArtifactGenerator read nothing, an
+  ImageRepository the Secrets of its credentials, its proxy and its certificates, an
   ImageUpdateAutomation the Secret of its signing key). And its durations, held to the pattern their fields declare as on the
-  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation).
+  Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation,
+  the `interval` and the `timeout` of an ImageRepository; that `timeout` takes no `h`,
+  and one of an hour or more is written in minutes).
+  - **One of them is held to the environment policy:** the registry of an
+    `imagerepository`'s `image` to the allowed registries, by the rule that holds the
+    image of a pod. No tag rule applies, since the field names a repository. Its
+    `accessFrom`, which opens the scanned tags to other namespaces,
+    `serviceAccountName` and `insecure` are written as authored.
   - **Nothing gates what such an object reaches outside its namespace:** a source's
     `namespace` on an Alert, the repository's on an ImagePolicy, the GitRepository's
     on an ImageUpdateAutomation, which commits and pushes through it, and a source's on
     an ArtifactGenerator, which copies that source's content into its artifacts, are
     written as authored, as the references and the accounts of a `helmrelease` and a
-    `fluxcd-kustomization` are. No environment policy applies and no `Policy` method is
-    added.
+    `fluxcd-kustomization` are. No environment policy applies to these fields and no
+    `Policy` method is added.
   - **In the Flux namespace such an object shares its namespace with every other
     application's Flux objects,** so a reference without a namespace and a selector over
     the object's namespace reach them with no `namespace` written: an

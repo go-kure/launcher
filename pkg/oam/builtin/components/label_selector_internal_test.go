@@ -174,6 +174,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"helmValuesFromSpec":                         reflect.TypeFor[helmValuesFromSpec](),
 	"helmv2.HelmReleaseSpec":                     reflect.TypeFor[helmv2.HelmReleaseSpec](),
 	"imagev1.ImagePolicySpec":                    reflect.TypeFor[imagev1.ImagePolicySpec](),
+	"imagev1.ImageRepositorySpec":                reflect.TypeFor[imagev1.ImageRepositorySpec](),
 	"kustv1.KustomizationSpec":                   reflect.TypeFor[kustv1.KustomizationSpec](),
 	"metallbv1beta1.BFDProfileSpec":              reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
 	"metallbv1beta1.BGPAdvertisementSpec":        reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),

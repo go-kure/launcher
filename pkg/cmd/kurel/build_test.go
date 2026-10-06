@@ -509,6 +509,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"horizontalpodautoscaler",
 		"httproute",
 		"imagepolicy",
+		"imagerepository",
 		"imageupdateautomation",
 		"ingress",
 		"ingressclass",

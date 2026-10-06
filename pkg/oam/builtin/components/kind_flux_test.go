@@ -7,6 +7,7 @@ package components_test
 // ones.
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // fluxAlertSource is one source of events: every Kustomization of the Alert's
@@ -83,6 +85,32 @@ func imagePolicyFull() map[string]any {
 		"digestReflectionPolicy": "Always",
 		"interval":               "10m",
 		"suspend":                true,
+	}
+}
+
+// imageRepositoryMinimal is the least an imagerepository may author. Its
+// registry is the one ptStrictPolicy allows.
+func imageRepositoryMinimal() map[string]any {
+	return map[string]any{"image": "registry.example/shop/web", "interval": "10m"}
+}
+
+// imageRepositoryFull sets every field of an ImageRepositorySpec. Its three
+// Secrets are read from the namespace the object lands in, and its ACL opens
+// it to the namespaces labelled for the shop team.
+func imageRepositoryFull() map[string]any {
+	return map[string]any{
+		"image":              "registry.example/shop/web",
+		"interval":           "10m",
+		"timeout":            "90s",
+		"secretRef":          map[string]any{"name": "registry-credentials"},
+		"proxySecretRef":     map[string]any{"name": "registry-proxy"},
+		"certSecretRef":      map[string]any{"name": "registry-tls"},
+		"serviceAccountName": "scanner",
+		"suspend":            true,
+		"accessFrom":         map[string]any{"namespaceSelectors": []any{map[string]any{"matchLabels": map[string]any{"team": "shop"}}}},
+		"exclusionList":      []any{`^.*\.sig$`, `^.*\.att$`},
+		"provider":           "aws",
+		"insecure":           true,
 	}
 }
 
@@ -211,7 +239,7 @@ func fluxKinds(t *testing.T) []policyFreeKind {
 	// Vacuity guard: the Flux kinds are these, each once. A row dropped from
 	// policyFreeKinds would otherwise take the kind's tests with it, here and
 	// in the tests every policy-free kind shares.
-	want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imageupdateautomation"}
+	want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imagerepository", "imageupdateautomation"}
 	got := make([]string, 0, len(kinds))
 	for _, kind := range kinds {
 		got = append(got, kind.component)
@@ -330,6 +358,84 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 	}
 }
 
+// TestImageRepository_ImageIsHeldToAllowedRegistries: the registry of an
+// imagerepository's `image` is held to the allowed registries by the rule an
+// image of a pod is held to. A name with no registry is one of docker.io; no
+// tag rule applies, since the field names a repository; and with no policy, or
+// one that lists no registry, nothing is refused.
+func TestImageRepository_ImageIsHeldToAllowedRegistries(t *testing.T) {
+	allowing := func(registries ...string) oam.Policy {
+		return esPolicy{stubPolicy: &stubPolicy{allowedRegistries: registries}}
+	}
+	cases := []struct {
+		name, image string
+		policy      oam.Policy
+		refused     bool
+	}{
+		{"its registry is allowed", "registry.example/shop/web", allowing("registry.example"), false},
+		{"its registry is allowed, with a port", "registry.example:5000/shop/web", allowing("registry.example:5000"), false},
+		{"another registry", "ghcr.io/shop/web", allowing("registry.example"), true},
+		{"the allowed registry on another port", "registry.example:5000/shop/web", allowing("registry.example"), true},
+		{"a name with no registry", "shop/web", allowing("registry.example"), true},
+		{"a name with no registry, docker.io allowed", "shop/web", allowing("docker.io"), false},
+		{"a policy that lists no registry", "ghcr.io/shop/web", allowing(), false},
+		{"no policy", "ghcr.io/shop/web", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := withProperty(imageRepositoryMinimal(), "image", tc.image)
+			cfg, err := (&components.ImageRepositoryHandler{}).ToApplicationConfig(&oam.Component{Name: "web", Type: "imagerepository", Properties: props}, coreKindNamespace)
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			err = cfg.(policyApplier).ApplyPolicy(tc.policy)
+			if !tc.refused {
+				if err != nil {
+					t.Errorf("ApplyPolicy = %v, want no refusal", err)
+				}
+				return
+			}
+			var refusal *oam.PolicyRefusal
+			want := fmt.Sprintf("image %q is not from an allowed registry", tc.image)
+			if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry || !strings.Contains(err.Error(), want) {
+				t.Errorf("ApplyPolicy = %v, want a refusal of class %q that says %q", err, oam.RefusalRegistry, want)
+			}
+		})
+	}
+}
+
+// TestImageRepository_TimeoutIsWrittenWithoutHours: the pattern of `timeout`
+// takes no h, which is how the type writes an hour or more. An authored
+// timeout of that length, given in the units the pattern takes, goes out in
+// minutes, and the interval, whose pattern takes h, as the type writes it.
+func TestImageRepository_TimeoutIsWrittenWithoutHours(t *testing.T) {
+	props := withProperty(withProperty(imageRepositoryMinimal(), "timeout", "90m"), "interval", "90m")
+	kind := fluxKindRow(t, "imagerepository")
+	objs, err := fluxKindTransform(kind, "flux-system", oam.Component{Name: "web", Properties: props})
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("transform = %d objects, %v; want one", len(objs), err)
+	}
+	spec, _ := policyFreeJSON(t, objs[0])["spec"].(map[string]any)
+	if got, want := spec["timeout"], "90m0s"; got != want {
+		t.Errorf("spec.timeout = %v, want %q", got, want)
+	}
+	if got, want := spec["interval"], "1h30m0s"; got != want {
+		t.Errorf("spec.interval = %v, want %q", got, want)
+	}
+}
+
+// fluxKindRow is the row of the named Flux kind.
+func fluxKindRow(t *testing.T, component string) policyFreeKind {
+	t.Helper()
+	for _, kind := range fluxKinds(t) {
+		if kind.component == component {
+			return kind
+		}
+	}
+	t.Fatalf("%s is no Flux kind", component)
+	return policyFreeKind{}
+}
+
 // TestFluxKinds_ReportReads: each kind's config reports the ConfigMaps and
 // Secrets its object reads by name from the namespace it lands in, so the
 // objects of a trait that are named follow it to the Flux namespace. Every
@@ -346,6 +452,12 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		// An ImagePolicy names an ImageRepository, which is the object that
 		// holds the credentials of the registry.
 		"imagepolicy": {{props: imagePolicyFull()}},
+		// An ImageRepository reads the Secrets of the registry's credentials,
+		// of its proxy and of its certificates.
+		"imagerepository": {
+			{props: imageRepositoryFull(), secrets: []string{"registry-credentials", "registry-proxy", "registry-tls"}},
+			{props: imageRepositoryMinimal()},
+		},
 		// An ImageUpdateAutomation reads the Secret of its signing key. The
 		// credentials of the repository are the GitRepository's.
 		"imageupdateautomation": {

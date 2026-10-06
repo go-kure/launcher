@@ -1,0 +1,37 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  labels:
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  image: ghcr.io/example/web
+  interval: 10m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  labels:
+    launcher.gokure.dev/component: api
+  name: api-builds
+  namespace: default
+spec:
+  accessFrom:
+    namespaceSelectors:
+    - matchLabels:
+        team: shop
+  certSecretRef:
+    name: registry-tls
+  exclusionList:
+  - ^.*\.sig$
+  - ^.*\.att$
+  image: registry.example.com/shop/api
+  interval: 1h0m0s
+  provider: generic
+  proxySecretRef:
+    name: registry-proxy
+  secretRef:
+    name: registry-credentials
+  serviceAccountName: scanner
+  timeout: 90m0s
