@@ -259,3 +259,44 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 		})
 	}
 }
+
+// TestPostgresqlRule_PoolerInstances: what the emitted Pooler holds at
+// instances for each authored pooler.instances. The Pooler CRD gives the field
+// a default of 1 and no minimum, so a Pooler without it runs one pod. An
+// authored 0 or negative count is left out of the Pooler: the document builds,
+// and the operator's default replaces what the author wrote.
+func TestPostgresqlRule_PoolerInstances(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pooler map[string]any
+		want   any
+	}{
+		{name: "not authored", pooler: map[string]any{"enabled": true}, want: int64(3)},
+		{name: "two", pooler: map[string]any{"enabled": true, "instances": 2}, want: int64(2)},
+		{name: "zero", pooler: map[string]any{"enabled": true, "instances": 0}, want: nil},
+		{name: "negative", pooler: map[string]any{"enabled": true, "instances": -1}, want: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"pooler": tc.pooler}}
+			res, err := PostgresqlRule{}.LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
+			if err != nil {
+				t.Fatalf("lowering refused: %v", err)
+			}
+			var pooler *oam.Component
+			for i := range res.Components {
+				if res.Components[i].Type == "cnpg-pooler" {
+					pooler = &res.Components[i]
+				}
+			}
+			if pooler == nil {
+				t.Fatal("the lowering emitted no cnpg-pooler component")
+			}
+			if got := pooler.Properties["instances"]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("the lowered Pooler holds %v (%T) at instances, want %v", got, got, tc.want)
+			}
+			if _, err := (&CnpgPoolerHandler{}).ToApplicationConfig(pooler, "default"); err != nil {
+				t.Errorf("cnpg-pooler refuses the lowered component: %v", err)
+			}
+		})
+	}
+}
