@@ -50,11 +50,13 @@ func (h *CnpgDatabaseHandler) PropertySchema() map[string]oam.PropertySchema {
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: itemDesc},
 		}
 	}
+	// required marks a property the kind refuses a component without.
+	required := func(s oam.PropertySchema) oam.PropertySchema { s.Required = true; return s }
 	return map[string]oam.PropertySchema{
-		"cluster":               {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Required. Reference to the CloudNativePG Cluster hosting the database: {name: <cluster>}." + ref},
+		"cluster":               {Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true, Description: "Required. Reference to the CloudNativePG Cluster hosting the database: {name: <cluster>}." + ref},
 		"ensure":                str("Whether the database is present or absent. The operator's default (present) applies when omitted."),
-		"name":                  str("Required. Name of the database inside PostgreSQL. postgres, template0 and template1 are reserved."),
-		"owner":                 str("Required. Role that owns the database."),
+		"name":                  required(str("Required. Name of the database inside PostgreSQL. postgres, template0 and template1 are reserved.")),
+		"owner":                 required(str("Required. Role that owns the database.")),
 		"template":              str("Template database the database is created from."),
 		"encoding":              str("Character encoding of the database."),
 		"locale":                str("Locale of the database."),
