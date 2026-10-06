@@ -9,9 +9,9 @@ import (
 )
 
 // TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses: what
-// ToApplicationConfig refuses of a cnpg-cluster's properties, and what
-// Endpoints answers for the same component. Endpoints reads the object name
-// only, so it answers for every one of them.
+// ToApplicationConfig refuses of a cnpg-cluster's properties, Endpoints refuses
+// for the same component, in the same words. A component it accepts keeps its
+// endpoint, whatever it authors.
 func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) {
 	h := &components.CnpgClusterHandler{}
 	for _, tc := range []struct {
@@ -62,10 +62,23 @@ func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) 
 				t.Fatalf("ToApplicationConfig err = %v\nwant one containing %q", buildErr, tc.want)
 			}
 			eps, err := h.Endpoints(comp)
-			if err != nil || len(eps) != 1 {
-				t.Errorf("Endpoints = %+v, %v\nwant today's answer: one endpoint and no refusal", eps, err)
+			if err == nil || err.Error() != buildErr.Error() || eps != nil {
+				t.Errorf("Endpoints = %+v, %v\nwant no endpoint and ToApplicationConfig's refusal: %v", eps, err, buildErr)
 			}
 		})
+	}
+
+	accepted := &oam.Component{Name: "db", Type: "cnpg-cluster", Properties: map[string]any{
+		"instances": 3,
+		"imageName": "ghcr.io/example/postgres:17.2",
+		"storage":   map[string]any{"size": "10Gi"},
+	}}
+	if _, err := h.ToApplicationConfig(accepted, "data"); err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	eps, err := h.Endpoints(accepted)
+	if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != "db" {
+		t.Errorf("Endpoints = %+v, %v\nwant cnpg.io/cluster=db", eps, err)
 	}
 }
 

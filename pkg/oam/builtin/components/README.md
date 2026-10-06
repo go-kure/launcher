@@ -6781,7 +6781,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   limit below an authored request is refused as well. The other
   resource-name rules of the shared parser are left to the API server.
   `Endpoints` declares the same primary endpoint as `postgresql`
-  (`cnpg.io/cluster: <component-name>` on port `5432`).
+  (`cnpg.io/cluster: <Cluster name>` on port `5432`), and only for a
+  component the parse accepts: what `ToApplicationConfig` refuses of the
+  name or of the properties is refused where endpoints are collected, in the
+  same words (`instances: must be >= 1, got 0`). What `Generate` refuses
+  once the policy is applied is not repeated there.
   `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
   `ClusterSpec` by reflection: each json field is published with its type or
   listed with a reason in `cnpgClusterExcludedFields` (empty today), and a

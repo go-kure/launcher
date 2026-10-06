@@ -85,15 +85,20 @@ func (h *CnpgClusterHandler) CanHandle(componentType string) bool {
 // otherwise), on the PostgreSQL port. It is the same primary endpoint
 // postgresql publishes; the pooler endpoint belongs to a Pooler, which this
 // kind does not emit.
+//
+// It answers only for a component ToApplicationConfig accepts, and refuses
+// another in ToApplicationConfig's words: the object name, which is copied into
+// the selector verbatim, and the properties as they are decoded and validated
+// there. What Generate refuses is not repeated: it is checked on the spec a
+// policy has completed, which this entry is not given.
 func (h *CnpgClusterHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	// Refused here as well as at parse time: endpoints are collected
-	// separately, and the name is copied into the selector verbatim.
-	name := component.ObjectName()
-	if err := validateCnpgClusterName(name); err != nil {
+	// Endpoints are collected separately from the build, so the build's own
+	// decode and validation run here too. The namespace takes no part in them.
+	if _, err := h.ToApplicationConfig(component, ""); err != nil {
 		return nil, err
 	}
 	return []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: name}},
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.ObjectName()}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}, nil
 }
