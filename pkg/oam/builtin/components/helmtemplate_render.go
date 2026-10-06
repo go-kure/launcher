@@ -1038,7 +1038,9 @@ func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGro
 // check refuses a child name built from n.prefix and one of suffixes that is
 // over 63 characters, or no DNS-1123 subdomain, naming the component, the role
 // and the whole name. With no prefix it refuses nothing: the default is
-// shortened. The longest child name is the one refused for its length, as an
+// shortened. With no suffix it refuses nothing either: a chart with at most
+// one hook group has no child, so the prefix names nothing, whatever its
+// length. The longest child name is the one refused for its length, as an
 // *oam.HookGroupNameError, so the prefix length the message asks for fits every
 // child.
 //
@@ -1046,7 +1048,7 @@ func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGro
 // wherever the render is known: when the layout is built (childNames), and in a
 // transform that rendered the chart (HelmTemplateConfig.CheckHookGroupNames).
 func (n hookGroupNaming) check(suffixes []string) error {
-	if n.prefix == "" {
+	if n.prefix == "" || len(suffixes) == 0 {
 		return nil
 	}
 	longest := ""

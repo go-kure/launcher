@@ -94,6 +94,16 @@ func TestHookGroupNaming_ChildNames(t *testing.T) {
 		if errors.Is(err, oam.ErrHookGroupNameTooLong) {
 			t.Error("the refusal of a name that is no subdomain answers to oam.ErrHookGroupNameTooLong")
 		}
+
+		// No child, no name: a prefix names nothing then, and is not measured
+		// alone, whatever its length.
+		alone := hookGroupNaming{component: "db", prefix: "a." + strings.Repeat("p", 62)}
+		if err := alone.check(nil); err != nil {
+			t.Errorf("check with no child: %v", err)
+		}
+		if names, err := alone.childNames("db", nil); err != nil || len(names) != 0 {
+			t.Errorf("childNames with no child: %d name(s), err = %v", len(names), err)
+		}
 	})
 }
 
@@ -238,17 +248,20 @@ func TestHelmTemplateConfig_CheckHookGroupNames(t *testing.T) {
 	})
 
 	t.Run("nothing to refuse", func(t *testing.T) {
-		// A chart with one group has no hook-group layout, so the prefix names
-		// nothing; and the default prefix is shortened, never refused.
+		// A chart with at most one group has no hook-group layout, so the prefix
+		// names nothing, even one that is itself over 63 characters; and the
+		// default prefix is shortened, never refused.
 		const oneGroup = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: main\n"
+		alone := "a." + strings.Repeat("p", 62) // 64 characters, a valid subdomain
 		for name, cfg := range map[string]*HelmTemplateConfig{
+			"no group":           helmTemplateFixture(t, stubRender("")),
 			"one group":          helmTemplateFixture(t, stubRender(oneGroup)),
 			"the default prefix": helmTemplateFixture(t, stubRender(helmTemplateThreeGroupChart)),
 			"a prefix that fits": helmTemplateFixture(t, stubRender(helmTemplateThreeGroupChart)),
 		} {
 			switch name {
-			case "one group":
-				cfg.HookGroupNamePrefix = over
+			case "no group", "one group":
+				cfg.HookGroupNamePrefix = alone
 			case "the default prefix":
 				cfg.Application = strings.Repeat("a", 70)
 			case "a prefix that fits":

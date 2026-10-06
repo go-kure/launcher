@@ -563,6 +563,18 @@ func TestHookGroupNames_TooLongIsRefusedByTheTransform(t *testing.T) {
 	// is built.
 	fits := hookComponent("db", "helmtemplate", url, "        hookGroupNamePrefix: "+long[:47]+"\n")
 	mustHookGroupTree(t, hookApp("shop", fits, ""), oam.TransformContext{})
+
+	// A chart with one group has no hook-group layout, so its prefix names
+	// nothing and is not measured: one that is itself over 63 characters builds,
+	// the author's and the hook's alike.
+	single := serveChartWithHooks(t)
+	alone := "a." + strings.Repeat("p", 62) // 64 characters, a valid subdomain
+	authoredAlone := hookComponent("db", "helmtemplate", single, "        hookGroupNamePrefix: "+alone+"\n")
+	mustHookGroupTree(t, hookApp("shop", authoredAlone, ""), oam.TransformContext{})
+	hooked := oam.TransformContext{Naming: func(req oam.NameRequest) (string, bool) {
+		return alone, req.Role == oam.NameRoleHookGroup
+	}}
+	mustHookGroupTree(t, hookApp("shop", hookComponent("db", "helmtemplate", single, ""), ""), hooked)
 }
 
 // The limit the README states: the transform holds the prefixes apart, not the

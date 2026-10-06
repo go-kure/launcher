@@ -784,6 +784,8 @@ or not it was given a policy, and a consumer that only calls `Generate`, which w
 hook-group layout, is refused as well. `AugmentLayout` still refuses the same name with the
 same error. That is the one a consumer meets outside a transform: on a `HelmTemplateConfig`
 it built directly, and on a config whose `HookGroupNamePrefix` it set after the transform.
+Neither place refuses a prefix that names nothing: a chart with at most one hook group has no
+hook-group layout, and its prefix is not measured, whatever its length.
 
 A caller tells the refusal from every other error without reading its text, from either
 place: `errors.Is(err, oam.ErrHookGroupNameTooLong)` is true, and `errors.As` finds the
