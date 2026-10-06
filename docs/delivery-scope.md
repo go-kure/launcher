@@ -710,7 +710,8 @@ its text:
 - **Now** (`pkg/oam/README.md` "Contract metadata"):
   - Every built-in handler and lowering rule implements `ContractDescriber`
     (`pkg/oam/handler.go`; one `contract.go` in each of the components, traits and
-    policies packages). `Family` is the type name, `Version` is `builtin.ContractVersion`
+    policies packages, or the kind's own file for a kind component added since).
+    `Family` is the type name, `Version` is `builtin.ContractVersion`
     (`v1alpha1`, `pkg/oam/builtin/contract.go`).
   - `HandlerContractSet` (`pkg/oam/transform.go`) has a third map, `Policies`. Breaking
     for a consumer that wrote an unkeyed literal of it.
