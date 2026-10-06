@@ -379,9 +379,9 @@ uses `launcher.gokure.dev`). The full key is overridable per transform through
 > `gokure.dev/component`). Launcher puts that label on every object a component owns and on
 its pod templates itself (go-kure/launcher#788, [Component label and
 ownership](#component-label-and-ownership)), so the selector matches the component's pods
-with no caller labelling anything. A caller that sets `ComponentLabelKey` to a key its
-objects already carry (e.g. `"app"`) keeps the values they carry: the label is added only
-where the key is absent.
+with no caller labelling anything. The label is authoritative: a value an object already
+holds under the key is the component's own, or generation fails, so `ComponentLabelKey` must
+be a key nothing else writes.
 
 The selector **value** is `ComponentLabelValue(name)` of the authored component, not the raw
 component name, and the label launcher adds has the same value. A component name is a DNS-1123
@@ -489,12 +489,65 @@ goes on:
   is: the layout walker puts there what the application generated, which carries the label;
 - nothing an application without an owner generates.
 
-It is added **only where the key is absent**. An authored object or pod template that already
-carries the key (a `manifests` or `passthrough` document, an authored pod label) keeps its
-value, as a bundle's labels never replace an object's own. Launcher therefore does not make
-the label authoritative: a consumer that needs every object of a component to carry exactly
-the component's value enforces that in its own pass over the `GenerateApplications` result,
-by overwriting the key or by refusing a document whose value differs.
+**The label is authoritative** (go-kure/launcher#790). Before it writes the label, the
+wrapper holds every object the application generates to it: a value the object already holds
+under the key is the owner's, or generation fails. That holds whatever wrote the value: a
+`manifests` or `passthrough` document, an authored pod label, a kind's property, a chart
+rendered at build time. The synthesized NetworkPolicies select by the label, so a pod that
+carried another component's value would be let in wherever that component's pods are. The
+kinds' `labels` property refuses the same value in the transform ("`labels` and
+`annotations`: the metadata of a kind component's object" below). The key must therefore be
+one nothing else writes.
+
+The value is read, on every object and on each member of an unstructured list envelope:
+
+| Where | On | Launcher writes the label there when the key is absent |
+|-------|----|----|
+| `metadata.labels` | every object | yes |
+| the pod template's labels | `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet`, `ReplicationController`, `PodTemplate`, and the job template's pod template of a `CronJob`, each in its own API group | yes |
+| `spec.inheritedMetadata.labels` | a `postgresql.cnpg.io` `Cluster` | no |
+| `spec.template.metadata.labels` | a `postgresql.cnpg.io` `Pooler` | no |
+| `spec.podMetadata.labels` | a `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`, `Alertmanager` or `ThanosRuler` | no |
+
+The last three rows are metadata an operator puts on the pods it creates. Launcher reads them
+and writes nothing there: such pods carry the component label only where the document or a
+kind puts it. A typed object of one of the `monitoring.coreos.com` kinds is recognized when
+it states its kind. Not read: a job template's own labels, a volume claim template's, and
+what a Flux object hands on to what it applies (`spec.commonMetadata`).
+
+A workload whose own selector **requires** another value for the key is refused too: a
+`matchLabels` entry, an `In` expression that does not hold the component's value, or the
+entry of a `ReplicationController`'s label map. Its pods could not carry the component's
+value.
+
+The refusal names the object, the path and the component, and its text is the document
+author's to read:
+
+```text
+Deployment "web": spec.template.metadata.labels["launcher.gokure.dev/component"]: "db" is not the component label of component "web" ("web"): launcher sets that label on everything the component generates, and the NetworkPolicies generated for the component select by it; remove the label, or write that value
+```
+
+It comes from generation (`GenerateApplications`, or `Generate` on an application), as the
+reserved-key refusal does, and it is a plain error: there is no sentinel or type for it. An
+application the document as a whole owns has no component, and its objects are not held to
+any value.
+
+**One value besides the owner's, under the key `app` only.** `app` is the label the built-in
+kinds and traits write themselves, valued with the name of the component after lowering they
+generate for. That is the owner's, except for an entry a lowering rule emitted under a name
+of its own. With `ComponentLabelKey: "app"` such an entry's objects carry the entry's value,
+which launcher wrote and no document can change, so the wrapper accepts it on that entry's
+objects (and on what the entry's traits and policies generate), and nowhere else. It admits
+no other component's value: under this key the transform refuses a document in which a rule
+emitted, for one component, an entry whose label value is another component's (the refusal
+names both components and the entry, and says to rename one of the two). Lowering's own name
+checks do not see that case where the other component
+is itself lowered into entries under other names.
+What it leaves: under such a key a renamed entry's pods carry the entry's value, and the
+component's NetworkPolicies, which select the owner's, do not select them. That is a gap of
+its own (a pod of a component left unselected by its policies, go-kure/launcher#790), not
+closed by this rule. No built-in rule emits a pod-running entry under another name ("What a
+synthesized policy selects" below).
 
 The label is written into a label map of the object's, or the pod template's, own. A config
 that uses one map for an object's labels, its selector and its pod template keeps that map
@@ -545,7 +598,9 @@ the default.
 
 A chart rendered at build time
 (`helm` under `delivery: template`, `helmtemplate`) yields objects launcher generates, which
-are labelled like any other: where the key is absent.
+are held to the label and labelled like any other. So one chart is treated two ways: a value
+it sets under the key is **refused under template delivery, overwritten when Flux installs**.
+Either way the key is one no chart may set.
 
 **What a synthesized policy selects.** A synthesized inbound or egress policy selects the
 value its entry's objects carry: the authored component's, also for an entry a lowering rule
@@ -561,7 +616,8 @@ generates. The case is reached only through a consumer's own lowering rule.
 - Pods an operator creates from a custom resource (a CloudNativePG `Cluster`'s instance pods,
   a `Pooler`'s pods): the custom resource carries the label, its pods do not. This is not a
   goal. The endpoint-ingress policy selects those pods by the operator's own labels for that
-  reason.
+  reason. Where the custom resource does hand labels on to its pods, another component's
+  value there is refused (the table above).
 - Pods of a kind the post-renderer has no patch for in a Flux-installed chart.
 
 **Breaking library changes** (go-kure/launcher#788):
@@ -588,6 +644,25 @@ generates. The case is reached only through a consumer's own lowering rule.
   applications accordingly (`sub-application "db-pooler" of component "db"`).
 - `stack.Application.Config` is the ownership wrapper after `Transform`: a type assertion on
   a concrete config type goes through `UnwrapConfig`.
+
+**Breaking library changes** (go-kure/launcher#790, the authoritative label):
+
+- A document that built before is refused at generation when an object it generates holds
+  the component label's key with a value that is not its component's: on the object, on a
+  pod template, in a `Cluster`'s `spec.inheritedMetadata`, a `Pooler`'s pod template or
+  `spec.podMetadata` of a Prometheus operator kind, or as the value a workload's selector
+  requires. Before, such a value stayed as written. The key must be one nothing else writes:
+  a consumer that set `ComponentLabelKey` to a key its documents or charts also set (`app`,
+  `app.kubernetes.io/name`) moves to a key of its own, such as the default.
+- With `ComponentLabelKey: "app"`, what the built-in kinds and traits write still builds
+  (the entry's own value, above). A chart rendered at build time, or an authored object,
+  that sets `app` to anything but its component's value, or on a renamed entry that entry's,
+  does not. Nor does a document in which a lowering rule emits, for one component, an entry
+  whose label value is another component's: the transform refuses it.
+- The reserved metadata keys are read in two more places, which the two checks share: a
+  `Pooler`'s pod template and `spec.podMetadata` of a `Prometheus`, `PrometheusAgent`,
+  `Alertmanager` or `ThanosRuler` ([Reserved metadata keys](#reserved-metadata-keys)). A
+  document that set a reserved key there built before and is refused now.
 
 ## Reserved metadata keys
 
@@ -642,10 +717,10 @@ if errors.As(err, &refused) {
 object states none, and the kind is zero for a typed object that states none and that the
 check reads only the metadata of, which `Object` (the object as the text names it) then names
 by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
-the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate` or
-`ReservedKeyInInheritedMetadata`. `Annotation` is false for a label. `Entry` is the entry
-that reserves `Key`: the key itself, or the prefix it is under. Metadata the check cannot
-read fails generation with another error, which is neither.
+the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`,
+`ReservedKeyInInheritedMetadata` or `ReservedKeyInPodMetadata`. `Annotation` is false for a
+label. `Entry` is the entry that reserves `Key`: the key itself, or the prefix it is under.
+Metadata the check cannot read fails generation with another error, which is neither.
 
 **What is read.** On every object, and on each member of an unstructured list envelope as
 Flux applies it (a `List`, or an envelope with `items`):
@@ -655,7 +730,16 @@ Flux applies it (a `List`, or an envelope with `items`):
   `Job`, `ReplicaSet`, `ReplicationController` or `PodTemplate`, and the job template's pod
   template on a `CronJob`, each in its own API group: they become the metadata of the pods;
 - `spec.inheritedMetadata` of a `postgresql.cnpg.io` `Cluster`, which the operator copies
-  onto every object it creates for the cluster.
+  onto every object it creates for the cluster;
+- the pod template's labels and annotations of a `postgresql.cnpg.io` `Pooler`
+  (`spec.template.metadata`), named as a pod template's;
+- `spec.podMetadata` of a `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`,
+  `Alertmanager` or `ThanosRuler`, which the operator puts on the pods it creates.
+
+These are the places the component label is held to its value in
+([Component label and ownership](#component-label-and-ownership)): one list serves both
+checks. A typed object of one of the `monitoring.coreos.com` kinds is recognized when it
+states its kind.
 
 A key is read whatever its value: a value the API server would refuse, or a null, does not
 hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the
@@ -668,6 +752,8 @@ object named, and is not read as holding no key.
   the check reads labels. The built-in components and traits write the first on what they
   generate, and a consumer may well configure the second under a prefix it reserves. Both
   stay checked as annotation keys, and another key under the same prefix stays reserved.
+  The exemption is of the key: the component label's value is held to the component's by the
+  wrapper's other check.
 - The component label the wrapper stamps, and a bundle's labels and annotations, are added
   after the check and never read.
 - The annotations the platform sets on an Ingress: the ones the `expose` rule writes from a
@@ -1319,9 +1405,9 @@ The engine refuses, as a `TransformError` naming the component, the property and
 - the `app` label with another value than `ComponentLabelValue` of the component's name,
   which the kinds that set `app` select by;
 - the component label key (`ComponentLabelKey`, or the key derived from `Domain`) with
-  another value than the one launcher gives the component. The ownership wrapper keeps a
-  component label an object already carries, so another value would take the object out of
-  the selectors generated for its component.
+  another value than the one launcher gives the component. The ownership wrapper refuses
+  that value on every generated object ("Component label and ownership"); here the refusal
+  names the property that holds it.
 
 A key in `ReservedMetadataKeys` is refused where every reserved key is, when the object is
 generated. A label that names another object is the author's literal: it does not follow that

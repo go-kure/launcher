@@ -462,7 +462,13 @@ Decided in the ticket:
 - **Now:** the transform's last step records the owner of every application, and launcher
   stamps `<ComponentLabelKey>: ComponentLabelValue(c)` on every object and pod template a
   component owns, where the key is absent (`pkg/oam/component_ownership.go`,
-  `pkg/oam/README.md` "Component label and ownership").
+  `pkg/oam/README.md` "Component label and ownership"). The label is authoritative
+  (go-kure/launcher#790): where the key is there with a value that is not the component's,
+  generation is refused (`pkg/oam/component_label_check.go`). That holds for an object's own
+  labels, a pod template's, the labels a CloudNativePG Cluster or Pooler and the Prometheus
+  operator kinds hand on to their pods, and the value a workload's selector requires. The
+  key must be one nothing else writes. With `app` as the key, the value the built-in kinds
+  write for an entry a lowering rule named differently from its component is accepted too.
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per kind with a pod template
     (Deployment, StatefulSet, DaemonSet, Job, CronJob, ReplicaSet, ReplicationController,
@@ -473,7 +479,8 @@ Decided in the ticket:
     to use is one no chart sets, such as the default. Whether a chart's hook and test Pods
     pass through a post-renderer is not verified.
   - Chart output under template delivery: labels added to the rendered objects, where the
-    key is absent.
+    key is absent. A value the chart set under the key is refused under template delivery,
+    overwritten when Flux installs.
   - A generated workload whose own selector rules the label out keeps its pod template as
     written, and its pods carry no component label.
   - `GeneratedApplication.Component` is the authored component for the pooler, a database,
@@ -482,8 +489,8 @@ Decided in the ticket:
     the one stamped, also for an entry a lowering rule emitted under another name.
   - A shared generated source is owned by the application: it carries no component label
     and reports an empty component. So does the external-backend NetworkPolicy.
-  - Not covered: pods an operator creates from a custom resource, and an owner label a
-    consumer needs to be authoritative (it enforces that in its own pass).
+  - Not covered: pods an operator creates from a custom resource whose pod metadata the
+    custom resource does not hold.
 
 ---
 
@@ -768,7 +775,9 @@ its text:
     CloudNativePG Cluster. A test runs each of these carriers
     (`TestReservedMetadataKeys_EveryCarrier`).
   - Read: an object's own labels and annotations, the pod template's on the kinds that have
-    one, and a Cluster's `spec.inheritedMetadata`. Exempt: the `app` label and the component
+    one, a Cluster's `spec.inheritedMetadata`, a Pooler's pod template and
+    `spec.podMetadata` of the Prometheus operator kinds (the last two since
+    go-kure/launcher#790, with the component label's check). Exempt: the `app` label and the component
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field

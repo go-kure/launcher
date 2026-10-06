@@ -1,0 +1,347 @@
+package oam
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/go-kure/launcher/pkg/errors"
+)
+
+// The component label is authoritative (go-kure/launcher#790). The ownership
+// wrapper holds every object its config generates to it before it writes the
+// label itself: a value the object already carries under the label's key is the
+// owning component's, or generation fails. The NetworkPolicies synthesized for
+// a component select by the label, so a pod that carried another component's
+// value would be let in wherever that component's pods are.
+//
+// One table says where an object holds metadata (metadataHolders), and both
+// checks of the wrapper read through it: this one and the reserved metadata
+// keys (reserved_metadata.go).
+
+// monitoringGroup is the API group of the Prometheus operator's kinds, and
+// cnpgPoolerKind the CloudNativePG Pooler.
+const (
+	monitoringGroup = "monitoring.coreos.com"
+	cnpgPoolerKind  = "Pooler"
+)
+
+// metadataHolder is one place an object holds labels and annotations in: its
+// own metadata, or metadata that becomes that of pods or of other objects in
+// the cluster.
+type metadataHolder struct {
+	// path is where the object holds it: the object with the `labels` and the
+	// `annotations`.
+	path []string
+	// in is the holder as a reserved-key refusal names it.
+	in ReservedKeyHolder
+}
+
+// labelsPath is the path of the holder's labels, as a refusal prints it.
+func (h metadataHolder) labelsPath() string {
+	return strings.Join(h.path, ".") + ".labels"
+}
+
+// operatorMetadataKinds are the kinds whose object holds metadata an operator
+// puts on what it creates. The wrapper reads it and writes nothing there: the
+// pods of such an object carry the operator's labels, and the component label
+// only where the document or a kind puts it.
+//
+//   - a CloudNativePG Cluster's spec.inheritedMetadata goes onto every object
+//     the operator creates for the cluster;
+//   - a Pooler's spec.template is the pod template of its pods;
+//   - spec.podMetadata of a Prometheus, a PrometheusAgent, an Alertmanager and a
+//     ThanosRuler is the metadata of its pods.
+//
+// A kind is told by the group and kind the object states. Of the typed objects
+// that state none, only the ones statedOrTypedKind names are recognized.
+var operatorMetadataKinds = []struct {
+	group, kind string
+	holder      metadataHolder
+}{
+	{cnpgGroup, cnpgClusterKind, metadataHolder{[]string{"spec", "inheritedMetadata"}, ReservedKeyInInheritedMetadata}},
+	{cnpgGroup, cnpgPoolerKind, metadataHolder{[]string{"spec", "template", "metadata"}, ReservedKeyInPodTemplate}},
+	{monitoringGroup, "Prometheus", metadataHolder{[]string{"spec", "podMetadata"}, ReservedKeyInPodMetadata}},
+	{monitoringGroup, "PrometheusAgent", metadataHolder{[]string{"spec", "podMetadata"}, ReservedKeyInPodMetadata}},
+	{monitoringGroup, "Alertmanager", metadataHolder{[]string{"spec", "podMetadata"}, ReservedKeyInPodMetadata}},
+	{monitoringGroup, "ThanosRuler", metadataHolder{[]string{"spec", "podMetadata"}, ReservedKeyInPodMetadata}},
+}
+
+// metadataHolders returns every place an object of group and kind holds
+// metadata in: its own first, then its pod template's on a kind that has one
+// (podTemplateKinds), then what an operator hands on (operatorMetadataKinds).
+// Both checks read exactly these. Neither reads the metadata a Flux object
+// hands on to what it applies (spec.commonMetadata), a job template's or a
+// volume claim template's.
+func metadataHolders(group, kind string) []metadataHolder {
+	holders := []metadataHolder{{[]string{"metadata"}, ReservedKeyInObjectMetadata}}
+	for _, k := range podTemplateKinds {
+		if group == k.group && kind == k.kind {
+			holders = append(holders, metadataHolder{append(slices.Clone(k.spec), "template", "metadata"), ReservedKeyInPodTemplate})
+		}
+	}
+	for _, k := range operatorMetadataKinds {
+		if group == k.group && kind == k.kind {
+			holders = append(holders, k.holder)
+		}
+	}
+	return holders
+}
+
+// generatedObject is an object an application generated, read once for both
+// checks.
+type generatedObject struct {
+	obj         client.Object
+	group, kind string
+	// where names the object in a refusal: `Deployment "web"`, with the Go type
+	// in place of the kind for a typed object that states none.
+	where string
+	// content is the object as the cluster would be sent it. The checks only
+	// read it.
+	content map[string]any
+}
+
+func readGeneratedObject(obj client.Object) (generatedObject, error) {
+	g := generatedObject{obj: obj}
+	g.group, g.kind = statedOrTypedKind(obj)
+	g.where = fmt.Sprintf("%s %q", g.kind, obj.GetName())
+	if g.kind == "" {
+		g.where = fmt.Sprintf("%T %q", obj, obj.GetName())
+	}
+	content, err := objectContent(obj)
+	if err != nil {
+		return g, err
+	}
+	g.content = content
+	return g, nil
+}
+
+// check holds obj to the consumer's reserved metadata keys (checkReserved) and
+// to the component label (checkComponentLabel), and with it every object obj
+// stands for when Flux applies it (appliedObjects, a list envelope's members).
+// An object of an application the document as a whole owns has no component
+// label to be held to.
+//
+// The reserved keys are checked on obj and all it stands for before the
+// component label is checked on any of them, so a reserved key is refused as
+// one (ErrReservedMetadataKey) whatever the labels beside it hold.
+func (o *ownedConfig) check(obj client.Object) error {
+	if o.reserved == nil && o.component == "" {
+		return nil
+	}
+	checked := []client.Object{obj}
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		for _, applied := range appliedObjects(u) {
+			if applied != obj {
+				checked = append(checked, applied)
+			}
+		}
+	}
+	// An object that cannot be read is refused by the first check that reads it.
+	unreadable := "component label"
+	if o.reserved != nil {
+		unreadable = "reserved metadata keys"
+	}
+	generated := make([]generatedObject, 0, len(checked))
+	for _, c := range checked {
+		g, err := readGeneratedObject(c)
+		if err != nil {
+			return errors.Errorf("%s: %s: %w", unreadable, g.where, err)
+		}
+		if o.reserved != nil {
+			if err := o.checkReserved(g); err != nil {
+				return err
+			}
+		}
+		generated = append(generated, g)
+	}
+	if o.component == "" {
+		return nil
+	}
+	for _, g := range generated {
+		if err := o.checkComponentLabel(g); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// componentLabelValues returns the values the component label's key may hold on
+// what the config generates: the owning component's.
+//
+// With ComponentLabelKey "app" there is a second one. The kinds write the `app`
+// label themselves, valued with the name of the component after lowering they
+// generate for, which is the owner's except for an entry a lowering rule
+// emitted under a name of its own. That value is launcher's own output, and no
+// document can change it, so it is accepted on that entry's objects. It is no
+// other component's value: the transform refuses a document in which it would
+// be (checkEntryLabelValues). Such an entry's pods then carry the entry's value,
+// and the component's NetworkPolicies, which select the owner's, do not select
+// them.
+func (o *ownedConfig) componentLabelValues() []string {
+	values := []string{ComponentLabelValue(o.component)}
+	if o.labelKey == appLabelKey && o.entry != "" && o.entry != o.component {
+		values = append(values, ComponentLabelValue(o.entry))
+	}
+	return values
+}
+
+// checkEntryLabelValues refuses, under the component label key `app`, a document
+// in which a lowering rule emitted an entry for one component under a name
+// whose label value is another component's. The kinds label such an entry's
+// objects with the entry's value (componentLabelValues), which would be the
+// value the other component's NetworkPolicies select by. Lowering's own name
+// checks do not see it where the other component was itself lowered into
+// entries under other names. owners holds the authored component of every
+// entry after lowering, by the entry's name; "" is the document as a whole.
+func checkEntryLabelValues(owners map[string]string, labelKey string) error {
+	if labelKey != appLabelKey {
+		return nil
+	}
+	byValue := map[string]string{}
+	for _, component := range owners {
+		if component != "" {
+			byValue[ComponentLabelValue(component)] = component
+		}
+	}
+	for _, entry := range slices.Sorted(maps.Keys(owners)) {
+		component := owners[entry]
+		if component == "" || entry == component {
+			continue
+		}
+		if other, taken := byValue[ComponentLabelValue(entry)]; taken && other != component {
+			return errors.Errorf("component %q: its lowering emitted %q, whose `app` label value %q is the component label of component %q: with the component label key %q the objects of %q would carry the label the NetworkPolicies generated for %q select by; rename one of the two components",
+				component, entry, ComponentLabelValue(entry), other, labelKey, entry, other)
+		}
+	}
+	return nil
+}
+
+// checkComponentLabel refuses g when it carries the component label's key with
+// a value that is not the owning component's (componentLabelValues), in any
+// place it holds metadata in (metadataHolders), whoever wrote it there: a
+// passthrough or manifests object, a rendered chart, a kind's own property. An
+// absent key is not refused: the wrapper writes the label where it writes one
+// at all (stampComponentLabel). A null value is the empty string the cluster
+// reads it as, and a value that is no string is refused as such.
+//
+// A workload whose own selector requires another value for the key is refused
+// too (checkWorkloadSelector).
+func (o *ownedConfig) checkComponentLabel(g generatedObject) error {
+	accepted := o.componentLabelValues()
+	for _, h := range metadataHolders(g.group, g.kind) {
+		holder, found, err := nestedObject(g.content, h.path...)
+		if err != nil {
+			return errors.Errorf("component label: %s: %w", g.where, err)
+		}
+		if !found {
+			continue
+		}
+		labels, _, err := objectField(holder, "labels")
+		if err != nil {
+			return errors.Errorf("component label: %s: %s: %w", g.where, strings.Join(h.path, "."), err)
+		}
+		raw, carried := labels[o.labelKey]
+		if !carried {
+			continue
+		}
+		got, isString := raw.(string)
+		if raw != nil && !isString {
+			return errors.Errorf("component label: %s: %s[%q] is a %T, not a string", g.where, h.labelsPath(), o.labelKey, raw)
+		}
+		if !slices.Contains(accepted, got) {
+			return errors.Errorf("%s: %s[%q]: %q is not the component label of component %q (%q): launcher sets that label on everything the component generates, and the NetworkPolicies generated for the component select by it; remove the label, or write that value",
+				g.where, h.labelsPath(), o.labelKey, got, o.component, accepted[0])
+		}
+	}
+	return o.checkWorkloadSelector(g, accepted)
+}
+
+// checkWorkloadSelector refuses a workload whose own selector requires, for the
+// component label's key, values of which none is accepted: its pods could not
+// carry the component's value, and the cluster refuses a workload whose
+// selector does not match its pod template.
+//
+// A selector that rules the key out, or the component's value, is not refused:
+// its pod template stays as written (withComponentLabel).
+func (o *ownedConfig) checkWorkloadSelector(g generatedObject, accepted []string) error {
+	for _, k := range podTemplateKinds {
+		// A PodTemplate has no spec around its template and no selector.
+		if g.group != k.group || g.kind != k.kind || len(k.spec) == 0 {
+			continue
+		}
+		spec, found, err := nestedObject(g.content, k.spec...)
+		if err != nil {
+			return errors.Errorf("component label: %s: %w", g.where, err)
+		}
+		if !found {
+			continue
+		}
+		selector, isObject := spec["selector"].(map[string]any)
+		if !isObject {
+			continue
+		}
+		for _, required := range requiredLabelValues(selector, o.labelKey, k.labelMapSelector) {
+			if slices.ContainsFunc(required, func(v string) bool { return slices.Contains(accepted, v) }) {
+				continue
+			}
+			return errors.Errorf("%s: %s.selector requires %s for the label %q, not the component label of component %q (%q): launcher sets that label on the pod template, and the NetworkPolicies generated for the component select by it; take the label out of the selector, or require that value",
+				g.where, strings.Join(k.spec, "."), quotedValues(required), o.labelKey, o.component, accepted[0])
+		}
+	}
+	return nil
+}
+
+// requiredLabelValues returns the values selector requires the label key to
+// have one of, one set per requirement: a matchLabels entry and each In
+// expression of a label selector, or the entry of a plain label map
+// (labelMap, a ReplicationController's). A requirement that names no values the
+// key must have (Exists, DoesNotExist, NotIn) is none, and a selector that does
+// not decode requires nothing, as it holds no label back (withComponentLabel).
+func requiredLabelValues(selector map[string]any, key string, labelMap bool) [][]string {
+	if labelMap {
+		switch v := selector[key].(type) {
+		case string:
+			return [][]string{{v}}
+		case nil:
+			if _, named := selector[key]; named {
+				return [][]string{{""}}
+			}
+		}
+		return nil
+	}
+	decoded := &metav1.LabelSelector{}
+	if runtime.DefaultUnstructuredConverter.FromUnstructured(selector, decoded) != nil {
+		return nil
+	}
+	var required [][]string
+	if v, named := decoded.MatchLabels[key]; named {
+		required = append(required, []string{v})
+	}
+	for _, e := range decoded.MatchExpressions {
+		// An In that names no value is no selector the cluster accepts, and not
+		// this check's to refuse.
+		if e.Key == key && e.Operator == metav1.LabelSelectorOpIn && len(e.Values) > 0 {
+			required = append(required, e.Values)
+		}
+	}
+	return required
+}
+
+// quotedValues prints the values a selector requires one of.
+func quotedValues(values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = fmt.Sprintf("%q", v)
+	}
+	if len(quoted) == 1 {
+		return quoted[0]
+	}
+	return "one of " + strings.Join(quoted, ", ")
+}

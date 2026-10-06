@@ -8376,7 +8376,11 @@ built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`
 
 The component label (`<domain>/component`) is not this package's to write: the transform
 adds it to every object a component's config generates, and to its pod templates, with the
-authored component's value, where the key is absent (go-kure/launcher#788). A lowered part
+authored component's value, where the key is absent (go-kure/launcher#788). Where the key is
+there with another value, the transform's output is refused when it is generated
+(go-kure/launcher#790): that holds for what a component type of this package emits from
+authored objects or a rendered chart (`passthrough`, `manifests`, `helmtemplate`, `helm`
+under template delivery) as for any other, so the key is one nothing else writes. A lowered part
 named differently from its component (the `postgresql` pooler, a database, an object store)
 carries the component's value, not its own name. A source a lowering rule generates and the
 application bundle holds (the repository a `helm` component generates) carries none. A

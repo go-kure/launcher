@@ -48,10 +48,12 @@ type componentOwner interface {
 // the component's own config, over a trait decorator, over a sibling group.
 //
 // Generate first holds the wrapped config's objects to the consumer's reserved
-// metadata keys (checkReserved), then labels them with the owning component,
-// where they carry no value for the key yet (stampComponentLabel). An
-// application the document as a whole owns (component "") is checked and
-// otherwise generated unchanged.
+// metadata keys and to the component label (check): a value an object already
+// carries under the label's key is the owning component's, or generation fails.
+// Then it labels them with the owning component, where they carry no value for
+// the key yet (stampComponentLabel). An application the document as a whole
+// owns (component "") is held to the reserved keys and otherwise generated
+// unchanged.
 //
 // It forwards every optional contract code reads on an application's config
 // after the transform, each as a trait decorator forwards it: by value, so a
@@ -62,7 +64,12 @@ type componentOwner interface {
 type ownedConfig struct {
 	inner     stack.ApplicationConfig
 	component string
-	labelKey  string
+	// entry is the name of the component after lowering the application came
+	// from, which is the owning component's unless a lowering rule emitted it
+	// under a name of its own. The kinds write the `app` label with it
+	// (componentLabelValues).
+	entry    string
+	labelKey string
 	// reserved is the consumer's reserved metadata keys, nil when it reserves
 	// none (reserved_metadata.go).
 	reserved *reservedMetadataKeys
@@ -79,7 +86,14 @@ func wrapOwnedConfig(inner stack.ApplicationConfig, component, labelKey string) 
 // wrapOwnedConfigReserving is wrapOwnedConfig with the consumer's reserved
 // metadata keys, which the wrapper holds the application's objects to.
 func wrapOwnedConfigReserving(inner stack.ApplicationConfig, component, labelKey string, reserved *reservedMetadataKeys) stack.ApplicationConfig {
-	owned := &ownedConfig{inner: inner, component: component, labelKey: labelKey, reserved: reserved}
+	return wrapOwnedEntryConfig(inner, component, component, labelKey, reserved)
+}
+
+// wrapOwnedEntryConfig is wrapOwnedConfigReserving for an application that came
+// from the component named entry after lowering, which a rule may have emitted
+// under another name than component, its owner's.
+func wrapOwnedEntryConfig(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys) stack.ApplicationConfig {
+	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved}
 	augmenter, ok := inner.(layout.LayoutAugmenter)
 	if !ok {
 		return owned
@@ -145,14 +159,14 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 	return objs, nil
 }
 
-// stamp holds obj to the reserved metadata keys as the wrapped config left it,
-// then labels it with the owning component. The check comes first, so it never
-// reads the label the wrapper itself writes.
+// stamp holds obj to the reserved metadata keys and to the component label as
+// the wrapped config left it, then labels it with the owning component. The
+// checks come first, so they never read the label the wrapper itself writes.
 func (o *ownedConfig) stamp(obj client.Object) error {
 	if isNullValue(obj) {
 		return nil
 	}
-	if err := o.checkReserved(obj); err != nil {
+	if err := o.check(obj); err != nil {
 		return err
 	}
 	if o.component == "" {
@@ -386,19 +400,25 @@ var (
 // (componentOrder.sources), whichever component's rule emitted it and however
 // many components read it, with the applications that source's traits added,
 // and the NetworkPolicy synthesized for an external backend Service.
-func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys) {
+//
+// It refuses the one document the wrapper's `app` exemption would let another
+// component's label value through for (checkEntryLabelValues).
+func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys) error {
 	if cluster == nil {
-		return
+		return nil
 	}
-	// The owner of each application, and of each component after lowering by
-	// name; "" is the document as a whole.
-	owners := map[*stack.Application]string{}
+	// The owner of each application, with the component after lowering it came
+	// from, and of each component after lowering by name; "" is the document as
+	// a whole.
+	type owner struct{ component, entry string }
+	owners := map[*stack.Application]owner{}
 	byEntryName := map[string]string{}
 	record := func(e componentEntry, component string) {
-		owners[e.app] = component
+		owners[e.app] = owner{component: component, entry: e.component.Name}
 		byEntryName[e.component.Name] = component
 		for _, m := range e.members {
-			owners[m.app] = component
+			owners[m.app] = owner{component: component, entry: m.component.Name}
+			byEntryName[m.component.Name] = component
 		}
 	}
 	for _, e := range order.sources {
@@ -409,6 +429,9 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 			record(e, authoredComponent(e.component))
 		}
 	}
+	if err := checkEntryLabelValues(byEntryName, labelKey); err != nil {
+		return err
+	}
 	// A trait's sub-applications follow the application the trait ran on: in a
 	// sibling group that is a member, which record covers.
 	for _, s := range subApps {
@@ -418,16 +441,18 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 	}
 	walkBundles(cluster.Node, func(bundle *stack.Bundle) {
 		for _, app := range bundle.Applications {
-			component, ok := owners[app]
+			own, ok := owners[app]
 			if !ok {
 				// What is left is what the transform itself added: a synthesized
 				// NetworkPolicy, its component's or, for an external backend, the
 				// document's.
-				component = byEntryName[synthesizedPolicyComponent(app.Config)]
+				entry := synthesizedPolicyComponent(app.Config)
+				own = owner{component: byEntryName[entry], entry: entry}
 			}
-			app.Config = wrapOwnedConfigReserving(app.Config, component, labelKey, reserved)
+			app.Config = wrapOwnedEntryConfig(app.Config, own.component, own.entry, labelKey, reserved)
 		}
 	})
+	return nil
 }
 
 // authoredComponent returns the name of the authored component c came from:
@@ -462,11 +487,13 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // there too. A HelmRelease also gets the post-renderer that labels its chart's
 // pod templates (componentLabelPostRenderer).
 //
-// A value already there stays, whatever it is: a component, a trait or an
-// author set it, and with a key a workload selects on (ComponentLabelKey "app")
-// an overwrite of the pod template's would part the selector from the template.
-// For the same reason a pod template stays as written when the workload's own
-// selector rules the label out (withComponentLabel).
+// A value already there stays. The wrapper has held it to the component's
+// before this runs (ownedConfig.checkComponentLabel), so it is the value this
+// would write, or under ComponentLabelKey "app" the one a kind wrote for an
+// entry of the component. It is never overwritten: with a key a workload
+// selects on, an overwrite of the pod template's would part the selector from
+// the template. For the same reason a pod template stays as written when the
+// workload's own selector rules the label out (withComponentLabel).
 //
 // An unstructured list envelope stands for its members when Flux applies it
 // (appliedObjects), so each member is labelled as an object handed out on its
@@ -584,18 +611,22 @@ func ownLabels(labels map[string]string, key, value string) map[string]string {
 // A PodTemplate holds its pod template itself, with no spec around it and no
 // selector: its path is empty. It is in the core group too, so its patch has
 // the reach the ReplicationController's has.
+//
+// labelMapSelector says the selector is that plain label map, which the check
+// of the values a selector requires reads as one (requiredLabelValues).
 var podTemplateKinds = []struct {
 	group, version, kind string
 	spec                 []string
+	labelMapSelector     bool
 }{
-	{"apps", "v1", "Deployment", []string{"spec"}},
-	{"apps", "v1", "StatefulSet", []string{"spec"}},
-	{"apps", "v1", "DaemonSet", []string{"spec"}},
-	{"batch", "v1", "Job", []string{"spec"}},
-	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}},
-	{"apps", "v1", "ReplicaSet", []string{"spec"}},
-	{"", "v1", "ReplicationController", []string{"spec"}},
-	{"", "v1", "PodTemplate", nil},
+	{"apps", "v1", "Deployment", []string{"spec"}, false},
+	{"apps", "v1", "StatefulSet", []string{"spec"}, false},
+	{"apps", "v1", "DaemonSet", []string{"spec"}, false},
+	{"batch", "v1", "Job", []string{"spec"}, false},
+	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}, false},
+	{"apps", "v1", "ReplicaSet", []string{"spec"}, false},
+	{"", "v1", "ReplicationController", []string{"spec"}, true},
+	{"", "v1", "PodTemplate", nil, false},
 }
 
 // objectField returns the object m holds at field. YAML's explicit null is an
