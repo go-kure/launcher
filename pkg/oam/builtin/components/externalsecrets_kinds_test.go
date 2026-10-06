@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -494,6 +495,27 @@ func TestExternalSecretKinds_TargetManifest(t *testing.T) {
 				htWantViolation(t, err, `component "web": `+kind.at+secretRefusal)
 				rcWantClass(t, err, oam.RefusalExplicitSecret)
 			})
+			// An apiVersion that is no API version names no group, and the
+			// kind beside it reads as no kind at all: neither the kind check
+			// nor the Secret check would see a Deployment or a Secret there.
+			// It is refused as the value it is, under every policy, and not
+			// as a policy refusal.
+			for _, apiVersion := range []string{"apps/v1/x", "a/b/c"} {
+				for _, written := range []string{"Deployment", "Secret"} {
+					t.Run(kind.component+"/"+policyName+"/"+apiVersion+" "+written, func(t *testing.T) {
+						_, err := pvTransform(kind.component, kind.handler, manifest(kind.at, apiVersion, written), policy)
+						want := fmt.Sprintf("%starget.manifest.apiVersion: %q is no API version: "+
+							"want a version (v1) or a group and a version (apps/v1)", kind.at, apiVersion)
+						if err == nil || !strings.Contains(err.Error(), want) {
+							t.Fatalf("err %v\nwant it to hold: %s", err, want)
+						}
+						var refusal *oam.PolicyRefusal
+						if errors.As(err, &refusal) {
+							t.Errorf("the refusal is a policy refusal of class %q, want none: %v", refusal.Class, err)
+						}
+					})
+				}
+			}
 		}
 	}
 }
