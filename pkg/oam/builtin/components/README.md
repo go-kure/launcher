@@ -6971,8 +6971,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   The fields, per kind:
   - `fluxcd-alert`: `eventSources[].namespace` names the namespace of the
-    objects whose events are sent, and a source's `name: "*"`, with or
-    without `matchLabels`, takes every object of its kind there. The events
+    objects whose events are sent, and a source's `name: "*"` takes every
+    object of its kind there, or, with `matchLabels`, every one that carries
+    those labels. The events
     go to the Provider `providerRef` names, so an Alert sends what happens
     to another namespace's Flux objects to a receiver its author chose.
     `providerRef` holds a name and no namespace: the Provider is one of the
@@ -7083,8 +7084,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   adds, drops or moves one fails there. Nothing here is held to the API
   server's own validator, which answers from a CRD. **Not refused:**
   - a list the API wants an item of that is authored empty
-    (`eventSources: []`, the `sources`, `artifacts` and `copy` of an
-    `artifactgenerator`), and one longer than the API allows;
+    (the `sources`, `artifacts` and `copy` of an `artifactgenerator`), and
+    one longer than the API allows;
   - every value rule of the API but the pattern of a duration: enumerations
     (`eventSeverity`, a source's `kind`, `digestReflectionPolicy`, a
     policy's `order`), lengths (a source's `name` and `namespace`,
