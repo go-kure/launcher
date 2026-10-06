@@ -66,7 +66,7 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 	if !ok {
 		return nil, errors.Errorf("internal: a policy-free kind's config is a %T", cfg)
 	}
-	return &fluxKindConfig[T]{policyFreeKindConfig: free, reads: k.reads, enforce: k.enforce}, nil
+	return &fluxKindConfig[T]{policyFreeKindConfig: free, component: component.Type, reads: k.reads, durations: k.durations, enforce: k.enforce}, nil
 }
 
 // fluxKindConfig implements stack.ApplicationConfig for a fluxKind: a
@@ -75,8 +75,11 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 // policy.
 type fluxKindConfig[T any] struct {
 	*policyFreeKindConfig[T]
-	reads   func(decoded *T, r *fluxReads)
-	enforce func(decoded *T, p oam.Policy) error
+	// component is the component's type, for an error of Generate.
+	component string
+	reads     func(decoded *T, r *fluxReads)
+	durations []fluxDurationField[T]
+	enforce   func(decoded *T, p oam.Policy) error
 
 	// fluxNS overrides the object's namespace. Set by postProcessFluxNamespace
 	// via TransformContext.FluxNamespace. Empty means the application's.
@@ -107,7 +110,9 @@ func (c *fluxKindConfig[T]) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate is policyFreeKindConfig.Generate in the Flux namespace when one is
-// set, else in the application's.
+// set, else in the application's, with every duration in the text its pattern
+// takes (emitFluxKind).
 func (c *fluxKindConfig[T]) Generate(app *stack.Application) ([]*client.Object, error) {
-	return kindObject(c.kind.build(kindObjectName(c.objectName, app.Name), fluxSourceNamespace(app.Namespace, c.fluxNS), c.decoded), c.metadata)
+	obj := c.kind.build(kindObjectName(c.objectName, app.Name), fluxSourceNamespace(app.Namespace, c.fluxNS), c.decoded)
+	return emitFluxKind(c.component, obj, c.decoded, c.durations, c.metadata)
 }

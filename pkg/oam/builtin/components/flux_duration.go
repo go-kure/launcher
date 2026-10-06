@@ -178,3 +178,39 @@ func emitFluxSource(component string, obj client.Object, timeout *metav1.Duratio
 	}
 	return []*client.Object{&obj}, nil
 }
+
+// emitFluxKind is emitFluxSource for a fluxKind, whose durations sit anywhere
+// in the spec: a duration of fields that its form writes otherwise than
+// Duration.String() does (a timeout of an hour or more, under a pattern that
+// takes no h) goes out in the form's text, in an unstructured copy of obj.
+// Every other object is emitted as the typed one. meta is the labels and
+// annotations authored for the object, set before the copy.
+func emitFluxKind[S any](component string, obj client.Object, spec *S, fields []fluxDurationField[S], meta oam.ObjectMetadata) ([]*client.Object, error) {
+	if err := meta.ApplyTo(obj); err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	for _, f := range fields {
+		d := f.get(spec)
+		if d == nil {
+			continue
+		}
+		text := f.form.Format(d.Duration)
+		if text == d.Duration.String() {
+			continue
+		}
+		if m == nil {
+			var err error
+			if m, err = runtime.DefaultUnstructuredConverter.ToUnstructured(obj); err != nil {
+				return nil, errors.Wrapf(err, "%s: convert the object to set spec.%s %q", component, f.name(), text)
+			}
+		}
+		if err := unstructured.SetNestedField(m, text, append([]string{"spec"}, f.path...)...); err != nil {
+			return nil, errors.Wrapf(err, "%s: set spec.%s %q", component, f.name(), text)
+		}
+	}
+	if m != nil {
+		obj = &unstructured.Unstructured{Object: m}
+	}
+	return []*client.Object{&obj}, nil
+}
