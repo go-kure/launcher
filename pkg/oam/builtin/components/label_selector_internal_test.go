@@ -29,6 +29,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -174,6 +175,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"helmv2.HelmReleaseSpec":                     reflect.TypeFor[helmv2.HelmReleaseSpec](),
 	"imagev1.ImagePolicySpec":                    reflect.TypeFor[imagev1.ImagePolicySpec](),
 	"kustv1.KustomizationSpec":                   reflect.TypeFor[kustv1.KustomizationSpec](),
+	"metallbv1beta1.IPAddressPoolSpec":           reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
 	"monitoringv1.PodMonitorSpec":                reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 	"monitoringv1.ProbeSpec":                     reflect.TypeFor[monitoringv1.ProbeSpec](),
 	"monitoringv1.PrometheusRuleSpec":            reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
@@ -584,6 +586,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		component: "replicationdestination", typ: "volsyncv1alpha1.ReplicationDestinationSpec", config: kindConfig(&ReplicationDestinationHandler{}),
 		base: map[string]any{},
 		crds: crdFileVersion(volsyncModulePath, volsyncCRDs+"replicationdestinations.yaml", "v1alpha1"),
+	},
+	{
+		component: "metallb-ipaddresspool", typ: "metallbv1beta1.IPAddressPoolSpec", config: kindConfig(&MetalLBIPAddressPoolHandler{}),
+		base: map[string]any{"addresses": []any{"192.0.2.0/24"}},
+		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion),
 	},
 }
 

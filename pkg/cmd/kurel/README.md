@@ -148,6 +148,7 @@ at its position.
 | `issuer` | An Issuer in the build namespace. No capability is required of the cluster profile to build it. |
 | `limitrange` | |
 | `listenerset` | A ListenerSet in the build namespace. No capability is required of the cluster profile to build it. |
+| `metallb-ipaddresspool` | Two IPAddressPool objects in the build namespace, one with every field, one named by `objectName` with its addresses alone. No capability is required to build it. |
 | `namespace` | |
 | `networkpolicy` | The authored spec. Unlike the trait of the same name, the kind selects every pod of the namespace when no `podSelector` is written. |
 | `persistentvolume` | |

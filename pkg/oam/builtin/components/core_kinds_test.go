@@ -17,6 +17,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -118,6 +119,8 @@ var coreKindSchemas = []struct {
 	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
 	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
 	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
+	// And the kinds of MetalLB's API.
+	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
 	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
 	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
 	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}, nil},

@@ -77,6 +77,7 @@ var validComponentTypes = map[string]bool{
 	"limitrange":                      true,
 	"listenerset":                     true,
 	"manifests":                       true,
+	"metallb-ipaddresspool":           true,
 	"namespace":                       true,
 	"networkpolicy":                   true,
 	"oci":                             true,
