@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
@@ -47,17 +48,17 @@ import (
 // handler and its CRD. The test then names every field of the set that has no
 // row.
 
-// crdValidation is the schema of the v1 version of one CRD and its validator.
+// crdValidation is the schema of one version of one CRD and its validator.
 type crdValidation struct {
 	schema    *spec.Schema
 	validator *validate.SchemaValidator
 }
 
 // crdValidationOf reads the CRD in file, a path under the directory of the
-// linked module, and builds the validator of its schema: the one the API
-// server builds for a custom resource (k8s.io/kube-openapi's), over the schema
-// as the CRD writes it.
-func crdValidationOf(t *testing.T, modulePath, file string) crdValidation {
+// linked module, and builds the validator of the schema of the version named:
+// the one the API server builds for a custom resource (k8s.io/kube-openapi's),
+// over the schema as the CRD writes it.
+func crdValidationOf(t *testing.T, modulePath, file, version string) crdValidation {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(linkedModuleDir(t, modulePath), filepath.FromSlash(file)))
 	if err != nil {
@@ -67,9 +68,9 @@ func crdValidationOf(t *testing.T, modulePath, file string) crdValidation {
 	if err := yaml.Unmarshal(data, &crd); err != nil {
 		t.Fatalf("decode the CRD %s: %v", file, err)
 	}
-	at := slices.IndexFunc(crd.Spec.Versions, func(v apiextensionsv1.CustomResourceDefinitionVersion) bool { return v.Name == "v1" })
+	at := slices.IndexFunc(crd.Spec.Versions, func(v apiextensionsv1.CustomResourceDefinitionVersion) bool { return v.Name == version })
 	if at < 0 || crd.Spec.Versions[at].Schema == nil || crd.Spec.Versions[at].Schema.OpenAPIV3Schema == nil {
-		t.Fatalf("%s has no schema for the version v1", file)
+		t.Fatalf("%s has no schema for the version %s", file, version)
 	}
 	raw, err := json.Marshal(crd.Spec.Versions[at].Schema.OpenAPIV3Schema)
 	if err != nil {
@@ -188,7 +189,18 @@ type nullRequiredKind struct {
 	handler    oam.ComponentHandler
 	modulePath string
 	crd        string
-	rows       []nullRequiredRow
+	// version is the version of the CRD the kind's object is of, where that
+	// is not v1.
+	version string
+	rows    []nullRequiredRow
+}
+
+// crdVersion is the version of the CRD the kind's object is of.
+func (k nullRequiredKind) crdVersion() string {
+	if k.version == "" {
+		return "v1"
+	}
+	return k.version
 }
 
 const nodeSelectorTermsReason = "the node selector terms, of which a node must match one"
@@ -326,6 +338,16 @@ var nullRequiredKinds = []nullRequiredKind{
 	{
 		component: "clusterissuer", typ: reflect.TypeFor[certv1.IssuerSpec](), handler: &ClusterIssuerHandler{},
 		modulePath: certManagerModulePath, crd: certManagerCRDs + "clusterissuers.yaml", rows: issuerNullRequiredRows(),
+	},
+	{
+		component: "replicationsource", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), handler: &ReplicationSourceHandler{},
+		modulePath: volsyncModulePath, crd: volsyncCRDs + "replicationsources.yaml", version: "v1alpha1",
+		rows: volsyncNullRequiredRows("rclone", "restic", "rsyncTLS", "syncthing"),
+	},
+	{
+		component: "replicationdestination", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), handler: &ReplicationDestinationHandler{},
+		modulePath: volsyncModulePath, crd: volsyncCRDs + "replicationdestinations.yaml", version: "v1alpha1",
+		rows: volsyncNullRequiredRows("rclone", "restic", "rsyncTLS"),
 	},
 	// The next three kinds have no required field their type writes as null
 	// in the linked versions: their rows are of the second set.
@@ -631,7 +653,7 @@ func TestKindComponents_NullRequired(t *testing.T) {
 	for _, kind := range nullRequiredKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			file := filepath.Join(linkedModuleDir(t, kind.modulePath), filepath.FromSlash(kind.crd))
-			props, required := crdSpecProperties(t, file)
+			props, required := crdSpecProperties(t, file, kind.crdVersion())
 			var null, zero []string
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				prop, ok := props[f.path]
@@ -664,7 +686,7 @@ func TestKindComponents_NullRequired(t *testing.T) {
 				t.Errorf("written by the type as a zero value the CRD refuses:\n  derived  %v\n  answered %v", zero, answeredZero)
 			}
 
-			crd := crdValidationOf(t, kind.modulePath, kind.crd)
+			crd := crdValidationOf(t, kind.modulePath, kind.crd, kind.crdVersion())
 			for _, row := range kind.rows {
 				t.Run(row.at, func(t *testing.T) {
 					if (row.reason == "") == (row.why == "") {

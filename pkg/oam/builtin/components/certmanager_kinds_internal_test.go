@@ -40,11 +40,11 @@ func certManagerCRD(t *testing.T, file string) string {
 	return filepath.Join(linkedModuleDir(t, certManagerModulePath), "deploy", "crds", file)
 }
 
-// crdSpecProperties reads a single-version CRD file, as crdSpecScalarDefaults
-// does, and returns the schema of every property under spec, keyed by json
-// path with [] for a list element and {} for a map value, and the paths the
-// schema of their parent requires.
-func crdSpecProperties(t *testing.T, file string) (map[string]apiextensionsv1.JSONSchemaProps, map[string]bool) {
+// crdSpecProperties reads a CRD file that serves the one version named and
+// returns the schema of every property under spec, keyed by json path with []
+// for a list element and {} for a map value, and the paths the schema of their
+// parent requires.
+func crdSpecProperties(t *testing.T, file, version string) (map[string]apiextensionsv1.JSONSchemaProps, map[string]bool) {
 	t.Helper()
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -54,8 +54,8 @@ func crdSpecProperties(t *testing.T, file string) (map[string]apiextensionsv1.JS
 	if err := yaml.Unmarshal(data, &crd); err != nil {
 		t.Fatalf("decode the CRD %s: %v", file, err)
 	}
-	if len(crd.Spec.Versions) != 1 || crd.Spec.Versions[0].Name != "v1" || crd.Spec.Versions[0].Schema == nil {
-		t.Fatalf("%s does not serve exactly one schema-bearing v1 version; update this test", file)
+	if len(crd.Spec.Versions) != 1 || crd.Spec.Versions[0].Name != version || crd.Spec.Versions[0].Schema == nil {
+		t.Fatalf("%s does not serve exactly one schema-bearing %s version; update this test", file, version)
 	}
 	spec, ok := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
 	if !ok {
@@ -158,7 +158,7 @@ func crdRefusesZero(s apiextensionsv1.JSONSchemaProps, typ reflect.Type) string 
 func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 	for _, kind := range certManagerKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			props, required := crdSpecProperties(t, certManagerCRD(t, kind.crd))
+			props, required := crdSpecProperties(t, certManagerCRD(t, kind.crd), "v1")
 			listed, empty, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
@@ -266,7 +266,7 @@ func TestCertManagerKinds_NoDefaultedZeros(t *testing.T) {
 		t.Run(kind.component, func(t *testing.T) {
 			file := certManagerCRD(t, kind.crd)
 			// Vacuity guards: both walks reach depth.
-			props, _ := crdSpecProperties(t, file)
+			props, _ := crdSpecProperties(t, file, "v1")
 			omitted := omitemptyScalarPaths(kind.typ)
 			deep := map[string]string{
 				"issuer":        "acme.solvers[].http01.ingress.podTemplate.spec.securityContext.runAsNonRoot",

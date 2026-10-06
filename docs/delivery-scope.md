@@ -1285,6 +1285,46 @@ its text:
     two, its kind cannot be read.
   - A trait's ExternalSecret and an `externalsecret` component's are one kind: given
     one name in one namespace they are refused as a collision.
+- **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
+  `replicationsource` and `replicationdestination` (`replicationsource.go`,
+  `replicationdestination.go`, with what they share in `volsync_common.go`), each the
+  strict projection of its spec type, declaring its namespaced object and taking
+  `objectName`. Both are built on `policyHeldKind`; no `Policy` method is added.
+  - **No capability is required and nothing gates them:** on a cluster without VolSync's
+    CRDs the component builds and the object is refused at apply. The kinds read nothing
+    of the cluster profile.
+  - **Three things an author writes are held to the environment policy:** every
+    authored capacity that sizes a volume the operator provisions (`capacity`,
+    `restic.cacheCapacity`, `syncthing.configCapacity`), to the storage maximum; the cpu
+    and memory of a mover's `moverResources`, to the maxima; and a mover's
+    `moverSecurityContext.windowsOptions.hostProcess`, refused unless privileged
+    workloads are allowed. No default is filled. **Not held:** a capacity the author
+    left out, a mover's affinity, the volumes mounted into it, the type of its Service,
+    and the namespace annotation by which an administrator lets movers run privileged,
+    which is no field of the object.
+  - Required fields follow the rule of the Prometheus operator's kinds. A test holds
+    each list to the CRDs the linked module ships (11 paths for a source, 6 for a
+    destination): of a volume mounted into a mover its `mountPath` and `volumeSource`,
+    of a Syncthing peer its `address`, `ID` and `introducer`. The terms of a required
+    node affinity in a mover's affinity, which the Kubernetes type would write as
+    `null`, are refused when left out.
+  - **Two fields the linked Kubernetes type holds and the CRDs do not are refused when
+    authored:** `defaultUser` and `items[].user` of a Secret mounted into a mover. The
+    linked Kubernetes API is newer than the one VolSync's CRDs were generated from. A
+    test derives the set from the CRDs, both ways, and shows with the API server's own
+    create sequence that it names each as an unknown field and prunes it.
+  - The CRDs default nothing under `spec` and declare no expression rule; a test holds
+    each claim, so a dependency bump that adds either fails with the field or rule
+    named.
+  - **The operator's own rule is not repeated:** it refuses, when it reconciles, an
+    object that configures no replication method or more than one.
+  - **Hosts are not checked** (`rsync.address`, `rsyncTLS.address`, a Syncthing peer's
+    `address`, the server of an NFS export mounted into a mover): none is an artifact
+    source. **No literal secret is checked:** a credential is the name of a Secret, and
+    the `parameters` of an `external` provider are written as authored.
+  - The `volsync` trait still builds a ReplicationSource for a workload's claim, named
+    `<sourcePVC>-backup`; its object and a `replicationsource` component's of the same
+    name are refused as a collision.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
@@ -1323,7 +1363,7 @@ its text:
   ticket.
 - **Missing kinds:** the inventory's `missing` rows (APIService, GRPCRoute among
   them), and its `trait` rows, the
-  kinds reachable only as traits today (ExternalSecret, ReplicationSource).
+  kinds reachable only as traits today (ExternalSecret).
   The ticket adds them group by group. A kind kure lacks is added to kure first.
 
 ---
@@ -1484,7 +1524,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`). Open: an author override for bundle, ordered-group and synthesized NetworkPolicy names; a hook role for the names outside the roles of §3.2, among them the claim a `pvc` volume generates | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`, `clusterrole`, `clusterrolebinding`, `secretstore`, `clustersecretstore`, `externalsecret` and `clusterexternalsecret` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the `namespace`, `limitrange`, `resourcequota`, `persistentvolume`, `pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `storageclass`, `volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass`, `csidriver`, `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy`, `servicecidr`, `poddisruptionbudget`, `horizontalpodautoscaler`, `secret`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, `issuer`, `clusterissuer`, `certificate`, `cilium-bgpadvertisement`, `cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`, `cilium-cidrgroup`, `cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`, `cilium-localredirectpolicy`, `cilium-nodeconfig`, `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`, `clusterrole`, `clusterrolebinding`, `secretstore`, `clustersecretstore`, `externalsecret`, `clusterexternalsecret`, `replicationsource` and `replicationdestination` kinds; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

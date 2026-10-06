@@ -97,6 +97,9 @@ var validComponentTypes = map[string]bool{
 	"clusterissuer": true,
 	"certificate":   true,
 
+	"replicationsource":      true,
+	"replicationdestination": true,
+
 	"cilium-bgpadvertisement":      true,
 	"cilium-bgpclusterconfig":      true,
 	"cilium-bgpnodeconfigoverride": true,

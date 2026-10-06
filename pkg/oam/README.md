@@ -1368,7 +1368,8 @@ The kind components `namespace`, `limitrange`, `resourcequota`, `persistentvolum
 `cilium-clusterwidenetworkpolicy`, `gatewayclass`, `gateway`, `listenerset`,
 `referencegrant`, `backendtlspolicy`, `endpointslice`, `role`, `rolebinding`,
 `clusterrole`, `clusterrolebinding`, `secretstore`, `clustersecretstore`,
-`externalsecret` and `clusterexternalsecret` (go-kure/launcher#790) are on this list.
+`externalsecret`, `clusterexternalsecret`, `replicationsource` and
+`replicationdestination` (go-kure/launcher#790) are on this list.
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are
 also trait types: the two lists are separate, and a component of such a type is the
 authored object, not the trait.

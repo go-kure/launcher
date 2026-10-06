@@ -495,6 +495,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"endpointslice",
 		"clusterrole", "clusterrolebinding", "role", "rolebinding",
 		"clusterexternalsecret", "clustersecretstore", "externalsecret", "secretstore",
+		"replicationdestination", "replicationsource",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"helm", "oci", "postgresql", "webservice", "worker"}
