@@ -209,8 +209,9 @@ func privilegedParameter(t *testing.T, moduleDir, mover, function string) string
 //     securityContext (capabilities add and drop, privileged,
 //     allowPrivilegeEscalation, runAsUser).
 //  3. The builder parameters: in builder.go of each mover, the last one of
-//     FromSource and FromDestination (rsync drops it as "_", the four others
-//     name it privileged).
+//     FromSource and FromDestination (rsync drops it as "_", and so does
+//     syncthing's FromDestination, which builds nothing; the others name it
+//     privileged).
 //
 // Then restate volsyncRsyncCapabilities and the comment on it,
 // volsyncOperatorVersion and volsyncReadDigest.
