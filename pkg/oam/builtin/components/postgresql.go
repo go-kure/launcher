@@ -209,8 +209,16 @@ func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Loweri
 	if err != nil {
 		return nil, err
 	}
-	// The Cluster is the first member the lowering emits; the selector carries
-	// its object's name verbatim.
+	// The Cluster is the first member the lowering emits. Held here, so a
+	// lowering that emitted otherwise would be refused and not read past.
+	if len(lowered.Components) == 0 || lowered.Components[0].Type != "cnpg-cluster" {
+		return nil, errors.Errorf("postgresql component %q: its lowering emits no cnpg-cluster member first, so it has no cluster endpoint", component.Name)
+	}
+	// Each selector carries the name of the member's object (ObjectName): the
+	// Cluster's is the name resolved for it, and the Pooler is emitted as a
+	// component of the name resolved for it (postgresqlPoolerName: the authored
+	// `poolerName`, else the hook's answer, else the default), whose object the
+	// cnpg-pooler kind names and labels by the same accessor.
 	cluster := lowered.Components[0]
 	eps := []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: cluster.ObjectName()}},
@@ -223,11 +231,11 @@ func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Loweri
 		// The Pooler refers to the Cluster by the name resolved above, and a
 		// Pooler that carries that name itself is refused where it is built
 		// (CnpgPoolerConfig.validate): refused here in the same words.
-		if err := refusePoolerNamedAsCluster(member.Name, cluster.ObjectName()); err != nil {
+		if err := refusePoolerNamedAsCluster(member.ObjectName(), cluster.ObjectName()); err != nil {
 			return nil, err
 		}
 		eps = append(eps, netpol.Endpoint{
-			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: member.Name}},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: member.ObjectName()}},
 			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 		})
 	}
