@@ -820,7 +820,7 @@ its text:
     such a PersistentVolume. The other three kinds have nothing to enforce.
 - **Shipped: the pod kinds** `pod`, `replicaset`, `replicationcontroller` and
   `podtemplate` (`pod.go`, `replicaset.go`, `replicationcontroller.go`, `podtemplate.go`,
-  `pod_template.go`), on the same recipe.
+  `pod_template.go`), on the recipe of the four core kinds.
   - `pod` projects `PodSpec`, `replicaset` projects `ReplicaSetSpec`,
     `replicationcontroller` projects `ReplicationControllerSpec`. The pod spec, the one
     under a `template` included, refuses `ephemeralContainers`, `priority` and
@@ -921,7 +921,7 @@ its text:
     that names a longer driver. The kind refuses what the API server refuses of the
     object and no more.
 - **Shipped: the routing kinds** `ingress` and `httproute` (`ingress.go`,
-  `httproute.go`), on the recipe of the core kinds above.
+  `httproute.go`), on the recipe of the four core kinds.
   - `ingress` projects `IngressSpec`, `httproute` projects `HTTPRouteSpec`. No field is
     required by the decode and none is filled; the API's value rules are left to the API
     server.
@@ -934,8 +934,8 @@ its text:
     policy that forbids the trait does not refuse the component; the rendered
     paths emit the same object under the same terms. A capability gate on component
     types is an open point of go-kure/launcher#790.
-- **Shipped: the `networkpolicy` kind** (`networkpolicy.go`), on the same recipe and
-  ungated under the same terms.
+- **Shipped: the `networkpolicy` kind** (`networkpolicy.go`), on the recipe of the four
+  core kinds and ungated under the terms of the routing kinds.
   - It projects `NetworkPolicySpec`. No field is required by the decode and none is
     filled.
   - It is an authored object, not the trait of the same type name, and reads as the
@@ -946,7 +946,7 @@ its text:
   - A null rule, peer or port is refused by its path: decoded, it would be the empty
     one, which allows everything.
 - **Shipped: the `cilium-networkpolicy` kind** (`cilium_networkpolicy.go`), ungated
-  under the same terms.
+  under the terms of the routing kinds.
   - A CiliumNetworkPolicy has no spec type: the kind projects its `spec` (one rule) and
     `specs` (a list of rules), each the whole Cilium rule.
   - It refuses a policy Cilium rejects: no rule at all, a rule with no
@@ -1077,7 +1077,8 @@ its text:
   type names carry a prefix: MetalLB has a BGPAdvertisement too.
   - **No capability is required and nothing gates them:** on a cluster without Cilium's
     CRDs the component builds and the object is refused at apply.
-  - The required lists follow the rule above, read from the CRDs of the linked module: a
+  - The required lists follow the rule of the Prometheus operator's kinds, read from the
+    CRDs of the linked module: a
     test holds each list to the CRD's `required` entries the Go type would write
     unauthored.
   - The CRDs carry six expression rules. The five on an advertisement entry (`service`
@@ -1246,7 +1247,8 @@ its text:
     operator's CRDs the component builds and the object is refused at apply. The
     cluster's `external-secret` capability is the trait's; the kinds do not read it,
     and an `externalsecret` names its own store.
-  - The required lists follow the rule above, read from the Go source of the linked
+  - The required lists follow the rule of the Prometheus operator's kinds, read from the
+    Go source of the linked
     module, which ships no CRD. **A store's list is generated** (251 paths over every
     provider at this pin, in `zz_generated_externalsecrets_required.go`), and a test
     fails where the file and the derivation differ. Four more fields of a store are
