@@ -18,7 +18,9 @@ import (
 // required list to the fields the CRD requires and the type writes unauthored,
 // TestMetalLBKinds_NoDefaultIsLost the claim that no CRD default turns an
 // authored 0 or false into another value, and TestMetalLBKinds_ExpressionRules
-// the claim that no CRD of them declares an expression rule.
+// each expression rule a CRD declares to the kind's validate, whose answer it
+// compares with the API server's: the BGP advertisement's CRD declares one,
+// the others none.
 //
 // MetalLB also runs a validating webhook over these objects. It was not read,
 // and nothing it refuses is repeated here.

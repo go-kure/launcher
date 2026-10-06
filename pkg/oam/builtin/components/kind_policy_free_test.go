@@ -47,11 +47,11 @@ import (
 // group, a load balancer IP pool, an egress gateway policy, a local redirect
 // policy and a node configuration), the five kinds of the Gateway API's
 // infrastructure objects, the EndpointSlice, the first of them that is a
-// whole object in a namespace, and two of MetalLB's API (an address pool and
-// an advertisement on the local network). The three kinds of cert-manager's
-// API and the four of the External Secrets Operator's are held here too: the
-// policy reaches one part of each (held), and everything else of them is the
-// helper's.
+// whole object in a namespace, and three of MetalLB's API (an address pool, an
+// advertisement on the local network and one over BGP). The three kinds of
+// cert-manager's API and the four of the External Secrets Operator's are held
+// here too: the policy reaches one part of each (held), and everything else of
+// them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -491,6 +491,31 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), namespaced: true,
 		minimal: listenerSetWith(gatewayListener()),
 		full:    listenerSetFull(),
+	},
+	{
+		component: "metallb-bgpadvertisement", handler: &components.MetalLBBGPAdvertisementHandler{},
+		gvk: metallbv1beta1.GroupVersion.WithKind("BGPAdvertisement"),
+		typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), namespaced: true,
+		// No field is required: an advertisement that authors nothing is one.
+		minimal: map[string]any{},
+		// The API takes serviceSelectors only with one route per address, so the
+		// two lengths are authored at that: they are the values the API would
+		// fill, and the pointers keep them. Lengths that roll addresses up are
+		// read in TestPolicyFreeKinds_AuthoredValuesArriveTyped.
+		full: map[string]any{
+			"aggregationLength":      32,
+			"aggregationLengthV6":    128,
+			"localPref":              100,
+			"communities":            []any{"64512:100", "no-export"},
+			"ipAddressPools":         []any{"edge", "shared"},
+			"ipAddressPoolSelectors": []any{map[string]any{"matchLabels": map[string]any{"tier": "edge"}}},
+			"nodeSelectors": []any{map[string]any{
+				"matchLabels":      map[string]any{"role": "edge"},
+				"matchExpressions": []any{map[string]any{"key": "zone", "operator": "In", "values": []any{"a", "b"}}},
+			}},
+			"peers":            []any{"upstream-a", "upstream-b"},
+			"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}},
+		},
 	},
 	{
 		component: "metallb-ipaddresspool", handler: &components.MetalLBIPAddressPoolHandler{},
@@ -1302,6 +1327,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.Options",
 			".Spec.Listeners[1].AllowedRoutes.Namespaces.Selector", ".Spec.Listeners[1].AllowedRoutes.Kinds[1].Group",
 		},
+		"metallb-bgpadvertisement": {
+			".Spec.AggregationLength", ".Spec.AggregationLengthV6", ".Spec.Communities", ".Spec.IPAddressPools",
+			".Spec.IPAddressPoolSelectors", ".Spec.IPAddressPoolSelectors[0].MatchLabels", ".Spec.NodeSelectors",
+			".Spec.NodeSelectors[0].MatchExpressions", ".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Peers",
+			".Spec.ServiceSelectors", ".Spec.ServiceSelectors[0].MatchLabels",
+		},
 		"metallb-ipaddresspool": {
 			".Spec.Addresses", ".Spec.AutoAssign", ".Spec.AllocateTo", ".Spec.AllocateTo.Namespaces",
 			".Spec.AllocateTo.NamespaceSelectors", ".Spec.AllocateTo.NamespaceSelectors[0].MatchLabels",
@@ -2088,6 +2119,36 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null listener", listenerSetWith(gatewayListener(), nil), "listeners[1]"},
 			{"two spellings", withProperty(listenerSetWith(gatewayListener()), "ParentRef", map[string]any{"name": "other"}), "sets the same field as"},
 		},
+		"metallb-bgpadvertisement": {
+			// The CRD's one expression rule, each side of it with the length named.
+			{"a service selector with an IPv4 length that rolls up", map[string]any{
+				"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 24,
+			}, "serviceSelectors: not allowed with aggregationLength 24: the API takes a service selector only with one route per address"},
+			{"a service selector with an IPv6 length that rolls up", map[string]any{
+				"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}}, "aggregationLength": 32, "aggregationLengthV6": 64,
+			}, "serviceSelectors: not allowed with aggregationLengthV6 64: "},
+			{"pool expression without an operator", map[string]any{
+				"ipAddressPoolSelectors": []any{ciliumExpression(map[string]any{"key": "tier"})},
+			}, "ipAddressPoolSelectors[0].matchExpressions[0].operator: required"},
+			{"a later node selector's expression without a key", map[string]any{
+				"nodeSelectors": []any{map[string]any{}, ciliumExpression(map[string]any{"operator": "Exists"})},
+			}, "nodeSelectors[1].matchExpressions[0].key: required"},
+			{"service expression without a key", map[string]any{
+				"serviceSelectors": []any{ciliumExpression(map[string]any{"operator": "Exists"})},
+			}, "serviceSelectors[0].matchExpressions[0].key: required"},
+			{"unknown key", map[string]any{"pools": []any{"edge"}}, notA + "metallb.io/v1beta1 BGPAdvertisementSpec"},
+			{"the object's spec", map[string]any{"spec": map[string]any{"ipAddressPools": []any{"edge"}}}, notA},
+			// MetalLB's Go type has a status, and no field of the spec is one.
+			{"the object's status", map[string]any{"status": map[string]any{}}, notA},
+			{"selector sub-key", map[string]any{"nodeSelectors": []any{map[string]any{"nodeNames": []any{"edge-1"}}}}, notA},
+			{"aggregationLength a string", map[string]any{"aggregationLength": "24"}, notA},
+			{"aggregationLength a fraction", map[string]any{"aggregationLength": 24.5}, notA},
+			{"localPref negative", map[string]any{"localPref": -1}, notA},
+			{"communities a string", map[string]any{"communities": "64512:100"}, notA},
+			{"a peer's name a number", map[string]any{"peers": []any{1}}, notA},
+			{"null selector", map[string]any{"serviceSelectors": []any{map[string]any{}, nil}}, "serviceSelectors[1]"},
+			{"two spellings", map[string]any{"peers": []any{"upstream-a"}, "Peers": []any{"upstream-b"}}, "sets the same field as"},
+		},
 		"metallb-ipaddresspool": {
 			{"no properties", nil, "addresses: required"},
 			{"null addresses", map[string]any{"addresses": nil}, "addresses: required"},
@@ -2805,6 +2866,48 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	// A pool's name is not read: one no pool of the application carries builds.
 	if err := coreKindErr(kinds["metallb-l2advertisement"].handler, "metallb-l2advertisement", "fast", map[string]any{"ipAddressPools": []any{"no-such-pool"}}); err != nil {
 		t.Errorf("a pool no component declares: %v, want it accepted", err)
+	}
+
+	routed := build("metallb-bgpadvertisement", full["metallb-bgpadvertisement"]).(*metallbv1beta1.BGPAdvertisement)
+	if got := routed.Spec; got.AggregationLength == nil || *got.AggregationLength != 32 || got.AggregationLengthV6 == nil || *got.AggregationLengthV6 != 128 || got.LocalPref != 100 {
+		t.Errorf("spec = %+v, want the two authored aggregation lengths and the authored localPref", got)
+	}
+	if got := routed.Spec; !slices.Equal(got.Communities, []string{"64512:100", "no-export"}) || !slices.Equal(got.IPAddressPools, []string{"edge", "shared"}) ||
+		!slices.Equal(got.Peers, []string{"upstream-a", "upstream-b"}) || len(got.IPAddressPoolSelectors) != 1 || len(got.NodeSelectors) != 1 || len(got.ServiceSelectors) != 1 {
+		t.Errorf("spec = %+v, want the communities, the pools and the peers in order and a selector of each kind", got)
+	}
+	// With no service selector the lengths may roll addresses up.
+	if got, want := spec("metallb-bgpadvertisement", map[string]any{"aggregationLength": 24, "aggregationLengthV6": 64}), "map[aggregationLength:24 aggregationLengthV6:64]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// An advertisement that authors nothing carries an empty spec, into which
+	// MetalLB's API fills the two aggregation lengths of one route per address.
+	// An authored `localPref: 0` is the value the type holds for an
+	// advertisement that authors none: it is left out, and the API fills nothing
+	// there.
+	for name, props := range map[string]map[string]any{"nothing": {}, "localPref 0": {"localPref": 0}, "an empty list of peers": {"peers": []any{}}} {
+		if got, want := spec("metallb-bgpadvertisement", props), "map[]"; got != want {
+			t.Errorf("an advertisement that authors %s: spec = %s, want %s", name, got, want)
+		}
+	}
+	// A service selector is written beside the lengths of one route per address,
+	// authored or not, and an authored length is written even where it is the
+	// one the API would fill.
+	if got, want := spec("metallb-bgpadvertisement", map[string]any{
+		"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}}, "aggregationLength": 32,
+	}), "map[aggregationLength:32 serviceSelectors:[map[matchLabels:map[exposure:public]]]]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// An aggregation length sits on a pointer: an authored 0 is written, and is
+	// the API server's to refuse (the CRD's minimum is 1).
+	if got, want := spec("metallb-bgpadvertisement", map[string]any{"aggregationLength": 0}), "map[aggregationLength:0]"; got != want {
+		t.Errorf("spec = %s, want %s", got, want)
+	}
+	// A community, a pool's name and a peer's name are not read.
+	if err := coreKindErr(kinds["metallb-bgpadvertisement"].handler, "metallb-bgpadvertisement", "fast", map[string]any{
+		"communities": []any{"not-a-community"}, "ipAddressPools": []any{"no-such-pool"}, "peers": []any{"no-such-peer"},
+	}); err != nil {
+		t.Errorf("a community of no known form and names no component declares: %v, want them accepted", err)
 	}
 }
 

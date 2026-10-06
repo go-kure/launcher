@@ -30,12 +30,19 @@ const metallbVersion = "v1beta1"
 // metallbKinds lists the kind components of MetalLB's API
 // (go-kure/launcher#790), each with the CRD it emits an object of, the spec
 // type it decodes into and its required list. Every one is namespaced.
+//
+// checked names the CRD's expression rules the kind's validate holds, by the
+// path of the value they are declared on and their text, each with properties
+// that break it and properties that keep it (ciliumBGPRule, which the rules of
+// Cilium's BGP kinds are listed with). A rule a CRD declares that is not
+// checked fails TestMetalLBKinds_ExpressionRules.
 var metallbKinds = []struct {
 	component string
 	handler   oam.ComponentHandler
 	crd       string
 	typ       reflect.Type
 	required  map[string]string
+	checked   map[string]ciliumBGPRule
 }{
 	{
 		component: "metallb-ipaddresspool", handler: &MetalLBIPAddressPoolHandler{},
@@ -47,6 +54,47 @@ var metallbKinds = []struct {
 		crd: "metallb.io_l2advertisements.yaml", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
 		required: metallbL2AdvertisementKind.required,
 	},
+	{
+		component: "metallb-bgpadvertisement", handler: &MetalLBBGPAdvertisementHandler{},
+		crd: "metallb.io_bgpadvertisements.yaml", typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),
+		required: metallbBGPAdvertisementKind.required,
+		checked: map[string]ciliumBGPRule{
+			"spec: !has(self.serviceSelectors) || self.serviceSelectors.size() == 0 || ((!has(self.aggregationLength) || self.aggregationLength == 32) && (!has(self.aggregationLengthV6) || self.aggregationLengthV6 == 128))": {
+				breaks: []map[string]any{
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 24},
+					{"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}}, "aggregationLengthV6": 64},
+					// One length at the value the rule allows does not excuse the other.
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 32, "aggregationLengthV6": 64},
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 24, "aggregationLengthV6": nil},
+				},
+				want: "serviceSelectors: not allowed with aggregationLength",
+				keeps: []map[string]any{
+					// Neither length authored: the API server fills the two the rule allows.
+					{"serviceSelectors": []any{map[string]any{}}},
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": nil, "aggregationLengthV6": nil},
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 32, "aggregationLengthV6": 128},
+					{"serviceSelectors": []any{map[string]any{}}, "aggregationLength": 32},
+					// No service selector: any length.
+					{"aggregationLength": 24, "aggregationLengthV6": 64},
+					{"aggregationLength": 24, "serviceSelectors": []any{}},
+					{"aggregationLengthV6": 64, "serviceSelectors": nil},
+				},
+			},
+		},
+	},
+}
+
+// metallbCheckedRules prepares the CRD in file as the API server serves it,
+// defaults included, for a kind whose properties are the object's spec.
+func metallbCheckedRules(t *testing.T, component string, handler oam.ComponentHandler, file string) checkedRules {
+	t.Helper()
+	crd, _ := metallbCRD(t, file)
+	return checkedRules{
+		create: crdCreateOf(t, crd, metallbVersion), component: component, handler: handler,
+		document: func(props map[string]any) map[string]any {
+			return crdDocument(crd, metallbVersion, map[string]any{"spec": props})
+		},
+	}
 }
 
 // metallbCRD reads one CRD of the linked module and returns it with the schema
@@ -234,31 +282,44 @@ func TestMetalLBKinds_NoDefaultIsLost(t *testing.T) {
 			}
 		})
 	}
-	// Vacuity guard: the defaults of these CRDs are read, the one on a pointer
+	// Vacuity guard: the defaults of these CRDs are read, the ones on a pointer
 	// and the one on a field the type leaves out.
 	want := map[string]string{
-		"metallb-ipaddresspool: autoAssign":    "true",
-		"metallb-ipaddresspool: avoidBuggyIPs": "false",
+		"metallb-ipaddresspool: autoAssign":             "true",
+		"metallb-ipaddresspool: avoidBuggyIPs":          "false",
+		"metallb-bgpadvertisement: aggregationLength":   "32",
+		"metallb-bgpadvertisement: aggregationLengthV6": "128",
 	}
 	if !maps.Equal(found, want) {
 		t.Errorf("the CRDs default %v, want %v", found, want)
 	}
 }
 
-// TestMetalLBKinds_ExpressionRules: no CRD of these kinds declares an
-// expression rule, anywhere in the object, so there is none a kind would have
-// to check or to leave to the API server. A dependency bump that adds one
-// fails here until it is classified.
+// TestMetalLBKinds_ExpressionRules: every expression rule the CRDs declare,
+// anywhere in the object, is one its kind checks, and a checked one is held to
+// the API server's answer, after the defaults the API server fills
+// (checkedRules.show). A dependency bump that adds or rewords a rule fails
+// here until it is classified.
 func TestMetalLBKinds_ExpressionRules(t *testing.T) {
 	for _, kind := range metallbKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			if declared := metallbRules(t, kind.crd); len(declared) != 0 {
-				t.Errorf("the CRD declares the rules %q, and the kind classifies none", declared)
+			declared := metallbRules(t, kind.crd)
+			if classified := slices.Sorted(maps.Keys(kind.checked)); !slices.Equal(declared, classified) {
+				t.Errorf("the CRD declares the rules %q\nthe kind checks       %q", declared, classified)
+			}
+			if len(kind.checked) == 0 {
+				return
+			}
+			shown := metallbCheckedRules(t, kind.component, kind.handler, kind.crd)
+			for rule, checked := range kind.checked {
+				t.Run(rule, func(t *testing.T) {
+					shown.show(t, crdRuleOf(t, rule), checked.want, checked.breaks, checked.keeps)
+				})
 			}
 		})
 	}
-	// Vacuity guard: the walk reads rules. No CRD above declares one, so the
-	// guard reads the one the module's BGP advertisement declares, on its spec.
+	// Vacuity guard: the walk reads rules. The BGP advertisement's CRD declares
+	// one, on its spec, and the others none.
 	if declared := metallbRules(t, "metallb.io_bgpadvertisements.yaml"); len(declared) != 1 || !strings.HasPrefix(declared[0], "spec: ") {
 		t.Errorf("the module's BGP advertisement declares the rules %q, want the one on its spec", declared)
 	}

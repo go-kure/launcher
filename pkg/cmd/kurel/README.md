@@ -148,6 +148,7 @@ at its position.
 | `issuer` | An Issuer in the build namespace. No capability is required of the cluster profile to build it. |
 | `limitrange` | |
 | `listenerset` | A ListenerSet in the build namespace. No capability is required of the cluster profile to build it. |
+| `metallb-bgpadvertisement` | Three BGPAdvertisement objects in the build namespace: one that rolls addresses up, one with a service selector alone, and one that authors nothing but its `objectName`. No capability is required to build it. |
 | `metallb-ipaddresspool` | Two IPAddressPool objects in the build namespace, one with every field, one named by `objectName` with its addresses alone. No capability is required to build it. |
 | `metallb-l2advertisement` | Two L2Advertisement objects in the build namespace, one with every field, one named by `objectName` that authors nothing else and is written with an empty spec. No capability is required to build it. |
 | `namespace` | |

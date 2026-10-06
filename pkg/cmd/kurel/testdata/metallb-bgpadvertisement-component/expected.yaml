@@ -1,0 +1,53 @@
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  labels:
+    launcher.gokure.dev/component: edge
+  name: edge
+  namespace: metallb-system
+spec:
+  aggregationLength: 24
+  aggregationLengthV6: 64
+  communities:
+  - 64512:100
+  - no-export
+  ipAddressPoolSelectors:
+  - matchLabels:
+      tier: edge
+  ipAddressPools:
+  - edge
+  - shared
+  localPref: 100
+  nodeSelectors:
+  - matchExpressions:
+    - key: zone
+      operator: In
+      values:
+      - a
+      - b
+    matchLabels:
+      role: edge
+  peers:
+  - upstream-a
+  - upstream-b
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  labels:
+    launcher.gokure.dev/component: public
+  name: public-services
+  namespace: metallb-system
+spec:
+  serviceSelectors:
+  - matchLabels:
+      exposure: public
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  labels:
+    launcher.gokure.dev/component: everything
+  name: every-pool
+  namespace: metallb-system
+spec: {}

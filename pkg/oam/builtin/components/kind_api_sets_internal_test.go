@@ -500,6 +500,7 @@ var apiSetKinds = []apiSetKind{
 		refused: []string{"listeners", "listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
 	// MetalLB's API, from the CRDs its module ships.
+	{component: "metallb-bgpadvertisement", typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bgpadvertisements.yaml", metallbVersion)},
 	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "metallb-l2advertisement", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion)},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
