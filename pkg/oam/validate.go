@@ -55,6 +55,7 @@ var validComponentTypes = map[string]bool{
 	"deployment":                      true,
 	"endpointslice":                   true,
 	"externalsecret":                  true,
+	"fluxcd-alert":                    true,
 	"fluxcd-kustomization":            true,
 	"gateway":                         true,
 	"gatewayclass":                    true,

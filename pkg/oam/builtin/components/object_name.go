@@ -12,6 +12,7 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -649,4 +650,10 @@ func (h *HelmReleaseHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // lands in the Flux namespace when one is set.
 func (h *FluxcdKustomizationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: kustv1.GroupVersion.Group, Kind: kustv1.KustomizationKind}, oam.ObjectScopeFlux
+}
+
+// ComponentObject declares the fluxcd-alert kind's Alert, which lands in the
+// Flux namespace when one is set.
+func (h *FluxcdAlertHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: notificationv1beta3.GroupVersion.Group, Kind: notificationv1beta3.AlertKind}, oam.ObjectScopeFlux
 }

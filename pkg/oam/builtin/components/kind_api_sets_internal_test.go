@@ -15,6 +15,7 @@ import (
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -125,11 +126,40 @@ func crdAPISource(modulePath, file, version string) func(*testing.T) apiSource {
 }
 
 // markerModules are the modules whose Go source markerAPISource reads.
-var markerModules = []string{monitoringModulePath, "k8s.io/apimachinery", "k8s.io/api"}
+var markerModules = append([]string{monitoringModulePath, "k8s.io/apimachinery", "k8s.io/api"}, fluxMarkerModules...)
+
+// linkedFieldMarkers returns the lookup of a field's markers in the Go source
+// of the linked modules named, and whether that source declares the field. A
+// package is read once, when the first of its fields is asked for.
+func linkedFieldMarkers(t *testing.T, modules []string) func(kindField) (fieldMarkers, bool) {
+	t.Helper()
+	dirs, packages := map[string]string{}, map[string]map[string]fieldMarkers{}
+	return func(f kindField) (fieldMarkers, bool) {
+		pkg := f.owner.PkgPath()
+		markers, loaded := packages[pkg]
+		if !loaded {
+			for _, module := range modules {
+				if pkg != module && !strings.HasPrefix(pkg, module+"/") {
+					continue
+				}
+				dir, ok := dirs[module]
+				if !ok {
+					dir = linkedModuleDir(t, module)
+					dirs[module] = dir
+				}
+				markers = packageFieldMarkers(t, filepath.Join(dir, filepath.FromSlash(strings.TrimPrefix(pkg, module))))
+				break
+			}
+			packages[pkg] = markers
+		}
+		m, ok := markers[f.owner.Name()+"."+f.field.Name]
+		return m, ok
+	}
+}
 
 // markerAPISource is the markers of the linked modules' source, for an API
-// whose module ships no CRD (the Prometheus operator's) and for the built-in
-// types: a field is defaulted where it carries a default marker, and required
+// whose module ships no CRD (the Prometheus operator's, the Flux controllers')
+// and for the built-in types: a field is defaulted where it carries a default marker, and required
 // by the rule the schema generators apply to the same source. A field marked
 // required is required; one marked optional is not; one with neither marker
 // is required unless its json tag omits it when empty. A field of a package
@@ -147,28 +177,7 @@ var markerModules = []string{monitoringModulePath, "k8s.io/apimachinery", "k8s.i
 // held by hand, in the kinds' validate functions.
 func markerAPISource(t *testing.T) apiSource {
 	t.Helper()
-	dirs, packages := map[string]string{}, map[string]map[string]fieldMarkers{}
-	of := func(f kindField) (fieldMarkers, bool) {
-		pkg := f.owner.PkgPath()
-		markers, loaded := packages[pkg]
-		if !loaded {
-			for _, module := range markerModules {
-				if pkg != module && !strings.HasPrefix(pkg, module+"/") {
-					continue
-				}
-				dir, ok := dirs[module]
-				if !ok {
-					dir = linkedModuleDir(t, module)
-					dirs[module] = dir
-				}
-				markers = packageFieldMarkers(t, filepath.Join(dir, filepath.FromSlash(strings.TrimPrefix(pkg, module))))
-				break
-			}
-			packages[pkg] = markers
-		}
-		m, ok := markers[f.owner.Name()+"."+f.field.Name]
-		return m, ok
-	}
+	of := linkedFieldMarkers(t, markerModules)
 	return apiSource{
 		required: func(f kindField) bool {
 			m, ok := of(f)
@@ -454,6 +463,7 @@ var apiSetKinds = []apiSetKind{
 	},
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
+	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), source: markerAPISource},
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
 	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
