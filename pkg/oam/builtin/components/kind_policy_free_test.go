@@ -301,8 +301,6 @@ var policyFreeKinds = []policyFreeKind{
 			},
 		},
 	},
-	// The four kinds of the RBAC API are whole objects too. The API requires
-	// nothing of a role, and of a binding the role it grants.
 	{
 		component: "clusterexternalsecret", handler: &components.ClusterExternalSecretHandler{},
 		gvk:     esv1.SchemeGroupVersion.WithKind(esv1.ClusterExtSecretKind),
@@ -318,6 +316,8 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: map[string]any{},
 		full:    issuerFull(),
 	},
+	// The four kinds of the RBAC API are whole objects too. The API requires
+	// nothing of a role, and of a binding the role it grants.
 	{
 		component: "clusterrole", handler: &components.ClusterRoleHandler{},
 		gvk: rbacv1.SchemeGroupVersion.WithKind("ClusterRole"),
