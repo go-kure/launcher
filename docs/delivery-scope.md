@@ -859,33 +859,52 @@ its text:
   Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `fluxcd-provider`
   (`fluxcd_provider.go`), `fluxcd-receiver` (`fluxcd_receiver.go`), `imagepolicy`
   (`imagepolicy.go`), `imagerepository` (`imagerepository.go`),
-  `imageupdateautomation` (`imageupdateautomation.go`) and
-  `artifactgenerator` (`artifactgenerator.go`), with
+  `imageupdateautomation` (`imageupdateautomation.go`),
+  `artifactgenerator` (`artifactgenerator.go`) and, of the Flux Operator's API,
+  `resourcesetinputprovider` (`resourcesetinputprovider.go`), with
   what such kinds share in `kind_flux.go`: the strict projection of its spec type,
   declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
   two additions. The Flux namespace: the object lands there when one is set, as the
   Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
   an Alert, an ImagePolicy and an ArtifactGenerator read nothing, a Provider and an
   ImageRepository the Secrets of their credentials, their proxy and their certificates, a
-  Receiver the Secret of its token, an
+  Receiver the Secret of its token, a ResourceSetInputProvider the Secrets of its
+  credentials and its certificates, an
   ImageUpdateAutomation the Secret of its signing key). And its durations, held to the pattern their fields declare as on the
   Flux kinds above (the `interval` of a Receiver, of an ImagePolicy and of an ImageUpdateAutomation,
   the `interval` and the `timeout` of a Provider and of an ImageRepository; that `timeout` takes no `h`,
-  and one of an hour or more is written in minutes).
+  and one of an hour or more is written in minutes; the `window` of a
+  ResourceSetInputProvider's schedule, which sits under a list, by its authored text).
+  A ResourceSetInputProvider's `filter.limit: 0` is refused: the type omits it, and
+  the API server would apply its default 100; so are an empty `timeZone` of its
+  schedule (default `UTC`) and an ImageRepository's empty `provider` (default
+  `generic`).
   - **A user or a password in a Provider's `address` or `proxy` is refused,** under
     every policy and under none, by the rule that refuses one in an inline chart
     source's URL: it would be written in plain text into the object. The hosts of both
     are written as authored and not held: the Provider sends events there, it fetches
     no artifact. A token in the path or the query of an address is not something the
     kind can tell.
-  - **One of them is held to the environment policy:** the registry of an
+  - **Two of them are held to the environment policy:** the registry of an
     `imagerepository`'s `image` to the allowed registries, by the rule that holds the
     image of a pod. No tag rule applies, since the field names a repository. Its
     `accessFrom`, which opens the scanned tags to other namespaces,
-    `serviceAccountName` and `insecure` are written as authored.
+    `serviceAccountName` and `insecure` are written as authored. And the host of a
+    `resourcesetinputprovider`'s `url`, whatever the type, by the host rule of the Flux
+    sources and an `oci://` url by the one of an `ocirepository`: the answer of that
+    host decides what a ResourceSet deploys, the `ExternalService` call sends the
+    referenced credential to it, and one rule holds a type a later operator version
+    adds. A user or a password in that `url` is refused under every policy and under
+    none.
   - **A Receiver opens an inbound path on the notification controller:** a request
     there that the Receiver validates makes the controller reconcile the objects its
     `resources` name. Nothing gates that the object opens it.
+  - **An `ExternalArtifact` ResourceSetInputProvider can list objects of every
+    namespace with the operator's client:** its `selectors[].namespace` names the
+    namespace it lists ExternalArtifacts in, `*` every namespace, and without a
+    `serviceAccountName` the list is made with the operator's own client, or as its
+    default account when the operator is started with one. Both are
+    written as authored, and nothing gates them.
   - **Nothing gates what such an object reaches outside its namespace:** a source's
     `namespace` on an Alert, a resource's on a Receiver, which a webhook makes the
     controller reconcile, the repository's on an ImagePolicy, the GitRepository's
@@ -902,13 +921,18 @@ its text:
   - Required fields follow the rule of the Prometheus operator's kinds, and are derived
     as theirs are, from the `+required` markers of the linked modules' Go source: the
     API modules of the Flux controllers ship no CRD, so no list is held to the API
-    server's validator.
+    server's validator. The Flux Operator's module ships its CRDs; its list is read
+    from the markers too.
   - **The APIs' expression rules are not checked,** for the same reason: a check is
     held to the API server's validator (go-kure/launcher#874), which answers from a
     CRD. An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
     reverse, builds and is refused at apply; so does an ArtifactGenerator without a
-    `pathPattern` whose artifact is not named as a Kubernetes object. The rules are listed from the markers of
-    the linked source, and a test fails on one added or reworded.
+    `pathPattern` whose artifact is not named as a Kubernetes object, and a
+    ResourceSetInputProvider whose `url`, Secret references, account, `insecure` or
+    `selectors` do not suit its `type`. The Flux Operator's module ships that CRD;
+    the kind deliberately checks none of its rules. The rules are listed from the
+    markers of the linked source, the ResourceSetInputProvider's are also held to the
+    shipped CRD, and a test fails on one added, dropped or reworded.
   - No default is filled, and the API's other value rules are the API server's.
 - **Shipped: five kinds of the Gateway API's `gateway.networking.k8s.io/v1`
   infrastructure objects,** `gatewayclass`, `gateway`, `listenerset`, `referencegrant`

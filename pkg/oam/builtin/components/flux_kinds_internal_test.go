@@ -16,14 +16,18 @@ import (
 	"testing"
 	"time"
 
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
+	"github.com/go-kure/kure/pkg/stack"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
@@ -32,11 +36,14 @@ import (
 // fluxMarkerModules are the modules whose Go source the tests below read: the
 // API modules of the Flux controllers hold the Go types and ship no CRD, so
 // the markers the CRDs are generated from are the source, as for the kinds of
-// the Prometheus operator's API. Nothing here is held to the API server's own
-// validator (crdCreate), which answers from a CRD. The shared type modules are
-// meta, the kustomize one a Kustomization's patches and images are declared
-// in, and the access-control one a HelmRepository's accessFrom is declared in.
+// the Prometheus operator's API. The Flux Operator's module ships its CRDs
+// beside its types; its markers are read the same way, so that one rule holds
+// every Flux kind. Nothing here is held to the API server's own validator
+// (crdCreate), which answers from a CRD. The shared type modules are meta, the
+// kustomize one a Kustomization's patches and images are declared in, and the
+// access-control one a HelmRepository's accessFrom is declared in.
 var fluxMarkerModules = []string{
+	"github.com/controlplaneio-fluxcd/flux-operator",
 	"github.com/fluxcd/notification-controller/api",
 	"github.com/fluxcd/image-reflector-controller/api",
 	"github.com/fluxcd/image-automation-controller/api",
@@ -69,6 +76,7 @@ var fluxKindRows = []struct {
 	{imageRepositoryType, reflect.TypeFor[imagev1.ImageRepositorySpec](), imageRepositoryKind.required, nil, durationForms(imageRepositoryKind.durations), imageRepositoryKind.defaultedZeros.fields},
 	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations), imageUpdateAutomationKind.defaultedZeros.fields},
 	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), artifactGeneratorKind.required, nil, durationForms(artifactGeneratorKind.durations), artifactGeneratorKind.defaultedZeros.fields},
+	{resourceSetInputProviderType, reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), resourceSetInputProviderKind.required, nil, durationForms(resourceSetInputProviderKind.durations), resourceSetInputProviderKind.defaultedZeros.fields},
 }
 
 // durationForms is a kind's duration fields by path, each with its form.
@@ -84,6 +92,18 @@ func durationForms[T any](fields []fluxDurationField[T]) map[string]fluxduration
 // (go-kure/launcher#874): a check is held to the API server's own validator,
 // which answers from a CRD, and the linked modules ship none.
 const fluxNoCRD = "the linked module ships no CRD, so a check could not be held to the API server's validator"
+
+// fluxOperatorUnchecked is why the kind of the Flux Operator's API checks no
+// expression rule although its module ships the CRD: it is held to the rule of
+// the other Flux kinds, which leave every rule to the API server.
+// TestFluxOperatorKinds_ExpressionRulesMatchCRD holds its list to that CRD.
+const fluxOperatorUnchecked = "the kind leaves every expression rule to the API server on purpose, as the other Flux kinds do; the module ships the CRD, which the list is held to, and no check is made against it"
+
+// fluxOperatorCRDs are the CRDs of the Flux Operator's kinds, by component: a
+// path under the directory of the linked module.
+var fluxOperatorCRDs = map[string]string{
+	resourceSetInputProviderType: "config/crd/bases/fluxcd.controlplane.io_resourcesetinputproviders.yaml",
+}
 
 // fluxRulesLeft lists, per kind, every expression rule the API declares on
 // what the kind decodes, as "<path>: <rule>", with what the kind leaves to the
@@ -106,6 +126,25 @@ var fluxRulesLeft = map[string]map[string]string{
 	},
 	artifactGeneratorType: {
 		`spec: has(self.pathPattern) && size(self.pathPattern) > 0 || self.artifacts.all(a, a.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'))`: "without a `pathPattern`, an artifact whose `name` is no Kubernetes object name builds and is refused at apply: " + fluxNoCRD,
+	},
+	resourceSetInputProviderType: {
+		"spec: self.type != 'Static' || !has(self.url)":                                                                                                                                               "a `url` on a `Static` provider builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: self.type != 'ExternalArtifact' || !has(self.url)":                                                                                                                                     "a `url` on an `ExternalArtifact` provider builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: self.type == 'Static' || self.type == 'ExternalArtifact' || has(self.url)":                                                                                                             "a provider of another type than `Static` or `ExternalArtifact` without a `url` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !self.type.startsWith('Git') || self.url.startsWith('http')":                                                                                                                           "a Git provider whose `url` is not `http(s)://` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !self.type.startsWith('AzureDevOps') || self.url.startsWith('http://') || self.url.startsWith('https://')":                                                                             "an AzureDevOps provider whose `url` is not `http(s)://` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !self.type.startsWith('AWSCodeCommit') || self.url.startsWith('https://')":                                                                                                             "an AWSCodeCommit provider whose `url` is not `https://` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !self.type.endsWith('ArtifactTag') || self.url.startsWith('oci')":                                                                                                                      "an OCI provider whose `url` is not `oci://` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !self.type.endsWith('ArtifactTag') || !self.url.startsWith('oci://') || self.url.substring(6).contains('/')":                                                                           "an OCI provider whose `url` names no repository after its host builds and is refused at apply, unless an allowed-registries policy refuses it first (enforceResourceSetInputProviderURL): " + fluxOperatorUnchecked,
+		"spec: self.type != 'ExternalService' || self.url.startsWith('http')":                                                                                                                         "an `ExternalService` provider whose `url` is not `http(s)://` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !has(self.insecure) || !self.insecure || self.type == 'ExternalService' || self.type == 'OCIArtifactTag'":                                                                              "`insecure: true` on a provider of another type than `ExternalService` or `OCIArtifactTag` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: self.type != 'ExternalService' || !self.url.startsWith('http://') || (has(self.insecure) && self.insecure)":                                                                            "an `ExternalService` provider with an `http://` url and without `insecure: true` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !has(self.serviceAccountName) || self.type.startsWith('AzureDevOps') || self.type.startsWith('AWSCodeCommit') || self.type.endsWith('ArtifactTag') || self.type == 'ExternalArtifact'": "a `serviceAccountName` on a provider of another type than those builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !has(self.certSecretRef) || !(self.type == 'Static' || self.type == 'ExternalArtifact' || self.type.startsWith('AzureDevOps') || self.type.startsWith('AWSCodeCommit') || (self.type.endsWith('ArtifactTag') && self.type != 'OCIArtifactTag'))": "a `certSecretRef` on a provider of one of those types builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: !has(self.secretRef) || !(self.type == 'Static' || self.type == 'ExternalArtifact' || self.type.startsWith('AWSCodeCommit') || (self.type.endsWith('ArtifactTag') && self.type != 'OCIArtifactTag'))":                                            "a `secretRef` on a provider of one of those types builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: self.type != 'ExternalArtifact' || (has(self.selectors) && size(self.selectors) > 0)":                                                                                                                                                            "an `ExternalArtifact` provider without a selector builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec: self.type == 'ExternalArtifact' || !has(self.selectors)":                                "`selectors` on a provider of another type than `ExternalArtifact` builds and is refused at apply: " + fluxOperatorUnchecked,
+		"spec.selectors[]: !has(self.name) || (!has(self.matchLabels) && !has(self.matchExpressions))": "a selector with a `name` and labels or expressions builds and is refused at apply: " + fluxOperatorUnchecked,
 	},
 }
 
@@ -254,7 +293,44 @@ func TestFluxKinds_DefaultedZeros(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Errorf("an authored empty string on a defaulted field: got %v, want %s", err, want)
 	}
-	for _, at := range []string{"AlertSpec: suspend", "ImagePolicySpec: suspend", "ImageUpdateAutomationSpec: suspend"} {
+	// A string default of another API, and a field under a list: the authored
+	// spelling of the key does not matter, and an omitted or set value passes.
+	repo := func(extra map[string]any) map[string]any {
+		props := map[string]any{"image": "ghcr.io/org/app", "interval": "5m"}
+		maps.Copy(props, extra)
+		return props
+	}
+	schedules := func(extra map[string]any) map[string]any {
+		second := map[string]any{"cron": "0 0 * * *"}
+		maps.Copy(second, extra)
+		return map[string]any{"type": "Static", "schedule": []any{map[string]any{"cron": "0 * * * *"}, second}}
+	}
+	type configurer interface {
+		config(*oam.Component) (stack.ApplicationConfig, error)
+	}
+	for _, c := range []struct {
+		kind  configurer
+		props map[string]any
+		want  string
+	}{
+		{imageRepositoryKind, repo(map[string]any{"provider": ""}), `provider: "" cannot be carried by the Flux API types (the field is omitted when zero, so the API server would apply its default "generic")`},
+		{imageRepositoryKind, repo(map[string]any{"Provider": ""}), `Provider: "" cannot be carried by the Flux API types (the field is omitted when zero, so the API server would apply its default "generic")`},
+		{imageRepositoryKind, repo(map[string]any{"provider": "aws"}), ""},
+		{imageRepositoryKind, repo(nil), ""},
+		{resourceSetInputProviderKind, schedules(map[string]any{"timeZone": ""}), `schedule[1].timeZone: "" cannot be carried by the Flux Operator API types (the field is omitted when zero, so the API server would apply its default "UTC")`},
+		{resourceSetInputProviderKind, schedules(map[string]any{"TimeZone": ""}), `schedule[1].TimeZone: "" cannot be carried by the Flux Operator API types (the field is omitted when zero, so the API server would apply its default "UTC")`},
+		{resourceSetInputProviderKind, schedules(map[string]any{"timeZone": "Europe/Brussels"}), ""},
+		{resourceSetInputProviderKind, schedules(nil), ""},
+	} {
+		_, err := c.kind.config(&oam.Component{Name: "c", Properties: c.props})
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%v: unexpected error %v", c.props, err)
+		case c.want != "" && (err == nil || err.Error() != c.want):
+			t.Errorf("%v: got %v, want %s", c.props, err, c.want)
+		}
+	}
+	for _, at := range []string{"AlertSpec: suspend", "ImagePolicySpec: suspend", "ImageUpdateAutomationSpec: suspend", "ResourceSetInputProviderSpec: filter.limit"} {
 		if !walked[at] {
 			t.Errorf("the walk did not reach %s; it found %v", at, slices.Sorted(maps.Keys(walked)))
 		}
@@ -461,11 +537,15 @@ func fluxExpressionRules(t *testing.T, typ reflect.Type, lines func(pkgPath, key
 // classified.
 //
 // No rule is checked by a kind, and none is shown against the API server's
-// validator: that takes a CRD (crdCreate, go-kure/launcher#874), and these
-// modules ship none. The table is what the README's "not checked" lists are
-// held to say.
+// validator: that takes a CRD (crdCreate, go-kure/launcher#874), and the
+// modules of the Flux controllers ship none. The Flux Operator's module ships
+// its CRDs; its kind leaves the rules on purpose, and
+// TestFluxOperatorKinds_ExpressionRulesMatchCRD holds its list to the CRD
+// too. The table is what the README's "not checked" lists are held to say.
 func TestFluxKinds_ExpressionRules(t *testing.T) {
-	lines := linkedMarkerLines(t, markerModules)
+	// A ResourceSetInputProvider's defaultValues holds apiextensions JSON
+	// values, whose source is read for the rules they could declare.
+	lines := linkedMarkerLines(t, append(slices.Clone(markerModules), "k8s.io/apiextensions-apiserver"))
 	total := 0
 	for _, kind := range fluxKindRows {
 		t.Run(kind.component, func(t *testing.T) {
@@ -501,6 +581,62 @@ func TestFluxKinds_ExpressionRules(t *testing.T) {
 	// Vacuity guard: the two rules of an ImagePolicy are in the source read.
 	if total < 2 {
 		t.Fatalf("the source declares %d expression rules on the Flux kinds; the markers are not being read", total)
+	}
+}
+
+// TestFluxOperatorKinds_ExpressionRulesMatchCRD holds fluxRulesLeft of each
+// kind of the Flux Operator's API to the x-kubernetes-validations of the CRD
+// its module ships, in both directions: a rule the CRD adds, drops or rewords
+// fails here until the list says so. The kind checks none of them, on purpose
+// (fluxOperatorUnchecked); the CRD is read only for the list. A rule on the
+// root of the object could reach the spec and fails too; the status is the
+// operator's and is not read.
+func TestFluxOperatorKinds_ExpressionRulesMatchCRD(t *testing.T) {
+	const module = "github.com/controlplaneio-fluxcd/flux-operator"
+	total := 0
+	for component, file := range fluxOperatorCRDs {
+		t.Run(component, func(t *testing.T) {
+			path := filepath.Join(linkedModuleDir(t, module), filepath.FromSlash(file))
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the CRD: %v", err)
+			}
+			var crd apiextensionsv1.CustomResourceDefinition
+			if err := yaml.Unmarshal(data, &crd); err != nil {
+				t.Fatalf("decode the CRD %s: %v", file, err)
+			}
+			if len(crd.Spec.Versions) != 1 || crd.Spec.Versions[0].Name != fluxoperatorv1.GroupVersion.Version || crd.Spec.Versions[0].Schema == nil || crd.Spec.Versions[0].Schema.OpenAPIV3Schema == nil {
+				t.Fatalf("%s: want the one version %s, with a schema; update this test", file, fluxoperatorv1.GroupVersion.Version)
+			}
+			var declared []string
+			walkCiliumBGPSchema(*crd.Spec.Versions[0].Schema.OpenAPIV3Schema, "", func(at string, s apiextensionsv1.JSONSchemaProps) {
+				if at != "" && at != "spec" && !strings.HasPrefix(at, "spec.") {
+					return
+				}
+				for _, rule := range s.XValidations {
+					if at == "" {
+						t.Errorf("the CRD declares the rule %q on the root of the object; classify it", rule.Rule)
+						continue
+					}
+					declared = append(declared, at+": "+rule.Rule)
+				}
+			})
+			slices.Sort(declared)
+			total += len(declared)
+			left := fluxRulesLeft[component]
+			if listed := slices.Sorted(maps.Keys(left)); !slices.Equal(declared, listed) {
+				t.Errorf("the CRD declares the rules %q\nfluxRulesLeft lists     %q", declared, listed)
+			}
+			for rule, why := range left {
+				if !strings.HasSuffix(why, fluxOperatorUnchecked) {
+					t.Errorf("rule %q is listed without the reason the kind leaves it to the API server", rule)
+				}
+			}
+		})
+	}
+	// Vacuity guard: the seventeen rules of a ResourceSetInputProvider are read.
+	if total != 17 {
+		t.Errorf("the CRDs declare %d expression rules on the specs, want 17", total)
 	}
 }
 

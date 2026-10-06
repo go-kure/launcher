@@ -544,6 +544,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"replicationdestination",
 		"replicationsource",
 		"resourcequota",
+		"resourcesetinputprovider",
 		"role",
 		"rolebinding",
 		"runtimeclass",

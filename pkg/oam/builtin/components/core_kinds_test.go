@@ -10,6 +10,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
@@ -155,6 +156,7 @@ var coreKindSchemas = []struct {
 	{"replicationdestination", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), &components.ReplicationDestinationHandler{}, nil},
 	{"replicationsource", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), &components.ReplicationSourceHandler{}, nil},
 	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}, nil},
+	{"resourcesetinputprovider", reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), &components.ResourceSetInputProviderHandler{}, nil},
 	{"role", reflect.TypeFor[rbacv1.Role](), &components.RoleHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 Role")},
 	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), &components.RoleBindingHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 RoleBinding")},
 	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},

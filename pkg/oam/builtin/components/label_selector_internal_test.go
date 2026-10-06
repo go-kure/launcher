@@ -19,6 +19,7 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
@@ -135,83 +136,84 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 // holds the keys to the package's source and counts the kinds of each type by
 // the files that decode it, so a kind added without a row fails there.
 var strictlyDecodedTypes = map[string]reflect.Type{
-	"appsv1.ReplicaSetSpec":                      reflect.TypeFor[appsv1.ReplicaSetSpec](),
-	"autoscalingv2.HorizontalPodAutoscalerSpec":  reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](),
-	"autov1.ImageUpdateAutomationSpec":           reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
-	"barmanv1.ObjectStoreSpec":                   reflect.TypeFor[barmanv1.ObjectStoreSpec](),
-	"certv1.CertificateSpec":                     reflect.TypeFor[certv1.CertificateSpec](),
-	"certv1.IssuerSpec":                          reflect.TypeFor[certv1.IssuerSpec](),
-	"ciliumNetworkPolicyProperties":              reflect.TypeFor[ciliumNetworkPolicyProperties](),
-	"ciliumv2.CiliumBGPAdvertisementSpec":        reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
-	"ciliumv2.CiliumBGPClusterConfigSpec":        reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](),
-	"ciliumv2.CiliumBGPNodeConfigOverrideSpec":   reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](),
-	"ciliumv2.CiliumBGPPeerConfigSpec":           reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](),
-	"ciliumv2.CiliumCIDRGroupSpec":               reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](),
-	"ciliumv2.CiliumEgressGatewayPolicySpec":     reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](),
-	"ciliumv2.CiliumLoadBalancerIPPoolSpec":      reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](),
-	"ciliumv2.CiliumLocalRedirectPolicySpec":     reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](),
-	"ciliumv2.CiliumNodeConfigSpec":              reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](),
-	"cnpgv1.ClusterSpec":                         reflect.TypeFor[cnpgv1.ClusterSpec](),
-	"cnpgv1.DatabaseSpec":                        reflect.TypeFor[cnpgv1.DatabaseSpec](),
-	"cnpgv1.PoolerSpec":                          reflect.TypeFor[cnpgv1.PoolerSpec](),
-	"corev1.LimitRangeSpec":                      reflect.TypeFor[corev1.LimitRangeSpec](),
-	"corev1.NamespaceSpec":                       reflect.TypeFor[corev1.NamespaceSpec](),
-	"corev1.PersistentVolumeSpec":                reflect.TypeFor[corev1.PersistentVolumeSpec](),
-	"corev1.PodSpec":                             reflect.TypeFor[corev1.PodSpec](),
-	"corev1.ReplicationControllerSpec":           reflect.TypeFor[corev1.ReplicationControllerSpec](),
-	"corev1.ResourceQuotaSpec":                   reflect.TypeFor[corev1.ResourceQuotaSpec](),
-	"discoveryv1.EndpointSlice":                  reflect.TypeFor[discoveryv1.EndpointSlice](),
-	"esv1.ClusterExternalSecretSpec":             reflect.TypeFor[esv1.ClusterExternalSecretSpec](),
-	"esv1.ExternalSecretSpec":                    reflect.TypeFor[esv1.ExternalSecretSpec](),
-	"esv1.SecretStoreSpec":                       reflect.TypeFor[esv1.SecretStoreSpec](),
-	"gatewayv1.BackendTLSPolicySpec":             reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
-	"gatewayv1.GatewayClassSpec":                 reflect.TypeFor[gatewayv1.GatewayClassSpec](),
-	"gatewayv1.GatewaySpec":                      reflect.TypeFor[gatewayv1.GatewaySpec](),
-	"gatewayv1.HTTPRouteSpec":                    reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
-	"gatewayv1.ListenerSetSpec":                  reflect.TypeFor[gatewayv1.ListenerSetSpec](),
-	"gatewayv1.ReferenceGrantSpec":               reflect.TypeFor[gatewayv1.ReferenceGrantSpec](),
-	"helmProperties":                             reflect.TypeFor[helmProperties](),
-	"helmTemplateProperties":                     reflect.TypeFor[helmTemplateProperties](),
-	"helmValuesFromSpec":                         reflect.TypeFor[helmValuesFromSpec](),
-	"helmv2.HelmReleaseSpec":                     reflect.TypeFor[helmv2.HelmReleaseSpec](),
-	"imagev1.ImagePolicySpec":                    reflect.TypeFor[imagev1.ImagePolicySpec](),
-	"imagev1.ImageRepositorySpec":                reflect.TypeFor[imagev1.ImageRepositorySpec](),
-	"kustv1.KustomizationSpec":                   reflect.TypeFor[kustv1.KustomizationSpec](),
-	"metallbv1beta1.BFDProfileSpec":              reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
-	"metallbv1beta1.BGPAdvertisementSpec":        reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),
-	"metallbv1beta1.CommunitySpec":               reflect.TypeFor[metallbv1beta1.CommunitySpec](),
-	"metallbv1beta1.IPAddressPoolSpec":           reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
-	"metallbv1beta1.L2AdvertisementSpec":         reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
-	"monitoringv1.PodMonitorSpec":                reflect.TypeFor[monitoringv1.PodMonitorSpec](),
-	"monitoringv1.ProbeSpec":                     reflect.TypeFor[monitoringv1.ProbeSpec](),
-	"monitoringv1.PrometheusRuleSpec":            reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
-	"monitoringv1.ServiceMonitorSpec":            reflect.TypeFor[monitoringv1.ServiceMonitorSpec](),
-	"networkingv1.IngressClassSpec":              reflect.TypeFor[networkingv1.IngressClassSpec](),
-	"networkingv1.IngressSpec":                   reflect.TypeFor[networkingv1.IngressSpec](),
-	"networkingv1.NetworkPolicySpec":             reflect.TypeFor[networkingv1.NetworkPolicySpec](),
-	"networkingv1.ServiceCIDRSpec":               reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
-	"nodev1.RuntimeClass":                        reflect.TypeFor[nodev1.RuntimeClass](),
-	"notificationv1.ReceiverSpec":                reflect.TypeFor[notificationv1.ReceiverSpec](),
-	"notificationv1beta3.AlertSpec":              reflect.TypeFor[notificationv1beta3.AlertSpec](),
-	"notificationv1beta3.ProviderSpec":           reflect.TypeFor[notificationv1beta3.ProviderSpec](),
-	"podTemplateProperties":                      reflect.TypeFor[podTemplateProperties](),
-	"policyv1.PodDisruptionBudgetSpec":           reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](),
-	"rbacv1.ClusterRole":                         reflect.TypeFor[rbacv1.ClusterRole](),
-	"rbacv1.ClusterRoleBinding":                  reflect.TypeFor[rbacv1.ClusterRoleBinding](),
-	"rbacv1.Role":                                reflect.TypeFor[rbacv1.Role](),
-	"rbacv1.RoleBinding":                         reflect.TypeFor[rbacv1.RoleBinding](),
-	"schedulingv1.PriorityClass":                 reflect.TypeFor[schedulingv1.PriorityClass](),
-	"sourcev1.BucketSpec":                        reflect.TypeFor[sourcev1.BucketSpec](),
-	"sourcev1.GitRepositorySpec":                 reflect.TypeFor[sourcev1.GitRepositorySpec](),
-	"sourcev1.HelmChartSpec":                     reflect.TypeFor[sourcev1.HelmChartSpec](),
-	"sourcev1.HelmRepositorySpec":                reflect.TypeFor[sourcev1.HelmRepositorySpec](),
-	"sourcev1.OCIRepositorySpec":                 reflect.TypeFor[sourcev1.OCIRepositorySpec](),
-	"storagev1.CSIDriverSpec":                    reflect.TypeFor[storagev1.CSIDriverSpec](),
-	"storagev1.StorageClass":                     reflect.TypeFor[storagev1.StorageClass](),
-	"storagev1.VolumeAttributesClass":            reflect.TypeFor[storagev1.VolumeAttributesClass](),
-	"swv1beta1.ArtifactGeneratorSpec":            reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
-	"volsyncv1alpha1.ReplicationDestinationSpec": reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
-	"volsyncv1alpha1.ReplicationSourceSpec":      reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
+	"appsv1.ReplicaSetSpec":                       reflect.TypeFor[appsv1.ReplicaSetSpec](),
+	"autoscalingv2.HorizontalPodAutoscalerSpec":   reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](),
+	"autov1.ImageUpdateAutomationSpec":            reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
+	"barmanv1.ObjectStoreSpec":                    reflect.TypeFor[barmanv1.ObjectStoreSpec](),
+	"certv1.CertificateSpec":                      reflect.TypeFor[certv1.CertificateSpec](),
+	"certv1.IssuerSpec":                           reflect.TypeFor[certv1.IssuerSpec](),
+	"ciliumNetworkPolicyProperties":               reflect.TypeFor[ciliumNetworkPolicyProperties](),
+	"ciliumv2.CiliumBGPAdvertisementSpec":         reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
+	"ciliumv2.CiliumBGPClusterConfigSpec":         reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](),
+	"ciliumv2.CiliumBGPNodeConfigOverrideSpec":    reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](),
+	"ciliumv2.CiliumBGPPeerConfigSpec":            reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](),
+	"ciliumv2.CiliumCIDRGroupSpec":                reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](),
+	"ciliumv2.CiliumEgressGatewayPolicySpec":      reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](),
+	"ciliumv2.CiliumLoadBalancerIPPoolSpec":       reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](),
+	"ciliumv2.CiliumLocalRedirectPolicySpec":      reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](),
+	"ciliumv2.CiliumNodeConfigSpec":               reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](),
+	"cnpgv1.ClusterSpec":                          reflect.TypeFor[cnpgv1.ClusterSpec](),
+	"cnpgv1.DatabaseSpec":                         reflect.TypeFor[cnpgv1.DatabaseSpec](),
+	"cnpgv1.PoolerSpec":                           reflect.TypeFor[cnpgv1.PoolerSpec](),
+	"corev1.LimitRangeSpec":                       reflect.TypeFor[corev1.LimitRangeSpec](),
+	"corev1.NamespaceSpec":                        reflect.TypeFor[corev1.NamespaceSpec](),
+	"corev1.PersistentVolumeSpec":                 reflect.TypeFor[corev1.PersistentVolumeSpec](),
+	"corev1.PodSpec":                              reflect.TypeFor[corev1.PodSpec](),
+	"corev1.ReplicationControllerSpec":            reflect.TypeFor[corev1.ReplicationControllerSpec](),
+	"corev1.ResourceQuotaSpec":                    reflect.TypeFor[corev1.ResourceQuotaSpec](),
+	"discoveryv1.EndpointSlice":                   reflect.TypeFor[discoveryv1.EndpointSlice](),
+	"esv1.ClusterExternalSecretSpec":              reflect.TypeFor[esv1.ClusterExternalSecretSpec](),
+	"esv1.ExternalSecretSpec":                     reflect.TypeFor[esv1.ExternalSecretSpec](),
+	"esv1.SecretStoreSpec":                        reflect.TypeFor[esv1.SecretStoreSpec](),
+	"fluxoperatorv1.ResourceSetInputProviderSpec": reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](),
+	"gatewayv1.BackendTLSPolicySpec":              reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
+	"gatewayv1.GatewayClassSpec":                  reflect.TypeFor[gatewayv1.GatewayClassSpec](),
+	"gatewayv1.GatewaySpec":                       reflect.TypeFor[gatewayv1.GatewaySpec](),
+	"gatewayv1.HTTPRouteSpec":                     reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
+	"gatewayv1.ListenerSetSpec":                   reflect.TypeFor[gatewayv1.ListenerSetSpec](),
+	"gatewayv1.ReferenceGrantSpec":                reflect.TypeFor[gatewayv1.ReferenceGrantSpec](),
+	"helmProperties":                              reflect.TypeFor[helmProperties](),
+	"helmTemplateProperties":                      reflect.TypeFor[helmTemplateProperties](),
+	"helmValuesFromSpec":                          reflect.TypeFor[helmValuesFromSpec](),
+	"helmv2.HelmReleaseSpec":                      reflect.TypeFor[helmv2.HelmReleaseSpec](),
+	"imagev1.ImagePolicySpec":                     reflect.TypeFor[imagev1.ImagePolicySpec](),
+	"imagev1.ImageRepositorySpec":                 reflect.TypeFor[imagev1.ImageRepositorySpec](),
+	"kustv1.KustomizationSpec":                    reflect.TypeFor[kustv1.KustomizationSpec](),
+	"metallbv1beta1.BFDProfileSpec":               reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
+	"metallbv1beta1.BGPAdvertisementSpec":         reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),
+	"metallbv1beta1.CommunitySpec":                reflect.TypeFor[metallbv1beta1.CommunitySpec](),
+	"metallbv1beta1.IPAddressPoolSpec":            reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
+	"metallbv1beta1.L2AdvertisementSpec":          reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
+	"monitoringv1.PodMonitorSpec":                 reflect.TypeFor[monitoringv1.PodMonitorSpec](),
+	"monitoringv1.ProbeSpec":                      reflect.TypeFor[monitoringv1.ProbeSpec](),
+	"monitoringv1.PrometheusRuleSpec":             reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
+	"monitoringv1.ServiceMonitorSpec":             reflect.TypeFor[monitoringv1.ServiceMonitorSpec](),
+	"networkingv1.IngressClassSpec":               reflect.TypeFor[networkingv1.IngressClassSpec](),
+	"networkingv1.IngressSpec":                    reflect.TypeFor[networkingv1.IngressSpec](),
+	"networkingv1.NetworkPolicySpec":              reflect.TypeFor[networkingv1.NetworkPolicySpec](),
+	"networkingv1.ServiceCIDRSpec":                reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
+	"nodev1.RuntimeClass":                         reflect.TypeFor[nodev1.RuntimeClass](),
+	"notificationv1.ReceiverSpec":                 reflect.TypeFor[notificationv1.ReceiverSpec](),
+	"notificationv1beta3.AlertSpec":               reflect.TypeFor[notificationv1beta3.AlertSpec](),
+	"notificationv1beta3.ProviderSpec":            reflect.TypeFor[notificationv1beta3.ProviderSpec](),
+	"podTemplateProperties":                       reflect.TypeFor[podTemplateProperties](),
+	"policyv1.PodDisruptionBudgetSpec":            reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](),
+	"rbacv1.ClusterRole":                          reflect.TypeFor[rbacv1.ClusterRole](),
+	"rbacv1.ClusterRoleBinding":                   reflect.TypeFor[rbacv1.ClusterRoleBinding](),
+	"rbacv1.Role":                                 reflect.TypeFor[rbacv1.Role](),
+	"rbacv1.RoleBinding":                          reflect.TypeFor[rbacv1.RoleBinding](),
+	"schedulingv1.PriorityClass":                  reflect.TypeFor[schedulingv1.PriorityClass](),
+	"sourcev1.BucketSpec":                         reflect.TypeFor[sourcev1.BucketSpec](),
+	"sourcev1.GitRepositorySpec":                  reflect.TypeFor[sourcev1.GitRepositorySpec](),
+	"sourcev1.HelmChartSpec":                      reflect.TypeFor[sourcev1.HelmChartSpec](),
+	"sourcev1.HelmRepositorySpec":                 reflect.TypeFor[sourcev1.HelmRepositorySpec](),
+	"sourcev1.OCIRepositorySpec":                  reflect.TypeFor[sourcev1.OCIRepositorySpec](),
+	"storagev1.CSIDriverSpec":                     reflect.TypeFor[storagev1.CSIDriverSpec](),
+	"storagev1.StorageClass":                      reflect.TypeFor[storagev1.StorageClass](),
+	"storagev1.VolumeAttributesClass":             reflect.TypeFor[storagev1.VolumeAttributesClass](),
+	"swv1beta1.ArtifactGeneratorSpec":             reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
+	"volsyncv1alpha1.ReplicationDestinationSpec":  reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
+	"volsyncv1alpha1.ReplicationSourceSpec":       reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
 }
 
 // strictDecodeSites reads the package's source, test files apart, and returns
@@ -257,8 +259,34 @@ func strictDecodeSites(t *testing.T) map[string][]string {
 
 // labelSelectorPaths returns the json paths, with [] for a list element and {}
 // for a map value, of every metav1.LabelSelector the encoding of typ reaches.
+// A struct that embeds one inline, as the Flux Operator's
+// ExternalArtifactSelector does, holds its matchLabels and matchExpressions at
+// its own path, and is reported there: walkKindFields promotes the embedded
+// fields and visits no field of the selector's own type.
+// TestLabelSelectorPaths_FindsAnInlineSelector holds that.
 func labelSelectorPaths(typ reflect.Type) []string {
 	selector := reflect.TypeFor[metav1.LabelSelector]()
+	var inline func(t reflect.Type) bool
+	inline = func(t reflect.Type) bool {
+		if t.Kind() != reflect.Struct {
+			return false
+		}
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if !f.Anonymous || name != "" {
+				continue
+			}
+			embedded := f.Type
+			if embedded.Kind() == reflect.Pointer {
+				embedded = embedded.Elem()
+			}
+			if embedded == selector || inline(embedded) {
+				return true
+			}
+		}
+		return false
+	}
 	var paths []string
 	walkKindFields(typ, func(kindField) bool { return true }, func(f kindField) {
 		at, path := f.field.Type, f.path
@@ -275,12 +303,40 @@ func labelSelectorPaths(typ reflect.Type) []string {
 				break unwrap
 			}
 		}
-		if at == selector {
+		if at == selector || inline(at) {
 			paths = append(paths, path)
 		}
 	})
 	slices.Sort(paths)
 	return paths
+}
+
+// TestLabelSelectorPaths_FindsAnInlineSelector holds labelSelectorPaths to a
+// selector embedded inline, which walkKindFields promotes away: on a type made
+// for the test, beside a selector named by a field, and on the one kind type
+// that embeds one, the Flux Operator's ResourceSetInputProviderSpec. A walk that
+// loses the inline selector leaves its kind out of
+// TestLabelSelectorKinds_CoverEverySelector, and fails here.
+func TestLabelSelectorPaths_FindsAnInlineSelector(t *testing.T) {
+	type inlineSelector struct {
+		metav1.LabelSelector `json:",inline"`
+		Name                 string `json:"name,omitempty"`
+	}
+	type deeper struct {
+		inlineSelector `json:",inline"`
+	}
+	type probe struct {
+		Named   *metav1.LabelSelector `json:"named,omitempty"`
+		Listed  []inlineSelector      `json:"listed,omitempty"`
+		Pointer *deeper               `json:"pointer,omitempty"`
+		Keyed   map[string]deeper     `json:"keyed,omitempty"`
+	}
+	if got, want := labelSelectorPaths(reflect.TypeFor[probe]()), []string{"keyed{}", "listed[]", "named", "pointer"}; !slices.Equal(got, want) {
+		t.Errorf("labelSelectorPaths(probe) = %v, want %v", got, want)
+	}
+	if got, want := labelSelectorPaths(reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec]()), []string{"selectors[]"}; !slices.Equal(got, want) {
+		t.Errorf("labelSelectorPaths(ResourceSetInputProviderSpec) = %v, want %v", got, want)
+	}
 }
 
 // kindConfig is the ToApplicationConfig of a handler, in the build namespace
@@ -584,6 +640,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		component: "imageupdateautomation", typ: "autov1.ImageUpdateAutomationSpec", config: kindConfig(&ImageUpdateAutomationHandler{}),
 		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}, "interval": "30m"},
 		ground: fluxRuleGround,
+	},
+	{
+		component: "resourcesetinputprovider", typ: "fluxoperatorv1.ResourceSetInputProviderSpec", config: kindConfig(&ResourceSetInputProviderHandler{}),
+		base: map[string]any{"type": "ExternalArtifact"},
+		crds: crdFile("github.com/controlplaneio-fluxcd/flux-operator", fluxOperatorCRDs[resourceSetInputProviderType]),
 	},
 	{
 		component: "replicationsource", typ: "volsyncv1alpha1.ReplicationSourceSpec", config: kindConfig(&ReplicationSourceHandler{}),

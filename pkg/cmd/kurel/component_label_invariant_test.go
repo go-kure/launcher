@@ -521,6 +521,9 @@ spec:
 		"sourcePVC": "data", "trigger": map[string]any{"schedule": "0 3 * * *"},
 		"restic": map[string]any{"repository": "restic-repo", "copyMethod": "Snapshot"}}},
 	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
+	"resourcesetinputprovider": {props: map[string]any{
+		"type": "GitHubPullRequest",
+		"url":  "https://github.example.com/org/app"}},
 	"role": {props: map[string]any{"rules": []any{
 		map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}},
 	"rolebinding": {props: map[string]any{

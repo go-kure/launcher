@@ -102,6 +102,46 @@ func fluxReceiverFull() map[string]any {
 	}
 }
 
+// resourceSetInputProviderMinimal is the least a resourcesetinputprovider may
+// author: a Static provider names no url.
+func resourceSetInputProviderMinimal() map[string]any {
+	return map[string]any{"type": "Static"}
+}
+
+// resourceSetInputProviderFull sets every field of a
+// ResourceSetInputProviderSpec. It breaks one of the API's expression rules,
+// which refuses selectors on a provider of another type than ExternalArtifact:
+// the kind checks none of them (fluxRulesLeft), so it builds. Its url names
+// the registry the strict policy allows, its second selector lists another
+// namespace and its first every namespace, and its two Secrets are read from
+// the namespace the object lands in.
+func resourceSetInputProviderFull() map[string]any {
+	return map[string]any{
+		"type":               "OCIArtifactTag",
+		"url":                "oci://registry.example/shop/app",
+		"serviceAccountName": "inputs-reader",
+		"secretRef":          map[string]any{"name": "provider-credentials"},
+		"certSecretRef":      map[string]any{"name": "provider-tls"},
+		"insecure":           true,
+		"defaultValues":      map[string]any{"env": "staging", "replicas": 2},
+		"filter": map[string]any{
+			"includeBranch": "^feat/", "excludeBranch": "^feat/wip-", "includeTag": "^v", "excludeTag": "-rc",
+			"includeEnvironment": "^prod", "excludeEnvironment": "-old",
+			"labels": []any{"deploy/preview"}, "limit": 10, "semver": ">=1.0.0",
+		},
+		"skip":     map[string]any{"labels": []any{"!deploy/preview"}},
+		"schedule": []any{map[string]any{"cron": "0 * * * *", "timeZone": "Europe/Brussels", "window": "1h"}},
+		"selectors": []any{
+			map[string]any{"name": "bundle", "namespace": "*"},
+			map[string]any{
+				"matchLabels":      map[string]any{"team": "shop"},
+				"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}},
+				"namespace":        "fleet",
+			},
+		},
+	}
+}
+
 // fluxProviderMinimal is the least a fluxcd-provider may author.
 func fluxProviderMinimal() map[string]any {
 	return map[string]any{"type": "slack"}
@@ -308,7 +348,7 @@ func fluxKinds(t *testing.T) []policyFreeKind {
 	// Vacuity guard: the Flux kinds are these, each once. A row dropped from
 	// policyFreeKinds would otherwise take the kind's tests with it, here and
 	// in the tests every policy-free kind shares.
-	want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "fluxcd-receiver", "imagepolicy", "imagerepository", "imageupdateautomation"}
+	want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "fluxcd-receiver", "imagepolicy", "imagerepository", "imageupdateautomation", "resourcesetinputprovider"}
 	got := make([]string, 0, len(kinds))
 	for _, kind := range kinds {
 		got = append(got, kind.component)
@@ -536,6 +576,126 @@ func TestImageRepository_TimeoutIsWrittenWithoutHours(t *testing.T) {
 	}
 }
 
+// TestResourceSetInputProvider_URLIsHeldToAllowedRegistries: the host of a
+// resourcesetinputprovider's `url` is held to the allowed registries, whatever
+// the type: an http(s) url by the host rule of the Flux sources, an oci:// url
+// by the OCI host rule, which wants its registry named explicitly. An unset
+// url names no host, and with no policy, or one that lists no registry,
+// nothing is refused.
+func TestResourceSetInputProvider_URLIsHeldToAllowedRegistries(t *testing.T) {
+	allowing := func(registries ...string) oam.Policy {
+		return esPolicy{stubPolicy: &stubPolicy{allowedRegistries: registries}}
+	}
+	cases := []struct {
+		name, typ, url string
+		policy         oam.Policy
+		refused        string
+	}{
+		{"a Git host that is allowed", "GitHubPullRequest", "https://git.example/shop/fleet", allowing("git.example"), ""},
+		{"another Git host", "GitHubPullRequest", "https://git.other.example/shop/fleet", allowing("git.example"), "source registry"},
+		{"the allowed host on another port", "GitLabBranch", "https://git.example:8443/shop/fleet", allowing("git.example"), "source registry"},
+		{"an ExternalService host that is allowed", "ExternalService", "https://inputs.example/api", allowing("inputs.example"), ""},
+		{"another ExternalService host", "ExternalService", "http://inputs.other.example/api", allowing("inputs.example"), "source registry"},
+		{"a type a later operator version adds", "SomeNewProvider", "https://inputs.other.example", allowing("inputs.example"), "source registry"},
+		{"an OCI registry that is allowed", "OCIArtifactTag", "oci://registry.example/shop/app", allowing("registry.example"), ""},
+		{"another OCI registry", "ACRArtifactTag", "oci://registry.other.example/shop/app", allowing("registry.example"), "source registry"},
+		{"an OCI url whose registry is not explicit", "OCIArtifactTag", "oci://registry/shop/app", allowing("registry"), "does not name its registry explicitly"},
+		{"an OCI url with no repository", "OCIArtifactTag", "oci://registry.example", allowing("registry.example"), "does not name its registry explicitly"},
+		{"a Static provider", "Static", "", allowing("registry.example"), ""},
+		{"a policy that lists no registry", "GitHubPullRequest", "https://git.other.example/shop/fleet", allowing(), ""},
+		{"no policy", "GitHubPullRequest", "https://git.other.example/shop/fleet", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"type": tc.typ}
+			if tc.url != "" {
+				props["url"] = tc.url
+			}
+			cfg, err := (&components.ResourceSetInputProviderHandler{}).ToApplicationConfig(&oam.Component{Name: "inputs", Type: "resourcesetinputprovider", Properties: props}, coreKindNamespace)
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			err = cfg.(policyApplier).ApplyPolicy(tc.policy)
+			if tc.refused == "" {
+				if err != nil {
+					t.Errorf("ApplyPolicy = %v, want no refusal", err)
+				}
+				return
+			}
+			var refusal *oam.PolicyRefusal
+			if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry || !strings.Contains(err.Error(), "resourcesetinputprovider: url") || !strings.Contains(err.Error(), tc.refused) {
+				t.Errorf("ApplyPolicy = %v, want a refusal of class %q of url that says %q", err, oam.RefusalRegistry, tc.refused)
+			}
+		})
+	}
+}
+
+// TestResourceSetInputProvider_RefusesAUserOrPassword: a user or a password in
+// a resourcesetinputprovider's `url` is refused when the component is read, so
+// under every policy and under none, and the refusal does not repeat the
+// value. A token in a path or a query is not something the kind can tell.
+func TestResourceSetInputProvider_RefusesAUserOrPassword(t *testing.T) {
+	const secret = "s3cr3t-token"
+	cases := []struct {
+		name, url, wantErr string
+	}{
+		{"a user and a password in an https url", "https://bot:" + secret + "@git.example/shop/fleet", "resourcesetinputprovider: url must not carry a user or password"},
+		{"a user alone in an oci url", "oci://" + secret + "@registry.example/shop/app", "resourcesetinputprovider: url must not carry a user or password"},
+		{"a url that is no URL", "https://git.example:" + secret, "resourcesetinputprovider: url is not a valid URL"},
+		{"a url with no user", "https://git.example/shop/fleet", ""},
+		{"a token in the query", "https://inputs.example/api?token=" + secret, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"type": "ExternalService", "url": tc.url}
+			_, err := (&components.ResourceSetInputProviderHandler{}).ToApplicationConfig(&oam.Component{Name: "inputs", Type: "resourcesetinputprovider", Properties: props}, coreKindNamespace)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("ToApplicationConfig = %v, want no refusal", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ToApplicationConfig = %v, want an error that says %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("the refusal repeats the credential: %v", err)
+			}
+		})
+	}
+}
+
+// TestResourceSetInputProvider_ScheduleWindowIsCheckedAsAuthored: a
+// schedule's `window` is a duration under a list, held to its pattern by its
+// authored text in every schedule, and written as the type writes it.
+func TestResourceSetInputProvider_ScheduleWindowIsCheckedAsAuthored(t *testing.T) {
+	schedule := func(windows ...string) map[string]any {
+		var items []any
+		for _, w := range windows {
+			items = append(items, map[string]any{"cron": "0 * * * *", "window": w})
+		}
+		return withProperty(resourceSetInputProviderMinimal(), "schedule", items)
+	}
+	_, err := (&components.ResourceSetInputProviderHandler{}).ToApplicationConfig(&oam.Component{Name: "inputs", Type: "resourcesetinputprovider", Properties: schedule("1h", "500us")}, coreKindNamespace)
+	if want := `resourcesetinputprovider: schedule[].window "500us" is invalid: must be a Flux duration`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("a second schedule's window of 500us: err = %v, want %q", err, want)
+	}
+
+	objs, err := fluxKindTransform(fluxKindRow(t, "resourcesetinputprovider"), "flux-system", oam.Component{Name: "inputs", Properties: schedule("90m", "30s")})
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("transform = %d objects, %v; want one", len(objs), err)
+	}
+	spec, _ := policyFreeJSON(t, objs[0])["spec"].(map[string]any)
+	items, _ := spec["schedule"].([]any)
+	var got []any
+	for _, item := range items {
+		got = append(got, item.(map[string]any)["window"])
+	}
+	if want := []any{"1h30m0s", "30s"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the schedules' windows = %v, want %v", got, want)
+	}
+}
+
 // fluxKindRow is the row of the named Flux kind.
 func fluxKindRow(t *testing.T, component string) policyFreeKind {
 	t.Helper()
@@ -592,6 +752,13 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		// An ArtifactGenerator names Flux sources, which are the objects that
 		// hold the addresses and the credentials.
 		"artifactgenerator": {{props: artifactGeneratorFull()}},
+		// A ResourceSetInputProvider reads the Secrets of the provider's
+		// credentials and of its certificates. The ExternalArtifacts its
+		// selectors list are no ConfigMap and no Secret.
+		"resourcesetinputprovider": {
+			{props: resourceSetInputProviderFull(), secrets: []string{"provider-credentials", "provider-tls"}},
+			{props: resourceSetInputProviderMinimal()},
+		},
 	}
 	for _, kind := range fluxKinds(t) {
 		if len(cases[kind.component]) == 0 {

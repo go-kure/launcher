@@ -304,7 +304,7 @@ that synthesis adds are no component's sub-applications and stay undecorated.
 
 Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxNamespace`: the
 `helmrelease`, `fluxcd-kustomization`, Flux source, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
-`imagerepository`, `imageupdateautomation` and `artifactgenerator` kinds) moves its Flux objects there, and a trait
+`imagerepository`, `imageupdateautomation`, `artifactgenerator` and `resourcesetinputprovider` kinds) moves its Flux objects there, and a trait
 sub-application of that component follows only when the Flux object reads it by name from its own
 namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespaceReads`: a
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
@@ -1760,6 +1760,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `replicationdestination` |
 | `replicationsource` |
 | `resourcequota` |
+| `resourcesetinputprovider` |
 | `role` |
 | `rolebinding` |
 | `runtimeclass` |

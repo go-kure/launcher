@@ -15,6 +15,7 @@ import (
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
@@ -584,6 +585,12 @@ var apiSetKinds = []apiSetKind{
 		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS", "syncthing"),
 	},
 	{component: "resourcequota", typ: reflect.TypeFor[corev1.ResourceQuotaSpec](), source: markerAPISource},
+	{
+		component: "resourcesetinputprovider", typ: reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), source: markerAPISource,
+		harmless: map[string]string{
+			"schedule[].window": "the type writes an unauthored window as 0s, which is the API's own default",
+		},
+	},
 	{component: "role", typ: reflect.TypeFor[rbacv1.Role](), source: markerAPISource, skip: objectIdentity},
 	{component: "rolebinding", typ: reflect.TypeFor[rbacv1.RoleBinding](), source: markerAPISource, skip: objectIdentity},
 	{component: "runtimeclass", typ: reflect.TypeFor[nodev1.RuntimeClass](), source: markerAPISource, skip: objectIdentity},
