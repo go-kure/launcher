@@ -1375,9 +1375,9 @@ its text:
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
 - **Missing kinds:** the inventory's `missing` rows (APIService, GRPCRoute among
-  them), and its `trait` rows, the
-  kinds reachable only as traits today (ExternalSecret).
-  The ticket adds them group by group. A kind kure lacks is added to kure first.
+  them). The inventory has no `trait` row left: no kind is reachable only as a trait.
+  The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
+  first.
 
 ---
 
