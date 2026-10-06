@@ -51,10 +51,10 @@ func (h *FluxcdAlertHandler) PropertySchema() map[string]oam.PropertySchema {
 		"eventSeverity": fluxSourceString(spec + "eventSeverity: `info` (every event, the API's default) or `error`."),
 		"eventSources": {
 			Type: oam.PropertyTypeArray, Required: true,
-			Description: "Required. " + spec + "eventSources: the Flux objects whose events are sent. An entry may name another namespace, and with the name `*` every object of a kind there: nothing holds it to the application's own namespace.",
+			Description: "Required. " + spec + "eventSources: the Flux objects whose events are sent. An entry may name another namespace, and with the name `*` every object of a kind there, or with `matchLabels` every one that carries those labels: nothing holds it to the application's own namespace.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
-				Description: "One source of events: `kind` and `name` (`*` for every object of the kind), both required, `apiVersion`, `namespace` and `matchLabels`, which the API documents as needing the name `*`.",
+				Description: "One source of events: `kind` and `name` (`*` for every object of the kind), both required, `apiVersion`, `namespace` and `matchLabels`, which narrows the name `*` to the objects that carry those labels and which the API documents as needing that name.",
 			},
 		},
 		"inclusionList": regexes(spec + "inclusionList: only events whose message matches one of these are sent."),
@@ -79,7 +79,7 @@ var fluxcdAlertKind = &fluxKind[notificationv1beta3.AlertSpec]{
 			"providerRef.name":    "the name of the Provider, in the namespace the Alert lands in",
 			"eventSources":        "the Flux objects whose events are sent",
 			"eventSources[].kind": "the kind of the objects, such as Kustomization or HelmRelease",
-			"eventSources[].name": "the name of the object, or `*` for every object of the kind",
+			"eventSources[].name": "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
 		},
 		build: func(name, namespace string, spec *notificationv1beta3.AlertSpec) client.Object {
 			alert := fluxcd.CreateAlert(name, namespace)
