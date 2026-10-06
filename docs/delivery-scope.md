@@ -1116,7 +1116,11 @@ its text:
     every policy and under the default one; a core Secret is refused where
     `passthrough` refuses it; any other kind passes as it would there, and whether
     the operator writes it at all is the cluster's (the operator's generic-target
-    setting and its RBAC).
+    setting and its RBAC). That is stricter than `passthrough` where the policy
+    would pass the object it read (a claim under a policy with no storage maximum,
+    an autoscaler under one with no replica maximum): here there is nothing to
+    read. An `apiVersion` there that is no API version is refused under every
+    policy, since nothing can write such an object and its kind cannot be read.
   - A trait's ExternalSecret and an `externalsecret` component's are one kind: given
     one name in one namespace they are refused as a collision.
 - **Held: `endpointslice`.** A slice belongs to a Service only through the

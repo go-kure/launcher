@@ -8,6 +8,7 @@ import (
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -381,15 +382,41 @@ var clusterExternalSecretRequired = func() map[string]string {
 }()
 
 // validateExternalSecret holds an ExternalSecret's spec to what its object can
-// carry: see refuseDataGeneratorRef.
+// carry: see validateExternalSecretSpec.
 func validateExternalSecret(spec *esv1.ExternalSecretSpec) error {
-	return refuseDataGeneratorRef(spec, "")
+	return validateExternalSecretSpec(spec, "")
 }
 
 // validateClusterExternalSecret is validateExternalSecret for the spec of the
 // ExternalSecrets a ClusterExternalSecret creates.
 func validateClusterExternalSecret(spec *esv1.ClusterExternalSecretSpec) error {
-	return refuseDataGeneratorRef(&spec.ExternalSecretSpec, "externalSecretSpec.")
+	return validateExternalSecretSpec(&spec.ExternalSecretSpec, "externalSecretSpec.")
+}
+
+// validateExternalSecretSpec is what the two kinds refuse of an
+// ExternalSecret's spec. at prefixes the path.
+func validateExternalSecretSpec(spec *esv1.ExternalSecretSpec, at string) error {
+	if err := refuseDataGeneratorRef(spec, at); err != nil {
+		return err
+	}
+	return refuseManifestAPIVersion(spec, at)
+}
+
+// refuseManifestAPIVersion refuses a target.manifest whose apiVersion is no
+// API version: neither a version nor a group and a version separated by one
+// slash (schema.ParseGroupVersion). No object can be written under such a
+// value, and it names no group: the kind beside it then reads as no kind at
+// all, so neither check of enforceTargetManifest would see a Deployment or a
+// Secret there. The API bounds the field by a minimum length only.
+func refuseManifestAPIVersion(spec *esv1.ExternalSecretSpec, at string) error {
+	manifest := spec.Target.Manifest
+	if manifest == nil {
+		return nil
+	}
+	if _, err := schema.ParseGroupVersion(manifest.APIVersion); err != nil {
+		return errors.Errorf("%starget.manifest.apiVersion: %q is no API version: want a version (v1) or a group and a version (apps/v1)", at, manifest.APIVersion)
+	}
+	return nil
 }
 
 // refuseDataGeneratorRef refuses a generator named as the source of one key of
@@ -435,6 +462,10 @@ func enforceClusterExternalSecretPolicy(spec *esv1.ClusterExternalSecretSpec, p 
 // policy that forbids explicit secrets, and passed under any other. An object
 // of any other kind passes, as it does on passthrough: a ConfigMap, a custom
 // resource.
+//
+// The apiVersion is an API version here: one that is none was refused where the
+// spec was decoded (refuseManifestAPIVersion), since its kind would read as no
+// kind at all to both checks.
 //
 // Whether the operator writes such an object at all is the cluster's: its
 // generic-target setting and the access it was given. at prefixes the path.
