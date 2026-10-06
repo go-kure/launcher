@@ -387,6 +387,9 @@ spec:
 		"parentRefs": []any{map[string]any{"name": "gateway"}},
 		"rules": []any{map[string]any{"backendRefs": []any{
 			map[string]any{"name": "web", "port": 80}}}}}},
+	"imagepolicy": {props: map[string]any{
+		"imageRepositoryRef": map[string]any{"name": "web"},
+		"policy":             map[string]any{"semver": map[string]any{"range": ">=1.0.0"}}}},
 	// An Ingress name is a DNS-1123 subdomain. The object is authored: it runs
 	// no pods and selects none, and its backend is a Service by name.
 	"ingress": {props: map[string]any{"defaultBackend": map[string]any{

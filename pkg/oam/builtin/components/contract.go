@@ -79,6 +79,11 @@ func (h *FluxcdAlertHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *ImagePolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(imagePolicyType)
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *HelmRepositoryHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("helmrepository")
 }
