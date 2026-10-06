@@ -57,6 +57,10 @@ const (
 	limitSchemaCheck         = "the schema check of authored properties"
 	limitPolicyAndGeneration = "what is refused once the policy is applied or at generation"
 	limitDocument            = "what only the document shows"
+	// Provisional, found by review: what the transform refuses of the component
+	// alone after its type's own parse (a member's name, an evaluated value, the
+	// parse of a kind it is lowered into).
+	limitBeyondTheParse = "what the transform refuses of the component after its type's own parse"
 )
 
 // TestEndpoints_DocumentTheBuildRefuses holds every endpoint implementation to
@@ -184,6 +188,24 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			answer: endpointRefused,
 		},
 		{
+			name:       "webservice: a Deployment name that is no name",
+			components: component("webservice", "        image: ghcr.io/example/web:v1.0.0\n        deploymentObjectName: BAD_NAME\n"),
+			stage:      "transform", want: `BAD_NAME`,
+			answer: endpointAnswered, limit: limitBeyondTheParse,
+		},
+		{
+			name:       "webservice: a node selector key that is no label key",
+			components: component("webservice", "        image: ghcr.io/example/web:v1.0.0\n        affinity:\n          nodeSelector:\n            \"bad key!\": x\n"),
+			stage:      "transform", want: `bad key!`,
+			answer: endpointAnswered, limit: limitBeyondTheParse,
+		},
+		{
+			name:       "postgresql: a database with a reserved name",
+			components: component("postgresql", "        databases:\n          - name: postgres\n            owner: app\n"),
+			stage:      "transform", want: `name "postgres": reserved by PostgreSQL`,
+			answer: endpointAnswered, limit: limitBeyondTheParse,
+		},
+		{
 			name:       "service: a port out of range",
 			components: component("service", "        ports:\n          - port: 70000\n"),
 			stage:      "transform", want: `ports[0].port: must be between 1 and 65535, got 70000`,
@@ -229,38 +251,35 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 }
 
 // TestEndpoints_TypesWithAnEntry pins which component types have an endpoint
-// entry: the five the table above holds to the rule. Every other registered
-// type answers no endpoint and no refusal, whatever the component holds, so a
-// type that gains an entry fails here until the table has its rows.
+// entry: the five the table above holds to the rule. It reads the two
+// registries `kurel build` registers its component types from, and asks each
+// handler and rule whether it implements an endpoint interface, so a type that
+// gains an entry fails here until the table has its rows.
 func TestEndpoints_TypesWithAnEntry(t *testing.T) {
-	transformer := newBuiltinTransformer()
 	withEntry := map[string]bool{"webservice": true, "service": true, "postgresql": true, "cnpg-cluster": true, "cnpg-pooler": true}
-	// Every registered component type, by each listing the transformer
-	// publishes: a type that publishes no schema is in the other two.
-	types := map[string]bool{}
-	for typ := range transformer.HandlerSchemas().Components {
-		types[typ] = true
+	registered := map[string]any{}
+	for typ, h := range builtinComponentHandlers() {
+		registered[typ] = h
 	}
-	for typ := range transformer.HandlerContracts().Components {
-		types[typ] = true
-	}
-	for _, typ := range transformer.LowerableTypes().ComponentTypes {
-		types[typ] = true
+	for typ, r := range builtinComponentLoweringRules() {
+		if _, both := registered[typ]; both {
+			t.Errorf("type %q is registered as a handler and as a lowering rule", typ)
+		}
+		registered[typ] = r
 	}
 	// Not vacuous: the types checked include the workload types and the kinds
 	// added last.
 	for _, typ := range []string{"worker", "deployment", "endpointslice", "role", "rolebinding", "clusterrole", "clusterrolebinding"} {
-		if !types[typ] {
+		if _, ok := registered[typ]; !ok {
 			t.Errorf("type %q is not among the registered types this checks", typ)
 		}
 	}
 	found := 0
-	for typ := range types {
-		// A component with no properties: a type with an entry answers an
-		// endpoint or its parse's refusal, one without answers neither.
-		eps, err := transformer.ComponentEndpoints(&oam.Component{Name: "db", Type: typ})
-		if answers := eps != nil || err != nil; answers != withEntry[typ] {
-			t.Errorf("type %q: ComponentEndpoints = %v, %v; has an endpoint entry: want %t", typ, eps, err, withEntry[typ])
+	for typ, v := range registered {
+		_, plain := v.(oam.EndpointProvider)
+		_, named := v.(oam.NamedEndpointProvider)
+		if has := plain || named; has != withEntry[typ] {
+			t.Errorf("type %q (%T): implements an endpoint interface: %t, want %t", typ, v, has, withEntry[typ])
 		}
 		if withEntry[typ] {
 			found++
