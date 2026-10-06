@@ -441,6 +441,8 @@ func TestPVCTwin_SameRefusalsBothWays(t *testing.T) {
 		name  string
 		props map[string]any
 		want  string
+		// wantEnd, when set, is what the refusal must end with.
+		wantEnd string
 	}{
 		{name: "non-string size", props: map[string]any{"size": 5}, want: "properties.size: expected string"},
 		{name: "zero size", props: map[string]any{"size": "0"}, want: "size: must be positive"},
@@ -453,7 +455,13 @@ func TestPVCTwin_SameRefusalsBothWays(t *testing.T) {
 		{name: "read write once pod combined", props: map[string]any{"size": "1Gi", "accessModes": []any{"ReadWriteOncePod", "ReadOnlyMany"}}, want: "cannot be combined with other access modes"},
 		{name: "empty volume mode", props: map[string]any{"size": "1Gi", "volumeMode": ""}, want: "properties.volumeMode: value  not in allowed set"},
 		{name: "unknown volume mode", props: map[string]any{"size": "1Gi", "volumeMode": "Raw"}, want: "properties.volumeMode: value Raw not in allowed set"},
-		{name: "data source", props: map[string]any{"size": "1Gi", "dataSource": map[string]any{"kind": "PersistentVolumeClaim", "name": "golden"}}, want: `properties: unsupported field "dataSource"`},
+		{
+			name: "data source", props: map[string]any{"size": "1Gi", "dataSource": map[string]any{"kind": "PersistentVolumeClaim", "name": "golden"}},
+			want: `properties: unsupported field "dataSource"`,
+			// The kind's reason follows the generic refusal on both paths: the
+			// trait reads a claim through the kind's parser and gives its hint.
+			wantEnd: "); dataSource: not authorable — superseded by dataSourceRef, which the apiserver mirrors back into dataSource when dataSourceRef sets no namespace (and requires dataSource to stay empty when it does); author dataSourceRef instead",
+		},
 		{name: "empty selector", props: map[string]any{"size": "1Gi", "selector": map[string]any{}}, want: "selector: empty selector"},
 		{name: "invalid volume name", props: map[string]any{"size": "1Gi", "volumeName": "PV_Archive"}, want: `volumeName: invalid name "PV_Archive"`},
 		{name: "non-string volume name", props: map[string]any{"size": "1Gi", "volumeName": 7}, want: "properties.volumeName: expected string"},
@@ -470,6 +478,9 @@ func TestPVCTwin_SameRefusalsBothWays(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tc.want) {
 					t.Errorf("viaTrait=%v: error %q does not contain %q\n%s", viaTrait, err, tc.want, stderr)
+				}
+				if !strings.HasSuffix(err.Error(), tc.wantEnd) {
+					t.Errorf("viaTrait=%v: error %q does not end with %q", viaTrait, err, tc.wantEnd)
 				}
 			}
 		})

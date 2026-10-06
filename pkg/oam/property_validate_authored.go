@@ -194,7 +194,7 @@ func (t *Transformer) validateAuthoredComponent(comp *Component) error {
 		return withUnsupportedFieldHint(h, validateAuthoredComponentAgainst(h, comp.Properties, path))
 	}
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
-		return validateAuthoredAgainst(rule, comp.Properties, path)
+		return withUnsupportedFieldHint(rule, validateAuthoredAgainst(rule, comp.Properties, path))
 	}
 	return nil
 }
@@ -213,10 +213,12 @@ func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string
 	return validateAuthoredProperties(withObjectProperties(handler, p.PropertySchema()), props, path)
 }
 
-// unsupportedFieldHinter is implemented by a component handler that adds a
-// hint to the refusal of an undeclared top-level key: the helmchart terminal
-// points a key of the composite that used to carry its name to `helm`. "" adds
-// nothing.
+// unsupportedFieldHinter is implemented by a component handler, a component
+// lowering rule or a trait handler or lowering rule that adds a hint to the
+// refusal of an undeclared top-level key: the helmchart terminal points a key
+// of the composite that used to carry its name to `helm`, and a hand-parsed
+// kind gives the reason it refuses a field of the Kubernetes type it projects.
+// "" adds nothing. A key refused below the top level gets no hint.
 type unsupportedFieldHinter interface {
 	UnsupportedFieldHint(key string) string
 }
@@ -271,11 +273,11 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, 
 	}
 	p, declares := handler.(PropertySchemaProvider)
 	if !declares || len(capabilities) == 0 {
-		return validateAuthoredTraitAgainst(handler, trait.Properties, path)
+		return withUnsupportedFieldHint(handler, validateAuthoredTraitAgainst(handler, trait.Properties, path))
 	}
 	schema := withEngineTraitProperties(p.PropertySchema())
 	if err := validateAuthoredProperties(relaxObjectRequired(schema), trait.Properties, path); err != nil {
-		return err
+		return withUnsupportedFieldHint(handler, err)
 	}
 	// Looked up only after validation, which normalizes what the author wrote: a scope
 	// of a named string type matches its binding here, as it does in Transform.

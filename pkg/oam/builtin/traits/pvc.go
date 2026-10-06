@@ -27,6 +27,13 @@ func (h *PVCHandler) CanHandle(traitType string) bool {
 	return traitType == "pvc"
 }
 
+// UnsupportedFieldHint gives the document check the reason the
+// persistentvolumeclaim kind refuses key with: the trait reads a claim through
+// that kind's parser, so its refusals are the trait's.
+func (h *PVCHandler) UnsupportedFieldHint(key string) string {
+	return (&components.PersistentVolumeClaimHandler{}).UnsupportedFieldHint(key)
+}
+
 // ValidateAndApplyDefaults accepts the pvc storageClassName rendering key and rejects
 // any other key, turning an operator typo into a profile-load error instead of a
 // silent pass-through. The class stays optional/overridable, so pvc is not

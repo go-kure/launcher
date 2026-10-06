@@ -151,7 +151,7 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 // ResourceRequirements.Requests/Limits (no separate "extra" bucket).
 //
 // `claims` (corev1.ResourceRequirements.Claims, Dynamic Resource Allocation) is
-// deliberately not projected: the pinned k8s.io/api@v0.36.3 type carries
+// deliberately not projected: the pinned k8s.io/api@v0.37.1 type carries
 // `+featureGate=DynamicResourceAllocation` on that field (unlike procMount, whose
 // alpha rationale proved false — see parseSecurityContext), and a Claims entry
 // only means anything paired with a PodSpec.ResourceClaims entry. The pod-level
@@ -159,7 +159,9 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 // the container side: a `claims` entry must name a declared pod-level claim, a
 // cross-field check parseResources has no access to today. Left for a
 // follow-up rather than validating a shape that can silently produce an
-// invalid corev1 object.
+// invalid corev1 object. Until then parseResources refuses the key with that
+// reason (resourcesRejectedKeys), so it is not dropped for a caller that
+// skips the document check either.
 // reserved is a required argument (D3); see schemaEnv's doc comment above.
 func schemaResources(reserved bool) oam.PropertySchema {
 	// requests and limits each get their own map so the returned schema shares no
@@ -616,7 +618,9 @@ func schemaSidecars() oam.PropertySchema {
 	}
 }
 
-// schemaAffinity describes the shared `affinity` property (see parseAffinity).
+// schemaAffinity describes the shared `affinity` property (see parseAffinity):
+// a shorthand of the four keys below (affinityShorthandKeys), not a
+// corev1.Affinity, whose fields parseAffinity refuses by name.
 func schemaAffinity() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeObject,

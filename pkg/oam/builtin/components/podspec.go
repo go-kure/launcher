@@ -90,6 +90,13 @@ var podSpecRejectedKeys = map[string]string{
 	"overhead": "overhead: not authorable — the RuntimeClass admission controller (enabled by default) derives it from the RuntimeClass and rejects a pod whose value differs; set runtimeClassName",
 	// corev1.PodSpec.DeprecatedServiceAccount: "Deprecated: Use serviceAccountName instead."
 	"serviceAccount": "serviceAccount: deprecated alias of serviceAccountName; use serviceAccountName",
+	// corev1.PodSpec.EvictionResponders: "+featureGate=EvictionRequestAPI",
+	// alpha since Kubernetes 1.37. The `pod` kind decodes it with the rest of
+	// the PodSpec; no parser here reads it.
+	"evictionResponders": "evictionResponders: not read by this component — alpha upstream, behind the EvictionRequestAPI feature gate",
+	// Read in another shape: buildPodSpec assembles the list from the main
+	// container and the `sidecars` entries.
+	"containers": "containers: not authorable as a list — the main container is the component's own container properties, and a component that takes further containers takes them as sidecars entries",
 }
 
 // parsePodSpec parses the shared pod-level properties (see podSpecPropertyKeys)
@@ -103,19 +110,15 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	var cfg PodSpecConfig
 	ps := &cfg.PodSpec
 
-	// Sorted so the reported error is stable when several rejected keys are
-	// authored at once (map iteration order is randomised).
-	rejected := make([]string, 0, len(podSpecRejectedKeys))
-	for key := range podSpecRejectedKeys {
-		rejected = append(rejected, key)
-	}
-	slices.Sort(rejected)
-	for _, key := range rejected {
-		if _, present := props[key]; present {
-			return PodSpecConfig{}, errors.New(podSpecRejectedKeys[key])
-		}
+	// In key order, so the reported error is stable when several rejected keys
+	// are authored at once (map iteration order is randomised).
+	if err := refusedProperty(props, podSpecRejectedKeys); err != nil {
+		return PodSpecConfig{}, err
 	}
 	if !jobPods {
+		if err := refusedProperty(props, appsPodTemplateRejectedKeys); err != nil {
+			return PodSpecConfig{}, err
+		}
 		for _, key := range podSpecJobOnlyKeys {
 			if _, present := props[key]; present {
 				return PodSpecConfig{}, errors.Errorf("%s: %s", key, podSpecJobOnlyReason)

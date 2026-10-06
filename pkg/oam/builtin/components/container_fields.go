@@ -126,6 +126,18 @@ func withContainerFields(m map[string]oam.PropertySchema) map[string]oam.Propert
 	return m
 }
 
+// parseMainContainerFields is parseContainerFields for a type's main container,
+// whose keys are the type's own top-level properties. It first refuses the
+// corev1.Container fields a main container is not authored with
+// (mainContainerRejectedKeys); an entry's key set is closed by its own parser,
+// and there several of those names are keys of the entry.
+func parseMainContainerFields(props map[string]any) (ContainerFields, error) {
+	if err := refusedProperty(props, mainContainerRejectedKeys); err != nil {
+		return ContainerFields{}, err
+	}
+	return parseContainerFields(props, false)
+}
+
 // parseContainerFields reads the containerFieldKeys from raw: a kind's
 // top-level properties for its main container, or one `initContainers` or
 // `sidecars` entry. Errors name the field only; the caller adds the entry

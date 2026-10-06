@@ -71,6 +71,13 @@ func validateCronSchedule(schedule string) error {
 // CronjobHandler handles OAM cronjob components.
 type CronjobHandler struct{}
 
+// cronJobSpecRejectedKeys are the batchv1.CronJobSpec fields an author may not
+// set on a cronjob component; each maps to the error explaining why
+// (refusedKeys).
+var cronJobSpecRejectedKeys = map[string]string{
+	"jobTemplate": "jobTemplate: not authorable as a whole; the job is projected from the component's own job-level, pod-level and container properties",
+}
+
 // CanHandle returns true for cronjob component type.
 func (h *CronjobHandler) CanHandle(componentType string) bool {
 	return componentType == "cronjob"
@@ -126,6 +133,13 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 
 	props := component.Properties
+
+	// The JobSpec fields the job component refuses, for the same reasons: the
+	// CronJob's job is the same JobSpec. Refused before anything is read out of
+	// props, as there.
+	if err := refusedProperty(props, cronJobSpecRejectedKeys, jobSpecRejectedKeys); err != nil {
+		return nil, err
+	}
 
 	image, ok := props["image"].(string)
 	if !ok {
@@ -293,7 +307,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	} else if present {
 		config.WorkingDir = workingDir
 	}
-	if config.ContainerFields, err = parseContainerFields(props, false); err != nil {
+	if config.ContainerFields, err = parseMainContainerFields(props); err != nil {
 		return nil, err
 	}
 

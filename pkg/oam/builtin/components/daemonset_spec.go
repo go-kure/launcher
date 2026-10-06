@@ -46,6 +46,7 @@ var (
 // each maps to the error explaining why.
 var daemonSetSpecRejectedKeys = map[string]string{
 	"selector": "selector: not authorable; the DaemonSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created",
+	"template": "template: not authorable as a whole; the pod template is projected from the component's own container and pod-level properties",
 }
 
 // parseDaemonSetSpec reads the DaemonSetSpec-level properties. Validation
