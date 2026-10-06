@@ -109,6 +109,7 @@ var coreKindSchemas = []struct {
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
 	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
 	{"fluxcd-alert", reflect.TypeFor[notificationv1beta3.AlertSpec](), &components.FluxcdAlertHandler{}, nil},
+	{"fluxcd-provider", reflect.TypeFor[notificationv1beta3.ProviderSpec](), &components.FluxcdProviderHandler{}, nil},
 	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
 	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},

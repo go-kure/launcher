@@ -167,6 +167,7 @@ reads it.
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
 | `fluxcd-alert` | Alert | Kind-named Flux Alert: the whole `AlertSpec`, strictly decoded; `providerRef` with its `name` and `eventSources`, each with its `kind` and `name`, are required. A source may name the objects of another namespace, and nothing gates it. No environment policy applies — see below. |
 | `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source; what `oci` lowers to beside an `ocirepository` (`OCIRule`, see below). An authored Flux object, not how an application is delivered. |
+| `fluxcd-provider` | Provider | Kind-named Flux Provider: the whole `ProviderSpec`, strictly decoded; `type` is required, and of an authored Secret reference its `name`. A user or a password in `address` or `proxy` is refused under every policy and under none; the hosts of both are written as authored, and nothing gates `serviceAccountName` — see below. |
 | `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
@@ -399,7 +400,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | kind | `imageupdateautomation` | strict decode of `ImageUpdateAutomationSpec` | `sourceRef` with its `kind` and `name` and `interval` must be written, and of an authored `git` its `commit` with the author's `email`: the fields the linked Go source marks required, not held to a CRD. `sourceRef.kind` is defaulted by the API and required here, since the type writes it empty. The source's `namespace` is written as authored, and so is where the automation pushes. `interval` is held to the pattern of a Flux duration. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | kind | `fluxcd-kustomization` | strict decode of `KustomizationSpec` | `oci` lowers onto it. `targetNamespace` is never defaulted. |
 | `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` lowers onto it. |
-| `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | missing | - | - | - |
+| `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | kind | `fluxcd-provider` | strict decode of `ProviderSpec` | `type` must be written, and of an authored `secretRef`, `proxySecretRef` or `certSecretRef` its `name`: the fields the linked Go source marks required, not held to a CRD. `interval` and `timeout` are each held to the pattern of their field; `timeout` takes no `h`, and one of an hour or more is written in minutes. It lands in the Flux namespace when one is set. A user or a password in `address` or `proxy` is refused; no environment policy applies. |
 | `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | missing | - | - | - |
 | `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | held | - | - | Its `resourcesTemplate` is, in the API's words, "a Go template that generates the list of Kubernetes resources to reconcile". The operator renders it on the cluster, so no build sees the objects and none can be held to a rule: the kind would be a way round every rule a policy holds a workload or a Secret to (go-kure/launcher#790). |
 | `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | missing | - | - | - |
@@ -2159,10 +2160,10 @@ type for every field it reads, so an out-of-range `replicas` or
 reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
 go-kure/launcher#512 (see the `postgresql` entry below).
 
-- **fluxcd-alert, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator**
+- **fluxcd-alert, fluxcd-provider, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator**
   (go-kure/launcher#790) are the kind-named projections of objects of the
   Flux APIs beside the sources, the HelmRelease and the Kustomization: a
-  notification.toolkit.fluxcd.io/v1beta3 Alert, an
+  notification.toolkit.fluxcd.io/v1beta3 Alert and Provider, an
   image.toolkit.fluxcd.io/v1 ImagePolicy, ImageRepository and
   ImageUpdateAutomation, and a
   source.extensions.fluxcd.io/v1beta1 ArtifactGenerator. Each is
@@ -2215,6 +2216,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     to another namespace's Flux objects to a receiver its author chose.
     `providerRef` holds a name and no namespace: the Provider is one of the
     namespace the Alert lands in. An Alert names no account.
+  - `fluxcd-provider`: the object makes the notification controller send
+    the events of the Alerts that name it to `address`, which the API calls
+    "the endpoint, in a generic sense, to where alerts are sent" (for some
+    types "a project ID or a namespace"), through `proxy` or the proxy the
+    Secret of `proxySecretRef` holds. Both are hosts outside the cluster
+    unless the receiver runs in it, and launcher writes both as authored.
+    **`serviceAccountName` names the account the controller authenticates
+    as:** in the API's words "the Kubernetes ServiceAccount used to
+    authenticate with cloud provider services through workload identity",
+    for the types `azureeventhub`, `azuredevops` and `googlepubsub`, and
+    only with the controller's `ObjectLevelWorkloadIdentity` feature gate.
+    The field holds a name and no namespace. *Assumption, not read here:* the
+    controller takes the account from the namespace of the Provider, which
+    in the Flux namespace holds the accounts of every application's Flux
+    objects. Launcher writes it as authored and refuses none.
   - `imagepolicy`: `imageRepositoryRef.namespace` names the namespace of
     the ImageRepository whose scanned tags the policy selects from, so an
     ImagePolicy may name the ImageRepository of another namespace and read
@@ -2275,6 +2291,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
     `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
     `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
+  - `fluxcd-provider` (`ProviderSpec`): `type`, `interval` (in the API's
+    words "Deprecated and not used in v1beta3"), `channel`, `username`,
+    `address`, `timeout`, `proxy` (deprecated by the API for
+    `proxySecretRef`), `proxySecretRef`, `secretRef`, `certSecretRef` (each a
+    `name`), `serviceAccountName`, `suspend` and `commitStatusExpr`.
+    **`commitStatusExpr` is a CEL expression the controller evaluates** to
+    the message of a commit status; launcher writes it as authored and does
+    not parse it.
   - `imagepolicy` (`ImagePolicySpec`): `imageRepositoryRef`, `policy`
     (`semver`, `alphabetical`, `numerical`), `filterTags`,
     `digestReflectionPolicy`, `interval` and `suspend`. An authored
@@ -2332,11 +2356,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
     of durations to its type and to the pattern markers of the linked
     source: the `interval` of an ImagePolicy and of an
-    ImageUpdateAutomation, and the `interval` and `timeout` of an
-    ImageRepository; an Alert and an ArtifactGenerator have none.
-    **The `timeout` of an ImageRepository takes no `h`:** its pattern holds
-    the units `ms`, `s` and `m`, so `1h` is refused (`imagerepository:
-    timeout "1h" is invalid: must be a Flux duration (…)`) and `60m` is not.
+    ImageUpdateAutomation, and the `interval` and `timeout` of a Provider
+    and of an ImageRepository; an Alert and an ArtifactGenerator have none.
+    **The `timeout` of a Provider and of an ImageRepository takes no `h`:**
+    its pattern holds the units `ms`, `s` and `m`, so `1h` is refused
+    (`imagerepository: timeout "1h" is invalid: must be a Flux duration
+    (…)`) and `60m` is not.
     Go formats an hour or more with an `h`, which the pattern would refuse
     at apply, so such a timeout is written in minutes (`90m` as `90m0s`),
     as the timeout of a Flux source is (go-kure/launcher#619).
@@ -2348,6 +2373,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   value, and the API server's to refuse.
   - A `fluxcd-alert`: `providerRef` with its `name`, and `eventSources`; of
     each source its `kind` and `name`.
+  - A `fluxcd-provider`: `type`; of an authored `secretRef`,
+    `proxySecretRef` or `certSecretRef` its `name`.
   - An `imagepolicy`: `imageRepositoryRef` with its `name`, and `policy`; of
     a `semver` policy its `range`.
   - An `imagerepository`: `interval`; of an authored `secretRef`,
@@ -2390,6 +2417,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a `policy` that names none of `semver`, `alphabetical` and `numerical`,
     or more than one: the type calls it a union, and no marker holds it to
     one;
+  - of a `fluxcd-provider`, the enumeration of `type`, the lengths of
+    `channel`, `username`, `address` and `proxy`, and the pattern of `proxy`
+    (an `http` or `https` URL); an `address` that does not parse as a URL is
+    written as authored unless it holds an `@` (Policy, below);
   - of an `imagerepository`, the enumeration of `provider`, the length of
     `serviceAccountName`, an `exclusionList` of more than 25 entries, an
     `accessFrom` whose `namespaceSelectors` is authored empty, and whether
@@ -2416,6 +2447,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   dependency bump that adds or rewords one fails there.
   - The types of an Alert, of an ImageRepository and of an
     ImageUpdateAutomation declare none.
+  - A `fluxcd-provider`: `commitStatusExpr` set on a `type` other than
+    `github`, `gitlab`, `gitea`, `bitbucketserver`, `bitbucket` and
+    `azuredevops`. It builds and is refused at apply.
   - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
     and `digestReflectionPolicy: Always` without `interval`. Each builds and
     is refused at apply.
@@ -2431,6 +2465,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **No field of an Alert holds a secret or a host.** The address and the
     credentials are the Provider's. `eventMetadata` is a free map, written to
     the object as authored under a policy that forbids explicit secrets too.
+  - **A user or a password in a Provider's `address` or `proxy` is
+    refused**, under every policy and under none, by the rule that refuses
+    one in an inline chart source's URL (`fluxcd-provider: address must not
+    carry a user or password, which would be written in plain text into the
+    Provider; …`): it would sit in the object in plain text. An `address`
+    that does not parse as a URL is refused only when it holds an `@`, since
+    the API allows a project ID or a namespace there. *Assumption, not read
+    here:* for the webhook types the address itself is the credential and
+    belongs in the Secret `secretRef` names, under an `address` key; the
+    linked type says only that this Secret holds "the authentication
+    credentials". **A token in the path or the query of an address is not
+    something the kind can tell**, and is written as authored. **Not held:**
+    the hosts of `address` and `proxy`: the Provider sends events there and
+    fetches no artifact, so no dimension of the policy speaks of them;
+    `serviceAccountName`. The credentials, the proxy configuration and the
+    certificates of `secretRef`, `proxySecretRef` and `certSecretRef` are
+    Secrets the object names, not values.
   - **No field of an ImagePolicy holds an image, a secret or a host.** The
     image and the credentials of its registry are the ImageRepository's; the
     policy holds the rule by which one of that image's tags is selected.
@@ -2478,19 +2529,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
   a kind reads by name from the namespace it lands in, so that a trait's
   object one of them names moves with it; an Alert, an ImagePolicy and an ArtifactGenerator read
-  none, an ImageRepository reads the Secrets of `secretRef`,
+  none, a Provider and an ImageRepository read the Secrets of `secretRef`,
   `proxySecretRef` and `certSecretRef`, and an ImageUpdateAutomation reads
-  the Secret of `git.commit.signingKey.secretRef`. The ServiceAccount of an
-  ImageRepository's `serviceAccountName` is not reported: the report holds
-  ConfigMaps and Secrets only.
+  the Secret of `git.commit.signingKey.secretRef`. The ServiceAccount of a
+  Provider's or an ImageRepository's `serviceAccountName` is not reported:
+  the report holds ConfigMaps and Secrets only.
 
   **Labels and annotations** are the `labels` and `annotations` properties.
 
   **Not covered.** Whether what is referred to exists (the Provider, the
   objects of a source, the ImageRepository, the GitRepository, the signing
   key's Secret, the sources of an ArtifactGenerator, the Secrets and the
-  ServiceAccount of an ImageRepository), whether the registry of an
-  ImageRepository answers and holds the repository, whether a `filterTags`
+  ServiceAccount of a Provider and of an ImageRepository), whether the
+  registry of an ImageRepository answers and holds the repository, whether
+  the address of a Provider answers, whether a `commitStatusExpr` compiles,
+  whether a `filterTags`
   pattern, a `semver` range, a commit message template or a `pathPattern`
   parses, and whether the cluster serves the API: the
   component builds where the CRD is not installed, and the object is refused
