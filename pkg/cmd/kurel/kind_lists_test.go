@@ -326,7 +326,8 @@ func goListKeys(t *testing.T, file, name string) []string {
 
 // goListLiteral finds the literal: the value of the package-level variable
 // name, or, in the function before the dot, of the variable after it or of the
-// first return where "return" stands there.
+// first return where "return" stands there. A function written inside that
+// function is not read: its returns and variables are its own.
 func goListLiteral(file *ast.File, name string) *ast.CompositeLit {
 	fn, local, inFunc := strings.Cut(name, ".")
 	for _, decl := range file.Decls {
@@ -354,6 +355,8 @@ func goListLiteral(file *ast.File, name string) *ast.CompositeLit {
 					return false
 				}
 				switch n := n.(type) {
+				case *ast.FuncLit:
+					return false
 				case *ast.AssignStmt:
 					if len(n.Lhs) != 1 || len(n.Rhs) != 1 {
 						return true
@@ -546,6 +549,57 @@ func TestKindLists_MarkdownReader(t *testing.T) {
 			}
 			if tt.defect != "" && !strings.Contains(defect, tt.defect) {
 				t.Fatalf("got %q and defect %q, want a defect that names %q", got, defect, tt.defect)
+			}
+		})
+	}
+}
+
+// TestKindLists_GoReader holds the reader of the Go lists to the body of the
+// function it is given: a list in a function written inside it is not read in
+// place of the function's own, and does not stand in for one that is gone.
+func TestKindLists_GoReader(t *testing.T) {
+	const src = `package p
+
+func handlers() map[string]int {
+	_ = func() []string { return []string{"alpha"} }
+	return map[string]int{"b": 1, "a": 2}
+}
+
+func outer() {
+	inner := func() { want := []string{"alpha"}; _ = want }
+	inner()
+	want := []string{"b", "a"}
+	_ = want
+}
+
+func renamed() {
+	inner := func() { want := []string{"alpha"}; _ = want }
+	inner()
+}
+`
+	parsed, err := parser.ParseFile(token.NewFileSet(), "src.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{"handlers.return", []string{"b", "a"}},
+		{"outer.want", []string{"b", "a"}},
+		{"renamed.want", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			if lit := goListLiteral(parsed, tt.name); lit != nil {
+				for _, elt := range lit.Elts {
+					key, _ := goListKey(elt)
+					got = append(got, key)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("read %q, want %q", got, tt.want)
 			}
 		})
 	}
