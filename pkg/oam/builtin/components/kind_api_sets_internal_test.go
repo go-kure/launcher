@@ -312,34 +312,38 @@ var objectIdentity = []string{"kind", "apiVersion", "metadata"}
 // here: the two fields its experimental-channel CRD requires of an external
 // authorization filter are answered with the other Gateway API routes.
 //
-// A new kind joins with one row: its component, the type its properties
-// decode into (skip naming the identity fields of a whole-object type) and
-// its source, crdAPISource where the linked module ships the CRD and
-// markerAPISource where it does not.
+// The rows stand in the order of their component, as sort.Strings gives it
+// (TestKindLists_InOrder, pkg/cmd/kurel). Each row's source says where its two
+// sets are read: the markers of the source for the Prometheus operator's API
+// and the built-in types, the CRDs their modules ship for cert-manager's API,
+// Cilium's, CloudNativePG's and its Barman Cloud plugin's.
+//
+// A new kind joins with one row, at its position: its component, the type its
+// properties decode into (skip naming the identity fields of a whole-object
+// type) and its source, crdAPISource where the linked module ships the CRD
+// and markerAPISource where it does not.
 // TestKindComponents_OmittedRequiredAndWrittenDefaults then names every
 // member of the kind's two sets that has no answer. A refused member also
 // needs build and a document that holds the field, on which the test shows
 // the refusal.
 var apiSetKinds = []apiSetKind{
-	// The Prometheus operator's API, from the markers of its source.
-	{component: "servicemonitor", typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), source: markerAPISource},
-	{component: "podmonitor", typ: reflect.TypeFor[monitoringv1.PodMonitorSpec](), source: markerAPISource},
+	// The Gateway API's infrastructure objects (backendtlspolicy, gateway,
+	// gatewayclass, listenerset, referencegrant) are read from the experimental
+	// channel's CRDs its module ships, which hold every field the Go types do.
+	// TestGatewayKinds_RefusedOmissions holds each refusal to the standard
+	// channel's as well.
 	{
-		component: "prometheus-probe", typ: reflect.TypeFor[monitoringv1.ProbeSpec](), source: markerAPISource,
-		build: handlerBuild(&PrometheusProbeHandler{}, "prometheus-probe"),
+		component: "backendtlspolicy", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
+		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "backendtlspolicies"), "v1"),
+		build:  handlerBuild(&BackendTLSPolicyHandler{}, "backendtlspolicy"),
 		documents: []func() map[string]any{func() map[string]any {
 			return map[string]any{
-				"prober": map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
-				"params": []any{map[string]any{"name": "module", "values": []any{"http_2xx"}}},
+				"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
+				"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"},
 			}
 		}},
-		refused: []string{"params[].name"},
+		refused: []string{"targetRefs"},
 	},
-	{component: "prometheusrule", typ: reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), source: markerAPISource},
-
-	// cert-manager's API, from the CRDs its module ships.
-	{component: "issuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1")},
-	{component: "clusterissuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"clusterissuers.yaml", "v1")},
 	{
 		component: "certificate", typ: reflect.TypeFor[certv1.CertificateSpec](),
 		source: crdAPISource(certManagerModulePath, certManagerCRDs+"certificates.yaml", "v1"),
@@ -352,21 +356,6 @@ var apiSetKinds = []apiSetKind{
 		}},
 		refused: []string{"renewal.windows[].cron", "renewal.windows[].windowDuration"},
 	},
-
-	// VolSync's API, from the CRDs its module ships.
-	// TestVolsyncKinds_AbsentFromCRD shows the refusal of each absent field.
-	{
-		component: "replicationsource", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
-		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationsources.yaml", "v1alpha1"),
-		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS", "syncthing"),
-	},
-	{
-		component: "replicationdestination", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
-		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationdestinations.yaml", "v1alpha1"),
-		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS"),
-	},
-
-	// Cilium's API, from the CRDs its module ships.
 	{
 		component: "cilium-bgpadvertisement", typ: reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
 		source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgpadvertisements.yaml", "v2"),
@@ -390,16 +379,42 @@ var apiSetKinds = []apiSetKind{
 	{component: "cilium-bgpclusterconfig", typ: reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgpclusterconfigs.yaml", "v2")},
 	{component: "cilium-bgpnodeconfigoverride", typ: reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgpnodeconfigoverrides.yaml", "v2")},
 	{component: "cilium-bgppeerconfig", typ: reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumbgppeerconfigs.yaml", "v2")},
-	{component: "cilium-networkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumnetworkpolicies.yaml", "v2")},
-	{component: "cilium-clusterwidenetworkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumclusterwidenetworkpolicies.yaml", "v2")},
 	{component: "cilium-cidrgroup", typ: reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumcidrgroups.yaml", "v2")},
-	{component: "cilium-loadbalancerippool", typ: reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumloadbalancerippools.yaml", "v2")},
+	{component: "cilium-clusterwidenetworkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumclusterwidenetworkpolicies.yaml", "v2")},
 	{component: "cilium-egressgatewaypolicy", typ: reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumegressgatewaypolicies.yaml", "v2")},
+	{component: "cilium-loadbalancerippool", typ: reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumloadbalancerippools.yaml", "v2")},
 	{component: "cilium-localredirectpolicy", typ: reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumlocalredirectpolicies.yaml", "v2")},
+	{component: "cilium-networkpolicy", typ: reflect.TypeFor[ciliumapi.Rule](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumnetworkpolicies.yaml", "v2")},
 	{component: "cilium-nodeconfig", typ: reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), source: crdAPISource(ciliumBGPModulePath, ciliumCRDs+"ciliumnodeconfigs.yaml", "v2")},
-
-	// CloudNativePG's API and its Barman Cloud plugin's, from the CRDs their
-	// modules ship.
+	{component: "clusterissuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"clusterissuers.yaml", "v1")},
+	{component: "clusterrole", typ: reflect.TypeFor[rbacv1.ClusterRole](), source: markerAPISource, skip: objectIdentity},
+	{component: "clusterrolebinding", typ: reflect.TypeFor[rbacv1.ClusterRoleBinding](), source: markerAPISource, skip: objectIdentity},
+	{
+		component: "cnpg-cluster", typ: reflect.TypeFor[cnpgv1.ClusterSpec](),
+		source: crdAPISource(cnpgModulePath, cnpgCRDs+"clusters.yaml", "v1"),
+		build:  handlerBuild(&CnpgClusterHandler{}, "cnpg-cluster"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"projectedVolumeTemplate": map[string]any{"sources": []any{
+				map[string]any{"podCertificate": map[string]any{"signerName": "example.com/workload", "keyType": "ECDSAP384"}},
+			}}}
+		}},
+		refused: []string{
+			"projectedVolumeTemplate.sources[].podCertificate.keyType",
+			"projectedVolumeTemplate.sources[].podCertificate.signerName",
+		},
+		harmless: map[string]string{
+			"instances": "the kind always writes a count of at least one: the authored one, the policy's default, or 1, which is the CRD's own default",
+			"backup.volumeSnapshot.onlineConfiguration": "the type writes {} under an authored volumeSnapshot; the object's default is waitForArchive true and immediateCheckpoint false, and in a {} the CRD fills waitForArchive with the field's own default true, while an absent immediateCheckpoint is false",
+		},
+	},
+	{
+		component: "cnpg-database", typ: reflect.TypeFor[cnpgv1.DatabaseSpec](),
+		source: crdAPISource(cnpgModulePath, cnpgCRDs+"databases.yaml", "v1"),
+		// TestCnpgKindsAlwaysEncodedDefaults_MatchCRD holds the same list to
+		// the same CRD, and the kind refuses an authored empty value.
+		filled: cnpgDatabaseAlwaysEncodedDefaults,
+	},
+	{component: "cnpg-objectstore", typ: reflect.TypeFor[barmanv1.ObjectStoreSpec](), source: crdAPISource(barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml", "v1")},
 	{
 		component: "cnpg-pooler", typ: reflect.TypeFor[cnpgv1.PoolerSpec](),
 		source: crdAPISource(cnpgModulePath, cnpgCRDs+"poolers.yaml", "v1"),
@@ -433,39 +448,15 @@ var apiSetKinds = []apiSetKind{
 			"template.spec.ephemeralContainers[].restartPolicyRules[].exitCodes.operator": "the kind refuses every ephemeral container of the template",
 		},
 	},
-	{
-		component: "cnpg-database", typ: reflect.TypeFor[cnpgv1.DatabaseSpec](),
-		source: crdAPISource(cnpgModulePath, cnpgCRDs+"databases.yaml", "v1"),
-		// TestCnpgKindsAlwaysEncodedDefaults_MatchCRD holds the same list to
-		// the same CRD, and the kind refuses an authored empty value.
-		filled: cnpgDatabaseAlwaysEncodedDefaults,
-	},
-	{component: "cnpg-objectstore", typ: reflect.TypeFor[barmanv1.ObjectStoreSpec](), source: crdAPISource(barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml", "v1")},
-	{
-		component: "cnpg-cluster", typ: reflect.TypeFor[cnpgv1.ClusterSpec](),
-		source: crdAPISource(cnpgModulePath, cnpgCRDs+"clusters.yaml", "v1"),
-		build:  handlerBuild(&CnpgClusterHandler{}, "cnpg-cluster"),
-		documents: []func() map[string]any{func() map[string]any {
-			return map[string]any{"projectedVolumeTemplate": map[string]any{"sources": []any{
-				map[string]any{"podCertificate": map[string]any{"signerName": "example.com/workload", "keyType": "ECDSAP384"}},
-			}}}
-		}},
-		refused: []string{
-			"projectedVolumeTemplate.sources[].podCertificate.keyType",
-			"projectedVolumeTemplate.sources[].podCertificate.signerName",
-		},
-		harmless: map[string]string{
-			"instances": "the kind always writes a count of at least one: the authored one, the policy's default, or 1, which is the CRD's own default",
-			"backup.volumeSnapshot.onlineConfiguration": "the type writes {} under an authored volumeSnapshot; the object's default is waitForArchive true and immediateCheckpoint false, and in a {} the CRD fills waitForArchive with the field's own default true, while an absent immediateCheckpoint is false",
-		},
-	},
-
-	// The Gateway API's infrastructure objects, from the experimental
-	// channel's CRDs its module ships, which hold every field the Go types
-	// do. TestGatewayKinds_RefusedOmissions holds each refusal to the
-	// standard channel's as well.
-	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
+	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
+	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
+	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
+	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
+	{component: "ingress", typ: reflect.TypeFor[networkingv1.IngressSpec](), source: markerAPISource},
+	{component: "ingressclass", typ: reflect.TypeFor[networkingv1.IngressClassSpec](), source: markerAPISource},
+	{component: "issuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1")},
+	{component: "limitrange", typ: reflect.TypeFor[corev1.LimitRangeSpec](), source: markerAPISource},
 	{
 		component: "listenerset", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](),
 		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "listenersets"), "v1"),
@@ -478,45 +469,49 @@ var apiSetKinds = []apiSetKind{
 		}},
 		refused: []string{"listeners", "listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
-	{component: "referencegrant", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "referencegrants"), "v1")},
-	{
-		component: "backendtlspolicy", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
-		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "backendtlspolicies"), "v1"),
-		build:  handlerBuild(&BackendTLSPolicyHandler{}, "backendtlspolicy"),
-		documents: []func() map[string]any{func() map[string]any {
-			return map[string]any{
-				"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "payments"}},
-				"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"},
-			}
-		}},
-		refused: []string{"targetRefs"},
-	},
-
-	// The built-in types, from the markers of their source.
-	{component: "storageclass", typ: reflect.TypeFor[storagev1.StorageClass](), source: markerAPISource, skip: objectIdentity},
-	{component: "volumeattributesclass", typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), source: markerAPISource, skip: objectIdentity},
-	{component: "priorityclass", typ: reflect.TypeFor[schedulingv1.PriorityClass](), source: markerAPISource, skip: objectIdentity},
-	{component: "runtimeclass", typ: reflect.TypeFor[nodev1.RuntimeClass](), source: markerAPISource, skip: objectIdentity},
-	{component: "ingressclass", typ: reflect.TypeFor[networkingv1.IngressClassSpec](), source: markerAPISource},
-	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
-	{component: "servicecidr", typ: reflect.TypeFor[networkingv1.ServiceCIDRSpec](), source: markerAPISource},
-	{component: "poddisruptionbudget", typ: reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), source: markerAPISource},
-	{component: "horizontalpodautoscaler", typ: reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), source: markerAPISource},
-	{component: "ingress", typ: reflect.TypeFor[networkingv1.IngressSpec](), source: markerAPISource},
-	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
-	{component: "limitrange", typ: reflect.TypeFor[corev1.LimitRangeSpec](), source: markerAPISource},
-	{component: "resourcequota", typ: reflect.TypeFor[corev1.ResourceQuotaSpec](), source: markerAPISource},
+	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
 	{component: "persistentvolume", typ: reflect.TypeFor[corev1.PersistentVolumeSpec](), source: markerAPISource},
 	{component: "pod", typ: reflect.TypeFor[corev1.PodSpec](), source: markerAPISource, listed: podSpecOmitted("")},
+	{component: "poddisruptionbudget", typ: reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), source: markerAPISource},
+	{component: "podmonitor", typ: reflect.TypeFor[monitoringv1.PodMonitorSpec](), source: markerAPISource},
 	{component: "podtemplate", typ: reflect.TypeFor[corev1.PodTemplate](), source: markerAPISource, skip: objectIdentity, listed: podSpecOmitted("template.spec.")},
+	{component: "priorityclass", typ: reflect.TypeFor[schedulingv1.PriorityClass](), source: markerAPISource, skip: objectIdentity},
+	{
+		component: "prometheus-probe", typ: reflect.TypeFor[monitoringv1.ProbeSpec](), source: markerAPISource,
+		build: handlerBuild(&PrometheusProbeHandler{}, "prometheus-probe"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{
+				"prober": map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
+				"params": []any{map[string]any{"name": "module", "values": []any{"http_2xx"}}},
+			}
+		}},
+		refused: []string{"params[].name"},
+	},
+	{component: "prometheusrule", typ: reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), source: markerAPISource},
+	{component: "referencegrant", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "referencegrants"), "v1")},
 	{component: "replicaset", typ: reflect.TypeFor[appsv1.ReplicaSetSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "replicationcontroller", typ: reflect.TypeFor[corev1.ReplicationControllerSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
-	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
+	// VolSync's API, from the CRDs its module ships.
+	// TestVolsyncKinds_AbsentFromCRD shows the refusal of each absent field.
+	{
+		component: "replicationdestination", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
+		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationdestinations.yaml", "v1alpha1"),
+		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS"),
+	},
+	{
+		component: "replicationsource", typ: reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
+		source: crdAPISource(volsyncModulePath, volsyncCRDs+"replicationsources.yaml", "v1alpha1"),
+		absent: volsyncAbsentFields("rclone", "restic", "rsyncTLS", "syncthing"),
+	},
+	{component: "resourcequota", typ: reflect.TypeFor[corev1.ResourceQuotaSpec](), source: markerAPISource},
 	{component: "role", typ: reflect.TypeFor[rbacv1.Role](), source: markerAPISource, skip: objectIdentity},
 	{component: "rolebinding", typ: reflect.TypeFor[rbacv1.RoleBinding](), source: markerAPISource, skip: objectIdentity},
-	{component: "clusterrole", typ: reflect.TypeFor[rbacv1.ClusterRole](), source: markerAPISource, skip: objectIdentity},
-	{component: "clusterrolebinding", typ: reflect.TypeFor[rbacv1.ClusterRoleBinding](), source: markerAPISource, skip: objectIdentity},
+	{component: "runtimeclass", typ: reflect.TypeFor[nodev1.RuntimeClass](), source: markerAPISource, skip: objectIdentity},
+	{component: "servicecidr", typ: reflect.TypeFor[networkingv1.ServiceCIDRSpec](), source: markerAPISource},
+	{component: "servicemonitor", typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), source: markerAPISource},
+	{component: "storageclass", typ: reflect.TypeFor[storagev1.StorageClass](), source: markerAPISource, skip: objectIdentity},
+	{component: "volumeattributesclass", typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), source: markerAPISource, skip: objectIdentity},
 }
 
 // editAt replaces the field of props at path, in the first element of each

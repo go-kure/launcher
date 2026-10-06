@@ -40,7 +40,16 @@ import (
 
 // coreKindSchemas lists those components with the upstream spec type each
 // projects. excluded names the json fields of the type the component refuses,
-// each with its reason; every other field is authorable.
+// each with its reason; every other field is authorable. The kinds of the
+// APIs that are not built in are held here too: each projects the top-level
+// fields of its spec type the same way. A kind with no spec type (the four
+// classes of storage, scheduling and node, the four kinds of the RBAC API)
+// names its object's type: the component projects the object, less its
+// identity.
+//
+// The rows stand in the order of their component type, as sort.Strings gives
+// it, and a new kind's row goes at its position: TestKindLists_InOrder
+// (pkg/cmd/kurel) holds it.
 var coreKindSchemas = []struct {
 	component string
 	typ       reflect.Type
@@ -49,35 +58,24 @@ var coreKindSchemas = []struct {
 	}
 	excluded map[string]string
 }{
-	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
-	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
-	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}, nil},
-	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}, nil},
-	{"pod", reflect.TypeFor[corev1.PodSpec](), &components.PodHandler{}, map[string]string{
-		"ephemeralContainers": "a pod cannot be created with ephemeral containers; they are added through its ephemeralcontainers subresource",
-		"priority":            "the Priority admission controller derives it from priorityClassName and rejects a differing value",
-		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
+	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
+	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
+	{"cilium-bgpadvertisement", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](), &components.CiliumBGPAdvertisementHandler{}, nil},
+	{"cilium-bgpclusterconfig", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), &components.CiliumBGPClusterConfigHandler{}, nil},
+	{"cilium-bgpnodeconfigoverride", reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), &components.CiliumBGPNodeConfigOverrideHandler{}, nil},
+	{"cilium-bgppeerconfig", reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), &components.CiliumBGPPeerConfigHandler{}, nil},
+	{"cilium-cidrgroup", reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](), &components.CiliumCIDRGroupHandler{}, nil},
+	// A CiliumClusterwideNetworkPolicy has no spec type either: `spec` and
+	// `specs`, as the CiliumNetworkPolicy.
+	{"cilium-clusterwidenetworkpolicy", reflect.TypeFor[ciliumv2.CiliumClusterwideNetworkPolicy](), &components.CiliumClusterwideNetworkPolicyHandler{}, map[string]string{
+		"kind":       "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
+		"apiVersion": "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
+		"metadata":   "launcher sets the object's name, as on every kind component",
+		"status":     "the Cilium agent writes it",
 	}},
-	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
-	{"replicationcontroller", reflect.TypeFor[corev1.ReplicationControllerSpec](), &components.ReplicationControllerHandler{}, nil},
-	// A PodTemplate has no spec type: the component projects the object, less
-	// its identity.
-	{"podtemplate", reflect.TypeFor[corev1.PodTemplate](), &components.PodTemplateHandler{}, map[string]string{
-		"kind":       "launcher emits a v1 PodTemplate; the object's type is not authored",
-		"apiVersion": "launcher emits a v1 PodTemplate; the object's type is not authored",
-		"metadata":   "launcher sets the object's name and namespace, as on every kind component; the pods' metadata is template.metadata",
-	}},
-	// The four classes below have no spec type either: each projects the
-	// object, less its identity.
-	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
-	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
-	{"priorityclass", reflect.TypeFor[schedulingv1.PriorityClass](), &components.PriorityClassHandler{}, objectIdentityExcluded("a scheduling.k8s.io/v1 PriorityClass")},
-	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},
-	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
-	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
-	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
-	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
-	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
+	{"cilium-egressgatewaypolicy", reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), &components.CiliumEgressGatewayPolicyHandler{}, nil},
+	{"cilium-loadbalancerippool", reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), &components.CiliumLoadBalancerIPPoolHandler{}, nil},
+	{"cilium-localredirectpolicy", reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), &components.CiliumLocalRedirectPolicyHandler{}, nil},
 	// A CiliumNetworkPolicy has no spec type: it holds one rule under `spec` and
 	// a list of them under `specs`, and the component projects those two fields.
 	{"cilium-networkpolicy", reflect.TypeFor[ciliumv2.CiliumNetworkPolicy](), &components.CiliumNetworkPolicyHandler{}, map[string]string{
@@ -86,62 +84,62 @@ var coreKindSchemas = []struct {
 		"metadata":   "launcher sets the object's name and namespace, as on every kind component",
 		"status":     "the Cilium agent writes it",
 	}},
-	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
-	{"poddisruptionbudget", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), &components.PodDisruptionBudgetHandler{}, nil},
-	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
-	// The kinds of the Prometheus operator's API are held here too: each
-	// projects the top-level fields of its spec type the same way.
-	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
-	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, nil},
-	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
-	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
-	// And the kinds of cert-manager's API. An Issuer and a ClusterIssuer share
-	// one spec type.
-	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
-	{"clusterissuer", reflect.TypeFor[certv1.IssuerSpec](), &components.ClusterIssuerHandler{}, nil},
-	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
-	// And the kinds of VolSync's API.
-	{"replicationsource", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), &components.ReplicationSourceHandler{}, nil},
-	{"replicationdestination", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), &components.ReplicationDestinationHandler{}, nil},
-	// So are the kinds of Cilium's BGP control plane.
-	{"cilium-bgpadvertisement", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](), &components.CiliumBGPAdvertisementHandler{}, nil},
-	{"cilium-bgpclusterconfig", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](), &components.CiliumBGPClusterConfigHandler{}, nil},
-	{"cilium-bgpnodeconfigoverride", reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](), &components.CiliumBGPNodeConfigOverrideHandler{}, nil},
-	{"cilium-bgppeerconfig", reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](), &components.CiliumBGPPeerConfigHandler{}, nil},
-	// And five more kinds of Cilium's API, each the projection of its spec type.
-	{"cilium-cidrgroup", reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](), &components.CiliumCIDRGroupHandler{}, nil},
-	{"cilium-loadbalancerippool", reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](), &components.CiliumLoadBalancerIPPoolHandler{}, nil},
-	{"cilium-egressgatewaypolicy", reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](), &components.CiliumEgressGatewayPolicyHandler{}, nil},
-	{"cilium-localredirectpolicy", reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](), &components.CiliumLocalRedirectPolicyHandler{}, nil},
 	{"cilium-nodeconfig", reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](), &components.CiliumNodeConfigHandler{}, nil},
-	// A CiliumClusterwideNetworkPolicy has no spec type either: `spec` and
-	// `specs`, as the CiliumNetworkPolicy above.
-	{"cilium-clusterwidenetworkpolicy", reflect.TypeFor[ciliumv2.CiliumClusterwideNetworkPolicy](), &components.CiliumClusterwideNetworkPolicyHandler{}, map[string]string{
-		"kind":       "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
-		"apiVersion": "launcher emits a cilium.io/v2 CiliumClusterwideNetworkPolicy; the object's type is not authored",
-		"metadata":   "launcher sets the object's name, as on every kind component",
-		"status":     "the Cilium agent writes it",
-	}},
-	// And the Gateway API's infrastructure kinds.
-	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
-	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
-	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
-	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
-	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
+	{"clusterexternalsecret", reflect.TypeFor[esv1.ClusterExternalSecretSpec](), &components.ClusterExternalSecretHandler{}, nil},
+	// A ClusterIssuer and an Issuer share one spec type.
+	{"clusterissuer", reflect.TypeFor[certv1.IssuerSpec](), &components.ClusterIssuerHandler{}, nil},
+	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), &components.ClusterRoleHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRole")},
+	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), &components.ClusterRoleBindingHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRoleBinding")},
+	// A ClusterSecretStore and a SecretStore hold one spec type.
+	{"clustersecretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.ClusterSecretStoreHandler{}, nil},
+	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
 	// An EndpointSlice has no spec type either: the component projects the
 	// object, less its identity.
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
-	// The four kinds of the RBAC API have no spec type either.
+	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
+	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
+	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
+	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
+	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
+	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
+	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
+	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
+	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
+	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
+	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
+	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
+	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}, nil},
+	{"pod", reflect.TypeFor[corev1.PodSpec](), &components.PodHandler{}, map[string]string{
+		"ephemeralContainers": "a pod cannot be created with ephemeral containers; they are added through its ephemeralcontainers subresource",
+		"priority":            "the Priority admission controller derives it from priorityClassName and rejects a differing value",
+		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
+	}},
+	{"poddisruptionbudget", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), &components.PodDisruptionBudgetHandler{}, nil},
+	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, nil},
+	// A PodTemplate has no spec type: the component projects the object, less
+	// its identity.
+	{"podtemplate", reflect.TypeFor[corev1.PodTemplate](), &components.PodTemplateHandler{}, map[string]string{
+		"kind":       "launcher emits a v1 PodTemplate; the object's type is not authored",
+		"apiVersion": "launcher emits a v1 PodTemplate; the object's type is not authored",
+		"metadata":   "launcher sets the object's name and namespace, as on every kind component; the pods' metadata is template.metadata",
+	}},
+	{"priorityclass", reflect.TypeFor[schedulingv1.PriorityClass](), &components.PriorityClassHandler{}, objectIdentityExcluded("a scheduling.k8s.io/v1 PriorityClass")},
+	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
+	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
+	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
+	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
+	{"replicationcontroller", reflect.TypeFor[corev1.ReplicationControllerSpec](), &components.ReplicationControllerHandler{}, nil},
+	{"replicationdestination", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](), &components.ReplicationDestinationHandler{}, nil},
+	{"replicationsource", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](), &components.ReplicationSourceHandler{}, nil},
+	{"resourcequota", reflect.TypeFor[corev1.ResourceQuotaSpec](), &components.ResourceQuotaHandler{}, nil},
 	{"role", reflect.TypeFor[rbacv1.Role](), &components.RoleHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 Role")},
 	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), &components.RoleBindingHandler{}, namespacedObjectIdentityExcluded("a rbac.authorization.k8s.io/v1 RoleBinding")},
-	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), &components.ClusterRoleHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRole")},
-	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), &components.ClusterRoleBindingHandler{}, objectIdentityExcluded("a rbac.authorization.k8s.io/v1 ClusterRoleBinding")},
-	// And the external-secrets kinds. A SecretStore and a ClusterSecretStore hold
-	// one spec type.
+	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},
 	{"secretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.SecretStoreHandler{}, nil},
-	{"clustersecretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.ClusterSecretStoreHandler{}, nil},
-	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
-	{"clusterexternalsecret", reflect.TypeFor[esv1.ClusterExternalSecretSpec](), &components.ClusterExternalSecretHandler{}, nil},
+	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
+	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
+	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
 }
 
 // coreKindHiddenFields names, per component, the Go fields of its type that no
