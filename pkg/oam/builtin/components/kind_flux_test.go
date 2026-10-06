@@ -59,6 +59,49 @@ func fluxAlertFull() map[string]any {
 	}
 }
 
+// fluxReceiverResource is one resource of a fluxcd-receiver, of another
+// namespace, with every field a resource takes.
+func fluxReceiverResource() map[string]any {
+	return map[string]any{
+		"apiVersion":  "source.toolkit.fluxcd.io/v1",
+		"kind":        "GitRepository",
+		"name":        "*",
+		"namespace":   "fleet",
+		"matchLabels": map[string]any{"team": "shop"},
+		"filter":      "res.metadata.name.startsWith('shop-')",
+	}
+}
+
+// fluxReceiverMinimal is the least a fluxcd-receiver may author.
+func fluxReceiverMinimal() map[string]any {
+	return map[string]any{
+		"type":      "github",
+		"resources": []any{map[string]any{"kind": "GitRepository", "name": "fleet"}},
+	}
+}
+
+// fluxReceiverFull sets every field of a ReceiverSpec. It breaks two of the
+// API's expression rules, which tie secretRef and oidcProviders to the type:
+// the kind checks none of them (fluxRulesLeft), so it builds. Its Secret is
+// read from the namespace the object lands in.
+func fluxReceiverFull() map[string]any {
+	return map[string]any{
+		"type":           "generic-oidc",
+		"interval":       "5m",
+		"events":         []any{"push"},
+		"resources":      []any{fluxReceiverResource()},
+		"resourceFilter": "req.ref == 'refs/heads/main'",
+		"secretRef":      map[string]any{"name": "webhook-token"},
+		"oidcProviders": []any{map[string]any{
+			"issuerURL":   "https://token.actions.example",
+			"audience":    "fleet",
+			"variables":   []any{map[string]any{"name": "owner", "expression": "claims.repository_owner"}},
+			"validations": []any{map[string]any{"expression": "vars.owner == 'shop'", "message": "not the shop's repository"}},
+		}},
+		"suspend": true,
+	}
+}
+
 // fluxProviderMinimal is the least a fluxcd-provider may author.
 func fluxProviderMinimal() map[string]any {
 	return map[string]any{"type": "slack"}
@@ -265,7 +308,7 @@ func fluxKinds(t *testing.T) []policyFreeKind {
 	// Vacuity guard: the Flux kinds are these, each once. A row dropped from
 	// policyFreeKinds would otherwise take the kind's tests with it, here and
 	// in the tests every policy-free kind shares.
-	want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "imagepolicy", "imagerepository", "imageupdateautomation"}
+	want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "fluxcd-receiver", "imagepolicy", "imagerepository", "imageupdateautomation"}
 	got := make([]string, 0, len(kinds))
 	for _, kind := range kinds {
 		got = append(got, kind.component)
@@ -379,7 +422,7 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 	}
 	// Vacuity guard: these are the kinds the policy does not reach.
 	slices.Sort(unheld)
-	if want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
+	if want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "fluxcd-receiver", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
 		t.Fatalf("the Flux kinds the policy does not reach are %v, want %v", unheld, want)
 	}
 }
@@ -523,6 +566,12 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		"fluxcd-provider": {
 			{props: fluxProviderFull(), secrets: []string{"provider-token", "provider-proxy", "provider-tls"}},
 			{props: fluxProviderMinimal()},
+		},
+		// A Receiver reads the Secret of the token a request is validated
+		// with.
+		"fluxcd-receiver": {
+			{props: fluxReceiverFull(), secrets: []string{"webhook-token"}},
+			{props: fluxReceiverMinimal()},
 		},
 		// An ImagePolicy names an ImageRepository, which is the object that
 		// holds the credentials of the registry.

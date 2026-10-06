@@ -309,6 +309,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"fluxcd-alert":                    &components.FluxcdAlertHandler{},
 		"fluxcd-kustomization":            &components.FluxcdKustomizationHandler{},
 		"fluxcd-provider":                 &components.FluxcdProviderHandler{},
+		"fluxcd-receiver":                 &components.FluxcdReceiverHandler{},
 		"gateway":                         &components.GatewayHandler{},
 		"gatewayclass":                    &components.GatewayClassHandler{},
 		"gitrepository":                   &components.GitRepositoryHandler{},
