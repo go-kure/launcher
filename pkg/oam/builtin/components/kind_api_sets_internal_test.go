@@ -528,6 +528,7 @@ var apiSetKinds = []apiSetKind{
 	// MetalLB's API, from the CRDs its module ships.
 	{component: "metallb-bfdprofile", typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bfdprofiles.yaml", metallbVersion)},
 	{component: "metallb-bgpadvertisement", typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bgpadvertisements.yaml", metallbVersion)},
+	{component: "metallb-community", typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_communities.yaml", metallbVersion)},
 	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "metallb-l2advertisement", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion)},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},

@@ -88,6 +88,13 @@ var metallbKinds = []struct {
 		crd: "metallb.io_bfdprofiles.yaml", typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
 		required: metallbBFDProfileKind.required,
 	},
+	{
+		// The CRD requires no field of a Community or of an alias, and declares
+		// no rule.
+		component: "metallb-community", handler: &MetalLBCommunityHandler{},
+		crd: "metallb.io_communities.yaml", typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](),
+		required: metallbCommunityKind.required,
+	},
 }
 
 // metallbCheckedRules prepares the CRD in file as the API server serves it,

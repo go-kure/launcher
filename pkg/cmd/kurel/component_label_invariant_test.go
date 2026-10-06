@@ -422,6 +422,9 @@ spec:
 		"ipAddressPools":   []any{"edge"},
 		"peers":            []any{"upstream"},
 		"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
+	// A set of community aliases holds no selector either.
+	"metallb-community": {props: map[string]any{
+		"communities": []any{map[string]any{"name": "no-export", "value": "65535:65281"}}}},
 	"metallb-ipaddresspool": {props: map[string]any{
 		"addresses": []any{"192.0.2.0/24"},
 		"serviceAllocation": map[string]any{"serviceSelectors": []any{

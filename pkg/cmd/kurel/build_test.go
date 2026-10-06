@@ -519,6 +519,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"manifests",
 		"metallb-bfdprofile",
 		"metallb-bgpadvertisement",
+		"metallb-community",
 		"metallb-ipaddresspool",
 		"metallb-l2advertisement",
 		"namespace",

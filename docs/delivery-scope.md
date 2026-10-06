@@ -1265,11 +1265,12 @@ its text:
     §7).
     Breaking for a chart, a `passthrough` component or a `manifests` source that holds
     such a PersistentVolume. The other three kinds have nothing to enforce.
-- **Shipped: four kinds of MetalLB's `metallb.io/v1beta1` API,**
-  `metallb-ipaddresspool`, `metallb-l2advertisement`, `metallb-bgpadvertisement` and
-  `metallb-bfdprofile` (`metallb_ipaddresspool.go`, `metallb_l2advertisement.go`,
-  `metallb_bgpadvertisement.go`, `metallb_bfdprofile.go`, with what the kinds of this
-  API share in `metallb_common.go`), each the strict projection of its spec type, built on
+- **Shipped: five kinds of MetalLB's `metallb.io/v1beta1` API,**
+  `metallb-ipaddresspool`, `metallb-l2advertisement`, `metallb-bgpadvertisement`,
+  `metallb-bfdprofile` and `metallb-community` (`metallb_ipaddresspool.go`,
+  `metallb_l2advertisement.go`, `metallb_bgpadvertisement.go`, `metallb_bfdprofile.go`,
+  `metallb_community.go`, with what the kinds of this API share in
+  `metallb_common.go`), each the strict projection of its spec type, built on
   `policyFreeKind`, declaring its object and taking `objectName`. The type names carry
   the `metallb-` prefix as the kinds of Cilium's API carry theirs: both APIs have a pool
   of addresses and an advertisement for BGP.
@@ -1286,6 +1287,10 @@ its text:
     so how fast the loss of such a peer is noticed. No field of it is required. Every
     field is a pointer, so an authored 0 or false is written; the bounds the CRD sets
     on the numbers are the API server's.
+  - A Community gives names to BGP community values, and a BGP advertisement that
+    names one attaches its value to what it announces. No field of it is required, of
+    the spec or of an alias; the form of a value and a name defined twice are not
+    read.
   - They are namespaced and written in the build namespace. MetalLB reads its objects
     in one namespace and in no other: the one it is configured to watch (its
     `--namespace` flag or `METALLB_NAMESPACE`), by default the one it runs in;
@@ -1297,7 +1302,7 @@ its text:
   - The defaults the CRDs declare are carried: a pool's `autoAssign` and a BGP
     advertisement's two aggregation lengths sit on pointers, and `avoidBuggyIPs`
     defaults to the `false` the Go type omits; a test holds the defaults to that. The
-    CRDs of the L2 advertisement and of the BFD profile have none.
+    CRDs of the L2 advertisement, of the BFD profile and of the Community have none.
   - **The one expression rule these CRDs declare is checked:** a BGP advertisement's
     `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or
     128 (IPv6). A test holds the kind's answer to the API server's, after the defaults

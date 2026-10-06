@@ -188,6 +188,7 @@ reads it.
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
 | `metallb-bfdprofile` | BFDProfile | Kind-named MetalLB BFD profile: the whole `BFDProfileSpec` (`receiveInterval`, `transmitInterval`, `echoInterval`, `detectMultiplier`, `echoMode`, `passiveMode` and `minimumTtl`, none required), strictly decoded. It is the timers of the BFD session of the BGP peers that name it, and so how fast the loss of such a peer is noticed. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-bgpadvertisement` | BGPAdvertisement | Kind-named MetalLB advertisement over BGP: the whole `BGPAdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `peers`, `nodeSelectors`, `serviceSelectors`, `aggregationLength`, `aggregationLengthV6`, `localPref` and `communities`, none required), strictly decoded. It says which pools' addresses MetalLB announces to which BGP peers, for which Services, and with which route attributes; one that authors nothing limits none of them. `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or 128 (IPv6), the CRD's expression rule. Namespaced; no environment policy applies and no capability is required — see below. |
+| `metallb-community` | Community | Kind-named MetalLB Community: the whole `CommunitySpec` (`communities`, a list of aliases of a `name` and a `value`, none required), strictly decoded. It gives names to BGP community values; a BGP advertisement that names one attaches its value to what it announces. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-ipaddresspool` | IPAddressPool | Kind-named MetalLB address pool: the whole `IPAddressPoolSpec` (`addresses`, required, `autoAssign`, `avoidBuggyIPs` and `serviceAllocation`), strictly decoded. It says which Services, in which namespaces, MetalLB gives an address of which range. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-l2advertisement` | L2Advertisement | Kind-named MetalLB advertisement on the local network: the whole `L2AdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `nodeSelectors`, `interfaces` and `serviceSelectors`, none required), strictly decoded. It says which pools' addresses MetalLB announces on the local network, from which nodes and interfaces, for which Services; one that authors nothing limits none of them. Namespaced; no environment policy applies and no capability is required — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are the `labels` property — see below. |
@@ -403,7 +404,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `metallb.CreateBFDProfile` | metallb.io/v1beta1 BFDProfile | kind | `metallb-bfdprofile` | strict decode of `BFDProfileSpec` | The object is named after the component unless `objectName` names it, and a MetalLB BGPPeer refers to it by that name. No field is required. Every field is a pointer, so an authored 0 or false is written; the bounds of the numbers are not checked. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. No capability is required. No environment policy applies. |
 | `metallb.CreateBGPAdvertisement` | metallb.io/v1beta1 BGPAdvertisement | kind | `metallb-bgpadvertisement` | strict decode of `BGPAdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing limits the announcement to no pool, peer, node or Service. A service selector beside an aggregation length other than the API's default is refused, as the CRD's expression rule refuses it. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The communities and the pool and peer names are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateBGPPeer` | metallb.io/v1beta2 BGPPeer | missing | - | - | - |
-| `metallb.CreateCommunity` | metallb.io/v1beta1 Community | missing | - | - | - |
+| `metallb.CreateCommunity` | metallb.io/v1beta1 Community | kind | `metallb-community` | strict decode of `CommunitySpec` | The object is named after the component unless `objectName` names it; a MetalLB BGPAdvertisement refers to an alias by the alias's own `name`, not the object's. No field is required, of the spec or of an alias. The form of a value is not read, and neither is a name defined twice. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. No capability is required. No environment policy applies. |
 | `metallb.CreateConfigurationState` | metallb.io/v1beta1 ConfigurationState | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateIPAddressPool` | metallb.io/v1beta1 IPAddressPool | kind | `metallb-ipaddresspool` | strict decode of `IPAddressPoolSpec` | The object is named after the component unless `objectName` names it, and a MetalLB advertisement refers to it by that name or selects it by its labels, the `labels` property. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The addresses are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateL2Advertisement` | metallb.io/v1beta1 L2Advertisement | kind | `metallb-l2advertisement` | strict decode of `L2AdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing limits the announcement to no pool, node, interface or Service. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The pool and interface names are not read. No capability is required. No environment policy applies. |
@@ -2560,6 +2561,75 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a community alias, a node, a Service). The object's status is MetalLB's
   and is not written: the type has no field in it, and the YAML the library
   writes leaves an empty status out.
+- **metallb-community** (go-kure/launcher#790) is the kind-named projection
+  of a fifth object of MetalLB's `metallb.io/v1beta1` API: a Community. It is
+  built on `policyFreeKind` as the kinds above are and emits that one object,
+  named after the component unless `objectName` names it; the handler adds
+  no label, no annotation and no default of its own.
+
+  **What it changes for others.** A Community defines aliases: each gives a
+  `name` to one BGP community `value`, a standard one of the form
+  `1234:1234` or a large one of the form `large:1234:1234:1234`. On its own
+  it announces nothing. An item of a MetalLB BGPAdvertisement's
+  `communities` may be the name of such an alias, and the advertisement then
+  attaches the alias's value to what the cluster announces to its BGP peers.
+  Routers that receive a route may act on its communities, so the value
+  behind a name bears on how the networks beyond the cluster treat the
+  addresses announced under it.
+
+  **The object is namespaced, and MetalLB reads it in one namespace only**,
+  as it reads a pool: it is written in the build namespace, and a Community
+  of an application built for another namespace than the one MetalLB watches
+  is an object MetalLB does not read. Launcher does not know that namespace
+  and checks nothing of it.
+
+  **No capability is required, and nothing gates the kind**: where MetalLB's
+  CRDs are not installed the component builds, and the object is refused at
+  apply. Whoever may author a component of an application built for MetalLB's
+  namespace may author a Community, and may so define a name an
+  advertisement there already uses. What MetalLB does with a name that two
+  aliases define, in one object or in two, was not read. The open point "No
+  capability gate on component types" on go-kure/launcher#790 carries it.
+
+  **Authored.** The one property is the top-level json field of
+  `CommunitySpec`, `communities`, decoded strictly: an unknown key is
+  refused, in the spec and in an alias. It is not required, and a component
+  that authors none builds, as `spec: {}`.
+  - **No default is filled.** The CRD declares none. The `name` and the
+    `value` of an alias are strings the upstream type leaves out when empty,
+    and the CRD requires neither: an alias authored with an empty one is
+    written without it, and an alias that authors nothing is written as an
+    empty item. `TestMetalLBKinds_NoDefaultIsLost` fails on a default a
+    dependency bump adds to a field that could not carry an authored empty
+    value.
+
+  **Required**: nothing. `TestMetalLBKinds_RequiredMatchCRD` holds that to
+  the linked module's `v1beta1` CRD.
+
+  **The CRD's expression rules.** The CRD declares none;
+  `TestMetalLBKinds_ExpressionRules` fails on one that is added.
+
+  **Not checked**, and MetalLB's or the API server's to refuse:
+  - **MetalLB's validating webhook was not read, and nothing it refuses is
+    repeated here.** An object the CRD's schema takes may still be refused at
+    apply by the webhook MetalLB installs;
+  - the form of a value: one that is neither a standard nor a large
+    community is written as authored;
+  - an alias without a name or without a value, and a name defined twice.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  An advertisement refers to an alias by the alias's `name`, not by the name
+  of the object that holds it.
+
+  **Policy.** No field of the spec is one an `oam.Policy` method speaks to, so
+  `ApplyPolicy` enforces nothing and fills nothing, and the kind builds the
+  same under every policy and under none. No field names a host or an image,
+  and none holds a literal secret or refers to a Secret.
+
+  **Not covered.** Whether an advertisement names an alias, and whether a name
+  an advertisement uses is defined. The object's status is MetalLB's and is
+  not written: the type has no field in it, and the YAML the library writes
+  leaves an empty status out.
 - **metallb-ipaddresspool** (go-kure/launcher#790) is the kind-named
   projection of an object of MetalLB's `metallb.io/v1beta1` API: an
   IPAddressPool. It is built on `policyFreeKind` and emits that one object,
