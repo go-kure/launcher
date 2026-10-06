@@ -417,8 +417,9 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 		owners[e.app] = owner{component: component, entry: e.component.Name}
 		byEntryName[e.component.Name] = component
 		for _, m := range e.members {
+			// A sibling group's members share its name (stampSiblingGroups), so
+			// byEntryName holds them already.
 			owners[m.app] = owner{component: component, entry: m.component.Name}
-			byEntryName[m.component.Name] = component
 		}
 	}
 	for _, e := range order.sources {

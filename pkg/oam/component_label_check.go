@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -200,6 +201,10 @@ func (o *ownedConfig) componentLabelValues() []string {
 // checks do not see it where the other component was itself lowered into
 // entries under other names. owners holds the authored component of every
 // entry after lowering, by the entry's name; "" is the document as a whole.
+//
+// It compares label values, not names: a name over 63 characters is projected
+// onto a shorter value (ComponentLabelValue), and an entry named as that
+// projection carries the same label as the component.
 func checkEntryLabelValues(owners map[string]string, labelKey string) error {
 	if labelKey != appLabelKey {
 		return nil
@@ -216,8 +221,15 @@ func checkEntryLabelValues(owners map[string]string, labelKey string) error {
 			continue
 		}
 		if other, taken := byValue[ComponentLabelValue(entry)]; taken && other != component {
-			return errors.Errorf("component %q: its lowering emitted %q, whose `app` label value %q is the component label of component %q: with the component label key %q the objects of %q would carry the label the NetworkPolicies generated for %q select by; rename one of the two components",
-				component, entry, ComponentLabelValue(entry), other, labelKey, entry, other)
+			return &ComponentLabelError{
+				Refused:   ComponentLabelOfAnotherComponent,
+				Component: component,
+				Key:       labelKey,
+				Value:     ComponentLabelValue(entry),
+				Want:      ComponentLabelValue(component),
+				Entry:     entry,
+				Other:     other,
+			}
 		}
 	}
 	return nil
@@ -256,8 +268,9 @@ func (o *ownedConfig) checkComponentLabel(g generatedObject) error {
 			return errors.Errorf("component label: %s: %s[%q] is a %T, not a string", g.where, h.labelsPath(), o.labelKey, raw)
 		}
 		if !slices.Contains(accepted, got) {
-			return errors.Errorf("%s: %s[%q]: %q is not the component label of component %q (%q): launcher sets that label on everything the component generates, and the NetworkPolicies generated for the component select by it; remove the label, or write that value",
-				g.where, h.labelsPath(), o.labelKey, got, o.component, accepted[0])
+			refusal := o.componentLabelRefusal(g, ComponentLabelForeignValue, h.labelsPath())
+			refusal.Value = got
+			return refusal
 		}
 	}
 	return o.checkWorkloadSelector(g, accepted)
@@ -291,12 +304,132 @@ func (o *ownedConfig) checkWorkloadSelector(g generatedObject, accepted []string
 			if slices.ContainsFunc(required, func(v string) bool { return slices.Contains(accepted, v) }) {
 				continue
 			}
-			return errors.Errorf("%s: %s.selector requires %s for the label %q, not the component label of component %q (%q): launcher sets that label on the pod template, and the NetworkPolicies generated for the component select by it; take the label out of the selector, or require that value",
-				g.where, strings.Join(k.spec, "."), quotedValues(required), o.labelKey, o.component, accepted[0])
+			refusal := o.componentLabelRefusal(g, ComponentLabelSelectorRequiresAnother, strings.Join(k.spec, ".")+".selector")
+			refusal.Required = slices.Clone(required)
+			return refusal
 		}
 	}
 	return nil
 }
+
+// componentLabelRefusal is the refusal of g for the owning component, with what
+// every refusal of an object says. The caller adds the value, or the values a
+// selector requires.
+func (o *ownedConfig) componentLabelRefusal(g generatedObject, refused ComponentLabelRefusal, path string) *ComponentLabelError {
+	return &ComponentLabelError{
+		Refused:   refused,
+		Component: o.component,
+		Kind:      schema.GroupKind{Group: g.group, Kind: g.kind},
+		Namespace: g.obj.GetNamespace(),
+		Name:      g.obj.GetName(),
+		Object:    g.where,
+		Path:      path,
+		Key:       o.labelKey,
+		Want:      ComponentLabelValue(o.component),
+	}
+}
+
+// ComponentLabelError is the refusal of a component label value that is not the
+// component's (go-kure/launcher#790). Refused says which of four it is: a value
+// an object holds, the values a workload's selector requires, the value a kind
+// component's `labels` property holds, or the value the kinds would write for an
+// entry a lowering rule emitted.
+//
+// Generation returns the first two and the transform the other two, each on its
+// own or wrapped, so it is found with errors.As. It answers to
+// ErrComponentLabelValue under errors.Is, which it unwraps to.
+type ComponentLabelError struct {
+	// Refused says what is refused.
+	Refused ComponentLabelRefusal
+	// Component is the component that owns the object, the property or the
+	// entry.
+	Component string
+	// Kind is the object's group and kind: the ones it states, else, for a typed
+	// object of a kind the check reads more than the metadata of, its Go type's.
+	// It is zero for any other typed object that states no kind, and where no
+	// object is refused: for a property and for an entry.
+	Kind schema.GroupKind
+	// Namespace is the object's namespace as it was generated, empty when the
+	// object states none. The text does not print it.
+	Namespace string
+	// Name is the object's name. On a member of a list envelope, Kind, Namespace
+	// and Name are the member's. It is empty for a property and for an entry.
+	Name string
+	// Object is the object as the text names it: `Deployment "web"`, with the Go
+	// type in place of the kind when Kind is zero. It is empty for a property
+	// and for an entry.
+	Object string
+	// Path is where what is refused is held: an object's labels
+	// ("spec.template.metadata.labels") or selector ("spec.selector"), or the
+	// property ("labels"). It is empty for an entry.
+	Path string
+	// Key is the component label's key.
+	Key string
+	// Value is the value refused: the one the object or the property holds under
+	// Key, or the one the kinds would write for the entry. It is empty for a
+	// selector.
+	Value string
+	// Required is the values a selector requires Key to have one of, none of
+	// which is the component's. It is nil otherwise.
+	Required []string
+	// Want is the component label's value for Component.
+	Want string
+	// Entry is the name of the component after lowering whose value is refused,
+	// for an entry; empty otherwise.
+	Entry string
+	// Other is the component whose label value the entry's is, for an entry;
+	// empty otherwise.
+	Other string
+}
+
+// ComponentLabelRefusal says which refusal a ComponentLabelError is.
+type ComponentLabelRefusal string
+
+const (
+	// ComponentLabelForeignValue is an object that holds the component label's
+	// key with a value that is not its component's, in its own labels, a pod
+	// template's, or the metadata an operator hands on to its pods.
+	ComponentLabelForeignValue ComponentLabelRefusal = "foreign value"
+	// ComponentLabelSelectorRequiresAnother is a workload whose own selector
+	// requires, for the component label's key, values none of which is its
+	// component's.
+	ComponentLabelSelectorRequiresAnother ComponentLabelRefusal = "selector requires another value"
+	// ComponentLabelInLabelsProperty is a kind component whose `labels`
+	// property holds the component label's key with a value that is not its
+	// component's. The transform refuses it (withObjectMetadata), before there
+	// is an object to name.
+	ComponentLabelInLabelsProperty ComponentLabelRefusal = "labels property holds a foreign value"
+	// ComponentLabelOfAnotherComponent is an entry a lowering rule emitted for
+	// one component whose `app` label value is another component's, under the
+	// component label key `app`. The transform refuses it.
+	ComponentLabelOfAnotherComponent ComponentLabelRefusal = "entry carries another component's value"
+)
+
+// Error returns the refusal's text, which the document's author reads: what
+// holds the value, whose label it is not, and what to do.
+func (e *ComponentLabelError) Error() string {
+	switch e.Refused {
+	case ComponentLabelSelectorRequiresAnother:
+		return fmt.Sprintf("%s: %s requires %s for the label %q, not the component label of component %q (%q): launcher sets that label on the pod template, and the NetworkPolicies generated for the component select by it; take the label out of the selector, or require that value",
+			e.Object, e.Path, quotedValues(e.Required), e.Key, e.Component, e.Want)
+	case ComponentLabelOfAnotherComponent:
+		return fmt.Sprintf("component %q: its lowering emitted %q, whose `app` label value %q is the component label of component %q: with the component label key %q the objects of %q would carry the label the NetworkPolicies generated for %q select by; rename one of the two components",
+			e.Component, e.Entry, e.Value, e.Other, e.Key, e.Entry, e.Other)
+	default:
+		// A value an object or the property holds: ComponentLabelForeignValue
+		// and ComponentLabelInLabelsProperty.
+		text := fmt.Sprintf("%s[%q]: %q is not the component label of component %q (%q): launcher sets that label on everything the component generates, and the NetworkPolicies generated for the component select by it; remove the label, or write that value",
+			e.Path, e.Key, e.Value, e.Component, e.Want)
+		if e.Refused == ComponentLabelInLabelsProperty {
+			// The property is the component's: there is no object to name.
+			return text
+		}
+		return e.Object + ": " + text
+	}
+}
+
+// Unwrap makes the error answer to ErrComponentLabelValue under errors.Is.
+func (e *ComponentLabelError) Unwrap() error { return ErrComponentLabelValue }
 
 // requiredLabelValues returns the values selector requires the label key to
 // have one of, one set per requirement: a matchLabels entry and each In

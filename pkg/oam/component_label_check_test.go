@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -692,6 +695,128 @@ func TestTransform_ComponentLabelUnderAppKey_EntryNamedAsAnotherComponent(t *tes
 	}
 	if _, err := tr.Transform(document(), TransformContext{}); err != nil {
 		t.Fatalf("Transform under the default key: %v", err)
+	}
+}
+
+// TestComponentLabelError: each refusal of the wrapper and of the entry check is
+// a *ComponentLabelError that answers to ErrComponentLabelValue, and its fields
+// say what its text says, so that a caller reads the component, the object, the
+// path, the key and the value without parsing it. A refusal for another reason
+// is neither. The fourth, of a kind's `labels` property, is held to the same in
+// the components package, which has the kinds.
+func TestComponentLabelError(t *testing.T) {
+	generate := func(reserved *reservedMetadataKeys, obj client.Object) error {
+		inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+		_, err := stack.NewApplication("web", "shop", wrapOwnedConfigReserving(inner, "web", ownershipKey, reserved)).Generate()
+		return err
+	}
+	transform := func() error {
+		app := makeApp("shop",
+			Component{Name: "api", Type: "renamed-parts"},
+			Component{Name: "api-renamed", Type: "renamed-parts"},
+		)
+		app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+		tr := ownershipTransformer()
+		tr.RegisterComponentLowering(renamedPartsRule{})
+		_, err := tr.Transform(app, TransformContext{ComponentLabelKey: "app"})
+		return err
+	}
+
+	for name, tc := range map[string]struct {
+		err  error
+		want ComponentLabelError
+	}{
+		"a value on a typed workload's pod template": {
+			generate(nil, func() client.Object {
+				d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "shop"}}
+				d.Spec.Template.Labels = map[string]string{ownershipKey: "db"}
+				return d
+			}()),
+			ComponentLabelError{
+				Refused: ComponentLabelForeignValue, Component: "web",
+				Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Namespace: "shop", Name: "web",
+				Object: `Deployment "web"`, Path: "spec.template.metadata.labels",
+				Key: ownershipKey, Value: "db", Want: "web",
+			},
+		},
+		// On a list envelope the object is the member, and a namespace it does
+		// not state stays empty.
+		"a value on a List member": {
+			generate(nil, &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "v1", "kind": "List",
+				"items": []any{map[string]any{
+					"apiVersion": "v1", "kind": "ConfigMap",
+					"metadata": map[string]any{"name": "c", "labels": map[string]any{ownershipKey: ""}},
+				}},
+			}}),
+			ComponentLabelError{
+				Refused: ComponentLabelForeignValue, Component: "web",
+				Kind: schema.GroupKind{Kind: "ConfigMap"}, Name: "c",
+				Object: `ConfigMap "c"`, Path: "metadata.labels",
+				Key: ownershipKey, Value: "", Want: "web",
+			},
+		},
+		"a selector that requires other values": {
+			generate(nil, func() client.Object {
+				d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "shop"}}
+				d.Spec.Selector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: ownershipKey, Operator: metav1.LabelSelectorOpIn, Values: []string{"db", "cache"}},
+				}}
+				return d
+			}()),
+			ComponentLabelError{
+				Refused: ComponentLabelSelectorRequiresAnother, Component: "web",
+				Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Namespace: "shop", Name: "web",
+				Object: `Deployment "web"`, Path: "spec.selector",
+				Key: ownershipKey, Required: []string{"db", "cache"}, Want: "web",
+			},
+		},
+		"an entry whose value is another component's": {
+			transform(),
+			ComponentLabelError{
+				Refused: ComponentLabelOfAnotherComponent, Component: "api",
+				Key: "app", Value: "api-renamed", Want: "api",
+				Entry: "api-renamed", Other: "api-renamed",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !errors.Is(tc.err, ErrComponentLabelValue) {
+				t.Fatalf("the refusal %v does not answer to ErrComponentLabelValue", tc.err)
+			}
+			if errors.Is(tc.err, ErrReservedMetadataKey) {
+				t.Errorf("the refusal %v answers to ErrReservedMetadataKey", tc.err)
+			}
+			var got *ComponentLabelError
+			if !errors.As(tc.err, &got) {
+				t.Fatalf("the refusal %v holds no *ComponentLabelError", tc.err)
+			}
+			if !reflect.DeepEqual(*got, tc.want) {
+				t.Errorf("refusal = %+v\nwant      %+v", *got, tc.want)
+			}
+			if !strings.Contains(tc.err.Error(), got.Error()) {
+				t.Errorf("the error %q does not hold the refusal's text %q", tc.err, got)
+			}
+		})
+	}
+
+	for name, err := range map[string]error{
+		"a reserved key": generate(mustReserve(t, reservedForTest...),
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c", Labels: map[string]string{"example.org/tenant": "a"}}}),
+		"a label value that is no string": generate(nil, &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "ConfigMap",
+			"metadata": map[string]any{"name": "c", "labels": map[string]any{ownershipKey: int64(1)}},
+		}}),
+	} {
+		t.Run(name+" is not one", func(t *testing.T) {
+			if err == nil {
+				t.Fatal("Generate accepted the object")
+			}
+			var refusal *ComponentLabelError
+			if errors.Is(err, ErrComponentLabelValue) || errors.As(err, &refusal) {
+				t.Errorf("the refusal %v answers to ErrComponentLabelValue", err)
+			}
+		})
 	}
 }
 

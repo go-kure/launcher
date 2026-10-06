@@ -163,10 +163,13 @@ func withObjectProperties(handler any, schema map[string]PropertySchema) map[str
 //   - a key or value the API server refuses: a label key or value that is none,
 //     an annotation key that is none, annotations over its size limit;
 //   - the `app` label with another value than the component's, which the kinds
-//     that set it select by;
+//     that set it select by; where `app` is the component label's key, as the
+//     component label's refusal;
 //   - the component label with another value than the one launcher gives the
 //     component: the ownership wrapper refuses that value on every object
-//     (checkComponentLabel), and this names the property that holds it.
+//     (checkComponentLabel), and this names the property that holds it. It is
+//     a *ComponentLabelError as the wrapper's is, and answers to
+//     ErrComponentLabelValue.
 func withObjectMetadata(component Component, handler ComponentHandler, labelKey string) (Component, error) {
 	rawLabels, hasLabels := component.Properties[ObjectLabelsProperty]
 	rawAnnotations, hasAnnotations := component.Properties[ObjectAnnotationsProperty]
@@ -211,14 +214,32 @@ func withObjectMetadata(component Component, handler ComponentHandler, labelKey 
 		}
 	}
 	if got, authored := labels[appLabelKey]; authored && got != ComponentLabelValue(component.Name) {
+		if labelKey == appLabelKey {
+			// The `app` label is then the component label, and its refusal
+			// is the component label's.
+			return component, &ComponentLabelError{
+				Refused:   ComponentLabelInLabelsProperty,
+				Component: component.Name,
+				Path:      ObjectLabelsProperty,
+				Key:       appLabelKey,
+				Value:     got,
+				Want:      ComponentLabelValue(component.Name),
+			}
+		}
 		return component, errors.Errorf("%s[%q]: %q is not the `app` label of component %q (%q): the kinds that set that label select by it; remove the label, or write that value",
 			ObjectLabelsProperty, appLabelKey, got, component.Name, ComponentLabelValue(component.Name))
 	}
 	if labelKey != "" {
 		owner := authoredComponent(component)
 		if got, authored := labels[labelKey]; authored && got != ComponentLabelValue(owner) {
-			return component, errors.Errorf("%s[%q]: %q is not the component label of component %q (%q): launcher sets that label on everything the component generates, and the NetworkPolicies generated for the component select by it; remove the label, or write that value",
-				ObjectLabelsProperty, labelKey, got, owner, ComponentLabelValue(owner))
+			return component, &ComponentLabelError{
+				Refused:   ComponentLabelInLabelsProperty,
+				Component: owner,
+				Path:      ObjectLabelsProperty,
+				Key:       labelKey,
+				Value:     got,
+				Want:      ComponentLabelValue(owner),
+			}
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(annotations)) {

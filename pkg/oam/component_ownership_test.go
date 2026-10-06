@@ -1441,11 +1441,18 @@ func TestTransform_ComponentOwnership(t *testing.T) {
 	)
 	ctx := TransformContext{
 		Domain: "launcher.gokure.dev",
-		EgressPeers: map[string][]netpol.EgressPeer{"web": {{
-			Namespace:   "data",
-			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
-			Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
-		}}},
+		EgressPeers: map[string][]netpol.EgressPeer{
+			"web": {{
+				Namespace:   "data",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+				Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+			}},
+			"db": {{
+				Namespace:   "backup",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "store"}},
+				Ports:       []intstr.IntOrString{intstr.FromInt32(9000)},
+			}},
+		},
 		IngressPeers: map[string][]netpol.IngressPeer{"api-part": {{
 			Endpoint: netpol.Endpoint{
 				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "part"}},
@@ -1466,6 +1473,7 @@ func TestTransform_ComponentOwnership(t *testing.T) {
 		"api-settings":                    "api", // a trait a lowering rule forwarded
 		"api-part-allow-endpoint-ingress": "api", // a policy for a lowered part
 		"db":                              "db",  // a sibling group
+		"db-allow-egress-traffic":         "db",  // a policy for a sibling group, whose members share its name
 		"one":                             "one",
 		"two":                             "two",
 		"charts":                          "", // the generated source both share
