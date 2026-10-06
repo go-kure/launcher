@@ -147,8 +147,9 @@ func TestPostgresqlRule_EndpointsForAPoolerNamedLikeItsComponent(t *testing.T) {
 
 // TestKindEndpoints_DirectCallOnAuthoredMetadata: `objectName`, `labels` and
 // `annotations` are read and taken out of a kind component's properties by the
-// transform before it runs the kind's parse, and before it asks the kind's
-// endpoints (Transformer.ComponentEndpoints). A direct call of Endpoints on a
+// transform before it runs the kind's parse. Endpoints are collected on a path
+// of their own (Transformer.ComponentEndpoints), which takes the three out
+// itself before it asks the kind's endpoints. A direct call of Endpoints on a
 // component that still holds one runs the parse on it as a direct call of
 // ToApplicationConfig does, and gives the answer that gives: the two CNPG
 // kinds, whose decode knows no such field, refuse it in the same words, and
