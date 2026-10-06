@@ -1,0 +1,28 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: chat
+      type: fluxcd-provider
+      properties:
+        type: slack
+        channel: releases
+        secretRef:
+          name: slack-webhook
+    - name: status
+      type: fluxcd-provider
+      properties:
+        objectName: commit-status
+        type: github
+        address: https://github.example.com/shop/fleet
+        timeout: 90m
+        secretRef:
+          name: github-token
+        proxySecretRef:
+          name: github-proxy
+        certSecretRef:
+          name: github-tls
+        commitStatusExpr: "(event.involvedObject.kind + '/' + event.involvedObject.name)"

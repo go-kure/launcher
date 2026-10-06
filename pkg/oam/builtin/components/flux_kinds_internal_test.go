@@ -62,6 +62,7 @@ var fluxKindRows = []struct {
 	defaulted map[string]string
 }{
 	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
+	{fluxcdProviderType, reflect.TypeFor[notificationv1beta3.ProviderSpec](), fluxcdProviderKind.required, nil, durationForms(fluxcdProviderKind.durations), fluxcdProviderKind.defaultedZeros.fields},
 	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations), imagePolicyKind.defaultedZeros.fields},
 	{imageRepositoryType, reflect.TypeFor[imagev1.ImageRepositorySpec](), imageRepositoryKind.required, nil, durationForms(imageRepositoryKind.durations), imageRepositoryKind.defaultedZeros.fields},
 	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations), imageUpdateAutomationKind.defaultedZeros.fields},
@@ -88,6 +89,9 @@ const fluxNoCRD = "the linked module ships no CRD, so a check could not be held 
 // TestFluxKinds_ExpressionRules holds the table to the markers of the linked
 // source, in both directions.
 var fluxRulesLeft = map[string]map[string]string{
+	fluxcdProviderType: {
+		"spec: self.type == 'github' || self.type == 'gitlab' || self.type == 'gitea' || self.type == 'bitbucketserver' || self.type == 'bitbucket' || self.type == 'azuredevops' || !has(self.commitStatusExpr)": "a `commitStatusExpr` on a provider of another type than those six builds and is refused at apply: " + fluxNoCRD,
+	},
 	imagePolicyType: {
 		"spec: !has(self.interval) || (has(self.digestReflectionPolicy) && self.digestReflectionPolicy == 'Always')": "an `interval` without `digestReflectionPolicy: Always` builds and is refused at apply: " + fluxNoCRD,
 		"spec: has(self.interval) || !has(self.digestReflectionPolicy) || self.digestReflectionPolicy != 'Always'":   "`digestReflectionPolicy: Always` without an `interval` builds and is refused at apply: " + fluxNoCRD,
@@ -648,6 +652,7 @@ func TestEmitFluxKind(t *testing.T) {
 func TestFluxKinds_UnheldHaveNoEnforce(t *testing.T) {
 	for component, held := range map[string]bool{
 		fluxcdAlertType:           fluxcdAlertKind.enforce != nil,
+		fluxcdProviderType:        fluxcdProviderKind.enforce != nil,
 		imagePolicyType:           imagePolicyKind.enforce != nil,
 		imageUpdateAutomationType: imageUpdateAutomationKind.enforce != nil,
 		artifactGeneratorType:     artifactGeneratorKind.enforce != nil,

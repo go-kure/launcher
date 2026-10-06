@@ -436,6 +436,13 @@ var policyFreeKinds = []policyFreeKind{
 		full:    fluxAlertFull(),
 	},
 	{
+		component: "fluxcd-provider", handler: &components.FluxcdProviderHandler{},
+		gvk: notificationv1beta3.GroupVersion.WithKind(notificationv1beta3.ProviderKind),
+		typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), namespaced: true, flux: true,
+		minimal: fluxProviderMinimal(),
+		full:    fluxProviderFull(),
+	},
+	{
 		component: "gateway", handler: &components.GatewayHandler{},
 		gvk: gatewayGVK("Gateway"),
 		typ: reflect.TypeFor[gatewayv1.GatewaySpec](), namespaced: true,
@@ -1328,6 +1335,9 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.EventSources", ".Spec.EventSources[1].MatchLabels", ".Spec.InclusionList", ".Spec.ExclusionList",
 			".Spec.EventMetadata",
 		},
+		"fluxcd-provider": {
+			".Spec.Interval", ".Spec.Timeout", ".Spec.ProxySecretRef", ".Spec.SecretRef", ".Spec.CertSecretRef",
+		},
 		"gateway": {
 			".Spec.Listeners", ".Spec.Listeners[1].Hostname", ".Spec.Listeners[1].TLS", ".Spec.Listeners[1].TLS.Mode",
 			".Spec.Listeners[1].TLS.CertificateRefs", ".Spec.Listeners[1].TLS.CertificateRefs[1].Namespace",
@@ -2039,6 +2049,24 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"suspend a string", withProperty(fluxAlertMinimal(), "suspend", "yes"), notA},
 			{"null source", fluxAlertWith(map[string]any{"name": "slack"}, fluxAlertSource(), nil), "eventSources[1]"},
 			{"two spellings", withProperty(fluxAlertMinimal(), "ProviderRef", map[string]any{"name": "other"}), "sets the same field as"},
+		},
+		"fluxcd-provider": {
+			{"no properties", nil, ": required"},
+			{"no type", map[string]any{"channel": "releases"}, "type: required"},
+			{"unknown key", withProperty(fluxProviderMinimal(), "token", "s3cr3t"), notA + "notification.toolkit.fluxcd.io/v1beta3 ProviderSpec"},
+			{"the object's spec", map[string]any{"spec": fluxProviderMinimal()}, notA},
+			{"secret sub-key", withProperty(fluxProviderMinimal(), "secretRef", map[string]any{"name": "provider-token", "namespace": "shop"}), notA},
+			{"secret without a name", withProperty(fluxProviderMinimal(), "secretRef", map[string]any{}), "secretRef.name: required"},
+			{"proxy secret without a name", withProperty(fluxProviderMinimal(), "proxySecretRef", map[string]any{}), "proxySecretRef.name: required"},
+			{"certificate secret without a name", withProperty(fluxProviderMinimal(), "certSecretRef", map[string]any{}), "certSecretRef.name: required"},
+			{"suspend a string", withProperty(fluxProviderMinimal(), "suspend", "yes"), notA},
+			{"interval not a duration", withProperty(fluxProviderMinimal(), "interval", "soon"), notA},
+			{"interval in a unit the API refuses", withProperty(fluxProviderMinimal(), "interval", "500us"), `fluxcd-provider: interval "500us" is invalid: must be a Flux duration`},
+			{"timeout in hours, which its pattern does not take", withProperty(fluxProviderMinimal(), "timeout", "1h"), `fluxcd-provider: timeout "1h" is invalid: must be a Flux duration`},
+			{"timeout emitted below a millisecond", withProperty(fluxProviderMinimal(), "Timeout", "0.5ms"), `fluxcd-provider: timeout "0.5ms" is invalid: it would be emitted as "500µs"`},
+			{"a user in the address", withProperty(fluxProviderMinimal(), "address", "https://flux:s3cr3t@hooks.example/notify"), "fluxcd-provider: address must not carry a user or password"},
+			{"a user in the proxy", withProperty(fluxProviderMinimal(), "proxy", "http://flux:s3cr3t@proxy.example:3128"), "fluxcd-provider: proxy must not carry a user or password"},
+			{"two spellings", withProperty(fluxProviderMinimal(), "Type", "msteams"), "sets the same field as"},
 		},
 		"gateway": {
 			{"no properties", nil, ": required"},

@@ -191,6 +191,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"networkingv1.ServiceCIDRSpec":               reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
 	"nodev1.RuntimeClass":                        reflect.TypeFor[nodev1.RuntimeClass](),
 	"notificationv1beta3.AlertSpec":              reflect.TypeFor[notificationv1beta3.AlertSpec](),
+	"notificationv1beta3.ProviderSpec":           reflect.TypeFor[notificationv1beta3.ProviderSpec](),
 	"podTemplateProperties":                      reflect.TypeFor[podTemplateProperties](),
 	"policyv1.PodDisruptionBudgetSpec":           reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](),
 	"rbacv1.ClusterRole":                         reflect.TypeFor[rbacv1.ClusterRole](),

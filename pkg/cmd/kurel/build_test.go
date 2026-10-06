@@ -499,6 +499,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"externalsecret",
 		"fluxcd-alert",
 		"fluxcd-kustomization",
+		"fluxcd-provider",
 		"gateway",
 		"gatewayclass",
 		"gitrepository",

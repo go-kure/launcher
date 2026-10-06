@@ -1,0 +1,31 @@
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  labels:
+    launcher.gokure.dev/component: chat
+  name: chat
+  namespace: default
+spec:
+  channel: releases
+  secretRef:
+    name: slack-webhook
+  type: slack
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  labels:
+    launcher.gokure.dev/component: status
+  name: commit-status
+  namespace: default
+spec:
+  address: https://github.example.com/shop/fleet
+  certSecretRef:
+    name: github-tls
+  commitStatusExpr: (event.involvedObject.kind + '/' + event.involvedObject.name)
+  proxySecretRef:
+    name: github-proxy
+  secretRef:
+    name: github-token
+  timeout: 90m0s
+  type: github

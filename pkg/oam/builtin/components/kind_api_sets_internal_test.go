@@ -474,6 +474,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
 	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), source: markerAPISource},
 	{component: "fluxcd-kustomization", typ: reflect.TypeFor[kustv1.KustomizationSpec](), source: markerAPISource},
+	{component: "fluxcd-provider", typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), source: markerAPISource},
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
 	{component: "gitrepository", typ: reflect.TypeFor[sourcev1.GitRepositorySpec](), source: markerAPISource},

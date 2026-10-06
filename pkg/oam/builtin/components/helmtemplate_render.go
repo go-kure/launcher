@@ -189,12 +189,19 @@ const templateUserinfoRemedy = "; a client-side render takes no credentials"
 // completes the message. No message names the URL, and an unparsable one is
 // refused without url.Parse's error, whose text repeats the whole URL.
 func refuseURLUserinfo(owner, rawURL, remedy string) error {
+	return refuseFieldUserinfo(owner, "source.url", rawURL, remedy)
+}
+
+// refuseFieldUserinfo is refuseURLUserinfo for the URL of the named field: a
+// kind whose object carries a URL verbatim refuses a user or password in it by
+// the same rule and in the same words.
+func refuseFieldUserinfo(owner, field, rawURL, remedy string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return errors.Errorf("%s: source.url is not a valid URL", owner)
+		return errors.Errorf("%s: %s is not a valid URL", owner, field)
 	}
 	if u.User != nil {
-		return errors.Errorf("%s: source.url must not carry a user or password%s", owner, remedy)
+		return errors.Errorf("%s: %s must not carry a user or password%s", owner, field, remedy)
 	}
 	return nil
 }
