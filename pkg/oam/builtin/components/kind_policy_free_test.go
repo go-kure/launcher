@@ -14,6 +14,7 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -435,6 +436,13 @@ var policyFreeKinds = []policyFreeKind{
 		typ:     reflect.TypeFor[gatewayv1.GatewayClassSpec](),
 		minimal: map[string]any{"controllerName": "example.net/gateway-controller"},
 		full:    gatewayClassFull(),
+	},
+	{
+		component: "imagepolicy", handler: &components.ImagePolicyHandler{},
+		gvk: imagev1.GroupVersion.WithKind(imagev1.ImagePolicyKind),
+		typ: reflect.TypeFor[imagev1.ImagePolicySpec](), namespaced: true, flux: true,
+		minimal: imagePolicyMinimal(),
+		full:    imagePolicyFull(),
 	},
 	{
 		component: "ingressclass", handler: &components.IngressClassHandler{},
@@ -1206,6 +1214,10 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.TLS.Frontend.PerPort", ".Spec.TLS.Frontend.PerPort[0].TLS.Validation.CACertificateRefs[0].Namespace",
 		},
 		"gatewayclass": {".Spec.ParametersRef", ".Spec.ParametersRef.Namespace", ".Spec.Description"},
+		"imagepolicy": {
+			".Spec.Policy.SemVer", ".Spec.Policy.Alphabetical", ".Spec.Policy.Numerical", ".Spec.FilterTags",
+			".Spec.Interval",
+		},
 		"ingressclass": {".Spec.Parameters", ".Spec.Parameters.APIGroup"},
 		"issuer":       issuerReaches,
 		"listenerset": {
@@ -1887,6 +1899,23 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"parameters sub-key", map[string]any{"controllerName": "example.net/c", "parametersRef": map[string]any{"group": "", "kind": "ConfigMap", "name": "config", "key": "k"}}, notA},
 			{"description a number", map[string]any{"controllerName": "example.net/c", "description": 1}, notA},
 			{"two spellings", map[string]any{"controllerName": "example.net/c", "ControllerName": "example.net/d"}, "sets the same field as"},
+		},
+		"imagepolicy": {
+			{"no properties", nil, ": required"},
+			{"no repository", map[string]any{"policy": imagePolicySemver()}, "imageRepositoryRef: required"},
+			{"repository without a name", withProperty(imagePolicyMinimal(), "imageRepositoryRef", map[string]any{"namespace": "registry"}), "imageRepositoryRef.name: required"},
+			{"no policy", map[string]any{"imageRepositoryRef": map[string]any{"name": "web"}}, "policy: required"},
+			{"semver without a range", withProperty(imagePolicyMinimal(), "policy", map[string]any{"semver": map[string]any{}}), "policy.semver.range: required"},
+			{"unknown key", withProperty(imagePolicyMinimal(), "imageRepository", "web"), notA + "image.toolkit.fluxcd.io/v1 ImagePolicySpec"},
+			{"the object's spec", map[string]any{"spec": imagePolicyMinimal()}, notA},
+			{"policy sub-key", withProperty(imagePolicyMinimal(), "policy", map[string]any{"latest": map[string]any{}}), notA},
+			{"repository sub-key", withProperty(imagePolicyMinimal(), "imageRepositoryRef", map[string]any{"name": "web", "kind": "ImageRepository"}), notA},
+			{"suspend a string", withProperty(imagePolicyMinimal(), "suspend", "yes"), notA},
+			{"interval not a duration", withProperty(imagePolicyMinimal(), "interval", "soon"), notA},
+			{"interval in a unit the API refuses", withProperty(imagePolicyMinimal(), "interval", "500us"), `imagepolicy: interval "500us" is invalid: must be a Flux duration`},
+			{"interval signed", withProperty(imagePolicyMinimal(), "interval", "-5m"), `imagepolicy: interval "-5m" is invalid: must be a Flux duration`},
+			{"interval emitted below a millisecond", withProperty(imagePolicyMinimal(), "Interval", "0.5ms"), `imagepolicy: interval "0.5ms" is invalid: it would be emitted as "500µs"`},
+			{"two spellings", withProperty(imagePolicyMinimal(), "Policy", imagePolicySemver()), "sets the same field as"},
 		},
 		"ingressclass": {
 			{"no properties", nil, "controller: required"},

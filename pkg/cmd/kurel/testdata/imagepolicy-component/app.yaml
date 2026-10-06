@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: imagepolicy
+      properties:
+        imageRepositoryRef:
+          name: web
+        policy:
+          semver:
+            range: ">=1.0.0"
+    - name: api-main
+      type: imagepolicy
+      properties:
+        objectName: api-main-builds
+        imageRepositoryRef:
+          name: api
+          namespace: registry
+        policy:
+          numerical:
+            order: asc
+        filterTags:
+          pattern: "^main-[a-f0-9]+-(?P<ts>[0-9]+)"
+          extract: "$ts"
+        digestReflectionPolicy: Always
+        interval: 10m

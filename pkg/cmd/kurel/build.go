@@ -316,6 +316,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"helmtemplate":                    &components.HelmTemplateHandler{},
 		"horizontalpodautoscaler":         &components.HorizontalPodAutoscalerHandler{},
 		"httproute":                       &components.HTTPRouteHandler{},
+		"imagepolicy":                     &components.ImagePolicyHandler{},
 		"ingress":                         &components.IngressHandler{},
 		"ingressclass":                    &components.IngressClassHandler{},
 		"issuer":                          &components.IssuerHandler{},

@@ -1,0 +1,33 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: web
+  name: web
+  namespace: default
+spec:
+  imageRepositoryRef:
+    name: web
+  policy:
+    semver:
+      range: '>=1.0.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: api-main
+  name: api-main-builds
+  namespace: default
+spec:
+  digestReflectionPolicy: Always
+  filterTags:
+    extract: $ts
+    pattern: ^main-[a-f0-9]+-(?P<ts>[0-9]+)
+  imageRepositoryRef:
+    name: api
+    namespace: registry
+  interval: 10m0s
+  policy:
+    numerical:
+      order: asc

@@ -25,13 +25,25 @@ type fluxKind[T any] struct {
 	// reads lists the ConfigMaps and Secrets decoded names in the object's own
 	// namespace. Nil for a kind that names none.
 	reads func(decoded *T, r *fluxReads)
+	// durations lists the duration fields of T, each with the form its CRD
+	// pattern takes: an authored value outside it, or one emitted outside it,
+	// is refused, as on the Flux kinds written before this file
+	// (go-kure/launcher#601). Nil for a kind with none.
+	// TestFluxKinds_DurationsMatchMarkers holds the list to the type.
+	durations []fluxDurationField[T]
 }
 
-// config is policyFreeKind.config, returning a config that moves to the Flux
-// namespace.
+// config is policyFreeKind.config and the check of the authored durations,
+// returning a config that moves to the Flux namespace. The durations are
+// checked on the authored text, after the strict decode
+// (checkAuthoredFluxDurations); a config is built here only, so Generate has
+// nothing further to check.
 func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig, error) {
 	cfg, err := k.policyFreeKind.config(component)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkAuthoredFluxDurations(component.Type, component.Properties, k.durations); err != nil {
 		return nil, err
 	}
 	free, ok := cfg.(*policyFreeKindConfig[T])
