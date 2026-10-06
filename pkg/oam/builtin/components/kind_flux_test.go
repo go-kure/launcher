@@ -59,6 +59,32 @@ func fluxAlertFull() map[string]any {
 	}
 }
 
+// fluxProviderMinimal is the least a fluxcd-provider may author.
+func fluxProviderMinimal() map[string]any {
+	return map[string]any{"type": "slack"}
+}
+
+// fluxProviderFull sets every field of a ProviderSpec. Its address and its
+// proxy name hosts no fixture's policy allows, and its three Secrets are read
+// from the namespace the object lands in.
+func fluxProviderFull() map[string]any {
+	return map[string]any{
+		"type":               "github",
+		"interval":           "10m",
+		"channel":            "releases",
+		"username":           "flux",
+		"address":            "https://github.other.example/shop/fleet",
+		"timeout":            "20s",
+		"proxy":              "http://proxy.other.example:3128",
+		"proxySecretRef":     map[string]any{"name": "provider-proxy"},
+		"secretRef":          map[string]any{"name": "provider-token"},
+		"serviceAccountName": "notifier",
+		"certSecretRef":      map[string]any{"name": "provider-tls"},
+		"suspend":            true,
+		"commitStatusExpr":   "(event.involvedObject.kind + '/' + event.involvedObject.name)",
+	}
+}
+
 // imagePolicySemver is the policy of an imagepolicy that selects the highest
 // tag of a semantic version range.
 func imagePolicySemver() map[string]any {
@@ -239,7 +265,7 @@ func fluxKinds(t *testing.T) []policyFreeKind {
 	// Vacuity guard: the Flux kinds are these, each once. A row dropped from
 	// policyFreeKinds would otherwise take the kind's tests with it, here and
 	// in the tests every policy-free kind shares.
-	want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imagerepository", "imageupdateautomation"}
+	want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "imagepolicy", "imagerepository", "imageupdateautomation"}
 	got := make([]string, 0, len(kinds))
 	for _, kind := range kinds {
 		got = append(got, kind.component)
@@ -351,10 +377,53 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 			})
 		}
 	}
-	// Vacuity guard: these four are the kinds the policy does not reach.
+	// Vacuity guard: these are the kinds the policy does not reach.
 	slices.Sort(unheld)
-	if want := []string{"artifactgenerator", "fluxcd-alert", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
+	if want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
 		t.Fatalf("the Flux kinds the policy does not reach are %v, want %v", unheld, want)
+	}
+}
+
+// TestFluxProvider_RefusesAUserOrPassword: a user or a password in a
+// fluxcd-provider's `address` or `proxy` is refused when the component is
+// read, so under every policy and under none, and the refusal does not repeat
+// the value. An address that is no URL is written as authored, and so is a
+// credential in a path or a query, which the kind cannot tell from a path.
+func TestFluxProvider_RefusesAUserOrPassword(t *testing.T) {
+	const secret = "s3cr3t-token"
+	cases := []struct {
+		name, field, value string
+		wantErr            string
+	}{
+		{"a user and a password in the address", "address", "https://bot:" + secret + "@hooks.example/services", "fluxcd-provider: address must not carry a user or password"},
+		{"a user alone in the address", "address", "https://" + secret + "@hooks.example/services", "fluxcd-provider: address must not carry a user or password"},
+		{"an address with an @ that is no URL", "address", "https://bot:" + secret + "%zz@hooks.example", "fluxcd-provider: address holds an @ and is not a valid URL"},
+		{"a user and a password in the proxy", "proxy", "http://bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy must not carry a user or password"},
+		{"a proxy that is no URL", "proxy", "http://proxy.example:" + secret, "fluxcd-provider: proxy is not a valid URL"},
+		{"an address with no user", "address", "https://hooks.example/services", ""},
+		{"a project ID", "address", "shop-fleet", ""},
+		{"a host and a port that parse as no URL", "address", "10.0.0.7:4222", ""},
+		{"a token in the path", "address", "https://hooks.example/services/" + secret, ""},
+		{"a token in the query", "address", "https://hooks.example/notify?token=" + secret, ""},
+		{"a proxy with no user", "proxy", "http://proxy.example:3128", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := withProperty(fluxProviderMinimal(), tc.field, tc.value)
+			_, err := (&components.FluxcdProviderHandler{}).ToApplicationConfig(&oam.Component{Name: "slack", Type: "fluxcd-provider", Properties: props}, coreKindNamespace)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("ToApplicationConfig = %v, want no refusal", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ToApplicationConfig = %v, want an error that says %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("the refusal repeats the credential: %v", err)
+			}
+		})
 	}
 }
 
@@ -449,6 +518,12 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 		// An Alert names a Provider, which is the object that holds the
 		// address and the credentials.
 		"fluxcd-alert": {{props: fluxAlertFull()}},
+		// A Provider reads the Secrets of its credentials, of its proxy and of
+		// its certificates.
+		"fluxcd-provider": {
+			{props: fluxProviderFull(), secrets: []string{"provider-token", "provider-proxy", "provider-tls"}},
+			{props: fluxProviderMinimal()},
+		},
 		// An ImagePolicy names an ImageRepository, which is the object that
 		// holds the credentials of the registry.
 		"imagepolicy": {{props: imagePolicyFull()}},

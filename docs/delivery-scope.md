@@ -876,7 +876,8 @@ its text:
   `kind_inventory_internal_test.go`): a base-library bump that adds a kind fails until the
   table has its row.
 - **Shipped: kinds of the Flux APIs beside the sources, the HelmRelease and the
-  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `imagepolicy`
+  Kustomization,** `fluxcd-alert` (`fluxcd_alert.go`), `fluxcd-provider`
+  (`fluxcd_provider.go`), `imagepolicy`
   (`imagepolicy.go`), `imagerepository` (`imagerepository.go`),
   `imageupdateautomation` (`imageupdateautomation.go`) and
   `artifactgenerator` (`artifactgenerator.go`), with
@@ -884,12 +885,18 @@ its text:
   declaring its object and taking `objectName`. Each is built on `policyFreeKind` with
   two additions. The Flux namespace: the object lands there when one is set, as the
   Flux kinds above do, and reports what it reads there by name (`FluxNamespaceReads`;
-  an Alert, an ImagePolicy and an ArtifactGenerator read nothing, an
-  ImageRepository the Secrets of its credentials, its proxy and its certificates, an
+  an Alert, an ImagePolicy and an ArtifactGenerator read nothing, a Provider and an
+  ImageRepository the Secrets of their credentials, their proxy and their certificates, an
   ImageUpdateAutomation the Secret of its signing key). And its durations, held to the pattern their fields declare as on the
   Flux kinds above (the `interval` of an ImagePolicy and of an ImageUpdateAutomation,
-  the `interval` and the `timeout` of an ImageRepository; that `timeout` takes no `h`,
+  the `interval` and the `timeout` of a Provider and of an ImageRepository; that `timeout` takes no `h`,
   and one of an hour or more is written in minutes).
+  - **A user or a password in a Provider's `address` or `proxy` is refused,** under
+    every policy and under none, by the rule that refuses one in an inline chart
+    source's URL: it would be written in plain text into the object. The hosts of both
+    are written as authored and not held: the Provider sends events there, it fetches
+    no artifact. A token in the path or the query of an address is not something the
+    kind can tell.
   - **One of them is held to the environment policy:** the registry of an
     `imagerepository`'s `image` to the allowed registries, by the rule that holds the
     image of a pod. No tag rule applies, since the field names a repository. Its
