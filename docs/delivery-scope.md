@@ -1428,6 +1428,12 @@ its text:
     as a `configmap` component and trait are. The Secret a `helm` component generates for
     `secretValues` is claimed under role `values-secret`, so a `secret` component under
     that name is refused as a name collision.
+- **Held: `ResourceSet` and `FluxInstance`** (fluxcd.controlplane.io/v1), each with its
+  reason in its inventory row. A ResourceSet's `resourcesTemplate` is a Go template the
+  operator renders on the cluster into the objects it reconciles: no build sees them,
+  so the kind would be a way round every rule a policy holds a workload or a Secret to.
+  A FluxInstance is the installation of Flux itself, under the one name the API accepts
+  (`flux`), not an application's object.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
