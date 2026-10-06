@@ -939,7 +939,9 @@ there it is the authored `clusterObjectName` or the component name. A consumer t
 `ComponentEndpointsNamed(application, comp, naming)` instead, which asks `naming` the same
 `NameRequest` the transform asks for that name, so one pure hook gives the selector the name
 the Pooler or the Cluster gets; an answer that is no valid name for its role is refused there with the
-transform's message.
+transform's message. The names come from the rule's own lowering of the component, so the
+hook is asked every request the transform asks for it: the ObjectStore's and each Database's
+as well.
 `application` is the document's name as the transform puts it in that request: its
 `metadata.name`, or the name it has after lowering where a document rule renames it.
 
@@ -953,11 +955,18 @@ validation; for `webservice`, the rule's parse; for `postgresql`, the
 rule's lowering, which names the Cluster, parses the component and names each member it
 emits. A type with no endpoint entry answers no endpoint and no refusal.
 
-Three things an endpoint entry cannot know, and does not repeat:
+Four things an endpoint entry does not see, and does not repeat:
 
 - the schema check of authored properties (`ValidateAuthoredProperties`), which neither entry
   runs: an undeclared top-level property, or a required one left out, has no endpoint only
   where the type's own parse refuses it too;
+- what the transform refuses of the component after its type's own parse, which an entry
+  that does not run that step does not see. The two rule entries differ here. `webservice`'s
+  runs the rule's parse and not its lowering, so a name or an evaluated field the lowering
+  refuses (a `deploymentObjectName` that is no name, a node selector key that is no label
+  key) still has an endpoint. `postgresql`'s runs its own lowering, so what the lowering
+  refuses has none; what a kind it lowers into refuses of a member (a database named
+  `postgres`, which the Database kind refuses) still has one;
 - what is refused once the policy is applied, or at generation: neither entry is given the
   policy;
 - what only the document shows: a name that is already another component of the document, a

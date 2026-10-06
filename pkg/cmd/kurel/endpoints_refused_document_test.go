@@ -51,16 +51,16 @@ func buildRefusal(t *testing.T, appYAML string, hook func(oam.NameRequest) (stri
 	return "", nil
 }
 
-// The three things an endpoint entry cannot know, each shown by one answered
+// The four things an endpoint entry does not see, each shown by an answered
 // row of TestEndpoints_DocumentTheBuildRefuses.
 const (
-	limitSchemaCheck         = "the schema check of authored properties"
+	limitSchemaCheck = "the schema check of authored properties"
+	// What an entry that does not run the step does not see: what webservice's
+	// lowering refuses after the rule's parse, and what a kind postgresql
+	// lowers into refuses of a member.
+	limitBeyondTheParse      = "what the transform refuses of the component after its type's own parse"
 	limitPolicyAndGeneration = "what is refused once the policy is applied or at generation"
 	limitDocument            = "what only the document shows"
-	// Provisional, found by review: what the transform refuses of the component
-	// alone after its type's own parse (a member's name, an evaluated value, the
-	// parse of a kind it is lowered into).
-	limitBeyondTheParse = "what the transform refuses of the component after its type's own parse"
 )
 
 // TestEndpoints_DocumentTheBuildRefuses holds every endpoint implementation to
@@ -70,7 +70,7 @@ const (
 // with its component db.
 //
 // A row that is endpointAnswered is not a refusal of the type's parse: it names
-// which of the three limits it shows. A new answered row needs one of them.
+// which of the four limits it shows. A new answered row needs one of them.
 func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 	const web = "    - name: web\n      type: webservice\n      properties:\n        image: ghcr.io/example/web:v1.0.0\n"
 	component := func(typ, props string) string {
@@ -86,7 +86,7 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 		answer      endpointAnswer
 		// otherwise is a part of the entry's own refusal, for endpointRefusedOtherwise.
 		otherwise string
-		// limit names which of the three things an endpoint entry cannot know
+		// limit names which of the four things an endpoint entry does not see
 		// an answered row shows; every answered row names one.
 		limit string
 	}{
