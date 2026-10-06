@@ -1992,9 +1992,9 @@ constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that d
 Wrong-type handling for the optional top-level properties go-kure/launcher#405
 moved onto the presence-reporting helpers: `port` on `webservice`, `daemonset`
 and `statefulset` (the latter two have since dropped it, go-kure/launcher#690;
-`parseInt32Field`; on `webservice` both reads of it — the
-conversion and the `Endpoints` declaration — so a wrong type is not declared
-as an endpoint on port 80 either), `topologySpread` on `webservice` and
+`parseInt32Field`; on `webservice` the `Endpoints` declaration runs the
+rule's whole parse, so a wrong type is not declared as an endpoint on port 80
+either, and neither is a component without an `image`), `topologySpread` on `webservice` and
 `worker` and `prune` on `oci` (`parseBoolField`), `serviceName` on
 `statefulset` and `path`, `interval` and `targetNamespace` on `oci`
 (`parseStringField`, so an authored `""` still reads as absent), and
@@ -6404,9 +6404,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   CloudNativePG omits a zero `connectionLimit` from the Cluster and applies its
   default `-1`, so the role would deploy with no limit. A role that must not
   connect sets `login: false` instead. The lowering repeats the refusal for a
-  `PostgresqlConfig` built directly rather than parsed. `Endpoints` reads
-  `pooler.enabled` the same way, so it refuses the wrong type instead of
-  declaring no pooler endpoint.
+  `PostgresqlConfig` built directly rather than parsed. `Endpoints` runs the
+  rule's lowering on the component, so what the lowering refuses of it has no
+  endpoint, in the same words (`pkg/oam`, "Name roles and the `Naming`
+  hook").
   **Two object store paths are required** (go-kure/launcher#790):
   `backup.destinationPath` where another value of `backup` is set
   (`retentionPolicy`, `endpointURL` or `secretName`), and
@@ -6537,15 +6538,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Cluster named apart the two can meet (a `clusterObjectName` of `db-pooler`
   on component `db`): it is refused where the Pooler is built, and where
   endpoints are collected in the same words (`cluster.name "db-pooler": a
-  pooler cannot have the same name as its cluster`). A Pooler named like
-  the `postgresql` component itself (a `poolerName` of `db` on component
-  `db`, or the hook's answer) is a name the document already holds: it is
-  refused by the lowering, and where endpoints are collected in the same
-  words (`pooler: generates component "db", which is already the name of
-  component "db" (type "postgresql") in the document; rename one of them`).
-  One named like another component of the document is refused by the
-  lowering only: endpoints are collected for one component (`pkg/oam`,
-  "Name roles and the `Naming` hook").
+  pooler cannot have the same name as its cluster`). A Pooler or a Database
+  named like the `postgresql` component itself (a `poolerName` of `db` on
+  component `db`, a database's `objectName`, or the hook's answer) is a name
+  the document already holds: it is refused by the lowering, and where
+  endpoints are collected in the same words (`pooler: generates component
+  "db", which is already the name of component "db" (type "postgresql") in
+  the document; rename one of them`). One named like another component of
+  the document is refused by the lowering only: endpoints are collected for
+  one component (`pkg/oam`, "Name roles and the `Naming` hook").
   **CloudNativePG derives the Cluster's Services (`<cluster>-rw`,
   `<cluster>-ro`, `<cluster>-r`) and Secrets (`<cluster>-app` and the others)
   from the Cluster's name, and the default backup path moves with it: the
@@ -6895,7 +6896,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   present, and the operator adds its `pgbouncer` container either way.
   `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
   <component-name>` on port `5432`), byte-identical to `postgresql`'s pooler
-  endpoint for a pooler of that name (`<cluster>-pooler` by default).
+  endpoint for a pooler of that name (`<cluster>-pooler` by default), and
+  only for a component the parse accepts: what `ToApplicationConfig` refuses
+  is refused where endpoints are collected, in the same words (`pgbouncer:
+  required (an empty object selects PgBouncer's defaults)`).
   `cnpg-database` also refuses the names the CRD reserves (`postgres`,
   `template0`, `template1`). The `ensure` of each schema, extension, fdw and
   server has no `omitempty` but a CRD default of `present`, so `Generate` writes

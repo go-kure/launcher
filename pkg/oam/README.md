@@ -939,11 +939,43 @@ there it is the authored `clusterObjectName` or the component name. A consumer t
 `ComponentEndpointsNamed(application, comp, naming)` instead, which asks `naming` the same
 `NameRequest` the transform asks for that name, so one pure hook gives the selector the name
 the Pooler or the Cluster gets; an answer that is no valid name for its role is refused there with the
-transform's message. It is given one component, so what the transform refuses for a reason
-only the document shows (a name that is already a component of the document, or that another
-object of it has) is not seen there.
+transform's message.
 `application` is the document's name as the transform puts it in that request: its
 `metadata.name`, or the name it has after lowering where a document rule renames it.
+
+An endpoint answered by either entry is not the build's verdict on the document. Each is
+given one component, and holds to one rule: **an endpoint entry answers only for a component
+its type's own parse accepts, and refuses another in the parse's words.** The parse is what
+the transform runs on that component alone: for a kind component (`service`, `cnpg-cluster`,
+`cnpg-pooler`), the reading of its `objectName`, `labels` and `annotations` (the component
+label excepted: the entries are given no key to hold it to) and then the kind's decode and
+validation; for `webservice`, the rule's parse; for `postgresql`, the
+rule's lowering, which names the Cluster, parses the component and names each member it
+emits. A type with no endpoint entry answers no endpoint and no refusal.
+
+Three things an endpoint entry cannot know, and does not repeat:
+
+- the schema check of authored properties (`ValidateAuthoredProperties`), which neither entry
+  runs: an undeclared top-level property, or a required one left out, has no endpoint only
+  where the type's own parse refuses it too;
+- what is refused once the policy is applied, or at generation: neither entry is given the
+  policy;
+- what only the document shows: a name that is already another component of the document, a
+  name another component generates in the same run, and two objects of the document that
+  collide. A member `postgresql` emits is held against the name of its own component, which
+  the entry is given, and against no other.
+
+Each of these is refused where the document is built: by the schema check, the transform,
+generation or the in-document collision check. Nothing is built from such an answer, and a
+consumer that needs the document's verdict runs the transform, with the checks before and
+after it.
+
+A direct call of a kind's `Endpoints` runs the kind's parse on the component as it is given,
+as a direct call of its `ToApplicationConfig` does, and gives the answer that gives. For a
+component that still holds `objectName`, `labels` or `annotations`, which the transform
+reads and takes out first: `cnpg-cluster` and `cnpg-pooler`, whose decode knows no such
+field, refuse it in both in the same words; `service`, whose parse reads only the
+properties it knows, accepts it in both.
 
 A name that is not the default (the author's or the hook's) must be a DNS-1123 subdomain of
 at most 253 characters, and is used as given or refused, never shortened. The `pooler` role is
