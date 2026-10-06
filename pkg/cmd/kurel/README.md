@@ -105,99 +105,71 @@ registered in both `builtinTraitHandlers()` and `pkg/oam`'s trait allowlist;
 `helm_secret_values_test.go` builds it authored and as the `helm` component's
 `secretValues` lowering. Fixtures with the same names
 build each one, and the `pvc-volume-claimname` fixture mounts a
-`persistentvolumeclaim` through a `pvc` volume's `claimName`. The kind
-components `namespace`, `limitrange`, `resourcequota`, `persistentvolume`,
-`pod`, `replicaset`, `replicationcontroller`, `podtemplate`, `ingress`,
-`httproute`, `networkpolicy`, `cilium-networkpolicy` and `secret`
-(go-kure/launcher#790) are registered the same way; the `<type>-component`
-fixtures build each but `secret`. The `secret` kind is the `secret` trait's
-twin: it emits the same Secret from the same properties, under the component's
-name, and is refused under a policy that forbids explicit secrets. It has no
-fixture, which would be a Secret manifest with entries; `secret_twin_test.go`
-builds it through `kurel build` instead. The
-`ingress` and `httproute` kinds emit the authored object and, unlike the traits
-of the same names, no NetworkPolicy allow rule. The `networkpolicy` kind emits
-the authored spec and, unlike the trait of the same name, selects every pod of
-the namespace when no `podSelector` is written. The `cilium-networkpolicy` kind
-emits the authored `spec` and `specs` and refuses a policy Cilium would reject
-when it reads it. The `pod` kind emits the authored spec and the `app`
-label, the `replicaset` and `replicationcontroller` kinds the authored spec
-with the `app` label on the pod template, and the `podtemplate` kind the
-authored template with no `app` label; none of them is one of the five pod
-kinds named below. The cluster-scoped kind components `storageclass`,
-`volumeattributesclass`, `priorityclass`, `runtimeclass`, `ingressclass` and
-`csidriver` (go-kure/launcher#790) are registered the same way, with a
-`<type>-component` fixture each; each emits one object, named after the
-component unless `objectName` names it, with no namespace. The kind components
-`servicecidr`, `poddisruptionbudget` and `horizontalpodautoscaler`
-(go-kure/launcher#790) are registered the same way, with a `<type>-component`
-fixture each: a ServiceCIDR with no namespace, and a PodDisruptionBudget and a
-HorizontalPodAutoscaler in the build namespace, each holding what was authored.
-The kind components of the Prometheus operator's API, `servicemonitor`,
-`podmonitor`, `prometheus-probe` and `prometheusrule` (go-kure/launcher#790),
-are registered the same way, with a `<type>-component` fixture each: a
-ServiceMonitor, a PodMonitor, a Probe and a PrometheusRule in the build
-namespace. No capability is required of the cluster profile to build them.
-The kind components of cert-manager's API, `issuer`, `clusterissuer` and
-`certificate` (go-kure/launcher#790), are registered the same way, with a
-`<type>-component` fixture each: an Issuer and a Certificate in the build
-namespace, and a ClusterIssuer with no namespace. No capability is required
-of the cluster profile to build them either; the `certificate` trait, which
-shares the kind's name, still requires its own.
-The kind components of Cilium's BGP control plane, `cilium-bgpadvertisement`,
-`cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride` and
-`cilium-bgppeerconfig` (go-kure/launcher#790), are registered the same way,
-with a `<type>-component` fixture each: a CiliumBGPAdvertisement, a
-CiliumBGPClusterConfig, a CiliumBGPNodeConfigOverride and a
-CiliumBGPPeerConfig with no namespace. No capability is required to build
-them either.
-Five more kind components of Cilium's API, `cilium-cidrgroup`,
-`cilium-loadbalancerippool`, `cilium-egressgatewaypolicy`,
-`cilium-localredirectpolicy` and `cilium-nodeconfig` (go-kure/launcher#790),
-are registered the same way, with a `<type>-component` fixture each: a
-CiliumCIDRGroup, a CiliumLoadBalancerIPPool and a CiliumEgressGatewayPolicy
-with no namespace, and a CiliumLocalRedirectPolicy and a CiliumNodeConfig in
-the build namespace. No capability is required to build them.
-The `cilium-clusterwidenetworkpolicy` kind component (go-kure/launcher#790) is
-registered the same way, with a `cilium-clusterwidenetworkpolicy-component`
-fixture: two CiliumClusterwideNetworkPolicy objects with no namespace, one
-with a rule for nodes under `spec`, one named by `objectName` with two rules
-for endpoints under `specs`. No capability is required to build it.
-The kind components of the Gateway API's infrastructure objects,
-`gatewayclass`, `gateway`, `listenerset`, `referencegrant` and
-`backendtlspolicy` (go-kure/launcher#790), are registered the same way, with a
-`<type>-component` fixture each: a GatewayClass with no namespace, and a
-Gateway, a ListenerSet, a ReferenceGrant and a BackendTLSPolicy in the build
-namespace. No capability is required of the cluster profile to build them.
-The `endpointslice` kind component (go-kure/launcher#790) is registered the
-same way, with an `endpointslice-component` fixture: a Service named by
-`objectName`, an EndpointSlice in the build namespace whose authored
-`kubernetes.io/service-name` label holds that name as a literal, and a slice
-that authors only its address type.
-The `role`, `rolebinding`, `clusterrole` and `clusterrolebinding` kind
-components (go-kure/launcher#790) are registered the same way, each with a
-`<kind>-component` fixture: a Role with two rules and one that authors none
-(`rules: null`); two RoleBindings in the build namespace, one of them without
-`roleRef.apiGroup` (written `apiGroup: ""`); a ClusterRole with a rule of
-non-resource URLs and an aggregated one; a ClusterRoleBinding with no
-namespace. No capability is required to build them, and no environment
-policy restricts what they grant.
-`TestObjectName_CollidesWithAGeneratedName` holds that a component of one of
-the four and an `rbac` trait that names the same object are refused.
-The kind components of the External Secrets Operator's API, `secretstore`,
-`clustersecretstore`, `externalsecret` and `clusterexternalsecret`
-(go-kure/launcher#790), are registered the same way, with a
-`<type>-component` fixture each: a SecretStore and an ExternalSecret in the
-build namespace, and a ClusterSecretStore and a ClusterExternalSecret with no
-namespace. No capability is required of the cluster profile to build them
-either, and they do not read its `external-secret` capability, which gives
-the `external-secret` trait its store.
-The kind components of VolSync's API, `replicationsource` and
-`replicationdestination` (go-kure/launcher#790), are registered the same way,
-with a `<type>-component` fixture each: two ReplicationSource objects in the
-build namespace, a Restic backup on a schedule and a Syncthing source, and two
-ReplicationDestination objects, a Restic restore and an rsync-over-TLS
-receiver. No capability is required of the cluster profile to build them.
+`persistentvolumeclaim` through a `pvc` volume's `claimName`.
+
+The kind components of go-kure/launcher#790 are registered the same way. Each
+but `secret` is built by the fixture named after it, `<type>-component`. The
+table has one row per type, in the order of the types; a new kind's row goes
+at its position.
+
+| `type` | What the fixture builds |
+|---|---|
+| `backendtlspolicy` | A BackendTLSPolicy in the build namespace. No capability is required of the cluster profile to build it. |
+| `certificate` | A Certificate in the build namespace. No capability is required of the cluster profile to build it; the `certificate` trait, which shares the kind's name, still requires its own. |
+| `cilium-bgpadvertisement` | A CiliumBGPAdvertisement with no namespace. No capability is required to build it. |
+| `cilium-bgpclusterconfig` | A CiliumBGPClusterConfig with no namespace. No capability is required to build it. |
+| `cilium-bgpnodeconfigoverride` | A CiliumBGPNodeConfigOverride with no namespace. No capability is required to build it. |
+| `cilium-bgppeerconfig` | A CiliumBGPPeerConfig with no namespace. No capability is required to build it. |
+| `cilium-cidrgroup` | A CiliumCIDRGroup with no namespace. No capability is required to build it. |
+| `cilium-clusterwidenetworkpolicy` | Two CiliumClusterwideNetworkPolicy objects with no namespace, one with a rule for nodes under `spec`, one named by `objectName` with two rules for endpoints under `specs`. No capability is required to build it. |
+| `cilium-egressgatewaypolicy` | A CiliumEgressGatewayPolicy with no namespace. No capability is required to build it. |
+| `cilium-loadbalancerippool` | A CiliumLoadBalancerIPPool with no namespace. No capability is required to build it. |
+| `cilium-localredirectpolicy` | A CiliumLocalRedirectPolicy in the build namespace. No capability is required to build it. |
+| `cilium-networkpolicy` | The authored `spec` and `specs`. The kind refuses a policy Cilium would reject when it reads it. |
+| `cilium-nodeconfig` | A CiliumNodeConfig in the build namespace. No capability is required to build it. |
+| `clusterexternalsecret` | A ClusterExternalSecret with no namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `clusterissuer` | A ClusterIssuer with no namespace. No capability is required of the cluster profile to build it. |
+| `clusterrole` | A ClusterRole with a rule of non-resource URLs and an aggregated one. No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
+| `clusterrolebinding` | A ClusterRoleBinding with no namespace. No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
+| `clustersecretstore` | A ClusterSecretStore with no namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `csidriver` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `endpointslice` | A Service named by `objectName`, an EndpointSlice in the build namespace whose authored `kubernetes.io/service-name` label holds that name as a literal, and a slice that authors only its address type. |
+| `externalsecret` | An ExternalSecret in the build namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `gateway` | A Gateway in the build namespace. No capability is required of the cluster profile to build it. |
+| `gatewayclass` | A GatewayClass with no namespace. No capability is required of the cluster profile to build it. |
+| `horizontalpodautoscaler` | A HorizontalPodAutoscaler in the build namespace, holding what was authored. |
+| `httproute` | The authored object and, unlike the trait of the same name, no NetworkPolicy allow rule. |
+| `ingress` | The authored object and, unlike the trait of the same name, no NetworkPolicy allow rule. |
+| `ingressclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `issuer` | An Issuer in the build namespace. No capability is required of the cluster profile to build it. |
+| `limitrange` | |
+| `listenerset` | A ListenerSet in the build namespace. No capability is required of the cluster profile to build it. |
+| `namespace` | |
+| `networkpolicy` | The authored spec. Unlike the trait of the same name, the kind selects every pod of the namespace when no `podSelector` is written. |
+| `persistentvolume` | |
+| `pod` | The authored spec and the `app` label. Not one of the five pod kinds named below. |
+| `poddisruptionbudget` | A PodDisruptionBudget in the build namespace, holding what was authored. |
+| `podmonitor` | A PodMonitor in the build namespace. No capability is required of the cluster profile to build it. |
+| `podtemplate` | The authored template, with no `app` label. Not one of the five pod kinds named below. |
+| `priorityclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `prometheus-probe` | A Probe in the build namespace. No capability is required of the cluster profile to build it. |
+| `prometheusrule` | A PrometheusRule in the build namespace. No capability is required of the cluster profile to build it. |
+| `referencegrant` | A ReferenceGrant in the build namespace. No capability is required of the cluster profile to build it. |
+| `replicaset` | The authored spec, with the `app` label on the pod template. Not one of the five pod kinds named below. |
+| `replicationcontroller` | The authored spec, with the `app` label on the pod template. Not one of the five pod kinds named below. |
+| `replicationdestination` | Two ReplicationDestination objects in the build namespace, a Restic restore and an rsync-over-TLS receiver. No capability is required of the cluster profile to build them. |
+| `replicationsource` | Two ReplicationSource objects in the build namespace, a Restic backup on a schedule and a Syncthing source. No capability is required of the cluster profile to build them. |
+| `resourcequota` | |
+| `role` | A Role with two rules and one that authors none (`rules: null`). No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
+| `rolebinding` | Two RoleBindings in the build namespace, one of them without `roleRef.apiGroup` (written `apiGroup: ""`). No capability is required to build it, and no environment policy restricts what it grants. `TestObjectName_CollidesWithAGeneratedName` holds that a component of this type and an `rbac` trait that names the same object are refused. |
+| `runtimeclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `secret` | No fixture, which would be a Secret manifest with entries: `secret_twin_test.go` builds it through `kurel build` instead. The kind is the `secret` trait's twin: it emits the same Secret from the same properties, under the component's name, and is refused under a policy that forbids explicit secrets. |
+| `secretstore` | A SecretStore in the build namespace. No capability is required of the cluster profile to build it, and it does not read the profile's `external-secret` capability, which gives the `external-secret` trait its store. |
+| `servicecidr` | A ServiceCIDR with no namespace, holding what was authored. |
+| `servicemonitor` | A ServiceMonitor in the build namespace. No capability is required of the cluster profile to build it. |
+| `storageclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `volumeattributesclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+
 The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
 role components generate, byte-identical to before the `serviceaccount` member
