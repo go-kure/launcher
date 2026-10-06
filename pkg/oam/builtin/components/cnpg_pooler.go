@@ -67,37 +67,15 @@ func (h *CnpgPoolerHandler) CanHandle(componentType string) bool {
 // `cluster.name` is its own name has no endpoint: it is refused here as the
 // build refuses it (refusePoolerNamedAsCluster).
 func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	name := component.ObjectName()
-	if err := validateCnpgPoolerName(name); err != nil {
+	// Endpoints are collected separately from the build, so the build's own
+	// decode and validation run here too: the Pooler's name, the decode of its
+	// spec, and the cluster reference that is the Pooler's own name among
+	// them. The namespace takes no part in them.
+	if _, err := h.ToApplicationConfig(component, ""); err != nil {
 		return nil, err
-	}
-	// The one relation between two names the build refuses (validate): a
-	// cluster reference that is the Pooler's own name. Only an authored string
-	// is compared; whatever else `cluster` holds is the decode's to refuse.
-	// The two keys are matched as the decode matches them, in any case
-	// (foldedFieldMaps), so `Cluster: {Name: …}` is read as it is built.
-	//
-	// The properties are read as the build's first step reads them, as their
-	// JSON serialization (jsonProperties), so a direct caller's typed value (a
-	// map[string]string, a struct) is compared too, and a tree that step
-	// refuses is refused here with its error.
-	props, _, err := jsonProperties(component.Properties)
-	if err != nil {
-		return nil, err
-	}
-	for _, cluster := range foldedFieldMaps(props, "cluster") {
-		for _, key := range foldedFieldKeys(cluster, "name") {
-			clusterName, ok := cluster[key].(string)
-			if !ok {
-				continue
-			}
-			if err := refusePoolerNamedAsCluster(name, clusterName); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: name}},
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: component.ObjectName()}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}, nil
 }

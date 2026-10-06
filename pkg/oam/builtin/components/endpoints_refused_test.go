@@ -144,3 +144,54 @@ func TestPostgresqlRule_EndpointsForAPoolerNamedLikeItsComponent(t *testing.T) {
 		}
 	})
 }
+
+// TestKindEndpoints_DirectCallOnAuthoredMetadata: `objectName`, `labels` and
+// `annotations` are read and taken out of a kind component's properties by the
+// transform before it runs the kind's parse, and before it asks the kind's
+// endpoints (Transformer.ComponentEndpoints). A direct call of Endpoints on a
+// component that still holds one runs the parse on it as a direct call of
+// ToApplicationConfig does, and gives the answer that gives: the two CNPG
+// kinds, whose decode knows no such field, refuse it in the same words, and
+// service, whose parse reads only the properties it knows, accepts it.
+func TestKindEndpoints_DirectCallOnAuthoredMetadata(t *testing.T) {
+	type kind interface {
+		oam.ComponentHandler
+		oam.EndpointProvider
+	}
+	for _, tc := range []struct {
+		typ     string
+		h       kind
+		props   func() map[string]any
+		refuses bool
+	}{
+		{"cnpg-cluster", &components.CnpgClusterHandler{}, func() map[string]any {
+			return map[string]any{"storage": map[string]any{"size": "10Gi"}}
+		}, true},
+		{"cnpg-pooler", &components.CnpgPoolerHandler{}, minimalPooler, true},
+		{"service", &components.ServiceHandler{}, func() map[string]any {
+			return map[string]any{"ports": []any{map[string]any{"port": 80}}}
+		}, false},
+	} {
+		for _, key := range []string{"objectName", "labels", "annotations"} {
+			t.Run(tc.typ+"/"+key, func(t *testing.T) {
+				props := tc.props()
+				props[key] = map[string]any{"team": "data"}
+				if key == "objectName" {
+					props[key] = "other"
+				}
+				comp := &oam.Component{Name: "db", Type: tc.typ, Properties: props}
+				_, buildErr := tc.h.ToApplicationConfig(comp, "data")
+				eps, err := tc.h.Endpoints(comp)
+				if tc.refuses {
+					if buildErr == nil || err == nil || err.Error() != buildErr.Error() || eps != nil {
+						t.Errorf("ToApplicationConfig err = %v\nEndpoints = %+v, %v\nwant one refusal from both and no endpoint", buildErr, eps, err)
+					}
+					return
+				}
+				if buildErr != nil || err != nil || len(eps) == 0 {
+					t.Errorf("ToApplicationConfig err = %v\nEndpoints = %+v, %v\nwant both to accept the component", buildErr, eps, err)
+				}
+			})
+		}
+	}
+}

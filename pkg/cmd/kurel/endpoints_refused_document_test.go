@@ -51,13 +51,22 @@ func buildRefusal(t *testing.T, appYAML string, hook func(oam.NameRequest) (stri
 	return "", nil
 }
 
+// The three things an endpoint entry cannot know, each shown by one answered
+// row of TestEndpoints_DocumentTheBuildRefuses.
+const (
+	limitSchemaCheck         = "the schema check of authored properties"
+	limitPolicyAndGeneration = "what is refused once the policy is applied or at generation"
+	limitDocument            = "what only the document shows"
+)
+
 // TestEndpoints_DocumentTheBuildRefuses holds every endpoint implementation to
-// one rule: a component of a document the build refuses gets no endpoint. Each
-// row is a document `kurel build` refuses, with the stage that refuses it and
-// what the endpoint entry does with its component db.
+// one rule: an endpoint entry answers only for a component its type's own
+// parse accepts, in the parse's words. Each row is a document `kurel build`
+// refuses, with the stage that refuses it and what the endpoint entry does
+// with its component db.
 //
-// A row that is not endpointRefused is a disagreement this table found. It
-// states what the entry does today, so that settling one changes its row.
+// A row that is endpointAnswered is not a refusal of the type's parse: it names
+// which of the three limits it shows. A new answered row needs one of them.
 func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 	const web = "    - name: web\n      type: webservice\n      properties:\n        image: ghcr.io/example/web:v1.0.0\n"
 	component := func(typ, props string) string {
@@ -73,6 +82,9 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 		answer      endpointAnswer
 		// otherwise is a part of the entry's own refusal, for endpointRefusedOtherwise.
 		otherwise string
+		// limit names which of the three things an endpoint entry cannot know
+		// an answered row shows; every answered row names one.
+		limit string
 	}{
 		{
 			name:       "cnpg-cluster: a misspelt key below a declared one",
@@ -108,19 +120,19 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			name:       "cnpg-cluster: a storage size of 0",
 			components: component("cnpg-cluster", "        storage:\n          size: \"0\"\n"),
 			stage:      "generation", want: `storage.size: quantity must be positive, got "0"`,
-			answer: endpointAnswered,
+			answer: endpointAnswered, limit: limitPolicyAndGeneration,
 		},
 		{
 			name:       "cnpg-pooler: no pgbouncer",
 			components: component("cnpg-pooler", "        cluster:\n          name: main\n"),
 			stage:      "transform", want: `pgbouncer: required`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "cnpg-pooler: a misspelt key below a declared one",
 			components: component("cnpg-pooler", "        cluster:\n          name: main\n        pgbouncer:\n          poolMod: session\n"),
 			stage:      "transform", want: `properties do not decode into a postgresql.cnpg.io/v1 PoolerSpec: json: unknown field "poolMod"`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "postgresql: a Pooler named like the component, the Cluster named apart",
@@ -145,31 +157,31 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			name:       "postgresql: a Pooler named like another component",
 			components: component("postgresql", pooler+"        poolerName: web\n") + web,
 			stage:      "transform", want: `pooler: generates component "web", which is already the name of component "web" (type "webservice") in the document; rename one of them`,
-			answer: endpointAnswered,
+			answer: endpointAnswered, limit: limitDocument,
 		},
 		{
 			name:       "postgresql: a Database named like the component",
 			components: component("postgresql", "        databases:\n          - name: orders\n            owner: app\n            objectName: db\n"),
 			stage:      "transform", want: `databases[0] "orders": generates component "db", which is already the name of component "db" (type "postgresql") in the document; rename one of them`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "postgresql: a backup value without its path",
 			components: component("postgresql", "        backup:\n          endpointURL: https://s3.example.com\n"),
 			stage:      "transform", want: `backup.destinationPath: required`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "webservice: no image",
 			components: component("webservice", "        port: 8080\n"),
 			stage:      "transform", want: `required property 'image' missing or not a string`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "webservice: an image tagged latest",
 			components: component("webservice", "        image: ghcr.io/example/web:latest\n"),
 			stage:      "transform", want: `image "ghcr.io/example/web:latest" rejected: :latest tag not allowed`,
-			answer: endpointAnswered,
+			answer: endpointRefused,
 		},
 		{
 			name:       "service: a port out of range",
@@ -181,7 +193,7 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			name:       "service: an undeclared property",
 			components: component("service", "        selectr:\n          app: web\n        ports:\n          - port: 80\n"),
 			stage:      "validation", want: `properties: unsupported field "selectr"`,
-			answer: endpointAnswered,
+			answer: endpointAnswered, limit: limitSchemaCheck,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,9 +218,55 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			if got != tc.answer {
 				t.Fatalf("the endpoint entry: %s (%d endpoints, err = %v)\nwant: %s", got, len(eps), err, tc.answer)
 			}
+			if (got == endpointAnswered) != (tc.limit != "") {
+				t.Errorf("the endpoint entry: %s, with limit %q; an answered row names its limit and no other row has one", got, tc.limit)
+			}
 			if got == endpointRefusedOtherwise && !strings.Contains(err.Error(), tc.otherwise) {
 				t.Errorf("the endpoint entry refuses with %v\nwant %q", err, tc.otherwise)
 			}
 		})
+	}
+}
+
+// TestEndpoints_TypesWithAnEntry pins which component types have an endpoint
+// entry: the five the table above holds to the rule. Every other registered
+// type answers no endpoint and no refusal, whatever the component holds, so a
+// type that gains an entry fails here until the table has its rows.
+func TestEndpoints_TypesWithAnEntry(t *testing.T) {
+	transformer := newBuiltinTransformer()
+	withEntry := map[string]bool{"webservice": true, "service": true, "postgresql": true, "cnpg-cluster": true, "cnpg-pooler": true}
+	// Every registered component type, by each listing the transformer
+	// publishes: a type that publishes no schema is in the other two.
+	types := map[string]bool{}
+	for typ := range transformer.HandlerSchemas().Components {
+		types[typ] = true
+	}
+	for typ := range transformer.HandlerContracts().Components {
+		types[typ] = true
+	}
+	for _, typ := range transformer.LowerableTypes().ComponentTypes {
+		types[typ] = true
+	}
+	// Not vacuous: the types checked include the workload types and the kinds
+	// added last.
+	for _, typ := range []string{"worker", "deployment", "endpointslice", "role", "rolebinding", "clusterrole", "clusterrolebinding"} {
+		if !types[typ] {
+			t.Errorf("type %q is not among the registered types this checks", typ)
+		}
+	}
+	found := 0
+	for typ := range types {
+		// A component with no properties: a type with an entry answers an
+		// endpoint or its parse's refusal, one without answers neither.
+		eps, err := transformer.ComponentEndpoints(&oam.Component{Name: "db", Type: typ})
+		if answers := eps != nil || err != nil; answers != withEntry[typ] {
+			t.Errorf("type %q: ComponentEndpoints = %v, %v; has an endpoint entry: want %t", typ, eps, err, withEntry[typ])
+		}
+		if withEntry[typ] {
+			found++
+		}
+	}
+	if found != len(withEntry) {
+		t.Errorf("%d of the %d types with an endpoint entry are registered", found, len(withEntry))
 	}
 }

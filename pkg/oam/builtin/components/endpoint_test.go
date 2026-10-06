@@ -15,8 +15,8 @@ func TestWebserviceHandler_Endpoints(t *testing.T) {
 		props    map[string]any
 		wantPort int32
 	}{
-		{name: "default port", props: nil, wantPort: 80},
-		{name: "explicit port", props: map[string]any{"port": 8080}, wantPort: 8080},
+		{name: "default port", props: map[string]any{"image": "ghcr.io/example/api:1.0"}, wantPort: 80},
+		{name: "explicit port", props: map[string]any{"image": "ghcr.io/example/api:1.0", "port": 8080}, wantPort: 8080},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

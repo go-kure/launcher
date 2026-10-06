@@ -152,7 +152,7 @@ var (
 // consumer hook's, else `<name>-pooler`. It is the one place the name is
 // resolved, for the Pooler LowerComponent emits and for the selector
 // EndpointsNamed builds, so the two ask the hook the same request. It reads the
-// raw property, as poolerEnabled does.
+// raw property.
 //
 // The name is held to the Pooler's own rule here (validateCnpgPoolerName). An
 // authored name and the hook's answer were held to it when they were resolved,
@@ -183,67 +183,55 @@ func postgresqlPoolerName(lctx oam.LoweringContext, component *oam.Component) (s
 // cluster endpoint's selector carrying the name lctx resolves for the Cluster
 // (postgresqlClusterMember) and the pooler endpoint's the one it resolves for
 // the Pooler (postgresqlPoolerName): the consumer hook's where the caller set
-// one and the author wrote no `clusterObjectName` or `poolerName`.
-func (PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.LoweringContext) ([]netpol.Endpoint, error) {
-	// The selector carries the Cluster's name verbatim, resolved as
-	// LowerComponent resolves it, so a name the Cluster cannot have is refused
-	// here too, as cnpg-cluster refuses it.
-	cluster, err := postgresqlClusterMember(lctx, component)
+// one and the author wrote no `clusterObjectName` or `poolerName`. The names
+// come from the rule's own lowering of the component, so the hook is asked
+// every request the transform asks for it: the ObjectStore's and each
+// Database's as well.
+func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.LoweringContext) ([]netpol.Endpoint, error) {
+	// Endpoints are collected separately from the build, so the rule's own
+	// lowering runs here too: it names the Cluster, parses the component and
+	// names every member it emits, in that order, and a component it refuses
+	// has no endpoint, in its words.
+	//
+	// The lowering refuses a member that carries the name of a component of
+	// the document (postgresqlReserveMember). This is given one component, so
+	// the document it shows the lowering holds that component alone: a member
+	// named like the postgresql component itself is refused here as it is
+	// there, and one named like another component of the document is not seen.
+	lctx.Component = component
+	if lctx.Document == nil {
+		doc := &oam.Application{}
+		doc.Metadata.Name = lctx.Origin.Document
+		doc.Spec.Components = []oam.Component{*component}
+		lctx.Document = doc
+	}
+	lowered, err := r.LowerComponent(component, lctx)
 	if err != nil {
 		return nil, err
 	}
+	// The Cluster is the first member the lowering emits; the selector carries
+	// its object's name verbatim.
+	cluster := lowered.Components[0]
 	eps := []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: cluster.ObjectName()}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}
-	enabled, err := poolerEnabled(component)
-	if err != nil {
-		return nil, err
-	}
-	if enabled {
-		// The selector value is the Pooler's name, resolved and held to the
-		// Pooler's rule as LowerComponent resolves and holds it.
-		poolerName, err := postgresqlPoolerName(lctx, component)
-		if err != nil {
-			return nil, errors.Wrapf(err, "pooler")
-		}
-		// The Pooler is a component the rule emits beside the Cluster, and the
-		// lowering refuses one that carries the name of a component of the
-		// document (postgresqlReserveMember), ahead of the Pooler's own rules.
-		// This is given one component, so it repeats that for the postgresql
-		// component itself, in the same words and the same order; a Pooler
-		// named like another component of the document is not seen here.
-		if poolerName == component.Name {
-			return nil, postgresqlMemberNameTaken("pooler", poolerName, component)
+	for _, member := range lowered.Components[1:] {
+		if member.Type != "cnpg-pooler" {
+			continue
 		}
 		// The Pooler refers to the Cluster by the name resolved above, and a
 		// Pooler that carries that name itself is refused where it is built
 		// (CnpgPoolerConfig.validate): refused here in the same words.
-		if err := refusePoolerNamedAsCluster(poolerName, cluster.ObjectName()); err != nil {
+		if err := refusePoolerNamedAsCluster(member.Name, cluster.ObjectName()); err != nil {
 			return nil, err
 		}
 		eps = append(eps, netpol.Endpoint{
-			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: poolerName}},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: member.Name}},
 			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 		})
 	}
 	return eps, nil
-}
-
-// poolerEnabled reports whether the component declares an enabled pooler. It reads the raw
-// property (mirroring ToApplicationConfig's pooler parse) so Endpoints stays a lightweight,
-// side-effect-free view that does not require a full config build. A wrongly typed
-// pooler or pooler.enabled is an error here too, not "no pooler".
-func poolerEnabled(component *oam.Component) (bool, error) {
-	pooler, present, err := parseObjectField(component.Properties, "pooler", "pooler")
-	if err != nil || !present {
-		return false, err
-	}
-	enabled, err := parseBoolField(pooler, "enabled", "pooler.enabled")
-	if err != nil || enabled == nil {
-		return false, err
-	}
-	return *enabled, nil
 }
 
 // PropertySchema declares the postgresql component's top-level user-facing

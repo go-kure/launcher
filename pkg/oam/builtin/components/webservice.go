@@ -113,18 +113,16 @@ func (WebserviceRule) ComponentType() string { return "webservice" }
 // way it does for a postgresql target. The webservice's single `port` property drives both the
 // container port and the Service port (TargetPort == Port), so there is one endpoint per component.
 func (WebserviceRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	// Same read as parseWebservice's: ComponentEndpoints calls this with no
-	// schema validation first, so a wrongly typed port must be refused here too
-	// rather than declared as the default 80.
-	port := int32(80)
-	if p, present, err := parsePortField(component.Properties, "port", "port", 1); err != nil {
+	// Endpoints are collected separately from the build, so the rule's own
+	// parse runs here too: a component it refuses has no endpoint, in the
+	// parse's words.
+	opinions, err := parseWebservice(component)
+	if err != nil {
 		return nil, err
-	} else if present {
-		port = p
 	}
 	return []netpol.Endpoint{{
 		PodSelector: selectorFrom(appLabels(component.Name)),
-		Ports:       []intstr.IntOrString{intstr.FromInt32(port)},
+		Ports:       []intstr.IntOrString{intstr.FromInt32(opinions.port)},
 	}}, nil
 }
 
