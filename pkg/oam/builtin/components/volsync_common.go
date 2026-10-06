@@ -20,12 +20,16 @@ import (
 //
 // Not held, since the object does not hold it or the policy has no dimension
 // for it: a capacity the author left out, which is then the operator's to
-// choose; the mover's affinity and the volumes mounted into it
-// (moverVolumes: a Secret, a claim or an NFS export, never a host path); the
-// type of the Service a mover is reached through; and whether the mover runs
-// with elevated permissions at all, which is an annotation an administrator
-// puts on the namespace (volsync.backube/privileged-movers), not a field of
-// the object.
+// choose; the rest of moverSecurityContext, a pod security context of which
+// only windowsOptions.hostProcess is held (the user and groups the mover runs
+// as, its sysctls, its SELinux and seccomp settings), the policy having no
+// dimension for it; the service account the mover runs under
+// (moverServiceAccount), an identity carried as authored; the mover's
+// affinity and the volumes mounted into it (moverVolumes: a Secret, a claim
+// or an NFS export, never a host path); the type of the Service a mover is
+// reached through; and whether the mover runs with elevated permissions at
+// all, which is an annotation an administrator puts on the namespace
+// (volsync.backube/privileged-movers), not a field of the object.
 //
 // The module ships its CRDs. TestVolsyncKinds_RequiredMatchCRD holds each
 // kind's required list to them, TestVolsyncKinds_NoDefaults the claim that
