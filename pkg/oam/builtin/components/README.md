@@ -194,7 +194,7 @@ reads it.
 | `clustersecretstore` | ClusterSecretStore | Kind-named External Secrets Operator ClusterSecretStore: the same `SecretStoreSpec`, strictly decoded, and the same policy check. Cluster-scoped. No capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
 | `clusterexternalsecret` | ClusterExternalSecret | Kind-named External Secrets Operator ClusterExternalSecret: the whole `ClusterExternalSecretSpec`, strictly decoded; `externalSecretSpec` is required, with what an `externalsecret` requires and what it refuses of a `target.manifest` under the environment policy. Cluster-scoped; no capability is required — see below. |
-| `replicationsource` | ReplicationSource | Kind-named VolSync ReplicationSource: the whole `ReplicationSourceSpec` (`sourcePVC`, `trigger`, the movers `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`, `external`, `paused`), strictly decoded; no top-level field is required. An authored capacity is held to the environment policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. No capability is required. Its object is of the kind the `volsync` trait builds — see below. |
+| `replicationsource` | ReplicationSource | Kind-named VolSync ReplicationSource: the whole `ReplicationSourceSpec` (`sourcePVC`, `trigger`, the movers `rsync`, `rsyncTLS`, `rclone`, `restic` and `syncthing`, `external`, `paused`), strictly decoded; no top-level field is required. An authored capacity is held to the environment policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. Its object is of the kind the `volsync` trait builds — see below. |
 | `replicationdestination` | ReplicationDestination | Kind-named VolSync ReplicationDestination: the whole `ReplicationDestinationSpec` (`trigger`, the movers `rsync`, `rsyncTLS`, `rclone` and `restic`, `external`, `paused`), strictly decoded, with the same policy checks. No top-level field is required and no capability is required — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
@@ -408,7 +408,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | kind | `servicemonitor` | strict decode of `ServiceMonitorSpec` | `endpoints` and `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | missing | - | - | - |
 | `volsync.CreateReplicationDestination` | volsync.backube/v1alpha1 ReplicationDestination | kind | `replicationdestination` | strict decode of `ReplicationDestinationSpec` | As `replicationsource`, without a Syncthing mover. Its labels and annotations are the `labels` and `annotations` properties. |
-| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, and of a Syncthing peer its `address`, `ID` and `introducer`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
+| `volsync.CreateReplicationSource` | volsync.backube/v1alpha1 ReplicationSource | kind | `replicationsource` | strict decode of `ReplicationSourceSpec` | No top-level field must be written; of a volume mounted into a mover that is authored, its `mountPath` and `volumeSource`, and of a Syncthing peer its `address`, `ID` and `introducer`. An authored capacity is held to the policy's storage maximum, a mover's cpu and memory to its maxima, and a mover's `hostProcess` switch is refused unless privileged workloads are allowed. An `rsync` mover is held to the policy's container capabilities for the seven the linked operator version adds to its container. No capability is required. The `volsync` trait builds a ReplicationSource for a workload's claim through the same constructor, from a hand-written parser. Its labels and annotations are the `labels` and `annotations` properties. |
 
 ## Common config
 
@@ -4841,6 +4841,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     is not allowed by environment policy`. An authored `false` builds. With
     no policy passed it is refused too, since `NoopPolicy` allows nothing
     privileged.
+  - **The `rsync` mover is held to the policy's container capabilities.**
+    Authoring the rsync-over-SSH mover is itself a choice of privilege: the
+    linked operator version (VolSync v0.16.0) runs its container as root
+    (`runAsUser: 0`), not privileged, with every capability dropped and seven
+    added (`AUDIT_WRITE`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`,
+    `SETUID`, `SYS_CHROOT`), on a source and on a destination alike, and its
+    builder does not take the namespace's answer on privileged movers. An
+    authored `rsync` mover, whatever it holds, is therefore held to the
+    policy's allowed and forbidden container capabilities for those seven,
+    as a container that adds them is on a pod kind: `component "web": rsync:
+    the mover's container as VolSync v0.16.0 writes it:
+    securityContext.capabilities.add: "SYS_CHROOT" is forbidden by
+    environment policy`. A policy that sets neither list, and no policy,
+    build it; allowing privileged workloads does not lift a forbidden
+    capability, as it does not on a pod kind. Two limits. The seven are what
+    the **linked** operator version writes
+    (`internal/controller/mover/rsync/mover.go` in its module;
+    `TestVolsyncKinds_RsyncCapabilities` reads that source and fails on a
+    dependency bump that changes it): a cluster that runs another version of
+    the operator may add other capabilities, and the kind does not know. And
+    that the container runs as root is stated here, not held: the policy has
+    no dimension for it.
   - **Not held:** the rest of `moverSecurityContext`. It is a pod security
     context, and of it only `windowsOptions.hostProcess` is held: the user
     and groups the mover runs as, its sysctls and its SELinux and seccomp
@@ -4850,9 +4872,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     authored. Nor are held a mover's affinity; the volumes mounted into it
     (`moverVolumes`: a Secret, a claim or an NFS export; the type holds no
     host path); the type of the Service a mover is reached through
-    (`serviceType`); and whether a mover runs with elevated permissions at
-    all, which is no field of the object: an administrator sets it with an
-    annotation on the namespace (`volsync.backube/privileged-movers`).
+    (`serviceType`); and whether an `rsyncTLS`, `rclone`, `restic` or
+    `syncthing` mover runs with elevated permissions, which is no field of
+    the object: an administrator sets it with an annotation on the namespace
+    (`volsync.backube/privileged-movers`), which the linked operator's
+    controllers read and hand to the builder of each of those four movers.
+    The `rsync` mover's builder drops that answer (above).
   - **Hosts are not checked.** A host these objects name is one the mover
     reaches, not an artifact source, and none is held to the policy's allowed
     registries: `rsync.address`, `rsyncTLS.address`, a Syncthing peer's

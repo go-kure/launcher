@@ -424,10 +424,17 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 		)
 	}
 	// A VolSync mover is held on both kinds: the volume a capacity sizes to the
-	// storage maximum, its container to the workload maxima, and its pod-level
-	// hostProcess switch to the privileged rule.
+	// storage maximum, its container to the workload maxima, its pod-level
+	// hostProcess switch to the privileged rule, and the capabilities the
+	// operator adds to an rsync-over-SSH mover's container to the class a pod
+	// kind's container gets for them.
 	for _, kind := range volsyncMoverKinds {
 		cases = append(cases,
+			componentCase{
+				name: kind.component + ", rsync mover's capability forbidden", class: oam.RefusalContainerCapability, typ: kind.component, handler: kind.handler,
+				props:  props(moverWith("rsync", "sshKeys", "rsync-keys")),
+				policy: rcWith(func(p *stubPolicy) { p.forbiddenContainerCaps = []string{"DAC_OVERRIDE"} }),
+			},
 			componentCase{
 				name: kind.component + ", capacity over the maximum", class: oam.RefusalStorageMaximum, typ: kind.component, handler: kind.handler,
 				props: props(moverWith("restic", "capacity", "20Gi")),
