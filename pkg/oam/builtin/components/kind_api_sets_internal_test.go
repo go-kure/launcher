@@ -318,6 +318,10 @@ var objectIdentity = []string{"kind", "apiVersion", "metadata"}
 // and the built-in types, the CRDs their modules ship for cert-manager's API,
 // Cilium's, CloudNativePG's and its Barman Cloud plugin's.
 //
+// Every registered component type has its row here, or its reason for having
+// none in kindListExceptions (pkg/cmd/kurel): TestKindLists_Complete holds
+// that, so a new kind is given one of the two.
+//
 // A new kind joins with one row, at its position: its component, the type its
 // properties decode into (skip naming the identity fields of a whole-object
 // type) and its source, crdAPISource where the linked module ships the CRD
