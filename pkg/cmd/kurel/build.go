@@ -313,6 +313,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"gateway":                         &components.GatewayHandler{},
 		"gatewayclass":                    &components.GatewayClassHandler{},
 		"gitrepository":                   &components.GitRepositoryHandler{},
+		"grpcroute":                       &components.GRPCRouteHandler{},
 		"helmchart":                       &components.HelmChartHandler{},
 		"helmrelease":                     &components.HelmReleaseHandler{},
 		"helmrepository":                  &components.HelmRepositoryHandler{},

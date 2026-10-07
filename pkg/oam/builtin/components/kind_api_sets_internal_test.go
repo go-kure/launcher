@@ -482,6 +482,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
 	{component: "gitrepository", typ: reflect.TypeFor[sourcev1.GitRepositorySpec](), source: markerAPISource},
+	{component: "grpcroute", typ: reflect.TypeFor[gatewayv1.GRPCRouteSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "grpcroutes"), "v1")},
 	{
 		component: "helmchart", typ: reflect.TypeFor[sourcev1.HelmChartSpec](), source: markerAPISource,
 		// The API defaults the provider of a verification and the type always

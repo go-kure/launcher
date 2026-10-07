@@ -1049,6 +1049,14 @@ its text:
     expression rule a CRD declares is named there with the reason it is left to the
     API server.
   - `useDefaultGateways` is an experimental-channel field; a test holds that.
+- **Shipped: the `grpcroute` kind** (`grpcroute.go`), the strict projection of
+  `GRPCRouteSpec`, on the `httproute` kind's recipe rather than on `policyFreeKind`:
+  the GRPCRoute API, like HTTPRoute's, requires no rule, backend or host name, so the
+  kind requires and fills none. No environment policy applies, no capability is
+  required, parents and backends of another namespace are written as authored, and the
+  NetworkPolicy synthesis allows nothing for its backends — all as for `httproute`. The
+  required fields it writes unauthored and does not refuse are pinned with the other
+  kinds' (README "Required fields a kind writes unauthored and does not refuse").
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1714,8 +1722,7 @@ its text:
   can deny writes for the whole cluster; they are taken up when a consumer asks. An RBAC
   grant, which is emitted, names its subjects in the document that makes it (README
   "Held: cluster-wide admission and API registration").
-- **Missing kinds:** the inventory's `missing` rows (GRPCRoute among
-  them). The inventory has no `trait` row left: no kind is reachable only as a trait.
+- **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.
 

@@ -170,6 +170,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"gatewayv1.BackendTLSPolicySpec":              reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
 	"gatewayv1.GatewayClassSpec":                  reflect.TypeFor[gatewayv1.GatewayClassSpec](),
 	"gatewayv1.GatewaySpec":                       reflect.TypeFor[gatewayv1.GatewaySpec](),
+	"gatewayv1.GRPCRouteSpec":                     reflect.TypeFor[gatewayv1.GRPCRouteSpec](),
 	"gatewayv1.HTTPRouteSpec":                     reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
 	"gatewayv1.ListenerSetSpec":                   reflect.TypeFor[gatewayv1.ListenerSetSpec](),
 	"gatewayv1.ReferenceGrantSpec":                reflect.TypeFor[gatewayv1.ReferenceGrantSpec](),

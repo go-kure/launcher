@@ -172,6 +172,7 @@ reads it.
 | `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
+| `grpcroute` | GRPCRoute | Kind-named GRPCRoute: the whole `GRPCRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded, on the `httproute` kind's recipe: nothing required or filled, no NetworkPolicy allow rule and no environment policy — see below. |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
@@ -330,7 +331,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |
 | `kubernetes.CreateEviction` | policy/v1 Eviction | not authorable | - | - | A request body for a pod's `eviction` subresource, not a stored object. |
-| `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | missing | - | - | - |
+| `kubernetes.CreateGRPCRoute` | gateway.networking.k8s.io/v1 GRPCRoute | kind | `grpcroute` | strict decode of `GRPCRouteSpec` | On the `httproute` kind's recipe: nothing required or filled, no environment policy, parent and backend references carried as authored, their namespaces included. The API requires no rule, backend or hostname of a GRPCRoute, as of an HTTPRoute, unlike the TCP, UDP and TLS routes. No type under `GRPCRouteSpec` unmarshals itself, so the decode reaches every depth. |
 | `kubernetes.CreateGateway` | gateway.networking.k8s.io/v1 Gateway | kind | `gateway` | strict decode of `GatewaySpec` | `gatewayClassName` and `listeners` must be written, and of a listener its `name`, `port` and `protocol`; of what is authored below them, the fields the API requires that the type would write empty. `defaultScope` is an experimental-channel field. The pods a controller starts for a Gateway are not the object's to size. No capability is required: the Gateway an `httproute` trait takes from a capability is not this component. No environment policy applies. |
 | `kubernetes.CreateGatewayClass` | gateway.networking.k8s.io/v1 GatewayClass (cluster-scoped) | kind | `gatewayclass` | strict decode of `GatewayClassSpec` | `controllerName` must be written, and of a `parametersRef` that is authored its `group`, `kind` and `name`. No capability is required. No environment policy applies. |
 | `kubernetes.CreateHTTPRoute` | gateway.networking.k8s.io/v1 HTTPRoute | kind | `httproute` | strict decode of `HTTPRouteSpec` | No type under `HTTPRouteSpec` unmarshals itself, so the decode reaches every depth. The `httproute` trait, which `expose` lowers onto, builds its own HTTPRoute with a hand-written parser. Only the trait feeds the NetworkPolicy synthesis, takes its parent from a capability and is held to the policy's capability lists. |
@@ -4406,6 +4407,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Labels and annotations** are the `labels` and `annotations` properties.
   **Not covered:** its `status`, which the Gateway controller writes.
+- **grpcroute** (go-kure/launcher#790) is the kind-named projection of a
+  gateway.networking.k8s.io/v1 GRPCRoute, on the `httproute` kind's recipe and
+  not on `policyFreeKind` as the TCP, UDP and TLS routes are: one schema key
+  per json field of `gatewayv1.GRPCRouteSpec` (`parentRefs`,
+  `useDefaultGateways`, `hostnames`, `rules`), decoded strictly into that
+  type, and one GRPCRoute emitted in the build namespace, named after the
+  component unless `objectName` names it. The API requires no rule, backend or
+  hostname of a GRPCRoute, as of an HTTPRoute, so the decode requires none and
+  fills none; the API's value rules are left to the API server. A null list
+  element is refused by its path. Parent and backend references are carried
+  as written, their `namespace` included. As for `httproute`, no NetworkPolicy
+  allow rule is synthesized for its backends, no parent comes from a
+  capability, and `ApplyPolicy` is a no-op. Its required fields written
+  unauthored and not refused are listed under [Required fields a kind writes
+  unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse).
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **Not covered:** its `status`, which the Gateway controller writes.
 - **networkpolicy** (go-kure/launcher#790) is the kind-named projection of a
   networking.k8s.io/v1 NetworkPolicy, on the same recipe as `ingress`: one
   schema key per json field of `networkingv1.NetworkPolicySpec` (`podSelector`,
@@ -5678,7 +5697,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   object as cluster-scoped, so its name is claimed in no namespace. The other
   four are emitted in the build namespace and declare their object as
   namespaced. The routes of the same API are their own kinds (`httproute`,
-  `tcproute`, `udproute`, `tlsroute`).
+  `grpcroute`, `tcproute`, `udproute`, `tlsroute`).
 
   **No capability is required, and nothing gates these kinds.** Launcher does
   not ask whether the cluster serves `gateway.networking.k8s.io/v1`: where the
@@ -10099,6 +10118,7 @@ match expression), has no member: those are refused on every kind
 | `cnpg-database` | 11 | | | | 11 |
 | `cnpg-objectstore` | 29 | | | 9 | 20 |
 | `httproute` | 44 | | | | 44 |
+| `grpcroute` | 34 | | | | 34 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
 | `helmrelease` | 17 | | | | 17 |
 | `fluxcd-kustomization` | 14 | | | | 14 |
@@ -10107,7 +10127,8 @@ match expression), has no member: those are refused on every kind
 | `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
 None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
-`listenerset`, `referencegrant`, `backendtlspolicy`, `metallb-ipaddresspool`,
+`listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
+`metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `prometheusrule`,
 `artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation`, `resourcesetinputprovider`, `secretstore`,

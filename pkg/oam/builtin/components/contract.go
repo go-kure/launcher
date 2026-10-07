@@ -172,6 +172,9 @@ func (h *IngressHandler) ContractMetadata() oam.ContractMetadata { return contra
 func (h *HTTPRouteHandler) ContractMetadata() oam.ContractMetadata { return contract("httproute") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *GRPCRouteHandler) ContractMetadata() oam.ContractMetadata { return contract("grpcroute") }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *NetworkPolicyHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("networkpolicy")
 }

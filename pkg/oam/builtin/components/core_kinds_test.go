@@ -115,6 +115,7 @@ var coreKindSchemas = []struct {
 	{"fluxcd-receiver", reflect.TypeFor[notificationv1.ReceiverSpec](), &components.FluxcdReceiverHandler{}, nil},
 	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
 	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},
+	{"grpcroute", reflect.TypeFor[gatewayv1.GRPCRouteSpec](), &components.GRPCRouteHandler{}, nil},
 	{"horizontalpodautoscaler", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](), &components.HorizontalPodAutoscalerHandler{}, nil},
 	{"httproute", reflect.TypeFor[gatewayv1.HTTPRouteSpec](), &components.HTTPRouteHandler{}, nil},
 	{"imagepolicy", reflect.TypeFor[imagev1.ImagePolicySpec](), &components.ImagePolicyHandler{}, nil},
