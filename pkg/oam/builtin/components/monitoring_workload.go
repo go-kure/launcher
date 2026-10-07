@@ -8,6 +8,7 @@ import (
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -69,7 +70,9 @@ type monitoringWorkload struct {
 	pod corev1.PodSpec
 	// generated names the containers the operator generates, by the property
 	// that lists them (containers, initContainers): a listed entry of one of
-	// these names is merged into that container, and may name no image.
+	// these names is merged into that container, and may name no image. Every
+	// kind must set it: where it is nil, every listed entry without an image
+	// is refused, a patch of the operator's own containers included.
 	generated map[string][]string
 	// images are the full image references the spec names outside pod. An
 	// empty value names no image and is not listed.
@@ -103,7 +106,10 @@ type monitoringWorkload struct {
 // generates is merged into it, so such a patch may name no image; any other
 // listed container is added to the pods as written, and one that names no
 // image is refused, since no pod runs it. An image volume that names no image
-// is not checked.
+// is not checked. A block that names a memory limit and no memory request is
+// refused where the request the operator fills (memoryRequests) exceeds that
+// limit: the operator fills it whatever the limit, and the API refuses a pod
+// whose request exceeds its limit.
 func validateMonitoringWorkload(w monitoringWorkload) error {
 	for _, image := range w.images {
 		if err := ValidateImageRef(image.value); err != nil {
@@ -135,6 +141,14 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	for _, r := range w.resources {
 		if err := validateResourcesAt(r.path, r.resources); err != nil {
 			return err
+		}
+		if q, ok := w.memoryRequests[r.path]; ok {
+			if _, named := r.resources.Requests[corev1.ResourceMemory]; !named {
+				filled := resource.MustParse(q)
+				if limit, limited := r.resources.Limits[corev1.ResourceMemory]; limited && filled.Cmp(limit) > 0 {
+					return errors.Errorf("%s: memory: the unset request the Prometheus operator fills as %s must not exceed limit %s; name a request no larger than the limit", r.path, q, limit.String())
+				}
+			}
 		}
 	}
 	return nil
