@@ -2496,10 +2496,26 @@ Kubernetes type they project, `webservice` and `worker` with their `deployment`'
 and the `pvc` trait with the `persistentvolumeclaim` kind's
 (`pkg/oam/builtin/components/README.md`, "Upstream fields a hand-parsed kind does
 not read"); `helmchart` and `helmrelease` point a removed key to its replacement.
-An empty answer adds nothing. A key refused *below* the top level gets no hint:
-the refusal there is the check's own text, and the type's reason for such a key
-reaches only a caller of the handler. The hint was asked of a terminal component
+An empty answer adds nothing. The hint was asked of a terminal component
 handler alone before go-kure/launcher#790; the three other positions are new.
+
+A key refused *below* the top level, inside an object the type declares, is
+never passed to `UnsupportedFieldHint`, so a hint written for a top-level key is
+not given for a nested key of the same name. At the same four positions, the
+optional method `NestedUnsupportedFieldHint(parents []string, key string) string`
+is asked instead. `parents` are the declared keys from the top level down to the
+object that refuses the key, list items unnamed: `initContainers[0].probes` is
+asked as `["initContainers"]`, `"probes"`. A non-empty answer is appended the same
+way:
+
+```
+component "web" (type "webservice"): properties.affinity: unsupported field "nodeAffinity" (allowed: …); affinity.nodeAffinity: not read — …
+```
+
+The built-in workload kinds, `webservice` and `worker` answer with the reason
+their parser gives for the key at that position (the components README, "Below
+the top level"). Before go-kure/launcher#790 a nested refusal carried no hint.
+The refusal text itself is unchanged at every depth.
 
 Before any of that, it runs `Transform`'s own reservation check
 (`enforcePlatformReserved`) over the document, with the same schemas and the same

@@ -218,31 +218,65 @@ func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string
 // refusal of an undeclared top-level key: the helmchart terminal points a key
 // of the composite that used to carry its name to `helm`, and a hand-parsed
 // kind gives the reason it refuses a field of the Kubernetes type it projects.
-// "" adds nothing. A key refused below the top level gets no hint.
+// "" adds nothing. A key refused below the top level is never passed to it:
+// see nestedUnsupportedFieldHinter.
 type unsupportedFieldHinter interface {
 	UnsupportedFieldHint(key string) string
 }
 
-// unsupportedFieldError is validateAuthoredProperties' refusal of an undeclared
-// top-level key.
+// nestedUnsupportedFieldHinter is unsupportedFieldHinter for a key refused
+// below the top level, inside an object the type declares. parents are the
+// declared keys from the top level down to that object, array items unnamed:
+// `initContainers[0].probes` is parents ["initContainers"], key "probes". A
+// hand-parsed kind gives the reason the parser of that object refuses the key
+// with. "" adds nothing. It is a method of its own so that a hinter written
+// for top-level keys is never asked about a nested key of the same name.
+type nestedUnsupportedFieldHinter interface {
+	NestedUnsupportedFieldHint(parents []string, key string) string
+}
+
+// unsupportedFieldError is the refusal of an undeclared key, at any depth:
+// validateAuthoredProperties' at the top level, validateObjectProperties'
+// below it. parents are the declared keys above the refused one, nil at the
+// top level; each object level that returns the error prepends its own key
+// (withUnsupportedFieldParent).
 type unsupportedFieldError struct {
 	path, key, allowed string
+	parents            []string
 }
 
 func (e *unsupportedFieldError) Error() string {
 	return fmt.Sprintf("%s: unsupported field %q (allowed: %s)", e.path, e.key, e.allowed)
 }
 
+// withUnsupportedFieldParent records key as the parent of the undeclared key
+// err refuses, when it refuses one, and returns err.
+func withUnsupportedFieldParent(err error, key string) error {
+	var uerr *unsupportedFieldError
+	if errors.As(err, &uerr) {
+		uerr.parents = append([]string{key}, uerr.parents...)
+	}
+	return err
+}
+
 // withUnsupportedFieldHint appends handler's hint to err when err refuses an
-// undeclared top-level key and handler has a hint for that key. Any other err
+// undeclared key and handler has a hint for that key: UnsupportedFieldHint for
+// a top-level key, NestedUnsupportedFieldHint for one below it. Any other err
 // is returned unchanged.
 func withUnsupportedFieldHint(handler any, err error) error {
-	h, ok := handler.(unsupportedFieldHinter)
 	var uerr *unsupportedFieldError
-	if !ok || !errors.As(err, &uerr) {
+	if !errors.As(err, &uerr) {
 		return err
 	}
-	if hint := h.UnsupportedFieldHint(uerr.key); hint != "" {
+	var hint string
+	if len(uerr.parents) == 0 {
+		if h, ok := handler.(unsupportedFieldHinter); ok {
+			hint = h.UnsupportedFieldHint(uerr.key)
+		}
+	} else if h, ok := handler.(nestedUnsupportedFieldHinter); ok {
+		hint = h.NestedUnsupportedFieldHint(slices.Clone(uerr.parents), uerr.key)
+	}
+	if hint != "" {
 		return errors.Errorf("%w; %s", err, hint)
 	}
 	return err
@@ -479,7 +513,7 @@ func validateAuthoredProperties(schema map[string]PropertySchema, props map[stri
 		}
 		normalized, err := validatePropertyValue(field, props[key], path+"."+key)
 		if err != nil {
-			return err
+			return withUnsupportedFieldParent(err, key)
 		}
 		props[key] = normalized
 	}

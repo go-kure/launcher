@@ -3,6 +3,7 @@ package components
 import (
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -26,10 +27,12 @@ import (
 // the check has it dropped, as pkg/oam's README states. The one exception is
 // jobCronOnlyRejectedKeys, the CronJobSpec fields `job` refuses by name.
 //
-// The hint is a type's answer for its top-level keys. A field one level down,
-// inside a property the type declares, is refused by the parser of that
-// property (resourcesRejectedKeys, affinityShorthandRejectedKeys below); the
-// document check refuses it with its own text and no reason.
+// The hint is a type's answer for its top-level keys. A field below the top
+// level, inside a property the type declares, is refused by the parser of that
+// property (resourcesRejectedKeys, affinityShorthandRejectedKeys below,
+// initContainerRejectedKeys, volumeClaimTemplateRejectedKeys); the document
+// check appends the type's NestedUnsupportedFieldHint to its refusal of such a
+// key (refusedNestedKeyHint).
 
 // mainContainerRejectedKeys are the corev1.Container fields a workload type's
 // main container is not authored with. That container is authored as the type's
@@ -121,10 +124,113 @@ func refusedKeyHint(componentType, key string) string {
 	return ""
 }
 
+// nestedRefusal is the refusal map of the parser of an object below a type's
+// top level, and the text that parser refuses a key of the map with, given
+// the key and its reason.
+type nestedRefusal struct {
+	refused map[string]string
+	text    func(key, reason string) string
+}
+
+// reasonOnly is the text of a parser that refuses with the reason alone, which
+// names the key's path itself (resourcesRejectedKeys,
+// affinityShorthandRejectedKeys).
+func reasonOnly(_, reason string) string { return reason }
+
+// containerNestedRefusals are the objects below the top level that every
+// workload type of refusedKeys declares and whose parser refuses keys by name,
+// keyed by the declared keys down to the object, joined with "." (array items
+// unnamed): the main container's `resources`, an init container entry, and the
+// `resources` of an init container or a sidecar entry. A type with no
+// `sidecars` property never reaches that row.
+var containerNestedRefusals = map[string]nestedRefusal{
+	"resources": {resourcesRejectedKeys, reasonOnly},
+	"initContainers": {initContainerRejectedKeys, func(key, reason string) string {
+		return key + ": not supported on an init container — " + reason
+	}},
+	"initContainers.resources": {resourcesRejectedKeys, reasonOnly},
+	"sidecars.resources":       {resourcesRejectedKeys, reasonOnly},
+}
+
+// nestedRefusedKeys lists, by component type, the objects below its top level
+// whose parser refuses keys by name (see containerNestedRefusals): the
+// `affinity` shorthand of webservice and worker, and a statefulset's
+// `volumeClaimTemplates` entry, besides the container ones.
+var nestedRefusedKeys = map[string]map[string]nestedRefusal{
+	"deployment": containerNestedRefusals,
+	"webservice": withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
+	"worker":     withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
+	"statefulset": withNestedRefusals(containerNestedRefusals, "volumeClaimTemplates", nestedRefusal{volumeClaimTemplateRejectedKeys, func(key, reason string) string {
+		return key + ": not authorable — " + reason
+	}}),
+	"daemonset": containerNestedRefusals,
+	"job":       containerNestedRefusals,
+	"cronjob":   containerNestedRefusals,
+}
+
+// withNestedRefusals returns a copy of refusals with r added under path.
+func withNestedRefusals(refusals map[string]nestedRefusal, path string, r nestedRefusal) map[string]nestedRefusal {
+	out := maps.Clone(refusals)
+	out[path] = r
+	return out
+}
+
+// refusedNestedKeyHint returns the reason componentType refuses key with
+// inside the object parents lead to, and "" when the parser of that object
+// refuses none under that name. It is the NestedUnsupportedFieldHint of every
+// type nestedRefusedKeys lists.
+func refusedNestedKeyHint(componentType string, parents []string, key string) string {
+	r, ok := nestedRefusedKeys[componentType][strings.Join(parents, ".")]
+	if !ok {
+		return ""
+	}
+	reason, ok := r.refused[key]
+	if !ok {
+		return ""
+	}
+	return r.text(key, reason)
+}
+
 // The methods below give the document check the reason a type refuses key
 // with: one per type refusedKeys lists (the serviceaccount's is beside its
-// map). A lowering rule answers with the maps of the kind it lowers to, whose
+// map), and for a key below the top level one per type nestedRefusedKeys
+// lists. A lowering rule answers with the maps of the kind it lowers to, whose
 // parsers its own parser runs.
+
+// NestedUnsupportedFieldHint is the deployment's refusedNestedKeyHint.
+func (h *DeploymentHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("deployment", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the webservice's refusedNestedKeyHint.
+func (WebserviceRule) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("webservice", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the worker's refusedNestedKeyHint.
+func (WorkerRule) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("worker", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the statefulset's refusedNestedKeyHint.
+func (h *StatefulsetHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("statefulset", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the daemonset's refusedNestedKeyHint.
+func (h *DaemonsetHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("daemonset", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the job's refusedNestedKeyHint.
+func (h *JobHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("job", parents, key)
+}
+
+// NestedUnsupportedFieldHint is the cronjob's refusedNestedKeyHint.
+func (h *CronjobHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("cronjob", parents, key)
+}
 
 // UnsupportedFieldHint is the deployment's refusedKeyHint.
 func (h *DeploymentHandler) UnsupportedFieldHint(key string) string {

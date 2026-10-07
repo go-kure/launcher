@@ -229,8 +229,9 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 // corev1.Affinity under the `affinity` shorthand of webservice and worker, and `claims` under a container's `resources`. The parser of the
 // property refuses each with its reason, whatever the value; before, a caller
 // that drives Transform without the document check had them dropped. The
-// document check refuses the same key with its generic text and no reason: a
-// type's hint answers for its top-level keys only.
+// document check refuses the same key with its generic text, followed by the
+// same reason (the type's NestedUnsupportedFieldHint); a key that is no field
+// of the upstream type gets the generic text alone.
 func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	tr := refusedKeyTransformer()
 	with := func(componentType, key string, value any) map[string]any {
@@ -238,15 +239,21 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 		props[key] = value
 		return props
 	}
-	check := func(t *testing.T, componentType string, props map[string]any, reason, documentPath, nested string) {
+	check := func(t *testing.T, componentType string, props map[string]any, reason, documentPath, nested string, hinted bool) {
 		t.Helper()
 		direct, document := refusedKeyPaths(t, tr, componentType, props)
 		if direct == nil || !strings.HasSuffix(direct.Error(), reason) {
 			t.Errorf("parser: error = %v, want it to end with %q", direct, reason)
 		}
 		generic := `component "c" (type "` + componentType + `"): ` + documentPath + `: unsupported field "` + nested + `" (allowed: `
-		if document == nil || !strings.HasPrefix(document.Error(), generic) || !strings.HasSuffix(document.Error(), ")") {
-			t.Errorf("document check: error = %v, want %q… ending with the allowed list and nothing after it", document, generic)
+		if document == nil || !strings.HasPrefix(document.Error(), generic) {
+			t.Fatalf("document check: error = %v, want it to begin with %q", document, generic)
+		}
+		if hinted && !strings.HasSuffix(document.Error(), "); "+reason) {
+			t.Errorf("document check: error = %v, want the allowed list followed by the parser's reason %q", document, reason)
+		}
+		if !hinted && !strings.HasSuffix(document.Error(), ")") {
+			t.Errorf("document check: error = %v, want it to end with the allowed list and nothing after it", document)
 		}
 	}
 	values := []struct {
@@ -271,14 +278,14 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 			}
 			for _, value := range values {
 				t.Run(componentType+"/affinity/"+key+"/"+value.name, func(t *testing.T) {
-					check(t, componentType, with(componentType, "affinity", map[string]any{key: value.v}), reason, "properties.affinity", key)
+					check(t, componentType, with(componentType, "affinity", map[string]any{key: value.v}), reason, "properties.affinity", key, true)
 				})
 			}
 		}
 		for _, value := range values {
 			t.Run(componentType+"/affinity/no upstream field/"+value.name, func(t *testing.T) {
 				check(t, componentType, with(componentType, "affinity", map[string]any{"noSuchKey": value.v}),
-					`affinity: unrecognized key "noSuchKey"`, "properties.affinity", "noSuchKey")
+					`affinity: unrecognized key "noSuchKey"`, "properties.affinity", "noSuchKey", false)
 			})
 		}
 	}
@@ -315,14 +322,75 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 		}{{"a value", []any{map[string]any{"name": "gpu"}}}, {"null", nil}} {
 			claims := map[string]any{"claims": value.v}
 			t.Run(componentType+"/resources/claims/"+value.name, func(t *testing.T) {
-				check(t, componentType, with(componentType, "resources", claims), reason, "properties.resources", "claims")
+				check(t, componentType, with(componentType, "resources", claims), reason, "properties.resources", "claims", true)
 			})
 			for _, list := range lists {
 				t.Run(componentType+"/"+list+"/resources/claims/"+value.name, func(t *testing.T) {
-					check(t, componentType, with(componentType, list, entry(claims)), reason, "properties."+list+"[0].resources", "claims")
+					check(t, componentType, with(componentType, list, entry(claims)), reason, "properties."+list+"[0].resources", "claims", true)
 				})
 			}
 		}
+	}
+}
+
+// TestRefusedKeys_InAnEntry holds the refusals inside a list entry the type
+// declares (go-kure/launcher#790): `probes` and `lifecycle` on an init
+// container entry, on every workload type, and the claim-spec fields a
+// statefulset's volumeClaimTemplates entry refuses. The document check refuses
+// each with its generic text followed by the reason the entry's parser gives.
+// A key of an entry that a type refuses only at its top level (the main
+// container's `livenessProbe`) gets the generic text alone: the type's
+// top-level hint is not asked about a nested key.
+func TestRefusedKeys_InAnEntry(t *testing.T) {
+	tr := refusedKeyTransformer()
+	check := func(t *testing.T, componentType string, props map[string]any, documentPath, key, hint string) {
+		t.Helper()
+		direct, document := refusedKeyPaths(t, tr, componentType, props)
+		generic := `component "c" (type "` + componentType + `"): ` + documentPath + `: unsupported field "` + key + `" (allowed: `
+		if document == nil || !strings.HasPrefix(document.Error(), generic) {
+			t.Fatalf("document check: error = %v, want it to begin with %q", document, generic)
+		}
+		if hint == "" {
+			if !strings.HasSuffix(document.Error(), ")") {
+				t.Errorf("document check: error = %v, want it to end with the allowed list and nothing after it", document)
+			}
+			return
+		}
+		if direct == nil || !strings.HasSuffix(direct.Error(), hint) {
+			t.Errorf("parser: error = %v, want it to end with %q", direct, hint)
+		}
+		if !strings.HasSuffix(document.Error(), "); "+hint) {
+			t.Errorf("document check: error = %v, want the allowed list followed by the parser's reason %q", document, hint)
+		}
+	}
+	initEntry := func(key string) []any {
+		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
+	}
+	for _, componentType := range []string{"deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+		if refusedKeyHint(componentType, "livenessProbe") == "" {
+			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
+		}
+		for _, key := range slices.Sorted(maps.Keys(initContainerRejectedKeys)) {
+			t.Run(componentType+"/initContainers/"+key, func(t *testing.T) {
+				props := maps.Clone(refusedKeyBase[componentType])
+				props["initContainers"] = initEntry(key)
+				check(t, componentType, props, "properties.initContainers[0]", key,
+					key+": not supported on an init container — "+initContainerRejectedKeys[key])
+			})
+		}
+		t.Run(componentType+"/initContainers/livenessProbe", func(t *testing.T) {
+			props := maps.Clone(refusedKeyBase[componentType])
+			props["initContainers"] = initEntry("livenessProbe")
+			check(t, componentType, props, "properties.initContainers[0]", "livenessProbe", "")
+		})
+	}
+	for _, key := range slices.Sorted(maps.Keys(volumeClaimTemplateRejectedKeys)) {
+		t.Run("statefulset/volumeClaimTemplates/"+key, func(t *testing.T) {
+			props := maps.Clone(refusedKeyBase["statefulset"])
+			props["volumeClaimTemplates"] = []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data", key: "x"}}
+			check(t, "statefulset", props, "properties.volumeClaimTemplates[0]", key,
+				key+": not authorable — "+volumeClaimTemplateRejectedKeys[key])
+		})
 	}
 }
 
