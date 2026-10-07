@@ -16,11 +16,14 @@ import (
 
 // These tests pin what the delivery settings of a bundle reach under per-layout
 // placement, through kurel's own transformer and the base library's layout
-// walker and Flux integrator (go-kure/kure#1016). Launcher sets none of them
-// (go-kure/launcher#781): a consumer sets them on a bundle launcher returned.
-// The Kustomization of a component's layout, and of each hook-group layout
-// launcher adds below it, then takes five of them from that bundle: wait,
-// timeout, retry interval, labels and annotations.
+// walker and Flux integrator (go-kure/kure#1016, go-kure/kure#1021). Launcher
+// sets none of them (go-kure/launcher#781): a consumer sets them on a bundle
+// launcher returned. The Kustomization of a component's layout, and of each
+// hook-group layout launcher adds below it, then takes them from that bundle:
+// wait, timeout, retry interval, labels and annotations, held by the first two
+// tests below, and interval, prune, force, suspend and the postBuild
+// substitution, held by TestBundleSettings_FluxSettingsReachPerLayout. Patches,
+// which it takes too, are placed by object and not held here.
 
 // kustomizationSettings are the five settings a per-layout Kustomization takes
 // from the bundle that holds its application.
@@ -225,6 +228,84 @@ func TestBundleSettings_OrderedApplicationTakesTheGroupBundle(t *testing.T) {
 				}
 				if !reflect.DeepEqual(got[name], want) {
 					t.Errorf("Kustomization %s has %+v, want %+v", name, got[name], want)
+				}
+			}
+		})
+	}
+}
+
+// fluxSettings are the five settings besides patches that a per-layout
+// Kustomization takes from its bundle since go-kure/kure#1021. Substitute is
+// spec.postBuild.substitute, nil without a postBuild.
+type fluxSettings struct {
+	Interval   string
+	Prune      bool
+	Force      bool
+	Suspend    bool
+	Substitute map[string]string
+}
+
+func treeFluxSettings(root *layout.ManifestLayout) map[string]fluxSettings {
+	out := map[string]fluxSettings{}
+	var walk func(ml *layout.ManifestLayout)
+	walk = func(ml *layout.ManifestLayout) {
+		for _, o := range ml.Resources {
+			kz, ok := o.(*kustv1.Kustomization)
+			if !ok {
+				continue
+			}
+			s := fluxSettings{Interval: kz.Spec.Interval.Duration.String(), Prune: kz.Spec.Prune, Force: kz.Spec.Force, Suspend: kz.Spec.Suspend}
+			if kz.Spec.PostBuild != nil {
+				s.Substitute = kz.Spec.PostBuild.Substitute
+			}
+			out[kz.Name] = s
+		}
+		for _, child := range ml.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return out
+}
+
+// A bundle as launcher returns it sets none of the five, and every
+// Kustomization of the tree has the generator's interval and prune and no
+// force, suspend or postBuild. A bundle a consumer set them on gives them to
+// its own Kustomization, to the component's and to each hook group's: prune on
+// the bundle turns garbage collection on for the layouts too.
+// Each value set differs from the generator's, so a pin move that stops
+// handing one down is seen.
+func TestBundleSettings_FluxSettingsReachPerLayout(t *testing.T) {
+	doc := hookApp("shop", hookComponent("db", "helmtemplate", serveHookChart(t), ""), "")
+	generator := fluxSettings{Interval: "1h0m0s"}
+	set := fluxSettings{Interval: "7m0s", Prune: true, Force: true, Suspend: true, Substitute: map[string]string{"region": "eu"}}
+	for _, tc := range []struct {
+		name string
+		set  func(b *stack.Bundle)
+		want fluxSettings
+	}{
+		{name: "a bundle as launcher returns it", set: func(*stack.Bundle) {}, want: generator},
+		{name: "a bundle with the five settings", set: func(b *stack.Bundle) {
+			prune, force, suspend := true, true, true
+			b.Interval = "7m"
+			b.Prune = &prune
+			b.Force = &force
+			b.Suspend = &suspend
+			b.PostBuild = &stack.PostBuild{Substitute: map[string]string{"region": "eu"}}
+		}, want: set},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, err := bundleSettingsTree(t, doc, tc.set)
+			if err != nil {
+				t.Fatalf("integrating: %v", err)
+			}
+			got := treeFluxSettings(root)
+			if names, want := slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(bundleSettingsChain)); !slices.Equal(names, want) {
+				t.Fatalf("Kustomizations = %v, want %v", names, want)
+			}
+			for _, name := range slices.Sorted(maps.Keys(got)) {
+				if !reflect.DeepEqual(got[name], tc.want) {
+					t.Errorf("Kustomization %s has %+v, want %+v", name, got[name], tc.want)
 				}
 			}
 		})
