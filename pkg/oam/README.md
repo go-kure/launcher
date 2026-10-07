@@ -515,15 +515,19 @@ The value is read, on every object and on each member of an unstructured list en
 | `spec.<mover>.moverPodLabels` | a `volsync.backube` `ReplicationSource` (`rsync`, `rsyncTLS`, `rclone`, `restic`, `syncthing`) or `ReplicationDestination` (`rsync`, `rsyncTLS`, `rclone`, `restic`) | no |
 | `spec.acme.solvers[].http01.ingress.podTemplate.metadata.labels`, and the same under `http01.gatewayHTTPRoute`, in every solver | a `cert-manager.io` `Issuer` or `ClusterIssuer` | no |
 | `spec.infrastructure.labels` | a `gateway.networking.k8s.io` `Gateway` | no |
+| `spec.commonMetadata.labels` | a `kustomize.toolkit.fluxcd.io` `Kustomization`, a `helm.toolkit.fluxcd.io` `HelmRelease` or a `source.extensions.fluxcd.io` `ArtifactGenerator` | no |
 
-The last six rows are metadata an operator puts on the pods it creates (a Gateway's
-`spec.infrastructure` on whatever the controller creates for it, which may be pods). Launcher
-reads them and writes nothing there: such pods carry the component label only where the
-document or a kind puts it. A typed object of a kind of the last four rows is recognized
-when it states its kind. A refusal names the labels by their path, with the index of the
-solver where they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`).
-Not read: a volume claim template's labels, and what a Flux object hands on to what it
-applies (`spec.commonMetadata`).
+The six rows after the CronJob's are metadata an operator puts on the pods it creates (a
+Gateway's `spec.infrastructure` on whatever the controller creates for it, which may be
+pods). The last row is what the Flux controller puts on every object it applies, renders or
+generates, pods among them. Launcher reads them and writes nothing there: such pods carry the
+component label only where the document or a kind puts it. A typed object of a
+`monitoring.coreos.com`, `volsync.backube`, `cert-manager.io` or `gateway.networking.k8s.io`
+kind is recognized when it states its kind; a typed Flux `Kustomization`, `HelmRelease` or
+`ArtifactGenerator` by its Go type as well. A refusal names the labels by their path, with
+the index of the solver where they are in the list
+(`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not read: a volume claim
+template's labels.
 
 The label and the reserved metadata keys are held wherever an object holds labels that reach
 pods. Metadata an operator copies onto other objects it creates (the Ingress of a solver, the
@@ -733,6 +737,11 @@ generates. The case is reached only through a consumer's own lowering rule.
   `serviceAnnotations` of a VolSync `ReplicationDestination`'s `rsync` and `rsyncTLS` movers
   ([Reserved metadata keys](#reserved-metadata-keys)). A document that set a reserved key
   there built before and is refused now. The component label is not read there.
+- Both checks read `spec.commonMetadata` of a Flux `Kustomization`, `HelmRelease` or
+  `ArtifactGenerator`, which the controller puts on every object it applies, renders or
+  generates. A document that set a reserved key there, or the component label's key with a
+  value that is not its component's, built before and is refused now. Launcher writes
+  nothing there.
 
 **Breaking library changes** (go-kure/launcher#790, a CronJob's job template):
 
@@ -751,9 +760,10 @@ generates. The case is reached only through a consumer's own lowering rule.
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
 `ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
 `ComponentLabelSelectorRequiresAnother`, `ComponentLabelInLabelsProperty` and
-`ComponentLabelOfAnotherComponent`, four values of `ReservedKeyHolder`:
+`ComponentLabelOfAnotherComponent`, five values of `ReservedKeyHolder`:
 `ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
-`ReservedKeyInSolverPodTemplate` and `ReservedKeyInInfrastructure`, and the field `ReservedMetadataKeyError.Path`. The refusal of
+`ReservedKeyInSolverPodTemplate`, `ReservedKeyInInfrastructure` and
+`ReservedKeyInCommonMetadata`, and the field `ReservedMetadataKeyError.Path`. The refusal of
 a kind component's `labels` property that holds another value under the key, which the
 transform returned before as an error of no type, is a `*ComponentLabelError` now, with the
 same text. Under the key `app` the kinds' own `app` check refused such a value first, with a
@@ -821,8 +831,8 @@ check reads only the metadata of, which `Object` (the object as the text names i
 by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
 the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`, `ReservedKeyInJobTemplate`,
 `ReservedKeyInInheritedMetadata`, `ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
-`ReservedKeyInSolverPodTemplate` or `ReservedKeyInInfrastructure`, or, of metadata that
-reaches no pods, `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
+`ReservedKeyInSolverPodTemplate`, `ReservedKeyInInfrastructure` or
+`ReservedKeyInCommonMetadata`, or, of metadata that reaches no pods, `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
 `ReservedKeyInSecretTemplate`, `ReservedKeyInServiceTemplate`,
 `ReservedKeyInServiceAccountTemplate`, `ReservedKeyInVolumeSnapshot`,
 `ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` or
@@ -860,6 +870,10 @@ Flux applies it (a `List`, or an envelope with `items`):
   label "…"`;
 - the labels and annotations of `spec.infrastructure` of a `gateway.networking.k8s.io`
   `Gateway`, which the controller applies to what it creates for the Gateway;
+- the labels and annotations of `spec.commonMetadata` of a `kustomize.toolkit.fluxcd.io`
+  `Kustomization`, a `helm.toolkit.fluxcd.io` `HelmRelease` or a
+  `source.extensions.fluxcd.io` `ArtifactGenerator`, which the Flux controller puts on every
+  object it applies, renders or generates: `spec.commonMetadata label "…"`;
 - metadata an operator copies onto objects it creates that are no pods:
   - of each HTTP01 solver of an `Issuer` or `ClusterIssuer`, in every solver of the list,
     the Ingress template's labels and annotations
@@ -886,8 +900,9 @@ Flux applies it (a `List`, or an envelope with `items`):
 These are the places the component label is held to its value in
 ([Component label and ownership](#component-label-and-ownership)), but the metadata that
 reaches no pods: one list serves both checks. A typed object of a `monitoring.coreos.com`,
-`volsync.backube`, `cert-manager.io`, `gateway.networking.k8s.io`, `external-secrets.io` or
-`helm.toolkit.fluxcd.io` kind is recognized when it states its kind.
+`volsync.backube`, `cert-manager.io`, `gateway.networking.k8s.io` or `external-secrets.io`
+kind is recognized when it states its kind. A typed Flux `Kustomization`, `HelmRelease` or
+`ArtifactGenerator` is recognized by its Go type as well, whether or not it states its kind.
 
 A key is read whatever its value: a value the API server would refuse, or a null, does not
 hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the
@@ -921,11 +936,9 @@ object named, and is not read as holding no key.
 
 - A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
-- Metadata an object hands on to others in a field of its own: `spec.commonMetadata` of a
-  Flux `Kustomization`, `HelmRelease` or `ArtifactGenerator`, a StatefulSet's
-  `volumeClaimTemplates`. `labelReachNotRead` in
-  `pkg/cmd/kurel/label_reach_test.go` is the full list of fields of the kinds' API types
-  that hand metadata on and are not read.
+- Metadata an object hands on to others in a field of its own: a StatefulSet's
+  `volumeClaimTemplates`. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the
+  full list of fields of the kinds' API types that hand metadata on and are not read.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.

@@ -205,7 +205,8 @@ type labelReachUnread struct {
 }
 
 const (
-	// unreadFlux: decided with the rest of what Flux hands on.
+	// unreadFlux: what a Flux object hands on other than its
+	// spec.commonMetadata, which the checks read.
 	unreadFlux = "what a Flux object hands on to the objects it applies: the triage of go-kure/launcher#790"
 	// unreadTemplate: these become the metadata of a PersistentVolumeClaim, not
 	// of a pod.
@@ -272,11 +273,6 @@ var labelReachReservedOnly = []struct {
 // operatorMetadataKinds and podTemplateKinds), by both checks or, listed in
 // labelReachReservedOnly, by the reserved keys alone, or stands here.
 var labelReachNotRead = []labelReachUnread{
-	// What a Flux object hands on.
-	{field: "github.com/fluxcd/kustomize-controller/api/v1.KustomizationSpec.CommonMetadata", reason: unreadFlux},
-	{field: "github.com/fluxcd/helm-controller/api/v2.HelmReleaseSpec.CommonMetadata", reason: unreadFlux},
-	{field: "github.com/fluxcd/source-watcher/api/v2/v1beta1.ArtifactGeneratorSpec.CommonMetadata", reason: unreadFlux},
-
 	// A volume claim template's: a StatefulSet's spec.volumeClaimTemplates, and
 	// the claim template of an ephemeral volume, in every pod spec and in a
 	// CloudNativePG Cluster's spec.ephemeralVolumeSource. A CronJob's job
