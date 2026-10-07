@@ -1201,6 +1201,9 @@ func parseWindowsOptions(raw map[string]any, label string) (*corev1.WindowsSecur
 			set = true
 		}
 	}
+	if err := checkWindowsOptionStrings(wo, label); err != nil {
+		return nil, err
+	}
 	if v, err := parseBoolField(raw, "hostProcess", label+".hostProcess"); err != nil {
 		return nil, err
 	} else if v != nil {
@@ -1211,6 +1214,78 @@ func parseWindowsOptions(raw map[string]any, label string) (*corev1.WindowsSecur
 		return nil, nil
 	}
 	return wo, nil
+}
+
+// Upstream's limits on the windowsOptions strings
+// (validateWindowsSecurityContextOptions in k8s.io/kubernetes
+// pkg/apis/core/validation).
+const (
+	maxGMSACredentialSpecLength  = 64 * 1024
+	maxRunAsUserNameDomainLength = 256
+	maxRunAsUserNameUserLength   = 104
+)
+
+var (
+	windowsCtrlRe        = regexp.MustCompile(`[[:cntrl:]]+`)
+	windowsNetBiosRe     = regexp.MustCompile(`^[^\\/:\*\?"<>|\.][^\\/:\*\?"<>|]{0,14}$`)
+	windowsDomainDNSRe   = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	windowsUserCharsRe   = regexp.MustCompile(`["/\\:;|=,\+\*\?<>@\[\]]`)
+	windowsUserDotsSpcRe = regexp.MustCompile(`^[\. ]+$`)
+)
+
+// checkWindowsOptionStrings holds the authored windowsOptions strings to
+// upstream's rules, which the API server applies to the pod-level and every
+// container-level windowsOptions alike: gmsaCredentialSpecName names a
+// GMSACredentialSpec object, so it is a DNS-1123 subdomain; gmsaCredentialSpec
+// is at most 64 KiB; runAsUserName is "USER" or "DOMAIN\USER", with upstream's
+// limits on each part. An empty string is read as absent (parseStringField), so
+// upstream's refusal of an empty value is never reached. The first refusal in
+// upstream's order is returned.
+func checkWindowsOptionStrings(wo *corev1.WindowsSecurityContextOptions, label string) error {
+	if wo.GMSACredentialSpecName != nil {
+		if errs := validation.IsDNS1123Subdomain(*wo.GMSACredentialSpecName); len(errs) > 0 {
+			return errors.Errorf("%s.gmsaCredentialSpecName: invalid name %q: %s", label, *wo.GMSACredentialSpecName, strings.Join(errs, "; "))
+		}
+	}
+	if wo.GMSACredentialSpec != nil {
+		if l := len(*wo.GMSACredentialSpec); l > maxGMSACredentialSpecLength {
+			return errors.Errorf("%s.gmsaCredentialSpec: size must be under 64 KiB, got %d bytes", label, l)
+		}
+	}
+	if wo.RunAsUserName == nil {
+		return nil
+	}
+	name := *wo.RunAsUserName
+	key := label + ".runAsUserName"
+	if windowsCtrlRe.MatchString(name) {
+		return errors.Errorf("%s: invalid value %q: must not contain control characters", key, name)
+	}
+	parts := strings.Split(name, `\`)
+	if len(parts) > 2 {
+		return errors.Errorf("%s: invalid value %q: must not contain more than one backslash", key, name)
+	}
+	user := parts[0]
+	if len(parts) == 2 {
+		domain := parts[0]
+		user = parts[1]
+		if len(domain) >= maxRunAsUserNameDomainLength {
+			return errors.Errorf("%s: invalid value %q: the domain must be under %d characters", key, name, maxRunAsUserNameDomainLength)
+		}
+		if !windowsNetBiosRe.MatchString(domain) && !windowsDomainDNSRe.MatchString(domain) {
+			return errors.Errorf("%s: invalid value %q: the domain matches neither the NetBIOS nor the DNS format", key, name)
+		}
+	}
+	switch {
+	case user == "":
+		return errors.Errorf("%s: invalid value %q: the user must not be empty", key, name)
+	case len(user) > maxRunAsUserNameUserLength:
+		return errors.Errorf("%s: invalid value %q: the user must be at most %d characters", key, name, maxRunAsUserNameUserLength)
+	case windowsUserDotsSpcRe.MatchString(user):
+		return errors.Errorf("%s: invalid value %q: the user must not consist only of periods or spaces", key, name)
+	case windowsUserCharsRe.MatchString(user):
+		return errors.Errorf(`%s: invalid value %q: the user must not contain any of "/\:;|=,+*?<>@[]`, key, name)
+	}
+	return nil
 }
 
 // --- Builders ---

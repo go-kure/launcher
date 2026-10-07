@@ -168,6 +168,82 @@ func TestContainerWindowsOptions_HostProcessRefusals(t *testing.T) {
 	}
 }
 
+// windowsOptionsAt places a windowsOptions object at one level: the pod's
+// podSecurityContext, the main container's securityContext, or an init
+// container's.
+func windowsOptionsAt(level string, wo map[string]any) map[string]any {
+	sc := map[string]any{"windowsOptions": wo}
+	switch level {
+	case "pod":
+		return map[string]any{"podSecurityContext": sc}
+	case "init":
+		return map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "ghcr.io/org/init:v1", "securityContext": sc}}}
+	default:
+		return map[string]any{"securityContext": sc}
+	}
+}
+
+// TestWindowsOptions_StringRules: upstream's
+// validateWindowsSecurityContextOptions rules on the three strings, at the pod
+// level and on a container, each refusal beside a value upstream accepts. An
+// empty string is read as absent, as everywhere in this package, so upstream's
+// refusal of an empty value has no case here.
+func TestWindowsOptions_StringRules(t *testing.T) {
+	refused := []struct {
+		name string
+		wo   map[string]any
+		want string
+	}{
+		{"credential spec name not a subdomain", map[string]any{"gmsaCredentialSpecName": "INVALID_NAME"}, `gmsaCredentialSpecName: invalid name "INVALID_NAME"`},
+		{"credential spec over 64 KiB", map[string]any{"gmsaCredentialSpec": strings.Repeat("a", 64*1024+1)}, "gmsaCredentialSpec: size must be under 64 KiB"},
+		{"control character", map[string]any{"runAsUserName": "user\tname"}, "must not contain control characters"},
+		{"two backslashes", map[string]any{"runAsUserName": `a\b\c`}, "more than one backslash"},
+		{"domain too long", map[string]any{"runAsUserName": strings.Repeat("a", 256) + `\user`}, "the domain must be under 256 characters"},
+		{"domain neither NetBIOS nor DNS", map[string]any{"runAsUserName": `.bad-domain-over-15\user`}, "neither the NetBIOS nor the DNS format"},
+		{"empty domain", map[string]any{"runAsUserName": `\user`}, "neither the NetBIOS nor the DNS format"},
+		{"empty user", map[string]any{"runAsUserName": `CONTOSO\`}, "the user must not be empty"},
+		{"user too long", map[string]any{"runAsUserName": strings.Repeat("u", 105)}, "the user must be at most 104 characters"},
+		{"user only periods and spaces", map[string]any{"runAsUserName": ". ."}, "only of periods or spaces"},
+		{"user with a slash", map[string]any{"runAsUserName": "bad/user"}, "the user must not contain any of"},
+	}
+	accepted := []struct {
+		name string
+		wo   map[string]any
+	}{
+		{"credential spec name a subdomain", map[string]any{"gmsaCredentialSpecName": "webapp.gmsa"}},
+		{"credential spec of 64 KiB", map[string]any{"gmsaCredentialSpec": strings.Repeat("a", 64*1024)}},
+		{"plain user", map[string]any{"runAsUserName": "ContainerUser"}},
+		{"NetBIOS domain", map[string]any{"runAsUserName": `NT AUTHORITY\NETWORK SERVICE`}},
+		{"DNS domain", map[string]any{"runAsUserName": `contoso.example.com\svc-app`}},
+		{"user of 104 characters", map[string]any{"runAsUserName": strings.Repeat("u", 104)}},
+	}
+	levels := map[string]string{
+		"pod":  "podSecurityContext.windowsOptions.",
+		"main": "securityContext.windowsOptions.",
+		"init": "securityContext.windowsOptions.",
+	}
+	for level, prefix := range levels {
+		for _, tc := range refused {
+			t.Run(level+"/"+tc.name, func(t *testing.T) {
+				err := deploymentBuildError(withProps(map[string]any{"image": "ghcr.io/org/app:v1"}, windowsOptionsAt(level, tc.wo)))
+				if err == nil {
+					t.Fatal("expected an error, got none")
+				}
+				if !strings.Contains(err.Error(), prefix) || !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("error %q does not contain %q and %q", err.Error(), prefix, tc.want)
+				}
+			})
+		}
+		for _, tc := range accepted {
+			t.Run(level+"/accepted "+tc.name, func(t *testing.T) {
+				if err := deploymentBuildError(withProps(map[string]any{"image": "ghcr.io/org/app:v1"}, windowsOptionsAt(level, tc.wo))); err != nil {
+					t.Fatalf("unexpected error %v", err)
+				}
+			})
+		}
+	}
+}
+
 // deploymentBuildError parses and generates a deployment and returns the first
 // error. The pod-wide HostProcess rules need the assembled pod, so they are
 // refused when the pod is built, not when a property is parsed.
