@@ -619,6 +619,11 @@ spec:
 	"priorityclass": {
 		props: map[string]any{"value": 1000},
 	},
+	// A Prometheus is held as an Alertmanager is, its external labels the
+	// spec's own.
+	"prometheus": {props: map[string]any{
+		"serviceMonitorSelector": map[string]any{"matchLabels": map[string]any{"team": "payments"}},
+		"externalLabels":         map[string]any{"cluster": "eu-1"}}},
 	"prometheus-probe": {props: map[string]any{
 		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
 		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},

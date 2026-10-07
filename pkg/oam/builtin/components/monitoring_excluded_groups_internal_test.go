@@ -7,18 +7,18 @@ import (
 	"testing"
 )
 
-// TestThanosRulerExcludedGroup_MatchesMarkers holds the group withExcludedGroups
+// TestMonitoringExcludedGroup_MatchesMarkers holds the group withExcludedGroups
 // writes to the markers of the linked module's source: the kubebuilder default
 // of ObjectReference.Group, and its enum, which must admit that one value and no
 // other. An upstream change to either fails here, so the fill never writes a
 // value the API no longer defaults to or admits.
-func TestThanosRulerExcludedGroup_MatchesMarkers(t *testing.T) {
+func TestMonitoringExcludedGroup_MatchesMarkers(t *testing.T) {
 	m, read := monitoringFieldMarkers(t)["ObjectReference.Group"]
 	if !read {
 		t.Fatal("ObjectReference.Group has no field in the module's source")
 	}
-	if !m.hasDefault || m.def != thanosRulerExcludedGroup {
-		t.Errorf("ObjectReference.Group defaults to %q (has a default: %v), want %q", m.def, m.hasDefault, thanosRulerExcludedGroup)
+	if !m.hasDefault || m.def != monitoringExcludedGroup {
+		t.Errorf("ObjectReference.Group defaults to %q (has a default: %v), want %q", m.def, m.hasDefault, monitoringExcludedGroup)
 	}
 	var enum []string
 	found := false
@@ -42,7 +42,7 @@ func TestThanosRulerExcludedGroup_MatchesMarkers(t *testing.T) {
 	if !found {
 		t.Fatal("the walk did not reach ObjectReference.Group")
 	}
-	if len(enum) != 1 || enum[0] != thanosRulerExcludedGroup {
-		t.Errorf("ObjectReference.Group admits %q, want only %q", enum, thanosRulerExcludedGroup)
+	if len(enum) != 1 || enum[0] != monitoringExcludedGroup {
+		t.Errorf("ObjectReference.Group admits %q, want only %q", enum, monitoringExcludedGroup)
 	}
 }

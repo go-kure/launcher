@@ -110,6 +110,7 @@ var validComponentTypes = map[string]bool{
 	"podtemplate":                     true,
 	"postgresql":                      true,
 	"priorityclass":                   true,
+	"prometheus":                      true,
 	"prometheus-probe":                true,
 	"prometheusrule":                  true,
 	"referencegrant":                  true,

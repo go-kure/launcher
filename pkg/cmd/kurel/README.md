@@ -177,6 +177,7 @@ at its position.
 | `podmonitor` | A PodMonitor in the build namespace. No capability is required of the cluster profile to build it. |
 | `podtemplate` | The authored template, with no `app` label. Not one of the five pod kinds named below. |
 | `priorityclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `prometheus` | A Prometheus in the build namespace, its `externalLabels` under the spec's own name, a Thanos sidecar image, and an excluded-from-enforcement entry with no group written with the operator's one group. Its pods, those of every shard, are held to the environment policy as the Alertmanager's are; no capability is required to build it. |
 | `prometheus-probe` | A Probe in the build namespace. No capability is required of the cluster profile to build it. |
 | `prometheusrule` | A PrometheusRule in the build namespace. No capability is required of the cluster profile to build it. |
 | `referencegrant` | A ReferenceGrant in the build namespace. No capability is required of the cluster profile to build it. |
