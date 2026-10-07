@@ -209,13 +209,17 @@ the hook groups' Kustomizations. `PostBuild` is copied whole, and where the subs
 the build above would change a per-layout Kustomization's postBuild or patches, kure writes
 `kustomize.toolkit.fluxcd.io/substitute: disabled` on it. Where a bundle has per-layout
 Kustomizations its `Patches` are placed by object: a patch with a `Target` is on the bundle's
-Kustomization and on every per-layout one; a plain untargeted strategic-merge patch is only on
-the Kustomizations whose build holds every object it names, so it leaves the bundle's own
+Kustomization and on every per-layout one; a plain untargeted strategic-merge patch that comes
+before any entry that is not one is only on the Kustomizations whose build holds every object
+it names, so it leaves the bundle's own
 Kustomization where that one does not build the object; any other untargeted patch stays on
-the bundle's own Kustomization alone. An untargeted strategic-merge patch that comes after an
-entry that is not a plain strategic-merge patch (a JSON6902 patch, say) is not placed by
-object: it stays on the bundle's own Kustomization, is written besides on each per-layout one
-whose build holds every object it names, and is never refused. A bundle without per-layout
+the bundle's own Kustomization alone. A plain strategic-merge patch is one that parses as
+resources, carries none of kustomize's `internal.config.kubernetes.io/` build annotations and
+cannot remove its object (no top-level `$patch: delete`, no `config.kubernetes.io/local-config`
+at a value but `"false"`). A plain untargeted strategic-merge patch that comes after an entry
+that is not one (a JSON6902 patch, say) is not placed by object: it stays on the bundle's own
+Kustomization, is written besides on each per-layout one whose build holds every object it
+names, and is never refused. A bundle without per-layout
 Kustomizations keeps every patch on its own, as before. With
 `Wait`, a hook group's Kustomization is
 Ready once the objects it applied are, not once it has applied them, so the next group, whose
@@ -255,11 +259,12 @@ value but `"false"` needs a `kind` but no `apiVersion`.
 go-kure/kure#1022 and go-kure/kure#1020, with the kure commit `go.mod` pins). Under
 `FluxIntegratedPerLayout` placement, a bundle that sets one of the eleven gives it to the
 Kustomizations of the components it holds and of their hook groups, a bundle's plain
-untargeted strategic-merge patch moves off its own Kustomization where that one does not
-build the patched object, and a tree kure refuses for one of the first five reasons above no
-longer renders. Under any placement, a tree with a duration kure refuses no longer renders, a
-bundle with child bundles that sets `Wait` loses its child health checks, and a layout with
-an object written without a `kind` or an `apiVersion` is no longer written. What launcher
+untargeted strategic-merge patch that comes before any entry that is not one moves off its
+own Kustomization where that one does not build the patched object, and a tree kure refuses
+for one of the first five reasons above no longer renders. Under any placement, a tree with a
+duration kure refuses no longer renders, a bundle with child bundles that sets `Wait` loses
+its child health checks, and a layout holding an object the writers' type check above refuses
+is no longer written. What launcher
 returns does not change, and a tree that sets none of the eleven, no `Wait` on a bundle with
 child bundles and no such duration, and holds no object the writers now refuse, renders and
 is written as before.
