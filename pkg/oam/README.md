@@ -855,7 +855,7 @@ object named, and is not read as holding no key.
 - A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
 - Metadata an object hands on to others in a field of its own: `spec.commonMetadata` of a
-  Flux `Kustomization` or `HelmRelease`, a StatefulSet's `volumeClaimTemplates`, a CronJob's
+  Flux `Kustomization`, `HelmRelease` or `ArtifactGenerator`, a StatefulSet's `volumeClaimTemplates`, a CronJob's
   `jobTemplate` metadata (its pod template is read).
 - Metadata an operator copies onto objects it creates that are no pods: the Ingress and the
   HTTPRoutes of an issuer's solver, a Certificate's `secretTemplate`, the Service and

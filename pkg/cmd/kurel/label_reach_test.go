@@ -225,6 +225,7 @@ var labelReachNotRead = []labelReachUnread{
 	// What a Flux object hands on.
 	{field: "github.com/fluxcd/kustomize-controller/api/v1.KustomizationSpec.CommonMetadata", reason: unreadFlux},
 	{field: "github.com/fluxcd/helm-controller/api/v2.HelmReleaseSpec.CommonMetadata", reason: unreadFlux},
+	{field: "github.com/fluxcd/source-watcher/api/v2/v1beta1.ArtifactGeneratorSpec.CommonMetadata", reason: unreadFlux},
 
 	// A job template's and a volume claim template's: a CronJob's
 	// spec.jobTemplate.metadata, a StatefulSet's spec.volumeClaimTemplates, and
