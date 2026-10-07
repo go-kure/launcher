@@ -88,19 +88,29 @@ var (
 	externalSecretKind = schema.GroupKind{Group: esv1.SchemeGroupVersion.Group, Kind: esv1.ExtSecretKind}
 )
 
-// claimOwnObjectName claims the name of an object a trait names itself, under
-// no name role (oam.Trait.ClaimObjectName): the `cilium-networkpolicy` trait's
-// CiliumNetworkPolicy, whose `name` is required, so no hook could be asked for
-// it. The name is the one the handler settled and is not changed; the claim
-// refuses a second owner of it, a second trait's object or a kind component's,
-// with both named. authored is the value of the trait's `name` as the handler
-// parsed it, "" when the name is the trait's default.
+// The kinds of the configmap and pvc traits' objects, claimed under no role:
+// their `name` is required, so no hook could be asked for it. The secret
+// trait's Secret is secretKind.
+var (
+	configMapKind = schema.GroupKind{Kind: "ConfigMap"}
+	pvcKind       = schema.GroupKind{Kind: "PersistentVolumeClaim"}
+)
+
+// claimOwnObjectName claims the name of an object a trait generates and names
+// itself, under no name role (oam.Trait.ClaimGeneratedObjectName), in the
+// namespace it is generated in: the `cilium-networkpolicy` trait's
+// CiliumNetworkPolicy and the pvc trait's claim, whose `name` is required, so
+// no hook could be asked for it. The name is the one the handler settled and
+// is not changed; the claim refuses a second owner of it, a second trait's
+// object or a kind component's, with both named. authored is the value of the
+// trait's `name` as the handler parsed it, "" when the name is the trait's
+// default.
 func claimOwnObjectName(trait *oam.Trait, kind schema.GroupKind, namespace, name, authored string) error {
 	property := ""
 	if authored != "" {
 		property = "name"
 	}
-	return trait.ClaimObjectName(kind, namespace, name, property)
+	return trait.ClaimGeneratedObjectName(kind, namespace, name, property, "", "")
 }
 
 // resolveSubApplicationName resolves the name of the sub-application a trait

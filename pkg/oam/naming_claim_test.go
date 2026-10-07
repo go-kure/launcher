@@ -49,6 +49,93 @@ func TestClaimObjectName_HeldAgainstAResolvedName(t *testing.T) {
 	})
 }
 
+// TestClaimObjectName_SealedTraitOfItsRulesName: a trait a lowering rule
+// emitted generates that rule's object when the rule resolved and claimed the
+// name for the trait's own component (go-kure/launcher#787), so neither claim
+// adds a second owner. Every other claim of a sealed trait is made as an
+// authored one's: a name a component's role resolved, or another component's
+// rule did, and any claim of an object the trait does not generate (a
+// certificate trait's Secret, which no generated-object check sees).
+func TestClaimObjectName_SealedTraitOfItsRulesName(t *testing.T) {
+	configMapKind := schema.GroupKind{Kind: "ConfigMap"}
+	key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{kind: "ConfigMap", namespace: "default", name: "vals"}}
+	lowered := func(component string) resolvedNameClaim {
+		return resolvedNameClaim{owner: nameOwner{component: component, role: NameRoleValuesConfigMap, lowered: true, def: "vals"}}
+	}
+	sealedTrait := func(h *namingHarness, component string) *Trait {
+		tr := h.trait(component, "configmap", 0)
+		tr.sealed = true
+		return tr
+	}
+
+	t.Run("its own component's rule claimed it", func(t *testing.T) {
+		h := newNamingHarness(nil)
+		if err := h.resolver.claims.claimName(key, lowered("web")); err != nil {
+			t.Fatalf("claimName: %v", err)
+		}
+		sealed := sealedTrait(h, "web")
+		if err := sealed.ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "", ""); err != nil {
+			t.Errorf("ClaimGeneratedObjectName: %v, want the rule's object accepted", err)
+		}
+		if err := sealed.ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "ConfigMap", "vals"); err != nil {
+			t.Errorf("ClaimGeneratedObjectName of a Flux input: %v, want the rule's object accepted", err)
+		}
+		err := h.trait("web", "configmap", 1).ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "", "")
+		if err == nil || !strings.Contains(err.Error(), "name collision") {
+			t.Fatalf("an unsealed trait's claim: err = %v, want a name collision", err)
+		}
+	})
+	t.Run("the trait does not generate it", func(t *testing.T) {
+		for name, claim := range map[string]func(*Trait) error{
+			"ClaimObjectName": func(tr *Trait) error { return tr.ClaimObjectName(configMapKind, "default", "vals", "name") },
+			"ClaimFluxInputName": func(tr *Trait) error {
+				return tr.ClaimFluxInputName(configMapKind, "default", "vals", "name", "ConfigMap", "vals")
+			},
+		} {
+			h := newNamingHarness(nil)
+			if err := h.resolver.claims.claimName(key, lowered("web")); err != nil {
+				t.Fatalf("claimName: %v", err)
+			}
+			err := claim(sealedTrait(h, "web"))
+			if err == nil || !strings.Contains(err.Error(), "name collision") {
+				t.Errorf("%s: err = %v, want a name collision", name, err)
+			}
+		}
+	})
+	t.Run("another component's rule claimed it", func(t *testing.T) {
+		h := newNamingHarness(nil)
+		if err := h.resolver.claims.claimName(key, lowered("api")); err != nil {
+			t.Fatalf("claimName: %v", err)
+		}
+		err := sealedTrait(h, "web").ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "", "")
+		if err == nil || !strings.Contains(err.Error(), "name collision") {
+			t.Fatalf("err = %v, want a name collision", err)
+		}
+	})
+	t.Run("a component's role resolved it", func(t *testing.T) {
+		h := newNamingHarness(nil)
+		owner, spec := objectSpec(configMapKind, "vals")
+		if _, err := h.resolver.resolve(owner, spec); err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		err := sealedTrait(h, "web").ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "", "")
+		if err == nil || !strings.Contains(err.Error(), "name collision") {
+			t.Fatalf("err = %v, want a name collision", err)
+		}
+	})
+	t.Run("nothing claimed it first", func(t *testing.T) {
+		h := newNamingHarness(nil)
+		if err := sealedTrait(h, "web").ClaimGeneratedObjectName(configMapKind, "default", "vals", "name", "", ""); err != nil {
+			t.Fatalf("ClaimObjectName: %v", err)
+		}
+		owner, spec := objectSpec(configMapKind, "vals")
+		_, err := h.resolver.resolve(owner, spec)
+		if err == nil || !strings.Contains(err.Error(), "name collision") {
+			t.Fatalf("a later owner: err = %v, want a name collision", err)
+		}
+	})
+}
+
 // TestClaimObjectName_ClaimsWhatItIsGiven: the claim is of one kind, namespace
 // and name. Another of any of the three is another object, and nothing about
 // the name is asked of the hook.

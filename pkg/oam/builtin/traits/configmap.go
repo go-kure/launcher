@@ -55,6 +55,12 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	if err := checkAuthoredObjectName("name", "the ConfigMap", name); err != nil {
 		return err
 	}
+	// The required name is claimed as written, in the namespace the ConfigMap
+	// lands in: the Flux namespace when the component's Flux object reads it
+	// (FluxNamespaceInput), else the application's. The trait generates it.
+	if err := trait.ClaimGeneratedObjectName(configMapKind, app.Namespace, name, "name", "ConfigMap", name); err != nil {
+		return err
+	}
 
 	var mountPath string
 	if mp, ok := props["mountPath"].(string); ok {

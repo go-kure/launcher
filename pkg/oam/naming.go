@@ -683,25 +683,50 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 // On a trait built outside a transform (a handler's Apply called directly)
 // nothing is claimed, as ResolveName claims nothing there.
 func (t *Trait) ClaimObjectName(kind schema.GroupKind, namespace, name, property string) error {
-	return t.claimObjectName(kind, name, property, func() string { return namespace })
+	return t.claimObjectName(kind, name, property, func() string { return namespace }, false)
 }
 
 // ClaimFluxInputName is ClaimObjectName for an object of a trait
 // sub-application that moves to the Flux namespace with the component's Flux
 // object when that object reads the ConfigMap or Secret (readKind) of readName
 // from its own namespace (the sub-application's FluxNamespaceInput): the
-// certificate trait's Secret, or an external-secret trait's ExternalSecret,
-// which moves when its produced Secret is read. The name is claimed in the
-// namespace the object lands in, the Flux namespace when the transform has one
-// and the Flux object reads readName, else namespace, as NameSpec.FluxInput
-// claims a resolved name. Only a trait has it.
+// certificate trait's Secret, which moves when it is read. The name is claimed
+// in the namespace the object lands in, the Flux namespace when the transform
+// has one and the Flux object reads readName, else namespace, as
+// NameSpec.FluxInput claims a resolved name. Only a trait has it.
 func (t *Trait) ClaimFluxInputName(kind schema.GroupKind, namespace, name, property, readKind, readName string) error {
 	if err := fluxInputProblem(fmt.Sprintf("the claim of %s %q", kind, name), schema.GroupKind{Kind: readKind}, false); err != nil {
 		return err
 	}
 	return t.claimObjectName(kind, name, property, func() string {
 		return t.naming.landingNamespace(namespace, readKind, readName)
-	})
+	}, false)
+}
+
+// ClaimGeneratedObjectName is ClaimObjectName for an object the trait's own
+// sub-application generates (the configmap, secret and pvc traits' objects,
+// the CiliumNetworkPolicy, the ExternalSecret), and ClaimFluxInputName for one
+// when readKind is set: then it is claimed where it lands when the component's
+// Flux object reads the ConfigMap or Secret (readKind) of readName. An object
+// another controller writes from the trait's object (the certificate trait's
+// Secret) is claimed by ClaimObjectName or ClaimFluxInputName instead.
+//
+// It differs from those in one case only. A trait a lowering rule emitted
+// adds no claim of a name that a lowering rule of the trait's own component
+// resolved and claimed (LoweringContext.ResolveName): the object the trait
+// generates is that rule's object (the helm rule's values ConfigMap and
+// Secret, a role component's volume claims), not a second owner of it. Two
+// generated objects of one name are still refused, by the generated-object
+// check (CheckInDocumentCollisions).
+func (t *Trait) ClaimGeneratedObjectName(kind schema.GroupKind, namespace, name, property, readKind, readName string) error {
+	landing := func() string { return namespace }
+	if readKind != "" {
+		if err := fluxInputProblem(fmt.Sprintf("the claim of %s %q", kind, name), schema.GroupKind{Kind: readKind}, false); err != nil {
+			return err
+		}
+		landing = func() string { return t.naming.landingNamespace(namespace, readKind, readName) }
+	}
+	return t.claimObjectName(kind, name, property, landing, true)
 }
 
 // landingNamespace returns the namespace a trait object generated in namespace
@@ -732,7 +757,9 @@ func fluxInputProblem(what string, kind schema.GroupKind, clusterScoped bool) er
 
 // claimObjectName claims name for the trait, as ClaimObjectName says, in the
 // namespace namespace returns, asked only when there is a claim space.
-func (t *Trait) claimObjectName(kind schema.GroupKind, name, property string, namespace func() string) error {
+// generated is set for an object the trait generates itself
+// (ClaimGeneratedObjectName).
+func (t *Trait) claimObjectName(kind schema.GroupKind, name, property string, namespace func() string, generated bool) error {
 	if kind.Kind == "" {
 		return errors.New("naming: an object claim has no Kind")
 	}
@@ -756,6 +783,18 @@ func (t *Trait) claimObjectName(kind schema.GroupKind, name, property string, na
 	key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
 		group: kind.Group, kind: kind.Kind, namespace: namespace(), name: name,
 	}}
+	// A sealed trait that generates an object whose name a lowering rule of its
+	// own component resolved and claimed (LoweringContext.ResolveName) generates
+	// that rule's object: the helm rule's values ConfigMap and Secret, a role
+	// component's volume claims. It is one object, so the trait's claim adds no
+	// second owner. A name the trait's object makes another controller write is
+	// no such object, and the generated-object check cannot see it, so it is
+	// claimed as an authored trait's would be.
+	if generated && t.sealed {
+		if prior, ok := t.naming.resolver.claims.resolved[key]; ok && prior.owner.lowered && prior.owner.component == owner.component {
+			return nil
+		}
+	}
 	return t.naming.resolver.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: property})
 }
 

@@ -437,6 +437,16 @@ Decided in the ticket:
   writes no reference to the ReplicationSource by name.
   - The repository Secret has no role, by design: launcher only references it
     (`spec.restic.repository`, the `repository` property) and never generates it.
+- **Shipped: the `configmap`, `secret` and `pvc` traits' objects** (`traits/configmap.go`,
+  `traits/secret.go`, `traits/pvc.go`; the traits README, "Conventions"). Each has no
+  role, by design: its `name` is required, so the hook is never asked. The name is
+  claimed as written, so a second owner of it is refused as a name collision with both
+  named. The ConfigMap and the Secret are claimed in the namespace they land in, the Flux
+  namespace when the component's Flux object reads them.
+  - A trait a lowering rule emits is not claimed again for an object it generates when its
+    component's rule resolved the name under a role and claimed it (the `helm` component's
+    values ConfigMap and Secret, a role component's volume claims); any other name it
+    carries is claimed, the Secret a `certificate` trait has cert-manager write included.
 - **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
   - A name the `Namer` builds (`NameAllocator.Name` and
@@ -1536,9 +1546,9 @@ its text:
   - It is held to the environment policy, unlike the other kinds of this group: a policy
     that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses it, as it refuses
     the trait.
-  - The trait names its Secret under no role, so a `secret` component and a `secret`
-    trait that name one Secret are refused among the generated objects with both named,
-    as a `configmap` component and trait are. The Secret a `helm` component generates for
+  - The trait names its Secret under no role and claims the name, so a `secret` component
+    and a `secret` trait that name one Secret are refused as a name collision with both
+    named, as a `configmap` component and trait are. The Secret a `helm` component generates for
     `secretValues` is claimed under role `values-secret`, so a `secret` component under
     that name is refused as a name collision.
 - **Held: `ResourceSet` and `FluxInstance`** (fluxcd.controlplane.io/v1), each with its
@@ -1743,7 +1753,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. Open: a hook role for the names outside the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. Open: a hook role for the names outside the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
