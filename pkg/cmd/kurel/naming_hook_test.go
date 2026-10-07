@@ -188,11 +188,13 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
 	artifact := ociNamesComponent("artifact", "artifact", "", "")
-	// web carries an ingress and an httproute trait as well: their objects have
-	// roles of their own.
-	routing := claimIngressTrait + claimHTTPRouteTrait
+	// web carries an expose trait with managed TLS, an external-secret trait and
+	// an httproute trait as well: their objects, and the Secrets the first two
+	// make other controllers write, have roles of their own. The expose trait's
+	// ingress trait stands for the ingress role.
+	routing := namingSecretTraits + claimHTTPRouteTrait
 	doc := withWebVolume(namingApp(routing, namingDBStore+namingChart+jobs+artifact), "")
-	namingTransform(t, doc, namingContext(declineEveryName(&requests)))
+	namingTransform(t, doc, withManagedTLS(namingContext(declineEveryName(&requests))))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -255,10 +257,17 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "web", Role: oam.NameRoleNetworkPolicy, Kind: np, Default: "web-allow"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-networkpolicy"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-config"},
-		// The routing traits' sub-applications are asked for after their objects,
-		// with the object's default: the hook's answer names the object alone.
+		// The expose trait's ingress trait asks for its Ingress, its managed TLS
+		// Secret, then its sub-application, with the Ingress's default: the hook's
+		// answer names the object alone. The external-secret trait asks for the
+		// Secret its ExternalSecret produces, whose default is the trait's
+		// secretName; the httproute trait for its HTTPRoute, then its
+		// sub-application.
 		{Application: "shop", Component: "web", Role: oam.NameRoleIngress, Kind: "Ingress.networking.k8s.io", Default: "web-ingress"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleTLSSecret, Kind: "Secret", Default: "web-tls"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-ingress"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleExternalSecret, Kind: "Secret", Default: "web-creds"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-external-secret-web-creds"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleHTTPRoute, Kind: "HTTPRoute.gateway.networking.k8s.io", Default: "web-httproute"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-httproute"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleNetpolSynth, Kind: np, Default: synthNP},

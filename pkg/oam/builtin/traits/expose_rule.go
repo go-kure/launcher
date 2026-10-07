@@ -24,8 +24,8 @@ import (
 // The package-level helpers ExposeHandler.Apply used (ruleHosts, hostnameList,
 // exposeAnnotations (once setClusterIssuerAnnotation), expandHostnamesToIngressRules,
 // setSSLRedirectAnnotations, boolProp, setAuthAnnotations, stringList,
-// synthesizedIngressTLS, below) moved here from expose.go when ExposeHandler was
-// deleted — this file is now their only caller. The five pre-existing
+// managedIngressTLS (once synthesizedIngressTLS), below) moved here from expose.go
+// when ExposeHandler was deleted — this file is now their only caller. The five pre-existing
 // direct-construction test files (expose_ext_auth_test.go,
 // expose_managed_tls_test.go, expose_secretname_override_test.go,
 // expose_shorthand_sslredirect_test.go, traits_test.go) are re-pointed through the
@@ -223,6 +223,7 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 		delete(props, "tls")
 		authoredAnnotations, _ := props["annotations"].(map[string]any)
 		platform := &exposeAnnotations{component: componentName, authored: authoredAnnotations}
+		var managed map[string]any
 		if issuer != "" {
 			if err := platform.set(clusterIssuerAnnotation, issuer, "the certManagerClusterIssuer capability value"); err != nil {
 				return oam.LoweringResult{}, err
@@ -231,7 +232,7 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 			// `hostnames` are supplied, `rules` drives routing, so a hostnames entry
 			// that is not routed must not get a synthesized certificate.
 			if routingHosts := uniqueStrings(ruleHosts(props)); len(routingHosts) > 0 {
-				props["tls"] = synthesizedIngressTLS(routingHosts, componentName, secretName)
+				managed = managedIngressTLS(routingHosts, secretName)
 			}
 		} else if secretName != "" {
 			// No cluster-issuer capability → no synthesized TLS, so an authored
@@ -259,6 +260,13 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 			// reserved key whether or not the engine marks this rule's output
 			// synthesized.
 			if err := emitted.RenderReserved(platformAnnotationsProperty, platform.written); err != nil {
+				return oam.LoweringResult{}, errors.Wrap(err, "expose trait")
+			}
+		}
+		if managed != nil {
+			// The managed TLS entry reaches the ingress trait on the same guarded
+			// channel: its handler resolves the Secret's name (NameRoleTLSSecret).
+			if err := emitted.RenderReserved(managedTLSProperty, managed); err != nil {
 				return oam.LoweringResult{}, errors.Wrap(err, "expose trait")
 			}
 		}
@@ -487,20 +495,19 @@ func stringList(v any) []string {
 	return out
 }
 
-// synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
-// secret, for cert-manager's ingress-shim. secretName defaults to the deterministic
-// <component>-tls when the trait does not author an override; that default is
-// shortened by the one rule when it is over 253 characters, an override never.
-func synthesizedIngressTLS(hosts []string, component, secretName string) []any {
-	if secretName == "" {
-		secretName = oam.ShortenNameWithSuffix(component, "-tls", oam.ShortenLimitSubdomain)
-	}
+// managedIngressTLS builds the value of the ingress trait's managedTLS property:
+// the single managed TLS entry, all hosts under one Secret, for cert-manager's
+// ingress-shim. secretName is the trait's authored override, left out when the
+// author wrote none: the ingress trait's handler resolves the name
+// (managedTLSSecretName).
+func managedIngressTLS(hosts []string, secretName string) map[string]any {
 	anyHosts := make([]any, len(hosts))
 	for i, h := range hosts {
 		anyHosts[i] = h
 	}
-	return []any{map[string]any{
-		"hosts":      anyHosts,
-		"secretName": secretName,
-	}}
+	managed := map[string]any{"hosts": anyHosts}
+	if secretName != "" {
+		managed["secretName"] = secretName
+	}
+	return managed
 }

@@ -35,6 +35,18 @@ const (
 	NameRoleHPA NameRole = "hpa"
 	// NameRolePDB is the scaler trait's PodDisruptionBudget.
 	NameRolePDB NameRole = "pdb"
+	// NameRoleTLSSecret is the Secret of the TLS entry the expose trait manages
+	// on its Ingress: cert-manager's ingress-shim writes it, and the Ingress's
+	// `tls[].secretName` is launcher's one reference to it, written with the
+	// resolved name. Default: "<component>-tls". An ingress trait's own authored
+	// `tls[].secretName` is not resolved under it.
+	NameRoleTLSSecret NameRole = "tls-secret"
+	// NameRoleExternalSecret is the Secret the external-secret trait's
+	// ExternalSecret produces. Default: the trait's `secretName`, the
+	// ExternalSecret's own name. The ExternalSecret's `target.name` and the
+	// envFrom and secret volume the trait adds to the workload read the resolved
+	// name; a reference the author wrote elsewhere does not.
+	NameRoleExternalSecret NameRole = "external-secret"
 	// NameRoleRBAC is each object the rbac trait generates: the Role and
 	// RoleBinding, or the ClusterRole and ClusterRoleBinding.
 	NameRoleRBAC NameRole = "rbac"
@@ -210,6 +222,8 @@ var nameRoles = []struct {
 	{NameRoleNetpolSynth, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHPA, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePDB, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleTLSSecret, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleExternalSecret, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleRBAC, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleNetworkPolicy, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleIngress, nameClassObject, nameSyntaxSubdomain},
