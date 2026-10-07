@@ -547,9 +547,10 @@ namespace is empty when the object states none, and on a list envelope they are 
 member's. They are empty where the transform refuses, which has no object yet: for a
 property and for an entry. A reserved-key refusal is not one, and neither is metadata the
 check cannot read or a label value that is no string, which fail generation with another
-error. Under the key `app`, a `labels` property is held to the `app` value the kinds write, the
-name of the component after lowering: a refused value there is `ComponentLabelInLabelsProperty`
-too, with that name as `Component` and its value as `Want`.
+error. Under the key `app`, a `labels` property is held first to the `app` value the kinds
+write, that of the name of the component after lowering, then to the owner's as under any key:
+a refused value there is `ComponentLabelInLabelsProperty` too, with the name it fails as
+`Component` and that name's value as `Want`.
 
 **One value besides the owner's, under the key `app` only.** `app` is the label the built-in
 kinds and traits write themselves, valued with the name of the component after lowering they
