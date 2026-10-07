@@ -77,7 +77,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	return map[string]oam.PropertySchema{
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
-		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset, the object names no image: which image then runs is the operator's to decide, and no policy is asked about it. version is still needed for the operator to know which Alertmanager it configures."),
+		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the object names no image and the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
 		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
@@ -117,7 +117,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry named alertmanager or config-reloader is merged into that container. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. An entry without an image is not checked for one.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates is merged into it (the API reference names alertmanager, config-reloader and thanos-sidecar). Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. An entry without an image is not checked for one.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are.",
 			"One container."+core+"Container in the Kubernetes API reference."),
@@ -217,12 +217,13 @@ var alertmanagerRequired = requiredFields(map[string]string{ //nolint:gosec // G
 )...))
 
 // alertmanagerRulesLeft lists, by the property that reaches it, each
-// expression rule the API states on a type the spec reaches. None is checked
-// here: the linked module ships no CRD, so there is no rule text for the
-// validator harness to evaluate. TestMonitoringWorkloadKinds_RulesListed
-// derives the list from the markers of the module's source.
+// expression rule the API states on a type the spec reaches, as its
+// expression and its message. None is checked here: the linked module ships
+// no CRD, so there is no rule text for the validator harness to evaluate.
+// TestMonitoringWorkloadKinds_RulesListed derives the list from the markers of
+// the module's source.
 var alertmanagerRulesLeft = map[string]string{
-	"updateStrategy": "rollingUpdate requires type to be RollingUpdate",
+	"updateStrategy": "!(self.type != 'RollingUpdate' && has(self.rollingUpdate)) (rollingUpdate requires type to be RollingUpdate)",
 }
 
 // validateAlertmanager refuses, with or without an environment policy, the
@@ -268,6 +269,8 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 	}
 	if spec.Image != nil && *spec.Image != "" {
 		w.images = []fieldValue{{"image", *spec.Image}}
+	} else {
+		w.unsetImages = []string{"image"}
 	}
 	if spec.Replicas != nil {
 		replicas := int64(*spec.Replicas)

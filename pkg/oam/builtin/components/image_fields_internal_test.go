@@ -23,6 +23,13 @@ type imageFieldPolicy struct {
 
 func (p *imageFieldPolicy) AllowedRegistries() []string { return p.allowed }
 
+// amListedImage is an Alertmanager image from the registry
+// TestImageFields_HeldOrListed allows.
+func amListedImage() *string {
+	image := "registry.example/prometheus/alertmanager:v0.28.1"
+	return &image
+}
+
 // imageFieldType is a type whose document can name an image, and how each of
 // its fields that could is accounted for.
 type imageFieldType struct {
@@ -49,6 +56,10 @@ type imageTagCheck struct {
 	// field the document may leave out: an empty reference names no image
 	// there, and the tag rule skips it as the registry rule does.
 	emptyRefused string
+	// emptyNotAllowed says why the registry rule refuses an empty reference
+	// that the tag rule skips: the document may leave the field out, and
+	// something outside it then chooses an image no allowlist reaches.
+	emptyNotAllowed string
 }
 
 // podSpecTagRule is the tag rule of the pod-spec kinds on ps
@@ -291,7 +302,9 @@ var imageFieldTypes = []imageFieldType{
 	{
 		// The alertmanager kind: its own image, and the containers and volumes
 		// it lists through the shared check. A listed container may leave its
-		// image out: it then patches one the operator generates.
+		// image out: it then patches one the operator generates. The spec's own
+		// image may not under allowed registries, so the checks of the other
+		// fields name one from the allowed registry.
 		name: "alertmanager spec",
 		typ:  reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 		held: map[string]func(string, oam.Policy) error{
@@ -299,13 +312,13 @@ var imageFieldTypes = []imageFieldType{
 				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: &reference}, p)
 			},
 			"containers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}, p)
+				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}, p)
 			},
 			"initContainers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
+				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
 			},
 			"volumes[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Volumes: []corev1.Volume{{
+				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), Volumes: []corev1.Volume{{
 					Name:         "ext",
 					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
 				}}}, p)
@@ -314,7 +327,7 @@ var imageFieldTypes = []imageFieldType{
 		tagged: map[string]imageTagCheck{
 			"image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Image: &reference})
-			}},
+			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
 			"containers[].image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
 			}},
@@ -517,6 +530,15 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 					t.Errorf("%s: an empty reference passes, and the field is listed as one that must name an image (%s)", path, tag.emptyRefused)
 				case tag.emptyRefused == "" && err != nil:
 					t.Errorf("%s: an empty reference is refused, and the field is not listed as one that must name an image: %v", path, err)
+				case tag.emptyRefused == "" && tag.emptyNotAllowed != "":
+					err := registry("", policy)
+					var refusal *oam.PolicyRefusal
+					if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry {
+						t.Errorf("%s: an empty reference gave %v under allowed registries, want a refusal of class %q (%s)", path, err, oam.RefusalRegistry, tag.emptyNotAllowed)
+					}
+					if err := registry("", &imageFieldPolicy{}); err != nil {
+						t.Errorf("%s: an empty reference is refused without allowed registries: %v", path, err)
+					}
 				case tag.emptyRefused == "":
 					if err := registry("", policy); err != nil {
 						t.Errorf("%s: the tag rule skips an empty reference and the registry rule refuses it: %v", path, err)

@@ -138,7 +138,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "alertmanager", handler: &components.AlertmanagerHandler{},
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("Alertmanager"),
 		typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](), namespaced: true, held: true,
-		minimal:    map[string]any{},
+		// Under ptStrictPolicy's allowed registries an unset image is refused
+		// (TestAlertmanager_UnsetImage), so the least is the image.
+		minimal:    map[string]any{"image": amImage},
 		full:       alertmanagerFull(),
 		unfixtured: alertmanagerUnfixtured,
 	},
