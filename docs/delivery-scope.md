@@ -1606,6 +1606,13 @@ its text:
   (`flux`), not an application's object. Either kind can still reach a build in a
   `passthrough` or `manifests` document; the metadata checks then read its
   `spec.commonMetadata` (go-kure/launcher#790).
+- **Held: `CiliumEnvoyConfig` and `CiliumClusterwideEnvoyConfig`** (cilium.io/v2), each with
+  its reason in its inventory row. Their `resources` are raw Envoy configuration ("Envoy xDS
+  resources": listeners, routes, clusters, endpoints and TLS secrets), each an opaque `Any`
+  the CRD keeps unpruned, and their `services` forward the traffic of the Services they name
+  to an Envoy listener. No build-time rule can read that configuration, so the kinds would
+  be a way round every rule a policy holds a route, a network policy or a Secret to
+  (go-kure/launcher#790).
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
