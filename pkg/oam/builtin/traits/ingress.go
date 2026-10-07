@@ -277,13 +277,9 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 // well as the map[string]any a decoder gives) and a value any string type. The
 // first key in sorted order whose value is no string is the one refused.
 func platformAnnotationsOf(raw any) (map[string]string, error) {
-	object := reflect.ValueOf(raw)
-	if object.Kind() != reflect.Map || object.Type().Key().Kind() != reflect.String {
-		return nil, errors.Errorf("%s: expected object, got %T", platformAnnotationsProperty, raw)
-	}
-	values := make(map[string]any, object.Len())
-	for entries := object.MapRange(); entries.Next(); {
-		values[entries.Key().String()] = entries.Value().Interface()
+	values, err := stringKeyedObject(platformAnnotationsProperty, raw)
+	if err != nil {
+		return nil, err
 	}
 	annotations := make(map[string]string, len(values))
 	for _, k := range slices.Sorted(maps.Keys(values)) {
@@ -294,6 +290,21 @@ func platformAnnotationsOf(raw any) (map[string]string, error) {
 		annotations[k] = value.String()
 	}
 	return annotations, nil
+}
+
+// stringKeyedObject reads the object value of a platform-reserved property:
+// any string-keyed map, since a capability rendering reaches the handler as
+// the consumer's Go value was written.
+func stringKeyedObject(property string, raw any) (map[string]any, error) {
+	object := reflect.ValueOf(raw)
+	if object.Kind() != reflect.Map || object.Type().Key().Kind() != reflect.String {
+		return nil, errors.Errorf("%s: expected object, got %T", property, raw)
+	}
+	values := make(map[string]any, object.Len())
+	for entries := object.MapRange(); entries.Next(); {
+		values[entries.Key().String()] = entries.Value().Interface()
+	}
+	return values, nil
 }
 
 // managedTLS is the managed TLS entry of an ingress trait (managedTLSProperty).
@@ -313,11 +324,11 @@ type managedTLSValue struct {
 
 // managedTLSOf reads the managedTLS property: an object with at least one host,
 // and a secretName, when present, that can name the Secret (as written, never
-// shortened).
+// shortened). Like platformAnnotations it may be any string-keyed map.
 func managedTLSOf(raw any) (*managedTLS, error) {
-	object, ok := raw.(map[string]any)
-	if !ok {
-		return nil, errors.Errorf("%s: expected object, got %T", managedTLSProperty, raw)
+	object, err := stringKeyedObject(managedTLSProperty, raw)
+	if err != nil {
+		return nil, err
 	}
 	value, err := builtin.DecodeStrict[managedTLSValue](object)
 	if err != nil {
