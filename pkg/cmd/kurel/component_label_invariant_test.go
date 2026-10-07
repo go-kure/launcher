@@ -512,7 +512,7 @@ spec:
 	"servicemonitor": {props: map[string]any{
 		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
 		"endpoints": []any{map[string]any{"port": "metrics"}}}},
-	"statefulset":           {props: workloadProps(map[string]any{"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 2},
+	"statefulset":           {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
 	"storageclass":          {props: map[string]any{"provisioner": "csi.example.com"}},
 	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
 	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
@@ -576,8 +576,20 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 	"volsync": {props: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
 		// Pod anti-affinity gives the host a second pod selector beside the
 		// StatefulSet's own, now that it emits no Service (go-kure/launcher#690).
+		// statefulset reads the raw upstream Affinity, so the term is authored;
+		// `Exists` on `app` matches the pods without naming the label value.
 		host: "statefulset", hostProps: workloadProps(map[string]any{
-			"affinity":             map[string]any{"enablePodAntiAffinity": true},
+			"affinity": map[string]any{"podAntiAffinity": map[string]any{
+				"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"weight": 100,
+					"podAffinityTerm": map[string]any{
+						"topologyKey": "kubernetes.io/hostname",
+						"labelSelector": map[string]any{"matchExpressions": []any{
+							map[string]any{"key": "app", "operator": "Exists"},
+						}},
+					},
+				}},
+			}},
 			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "10Gi", "mountPath": "/data"}}})},
 	"rbac": {props: map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"get"}}},
 		"clusterWide": true}, longHost: true, longLabelled: true},

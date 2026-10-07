@@ -75,10 +75,10 @@ var resourcesRejectedKeys = map[string]string{
 
 // affinityShorthandReason ends the refusal of a corev1.Affinity field on the
 // types whose `affinity` is the shorthand.
-const affinityShorthandReason = "on this component type affinity is a shorthand of four keys (enablePodAntiAffinity, topologyKey, podAntiAffinityType, nodeSelector), not a Kubernetes Affinity; an affinity in the Kubernetes shape is authored on a deployment, daemonset, job or cronjob component"
+const affinityShorthandReason = "on this component type affinity is a shorthand of four keys (enablePodAntiAffinity, topologyKey, podAntiAffinityType, nodeSelector), not a Kubernetes Affinity; an affinity in the Kubernetes shape is authored on a deployment, statefulset, daemonset, job or cronjob component"
 
 // affinityShorthandRejectedKeys are the corev1.Affinity fields: all of them,
-// since the `affinity` of `statefulset`, `webservice` and `worker` is the
+// since the `affinity` of `webservice` and `worker` is the
 // shorthand parseAffinity reads (schemaAffinity) and holds no field of the
 // upstream type under its name. Each reason says what the shorthand has for
 // the field.

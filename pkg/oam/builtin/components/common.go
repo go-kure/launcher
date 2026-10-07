@@ -3291,8 +3291,8 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 	return out, nil
 }
 
-// parseAffinity reads the `affinity` shorthand of `statefulset`, `webservice`
-// and `worker` (schemaAffinity). Its key set is closed (go-kure/launcher#790):
+// parseAffinity reads the `affinity` shorthand of `webservice` and `worker`
+// (schemaAffinity). Its key set is closed (go-kure/launcher#790):
 // the shorthand is no corev1.Affinity, so an upstream field of that type is
 // refused with what the shorthand has for it (affinityShorthandRejectedKeys),
 // and any other key by name, each whatever its value, as the document check

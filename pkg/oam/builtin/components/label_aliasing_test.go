@@ -44,7 +44,17 @@ var labelAliasingProps = map[string]map[string]any{
 	"worker":     {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
 	"statefulset": {
 		"replicas": 3,
-		"affinity": map[string]any{"enablePodAntiAffinity": true},
+		// statefulset reads the raw upstream Affinity, so its anti-affinity
+		// selector is authored rather than built from the app labels.
+		"affinity": map[string]any{"podAntiAffinity": map[string]any{
+			"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+				"weight": 100,
+				"podAffinityTerm": map[string]any{
+					"topologyKey":   "kubernetes.io/hostname",
+					"labelSelector": map[string]any{"matchLabels": map[string]any{"app": "app"}},
+				},
+			}},
+		}},
 		// A claim template is a per-object metadata position only this kind
 		// has, so only this kind can carry it into the collection.
 		"volumeClaimTemplates": []any{
@@ -172,8 +182,9 @@ func collectLabelMaps(objects []*client.Object) []labelMap {
 func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 	// Every kind emits its workload and a pod template; webservice and worker
 	// also emit a ServiceAccount and a PersistentVolumeClaim from the pvc
-	// volume. Only webservice and worker build topology spread constraints; only the three that take replicas
-	// build an anti-affinity selector. A StatefulSet claim template carries no
+	// volume. Only webservice and worker build topology spread constraints and
+	// an anti-affinity selector; statefulset's selector is the one its fixture
+	// authors. A StatefulSet claim template carries no
 	// labels today, so there is no position to require — the collector reads
 	// it anyway, so labelling one later lands in these tests rather than
 	// slipping past them.
