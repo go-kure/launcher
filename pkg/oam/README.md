@@ -674,11 +674,8 @@ label values, not names: a name over 63 characters is projected onto a shorter v
 (`ComponentLabelValue`), and an entry named as that projection carries the component's
 label. Lowering's own name checks do not see either case where the other component is itself
 lowered into entries under other names.
-What it leaves: under such a key a renamed entry's pods carry the entry's value, and the
-component's NetworkPolicies, which select the owner's, do not select them. That is a gap of
-its own (a pod of a component left unselected by its policies, go-kure/launcher#790), not
-closed by this rule. No built-in rule emits a pod-running entry under another name ("What a
-synthesized policy selects" below).
+Under this key a renamed entry's pods carry the entry's value, so the policies synthesized for
+that entry select it beside the owner's ("What a synthesized policy selects" below).
 
 The label is written into a label map of the object's, or the pod template's, own. A config
 that uses one map for an object's labels, its selector and its pod template keeps that map
@@ -735,10 +732,27 @@ overwritten when Flux installs**. Either way the key is one no chart should set.
 value its entry's objects carry: the authored component's, also for an entry a lowering rule
 emitted under a name of its own. The policy keeps the entry's name. A rule that emits several
 pod-running entries from one component therefore gets policies that each select the pods of
-all of them, as a sibling group's does. No built-in rule emits a pod-running entry under
-another name: `webservice` and `worker` emit theirs under the component's own name, as a
-same-name sibling group, and the `postgresql` pooler and databases run no pods launcher
-generates. The case is reached only through a consumer's own lowering rule.
+all of them, as a sibling group's does.
+
+With `ComponentLabelKey: "app"` the kinds write the entry's own value on a renamed entry's
+pods (the paragraph on the key `app` above), and the owner's value would leave them out. So
+under that key, and only where the entry's value differs from the owner's, the entry's
+inbound and egress policies select both: `matchExpressions: [{key: app, operator: In,
+values: [<owner>, <entry>]}]`. Each such policy then selects the pods stamped with the
+owner's value and that entry's own pods, not those of a sibling entry under a third name,
+which its own policies select. Under any other key the selector is `matchLabels` with the
+owner's value, as before.
+
+No built-in rule emits a pod-running entry under another name: `webservice` and `worker`
+emit theirs under the component's own name, as a same-name sibling group. The `postgresql`
+pooler, `<component>-pooler`, is an entry under another name, but it runs no pods launcher
+generates: the operator creates the Pooler's pods, and `postgresql` writes no labels on the
+Pooler's pod template, so those pods carry no component label under any key. The entry owns
+no Service and so gets no synthesized inbound policy; it gets an egress policy only where
+the consumer supplies egress peers under the entry's name, and under the key `app` that
+policy's selector names both values and still selects none of the Pooler's pods. The
+endpoint-ingress policy selects them by `cnpg.io/poolerName`. The databases run no pods. The
+case of pods selected is reached only through a consumer's own lowering rule.
 
 **What the label does not reach.**
 
@@ -844,6 +858,14 @@ generates. The case is reached only through a consumer's own lowering rule.
   reads it; this reaches a consumer's own config.
 - New exported API: `ComponentLabelSelectorRulesOut`, the `ComponentLabelRefusal` of that
   refusal.
+
+**Breaking library changes** (go-kure/launcher#790, a renamed entry under the key `app`):
+
+- Output: with `ComponentLabelKey: "app"`, the synthesized inbound and egress NetworkPolicies
+  of an entry a lowering rule emitted under a name whose label value differs from its
+  component's select `app In [<component>, <entry>]` (`matchExpressions`) instead of
+  `matchLabels` with the component's value. The entry's own pods, which the kinds label
+  with the entry's value, are now inside them. No other key and no other entry changes.
 
 **New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type

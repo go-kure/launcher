@@ -6,12 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // clLabelAt returns the value obj holds for key in the labels at path, and
@@ -377,6 +382,54 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 		}
 		if got, _ := clLabelAt(t, clObject(t, objs, "Service", "web-renamed-svc"), "app", "metadata"); got != "web-renamed-svc" {
 			t.Errorf("Service label app = %q, want the entry's web-renamed-svc", got)
+		}
+	})
+
+	// Those pods carry the entry's value, so the policy synthesized for the entry
+	// selects them, and the owner's value as well (go-kure/launcher#790).
+	t.Run("the policy of an entry a rule renamed", func(t *testing.T) {
+		tr := oam.NewTransformer(map[string]oam.ComponentHandler{
+			"deployment": &components.DeploymentHandler{},
+			"service":    &components.ServiceHandler{},
+		}, nil)
+		tr.RegisterComponentLowering(clRenameRule{})
+		egress := ctx
+		egress.EgressPeers = map[string][]netpol.EgressPeer{"web-renamed": {{
+			Namespace:   "data",
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+			Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+		}}}
+		objs, err := clGenerate(tr, mfApp("renamed-pair", map[string]any{}), egress)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(clObject(t, objs, "NetworkPolicy", "web-renamed-allow-egress-traffic"))
+		if err != nil {
+			t.Fatalf("to unstructured: %v", err)
+		}
+		var np networkingv1.NetworkPolicy
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(content, &np); err != nil {
+			t.Fatalf("decode the NetworkPolicy: %v", err)
+		}
+		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+		if err != nil {
+			t.Fatalf("podSelector %+v: %v", np.Spec.PodSelector, err)
+		}
+		d, err := runtime.DefaultUnstructuredConverter.ToUnstructured(clObject(t, objs, "Deployment", "web-renamed"))
+		if err != nil {
+			t.Fatalf("to unstructured: %v", err)
+		}
+		pod, _, err := unstructured.NestedStringMap(d, "spec", "template", "metadata", "labels")
+		if err != nil {
+			t.Fatalf("pod template labels: %v", err)
+		}
+		for _, tc := range []struct {
+			labels labels.Set
+			want   bool
+		}{{pod, true}, {labels.Set{"app": "web"}, true}, {labels.Set{"app": "web-renamed-svc"}, false}} {
+			if got := sel.Matches(tc.labels); got != tc.want {
+				t.Errorf("podSelector %s matches %v = %t, want %t", sel, tc.labels, got, tc.want)
+			}
 		}
 	})
 

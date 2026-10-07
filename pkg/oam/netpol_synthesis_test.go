@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -313,6 +314,59 @@ func TestComponentAllowPolicyConfig_PodSelectorKey(t *testing.T) {
 			}
 			if len(np.Spec.PodSelector.MatchLabels) != 1 {
 				t.Errorf("podSelector should have exactly one label, got %v", np.Spec.PodSelector.MatchLabels)
+			}
+		})
+	}
+}
+
+// TestSynthesizedPolicy_RenamedEntryUnderTheAppKey is go-kure/launcher#790: under
+// the key `app` the kinds label an entry a lowering rule emitted under a name of
+// its own with the entry's value, so the entry's inbound and egress policies
+// select that value beside the owner's. Under any other key, for an entry named
+// as its component, and for an entry whose value is the component's (a long name
+// and its projection) they select the owner's value alone.
+func TestSynthesizedPolicy_RenamedEntryUnderTheAppKey(t *testing.T) {
+	long := longNetpolComponentName(t, "web")
+	in := func(values ...string) metav1.LabelSelector {
+		return metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key: "app", Operator: metav1.LabelSelectorOpIn, Values: values,
+		}}}
+	}
+	only := func(key, value string) metav1.LabelSelector {
+		return metav1.LabelSelector{MatchLabels: map[string]string{key: value}}
+	}
+	for _, tc := range []struct {
+		name, key, owner, entry string
+		want                    metav1.LabelSelector
+	}{
+		{"renamed, app", "app", "api", "api-renamed", in("api", "api-renamed")},
+		{"renamed, the default key", "", "api", "api-renamed", only(ComponentLabel, "api")},
+		{"renamed, another key", "example.com/owner", "api", "api-renamed", only("example.com/owner", "api")},
+		{"the component's name, app", "app", "api", "api", only("app", "api")},
+		{"no owner, app", "app", "", "api", only("app", "api")},
+		{"the projection of a long name, app", "app", long, ComponentLabelValue(long), only("app", ComponentLabelValue(long))},
+		{"renamed from a long name, app", "app", long, "api", in(ComponentLabelValue(long), "api")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ingress := generatedNetworkPolicy(t, &componentAllowPolicyConfig{
+				ComponentName: tc.entry, Owner: tc.owner, PodSelectorKey: tc.key,
+				Rules: []trafficRule{{
+					Sources: []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+					Ports:   []intstr.IntOrString{intstr.FromInt32(80)},
+				}},
+			})
+			egress := generatedNetworkPolicy(t, &componentEgressPolicyConfig{
+				ComponentName: tc.entry, Owner: tc.owner, PodSelectorKey: tc.key,
+				Peers: []netpol.EgressPeer{{
+					Namespace:   "data",
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+					Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+				}},
+			})
+			for side, np := range map[string]*networkingv1.NetworkPolicy{"inbound": ingress, "egress": egress} {
+				if !reflect.DeepEqual(np.Spec.PodSelector, tc.want) {
+					t.Errorf("%s podSelector = %+v, want %+v", side, np.Spec.PodSelector, tc.want)
+				}
 			}
 		})
 	}
