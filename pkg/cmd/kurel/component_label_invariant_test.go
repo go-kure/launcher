@@ -351,10 +351,10 @@ spec:
 		"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
 		"data": []any{map[string]any{
 			"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}},
-	// Emits only the Kustomization, which carries no `app` label.
 	"fluxcd-alert": {props: map[string]any{
 		"providerRef":  map[string]any{"name": "slack"},
 		"eventSources": []any{map[string]any{"kind": "Kustomization", "name": "*"}}}},
+	// Emits only the Kustomization, which carries no `app` label.
 	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
 		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
 	"gateway": {props: map[string]any{
