@@ -14,8 +14,8 @@ var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConst
 
 // rawSchedulingKinds names, per kind, the raw scheduling keys its own literal
 // map publishes. `deployment` was the first (go-kure/launcher#412);
-// go-kure/launcher#790 adds the kinds below it. A kind that publishes `affinity`
-// as the four-key shorthand is not listed with that key here — see
+// go-kure/launcher#790 adds the kinds below it. The kinds that publish `affinity`
+// as the four-key shorthand are not listed — see
 // TestOpinionatedKindsKeepAffinityShorthand.
 var rawSchedulingKinds = []struct {
 	kind   string
@@ -23,7 +23,7 @@ var rawSchedulingKinds = []struct {
 	keys   []string
 }{
 	{"deployment", (&DeploymentHandler{}).PropertySchema, rawSchedulingKeys},
-	{"statefulset", (&StatefulsetHandler{}).PropertySchema, []string{"tolerations", "topologySpreadConstraints"}},
+	{"statefulset", (&StatefulsetHandler{}).PropertySchema, rawSchedulingKeys},
 	{"daemonset", (&DaemonsetHandler{}).PropertySchema, rawSchedulingKeys},
 	{"job", (&JobHandler{}).PropertySchema, rawSchedulingKeys},
 	{"cronjob", (&CronjobHandler{}).PropertySchema, rawSchedulingKeys},
@@ -112,16 +112,15 @@ func TestSchedulingKeysSurviveFragmentCopies(t *testing.T) {
 }
 
 // TestOpinionatedKindsKeepAffinityShorthand pins the regression this ticket had
-// to avoid. worker, statefulset and webservice each set the four-key shorthand
-// in their own literal map and then copy schemaPodSpec over it, so publishing a
-// raw `affinity` in that shared fragment would have replaced the shorthand on
-// all three — and no golden fixture would have moved, because none authored
-// affinity before this work.
+// to avoid. worker and webservice each set the four-key shorthand in their own
+// literal map and then copy schemaPodSpec over it, so publishing a raw
+// `affinity` in that shared fragment would have replaced the shorthand on both
+// — and no golden fixture would have moved, because none authored affinity
+// before this work.
 func TestOpinionatedKindsKeepAffinityShorthand(t *testing.T) {
 	cases := map[string]map[string]oam.PropertySchema{
-		"worker":      WorkerRule{}.PropertySchema(),
-		"statefulset": (&StatefulsetHandler{}).PropertySchema(),
-		"webservice":  WebserviceRule{}.PropertySchema(),
+		"worker":     WorkerRule{}.PropertySchema(),
+		"webservice": WebserviceRule{}.PropertySchema(),
 	}
 	for kind, s := range cases {
 		affinity, found := s["affinity"]

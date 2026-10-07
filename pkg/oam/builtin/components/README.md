@@ -1150,8 +1150,8 @@ are applied by `parseAffinity` only once the block is present, unlike the
 The key set is closed (go-kure/launcher#790). The shorthand is not a
 Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
 under it are each refused with what the shorthand has for the field and where
-an affinity in the Kubernetes shape is authored (`deployment`, `daemonset`,
-`job`, `cronjob`), and any other key is refused as
+an affinity in the Kubernetes shape is authored (`deployment`, `statefulset`,
+`daemonset`, `job`, `cronjob`), and any other key is refused as
 `affinity: unrecognized key "<key>"`, each whatever its value. The parser read
 none of them before, so a caller that skips the document check had them
 dropped; see
@@ -1634,17 +1634,20 @@ published (go-kure/launcher#790):
 | kind | `affinity` | `tolerations` | `topologySpreadConstraints` |
 |---|---|---|---|
 | `deployment` | raw | yes | yes |
-| `statefulset` | the four-key shorthand (see "Common config"), not the raw shape | yes | yes |
+| `statefulset` | raw | yes | yes |
 | `daemonset` | raw | yes | yes |
 | `job` | raw | yes | yes |
 | `cronjob` | raw | yes | yes |
 
-- The raw `affinity` shape on a kind that publishes the shorthand is refused,
-  not dropped: by the authored-property check, and by the shorthand's parser
-  with its reason for a caller that skips that check. So the pod's `affinity`
-  is not authorable in full on `statefulset`: the shorthand gives anti-affinity
-  to the component's own pods and a required node affinity on listed labels,
-  and nothing else of the upstream type.
+**Breaking (go-kure/launcher#790): `statefulset` dropped the four-key `affinity`
+shorthand.** Its `affinity` is the raw `corev1` shape, as on the other kinds in
+this table, so `enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType` and
+`nodeSelector` under it are refused as unrecognized keys. To migrate, author
+what the shorthand built: a `podAntiAffinity` term selecting `app: <component>`
+(see [The `app` label](#the-app-label)) over the topology key, `preferred` with
+weight 100 or `required`; and, for `nodeSelector`, a required `nodeAffinity`
+with one `In` requirement per label.
+
 - Nothing is defaulted on any of them: an unauthored key emits nothing, and a
   constraint or an affinity term selects only the pods its authored
   `labelSelector` names. The pods a kind builds carry `app: <component>` (see
@@ -1770,10 +1773,10 @@ unexpressible.
 These three keys live in the `deployment` handler's own property map, above the
 `maps.Copy` calls that merge the shared pod-level and `DeploymentSpec`
 fragments, and they must stay there. `maps.Copy` overwrites the destination, and
-`worker`, `statefulset` and `webservice` each set the four-key `affinity`
-shorthand in their own map and *then* copy the shared pod-level fragment over
-it — so moving a raw `affinity` into that fragment would silently replace the
-shorthand on all three, with no fixture moving to reveal it.
+`worker` and `webservice` each set the four-key `affinity` shorthand in their
+own map and *then* copy the shared pod-level fragment over it — so moving a raw
+`affinity` into that fragment would silently replace the shorthand on both,
+with no fixture moving to reveal it.
 
 **Routing traits on a `deployment` need an explicit Service.** `expose`,
 `ingress` and `httproute` are accepted on this kind — nothing restricts them —
@@ -5394,11 +5397,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below. `ports` declares the main container's
   ports (see "Main container ports"). It emits no Service
-  (go-kure/launcher#690). For scheduling it takes `tolerations` and
-  `topologySpreadConstraints` as the raw `corev1` shapes
-  (go-kure/launcher#790, see "Raw scheduling properties" above) beside the
-  four-key `affinity` shorthand; the raw `affinity` shape is not published on
-  this kind.
+  (go-kure/launcher#690). For scheduling it takes `affinity`, `tolerations`
+  and `topologySpreadConstraints` as the raw `corev1` shapes
+  (go-kure/launcher#790, see "Raw scheduling properties" above); the four-key
+  `affinity` shorthand is not published on this kind.
   - **`serviceName` names the governing Service, which the component does
     not emit.** Author it as a headless `service` component (`clusterIP:
     None`, selecting `app: <component>`) and name it here. It has no default:
@@ -8468,20 +8470,12 @@ property of the kind already: `securityContext` as `podSecurityContext` and
 
 ### Not authorable, and not refusable by name
 
-Two cases have no key a refusal could sit on:
-
-- **Name taken on this kind by another upstream field of the same name.** On
-  `job` and `cronjob`, `restartPolicy` is the pod's, so the main container's
-  own `restartPolicy` cannot be authored and cannot be refused. On `cronjob`,
-  `suspend` is the CronJob's, so the job template's `suspend` cannot either
-  (see "One JobSpec field is deliberately not shared" above).
-- **The property of the upstream name has the launcher's own shape.** On
-  `statefulset` (and on `webservice` and `worker`), `affinity` is the
-  four-key shorthand, not a Kubernetes `Affinity`. `nodeAffinity`,
-  `podAffinity` and `podAntiAffinity` under it are refused, each with what the
-  shorthand has for the field. So the pod's affinity is **not authorable in
-  full on `statefulset`**: the full pod spec that `deployment`, `daemonset`,
-  `job` and `cronjob` take stops there for this kind.
+One case has no key a refusal could sit on: a name taken on this kind by
+another upstream field of the same name. On `job` and `cronjob`,
+`restartPolicy` is the pod's, so the main container's own `restartPolicy`
+cannot be authored and cannot be refused. On `cronjob`, `suspend` is the
+CronJob's, so the job template's `suspend` cannot either (see "One JobSpec
+field is deliberately not shared" above).
 
 ### Outside the properties
 
@@ -8514,8 +8508,8 @@ refuses an undeclared key whatever its value, null included.
   the component's properties, and fails on a field that is neither read, nor
   refused, nor placed in one of the classes above — so a field a later
   `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
-  what a property holds inside is held to the upstream type only for
-  `affinity` on `statefulset` and for a container's `resources`.
+  what a property holds inside is held to the upstream type only for a
+  container's `resources`.
 - `TestRefusedKeys_BothPathsGiveTheReason` holds every entry of every refusal
   map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
   refusals inside a declared property.

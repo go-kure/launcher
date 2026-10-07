@@ -226,8 +226,7 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 
 // TestRefusedKeys_OneLevelDown holds the two refusals that sit inside a
 // property the type declares (go-kure/launcher#790): an upstream field of
-// corev1.Affinity under the `affinity` shorthand of statefulset, webservice and
-// worker, and `claims` under a container's `resources`. The parser of the
+// corev1.Affinity under the `affinity` shorthand of webservice and worker, and `claims` under a container's `resources`. The parser of the
 // property refuses each with its reason, whatever the value; before, a caller
 // that drives Transform without the document check had them dropped. The
 // document check refuses the same key with its generic text and no reason: a
@@ -255,7 +254,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 		v    any
 	}{{"a value", map[string]any{}}, {"null", nil}}
 
-	for _, componentType := range []string{"statefulset", "webservice", "worker"} {
+	for _, componentType := range []string{"webservice", "worker"} {
 		t.Run(componentType+"/affinity/control", func(t *testing.T) {
 			direct, document := refusedKeyPaths(t, tr, componentType, with(componentType, "affinity", map[string]any{
 				"enablePodAntiAffinity": true, "topologyKey": "topology.kubernetes.io/zone",

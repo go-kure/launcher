@@ -44,9 +44,8 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"volumes":              schemaVolumes(),
 		"initContainers":       schemaInitContainers(),
 		"sidecars":             schemaSidecars(),
-		"affinity":             schemaAffinity(),
-		// The two raw scheduling shapes scheduling.go projects beside the
-		// shorthand above; `affinity` stays the shorthand on this kind.
+		// The three raw scheduling shapes scheduling.go projects.
+		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
@@ -234,7 +233,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.InitContainers = initContainers
 
-	affinity, err := parseAffinity(props)
+	affinity, err := parseRawAffinity(props)
 	if err != nil {
 		return nil, err
 	}
@@ -315,10 +314,10 @@ type StatefulsetConfig struct {
 	PVCs                 []PVCConfig
 	InitContainers       []InitContainerConfig
 	Sidecars             []SidecarContainerConfig
-	Affinity             AffinityConfig
-	// Tolerations and TopologySpreadConstraints are the raw corev1 scheduling
-	// shapes (see scheduling.go), carried as the API types because nothing is
-	// inferred from them. Affinity above is the four-key shorthand.
+	// Affinity, Tolerations and TopologySpreadConstraints are the raw corev1
+	// scheduling shapes (see scheduling.go), carried as the API types because
+	// nothing is inferred from them.
+	Affinity                  *corev1.Affinity
 	Tolerations               []corev1.Toleration
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
@@ -518,7 +517,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		InitContainers: c.InitContainers,
 		Sidecars:       c.Sidecars,
 		Volumes:        c.Volumes,
-		Affinity:       buildAffinity(c.Affinity, appLabels(app.Name)),
+		Affinity:       c.Affinity,
 
 		Tolerations:               c.Tolerations,
 		TopologySpreadConstraints: c.TopologySpreadConstraints,

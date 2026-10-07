@@ -1459,8 +1459,8 @@ its text:
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
-  - `statefulset`: the raw `affinity` shape (it keeps the four-key shorthand);
-    `tolerations` and `topologySpreadConstraints` are read;
+  - `statefulset`: no scheduling field is left; the raw `affinity`, `tolerations`
+    and `topologySpreadConstraints` are read;
   - `daemonset`: no scheduling field is left; the raw `affinity`, `tolerations`,
     `topologySpreadConstraints` and `sidecars` are read;
   - `job`, `cronjob`: the raw `affinity`, `tolerations` and `topologySpreadConstraints`

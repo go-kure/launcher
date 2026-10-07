@@ -26,7 +26,7 @@ import (
 // publish is refused rather than dropped.
 var rawSchedulingByKind = map[string][]string{
 	"deployment":  {"affinity", "tolerations", "topologySpreadConstraints"},
-	"statefulset": {"tolerations", "topologySpreadConstraints"},
+	"statefulset": {"affinity", "tolerations", "topologySpreadConstraints"},
 	"daemonset":   {"affinity", "tolerations", "topologySpreadConstraints"},
 	"job":         {"affinity", "tolerations", "topologySpreadConstraints"},
 	"cronjob":     {"affinity", "tolerations", "topologySpreadConstraints"},
@@ -163,9 +163,7 @@ func TestRawSchedulingKinds_UnauthoredAndNullEmitNothing(t *testing.T) {
 				if ps.TopologySpreadConstraints != nil {
 					t.Errorf("TopologySpreadConstraints = %+v, want nil", ps.TopologySpreadConstraints)
 				}
-				// A kind with the affinity shorthand builds its own affinity; only a
-				// kind publishing the raw shape is held to nil here.
-				if slices.Contains(k.keys, "affinity") && ps.Affinity != nil {
+				if ps.Affinity != nil {
 					t.Errorf("Affinity = %+v, want nil", ps.Affinity)
 				}
 			})

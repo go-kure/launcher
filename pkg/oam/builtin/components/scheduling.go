@@ -18,12 +18,10 @@ import (
 // parseTolerations) `tolerations` — for the kind-named `deployment` component
 // (go-kure/launcher#412). Other workload kinds publish the ones their
 // PropertySchema names, through the same parsers (go-kure/launcher#790):
-// `statefulset` takes `tolerations` and `topologySpreadConstraints` and keeps
-// the shorthand for `affinity`; `daemonset`, `job` and `cronjob` take all
-// three.
+// `statefulset`, `daemonset`, `job` and `cronjob` take all three.
 //
 // These are NOT alternatives to the four-key `affinity` shorthand that
-// webservice, worker and statefulset publish (schemaAffinity/parseAffinity in
+// webservice and worker publish (schemaAffinity/parseAffinity in
 // schema.go and common.go). The two sit at different levels and the difference
 // is the point:
 //
@@ -854,7 +852,7 @@ func parseNodeInclusionPolicy(raw map[string]any, key, label string) (*corev1.No
 func schemaRawAffinity() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeObject,
-		Description: "Pod scheduling affinity, as the corev1.Affinity API shape. Unlike the four-key `affinity` shorthand on webservice/worker/statefulset, nothing is inferred from the component: every selector is authored.",
+		Description: "Pod scheduling affinity, as the corev1.Affinity API shape. Unlike the four-key `affinity` shorthand on webservice/worker, nothing is inferred from the component: every selector is authored.",
 		Properties: map[string]oam.PropertySchema{
 			"nodeAffinity": {
 				Type:        oam.PropertyTypeObject,

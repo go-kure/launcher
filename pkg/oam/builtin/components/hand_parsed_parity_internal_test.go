@@ -67,13 +67,6 @@ const (
 	// `job` and `cronjob`, and the job template's suspend under the CronJob's
 	// on `cronjob`.
 	parityNameTaken = "name taken on this kind by another upstream field of the same name"
-	// parityOwnShape: the kind has a property of the upstream name, and the
-	// property has the launcher's own shape, not the upstream type's: it reads
-	// no field of that type under the field's name. Every field of the type is
-	// a key of `nested`, the refusal map of the property's parser. The upstream
-	// field is not authorable in full on such a kind: `affinity` on
-	// `statefulset`, a shorthand of four keys.
-	parityOwnShape = "the property of the upstream name has the launcher's own shape"
 	// parityReadInPart: read under its name, and the fields of its type the
 	// property does not declare are keys of `nested`, the refusal map of the
 	// property's parser. The walk goes this one level further down for the
@@ -96,7 +89,7 @@ type parityRule struct {
 	// of the component.
 	descend bool
 	// nested is the refusal map of the parser that reads the property
-	// (parityOwnShape, parityReadInPart): its keys are fields of the upstream
+	// (parityReadInPart): its keys are fields of the upstream
 	// field's type, refused one level down.
 	nested map[string]string
 }
@@ -146,10 +139,6 @@ var parityRules = map[string][]parityRule{
 	"PodSpec.resources":             {{class: parityRenamed, as: []string{"podResources"}}},
 	"PodSpec.activeDeadlineSeconds": {{class: parityRenamed, as: []string{"podActiveDeadlineSeconds"}, only: []string{"job", "cronjob"}}},
 
-	// The statefulset's `affinity` is the four-key shorthand (parseAffinity);
-	// on `deployment`, `daemonset`, `job` and `cronjob` the property is the
-	// corev1.Affinity and needs no rule.
-	"PodSpec.affinity": {{class: parityOwnShape, only: []string{"statefulset"}, nested: affinityShorthandRejectedKeys}},
 	// A container's `resources` are read without `claims` (parseResources).
 	"Container.resources": {{class: parityReadInPart, nested: resourcesRejectedKeys}},
 
@@ -222,9 +211,9 @@ func parityRuleFor(k parityKind, typ reflect.Type, name string) (string, parityR
 //   - one of the classes of parityRules.
 //
 // The walk stops at the component's properties. What a property holds inside is
-// held to the upstream type only for the two properties whose parser has a
-// refusal map of its own (parityOwnShape, parityReadInPart); the fields inside
-// every other property are not walked.
+// held to the upstream type only for a property whose parser has a refusal map
+// of its own (parityReadInPart); the fields inside every other property are not
+// walked.
 //
 // A field with no answer fails the test, so a field a later k8s.io/api adds to
 // one of these types cannot be dropped in silence: it is read, or it gets its
@@ -309,7 +298,7 @@ func TestHandParsedKinds_CoverEveryUpstreamField(t *testing.T) {
 						if !declared(name) || hint != "" {
 							t.Errorf("%s: its name is said to be the property of %s, but %q is not a declared, unrefused property", id, rule.as[0], name)
 						}
-					case hasRule && (class == parityOwnShape || class == parityReadInPart):
+					case hasRule && class == parityReadInPart:
 						usedRules[id] = true
 						if !declared(name) || hint != "" {
 							t.Errorf("%s: %q is not a declared, unrefused property of the kind", id, name)
@@ -326,8 +315,6 @@ func TestHandParsedKinds_CoverEveryUpstreamField(t *testing.T) {
 							switch {
 							case isDeclared && isRefused:
 								t.Errorf("%s.%s: the property both declares and refuses it", id, field)
-							case isDeclared && class == parityOwnShape:
-								t.Errorf("%s.%s: the property has its own shape, but declares a key of the upstream field's name; one of the two is not so", id, field)
 							case !isDeclared && !isRefused:
 								t.Errorf("%s.%s (%s) is neither read nor refused by the property %q of %q: declare it, or give it an entry with its reason in the parser's refusal map", id, field, innerFields[field], name, k.componentType)
 							case isRefused && !strings.HasPrefix(reason, name+"."+field+": "):

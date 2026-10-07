@@ -74,11 +74,11 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		// The three raw pod-level scheduling shapes (go-kure/launcher#412).
 		// They MUST stay above the maps.Copy calls below and they must not move
 		// into schemaPodSpec: maps.Copy overwrites the destination's keys, and
-		// worker (worker.go), statefulset (statefulset.go) and webservice
-		// (webservice.go) each set the four-key `affinity` shorthand in their
-		// own literal map and then copy schemaPodSpec over it — so a raw
-		// `affinity` in the shared fragment would silently replace the
-		// shorthand on all three, with no fixture moving to show it.
+		// worker (worker.go) and webservice (webservice.go) each set the
+		// four-key `affinity` shorthand in their own literal map and then copy
+		// schemaPodSpec over it — so a raw `affinity` in the shared fragment
+		// would silently replace the shorthand on both, with no fixture moving
+		// to show it.
 		// TestSchedulingKeysAbsentFromSharedFragments and
 		// TestSchedulingKeysSurviveFragmentCopies pin this ordering.
 		"affinity":                  schemaRawAffinity(),
