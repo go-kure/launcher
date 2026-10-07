@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// The `ingress` and `httproute` traits resolve their one object's name under
-// their roles (`ingress`, `httproute`); the `cilium-networkpolicy` trait names
+// The `ingress`, `httproute` and `volsync` traits resolve their one object's
+// name under their roles (`ingress`, `httproute`,
+// `volsync-replicationsource`); the `cilium-networkpolicy` trait names
 // its object itself, under no role, and claims the name
 // (oam.Trait.ClaimObjectName). Either way a second owner of that object is
 // refused with both named.
@@ -26,6 +27,13 @@ const (
             rules:
               - backendRefs:
                   - port: 8080
+`
+	// claimVolSyncTrait backs up claim "data": its ReplicationSource's default
+	// name is "data-backup", whichever component carries it.
+	claimVolSyncTrait = `        - type: volsync
+          properties:
+            sourcePVC: data
+            schedule: "0 2 * * *"
 `
 )
 
@@ -82,6 +90,16 @@ func TestTraitObjectClaim_TwoTraitsNameOneObject(t *testing.T) {
 			want: `name collision: HTTPRoute.gateway.networking.k8s.io "default/api-httproute" is named by ` +
 				`component "web" traits[0] "httproute" (role "httproute", set by name) and by ` +
 				`component "api" traits[0] "httproute" (role "httproute", its default); give one of them another name`,
+		},
+		{
+			// The default is the claim's, not the component's: two components
+			// backing up one claim name one ReplicationSource unless one sets `name`.
+			name: "volsync",
+			web:  claimVolSyncTrait, api: claimVolSyncTrait,
+			off: claimVolSyncTrait + "            name: web-data-backup\n",
+			want: `name collision: ReplicationSource.volsync.backube "default/data-backup" is named by ` +
+				`component "web" traits[0] "volsync" (role "volsync-replicationsource", its default) and by ` +
+				`component "api" traits[0] "volsync" (role "volsync-replicationsource", its default); give one of them another name`,
 		},
 		{
 			name: "cilium-networkpolicy",

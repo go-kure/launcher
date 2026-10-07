@@ -188,12 +188,12 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
 	artifact := ociNamesComponent("artifact", "artifact", "", "")
-	// web carries an expose trait with managed TLS, an external-secret trait and
-	// an httproute trait as well: their objects, and the Secrets the first two
-	// make other controllers write, have roles of their own. The expose trait's
-	// ingress trait stands for the ingress role.
-	routing := namingSecretTraits + claimHTTPRouteTrait
-	doc := withWebVolume(namingApp(routing, namingDBStore+namingChart+jobs+artifact), "")
+	// web carries an expose trait with managed TLS, an external-secret trait, an
+	// httproute trait and a volsync trait as well: their objects, and the Secrets
+	// the first two make other controllers write, have roles of their own. The
+	// expose trait's ingress trait stands for the ingress role.
+	extra := namingSecretTraits + claimHTTPRouteTrait + claimVolSyncTrait
+	doc := withWebVolume(namingApp(extra, namingDBStore+namingChart+jobs+artifact), "")
 	namingTransform(t, doc, withManagedTLS(namingContext(declineEveryName(&requests))))
 
 	const (
@@ -261,8 +261,8 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		// Secret, then its sub-application, with the Ingress's default: the hook's
 		// answer names the object alone. The external-secret trait asks for the
 		// Secret its ExternalSecret produces, whose default is the trait's
-		// secretName; the httproute trait for its HTTPRoute, then its
-		// sub-application.
+		// secretName; the httproute and volsync traits for their object, then
+		// their sub-application.
 		{Application: "shop", Component: "web", Role: oam.NameRoleIngress, Kind: "Ingress.networking.k8s.io", Default: "web-ingress"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleTLSSecret, Kind: "Secret", Default: "web-tls"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-ingress"},
@@ -270,6 +270,8 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-external-secret-web-creds"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleHTTPRoute, Kind: "HTTPRoute.gateway.networking.k8s.io", Default: "web-httproute"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-httproute"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleVolSyncReplicationSource, Kind: "ReplicationSource.volsync.backube", Default: "data-backup"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "data-backup"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleNetpolSynth, Kind: np, Default: synthNP},
 		{Application: "shop", Component: "web", Role: subApp, Default: synthNP},
 	}
@@ -357,6 +359,31 @@ func TestNamingHook_RoutingObjectsRenamedAlone(t *testing.T) {
 		}
 	}
 	if got := generatedNames(cluster, apps); !slices.Contains(got, "shop-front: Ingress default/shop-front") {
+		t.Errorf("the authored name was not used:\n  %s", strings.Join(got, "\n  "))
+	}
+}
+
+// TestNamingHook_ReplicationSourceRenamedAlone: the hook's answer for the
+// volsync-replicationsource role names the ReplicationSource, and the
+// sub-application keeps launcher's default. An authored `name` is not put to
+// the hook, and its sub-application takes that name.
+func TestNamingHook_ReplicationSourceRenamedAlone(t *testing.T) {
+	cluster, apps := namingTransform(t, namingApp(claimVolSyncTrait, ""), namingContext(renameBy(map[string]string{
+		"volsync-replicationsource data-backup": "data-nightly",
+	})))
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "data-backup: ReplicationSource default/data-nightly") {
+		t.Errorf("the hook's name was not used:\n  %s", strings.Join(got, "\n  "))
+	}
+
+	authored := claimVolSyncTrait + "            name: data-offsite\n"
+	var requests []oam.NameRequest
+	cluster, apps = namingTransform(t, namingApp(authored, ""), namingContext(declineEveryName(&requests)))
+	for _, req := range requests {
+		if req.Role == oam.NameRoleVolSyncReplicationSource {
+			t.Errorf("the hook was asked for the name the volsync trait's name sets: %+v", req)
+		}
+	}
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "data-offsite: ReplicationSource default/data-offsite") {
 		t.Errorf("the authored name was not used:\n  %s", strings.Join(got, "\n  "))
 	}
 }

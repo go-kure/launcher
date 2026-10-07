@@ -60,6 +60,9 @@ const (
 	// "<component>-httproute", "<component>-httproute-<scope>" with a scope.
 	// Launcher writes no reference to it by name.
 	NameRoleHTTPRoute NameRole = "httproute"
+	// NameRoleVolSyncReplicationSource is the volsync trait's ReplicationSource.
+	// Default: "<sourcePVC>-backup". Launcher writes no reference to it by name.
+	NameRoleVolSyncReplicationSource NameRole = "volsync-replicationsource"
 	// NameRolePooler is the CloudNativePG Pooler the postgresql component
 	// generates. Default: "<component>-pooler". CloudNativePG names the pooler's
 	// Service after it, so a name that is not the default must be a DNS-1035
@@ -228,6 +231,7 @@ var nameRoles = []struct {
 	{NameRoleNetworkPolicy, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleIngress, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHTTPRoute, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleVolSyncReplicationSource, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},

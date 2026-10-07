@@ -200,8 +200,8 @@ Decided in the ticket:
   lowering rule resolves such a name with `LoweringContext.ResolveName`, and
   `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. The roles
   also include a kind component's own object, the source and the values ConfigMap and
-  Secret the `helm` rule generates, and the `ingress` trait's Ingress and the `httproute`
-  trait's HTTPRoute.
+  Secret the `helm` rule generates, the `ingress` trait's Ingress, the `httproute`
+  trait's HTTPRoute and the `volsync` trait's ReplicationSource.
 - **Author overrides.** Shipped with go-kure/launcher#787 (§3.2): the `scaler` HPA and PDB
   (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
@@ -256,8 +256,9 @@ Decided in the ticket:
   - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
     group's bundle, each sub-application a trait or a synthesized policy adds, each
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects, the
-    `networkpolicy` trait's policy, the `ingress` trait's Ingress and the `httproute`
-    trait's HTTPRoute, the `postgresql` Pooler and Databases, the object
+    `networkpolicy` trait's policy, the `ingress` trait's Ingress, the `httproute`
+    trait's HTTPRoute and the `volsync` trait's ReplicationSource, the `postgresql` Pooler
+    and Databases, the object
     of an authored kind component, the generated source, the values ConfigMap and
     Secret and the HelmRelease of a `helm` component, the Kustomization and the kept source of an `oci`
     component, the Deployment, the Service and the ServiceAccount of a `webservice` or
@@ -429,6 +430,13 @@ Decided in the ticket:
     renamed object breaks no reference.
   - The `cilium-networkpolicy` trait's CiliumNetworkPolicy has no role, by design: its
     `name` is required, so the hook is never asked. The name is still claimed.
+- **Shipped: the `volsync` trait's ReplicationSource** (`traits/volsync.go`; the traits
+  README, "Conventions"). It is named by the new optional `name`, else the hook, else
+  `<sourcePVC>-backup`, under role `volsync-replicationsource`. The hook's answer names
+  the object alone: the trait's sub-application keeps `name`, else the default. Launcher
+  writes no reference to the ReplicationSource by name.
+  - The repository Secret has no role, by design: launcher only references it
+    (`spec.restic.repository`, the `repository` property) and never generates it.
 - **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
   - A name the `Namer` builds (`NameAllocator.Name` and
@@ -1735,7 +1743,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. Open: a hook role for the names outside the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. Open: a hook role for the names outside the roles of §3.2 | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
