@@ -125,7 +125,8 @@ func cnpgCluster(apiVersion, kind string, inherited map[string]any) *unstructure
 }
 
 // TestOwnedConfig_ReservedKeyRefused: a reserved key is refused wherever the
-// check reads: the object's own labels and annotations, a pod template's, what
+// check reads: the object's own labels and annotations, a pod template's, a
+// CronJob's job template's, what
 // an operator hands on (a CloudNativePG Cluster's inheritedMetadata, a Pooler's
 // pod template, the Prometheus operator's podMetadata), and a list member's. The refusal
 // names the component, the object, the key and the entry that reserves it.
@@ -139,6 +140,8 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 	statefulSet.Spec.Template.ObjectMeta = typedPods(nil, map[string]string{"example.org/tenant": "a"})
 	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	cronJob.Spec.JobTemplate.Spec.Template.ObjectMeta = typedPods(map[string]string{"platform.example/zone": "a"}, nil)
+	cronJobJobs := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	cronJobJobs.Spec.JobTemplate.ObjectMeta = typedPods(map[string]string{"example.org/tenant": "a"}, nil)
 	podTemplate := &corev1.PodTemplate{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	podTemplate.Template.ObjectMeta = typedPods(nil, map[string]string{"platform.example/zone": "a"})
 	replicationController := &corev1.ReplicationController{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
@@ -185,6 +188,15 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 		},
 		"a typed CronJob's pod template label": {
 			cronJob, []string{`CronJob "w"`, `pod template label "platform.example/zone"`, prefix},
+		},
+		// A CronJob's job template is the metadata of every Job it creates.
+		"a typed CronJob's job template label": {
+			cronJobJobs, []string{`CronJob "w"`, `job template label "example.org/tenant"`, exact},
+		},
+		"an unstructured CronJob's job template annotation": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "batch/v1", "kind": "CronJob", "metadata": map[string]any{"name": "w"},
+				"spec": map[string]any{"jobTemplate": map[string]any{"metadata": map[string]any{"annotations": map[string]any{"platform.example/zone": "a"}}}}}},
+			[]string{`CronJob "w"`, `job template annotation "platform.example/zone"`, prefix},
 		},
 		"a typed PodTemplate's pod template annotation": {
 			podTemplate, []string{`PodTemplate "w"`, `pod template annotation "platform.example/zone"`, prefix},
@@ -532,8 +544,6 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 	deployment.Spec.Template.Labels = map[string]string{"app": "web", ownershipKey: "web"}
 	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: map[string]string{"example.org/tenant": "a"}}}}
-	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
-	cronJob.Spec.JobTemplate.Labels = map[string]string{"example.org/tenant": "a"}
 
 	// "app" and the component label key are reserved here, as a consumer that
 	// keeps the component key under a prefix of its own has them.
@@ -548,7 +558,10 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		"the two labels a Cluster's objects inherit": cnpgCluster("postgresql.cnpg.io/v1", "Cluster",
 			map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "web"}}),
 		"a volume claim template's label": statefulSet,
-		"a job template's label":          cronJob,
+		"a job template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "CronJob"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "jobTemplate", "metadata"),
+		"the two labels in a job template": holding(t, unstructuredWorkload("batch/v1", "CronJob"),
+			map[string]string{"app": "web", ownershipKey: "web"}, "spec", "jobTemplate", "metadata"),
 		"inheritedMetadata of a Cluster of another group": cnpgCluster("example.com/v1", "Cluster",
 			map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}),
 		"inheritedMetadata of another kind of the group": cnpgCluster("postgresql.cnpg.io/v1", "Pooler",

@@ -484,6 +484,8 @@ goes on:
 - the pod template of a `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet`,
   `ReplicationController` or `PodTemplate`, and the job template's pod template of a
   `CronJob`, typed or unstructured;
+- a `CronJob`'s job template (`spec.jobTemplate.metadata.labels`), typed or unstructured, so
+  every Job the CronJob creates carries the label;
 - the same places on every object the config adds to a layout it augments
   (`layout.LayoutAugmenter`): the objects that were not on the layout, or on a layout below
   it, before the config's `AugmentLayout` ran. What was on the layout already is left as it
@@ -506,6 +508,7 @@ The value is read, on every object and on each member of an unstructured list en
 |-------|----|----|
 | `metadata.labels` | every object | yes |
 | the pod template's labels | `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `ReplicaSet`, `ReplicationController`, `PodTemplate`, and the job template's pod template of a `CronJob`, each in its own API group | yes |
+| `spec.jobTemplate.metadata.labels`, the labels of each Job the CronJob creates | a `batch` `CronJob` | yes |
 | `spec.inheritedMetadata.labels` | a `postgresql.cnpg.io` `Cluster` | no |
 | `spec.template.metadata.labels` | a `postgresql.cnpg.io` `Pooler` | no |
 | `spec.podMetadata.labels` | a `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`, `Alertmanager` or `ThanosRuler` | no |
@@ -514,8 +517,8 @@ The value is read, on every object and on each member of an unstructured list en
 | `spec.infrastructure.labels` | a `gateway.networking.k8s.io` `Gateway` | no |
 | `spec.commonMetadata.labels` | a `kustomize.toolkit.fluxcd.io` `Kustomization`, a `helm.toolkit.fluxcd.io` `HelmRelease` or a `source.extensions.fluxcd.io` `ArtifactGenerator` | no |
 
-The six rows after the pod template's are metadata an operator puts on the pods it creates
-(a Gateway's `spec.infrastructure` on whatever the controller creates for it, which may be
+The six rows after the CronJob's are metadata an operator puts on the pods it creates (a
+Gateway's `spec.infrastructure` on whatever the controller creates for it, which may be
 pods). The last row is what the Flux controller puts on every object it applies, renders or
 generates, pods among them. Launcher reads them and writes nothing there: such pods carry the
 component label only where the document or a kind puts it. A typed object of a
@@ -523,8 +526,8 @@ component label only where the document or a kind puts it. A typed object of a
 kind is recognized when it states its kind; a typed Flux `Kustomization`, `HelmRelease` or
 `ArtifactGenerator` by its Go type as well. A refusal names the labels by their path, with
 the index of the solver where they are in the list
-(`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not read: a job
-template's own labels and a volume claim template's.
+(`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not read: a volume claim
+template's labels.
 
 The label and the reserved metadata keys are held wherever an object holds labels that reach
 pods. Metadata an operator copies onto other objects it creates (the Ingress of a solver, the
@@ -740,6 +743,19 @@ generates. The case is reached only through a consumer's own lowering rule.
   value that is not its component's, built before and is refused now. Launcher writes
   nothing there.
 
+**Breaking library changes** (go-kure/launcher#790, a CronJob's job template):
+
+- Output: every `CronJob` an owned application generates, typed or unstructured, gains the
+  component label on its job template (`spec.jobTemplate.metadata.labels`), and the
+  post-renderer of a `HelmRelease` puts it there on a chart's CronJobs too, so each Job a
+  CronJob creates carries the label. The cluster lets a CronJob's job template change: the
+  apply updates a CronJob it holds already, and the Jobs it created before keep their labels.
+- A document that built before is refused at generation when a CronJob's job template holds
+  the component label's key with a value that is not its component's, or a reserved metadata
+  key as a label or an annotation. Before, the job template's own metadata was not read.
+- New exported API: `ReservedKeyInJobTemplate`, the `ReservedKeyHolder` of a CronJob's job
+  template (`job template label "…"`).
+
 **New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
 `ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
@@ -813,7 +829,7 @@ if errors.As(err, &refused) {
 object states none, and the kind is zero for a typed object that states none and that the
 check reads only the metadata of, which `Object` (the object as the text names it) then names
 by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
-the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`,
+the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`, `ReservedKeyInJobTemplate`,
 `ReservedKeyInInheritedMetadata`, `ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
 `ReservedKeyInSolverPodTemplate`, `ReservedKeyInInfrastructure` or
 `ReservedKeyInCommonMetadata`, or, of metadata that reaches no pods, `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
@@ -836,6 +852,9 @@ Flux applies it (a `List`, or an envelope with `items`):
 - the pod template's labels and annotations, on a `Deployment`, `StatefulSet`, `DaemonSet`,
   `Job`, `ReplicaSet`, `ReplicationController` or `PodTemplate`, and the job template's pod
   template on a `CronJob`, each in its own API group: they become the metadata of the pods;
+- the job template's labels and annotations on a `batch` `CronJob`
+  (`spec.jobTemplate.metadata`), which become the metadata of each Job it creates: `job
+  template label "…"`;
 - `spec.inheritedMetadata` of a `postgresql.cnpg.io` `Cluster`, which the operator copies
   onto every object it creates for the cluster;
 - the pod template's labels and annotations of a `postgresql.cnpg.io` `Pooler`
@@ -918,9 +937,8 @@ object named, and is not read as holding no key.
 - A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
 - Metadata an object hands on to others in a field of its own: a StatefulSet's
-  `volumeClaimTemplates`, a CronJob's `jobTemplate` metadata (its pod template is read).
-  `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the full list of fields of
-  the kinds' API types that hand metadata on and are not read.
+  `volumeClaimTemplates`. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the
+  full list of fields of the kinds' API types that hand metadata on and are not read.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.

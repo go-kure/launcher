@@ -484,9 +484,10 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // stampComponentLabel puts key: value on obj where obj carries no value for key
 // yet, and on its pod template when obj is a workload: a Deployment,
 // StatefulSet, DaemonSet, Job, CronJob, ReplicaSet or ReplicationController,
-// typed or unstructured. A PodTemplate is its pod template: it gets the label
-// there too. A HelmRelease also gets the post-renderer that labels its chart's
-// pod templates (componentLabelPostRenderer).
+// typed or unstructured. A CronJob's job template gets it as well, so every Job
+// the CronJob creates carries it. A PodTemplate is its pod template: it gets
+// the label there too. A HelmRelease also gets the post-renderer that labels
+// its chart's pod templates and job templates (componentLabelPostRenderer).
 //
 // A value already there stays. The wrapper has held it to the component's
 // before this runs (ownedConfig.checkComponentLabel), so it is the value this
@@ -528,6 +529,8 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 	case *batchv1.Job:
 		o.Spec.Template.Labels = withComponentLabel(o.Spec.Template.Labels, o.Spec.Selector, key, value)
 	case *batchv1.CronJob:
+		// The job template's own labels are each Job's: no selector reads them.
+		o.Spec.JobTemplate.Labels = ownLabels(o.Spec.JobTemplate.Labels, key, value)
 		job := &o.Spec.JobTemplate.Spec
 		job.Template.Labels = withComponentLabel(job.Template.Labels, job.Selector, key, value)
 	case *appsv1.ReplicaSet:
@@ -615,19 +618,24 @@ func ownLabels(labels map[string]string, key, value string) map[string]string {
 //
 // labelMapSelector says the selector is that plain label map, which the check
 // of the values a selector requires reads as one (requiredLabelValues).
+//
+// jobTemplate is the path of a CronJob's job template, whose metadata every
+// Job the CronJob creates carries: it takes the label and is read as the pod
+// template is (go-kure/launcher#790). It is nil on every other kind.
 var podTemplateKinds = []struct {
 	group, version, kind string
 	spec                 []string
 	labelMapSelector     bool
+	jobTemplate          []string
 }{
-	{"apps", "v1", "Deployment", []string{"spec"}, false},
-	{"apps", "v1", "StatefulSet", []string{"spec"}, false},
-	{"apps", "v1", "DaemonSet", []string{"spec"}, false},
-	{"batch", "v1", "Job", []string{"spec"}, false},
-	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}, false},
-	{"apps", "v1", "ReplicaSet", []string{"spec"}, false},
-	{"", "v1", "ReplicationController", []string{"spec"}, true},
-	{"", "v1", "PodTemplate", nil, false},
+	{"apps", "v1", "Deployment", []string{"spec"}, false, nil},
+	{"apps", "v1", "StatefulSet", []string{"spec"}, false, nil},
+	{"apps", "v1", "DaemonSet", []string{"spec"}, false, nil},
+	{"batch", "v1", "Job", []string{"spec"}, false, nil},
+	{"batch", "v1", "CronJob", []string{"spec", "jobTemplate", "spec"}, false, []string{"spec", "jobTemplate"}},
+	{"apps", "v1", "ReplicaSet", []string{"spec"}, false, nil},
+	{"", "v1", "ReplicationController", []string{"spec"}, true, nil},
+	{"", "v1", "PodTemplate", nil, false, nil},
 }
 
 // objectField returns the object m holds at field. YAML's explicit null is an
@@ -719,10 +727,35 @@ func stampUnstructured(u *unstructured.Unstructured, key, value string) error {
 		if gvk.Group != k.group || gvk.Kind != k.kind {
 			continue
 		}
+		if err := stampUnstructuredJobTemplate(u.Object, k.jobTemplate, key, value); err != nil {
+			return errors.Errorf("component label: %s %q: job template: %w", gvk.Kind, u.GetName(), err)
+		}
 		if err := stampUnstructuredPodTemplate(u.Object, k.spec, key, value); err != nil {
 			return errors.Errorf("component label: %s %q: pod template: %w", gvk.Kind, u.GetName(), err)
 		}
 		return nil
+	}
+	return nil
+}
+
+// stampUnstructuredJobTemplate puts key: value on the job template at path of
+// obj where its labels carry no value for key yet, as the object's own are
+// (labelsOf, setLabel). A nil path, a kind with no job template, does nothing,
+// and so does an absent or null job template.
+func stampUnstructuredJobTemplate(obj map[string]any, path []string, key, value string) error {
+	if len(path) == 0 {
+		return nil
+	}
+	template, found, err := nestedObject(obj, path...)
+	if err != nil || !found {
+		return err
+	}
+	own, err := labelsOf(template)
+	if err != nil {
+		return err
+	}
+	if _, exists := own[key]; !exists {
+		setLabel(template, key, value)
 	}
 	return nil
 }
@@ -815,12 +848,12 @@ const componentLabelPostRendererName = "component-label"
 const coreGroupPattern = "^$"
 
 // componentLabelPostRenderer builds the Flux post-renderer that puts key: value
-// on the pod template of every workload and PodTemplate a chart renders, and on
-// a bare Pod. A Flux post-renderer offers kustomize patches and images only, so
-// it is one strategic merge patch per kind with a pod template
-// (podTemplateKinds) and one for Pod, each targeting the kind in its own API
-// group and no other; a chart that renders none of a kind is left alone by
-// that patch.
+// on the pod template of every workload and PodTemplate a chart renders, on the
+// job template of every CronJob, and on a bare Pod. A Flux post-renderer offers
+// kustomize patches and images only, so it is one strategic merge patch per
+// kind with a pod template (podTemplateKinds) and one for Pod, each targeting
+// the kind in its own API group and no other; a chart that renders none of a
+// kind is left alone by that patch.
 //
 // It reaches what Helm hands a post-renderer. Whether that includes a chart's
 // hook and test Pods depends on the Helm the helm-controller runs, and is not
@@ -834,16 +867,22 @@ const coreGroupPattern = "^$"
 func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) {
 	type target struct {
 		group, version, kind string
-		labels               []string
+		// labels are the paths of the labels the patch sets: the pod
+		// template's, and a CronJob's job template's beside it.
+		labels [][]string
 	}
 	targets := make([]target, 0, len(podTemplateKinds)+1)
 	for _, k := range podTemplateKinds {
-		targets = append(targets, target{k.group, k.version, k.kind, append(append([]string(nil), k.spec...), "template", "metadata", "labels")})
+		labels := [][]string{append(slices.Clone(k.spec), "template", "metadata", "labels")}
+		if k.jobTemplate != nil {
+			labels = append(labels, append(slices.Clone(k.jobTemplate), "metadata", "labels"))
+		}
+		targets = append(targets, target{k.group, k.version, k.kind, labels})
 	}
 	// A bare Pod has no pod template: its own labels are its pod's. It is of the
 	// core API group, as the ReplicationController and the PodTemplate are
 	// (podTemplateKinds).
-	targets = append(targets, target{"", "v1", "Pod", []string{"metadata", "labels"}})
+	targets = append(targets, target{"", "v1", "Pod", [][]string{{"metadata", "labels"}}})
 
 	patches := make([]kustomize.Patch, 0, len(targets))
 	for _, k := range targets {
@@ -854,8 +893,10 @@ func componentLabelPostRenderer(key, value string) (helmv2.PostRenderer, error) 
 		}
 		// Through the YAML encoder, which quotes a value that would read back as
 		// a number, a boolean or null: a label value is a string.
-		if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, k.labels...); err != nil {
-			return helmv2.PostRenderer{}, errors.Errorf("component label: post-renderer patch for %s: %w", k.kind, err)
+		for _, labels := range k.labels {
+			if err := unstructured.SetNestedStringMap(doc, map[string]string{key: value}, labels...); err != nil {
+				return helmv2.PostRenderer{}, errors.Errorf("component label: post-renderer patch for %s: %w", k.kind, err)
+			}
 		}
 		raw, err := yaml.Marshal(doc)
 		if err != nil {

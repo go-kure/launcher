@@ -152,6 +152,7 @@ func labelHolderRows() []labelHolderRow {
 	metadata := []string{"metadata"}
 	template := []string{"spec", "template", "metadata"}
 	cronTemplate := []string{"spec", "jobTemplate", "spec", "template", "metadata"}
+	jobTemplate := []string{"spec", "jobTemplate", "metadata"}
 	bareTemplate := []string{"template", "metadata"}
 	inherited := []string{"spec", "inheritedMetadata"}
 	podMetadata := []string{"spec", "podMetadata"}
@@ -223,6 +224,15 @@ func labelHolderRows() []labelHolderRow {
 		{name: "unstructured ReplicaSet", where: `ReplicaSet "w"`, path: template, filled: true, build: unstructuredAt(workload("apps/v1", "ReplicaSet"), template...)},
 		{name: "unstructured ReplicationController", where: `ReplicationController "w"`, path: template, filled: true, build: unstructuredAt(workload("v1", "ReplicationController"), template...)},
 		{name: "unstructured PodTemplate", where: `PodTemplate "w"`, path: bareTemplate, filled: true, build: unstructuredAt(workload("v1", "PodTemplate"), bareTemplate...)},
+
+		// A CronJob's job template: the metadata of every Job it creates.
+		{name: "typed CronJob, its job template", where: `CronJob "w"`, path: jobTemplate, filled: true, build: typed(func(l map[string]string) client.Object {
+			o := &batchv1.CronJob{ObjectMeta: named}
+			o.Spec.JobTemplate.Labels = l
+			return o
+		})},
+		{name: "unstructured CronJob, its job template", where: `CronJob "w"`, path: jobTemplate, filled: true, build: unstructuredAt(workload("batch/v1", "CronJob"), jobTemplate...)},
+		{name: "a List member's job template", where: `CronJob "w"`, path: jobTemplate, filled: true, build: member(1, unstructuredAt(workload("batch/v1", "CronJob"), jobTemplate...))},
 
 		// The members of a list envelope, as Flux applies them.
 		{name: "a List member", where: `ConfigMap "w"`, path: metadata, filled: true, build: member(1, unstructuredAt(object("v1", "ConfigMap"), metadata...))},
@@ -496,15 +506,14 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 	foreign := map[string]string{ownershipKey: "db"}
 	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: foreign}}}
-	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
-	cronJob.Spec.JobTemplate.Labels = foreign
 	annotated := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w", Annotations: foreign}}
 	annotated.Spec.Template.Annotations = foreign
 
 	for name, obj := range map[string]client.Object{
 		"a volume claim template's label": statefulSet,
-		"a job template's label":          cronJob,
 		"the key as an annotation":        annotated,
+		"a job template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "CronJob"),
+			foreign, "spec", "jobTemplate", "metadata"),
 		"commonMetadata of a Kustomization of another group": holding(t, unstructuredObject("example.com/v1", "Kustomization"),
 			foreign, "spec", "commonMetadata"),
 		"commonMetadata of another kind of the group": holding(t, unstructuredObject("helm.toolkit.fluxcd.io/v2", "HelmChart"),

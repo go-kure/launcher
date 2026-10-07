@@ -1358,6 +1358,11 @@ all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
   rule with `devicePath`, and `volumeMode: Block` is now accepted (it was
   rejected before). A Block template renders a claim template with
   `volumeMode: Block` and a main-container `volumeDevices` entry.
+- **Known limit: the published schema cannot say "exactly one of".** The
+  property schema has no one-of form, so a `volumes[]` entry and a
+  `volumeClaimTemplates[]` entry publish `mountPath` and `devicePath` as two
+  optional keys. A validator built from the schema accepts an entry with
+  both or neither; the build refuses it, as above.
 - **`initContainers[]` / `sidecars[]` entry.** Adds `volumeDevices:
   [{name, devicePath}]`, a closed key set with both keys required. A
   `volumeDevices` name must be a Block volume this component declares (a
@@ -6263,7 +6268,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `uninstall.timeout`, and `install.strategy.retryInterval` and
   `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
   the decode does. Exactly one of
-  `chart` and `chartRef` is required. Under an authored `chart`, `chart.spec.sourceRef.kind`
+  `chart` and `chartRef` is required. That is a known limit of the published schema, which
+  has no one-of form and lists both as optional: a validator built from it accepts neither or
+  both, and the build refuses either. Under an authored `chart`, `chart.spec.sourceRef.kind`
   is required (go-kure/launcher#790): the API requires it and takes `HelmRepository`,
   `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
   kind does not choose a source's kind for the author, so a reference without one is
