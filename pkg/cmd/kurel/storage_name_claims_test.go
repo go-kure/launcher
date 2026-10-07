@@ -54,7 +54,13 @@ func TestStorageClaims_FluxInputClaimedWhereItLands(t *testing.T) {
 			}
 		})
 		t.Run(tt.name+" read by one", func(t *testing.T) {
-			got := fluxNSObjects(t,
+			// The two sub-applications are named after their objects, and two
+			// applications of one name in one bundle are refused: the hook names
+			// b's apart, and leaves both objects named vals.
+			apart := func(req oam.NameRequest) (string, bool) {
+				return req.Default + "-b", req.Role == oam.NameRoleSubApplication && req.Component == "b"
+			}
+			got := fluxNSObjectsNamed(t, apart,
 				fluxNSComponent(t, "a", "helmrelease", reads, tt.trait),
 				fluxNSComponent(t, "b", "helmrelease", nil, tt.trait),
 			)

@@ -158,6 +158,11 @@ type TransformContext struct {
 	// appended, recorded by applyEntryTraits and read
 	// by postProcessFluxNamespace. Internal only, shared like subAppDecorations.
 	traitSubApps *[]traitSubApps
+	// subAppOrigins says who named each sub-application of the transform, a
+	// trait's (recordSubAppOrigins) or a synthesized NetworkPolicy's
+	// (resolveSynthesizedPolicyNames), for checkBundleApplicationNames. Internal
+	// only; a map, so every by-value ctx copy records into one.
+	subAppOrigins map[*stack.Application]subAppOrigin
 }
 
 // subAppDecoration is one decorating trait of one component and the
@@ -736,6 +741,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}
+	ctx.subAppOrigins = make(map[*stack.Application]subAppOrigin)
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -903,13 +909,19 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
-	if err := ctx.names.resolveSynthesizedPolicyNames(cluster); err != nil {
+	if err := ctx.names.resolveSynthesizedPolicyNames(cluster, ctx.subAppOrigins); err != nil {
 		return nil, nil, err
 	}
 	postProcessFluxNamespace(cluster, *ctx.traitSubApps, ctx.FluxNamespace)
 	// Last: a decorator hides the interfaces the steps above read on a trait
 	// sub-application (the NetworkPolicy synthesis collectors among them).
 	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {
+		return nil, nil, err
+	}
+	// Every bundle again, now that no step adds or renames an application: the
+	// synthesized NetworkPolicies' sub-applications, and a bundle a trait added
+	// as a child, were not there when each bundle's traits were checked.
+	if err := checkClusterApplicationNames(cluster, entries, ctx.subAppOrigins); err != nil {
 		return nil, nil, err
 	}
 	// After every step that reads a config: from here on each application's
@@ -1191,14 +1203,21 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 	before := slices.Clone(bundle.Applications)
 	var created []*stack.Application
 	ordered := make([]*stack.Application, 0, len(bundle.Applications))
+	origins := ctx.subAppOrigins
+	if origins == nil {
+		origins = make(map[*stack.Application]subAppOrigin)
+	}
 	for _, e := range entries {
-		subApps, err := t.applyEntryTraits(app, e, entries, bundle, ctx)
+		subApps, err := t.applyEntryTraits(app, e, entries, bundle, ctx, origins)
 		if err != nil {
 			return err
 		}
 		ordered = append(ordered, e.app)
 		ordered = append(ordered, subApps...)
 		created = append(created, subApps...)
+	}
+	if err := checkBundleApplicationNames(bundle, entries, origins); err != nil {
+		return err
 	}
 	// The membership check also holds the bundle to the entries: an application
 	// no entry accounts for keeps the bundle as it is.
@@ -1367,8 +1386,9 @@ type groupSubApp struct {
 // Two sub-applications that are both still under the name the Naming hook gave
 // them are compared by their defaults instead: the hook is asked the same
 // question for the same trait on two members, so their defaults meet whatever it
-// answers, while two different sub-applications it gave one name are accepted as
-// they are outside a group. Every other pair is compared by name as before: one
+// answers, while two different sub-applications it gave one name are left to the
+// bundle, which refuses them as it does outside a group
+// (checkBundleApplicationNames). Every other pair is compared by name as before: one
 // the hook named against one it did not name, or against one a policy renamed
 // since (go-kure/launcher#787).
 //
@@ -1430,7 +1450,10 @@ func (s groupSubApp) hookNamed() bool {
 // this entry's traits began, and each sibling group member's application under
 // its name then, after every trait and after the ApplyPolicy of every
 // sub-application one added (checkEntryApplications).
-func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
+//
+// origins records, for each sub-application the entry's traits added, who named
+// it and how (checkBundleApplicationNames).
+func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, bundle *stack.Bundle, ctx TransformContext, origins map[*stack.Application]subAppOrigin) ([]*stack.Application, error) {
 	var subApps []*stack.Application
 	// For a sibling group: each trait-created sub-application and the member type
 	// whose trait created it (checkGroupSubApplications).
@@ -1554,12 +1577,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				}
 			}
 			prev := slices.Clone(bundle.Applications)
+			// A trait may rename a sub-application an earlier one added.
+			named := recordedNames(origins)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{
 					Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 					Cause:   err,
 				}
 			}
+			recordRenames(origins, named, nil)
 			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{}); err != nil {
 				return nil, err
 			}
@@ -1567,13 +1593,14 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			added := addedApplications(prev, bundle.Applications)
 			// Which of them the Naming hook named is read now, under the names the
 			// trait gave them: a policy may rename one below.
+			names := resolved.naming.takeSubAppNames()
+			ofName := make(map[string]int, len(added))
+			for _, newApp := range added {
+				ofName[newApp.Name]++
+			}
+			recordSubAppOrigins(origins, added, names, resolved.naming, trait.Type)
 			var created []groupSubApp
 			if len(e.members) > 0 {
-				names := resolved.naming.takeSubAppNames()
-				ofName := make(map[string]int, len(added))
-				for _, newApp := range added {
-					ofName[newApp.Name]++
-				}
 				for _, newApp := range added {
 					s := groupSubApp{app: newApp, member: entry.component.Type}
 					if defs := hookDefaults(names[newApp.Name], ofName[newApp.Name]); len(defs) > 0 {
@@ -1584,9 +1611,13 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			}
 			for _, newApp := range added {
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
+					// Any sub-application recorded so far, not only this trait's,
+					// may be renamed by the policy.
+					before := recordedNames(origins)
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 						return nil, NewViolationError(entry.component.Name, err)
 					}
+					recordRenames(origins, before, newApp)
 					// The policy runs after the trait's check, so it is held to the
 					// same names (go-kure/launcher#752).
 					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{policyOf: newApp.Name}); err != nil {

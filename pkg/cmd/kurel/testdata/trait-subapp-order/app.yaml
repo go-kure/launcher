@@ -6,8 +6,10 @@ metadata:
 spec:
   components:
     # A trait sub-application follows its own component, not every component:
-    # the claim api-data comes right after api's objects, before the worker
-    # api-data's (go-kure/launcher#712).
+    # the claim api-cache comes right after api's objects, before the worker
+    # api-data's (go-kure/launcher#712). The claim is named apart from the
+    # worker: two applications of one name in one bundle are refused
+    # (go-kure/launcher#787).
     - name: api
       type: webservice
       properties:
@@ -16,7 +18,7 @@ spec:
       traits:
         - type: pvc
           properties:
-            name: api-data
+            name: api-cache
             size: 5Gi
     - name: api-data
       type: worker

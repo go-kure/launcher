@@ -1,7 +1,6 @@
 package oam
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
@@ -146,47 +145,41 @@ func (twiceNamedTrait) Apply(trait *Trait, _ *stack.Application, _ *stack.Bundle
 	return nil
 }
 
-// A sub-application's name is not unique, in a sibling group as outside one:
-// the Naming hook may give two different sub-applications of two members one
-// name. The same trait on two members is still refused, whatever the hook
-// answers, since it is asked the same question for both. A name the hook gave
-// that meets one it did not give is refused by name (go-kure/launcher#787).
+// The Naming hook giving two different sub-applications of two members one name
+// is refused by the bundle, as outside a group (checkBundleApplicationNames).
+// The same trait on two members is refused by the group first, whatever the
+// hook answers, since it is asked the same question for both. A name the hook
+// gave that meets one it did not give is refused by name (go-kure/launcher#787).
 func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 	shared := func(req NameRequest) (string, bool) {
 		return "shared", req.Role == NameRoleSubApplication
 	}
-	t.Run("two sub-applications given one name are accepted", func(t *testing.T) {
+	t.Run("two sub-applications given one name are refused", func(t *testing.T) {
 		tr := namingGroupTransformer([]Trait{named("", "web-config")}, []Trait{named("", "web-route")})
-		cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
-		if err != nil {
-			t.Fatalf("TransformWithPolicy: %v", err)
-		}
-		var names []string
-		for _, a := range cluster.Node.Bundle.Applications[1:] {
-			names = append(names, a.Name)
-		}
-		if want := []string{"shared", "shared"}; !slices.Equal(names, want) {
-			t.Errorf("trait sub-applications = %v, want %v", names, want)
+		_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
+		want := `bundle "app": name collision: application "shared" is named by ` +
+			`component "web" member "a" traits[0] "named" (role "sub-application", returned by the Naming hook in place of "web-config") and by ` +
+			`component "web" member "b" traits[0] "named" (role "sub-application", returned by the Naming hook in place of "web-route"); give one of them another name`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %q", err, want)
 		}
 	})
 	t.Run("a name the hook gave that is one's default is still the hook's", func(t *testing.T) {
 		// The hook answers "web-config" for both: member a's default, and member
-		// b's "web-route". Both are names the hook gave, of two sub-applications.
+		// b's "web-route". Both are names the hook gave, of two sub-applications:
+		// the group compares them by their defaults and passes them, and the
+		// bundle refuses their one name.
 		tr := namingGroupTransformer([]Trait{named("", "web-config")}, []Trait{named("", "web-route")})
-		cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{
+		_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{
 			Naming: func(req NameRequest) (string, bool) {
 				return "web-config", req.Role == NameRoleSubApplication
 			},
 		})
-		if err != nil {
-			t.Fatalf("TransformWithPolicy: %v", err)
-		}
-		var names []string
-		for _, a := range cluster.Node.Bundle.Applications[1:] {
-			names = append(names, a.Name)
-		}
-		if want := []string{"web-config", "web-config"}; !slices.Equal(names, want) {
-			t.Errorf("trait sub-applications = %v, want %v", names, want)
+		want := `name collision: application "web-config" is named by ` +
+			`component "web" member "a" traits[0] "named" (role "sub-application", returned by the Naming hook in place of "web-config") and by ` +
+			`component "web" member "b" traits[0] "named" (role "sub-application", returned by the Naming hook in place of "web-route")`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %q", err, want)
 		}
 	})
 	t.Run("the same trait on two members is refused", func(t *testing.T) {
@@ -253,21 +246,21 @@ func TestSiblingGroup_TraitSubApplicationsNamedByTheHook(t *testing.T) {
 			}
 		})
 	}
-	t.Run("a trait's two sub-applications and another member's, all given one name, are accepted", func(t *testing.T) {
+	t.Run("a trait's two sub-applications and another member's, all given one name, are refused by the bundle", func(t *testing.T) {
+		// The group passes them: their defaults differ. A policy renamed the first
+		// of member a's to "moved", and the second meets member b's. The hook
+		// gave both of member a's one name, so which default the second was
+		// resolved for is not known.
 		tr := namingGroupTransformer(
 			[]Trait{{Type: "twosub", Properties: map[string]any{"first": "web-x", "second": "web-y"}}},
 			[]Trait{named("", "web-z")})
 		tr.RegisterTrait("twosub", twoSubTrait{})
-		cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
-		if err != nil {
-			t.Fatalf("TransformWithPolicy: %v", err)
-		}
-		var names []string
-		for _, a := range cluster.Node.Bundle.Applications[1:] {
-			names = append(names, a.Name)
-		}
-		if want := []string{"moved", "shared", "shared"}; !slices.Equal(names, want) {
-			t.Errorf("trait sub-applications = %v, want %v", names, want)
+		_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{Naming: shared})
+		want := `name collision: application "shared" is named by ` +
+			`component "web" member "a" traits[0] "twosub" (role "sub-application", returned by the Naming hook for one of the trait's defaults) and by ` +
+			`component "web" member "b" traits[0] "named" (role "sub-application", returned by the Naming hook in place of "web-z")`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v\nwant one containing %q", err, want)
 		}
 	})
 	t.Run("a policy renaming one of a trait's two sub-applications leaves the other the hook's", func(t *testing.T) {

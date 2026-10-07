@@ -1207,6 +1207,9 @@ document").
 Every trait's sub-application name is resolved under the `sub-application` role, so the hook
 can rename it. That name is not the object's: the `configmap`, `secret`, `ingress`,
 `httproute` and `volsync` objects keep their own name when their sub-application is renamed.
+Two applications of one name in one bundle are refused, so a `configmap` and a `pvc` trait of
+one `name` on one component, or a trait sub-application named after another component, fail
+the transform (`pkg/oam/README.md`, "Name roles and the `Naming` hook"; go-kure/launcher#787).
 
 | Trait | Property | What it names |
 |-------|----------|---------------|

@@ -194,9 +194,10 @@ const (
 	// the role, since a group's bundle and the application's are told apart by
 	// name alone.
 	nameClassBundle
-	// nameClassSubApplication is a sub-application: not claimed. Two of one name
-	// are accepted when their objects differ (a configmap trait and a pvc trait
-	// both named "dup").
+	// nameClassSubApplication is a sub-application: not claimed when it is
+	// resolved, since its ApplyPolicy may still rename it. Two applications of
+	// one name in one bundle are refused once the bundle's traits have run
+	// (checkBundleApplicationNames, go-kure/launcher#787).
 	nameClassSubApplication
 	// nameClassHookGroupPrefix is the prefix of a component's hook-group layout
 	// names: claimed by the prefix across the document, so two components never
@@ -361,6 +362,18 @@ const (
 	nameFromDefault nameSource = iota
 	nameFromAuthor
 	nameFromHook
+	// nameFromTrait is a sub-application name the trait set without resolving
+	// it, nameFromPolicy one its own ApplyPolicy renamed since, nameRenamedLater
+	// one any other step renamed after its trait named it, nameFromTraitUnknown
+	// one of a name the trait resolved in more than one way, so that which way
+	// named it is not known, and nameOriginUnknown an application no step
+	// records the naming of: none is a resolved name, and only the bundle's
+	// application check prints them (checkBundleApplicationNames).
+	nameFromTrait
+	nameFromPolicy
+	nameRenamedLater
+	nameFromTraitUnknown
+	nameOriginUnknown
 )
 
 // nameOwner is the one thing a name was resolved for. Two resolutions with equal
@@ -434,6 +447,10 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 		who = fmt.Sprintf("document %q", o.document)
 	case o.component == "":
 		who = "the application"
+	case o.trait == "" && o.role == "":
+		// A component's own application, which no role names
+		// (checkBundleApplicationNames).
+		return fmt.Sprintf("component %q (its application)", o.component)
 	case o.trait == "":
 		who = fmt.Sprintf("component %q", o.component)
 	case o.member != "" && (detail >= describeMember || !o.authored):
@@ -462,7 +479,28 @@ func (o nameOwner) describe(source nameSource, property string, detail int) stri
 	case nameFromAuthor:
 		return fmt.Sprintf("%s (role %q, set by %s)", who, o.role, property)
 	case nameFromHook:
+		if o.def == "" {
+			// The hook gave one name for two of a trait's defaults, and which of
+			// them this one was resolved for is not known (recordSubAppOrigins).
+			return fmt.Sprintf("%s (role %q, returned by the Naming hook for one of the trait's defaults)", who, o.role)
+		}
 		return fmt.Sprintf("%s (role %q, returned by the Naming hook in place of %q)", who, o.role, o.def)
+	case nameFromTrait:
+		return fmt.Sprintf("%s (role %q, set by the trait without resolving it)", who, o.role)
+	case nameFromPolicy:
+		// property holds the name the sub-application had before its ApplyPolicy.
+		return fmt.Sprintf("%s (role %q, renamed from %q by its ApplyPolicy)", who, o.role, property)
+	case nameRenamedLater:
+		// property holds the last name its trait or its own policy gave it,
+		// empty when it was renamed away and back to that name.
+		if property == "" {
+			return fmt.Sprintf("%s (role %q, renamed away and back to the name its trait or policy gave it)", who, o.role)
+		}
+		return fmt.Sprintf("%s (role %q, renamed from %q after its trait named it)", who, o.role, property)
+	case nameOriginUnknown:
+		return fmt.Sprintf("%s (role %q, named where the transform records no namer)", who, o.role)
+	case nameFromTraitUnknown:
+		return fmt.Sprintf("%s (role %q, set by the trait, which resolved that name in more than one way: which one named this is not known)", who, o.role)
 	case nameFromDefault:
 	}
 	return fmt.Sprintf("%s (role %q, its default)", who, o.role)
@@ -484,7 +522,9 @@ func (k nameClaimKey) String() string {
 		return fmt.Sprintf("hook-group name prefix %q", k.name)
 	case nameClassLayout:
 		return fmt.Sprintf("layout Kustomization %q", k.name)
-	case nameClassObject, nameClassSubApplication:
+	case nameClassSubApplication:
+		return fmt.Sprintf("application %q", k.name)
+	case nameClassObject:
 	}
 	return k.objectIdentity.String()
 }
@@ -585,8 +625,23 @@ type traitNaming struct {
 // subAppName is one sub-application name a trait resolved: where it came from
 // and the default it stands for.
 type subAppName struct {
-	source nameSource
-	def    string
+	source   nameSource
+	def      string
+	property string
+}
+
+// ownerOf is the owner of a name of role and default def that the trait of type
+// traitType resolves where n stands. On a nil n (a trait built outside a
+// transform) it carries only the trait, role and default.
+func (n *traitNaming) ownerOf(traitType string, role NameRole, def string) nameOwner {
+	owner := nameOwner{role: role, trait: traitType, def: def}
+	if n == nil {
+		return owner
+	}
+	owner.component, owner.member = n.component, n.member
+	owner.slot, owner.authored = n.slot, n.authored
+	owner.apply, owner.nth = n.apply, n.nth
+	return owner
 }
 
 // takeSubAppNames returns, by name, the sub-application names this trait
@@ -636,7 +691,7 @@ func hookDefaults(resolved []subAppName, created int) []string {
 // validates an authored name and returns it or the default: the hook is not
 // consulted and nothing is claimed.
 func (t *Trait) ResolveName(spec NameSpec) (string, error) {
-	owner := nameOwner{role: spec.Role, trait: t.Type, def: spec.Default}
+	owner := t.naming.ownerOf(t.Type, spec.Role, spec.Default)
 	// A FluxInput name is claimed where its object lands, known only once the name
 	// is resolved (landingNamespace).
 	var landing func(name string) string
@@ -651,9 +706,6 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 	if t.naming == nil {
 		return (*nameResolver)(nil).resolve(owner, spec)
 	}
-	owner.component, owner.member = t.naming.component, t.naming.member
-	owner.slot, owner.authored = t.naming.slot, t.naming.authored
-	owner.apply, owner.nth = t.naming.apply, t.naming.nth
 	name, source, err := t.naming.resolver.resolveLanding(owner, spec, landing)
 	// Recorded with its source: a name the hook gave is the hook's even when it is
 	// the default, since what the sibling-group check asks is who named it.
@@ -661,7 +713,11 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 		if t.naming.subApps == nil {
 			t.naming.subApps = make(map[string][]subAppName)
 		}
-		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default})
+		property := ""
+		if source == nameFromAuthor {
+			property = spec.Property
+		}
+		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default, property: property})
 	}
 	return name, err
 }

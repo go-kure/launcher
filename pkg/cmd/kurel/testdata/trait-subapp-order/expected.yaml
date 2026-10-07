@@ -67,7 +67,7 @@ metadata:
   labels:
     app: api
     launcher.gokure.dev/component: api
-  name: api-data
+  name: api-cache
   namespace: default
 spec:
   accessModes:

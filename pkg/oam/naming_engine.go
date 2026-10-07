@@ -159,8 +159,10 @@ func (c *componentEndpointIngressPolicyConfig) setPolicyName(name string) { c.Po
 // that renames the sub-application leaves the policy's name alone.
 //
 // It runs after the three synthesis passes and before anything wraps a config,
-// so each synthesized application still holds its own config type.
-func (r *nameResolver) resolveSynthesizedPolicyNames(cluster *stack.Cluster) error {
+// so each synthesized application still holds its own config type. Who named
+// each sub-application is recorded in origins, when it is not nil, for the
+// bundle's application check (checkClusterApplicationNames).
+func (r *nameResolver) resolveSynthesizedPolicyNames(cluster *stack.Cluster, origins map[*stack.Application]subAppOrigin) error {
 	if r == nil || cluster == nil {
 		return nil
 	}
@@ -187,9 +189,16 @@ func (r *nameResolver) resolveSynthesizedPolicyNames(cluster *stack.Cluster) err
 				NameSpec{Role: NameRoleNetpolSynth, Kind: kind, Namespace: app.Namespace, Default: def})
 			if err == nil {
 				policy.setPolicyName(name)
-				app.Name, err = r.resolve(
-					nameOwner{component: component, role: NameRoleSubApplication, def: app.Name},
-					NameSpec{Role: NameRoleSubApplication, Default: app.Name})
+				owner := nameOwner{component: component, role: NameRoleSubApplication, def: app.Name}
+				var source nameSource
+				app.Name, source, err = r.resolveFrom(owner, NameSpec{Role: NameRoleSubApplication, Default: app.Name})
+				if err == nil && origins != nil {
+					// Recorded with the Service an external backend's policy is for, so
+					// the bundle's application check names it.
+					origin := owner
+					origin.service = service
+					origins[app] = newSubAppOrigin(resolvedNameClaim{owner: origin, source: source}, app.Name)
+				}
 			}
 			if err != nil {
 				firstErr = &TransformError{Message: fmt.Sprintf("synthesized NetworkPolicy %q", def), Cause: err}

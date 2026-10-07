@@ -352,7 +352,10 @@ func TestResolveName_Claims(t *testing.T) {
 		}
 	})
 
-	t.Run("two sub-applications of one name are accepted", func(t *testing.T) {
+	// The resolver claims no sub-application name: a policy may rename one after
+	// it is resolved, so the bundle refuses two of one name once its traits have
+	// run (TestBundleApplicationNames).
+	t.Run("two sub-applications of one name are not claimed", func(t *testing.T) {
 		h := newNamingHarness(nil)
 		for i, traitType := range []string{"configmap", "pvc"} {
 			if _, err := h.trait("web", traitType, i).ResolveName(NameSpec{Role: NameRoleSubApplication, Default: "dup"}); err != nil {

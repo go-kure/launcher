@@ -207,11 +207,17 @@ func TestDuplicateTraitObjects_HelmValuesAgainstAuthoredTrait(t *testing.T) {
 	}
 }
 
-func TestDuplicateTraitObjects_SameNameOtherKindAccepted(t *testing.T) {
+// A ConfigMap and a PersistentVolumeClaim both named dup are two objects, but
+// each trait names its sub-application after its object, and two applications
+// of one name in one bundle are refused (go-kure/launcher#787).
+func TestDuplicateTraitObjects_SameNameOtherKindRefusedByApplicationName(t *testing.T) {
 	for _, shape := range duplicateShapes {
 		t.Run(shape.name, func(t *testing.T) {
-			if _, err := collisionCheck(t, duplicateApp(webConfigMapAndClaim, shape.components, shape.policies)); err != nil {
-				t.Fatalf("a ConfigMap and a PersistentVolumeClaim both named dup were refused: %v", err)
+			err := transformRefusal(t, duplicateApp(webConfigMapAndClaim, shape.components, shape.policies))
+			want := `name collision: application "dup" is named by component "web" traits[0] "configmap" (role "sub-application", its default) and by ` +
+				`component "web" traits[1] "pvc" (role "sub-application", its default)`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want one containing %q", err, want)
 			}
 		})
 	}

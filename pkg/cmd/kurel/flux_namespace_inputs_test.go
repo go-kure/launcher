@@ -36,6 +36,12 @@ func fluxNSComponent(t *testing.T, name, typ string, extra map[string]any, trait
 // namespace of every generated object, keyed "Kind/name".
 func fluxNSObjects(t *testing.T, comps ...oam.Component) map[string]string {
 	t.Helper()
+	return fluxNSObjectsNamed(t, nil, comps...)
+}
+
+// fluxNSObjectsNamed is fluxNSObjects with naming for the Naming hook.
+func fluxNSObjectsNamed(t *testing.T, naming func(oam.NameRequest) (string, bool), comps ...oam.Component) map[string]string {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
@@ -46,7 +52,7 @@ func fluxNSObjects(t *testing.T, comps ...oam.Component) map[string]string {
 		"certificate": {Rendering: map[string]any{"issuerRef": map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"}}},
 	}
 	cluster, err := newBuiltinTransformer().Transform(app, oam.TransformContext{
-		FluxNamespace: fluxNSTarget, Domain: kurelDomain, Capabilities: capabilities,
+		FluxNamespace: fluxNSTarget, Domain: kurelDomain, Capabilities: capabilities, Naming: naming,
 	})
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
