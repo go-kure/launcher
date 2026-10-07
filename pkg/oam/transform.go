@@ -1543,6 +1543,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			if resolved.naming != nil {
 				resolved.naming.objectName = entry.component.ObjectName()
 				resolved.naming.fluxNamespace, resolved.naming.owner = ctx.FluxNamespace, entry.app
+				// What the owner's Flux object reads can depend on where it
+				// lands (a HelmRelease's chart verification Secret is read only
+				// when the chart's source is in its own namespace), so the
+				// owner is told the Flux namespace before a claim asks
+				// (fluxObjectReads), as postProcessFluxNamespace tells it again
+				// before the move: both ask the same question of the same state.
+				if setter, ok := entry.app.Config.(fluxNamespaceSettable); ok && ctx.FluxNamespace != "" {
+					setter.SetFluxNamespace(ctx.FluxNamespace)
+				}
 			}
 			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {

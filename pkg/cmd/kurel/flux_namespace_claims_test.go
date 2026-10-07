@@ -101,6 +101,35 @@ func TestFluxNamespace_ClaimsWhereTheObjectLands(t *testing.T) {
 	}
 }
 
+// TestFluxNamespace_ChartVerifyClaimFollowsTheSourceNamespace: a HelmRelease
+// reads its chart's verification Secret only when the chart's source is in the
+// namespace the HelmRelease lands in, the Flux namespace; whether a's Secret
+// moves, and so where it is claimed, turns on that, as b's same-named Secret in
+// the application namespace shows.
+func TestFluxNamespace_ChartVerifyClaimFollowsTheSourceNamespace(t *testing.T) {
+	release := func(sourceNS string) oam.Component {
+		chart := hrChart(map[string]any{"kind": "HelmRepository", "name": "example", "namespace": sourceNS},
+			map[string]any{"provider": "cosign", "secretRef": secretRef("shared")})
+		return fluxNSComponent(t, "a", "helmrelease", map[string]any{"chart": chart}, externalSecretTrait("shared"))
+	}
+	b := fluxNSComponent(t, "b", "deployment", nil, externalSecretTrait("shared"))
+
+	t.Run("source in the Flux namespace: read, moved, claimed there", func(t *testing.T) {
+		got, err := fluxNSBuild(t, nil, release(fluxNSTarget), b)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireObjects(t, got, "ExternalSecret "+fluxNSTarget+"/shared", "ExternalSecret default/shared")
+	})
+	t.Run("source in the application namespace: not read, stays, claimed there", func(t *testing.T) {
+		_, err := fluxNSBuild(t, nil, release("default"), b)
+		want := `name collision: Secret "default/shared" is named by component "a"`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build error = %v, want it to contain %q", err, want)
+		}
+	})
+}
+
 // TestFluxNamespace_SameFinalNamespaceStillCollides: two HelmRepositories each
 // read "shared" from their own external-secret trait; both Secrets land in the
 // Flux namespace, where their names collide.
