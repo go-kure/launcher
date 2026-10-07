@@ -3175,8 +3175,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   nothing, and a `Generate` that returns the constructor's object, under the
   object name the config carries, with a deep copy of what was decoded, so two
   builds of one config share nothing. The config type is unexported: a
-  component is only built from properties that went through the decode. The
-  helper keeps no list of defaulted zeros, so it suits a type only when none
+  component is only built from properties that went through the decode. A
+  kind may list its defaulted zeros (`defaultedZeros`), and an authored `0` or
+  `false` on a listed field is refused, as the secret-store kinds do (see the
+  **secretstore** entry). A kind that lists none suits a type only when none
   of its omit-when-zero numbers or booleans has a non-zero API default;
   `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
   Kubernetes type built on it and fails on one whose comment states such a
