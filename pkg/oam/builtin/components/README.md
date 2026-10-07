@@ -4643,8 +4643,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the API server's to fill where the field was not authored. The `kind` of a
     `secretStoreRef` has no default in the API: unset, it stays unset in the
     object, and is read as a SecretStore.
-  - **An authored `0` or `false` is kept, with three exceptions on a store,
-    which are refused.** The type omits a zero in
+  - **No CRD default, read from its marker, replaces an authored `0` or
+    `false`, except on three store fields, where the value is refused.** A
+    default the operator applies itself is not covered. The type omits a zero in
     `provider.beyondtrust.server.decrypt`,
     `provider.infisical.secretsScope.expandSecretReferences` and
     `provider.onepasswordSDK.cache.maxSize`, and the API defaults each to
@@ -4934,7 +4935,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a Syncthing peer's `introducer: false`, `moverSecurityContext.runAsUser:
     0`), and left out where the type omits a zero (`paused: false`).
     VolSync's CRDs default no field under `spec`, so no authored zero is
-    replaced by a default; `TestVolsyncKinds_NoDefaults` holds the linked
+    replaced by a CRD default; `TestVolsyncKinds_NoDefaults` holds the linked
     CRDs to that, and a dependency bump that adds a default fails there with
     the field named.
 

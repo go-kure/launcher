@@ -56,8 +56,8 @@ import (
 //
 // The module ships its CRDs. TestVolsyncKinds_RequiredMatchCRD holds each
 // kind's required list to them, TestVolsyncKinds_NoDefaults the claim that
-// they default nothing under spec, so that no authored 0 or false is lost on
-// these types, and TestVolsyncKinds_NoExpressionRules the claim that they
+// they default nothing under spec, so that no CRD default turns an authored 0
+// or false into another value, and TestVolsyncKinds_NoExpressionRules the claim that they
 // declare no expression rule for a kind to check.
 //
 // Two fields the linked Kubernetes type holds under a mounted Secret are no

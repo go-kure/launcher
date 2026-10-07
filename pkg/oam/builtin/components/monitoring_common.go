@@ -14,8 +14,8 @@ import (
 //
 // The API's types publish no field descriptions and the module ships no CRD,
 // so what the types cannot be asked is read from their source, in tests:
-// TestMonitoringKinds_NoDefaultedZeros holds the claim that no authored 0 or
-// false is lost on these types, and TestMonitoringKinds_RequiredMatchMarkers
+// TestMonitoringKinds_NoDefaultedZeros holds the claim that no CRD default,
+// read from its marker, turns an authored 0 or false into another value, and TestMonitoringKinds_RequiredMatchMarkers
 // holds each kind's required list to the fields the source marks required.
 //
 // One pair of required fields is of a Kubernetes type, which carries no
