@@ -219,7 +219,7 @@ reads it.
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `priorityclass` | PriorityClass | Kind-named PriorityClass: `value` (`0` when unauthored), `globalDefault`, `description`, `preemptionPolicy`, strictly decoded. Cluster-scoped; no environment policy applies — see below. |
-| `prometheus` | Prometheus | Kind-named Prometheus operator Prometheus: the whole `PrometheusSpec`, strictly decoded, every field under its upstream name, `externalLabels` included; no top-level field is required. The operator runs the pods: `image` and `thanos.image`, `replicas` times `shards`, `resources` and `thanos.resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` are held to the environment policy as the Alertmanager's are, the deprecated `baseImage`, `tag` and `sha` are refused (the spec's when not empty, an empty one writing nothing; the sidecar's whenever set, the empty string included), and a literal `bearerToken` of `remoteWrite[]`, `remoteRead[]` or `apiserverConfig` is refused under a policy that forbids explicit secrets. An unset `image` or `thanos.image` is not held to the allowed registries: the object then names none and the operator chooses the image. No capability is required — see below. |
+| `prometheus` | Prometheus | Kind-named Prometheus operator Prometheus: the whole `PrometheusSpec`, strictly decoded, every field under its upstream name, `externalLabels` included; no top-level field is required. The operator runs the pods: `image` and `thanos.image`, `replicas` times `shards`, `resources` and `thanos.resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` are held to the environment policy as the Alertmanager's are, the deprecated `baseImage`, `tag` and `sha` are refused (the spec's when not empty, an empty one writing nothing; the sidecar's whenever set, the empty string included), and a literal `bearerToken` of `remoteWrite[]`, `remoteRead[]` or `apiserverConfig` is refused under a policy that forbids explicit secrets. The pod count the operator runs, an unset replica or shard count read as 1, is held, not written. An image the operator chooses, for `prometheus`, its two reloaders or, where `thanos` is set, `thanos-sidecar`, is refused under a policy with allowed registries. No capability is required — see below. |
 | `prometheus-probe` | Probe | Kind-named Prometheus operator Probe: the whole `ProbeSpec`, strictly decoded; `prober.url` is required. The prober and the targets are the author's. No environment policy applies and no capability is required — see below. |
 | `prometheusrule` | PrometheusRule | Kind-named Prometheus operator PrometheusRule: the whole `PrometheusRuleSpec` (`groups`), strictly decoded; a group's `name` and a rule's `expr` are required. No environment policy applies and no capability is required — see below. |
 | `referencegrant` | ReferenceGrant | Kind-named Gateway API ReferenceGrant: the whole `ReferenceGrantSpec`, strictly decoded; `from` and `to` are required, with the group, kind and namespace of a source and the group and kind of a target. No capability is required and no environment policy applies — see below. |
@@ -461,7 +461,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | kind | `alertmanager` | strict decode of `AlertmanagerSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image`, `replicas`, `resources`, the storage of the claim the operator makes, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's; the replica count and memory request the operator fills where they are unset are held, not written. `baseImage`, `tag` and `sha` are refused when not empty, and so are a `retention` and a cluster duration of 0 or less. An image the operator chooses, for `alertmanager` or one of its two reloaders, is refused under a policy with allowed registries. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
 | `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | kind | `podmonitor` | strict decode of `PodMonitorSpec` | `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | kind | `prometheus-probe` | strict decode of `ProbeSpec` | `prober.url` must be written, and the three required fields of an `oauth2`. No environment policy applies, and no capability is required. The type name carries a prefix: a probe, in this package, is a container's. |
-| `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | kind | `prometheus` | strict decode of `PrometheusSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image` and `thanos.image`, `replicas` times `shards`, `resources` and `thanos.resources`, the storage a claim template requests, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's; and the deprecated `bearerToken` of `remoteWrite[]`, `remoteRead[]` and `apiserverConfig` under a policy that forbids explicit secrets. A credential in a header or a URL is not read. `baseImage`, `tag` and `sha` are refused when not empty, and the same three of `thanos` whenever set. An unset `image` or `thanos.image` is not held to the allowed registries: the object then names none and the operator chooses the image. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
+| `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | kind | `prometheus` | strict decode of `PrometheusSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image` and `thanos.image`, `replicas` times `shards`, `resources` and `thanos.resources`, the storage a claim template requests, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's; and the deprecated `bearerToken` of `remoteWrite[]`, `remoteRead[]` and `apiserverConfig` under a policy that forbids explicit secrets. A credential in a header or a URL is not read. `baseImage`, `tag` and `sha` are refused when not empty, and the same three of `thanos` whenever set. The pod count the operator runs, an unset replica or shard count read as 1, is held, not written. An image the operator chooses, for `prometheus`, its two reloaders or, where `thanos` is set, `thanos-sidecar`, is refused under a policy with allowed registries. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
 | `prometheus.CreatePrometheusRule` | monitoring.coreos.com/v1 PrometheusRule | kind | `prometheusrule` | strict decode of `PrometheusRuleSpec` | A group's `name` and a rule's `expr` must be written. No environment policy applies, and no capability is required. |
 | `prometheus.CreateServiceMonitor` | monitoring.coreos.com/v1 ServiceMonitor | kind | `servicemonitor` | strict decode of `ServiceMonitorSpec` | `endpoints` and `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateThanosRuler` | monitoring.coreos.com/v1 ThanosRuler | kind | `thanosruler` | strict decode of `ThanosRulerSpec`; its `labels` is the `externalLabels` property | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image`, `replicas`, `resources`, the storage of the claim the operator makes, and `containers`, `initContainers`, `volumes` and `securityContext` as a pod's; the replica count and memory request the operator fills where they are unset are held, not written; and the deprecated `remoteWrite[].bearerToken` under a policy that forbids explicit secrets. A credential in a header or a URL is not read. An image the operator chooses, for `thanos-ruler` or its config-reloader, is refused under a policy with allowed registries. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
@@ -4516,13 +4516,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `metricRelabelings` (`scrapeInterval: "" cannot be carried by the
   Prometheus operator API types (…)`), while a string default of the
   Kubernetes pod types is not refused; the tag rule and the request-over-limit
-  check hold with or without a policy; no policy default is filled; an
-  unset `image` or `thanos.image` is not held to the allowed registries (the
-  object then names none, and the operator chooses the image); a claim
-  template's metadata is not read. An empty `retention` is not refused: its
-  24h default is the operator's code (where `retentionSize` and
+  check hold with or without a policy; no policy default is filled; an image
+  the operator chooses is refused under a registry allowlist, and the
+  operator's own replica and shard counts are held, not written (both below);
+  a claim template's metadata is not read. An empty `retention` is not
+  refused: its 24h default is the operator's code (where `retentionSize` and
   `retentionPercentage` are empty too), not a CRD default, so the derived list
-  cannot hold it, and the object then gets the operator's default.
+  cannot hold it, and the object then gets the operator's default. The
+  operator's behaviour is read from its source at prometheus-operator v0.94.1
+  (`pkg/prometheus/server/statefulset.go`, `pkg/prometheus/common.go`). The
+  operator fills no memory request of its own for the prometheus container
+  or the sidecar, so the memory-limit refusal of `alertmanager` has no
+  counterpart.
 
   **No field is renamed.** The spec has no top-level `labels` or
   `annotations` field, so every property keeps its upstream name:
@@ -4549,9 +4554,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   set pointer; a `null` one sets none (`tag: not authorable: the Prometheus
   operator deprecates the field, …; use image`).
   `additionalArgs` and `thanos.additionalArgs` are passed as written and are
-  not read. An entry of `containers` named `prometheus`, `config-reloader` or
-  `thanos-sidecar` is a patch of the container the operator generates under
-  that name; of `initContainers`, `init-config-reloader`.
+  not read. An entry of `containers` named `prometheus` or `config-reloader`,
+  or `thanos-sidecar` where `thanos` is set, is a patch of the container the
+  operator generates under that name (`makeStatefulSetSpec`, merged by
+  `k8s.MergePatchContainers`); of `initContainers`, `init-config-reloader`.
+  A patch may name no image; any other entry that names none is refused
+  (`containers[0] "proxy": names no image, and the Prometheus operator
+  generates no container of that name to merge it into; name an image, or
+  the container it patches (prometheus, config-reloader)`), and so is a
+  `thanos-sidecar` entry without an image where `thanos` is unset, since no
+  sidecar is generated then.
 
   **Required.** No top-level field is one. Of what is authored below them:
   the `name` of an additional argument (the spec's and the sidecar's), a DNS
@@ -4592,10 +4604,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `volumeClaimTemplate` with `metadata: {}` and `status: {}`.
 
   **Policy.** Refused, with a workload kind's classes: `image`,
-  `thanos.image`, the image of a listed container or init container and an
-  image volume's reference outside the allowed registries; `replicas` times
-  `shards`, each `1` where unset, over the replica maximum, where either is
-  authored (`replicas times shards 4 exceeds enforced maximum 3`); the cpu or memory of `resources`,
+  `thanos.image`, the image of a listed container or init container (a patch
+  included) and an image volume's reference outside the allowed registries;
+  under a policy that lists allowed registries, an image the operator
+  chooses (below); `replicas` times `shards` over the replica maximum, as the
+  operator counts them (below; `replicas times shards 4 exceeds enforced
+  maximum 3`); the cpu or memory of `resources`,
   of `thanos.resources` and of a listed container over the maxima; the
   storage a claim requests over the storage maximum; a hostPath volume;
   `hostNetwork` where the policy does not allow the host network; a
@@ -4608,12 +4622,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and `thanos.resources` are held by `TestPrometheus_ReplicasTimesShards` and
   `TestPrometheus_PolicyRefusals` instead.
 
-  **An unset `image` or `thanos.image` is not held to the allowed
-  registries.** Where the spec names no image for the prometheus container,
-  or `thanos` is authored without an `image`, the operator chooses the one
-  that runs, and no registry allowlist reaches that choice: the allowlist
-  holds an authored `image` and `thanos.image` only, as on `alertmanager`.
-  Author them to have the registry held.
+  **An image the operator chooses is refused under a registry allowlist.**
+  Where the spec names no image for a container the operator generates, the
+  operator chooses the one it runs, and no registry allowlist reaches that
+  choice, so a policy with a non-empty `AllowedRegistries` refuses it
+  (`image: unset, so the Prometheus operator chooses the image the pods run,
+  …`; `thanos.image: unset, …`; `the image of the config-reloader container
+  (containers): unset, …`) and the author names an image from one of the
+  listed registries: `image` or a patch of `prometheus`; where `thanos` is
+  set, `thanos.image` or a patch of `thanos-sidecar`; a patch of
+  `config-reloader`; and a patch of `init-config-reloader` in
+  `initContainers`. The operator generates the prometheus container, both
+  reloaders and, where `thanos` is set, the sidecar (`makeStatefulSetSpec`,
+  `createThanosContainer`, `BuildConfigReloader`). Without such a list, it
+  builds.
+
+  **The operator's own counts are held, not written.** The operator runs one
+  StatefulSet a shard with the replica count each, and reads an unset or
+  negative `replicas` as 1 and an unset `shards`, or one of 1 or less, as 1
+  (`ReplicasNumberPtr`, `shardsNumber`). The replica maximum holds that
+  product whether or not either is authored, and the emitted object still
+  leaves both as authored.
 
   **Credentials: three are held, the rest are stated.** The deprecated
   `bearerToken` of a `remoteWrite` entry, of a `remoteRead` entry and of
@@ -4643,10 +4672,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   mounted Secret or ConfigMap, the ServiceAccount and the RBAC Kubernetes
   service discovery needs, a governing Service named by `serviceName`, the
   objects the selectors match, the Alertmanager endpoints). What the operator
-  adds on its own (its config-reloader containers, the `prometheus-operated`
-  Service, the configuration Secret) is not in the object, and its code is
-  not in the linked module and was not read. The object's status is the
-  operator's and is not written.
+  adds on its own beyond the containers above (the `prometheus-operated`
+  Service, the configuration Secret) is not in the object; its code is not in
+  the linked module, and was read at the version above for the containers,
+  their images and the pod count only. The object's status is the operator's
+  and is not written.
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and

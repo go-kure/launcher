@@ -53,6 +53,23 @@ func trPatched(spec monitoringv1.ThanosRulerSpec) *monitoringv1.ThanosRulerSpec 
 	return &spec
 }
 
+// pmListedImage is a Prometheus image from the registry
+// TestImageFields_HeldOrListed allows.
+func pmListedImage() *string {
+	image := "registry.example/prometheus/prometheus:v3.5.0"
+	return &image
+}
+
+// pmPatched is spec with both config-reloader containers the operator
+// generates patched with an image from that registry: under allowed registries
+// an unpatched one is refused, as the operator would choose its image.
+func pmPatched(spec monitoringv1.PrometheusSpec) *monitoringv1.PrometheusSpec {
+	const reloader = "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"
+	spec.Containers = append(slices.Clone(spec.Containers), corev1.Container{Name: "config-reloader", Image: reloader})
+	spec.InitContainers = append(slices.Clone(spec.InitContainers), corev1.Container{Name: "init-config-reloader", Image: reloader})
+	return &spec
+}
+
 // imageFieldType is a type whose document can name an image, and how each of
 // its fields that could is accounted for.
 type imageFieldType struct {
@@ -378,42 +395,43 @@ var imageFieldTypes = []imageFieldType{
 	},
 	{
 		// The prometheus kind: as the alertmanager kind, with the Thanos
-		// sidecar's image held as its own.
+		// sidecar's image held as its own. The operator generates the
+		// thanos-sidecar container only where thanos is set.
 		name: "prometheus spec",
 		typ:  reflect.TypeFor[monitoringv1.PrometheusSpec](),
 		held: map[string]func(string, oam.Policy) error{
 			"image": func(reference string, p oam.Policy) error {
-				return prometheusKind.enforce(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: &reference}}, p)
+				return prometheusKind.enforce(pmPatched(monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: &reference}}), p)
 			},
 			"thanos.image": func(reference string, p oam.Policy) error {
-				return prometheusKind.enforce(&monitoringv1.PrometheusSpec{Thanos: &monitoringv1.ThanosSpec{Image: &reference}}, p)
+				return prometheusKind.enforce(pmPatched(monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: pmListedImage()}, Thanos: &monitoringv1.ThanosSpec{Image: &reference}}), p)
 			},
 			"containers[].image": func(reference string, p oam.Policy) error {
-				return prometheusKind.enforce(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}}, p)
+				return prometheusKind.enforce(pmPatched(monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: pmListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}}), p)
 			},
 			"initContainers[].image": func(reference string, p oam.Policy) error {
-				return prometheusKind.enforce(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}}, p)
+				return prometheusKind.enforce(pmPatched(monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: pmListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}}), p)
 			},
 			"volumes[].image": func(reference string, p oam.Policy) error {
-				return prometheusKind.enforce(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Volumes: []corev1.Volume{{
+				return prometheusKind.enforce(pmPatched(monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: pmListedImage(), Volumes: []corev1.Volume{{
 					Name:         "ext",
 					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}}}, p)
+				}}}}), p)
 			},
 		},
 		tagged: map[string]imageTagCheck{
 			"image": {check: func(reference string) error {
 				return prometheusKind.validate(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Image: &reference}})
-			}},
+			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
 			"thanos.image": {check: func(reference string) error {
 				return prometheusKind.validate(&monitoringv1.PrometheusSpec{Thanos: &monitoringv1.ThanosSpec{Image: &reference}})
-			}},
+			}, emptyNotAllowed: "unset, the operator chooses the image the thanos-sidecar container runs"},
 			"containers[].image": {check: func(reference string) error {
 				return prometheusKind.validate(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}})
-			}},
+			}, emptyRefused: "a listed container the operator generates none of is added as written, and no pod runs one without an image"},
 			"initContainers[].image": {check: func(reference string) error {
 				return prometheusKind.validate(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}})
-			}},
+			}, emptyRefused: "a listed init container the operator generates none of is added as written, and no pod runs one without an image"},
 			"volumes[].image": {check: func(reference string) error {
 				return prometheusKind.validate(&monitoringv1.PrometheusSpec{CommonPrometheusFields: monitoringv1.CommonPrometheusFields{Volumes: []corev1.Volume{{
 					Name:         "ext",

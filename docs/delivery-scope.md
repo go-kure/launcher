@@ -1865,13 +1865,15 @@ and by scope, whatever component or trait emits it.
   - **No field is renamed.** The spec has no top-level `labels` or `annotations`, so
     `externalLabels` keeps its upstream name; it is not checked as Kubernetes labels are.
   - **The pods are held as the Alertmanager's are, those of every shard:** `replicas`
-    times `shards`, each 1 where unset, is held to the replica maximum where either is
-    authored, and the Thanos sidecar's `image` and `resources` are held as the prometheus
-    container's are. `baseImage`, `tag` and `sha` are not authorable: the spec's when not
-    empty (an empty one writes nothing), the sidecar's whenever set, the empty string
-    included. An unset `image` or `thanos.image` is not held to the allowed registries:
-    the operator chooses the image. No capability is required and no
-    default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
+    times `shards` is held to the replica maximum as the operator counts them, an unset
+    or negative replica count and an unset shard count or one of 1 or less read as 1,
+    authored or not, and the Thanos sidecar's `image` and `resources` are held as the
+    prometheus container's are. `baseImage`, `tag` and `sha` are not authorable: the
+    spec's when not empty (an empty one writes nothing), the sidecar's whenever set, the
+    empty string included. An image the operator chooses (for `prometheus`, the two
+    reloaders, and `thanos-sidecar` where `thanos` is set) is refused under a policy with
+    allowed registries, and a listed container that names no image and patches none the
+    operator generates is refused. No capability is required and no default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
     `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
     so is an empty `action` of a relabeling rule in the five lists of rules the spec
     holds (a remote write entry's, an Alertmanager endpoint's two, a scrape class's

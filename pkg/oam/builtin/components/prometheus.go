@@ -95,11 +95,11 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"scrapeConfigNamespaceSelector":   object("scrapeConfigNamespaceSelector: the namespaces ScrapeConfig objects are read from, by their labels. Unset, the Prometheus's own namespace only; an empty selector, all." + selector),
 		"version":                         text("version: the Prometheus version the operator configures for. Unset, the latest the operator knows of."),
 		"paused":                          flag("paused: true stops the operator from acting on the objects it manages for this Prometheus, deletion excepted."),
-		"image":                           text("image: the full image reference of the prometheus container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset, the object names no image: which image then runs is the operator's to decide, and no policy is asked about it. version is still needed for the operator to know which Prometheus it configures."),
-		"imagePullPolicy":                 text("imagePullPolicy: when the images of the prometheus, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
+		"image":                           text("image: the full image reference of the prometheus container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the image is the one an entry of containers named prometheus names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Prometheus it configures."),
+		"imagePullPolicy":                 text("imagePullPolicy: when the images of the prometheus, config-reloader, init-config-reloader and thanos-sidecar containers are pulled: Always, Never or IfNotPresent."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Prometheus's namespace that hold the credentials the images are pulled with.",
 			"One reference: name."),
-		"replicas":                    number("replicas: the number of Prometheus pods of each shard. replicas times shards, each 1 where unset, is held to the EnvironmentPolicy's replica maximum where either is authored. Unset with shards unset, the number is the operator's to decide: no replica default of the policy is applied."),
+		"replicas":                    number("replicas: the number of Prometheus pods of each shard. replicas times shards is held to the EnvironmentPolicy's replica maximum as the operator counts them: an unset or negative replicas as 1, an unset shards or one of 1 or less as 1. Nothing is written, and no replica default of the policy is applied."),
 		"shards":                      number("shards: the number of shards the scraped targets are spread over, one StatefulSet each. Unset, the API fills 1. Held with replicas: see replicas. Scaling the shards down or up moves no data."),
 		"shardingStrategy":            object("shardingStrategy: how targets are spread over the shards: mode, Address (the default, by a hash of the target's address) or Topology (behind the operator's PrometheusTopologySharding feature gate), with topology." + decoded + "ShardingStrategy in its API reference."),
 		"replicaExternalLabelName":    text("replicaExternalLabelName: the name of the external label that holds the replica's name. Unset, prometheus_replica; empty, no such label."),
@@ -150,9 +150,9 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSets create and delete pods when they scale: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSets."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSets replace their pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
 		"enableServiceLinks":  flag("enableServiceLinks: whether the Services of the namespace are injected into the pods' environment variables."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry named prometheus, config-reloader or thanos-sidecar is merged into that container. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. An entry without an image is not checked for one.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (prometheus, config-reloader, and thanos-sidecar where thanos is set) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates: an entry named init-config-reloader is merged into it. Held to the EnvironmentPolicy as containers are. A patch may name no image; any other entry must name one. Under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader is.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"additionalScrapeConfigs":     object("additionalScrapeConfigs: the Secret key that holds further scrape configurations, appended to the ones the operator generates as they are." + secretKey),
 		"apiserverConfig":             object("apiserverConfig: the Kubernetes API server Prometheus discovers targets from, and how it authenticates. Unset, the cluster Prometheus runs in, with the pod's service account. The deprecated bearerToken is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential is the key of a Secret or the path of a file in the container." + decoded + "APIServerConfig in its API reference."),
@@ -227,7 +227,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalAlertManagerConfigs": object("additionalAlertManagerConfigs: the Secret key that holds further Alertmanager configurations, appended to the ones the operator generates as they are." + secretKey),
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
-		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset image, the object names no sidecar image. Its objectStorageConfig and tracingConfig are keys of a Secret. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
+		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
 		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
@@ -351,11 +351,11 @@ var prometheusRequired = requiredFields(map[string]string{ //nolint:gosec // G10
 // harness to evaluate. TestMonitoringWorkloadKinds_RulesListed derives the
 // list from the markers of the module's source.
 var prometheusRulesLeft = map[string]string{
-	"":                               "shards must be greater than or equal to the number of topology values when sharding strategy mode is Topology",
-	"alerting.alertmanagers[].sigv4": "externalId can only be used when roleArn is specified",
-	"remoteWrite[].sigv4":            "externalId can only be used when roleArn is specified",
-	"shardingStrategy":               "topology can only be defined when mode is set to 'Topology'",
-	"updateStrategy":                 "rollingUpdate requires type to be RollingUpdate",
+	"":                               "!has(self.shardingStrategy) || !has(self.shardingStrategy.mode) || self.shardingStrategy.mode != 'Topology' || !has(self.shardingStrategy.topology) || !has(self.shardingStrategy.topology.values) || self.shardingStrategy.topology.values.size() == 0 || (has(self.shards) ? self.shards : 1) >= self.shardingStrategy.topology.values.size() (shards must be greater than or equal to the number of topology values when sharding strategy mode is Topology)",
+	"alerting.alertmanagers[].sigv4": "!has(self.externalId) || has(self.roleArn) (externalId can only be used when roleArn is specified)",
+	"remoteWrite[].sigv4":            "!has(self.externalId) || has(self.roleArn) (externalId can only be used when roleArn is specified)",
+	"shardingStrategy":               "!has(self.topology) || (has(self.mode) && self.mode == 'Topology') (topology can only be defined when mode is set to 'Topology')",
+	"updateStrategy":                 "!(self.type != 'RollingUpdate' && has(self.rollingUpdate)) (rollingUpdate requires type to be RollingUpdate)",
 }
 
 // validatePrometheus refuses, with or without an environment policy, the
@@ -394,20 +394,64 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 	return validateMonitoringWorkload(prometheusWorkload(spec))
 }
 
+// prometheusPods is the number of pods the operator runs for a Prometheus:
+// one StatefulSet per shard, each with the replica count. The operator reads
+// an unset or negative replica count as 1 (ReplicasNumberPtr), and an unset
+// shard count, or one of 1 or less, as 1 (shardsNumber,
+// pkg/prometheus/common.go:118-143 at prometheus-operator v0.94.1). The type's
+// own ExpectedReplicas multiplies the two as written, so it does not count a
+// negative one as the operator runs it.
+func prometheusPods(spec *monitoringv1.PrometheusSpec) int64 {
+	replicas := int64(1)
+	if spec.Replicas != nil && *spec.Replicas >= 0 {
+		replicas = int64(*spec.Replicas)
+	}
+	shards := int64(1)
+	if spec.Shards != nil && *spec.Shards > 1 {
+		shards = int64(*spec.Shards)
+	}
+	return replicas * shards
+}
+
+// prometheusGenerated names the containers the operator generates for the
+// pods, by the property that lists patches of them (makeStatefulSetSpec,
+// pkg/prometheus/server/statefulset.go:307-318 and :334-369 at
+// prometheus-operator v0.94.1): prometheus and config-reloader, with
+// init-config-reloader as an init container, on every Prometheus, and
+// thanos-sidecar where thanos is set (createThanosContainer, :544-547). Of
+// them prometheus takes its image from image and thanos-sidecar from
+// thanos.image; the two reloaders run the image of the operator's own
+// configuration unless a listed entry patches one (BuildConfigReloader,
+// pkg/prometheus/common.go:362-417).
+func prometheusGenerated(spec *monitoringv1.PrometheusSpec) map[string][]string {
+	containers := []string{"prometheus", "config-reloader"}
+	if spec.Thanos != nil {
+		containers = append(containers, "thanos-sidecar")
+	}
+	return map[string][]string{
+		"containers":     containers,
+		"initContainers": {"init-config-reloader"},
+	}
+}
+
 // prometheusWorkload maps a Prometheus spec into the workload the two shared
 // functions read. It only reads spec.
 //
 // Held through it: image and thanos.image; the pods of all shards, replicas
-// times shards as the type itself counts them (ExpectedReplicas), where
-// either is authored; storage; resources, the prometheus container's and the
-// Thanos sidecar's; the deprecated bearerToken of each remoteWrite and
-// remoteRead entry and of apiserverConfig, the credentials the spec holds in
-// the clear; and, as pod fields, containers, initContainers, volumes,
-// securityContext and hostNetwork. The spec has no hostPID or hostIPC field.
+// times shards as the operator counts them (prometheusPods), authored or not;
+// storage; resources, the prometheus container's and the Thanos sidecar's,
+// which the operator copies as written and fills no request of
+// (statefulset.go:346 and :639); the images of the containers the operator
+// generates, where the spec leaves them to it; the deprecated bearerToken of
+// each remoteWrite and remoteRead entry and of apiserverConfig, the
+// credentials the spec holds in the clear; and, as pod fields, containers,
+// initContainers, volumes, securityContext and hostNetwork. The spec has no
+// hostPID or hostIPC field.
 // TestMonitoringWorkloadKinds_PodFieldsHeldOrListed and
 // TestMonitoringWorkloadKinds_CredentialsHeldOrListed derive both claims from
 // the type.
 func prometheusWorkload(spec *monitoringv1.PrometheusSpec) monitoringWorkload {
+	pods := prometheusPods(spec)
 	w := monitoringWorkload{
 		pod: corev1.PodSpec{
 			InitContainers:  spec.InitContainers,
@@ -416,22 +460,35 @@ func prometheusWorkload(spec *monitoringv1.PrometheusSpec) monitoringWorkload {
 			SecurityContext: spec.SecurityContext,
 			HostNetwork:     spec.HostNetwork,
 		},
+		generated:    prometheusGenerated(spec),
+		replicas:     &pods,
 		replicasPath: "replicas times shards",
 		storage:      spec.Storage,
 		resources:    []fieldResources{{"resources", spec.Resources}},
 	}
-	if spec.Image != nil && *spec.Image != "" {
+	switch {
+	case spec.Image != nil && *spec.Image != "":
 		w.images = append(w.images, fieldValue{"image", *spec.Image})
+	case patchedImage(spec.Containers, "prometheus") == "":
+		w.unsetImages = append(w.unsetImages, "image")
 	}
 	if t := spec.Thanos; t != nil {
-		if t.Image != nil && *t.Image != "" {
+		switch {
+		case t.Image != nil && *t.Image != "":
 			w.images = append(w.images, fieldValue{"thanos.image", *t.Image})
+		case patchedImage(spec.Containers, "thanos-sidecar") == "":
+			w.unsetImages = append(w.unsetImages, "thanos.image")
 		}
 		w.resources = append(w.resources, fieldResources{"thanos.resources", t.Resources})
 	}
-	if spec.Replicas != nil || spec.Shards != nil {
-		pods := int64(spec.ExpectedReplicas())
-		w.replicas = &pods
+	for _, reloader := range []struct {
+		list       string
+		containers []corev1.Container
+		name       string
+	}{{"containers", spec.Containers, "config-reloader"}, {"initContainers", spec.InitContainers, "init-config-reloader"}} {
+		if patchedImage(reloader.containers, reloader.name) == "" {
+			w.unsetImages = append(w.unsetImages, fmt.Sprintf("the image of the %s container (%s)", reloader.name, reloader.list))
+		}
 	}
 	for i, rw := range spec.RemoteWrite {
 		if rw.BearerToken != "" {
