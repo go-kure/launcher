@@ -4326,8 +4326,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   matching the member set, a rule's `matches` and `backendRefs` limits) are
   left to the API server. A null list element (`rules: [null]`, a null parent
   or backendRef) is refused by its path. `useDefaultGateways` is a field of the
-  Gateway API's experimental channel: a cluster whose HTTPRoute CRD is the
-  standard channel's refuses a route that sets it.
+  Gateway API's experimental channel: the standard channel's HTTPRoute CRD
+  does not hold it, so a cluster on that channel does not keep it.
 
   **It is an authored object, not the `httproute` trait**, although the two
   share the type name. The trait attaches to a component and routes to that
