@@ -503,7 +503,9 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 			foreign, "spec", "restic", "moverPodLabels"),
 		"moverPodLabels of a mover the kind has none of": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationDestination"),
 			foreign, "spec", "syncthing", "moverPodLabels"),
-		// Metadata an operator copies onto objects it creates that are no pods.
+		// Metadata an operator copies onto objects it creates that are no pods:
+		// the reserved keys are read there, and the component label is not
+		// (TestOwnedConfig_NoPodMetadata holds every such holder).
 		"the ingress template of a solver": solverIssuer("Issuer", map[string]any{"http01": map[string]any{"ingress": map[string]any{
 			"ingressTemplate": map[string]any{"metadata": map[string]any{"labels": map[string]any{ownershipKey: "db"}}}}}}),
 		"the labels of a solver's HTTPRoutes": solverIssuer("ClusterIssuer", map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{

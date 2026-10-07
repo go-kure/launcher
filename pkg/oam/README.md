@@ -523,9 +523,12 @@ Not read: a job template's own labels, a volume claim template's, and what a Flu
 hands on to what it applies (`spec.commonMetadata`).
 
 The label and the reserved metadata keys are held wherever an object holds labels that reach
-pods; metadata an operator copies onto other objects it creates (the Ingress of a solver, the
-Secret of a Certificate, the Services of a Cluster) is not read yet, and `labelReachNotRead`
-in `pkg/cmd/kurel/label_reach_test.go` names each such field with what it reaches.
+pods. Metadata an operator copies onto other objects it creates (the Ingress of a solver, the
+Secret of a Certificate, the Services of a Cluster) is held to the reserved keys alone
+([Reserved metadata keys](#reserved-metadata-keys)): nothing selects those objects by the
+component label, so another component's value there builds, and launcher writes nothing
+there. `labelReachReservedOnly` in `pkg/cmd/kurel/label_reach_test.go` names each such field
+with what it reaches, and `labelReachNotRead` each field neither check reads.
 `TestLabelReach_EveryFieldIsHeldOrListed` derives these fields from the API types of the
 registered kind components, so a field a dependency adds fails the test until it is held or
 listed.
@@ -718,6 +721,15 @@ generates. The case is reached only through a consumer's own lowering rule.
   a cert-manager `Issuer` or `ClusterIssuer`, and a Gateway's `spec.infrastructure`
   ([Reserved metadata keys](#reserved-metadata-keys)). A document that set a reserved key
   there built before and is refused now.
+- The reserved metadata keys are also read in the metadata an operator copies onto objects
+  it creates that are no pods: a solver's Ingress template and HTTPRoute labels, a
+  Certificate's `secretTemplate`, the Service, ServiceAccount and VolumeSnapshot templates of
+  a CloudNativePG `Cluster`, a `Pooler`'s `serviceTemplate`, the Secret template of an
+  `ExternalSecret` and a `ClusterExternalSecret`, the `externalSecretMetadata` of a
+  `ClusterExternalSecret`, a `HelmRelease`'s `spec.chart.metadata`, and the
+  `serviceAnnotations` of a VolSync `ReplicationDestination`'s `rsync` and `rsyncTLS` movers
+  ([Reserved metadata keys](#reserved-metadata-keys)). A document that set a reserved key
+  there built before and is refused now. The component label is not read there.
 
 **New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
@@ -730,6 +742,13 @@ a kind component's `labels` property that holds another value under the key, whi
 transform returned before as an error of no type, is a `*ComponentLabelError` now, with the
 same text. Under the key `app` the kinds' own `app` check refused such a value first, with a
 text of its own; that refusal is the component label's now, text included.
+
+**New exported API** (go-kure/launcher#790, metadata that reaches no pods): nine values of
+`ReservedKeyHolder`: `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
+`ReservedKeyInSecretTemplate`, `ReservedKeyInServiceTemplate`,
+`ReservedKeyInServiceAccountTemplate`, `ReservedKeyInVolumeSnapshot`,
+`ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` and
+`ReservedKeyInMoverService`.
 
 ## Reserved metadata keys
 
@@ -786,11 +805,17 @@ check reads only the metadata of, which `Object` (the object as the text names i
 by its Go type. On a list envelope they are the member's. `Holder` says which metadata holds
 the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`,
 `ReservedKeyInInheritedMetadata`, `ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
-`ReservedKeyInSolverPodTemplate` or `ReservedKeyInInfrastructure`. `Path` is where the labels
+`ReservedKeyInSolverPodTemplate` or `ReservedKeyInInfrastructure`, or, of metadata that
+reaches no pods, `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
+`ReservedKeyInSecretTemplate`, `ReservedKeyInServiceTemplate`,
+`ReservedKeyInServiceAccountTemplate`, `ReservedKeyInVolumeSnapshot`,
+`ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` or
+`ReservedKeyInMoverService`. `Path` is where the labels
 or the annotations that hold the key are on the object (`metadata.labels`,
-`spec.template.metadata.annotations`), with the index of the element where they are in a list
-(`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`); the text prints it only
-there, in parentheses after the key. `Annotation` is false for a label. `Entry` is the entry
+`spec.template.metadata.annotations`), the map itself where the field is a map of labels or
+of annotations (`spec.rsync.serviceAnnotations`), with the index of the element where they
+are in a list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`); the text
+prints it only there, in parentheses after the key. `Annotation` is false for a label. `Entry` is the entry
 that reserves `Key`: the key itself, or the prefix it is under.
 Metadata the check cannot read fails generation with another error, which is neither.
 
@@ -815,12 +840,35 @@ Flux applies it (a `List`, or an envelope with `items`):
   and the same under `gatewayHTTPRoute`), in every solver of the list: `solver pod template
   label "…"`;
 - the labels and annotations of `spec.infrastructure` of a `gateway.networking.k8s.io`
-  `Gateway`, which the controller applies to what it creates for the Gateway.
+  `Gateway`, which the controller applies to what it creates for the Gateway;
+- metadata an operator copies onto objects it creates that are no pods:
+  - of each HTTP01 solver of an `Issuer` or `ClusterIssuer`, in every solver of the list,
+    the Ingress template's labels and annotations
+    (`spec.acme.solvers[].http01.ingress.ingressTemplate.metadata`: `solver ingress template
+    label "…"`) and the labels of the HTTPRoute of a solver on a Gateway
+    (`spec.acme.solvers[].http01.gatewayHTTPRoute.labels`: `solver HTTPRoute label "…"`);
+  - the Secret template of a `cert-manager.io` `Certificate` (`spec.secretTemplate`), an
+    `external-secrets.io` `ExternalSecret` (`spec.target.template.metadata`) and a
+    `ClusterExternalSecret` (`spec.externalSecretSpec.target.template.metadata`): `secret
+    template label "…"`;
+  - `spec.externalSecretMetadata` of a `ClusterExternalSecret`, which goes onto the
+    ExternalSecrets it creates;
+  - of a `postgresql.cnpg.io` `Cluster`, the service template of each additional Service
+    (`spec.managed.services.additional[].serviceTemplate.metadata`) and of a `Pooler`
+    (`spec.serviceTemplate.metadata`): `service template label "…"`; the service account
+    template (`spec.serviceAccountTemplate.metadata`) and the labels and annotations of the
+    VolumeSnapshots it takes (`spec.backup.volumeSnapshot`);
+  - `spec.chart.metadata` of a `helm.toolkit.fluxcd.io` `HelmRelease`, which goes onto the
+    HelmChart the controller creates: `chart template label "…"`;
+  - `serviceAnnotations` of the `rsync` and `rsyncTLS` movers of a `volsync.backube`
+    `ReplicationDestination`, which go onto the mover's Service: `mover service annotation
+    "…"`.
 
 These are the places the component label is held to its value in
-([Component label and ownership](#component-label-and-ownership)): one list serves both
-checks. A typed object of a `monitoring.coreos.com`, `volsync.backube`, `cert-manager.io` or
-`gateway.networking.k8s.io` kind is recognized when it states its kind.
+([Component label and ownership](#component-label-and-ownership)), but the metadata that
+reaches no pods: one list serves both checks. A typed object of a `monitoring.coreos.com`,
+`volsync.backube`, `cert-manager.io`, `gateway.networking.k8s.io`, `external-secrets.io` or
+`helm.toolkit.fluxcd.io` kind is recognized when it states its kind.
 
 A key is read whatever its value: a value the API server would refuse, or a null, does not
 hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the
@@ -856,13 +904,9 @@ object named, and is not read as holding no key.
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
 - Metadata an object hands on to others in a field of its own: `spec.commonMetadata` of a
   Flux `Kustomization`, `HelmRelease` or `ArtifactGenerator`, a StatefulSet's `volumeClaimTemplates`, a CronJob's
-  `jobTemplate` metadata (its pod template is read).
-- Metadata an operator copies onto objects it creates that are no pods: the Ingress and the
-  HTTPRoutes of an issuer's solver, a Certificate's `secretTemplate`, the Service and
-  ServiceAccount templates and the snapshot metadata of a CloudNativePG `Cluster`, a
-  `Pooler`'s `serviceTemplate`, the Secret template of an ExternalSecret, the HelmChart
-  template of a `HelmRelease`, a VolSync destination's `serviceAnnotations`.
-  `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the full list.
+  `jobTemplate` metadata (its pod template is read). `labelReachNotRead` in
+  `pkg/cmd/kurel/label_reach_test.go` is the full list of fields of the kinds' API types
+  that hand metadata on and are not read.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.

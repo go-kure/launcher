@@ -124,6 +124,41 @@ func TestReservedMetadataKeyError(t *testing.T) {
 			},
 			text: `component "edge": Gateway "w": spec.infrastructure label "platform.example/zone"` + byPrefix,
 		},
+		// Metadata that reaches objects that are no pods.
+		"a Certificate's secret template label": {
+			component: "tls",
+			obj: holding(t, unstructuredObject("cert-manager.io/v1", "Certificate"),
+				map[string]string{"example.org/tenant": "a"}, "spec", "secretTemplate"),
+			want: ReservedMetadataKeyError{
+				Component: "tls", Kind: schema.GroupKind{Group: "cert-manager.io", Kind: "Certificate"}, Name: "w", Object: `Certificate "w"`,
+				Holder: ReservedKeyInSecretTemplate, Path: "spec.secretTemplate.labels", Key: "example.org/tenant", Entry: "example.org/tenant",
+			},
+			text: `component "tls": Certificate "w": secret template label "example.org/tenant"` + byKey,
+		},
+		"a later solver's HTTPRoute label": {
+			component: "tls",
+			obj: solverIssuer("Issuer",
+				map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{"labels": map[string]any{"acme": "solver"}}}},
+				map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{"labels": map[string]any{"platform.example/zone": "a"}}}}),
+			want: ReservedMetadataKeyError{
+				Component: "tls", Kind: schema.GroupKind{Group: "cert-manager.io", Kind: "Issuer"}, Name: "w", Object: `Issuer "w"`,
+				Holder: ReservedKeyInSolverHTTPRoute, Path: "spec.acme.solvers[1].http01.gatewayHTTPRoute.labels",
+				Key: "platform.example/zone", Entry: "platform.example/",
+			},
+			text: `component "tls": Issuer "w": solver HTTPRoute label "platform.example/zone"` +
+				` (spec.acme.solvers[1].http01.gatewayHTTPRoute.labels)` + byPrefix,
+		},
+		// An annotation map: the path is the map's own.
+		"a mover's service annotation": {
+			component: "backup",
+			obj: holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationDestination"),
+				map[string]string{"platform.example/zone": "a"}, "spec", "rsyncTLS", "serviceAnnotations"),
+			want: ReservedMetadataKeyError{
+				Component: "backup", Kind: schema.GroupKind{Group: "volsync.backube", Kind: "ReplicationDestination"}, Name: "w", Object: `ReplicationDestination "w"`,
+				Holder: ReservedKeyInMoverService, Annotation: true, Path: "spec.rsyncTLS.serviceAnnotations", Key: "platform.example/zone", Entry: "platform.example/",
+			},
+			text: `component "backup": ReplicationDestination "w": mover service annotation "platform.example/zone"` + byPrefix,
+		},
 		// Named by its Go type in the text, and with no Kind.
 		"a typed object that states no kind": {
 			component: "web",

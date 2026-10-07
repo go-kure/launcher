@@ -28,14 +28,17 @@ import (
 
 // monitoringGroup is the API group of the Prometheus operator's kinds,
 // volsyncGroup that of VolSync's, certManagerGroup that of cert-manager's
-// issuers and gatewayGroup that of the Gateway API; cnpgPoolerKind is the
-// CloudNativePG Pooler.
+// kinds, gatewayGroup that of the Gateway API, externalSecretsGroup that of
+// External Secrets and helmGroup that of Flux's HelmRelease; cnpgPoolerKind is
+// the CloudNativePG Pooler.
 const (
-	monitoringGroup  = "monitoring.coreos.com"
-	volsyncGroup     = "volsync.backube"
-	certManagerGroup = "cert-manager.io"
-	gatewayGroup     = "gateway.networking.k8s.io"
-	cnpgPoolerKind   = "Pooler"
+	monitoringGroup      = "monitoring.coreos.com"
+	volsyncGroup         = "volsync.backube"
+	certManagerGroup     = "cert-manager.io"
+	gatewayGroup         = "gateway.networking.k8s.io"
+	externalSecretsGroup = "external-secrets.io"
+	helmGroup            = "helm.toolkit.fluxcd.io"
+	cnpgPoolerKind       = "Pooler"
 )
 
 // listStep, as a step of a holder's path, stands for every element of the list
@@ -43,29 +46,37 @@ const (
 const listStep = "[]"
 
 // metadataHolder is one place an object holds labels and annotations in: its
-// own metadata, or metadata that becomes that of pods the cluster runs for it.
+// own metadata, metadata that becomes that of pods the cluster runs for it, or
+// metadata an operator copies onto other objects it creates for it.
 type metadataHolder struct {
 	// path is where the object holds it: the object with the `labels` and the
-	// `annotations`, or, of a label map (labelMap), the map itself. A listStep
-	// in it reads every element of a list.
+	// `annotations`, or, of a label map (labelMap) or an annotation map
+	// (annotationMap), the map itself. A listStep in it reads every element of
+	// a list.
 	path []string
 	// in is the holder as a reserved-key refusal names it.
 	in ReservedKeyHolder
 	// labelMap says that what path holds is a map of labels and nothing else:
-	// there are no annotations beside it.
-	labelMap bool
+	// there are no annotations beside it. annotationMap says the same of a map
+	// of annotations.
+	labelMap, annotationMap bool
+	// noPods says the metadata reaches objects that are no pods. The reserved
+	// keys are read there; the component label, which selects pods, is not.
+	noPods bool
 }
 
 // heldMetadata is what a holder holds on one object: once, or once per element
 // of the lists its path goes through.
 type heldMetadata struct {
 	// metadata is the object with the `labels` and the `annotations`: of a
-	// label map, the map as its labels.
+	// label map, the map as its labels, and of an annotation map, the map as
+	// its annotations.
 	metadata map[string]any
 	// path is where it is, with the index of each list element
 	// ("spec.acme.solvers[1].http01.ingress.podTemplate.metadata"), and labels
-	// the path of its labels, as a refusal prints it.
-	path, labels string
+	// and annotations the paths of its labels and its annotations, as a refusal
+	// prints them.
+	path, labels, annotations string
 }
 
 // held returns what h holds in content. An absent or null step of the path
@@ -113,11 +124,14 @@ func (h metadataHolder) collect(m map[string]any, steps []string, at string, all
 		}
 		m = next
 	}
-	if h.labelMap {
+	switch {
+	case h.labelMap:
 		*all = append(*all, heldMetadata{metadata: map[string]any{"labels": m}, path: at, labels: at})
-		return nil
+	case h.annotationMap:
+		*all = append(*all, heldMetadata{metadata: map[string]any{"annotations": m}, path: at, annotations: at})
+	default:
+		*all = append(*all, heldMetadata{metadata: m, path: at, labels: at + ".labels", annotations: at + ".annotations"})
 	}
-	*all = append(*all, heldMetadata{metadata: m, path: at, labels: at + ".labels"})
 	return nil
 }
 
@@ -129,9 +143,12 @@ type operatorMetadataKind struct {
 }
 
 // operatorMetadataKinds are the kinds whose object holds metadata an operator
-// puts on the pods it creates. The wrapper reads it and writes nothing there:
-// the pods of such an object carry the operator's labels, and the component
-// label only where the document or a kind puts it.
+// puts on what it creates: pods, or objects that are no pods (noPods). The
+// wrapper reads it and writes nothing there: the pods of such an object carry
+// the operator's labels, and the component label only where the document or a
+// kind puts it.
+//
+// Metadata that reaches pods is held to both checks:
 //
 //   - a CloudNativePG Cluster's spec.inheritedMetadata goes onto every object
 //     the operator creates for the cluster, its pods among them;
@@ -147,12 +164,37 @@ type operatorMetadataKind struct {
 //   - a Gateway's spec.infrastructure holds labels and annotations for what
 //     the controller creates for the Gateway, which may be pods.
 //
+// Metadata an operator copies onto objects it creates that are no pods is held
+// to the consumer's reserved keys alone (go-kure/launcher#790): the component
+// label selects pods, and these objects are none.
+//
+//   - the ingress template's metadata of each HTTP01 solver of an Issuer and a
+//     ClusterIssuer (spec.acme.solvers[].http01.ingress.ingressTemplate), which
+//     goes onto the solver's Ingress, and the labels of a solver on a Gateway
+//     (spec.acme.solvers[].http01.gatewayHTTPRoute.labels), which go onto its
+//     HTTPRoute;
+//   - a Certificate's spec.secretTemplate, which goes onto its Secret;
+//   - of a CloudNativePG Cluster, the service template of each additional
+//     Service (spec.managed.services.additional[].serviceTemplate.metadata),
+//     the service account template (spec.serviceAccountTemplate.metadata) and
+//     spec.backup.volumeSnapshot, which go onto those Services, the
+//     ServiceAccount and the VolumeSnapshots; a Pooler's service template
+//     (spec.serviceTemplate.metadata);
+//   - the template of the Secret an ExternalSecret creates
+//     (spec.target.template.metadata); of a ClusterExternalSecret, the metadata
+//     of the ExternalSecrets it creates (spec.externalSecretMetadata) and the
+//     template of their Secrets
+//     (spec.externalSecretSpec.target.template.metadata);
+//   - a HelmRelease's spec.chart.metadata, which goes onto the HelmChart the
+//     controller creates;
+//   - serviceAnnotations of the rsync and rsyncTLS movers of a VolSync
+//     ReplicationDestination, which go onto the Service of the mover: a map of
+//     annotations, with no labels beside it.
+//
 // A kind is told by the group and kind the object states. Of the typed objects
 // that state none, only the ones statedOrTypedKind names are recognized.
 //
-// Metadata an operator copies onto objects it creates that are no pods (a
-// Service's, a Secret's, an Ingress's) is not here, and neither check reads
-// it. The table is held to the API types of the kind components by
+// The table is held to the API types of the kind components by
 // TestLabelReach_EveryFieldIsHeldOrListed (pkg/cmd/kurel), which finds every
 // field of them that hands metadata on and names each one that is not read.
 var operatorMetadataKinds = slices.Concat(
@@ -164,21 +206,62 @@ var operatorMetadataKinds = slices.Concat(
 		{monitoringGroup, "Alertmanager", metadataHolder{path: []string{"spec", "podMetadata"}, in: ReservedKeyInPodMetadata}},
 		{monitoringGroup, "ThanosRuler", metadataHolder{path: []string{"spec", "podMetadata"}, in: ReservedKeyInPodMetadata}},
 		{gatewayGroup, "Gateway", metadataHolder{path: []string{"spec", "infrastructure"}, in: ReservedKeyInInfrastructure}},
+
+		// Metadata that reaches objects that are no pods.
+		{certManagerGroup, "Certificate", metadataHolder{path: []string{"spec", "secretTemplate"}, in: ReservedKeyInSecretTemplate, noPods: true}},
+		{cnpgGroup, cnpgClusterKind, metadataHolder{
+			path: []string{"spec", "managed", "services", "additional", listStep, "serviceTemplate", "metadata"}, in: ReservedKeyInServiceTemplate, noPods: true,
+		}},
+		{cnpgGroup, cnpgClusterKind, metadataHolder{path: []string{"spec", "serviceAccountTemplate", "metadata"}, in: ReservedKeyInServiceAccountTemplate, noPods: true}},
+		{cnpgGroup, cnpgClusterKind, metadataHolder{path: []string{"spec", "backup", "volumeSnapshot"}, in: ReservedKeyInVolumeSnapshot, noPods: true}},
+		{cnpgGroup, cnpgPoolerKind, metadataHolder{path: []string{"spec", "serviceTemplate", "metadata"}, in: ReservedKeyInServiceTemplate, noPods: true}},
+		{externalSecretsGroup, "ExternalSecret", metadataHolder{path: []string{"spec", "target", "template", "metadata"}, in: ReservedKeyInSecretTemplate, noPods: true}},
+		{externalSecretsGroup, "ClusterExternalSecret", metadataHolder{path: []string{"spec", "externalSecretMetadata"}, in: ReservedKeyInExternalSecretMetadata, noPods: true}},
+		{externalSecretsGroup, "ClusterExternalSecret", metadataHolder{
+			path: []string{"spec", "externalSecretSpec", "target", "template", "metadata"}, in: ReservedKeyInSecretTemplate, noPods: true,
+		}},
+		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "chart", "metadata"}, in: ReservedKeyInChartTemplate, noPods: true}},
 	},
 	moverPodLabels("ReplicationSource", "rsync", "rsyncTLS", "rclone", "restic", "syncthing"),
 	moverPodLabels("ReplicationDestination", "rsync", "rsyncTLS", "rclone", "restic"),
-	solverPodTemplates("Issuer"),
-	solverPodTemplates("ClusterIssuer"),
+	moverServiceAnnotations("ReplicationDestination", "rsync", "rsyncTLS"),
+	solverHolders("Issuer"),
+	solverHolders("ClusterIssuer"),
 )
 
-// solverPodTemplates returns the rows of a cert-manager issuer kind: the pod
-// template's metadata of each HTTP01 solver, of every solver in the list.
-func solverPodTemplates(kind string) []operatorMetadataKind {
+// solverHolders returns the rows of a cert-manager issuer kind, of every solver
+// in the list: the pod template's metadata of each HTTP01 solver, the ingress
+// template's of a solver by Ingress and the HTTPRoute labels of a solver on a
+// Gateway.
+func solverHolders(kind string) []operatorMetadataKind {
+	solver := func(steps ...string) []string {
+		return append([]string{"spec", "acme", "solvers", listStep, "http01"}, steps...)
+	}
 	var rows []operatorMetadataKind
-	for _, solver := range []string{"ingress", "gatewayHTTPRoute"} {
+	for _, s := range []string{"ingress", "gatewayHTTPRoute"} {
 		rows = append(rows, operatorMetadataKind{certManagerGroup, kind, metadataHolder{
-			path: []string{"spec", "acme", "solvers", listStep, "http01", solver, "podTemplate", "metadata"},
+			path: solver(s, "podTemplate", "metadata"),
 			in:   ReservedKeyInSolverPodTemplate,
+		}})
+	}
+	return append(rows,
+		operatorMetadataKind{certManagerGroup, kind, metadataHolder{
+			path: solver("ingress", "ingressTemplate", "metadata"), in: ReservedKeyInSolverIngressTemplate, noPods: true,
+		}},
+		operatorMetadataKind{certManagerGroup, kind, metadataHolder{
+			path: solver("gatewayHTTPRoute", "labels"), in: ReservedKeyInSolverHTTPRoute, labelMap: true, noPods: true,
+		}},
+	)
+}
+
+// moverServiceAnnotations returns the rows of a VolSync kind:
+// spec.<mover>.serviceAnnotations of each of its movers, which go onto the
+// Service of the mover.
+func moverServiceAnnotations(kind string, movers ...string) []operatorMetadataKind {
+	rows := make([]operatorMetadataKind, 0, len(movers))
+	for _, mover := range movers {
+		rows = append(rows, operatorMetadataKind{volsyncGroup, kind, metadataHolder{
+			path: []string{"spec", mover, "serviceAnnotations"}, in: ReservedKeyInMoverService, annotationMap: true, noPods: true,
 		}})
 	}
 	return rows
@@ -199,10 +282,10 @@ func moverPodLabels(kind string, movers ...string) []operatorMetadataKind {
 // metadataHolders returns every place an object of group and kind holds
 // metadata in: its own first, then its pod template's on a kind that has one
 // (podTemplateKinds), then what an operator hands on (operatorMetadataKinds).
-// Both checks read exactly these. Neither reads the metadata a Flux object
-// hands on to what it applies (spec.commonMetadata), a job template's or a
-// volume claim template's, or metadata an operator copies onto objects it
-// creates that are no pods.
+// The reserved keys are read in every one of them, the component label in all
+// but those that reach no pods (noPods). Neither check reads the metadata a
+// Flux object hands on to what it applies (spec.commonMetadata), or a job
+// template's or a volume claim template's.
 func metadataHolders(group, kind string) []metadataHolder {
 	holders := []metadataHolder{{path: []string{"metadata"}, in: ReservedKeyInObjectMetadata}}
 	for _, k := range podTemplateKinds {
@@ -360,17 +443,21 @@ func checkEntryLabelValues(owners map[string]string, labelKey string) error {
 
 // checkComponentLabel refuses g when it carries the component label's key with
 // a value that is not the owning component's (componentLabelValues), in any
-// place it holds metadata in (metadataHolders), whoever wrote it there: a
-// passthrough or manifests object, a rendered chart, a kind's own property. An
-// absent key is not refused: the wrapper writes the label where it writes one
-// at all (stampComponentLabel). A null value is the empty string the cluster
-// reads it as, and a value that is no string is refused as such.
+// place it holds metadata in (metadataHolders) but metadata that reaches no
+// pods, whoever wrote it there: a passthrough or manifests object, a rendered
+// chart, a kind's own property. An absent key is not refused: the wrapper
+// writes the label where it writes one at all (stampComponentLabel). A null
+// value is the empty string the cluster reads it as, and a value that is no
+// string is refused as such.
 //
 // A workload whose own selector requires another value for the key is refused
 // too (checkWorkloadSelector).
 func (o *ownedConfig) checkComponentLabel(g generatedObject) error {
 	accepted := o.componentLabelValues()
 	for _, h := range metadataHolders(g.group, g.kind) {
+		if h.noPods {
+			continue
+		}
 		all, err := h.held(g.content)
 		if err != nil {
 			return errors.Errorf("component label: %s: %w", g.where, err)

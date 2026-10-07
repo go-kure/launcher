@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -340,6 +341,150 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 	}
 }
 
+// holdingThrough returns base with leaf at path, where a listStep holds a list
+// of one element. path starts at a field of the object's top level.
+func holdingThrough(base *unstructured.Unstructured, leaf any, path ...string) *unstructured.Unstructured {
+	held := leaf
+	for _, step := range slices.Backward(path) {
+		if step == listStep {
+			held = []any{held}
+			continue
+		}
+		held = map[string]any{step: held}
+	}
+	maps.Copy(base.Object, held.(map[string]any))
+	return base
+}
+
+// noPodHolderRow is one place an operator copies metadata from onto objects it
+// creates that are no pods.
+type noPodHolderRow struct {
+	name, apiVersion, kind string
+	in                     ReservedKeyHolder
+	// path is where the object holds the metadata: the object with the
+	// `labels` and the `annotations`, or the map itself of a labels or an
+	// annotations shape.
+	path  []string
+	shape string
+}
+
+// object returns the row's object, holding key in its labels (annotation
+// false) or its annotations.
+func (r noPodHolderRow) object(annotation bool, key, value string) *unstructured.Unstructured {
+	var leaf any = map[string]any{key: value}
+	if r.shape == "metadata" {
+		in := "labels"
+		if annotation {
+			in = "annotations"
+		}
+		leaf = map[string]any{in: leaf}
+	}
+	return holdingThrough(unstructuredObject(r.apiVersion, r.kind), leaf, r.path...)
+}
+
+// mapPath is the path of the labels or the annotations as a refusal names it,
+// with the one element of each list.
+func (r noPodHolderRow) mapPath(annotation bool) string {
+	at := strings.ReplaceAll(strings.Join(r.path, "."), "."+listStep, "[0]")
+	switch {
+	case r.shape != "metadata":
+		return at
+	case annotation:
+		return at + ".annotations"
+	default:
+		return at + ".labels"
+	}
+}
+
+func noPodHolderRows() []noPodHolderRow {
+	solver := func(steps ...string) []string {
+		return append([]string{"spec", "acme", "solvers", listStep, "http01"}, steps...)
+	}
+	return []noPodHolderRow{
+		{"an Issuer's solver ingress template", "cert-manager.io/v1", "Issuer", ReservedKeyInSolverIngressTemplate, solver("ingress", "ingressTemplate", "metadata"), "metadata"},
+		{"a ClusterIssuer's solver ingress template", "cert-manager.io/v1", "ClusterIssuer", ReservedKeyInSolverIngressTemplate, solver("ingress", "ingressTemplate", "metadata"), "metadata"},
+		{"an Issuer's solver HTTPRoute labels", "cert-manager.io/v1", "Issuer", ReservedKeyInSolverHTTPRoute, solver("gatewayHTTPRoute", "labels"), "labels"},
+		{"a ClusterIssuer's solver HTTPRoute labels", "cert-manager.io/v1", "ClusterIssuer", ReservedKeyInSolverHTTPRoute, solver("gatewayHTTPRoute", "labels"), "labels"},
+		{"a Certificate's secret template", "cert-manager.io/v1", "Certificate", ReservedKeyInSecretTemplate, []string{"spec", "secretTemplate"}, "metadata"},
+		{"a Cluster's additional service template", "postgresql.cnpg.io/v1", "Cluster", ReservedKeyInServiceTemplate,
+			[]string{"spec", "managed", "services", "additional", listStep, "serviceTemplate", "metadata"}, "metadata"},
+		{"a Cluster's service account template", "postgresql.cnpg.io/v1", "Cluster", ReservedKeyInServiceAccountTemplate, []string{"spec", "serviceAccountTemplate", "metadata"}, "metadata"},
+		{"a Cluster's volume snapshots", "postgresql.cnpg.io/v1", "Cluster", ReservedKeyInVolumeSnapshot, []string{"spec", "backup", "volumeSnapshot"}, "metadata"},
+		{"a Pooler's service template", "postgresql.cnpg.io/v1", "Pooler", ReservedKeyInServiceTemplate, []string{"spec", "serviceTemplate", "metadata"}, "metadata"},
+		{"an ExternalSecret's secret template", "external-secrets.io/v1", "ExternalSecret", ReservedKeyInSecretTemplate, []string{"spec", "target", "template", "metadata"}, "metadata"},
+		{"a ClusterExternalSecret's external secret metadata", "external-secrets.io/v1", "ClusterExternalSecret", ReservedKeyInExternalSecretMetadata,
+			[]string{"spec", "externalSecretMetadata"}, "metadata"},
+		{"a ClusterExternalSecret's secret template", "external-secrets.io/v1", "ClusterExternalSecret", ReservedKeyInSecretTemplate,
+			[]string{"spec", "externalSecretSpec", "target", "template", "metadata"}, "metadata"},
+		{"a HelmRelease's chart template", "helm.toolkit.fluxcd.io/v2", "HelmRelease", ReservedKeyInChartTemplate, []string{"spec", "chart", "metadata"}, "metadata"},
+		{"a ReplicationDestination's rsync service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
+			[]string{"spec", "rsync", "serviceAnnotations"}, "annotations"},
+		{"a ReplicationDestination's rsyncTLS service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
+			[]string{"spec", "rsyncTLS", "serviceAnnotations"}, "annotations"},
+	}
+}
+
+// TestOwnedConfig_NoPodMetadata: metadata an operator copies onto objects it
+// creates that are no pods is held to the reserved keys, as a label and as an
+// annotation wherever the holder has them, and the refusal names the holder
+// and the path. The component label is not read there, since nothing selects
+// those objects by it: another component's value builds, and the wrapper writes
+// nothing there.
+func TestOwnedConfig_NoPodMetadata(t *testing.T) {
+	for _, row := range noPodHolderRows() {
+		var shapes []bool
+		if row.shape != "annotations" {
+			shapes = append(shapes, false)
+		}
+		if row.shape != "labels" {
+			shapes = append(shapes, true)
+		}
+		for _, annotation := range shapes {
+			what := "label"
+			if annotation {
+				what = "annotation"
+			}
+			t.Run(row.name+", a reserved "+what, func(t *testing.T) {
+				obj := row.object(annotation, "platform.example/zone", "a")
+				inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+				_, err := stack.NewApplication("web", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, mustReserve(t, reservedForTest...))).Generate()
+				var got *ReservedMetadataKeyError
+				if !errors.As(err, &got) {
+					t.Fatalf("Generate = %v, want a *ReservedMetadataKeyError", err)
+				}
+				if got.Holder != row.in || got.Path != row.mapPath(annotation) || got.Annotation != annotation || got.Key != "platform.example/zone" {
+					t.Errorf("refusal = %+v, want holder %q, path %q", *got, row.in, row.mapPath(annotation))
+				}
+				if want := string(row.in) + " " + what + ` "platform.example/zone"`; !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not say %s", err, want)
+				}
+			})
+		}
+		if row.shape == "annotations" {
+			continue
+		}
+		t.Run(row.name+", another component's label", func(t *testing.T) {
+			obj := row.object(false, ownershipKey, "db")
+			inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+			if _, err := stack.NewApplication("web", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, mustReserve(t, reservedForTest...))).Generate(); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if got := obj.GetLabels()[ownershipKey]; got != "web" {
+				t.Errorf("object label = %q, want web", got)
+			}
+			// The holder's labels are as written. A kind's own stamp elsewhere in
+			// the spec (a HelmRelease's post-renderers) is not this holder's.
+			all, err := metadataHolder{path: row.path, labelMap: row.shape == "labels"}.held(obj.Object)
+			if err != nil || len(all) != 1 {
+				t.Fatalf("held = %v, %v, want the one holder", all, err)
+			}
+			if got := all[0].metadata["labels"]; !reflect.DeepEqual(got, map[string]any{ownershipKey: "db"}) {
+				t.Errorf("%s = %v, want it as written", all[0].labels, got)
+			}
+		})
+	}
+}
+
 // TestOwnedConfig_ReservedKeyNotRead is the control: what the check does not
 // read, and the keys a config writes itself, pass and are stamped as without a
 // list.
@@ -386,11 +531,18 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 			solverPod("ingress", map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "web"}})),
 		"the two labels in a Gateway's infrastructure": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "Gateway"),
 			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "infrastructure"),
-		// Metadata an operator copies onto objects it creates that are no pods.
-		"the ingress template of a solver": solverIssuer("Issuer", map[string]any{"http01": map[string]any{"ingress": map[string]any{
-			"ingressTemplate": map[string]any{"metadata": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}}}),
-		"the labels of a solver's HTTPRoutes": solverIssuer("ClusterIssuer", map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{
-			"labels": map[string]any{"example.org/tenant": "a"}}}}),
+		// Metadata an operator copies onto objects that are no pods: the two
+		// labels are exempt there too, and a holder is read on its own kind only.
+		"the two labels in a Certificate's secret template": holding(t, unstructuredObject("cert-manager.io/v1", "Certificate"),
+			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "secretTemplate"),
+		"the two labels in a solver's HTTPRoute labels": solverIssuer("ClusterIssuer", map[string]any{"http01": map[string]any{"gatewayHTTPRoute": map[string]any{
+			"labels": map[string]any{"app": "db", ownershipKey: "web"}}}}),
+		"secretTemplate of another kind of the group": holding(t, unstructuredObject("cert-manager.io/v1", "Issuer"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "secretTemplate"),
+		"serviceTemplate of a Pooler of another group": holding(t, unstructuredObject("example.com/v1", "Pooler"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "serviceTemplate", "metadata"),
+		"serviceAnnotations of a mover the kind has none of": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "rsync", "serviceAnnotations"),
 		"a solver pod template of another kind of the group": solverIssuer("Certificate",
 			solverPod("ingress", map[string]any{"labels": map[string]any{"example.org/tenant": "a"}})),
 		"infrastructure of another kind of the group": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "HTTPRoute"),

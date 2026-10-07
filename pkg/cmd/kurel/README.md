@@ -186,10 +186,12 @@ components to the component label and the reserved metadata keys of
 go-kure/launcher#790. It walks the API type of the object each kind builds from its
 fixture and finds every field through which labels and annotations reach what the
 cluster creates from the object: one that holds `labels` and `annotations`, and a map
-of strings named for labels or annotations. Each such field is either refused through,
-which a passthrough object of the kind shows, or listed with its reason. A field a
-dependency bump adds fails the test until it is one or the other, and so does a listed
-field no kind has any more. A field whose name and type say neither is not found; the
+of strings named for labels or annotations. Each such field is either refused through
+by both checks, which a passthrough object of the kind shows; or refused through by the
+reserved keys alone, as metadata an operator copies onto objects that are no pods, and
+listed in `labelReachReservedOnly` with what it reaches; or listed in
+`labelReachNotRead` with its reason. A field a dependency bump adds fails the test until
+it is one of them, and so does a listed field no kind has any more. A field whose name and type say neither is not found; the
 test lists those by hand.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
