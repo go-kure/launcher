@@ -170,13 +170,16 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 	delete(props, "allowedHostnameWildcard")
 
 	// The annotations the rule writes itself reach the ingress trait apart from
-	// the authored ones, as its platformAnnotations: only what the rule writes
-	// may arrive under that key, on either rendering.
-	if _, authored := props[platformAnnotationsProperty]; authored {
-		return oam.LoweringResult{}, &errors.ValidationError{
-			Field:     platformAnnotationsProperty,
-			Component: componentName,
-			Message:   platformAnnotationsProperty + " is not a property of the expose trait: the trait writes it on the ingress trait itself",
+	// the authored ones, as its platformAnnotations, and the TLS entry it manages
+	// as its managedTLS: only what the rule writes may arrive under those keys,
+	// on either rendering.
+	for _, reserved := range []string{platformAnnotationsProperty, managedTLSProperty} {
+		if _, authored := props[reserved]; authored {
+			return oam.LoweringResult{}, &errors.ValidationError{
+				Field:     reserved,
+				Component: componentName,
+				Message:   reserved + " is not a property of the expose trait: the trait writes it on the ingress trait itself",
+			}
 		}
 	}
 

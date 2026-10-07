@@ -197,6 +197,47 @@ func TestSecretRoles_ManagedTLSFromTheCapability(t *testing.T) {
 	}
 }
 
+// A capability rendering is the consumer's Go value as written, so managedTLS
+// may be any string-keyed map, as platformAnnotations may.
+func TestSecretRoles_ManagedTLSFromATypedCapabilityMap(t *testing.T) {
+	ctx := namingContext(nil)
+	ctx.Capabilities = map[string]oam.CapabilityBinding{"ingress": {Rendering: map[string]any{
+		"managedTLS": map[string][]string{"hosts": {"shop.example.com"}},
+	}}}
+	_, apps := namingTransform(t, namingApp(claimIngressTrait, ""), ctx)
+	tls := onlyOne(t, "Ingresses", generatedOf[*networkingv1.Ingress](apps)).Spec.TLS
+	if len(tls) != 1 || tls[0].SecretName != "web-tls" || !slices.Equal(tls[0].Hosts, []string{"shop.example.com"}) {
+		t.Errorf("Ingress TLS = %+v, want web-tls for shop.example.com", tls)
+	}
+}
+
+// The expose rule passes its properties on to the ingress trait it emits, so
+// it refuses managedTLS itself: a caller that transforms without validating
+// the authored properties first cannot reach the ingress trait's reserved
+// property through it, even when the rule writes no managed entry.
+func TestSecretRoles_ManagedTLSNotPassedThroughExpose(t *testing.T) {
+	const trait = `        - type: expose
+          properties:
+            hostnames: [shop.example.com]
+            managedTLS:
+              hosts: [injected.example.com]
+              secretName: injected
+`
+	transformer := newBuiltinTransformer()
+	app, err := oam.ParseWithExtraTypes([]byte(namingApp(trait, "")), nil, transformer.LowerableTypes())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	ctx := namingContext(nil)
+	ctx.Domain = kurelDomain
+	ctx.Capabilities = map[string]oam.CapabilityBinding{"expose": {Rendering: map[string]any{"controllerType": "ingress"}}}
+	_, err = transformer.Transform(app, ctx)
+	const want = "managedTLS is not a property of the expose trait"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Transform err = %v, want one containing %q", err, want)
+	}
+}
+
 // managedTLS is platform-reserved: an author who writes it on an ingress trait
 // is refused.
 func TestSecretRoles_ManagedTLSNotAuthorable(t *testing.T) {

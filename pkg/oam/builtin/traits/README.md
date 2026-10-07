@@ -1183,7 +1183,10 @@ component).
 The CiliumNetworkPolicy has no name role: it is author-named, and the hook is not asked, by
 design. The `cilium-networkpolicy` `name` is required, and the trait claims it
 (`(*Trait).ClaimObjectName`), so `Transform` refuses a second owner of that object with both
-named, as under a role.
+named, as under a role. The `certificate` trait's Secret and the `external-secret` trait's
+ExternalSecret are claimed the same way by their required `secretName`, in the namespace they
+land in (go-kure/launcher#787), so a `certificate` trait and an `external-secret` trait that
+write the same Secret are refused in `Transform`.
 
 Every other authored name in the
 table below is checked as a name, not against the other objects of the document:
