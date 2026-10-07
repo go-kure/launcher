@@ -37,7 +37,11 @@ func fillFluxVerifyProvider(provider *string) {
 // while the API's enum refuses it as written. The properties are read in their
 // JSON form, as the decode reads them (numbers kept exact), so a typed map or a
 // named string type a caller builds them with is read as what it encodes. Keys
-// match case-insensitively, as the decode's do.
+// match case-insensitively, as the decode's do. Two keys of one object on the
+// way that fold together (`Provider` and `provider`) are refused, as the kinds'
+// decode refuses them elsewhere (kind_decode.go): the decode keeps one value
+// and drops the other, so the "" read here need not be the one the field ends
+// with.
 func refuseEmptyFluxVerifyProvider(authored map[string]any, path ...string) error {
 	raw, err := json.Marshal(authored)
 	if err != nil {
@@ -49,25 +53,44 @@ func refuseEmptyFluxVerifyProvider(authored map[string]any, path ...string) erro
 	if err := dec.Decode(&props); err != nil {
 		return errors.Wrapf(err, "%s.provider: properties do not read as a JSON object", strings.Join(path, "."))
 	}
-	nodes := []map[string]any{props}
+	node := props
+	var at []string
 	for _, key := range path {
-		var next []map[string]any
-		for _, node := range nodes {
-			for _, k := range slices.Sorted(maps.Keys(node)) {
-				if m, ok := node[k].(map[string]any); ok && strings.EqualFold(k, key) {
-					next = append(next, m)
-				}
-			}
+		k, err := foldedKey(node, key, at)
+		if err != nil || k == "" {
+			return err
 		}
-		nodes = next
+		next, ok := node[k].(map[string]any)
+		if !ok {
+			return nil
+		}
+		node = next
+		at = append(at, k)
 	}
-	for _, node := range nodes {
-		for _, k := range slices.Sorted(maps.Keys(node)) {
-			if strings.EqualFold(k, "provider") && node[k] == "" {
-				return errors.Errorf(`%s.%s: "" is refused by the Flux API, whose enum is cosign or notation; omit the field for the API's default, %s`,
-					strings.Join(path, "."), k, fluxVerifyProviderDefault)
-			}
-		}
+	k, err := foldedKey(node, "provider", at)
+	if err != nil || k == "" {
+		return err
+	}
+	if node[k] == "" {
+		return errors.Errorf(`%s.%s: "" is refused by the Flux API, whose enum is cosign or notation; omit the field for the API's default, %s`,
+			strings.Join(at, "."), k, fluxVerifyProviderDefault)
 	}
 	return nil
+}
+
+// foldedKey returns the key of node that matches field case-insensitively, or
+// "" when none does, and refuses two that do. at is node's path, for the text.
+func foldedKey(node map[string]any, field string, at []string) (string, error) {
+	found := ""
+	for _, k := range slices.Sorted(maps.Keys(node)) {
+		if !strings.EqualFold(k, field) {
+			continue
+		}
+		if found != "" {
+			return "", errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)",
+				strings.Join(append(slices.Clone(at), k), "."), strings.Join(append(slices.Clone(at), found), "."))
+		}
+		found = k
+	}
+	return found, nil
 }
