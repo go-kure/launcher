@@ -36,6 +36,11 @@
       "allowedVersions": "!/^1\\.53\\.0$/"
     },
     {
+      "description": "k8s.io/kube-openapi is never proposed on its own: it moves only by MVS when the k8s.io/* modules move, and those follow the imported kure (the shared-direct list below). The shared preset's kubernetes group cannot hold it back here, because every other direct k8s.io/* require is in that list, so the group would only ever carry kube-openapi alone. It has no releases, so every update is a digest that can run ahead of k8s.io/apimachinery: go-kure/launcher#877's digest returned structured-merge-diff v7 types while apimachinery v0.37.1 builds managed fields with v6, and nothing reaching managedfields compiled. It is not in the shared-direct list because it is not a direct require of kure; it is a direct require here only for a test import.",
+      "enabled": false,
+      "matchPackageNames": ["k8s.io/kube-openapi"]
+    },
+    {
       "description": "Direct deps shared with the imported kure are never proposed here: launcher must not lead the kure release it imports (MVS pulls launcher up automatically, so only the 'ahead' direction needs control — see AGENTS.md § 'Shared dependencies with kure'). CI enforces this via site/scripts/check-kure-dep-sync.sh; this list mirrors that guard's current shared-direct set and must be updated together with go.mod changes that add or drop a shared direct dep — a dep missing here is still caught by the CI guard, just as a red PR instead of never being proposed. Correct sequence for these: land the kure bump, cut a kure release, bump the go-kure/kure require, take the shared dep together.",
       "enabled": false,
       "matchPackageNames": [
