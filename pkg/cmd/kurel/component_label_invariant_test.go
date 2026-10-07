@@ -367,6 +367,12 @@ spec:
 		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
 	"gatewayclass":  {props: map[string]any{"controllerName": "example.net/gateway-controller"}},
 	"gitrepository": {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
+	// A GRPCRoute is authored as an HTTPRoute is: no pods, no selector, a
+	// backend by name.
+	"grpcroute": {props: map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gateway"}},
+		"rules": []any{map[string]any{"backendRefs": []any{
+			map[string]any{"name": "web", "port": 9090}}}}}},
 	// Lowers to the helmrelease terminal plus a generated HelmRepository;
 	// valuesMode configMap with non-empty values adds the values ConfigMap
 	// through a configmap trait, the one labelled object.

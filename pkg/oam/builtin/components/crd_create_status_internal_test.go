@@ -32,6 +32,11 @@ var crdCreateStatusKinds = []struct {
 		required: "status.ancestors",
 	},
 	{
+		component: "grpcroute", crd: "grpcroutes", handler: &GRPCRouteHandler{},
+		props:    map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}},
+		required: "status.parents",
+	},
+	{
 		component: "httproute", crd: "httproutes", handler: &HTTPRouteHandler{},
 		props:    map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}},
 		required: "status.parents",

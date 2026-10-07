@@ -1,0 +1,29 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: orders
+  name: orders
+  namespace: default
+spec:
+  hostnames:
+  - api.example.com
+  parentRefs:
+  - name: public
+    namespace: gateways
+    sectionName: grpc
+  rules:
+  - backendRefs:
+    - name: orders
+      port: 9090
+    matches:
+    - method:
+        method: Get
+        service: shop.Orders
+  - backendRefs:
+    - name: orders-v1
+      port: 9090
+      weight: 9
+    - name: orders-v2
+      port: 9090
+      weight: 1

@@ -368,6 +368,9 @@ var requiredWrittenKinds = []pinKind{
 	{component: "httproute", handler: &HTTPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "httproutes"), "v1"),
 		base:   map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}}},
+	{component: "grpcroute", handler: &GRPCRouteHandler{}, typ: reflect.TypeFor[gatewayv1.GRPCRouteSpec](),
+		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "grpcroutes"), "v1"),
+		base:   map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}}},
 	{component: "tcproute", handler: &TCPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tcproutes"), "v1"),
 		base: map[string]any{

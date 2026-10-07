@@ -1921,6 +1921,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `gateway` |
 | `gatewayclass` |
 | `gitrepository` |
+| `grpcroute` |
 | `helm` |
 | `helmchart` |
 | `helmrelease` |

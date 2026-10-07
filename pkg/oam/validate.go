@@ -63,6 +63,7 @@ var validComponentTypes = map[string]bool{
 	"gateway":                         true,
 	"gatewayclass":                    true,
 	"gitrepository":                   true,
+	"grpcroute":                       true,
 	"helm":                            true,
 	"helmchart":                       true,
 	"helmrelease":                     true,

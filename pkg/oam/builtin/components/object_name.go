@@ -290,6 +290,11 @@ func (h *HTTPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope)
 	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}, oam.ObjectScopeNamespaced
 }
 
+// ComponentObject declares the grpcroute kind's GRPCRoute.
+func (h *GRPCRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: gatewayv1.GroupName, Kind: "GRPCRoute"}, oam.ObjectScopeNamespaced
+}
+
 // ComponentObject declares the networkpolicy kind's NetworkPolicy. The
 // `networkpolicy` trait resolves its policy's name under role "networkpolicy",
 // and the synthesis its policies' under "netpol-synth", both as this kind, so

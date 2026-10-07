@@ -504,6 +504,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"gateway",
 		"gatewayclass",
 		"gitrepository",
+		"grpcroute",
 		"helmchart",
 		"helmrelease",
 		"helmrepository",
