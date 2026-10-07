@@ -1386,7 +1386,10 @@ after lowering`; two traits a trait rule lowered one trait to are named
 `…, output 1 of its lowering` and `…, output 2 of its lowering`. One trait that resolves one
 name for two of its objects is refused as naming it twice. A synthesized policy is named
 by its component, or by its Service (`external backend Service "db"`): two external Services
-whose shortened default policy names meet are refused too.
+whose shortened default policy names meet are refused too. Each synthesized policy is held in a
+sub-application whose default is the policy's default name, resolved apart from the policy's: a
+hook that names two such policies apart and not their sub-applications leaves two applications
+of one name in the bundle, which is refused (go-kure/launcher#787).
 
 A caller tells this refusal from every other error of the transform without reading its
 text. The transform returns it behind a prefix of its own (`component "api": …`), and through
@@ -1453,9 +1456,38 @@ the Cluster and the ObjectStore of a `postgresql` component (roles `postgresql-c
 `postgresql-objectstore`): a `cnpg-cluster` component under the name of a `postgresql`
 component's Cluster is a name collision.
 
-A sub-application's name is resolved and validated but not kept apart: it is not unique. A
-`configmap` trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one
-holding a ConfigMap and one a PersistentVolumeClaim, and that is accepted. A sub-application's
+A sub-application's name is resolved and validated, and kept apart within its bundle once the
+bundle's traits have run: two applications of one name in one bundle are refused, a component's
+own application and a trait's sub-application as well as two sub-applications. A `configmap`
+trait and a `pvc` trait both named `dup` each add a sub-application `dup`, one holding a
+ConfigMap and one a PersistentVolumeClaim, and the transform refuses them, naming both and
+where each name came from:
+
+```
+bundle "shop": name collision: application "dup" is named by component "web" traits[0] "configmap" (role "sub-application", its default) and by component "web" traits[1] "pvc" (role "sub-application", its default); give one of them another name
+```
+
+The names are read after every trait of the bundle and every sub-application's `ApplyPolicy`
+has run, so a policy that renames a sub-application onto another application's name is
+refused (`renamed from "…" by its ApplyPolicy`), as is a sub-application a trait appends
+without resolving its name (`set by the trait without resolving it`). Every bundle of the
+transform is read again once nothing adds or renames an application any more, so the
+sub-application of a synthesized NetworkPolicy, and a bundle a trait adds as a child, are
+held to the same rule. Any other rename (by a later trait, or by another sub-application's
+policy) is reported as such, from the last name its own trait or policy gave it (`renamed
+from "…" after its trait named it`, or `renamed away and back to the name its trait or
+policy gave it` when it is back under that name), and an application
+whose namer the transform does not record (one in a bundle a trait added as a child) as
+`named where the transform records no namer`. Where a trait resolved one name in more than
+one way (by the author and by default, or for fewer of its sub-applications than it added under that
+name), which way named which sub-application is not known, and the error says so rather
+than guess; a hook that gave one name for two of a trait's defaults is reported without the
+default (`returned by the Naming hook for one of the trait's defaults`). The refusal is a
+`*NameCollisionError` with no `Kind`; a component's own application is the member with no
+`Role` and no `Trait`. **This is a behaviour change** (go-kure/launcher#787): before it, two
+sub-applications of one name were accepted. Two of one name in two bundles (two tiers, two
+groups) are two applications and stay accepted. A Naming hook that answers for role
+`sub-application` gives each a name of its own. A sub-application's
 name is also not its object's: a hook that renames the sub-application leaves the object's name
 alone. A consumer that read a sub-application's `Name` to learn the name of its ConfigMap,
 Secret, Ingress, HTTPRoute or ReplicationSource must read the generated object instead.
@@ -2055,7 +2087,9 @@ sibling group is one) or as a trait's sub-application and its component. Produce
 read alike are named once with their count, since the cluster cannot tell them apart: two
 traits of one component whose sub-applications share a name read as `2 sub-applications
 "dup" of component "web"`, a trait named after its own component and that component as
-`2 applications "web" of component "web"` (go-kure/launcher#757). A repeat within one application is not reported. `kurel build` runs both before it writes anything.
+`2 applications "web" of component "web"` (go-kure/launcher#757). The transform itself refuses
+both of those shapes within one bundle (two applications of one name, go-kure/launcher#787), so
+the check meets them only in a cluster built some other way. A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
 A PersistentVolume or PersistentVolumeClaim that is force-applied, or covered by the
 `ForceReplace` delivery intent, is warned about, not refused (go-kure/launcher#720): when an
@@ -2213,9 +2247,10 @@ The build refuses a group:
   are compared after each sub-application's `ApplyPolicy` has run, so a policy that
   renames a sub-application onto another member's is refused, and the name it moved
   away from is free (go-kure/launcher#755). Two sub-applications that both still carry
-  the name the `Naming` hook gave them are compared by their defaults instead: the hook
-  may give two different sub-applications one name, and the same trait on both members
-  is refused whatever the hook answers. A name is the hook's when the hook answered,
+  the name the `Naming` hook gave them are compared by their defaults instead: the same
+  trait on both members is refused whatever the hook answers, and two different
+  sub-applications the hook gave one name are left to the bundle, which refuses two
+  applications of one name as it does outside a group. A name is the hook's when the hook answered,
   also when its answer is the default. Several sub-applications of one name that one
   trait creates cannot be told apart: they are the hook's only when the hook named
   every one of them, and are then compared by all their defaults. A name the hook gave

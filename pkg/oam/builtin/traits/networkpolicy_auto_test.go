@@ -1134,7 +1134,8 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 // servicePort, which nothing in the package owns) emits db-allow-ingress-traffic; a router routing
 // to a bare external Service named db would collide. The names are compared as the transform
 // resolved them, so a consumer's Naming hook that tells the two apart lets both through
-// (go-kure/launcher#787).
+// (go-kure/launcher#787). Each policy is held in a sub-application of the same default name in
+// one bundle, so the hook names those apart too: one that names only the policies is refused.
 func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
@@ -1151,8 +1152,15 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 	}
 
 	var asked []string
+	subApps := false
 	ctx.Naming = func(req oam.NameRequest) (string, bool) {
-		if req.Role != oam.NameRoleNetpolSynth {
+		switch {
+		case req.Role == oam.NameRoleSubApplication && subApps && req.Default == "db-allow-ingress-traffic":
+			if req.Component == "" {
+				return "external-db-policy-app", true
+			}
+			return "component-db-policy-app", true
+		case req.Role != oam.NameRoleNetpolSynth:
 			return "", false
 		}
 		asked = append(asked, req.Component+" "+req.Default)
@@ -1161,6 +1169,13 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 		}
 		return "component-db-policy", true
 	}
+	wantApps := `bundle "myapp": name collision: application "db-allow-ingress-traffic" is named by ` +
+		`component "db" (role "sub-application", its default) and by external backend Service "db" (role "sub-application", its default)`
+	if _, _, err := tr.TransformWithPolicy(newApp(), ctx); err == nil || !strings.Contains(err.Error(), wantApps) {
+		t.Fatalf("a hook naming only the policies apart: error = %v, want one containing %q", err, wantApps)
+	}
+
+	asked, subApps = nil, true
 	cluster, _, err := tr.TransformWithPolicy(newApp(), ctx)
 	if err != nil {
 		t.Fatalf("a hook naming the two policies apart was refused: %v", err)

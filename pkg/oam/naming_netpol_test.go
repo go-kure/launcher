@@ -44,7 +44,7 @@ func TestResolveSynthesizedPolicyNames_ExternalBackendsOfOneShortenedDefault(t *
 	}
 
 	resolver := &nameResolver{application: "shop", claims: NewNameAllocator()}
-	err := resolver.resolveSynthesizedPolicyNames(cluster)
+	err := resolver.resolveSynthesizedPolicyNames(cluster, nil)
 	want := `synthesized NetworkPolicy "` + policy + `": name collision: NetworkPolicy.networking.k8s.io "default/` + policy +
 		`" is named by external backend Service "` + long + `" (role "netpol-synth", its default) and by external backend Service "` +
 		twin + `" (role "netpol-synth", its default); give one of them another name`

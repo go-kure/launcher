@@ -291,6 +291,19 @@ Decided in the ticket:
   `CheckInDocumentCollisions` over `GenerateApplications`: the objects of a component that
   is not a kind component, the lowering-rule names without a role, and the objects of a
   trait outside the roles.
+- **Shipped: two applications of one name in one bundle are refused** (`pkg/oam/bundle_application_names.go`,
+  `pkg/oam/README.md` "Name roles and the `Naming` hook"). A sub-application's name is not
+  claimed when it is resolved, since its `ApplyPolicy` may still rename it; once every
+  trait of a bundle and every sub-application's policy has run, two applications of one
+  name in the bundle (a component's own and a trait's sub-application, or two
+  sub-applications) fail the transform as a `*NameCollisionError`, naming both and where
+  each name came from: authored, the hook, the default, set by the trait without
+  resolving it, or renamed by its policy or after it. Every bundle is read again once
+  nothing adds or renames an application, so a synthesized NetworkPolicy's
+  sub-application and a bundle a trait adds as a child are held to the same rule.
+  - **Behaviour change:** two sub-applications of one name were accepted before (a
+    `configmap` and a `pvc` trait both named `dup`). Two of one name in two bundles stay
+    accepted.
 - **Shipped: `postgresql` `poolerName` and `databases[].objectName`**
   (`PostgresqlRule`, `pkg/oam/builtin/components/postgresql_lowering.go`). The Pooler's
   endpoint selector follows the chosen name. `poolerName` without `pooler.enabled: true`

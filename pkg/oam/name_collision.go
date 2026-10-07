@@ -10,7 +10,7 @@ import (
 
 // ErrNameCollision is what every name collision answers to under errors.Is: the
 // refusal of one object, bundle, hook-group name prefix or layout Kustomization
-// name that two members of a
+// name, or of one application name in one bundle, that two members of a
 // transform named (go-kure/launcher#787). errors.As with a *NameCollisionError
 // finds the same error and says what was named and by whom.
 var ErrNameCollision = errors.New("oam: name collision")
@@ -25,8 +25,10 @@ var ErrNameCollision = errors.New("oam: name collision")
 type NameCollisionError struct {
 	// Kind is the group and kind of the object that was named. It is zero for a
 	// name that is no object's: a bundle's (the members' Role is "bundle" or
-	// "group"), a hook-group name prefix (their Role is "hook-group") or the
-	// Kustomization of a component's own layout (their Role is "layout").
+	// "group"), a hook-group name prefix (their Role is "hook-group"), the
+	// Kustomization of a component's own layout (their Role is "layout") or an
+	// application of one bundle (one Role, at least, is "sub-application"; a
+	// component's own application has no Role and no Trait).
 	Kind schema.GroupKind
 	// Namespace is the object's namespace as the text prints it. It is empty for
 	// a cluster-scoped object and for a name that is no object's. It is also
@@ -92,6 +94,13 @@ func (e *NameCollisionError) named() string {
 		group: e.Kind.Group, kind: e.Kind.Kind, namespace: e.Namespace, name: e.Name,
 	}}
 	if e.Kind.Kind == "" {
+		// Two applications of one bundle: one of them, at least, is a trait's
+		// sub-application, and the other may be a component's own application,
+		// which has no role (checkBundleApplicationNames).
+		if e.First.Role == NameRoleSubApplication || e.Second.Role == NameRoleSubApplication {
+			key.class = nameClassSubApplication
+			return key.String()
+		}
 		switch e.First.Role {
 		case NameRoleHookGroup:
 			key.class = nameClassHookGroupPrefix
@@ -104,6 +113,16 @@ func (e *NameCollisionError) named() string {
 	return key.String()
 }
 
+// authoredProperty is the property the author wrote claim's name in, empty for
+// a name the author did not write: a renamed sub-application's claim carries its
+// earlier name there instead (nameFromPolicy).
+func authoredProperty(claim resolvedNameClaim) string {
+	if claim.source != nameFromAuthor {
+		return ""
+	}
+	return claim.property
+}
+
 // collisionMember is claim as a NameCollisionError names it, described in as
 // much detail as asked (nameOwner.describe).
 func collisionMember(claim resolvedNameClaim, detail int) NameCollisionMember {
@@ -111,7 +130,7 @@ func collisionMember(claim resolvedNameClaim, detail int) NameCollisionMember {
 		Component:   claim.owner.component,
 		Trait:       claim.owner.trait,
 		Role:        claim.owner.role,
-		Property:    claim.property,
+		Property:    authoredProperty(claim),
 		FromHook:    claim.source == nameFromHook,
 		Description: claim.owner.describe(claim.source, claim.property, detail),
 	}
