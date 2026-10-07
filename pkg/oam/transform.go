@@ -1131,7 +1131,7 @@ func (t *Transformer) buildBundle(app *Application, name string, entries []compo
 	apps := make([]*stack.Application, 0, len(entries))
 	for _, e := range entries {
 		if named, ok := e.app.Config.(LayoutKustomizationNameSetter); ok {
-			if err := ctx.names.resolveLayoutKustomizationName(name, e.component.Name, named); err != nil {
+			if err := ctx.names.resolveLayoutKustomizationName(name, e.app.Name, e.component.Name, named); err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", e.component.Name), Cause: err}
 			}
 		}

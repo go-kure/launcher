@@ -71,6 +71,12 @@ func TestLayoutKustomizationName_Defaults(t *testing.T) {
 			size: 63,
 		},
 		{
+			name: "flat, 32 and 32, helm under delivery: template",
+			doc:  hookApp(a32, hookComponent(c32, "helm", url, "        delivery: template\n"), ""),
+			want: oam.ShortenNameWithSuffix(a32, "-"+c32, 63),
+			size: 63,
+		},
+		{
 			name: "ordered, 30 and 30 under the group bundle",
 			doc:  hookApp(a30, strings.ReplaceAll(hookComponent("db", "helmtemplate", url, ""), "name: db", "name: "+c30)+layoutWeb, strings.ReplaceAll(layoutPlaced, "component: db", "component: "+c30)),
 			want: oam.ShortenNameWithSuffix(a30+"-infra", "-"+c30, 63),
