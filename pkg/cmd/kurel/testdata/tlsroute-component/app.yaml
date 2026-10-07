@@ -1,0 +1,40 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: postgres
+      type: tlsroute
+      properties:
+        parentRefs:
+          - name: edge
+            sectionName: tls
+        hostnames:
+          - db.example.com
+        rules:
+          - backendRefs:
+              - name: postgres
+                port: 5432
+    - name: tenants
+      type: tlsroute
+      properties:
+        objectName: tenants-passthrough
+        parentRefs:
+          - name: shared
+            namespace: gateways
+            sectionName: tls
+        hostnames:
+          - "*.tenants.example.com"
+          - tenants.example.com
+        rules:
+          - name: split
+            backendRefs:
+              - name: tenants
+                port: 8443
+                weight: 90
+              - name: tenants-next
+                namespace: staging
+                port: 8443
+                weight: 10

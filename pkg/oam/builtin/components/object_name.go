@@ -589,6 +589,21 @@ func (h *ClusterExternalSecretHandler) ComponentObject() (schema.GroupKind, oam.
 	return externalSecretsKind(esv1.ClusterExtSecretKind), oam.ObjectScopeCluster
 }
 
+// ComponentObject declares the tcproute kind's TCPRoute.
+func (h *TCPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("TCPRoute"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the udproute kind's UDPRoute.
+func (h *UDPRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("UDPRoute"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the tlsroute kind's TLSRoute.
+func (h *TLSRouteHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return gatewayAPIKind("TLSRoute"), oam.ObjectScopeNamespaced
+}
+
 // ComponentObject declares the cnpg-cluster kind's Cluster.
 func (h *CnpgClusterHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return cnpgKind(cnpgv1.ClusterKind), oam.ObjectScopeNamespaced

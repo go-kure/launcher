@@ -1,0 +1,43 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres
+  namespace: default
+spec:
+  hostnames:
+  - db.example.com
+  parentRefs:
+  - name: edge
+    sectionName: tls
+  rules:
+  - backendRefs:
+    - name: postgres
+      port: 5432
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: tenants
+  name: tenants-passthrough
+  namespace: default
+spec:
+  hostnames:
+  - '*.tenants.example.com'
+  - tenants.example.com
+  parentRefs:
+  - name: shared
+    namespace: gateways
+    sectionName: tls
+  rules:
+  - backendRefs:
+    - name: tenants
+      port: 8443
+      weight: 90
+    - name: tenants-next
+      namespace: staging
+      port: 8443
+      weight: 10
+    name: split

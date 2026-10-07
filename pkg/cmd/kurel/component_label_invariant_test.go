@@ -546,8 +546,15 @@ spec:
 	"servicemonitor": {props: map[string]any{
 		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
 		"endpoints": []any{map[string]any{"port": "metrics"}}}},
-	"statefulset":           {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
-	"storageclass":          {props: map[string]any{"provisioner": "csi.example.com"}},
+	"statefulset":  {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"storageclass": {props: map[string]any{"provisioner": "csi.example.com"}},
+	"tcproute": {props: map[string]any{
+		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
+	"tlsroute": {props: map[string]any{
+		"hostnames": []any{"db.example.com"},
+		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
+	"udproute": {props: map[string]any{
+		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}},
 	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
 	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
 	// selector the workload kinds build into the output.

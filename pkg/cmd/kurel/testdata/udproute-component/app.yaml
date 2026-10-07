@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: dns
+      type: udproute
+      properties:
+        parentRefs:
+          - name: edge
+            sectionName: dns
+        rules:
+          - backendRefs:
+              - name: dns
+                port: 53
+    - name: syslog
+      type: udproute
+      properties:
+        objectName: syslog-collectors
+        parentRefs:
+          - name: shared
+            namespace: gateways
+            port: 514
+        rules:
+          - name: collectors
+            backendRefs:
+              - name: syslog
+                port: 514
+                weight: 3
+              - name: syslog
+                namespace: logging
+                port: 514
+                weight: 1

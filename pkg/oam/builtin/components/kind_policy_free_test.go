@@ -899,6 +899,27 @@ var policyFreeKinds = []policyFreeKind{
 		},
 	},
 	{
+		component: "tcproute", handler: &components.TCPRouteHandler{},
+		gvk: gatewayGVK("TCPRoute"),
+		typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](), namespaced: true,
+		minimal: gatewayRouteMinimal(),
+		full:    gatewayRouteFull(),
+	},
+	{
+		component: "tlsroute", handler: &components.TLSRouteHandler{},
+		gvk: gatewayGVK("TLSRoute"),
+		typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](), namespaced: true,
+		minimal: tlsRouteMinimal(),
+		full:    tlsRouteFull(),
+	},
+	{
+		component: "udproute", handler: &components.UDPRouteHandler{},
+		gvk: gatewayGVK("UDPRoute"),
+		typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](), namespaced: true,
+		minimal: gatewayRouteMinimal(),
+		full:    gatewayRouteFull(),
+	},
+	{
 		component: "volumeattributesclass", handler: &components.VolumeAttributesClassHandler{},
 		gvk: storagev1.SchemeGroupVersion.WithKind("VolumeAttributesClass"),
 		typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), wholeObject: true,
@@ -1303,6 +1324,13 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		}
 		return out
 	}
+	// The routes that carry no HTTP hold their parents and their rules alike.
+	routeReaches := []string{
+		".Spec.CommonRouteSpec.ParentRefs", ".Spec.CommonRouteSpec.ParentRefs[0].Namespace",
+		".Spec.CommonRouteSpec.ParentRefs[0].Port", ".Spec.Rules", ".Spec.Rules[0].Name", ".Spec.Rules[0].BackendRefs",
+		".Spec.Rules[0].BackendRefs[0].Weight", ".Spec.Rules[0].BackendRefs[1].BackendObjectReference.Port",
+		".Spec.Rules[0].BackendRefs[2].BackendObjectReference.Group",
+	}
 	// In the order of the component types, as policyFreeKinds.
 	reaches := map[string][]string{
 		"artifactgenerator": {
@@ -1521,6 +1549,9 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.AttachMetadata",
 		},
 		"storageclass":          {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
+		"tcproute":              routeReaches,
+		"tlsroute":              append([]string{".Spec.Hostnames"}, routeReaches...),
+		"udproute":              routeReaches,
 		"volumeattributesclass": {".Parameters"},
 	}
 	type copyCase struct {
@@ -1744,6 +1775,39 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		{"solver sub-key", acmeIssuer(map[string]any{"http01": map[string]any{"ingress": map[string]any{"image": "registry.example/solver:1"}}}), notA},
 		{"null solver", map[string]any{"acme": acmeWith("solvers", []any{nil})}, "acme.solvers[0]"},
 		{"two spellings", map[string]any{"selfSigned": map[string]any{}, "SelfSigned": map[string]any{}}, "sets the same field as"},
+	}
+	// The routes that carry no HTTP refuse the same of their rules. base is what
+	// a kind requires beside them, and upstream the type its decode names.
+	routeCases := func(upstream string, base map[string]any) []refusal {
+		on := func(props map[string]any) map[string]any {
+			out := map[string]any{}
+			maps.Copy(out, base)
+			maps.Copy(out, props)
+			return out
+		}
+		return []refusal{
+			{"no rules", on(map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}}), "rules: required"},
+			// The type omits an empty list as it omits an absent one, and a rule
+			// with no backend as one that authors none: the kind refuses each,
+			// since the API server would refuse the object either way.
+			{"empty rules", on(map[string]any{"rules": []any{}}), "rules: required"},
+			{"null rules", on(map[string]any{"rules": nil}), "rules: required"},
+			{"rule without backends", on(map[string]any{"rules": []any{map[string]any{"name": "primary"}}}), "rules[0].backendRefs: required"},
+			{"rule with empty backends", on(gatewayRouteWith()), "rules[0].backendRefs: required"},
+			{"backend without a name", on(gatewayRouteWith(map[string]any{"port": 5432})), "rules[0].backendRefs[0].name: required"},
+			{"parent without a name", on(withProperty(gatewayRouteMinimal(), "parentRefs", []any{map[string]any{"name": "public"}, map[string]any{"sectionName": "postgres"}})), "parentRefs[1].name: required"},
+			// A backend is a Service where it names no group and no kind, and the
+			// API requires the port of one.
+			{"Service without a port", on(gatewayRouteWith(map[string]any{"name": "db"})), "rules[0].backendRefs[0].port: required"},
+			{"Service with a null port", on(gatewayRouteWith(map[string]any{"name": "db", "port": nil})), "rules[0].backendRefs[0].port: required"},
+			{"a later Service, by its kind, without a port", on(gatewayRouteWith(gatewayRouteBackend(), map[string]any{"group": "", "kind": "Service", "name": "db-replica"})), "rules[0].backendRefs[1].port: required"},
+			{"unknown key", on(withProperty(gatewayRouteMinimal(), "listeners", []any{})), notA + upstream},
+			{"the object's spec", map[string]any{"spec": on(gatewayRouteMinimal())}, notA},
+			{"rule sub-key", on(map[string]any{"rules": []any{map[string]any{"backendRefs": []any{gatewayRouteBackend()}, "matches": []any{}}}}), notA},
+			{"port a string", on(gatewayRouteWith(map[string]any{"name": "db", "port": "postgres"})), notA},
+			{"null backend", on(gatewayRouteWith(gatewayRouteBackend(), nil)), "rules[0].backendRefs[1]"},
+			{"two spellings", on(withProperty(gatewayRouteMinimal(), "Rules", []any{})), "sets the same field as"},
+		}
 	}
 	// In the order of the component types, as policyFreeKinds.
 	cases := map[string][]refusal{
@@ -2641,6 +2705,27 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null mount option", map[string]any{"provisioner": "p", "mountOptions": []any{"ro", nil}}, "mountOptions[1]"},
 			{"two spellings", map[string]any{"provisioner": "p", "Provisioner": "q"}, "sets the same field as"},
 		},
+		// A TCPRoute and a UDPRoute hold no hostnames: the key belongs to the
+		// routes that read a name.
+		"tcproute": append([]refusal{
+			{"no properties", nil, "rules: required"},
+			{"another route's key", withProperty(gatewayRouteMinimal(), "hostnames", []any{"db.example.com"}), notA + "gateway.networking.k8s.io/v1 TCPRouteSpec"},
+		}, routeCases("gateway.networking.k8s.io/v1 TCPRouteSpec", nil)...),
+		// A TLSRoute requires its host names too, which the type omits when
+		// empty as it omits the rules; the form of a name is the API server's.
+		"tlsroute": append([]refusal{
+			{"no properties", nil, "hostnames: required"},
+			{"no hostnames", gatewayRouteMinimal(), "hostnames: required"},
+			{"empty hostnames", withProperty(gatewayRouteMinimal(), "hostnames", []any{}), "hostnames: required"},
+			{"null hostnames", withProperty(gatewayRouteMinimal(), "hostnames", nil), "hostnames: required"},
+			{"hostnames without rules", map[string]any{"hostnames": []any{"db.example.com"}}, "rules: required"},
+			{"hostname a number", withProperty(gatewayRouteMinimal(), "hostnames", []any{5432}), notA},
+			{"hostnames a string", withProperty(gatewayRouteMinimal(), "hostnames", "db.example.com"), notA},
+		}, routeCases("gateway.networking.k8s.io/v1 TLSRouteSpec", map[string]any{"hostnames": []any{"db.example.com"}})...),
+		"udproute": append([]refusal{
+			{"no properties", nil, "rules: required"},
+			{"another route's key", withProperty(gatewayRouteMinimal(), "hostnames", []any{"dns.example.com"}), notA + "gateway.networking.k8s.io/v1 UDPRouteSpec"},
+		}, routeCases("gateway.networking.k8s.io/v1 UDPRouteSpec", nil)...),
 		"volumeattributesclass": {
 			{"no properties", nil, "driverName: required"},
 			{"empty driverName", map[string]any{"driverName": "", "parameters": map[string]any{"iops": "1"}}, "driverName: required"},

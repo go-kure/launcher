@@ -599,6 +599,36 @@ var apiSetKinds = []apiSetKind{
 	{component: "servicecidr", typ: reflect.TypeFor[networkingv1.ServiceCIDRSpec](), source: markerAPISource},
 	{component: "servicemonitor", typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), source: markerAPISource},
 	{component: "storageclass", typ: reflect.TypeFor[storagev1.StorageClass](), source: markerAPISource, skip: objectIdentity},
+	{
+		component: "tcproute", typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](),
+		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tcproutes"), "v1"),
+		build:  handlerBuild(&TCPRouteHandler{}, "tcproute"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}
+		}},
+		refused: []string{"rules", "rules[].backendRefs"},
+	},
+	{
+		component: "tlsroute", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
+		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes"), "v1"),
+		build:  handlerBuild(&TLSRouteHandler{}, "tlsroute"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{
+				"hostnames": []any{"db.example.com"},
+				"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}},
+			}
+		}},
+		refused: []string{"hostnames", "rules", "rules[].backendRefs"},
+	},
+	{
+		component: "udproute", typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](),
+		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "udproutes"), "v1"),
+		build:  handlerBuild(&UDPRouteHandler{}, "udproute"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}
+		}},
+		refused: []string{"rules", "rules[].backendRefs"},
+	},
 	{component: "volumeattributesclass", typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), source: markerAPISource, skip: objectIdentity},
 }
 

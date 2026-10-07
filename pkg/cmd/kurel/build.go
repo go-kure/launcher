@@ -366,6 +366,9 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"servicemonitor":                  &components.ServiceMonitorHandler{},
 		"statefulset":                     &components.StatefulsetHandler{},
 		"storageclass":                    &components.StorageClassHandler{},
+		"tcproute":                        &components.TCPRouteHandler{},
+		"tlsroute":                        &components.TLSRouteHandler{},
+		"udproute":                        &components.UDPRouteHandler{},
 		"volumeattributesclass":           &components.VolumeAttributesClassHandler{},
 	}
 }

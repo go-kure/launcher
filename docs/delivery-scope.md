@@ -1022,6 +1022,33 @@ its text:
   - The pods a controller starts for a Gateway are not sized by the object, so the
     policy's maxima have nothing to hold. Labels and annotations are the `labels` and
     `annotations` properties, as on every kind component.
+- **Shipped: three kinds of the Gateway API's `gateway.networking.k8s.io/v1` routes
+  that carry no HTTP,** `tcproute`, `udproute` and `tlsroute` (`tcproute.go`,
+  `udproute.go`, `tlsroute.go`, with what the routes share in
+  `gateway_route_common.go`), each the strict projection of its spec type, declaring
+  its object and taking `objectName`. All three are built on `policyFreeKind`,
+  unchanged: no environment policy applies, no default is filled and no `Policy` method
+  is added, as for the `httproute` kind.
+  - **No capability is required and nothing gates them,** on the terms of the
+    infrastructure kinds above. **A reference across namespaces is not gated either:**
+    a parent's and a backend's `namespace` are written as authored, and whether the
+    Gateway's listener and a ReferenceGrant allow them is the cluster's to answer. The
+    `httproute` kind treats its parents and backends the same way.
+  - A route is an authored object: no parent is taken from a capability, and the
+    NetworkPolicy synthesis allows nothing for its backends.
+  - Required are the `name` of a parent and of a backend that are authored. The kind
+    itself refuses what the API requires and the type omits: a route with no `rules`,
+    a rule with no `backendRefs`, and a `tlsroute` with no `hostnames`. The `httproute`
+    kind requires none of these, since the HTTPRoute API requires none: its rules and
+    host names are optional there. A TLSRoute's host names are not artifact sources
+    and are not held to the allowed registries, as an HTTPRoute's are not; their form
+    is the API server's to check.
+  - **One expression rule of the CRDs is held by the kinds:** a backend that is a
+    Service names its `port`. Tests run the CRD of each channel through the API
+    server's creation path and hold a kind's refusals to that path's; every other
+    expression rule a CRD declares is named there with the reason it is left to the
+    API server.
+  - `useDefaultGateways` is an experimental-channel field; a test holds that.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1677,7 +1704,17 @@ its text:
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Missing kinds:** the inventory's `missing` rows (APIService, GRPCRoute among
+- **Held: the seven kinds of cluster-wide admission and API registration,**
+  ValidatingWebhookConfiguration, MutatingWebhookConfiguration,
+  ValidatingAdmissionPolicy and MutatingAdmissionPolicy with their bindings, and
+  APIService. Their inventory rows are `held`: by the Kubernetes documentation they act
+  on every other document's objects or on the API itself, the mutating ones undo what
+  the environment policy checked at build, and the policy has no dimension for
+  cluster-wide admission. A ValidatingAdmissionPolicy and its binding change nothing but
+  can deny writes for the whole cluster; they are taken up when a consumer asks. An RBAC
+  grant, which is emitted, names its subjects in the document that makes it (README
+  "Held: cluster-wide admission and API registration").
+- **Missing kinds:** the inventory's `missing` rows (GRPCRoute among
   them). The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

@@ -182,6 +182,9 @@ at its position.
 | `servicecidr` | A ServiceCIDR with no namespace, holding what was authored. |
 | `servicemonitor` | A ServiceMonitor in the build namespace. No capability is required of the cluster profile to build it. |
 | `storageclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
+| `tcproute` | Two TCPRoutes in the build namespace, one with a single backend, one named by `objectName` that attaches to a Gateway of another namespace and splits its traffic over two backends, one of them in another namespace. No capability is required of the cluster profile to build them. |
+| `tlsroute` | Two TLSRoutes as the `tcproute` fixture's, each naming its host names, one of them a wildcard. No capability is required of the cluster profile to build them. |
+| `udproute` | Two UDPRoutes as the `tcproute` fixture's. No capability is required of the cluster profile to build them. |
 | `volumeattributesclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 
 The

@@ -368,6 +368,25 @@ var requiredWrittenKinds = []pinKind{
 	{component: "httproute", handler: &HTTPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "httproutes"), "v1"),
 		base:   map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}}},
+	{component: "tcproute", handler: &TCPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](),
+		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tcproutes"), "v1"),
+		base: map[string]any{
+			"parentRefs": []any{map[string]any{"name": "public"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}},
+		}},
+	{component: "udproute", handler: &UDPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](),
+		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "udproutes"), "v1"),
+		base: map[string]any{
+			"parentRefs": []any{map[string]any{"name": "public"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}},
+		}},
+	{component: "tlsroute", handler: &TLSRouteHandler{}, typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
+		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes"), "v1"),
+		base: map[string]any{
+			"parentRefs": []any{map[string]any{"name": "public"}},
+			"hostnames":  []any{"db.example.com"},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}},
+		}},
 	// MetalLB's BFD profile and Community are not listed: their CRDs require
 	// no field, so there is nothing to measure.
 	{component: "metallb-ipaddresspool", handler: &MetalLBIPAddressPoolHandler{}, typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),

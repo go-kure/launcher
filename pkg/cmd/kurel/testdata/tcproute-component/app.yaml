@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: postgres
+      type: tcproute
+      properties:
+        parentRefs:
+          - name: edge
+            sectionName: postgres
+        rules:
+          - backendRefs:
+              - name: postgres
+                port: 5432
+    - name: broker
+      type: tcproute
+      properties:
+        objectName: broker-canary
+        parentRefs:
+          - name: shared
+            namespace: gateways
+            port: 5672
+        rules:
+          - name: split
+            backendRefs:
+              - name: broker
+                port: 5672
+                weight: 90
+              - name: broker-next
+                namespace: staging
+                port: 5672
+                weight: 10

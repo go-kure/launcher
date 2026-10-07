@@ -1,0 +1,38 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres
+  namespace: default
+spec:
+  parentRefs:
+  - name: edge
+    sectionName: postgres
+  rules:
+  - backendRefs:
+    - name: postgres
+      port: 5432
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: broker
+  name: broker-canary
+  namespace: default
+spec:
+  parentRefs:
+  - name: shared
+    namespace: gateways
+    port: 5672
+  rules:
+  - backendRefs:
+    - name: broker
+      port: 5672
+      weight: 90
+    - name: broker-next
+      namespace: staging
+      port: 5672
+      weight: 10
+    name: split

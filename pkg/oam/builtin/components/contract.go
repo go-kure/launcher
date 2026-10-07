@@ -361,6 +361,21 @@ func (h *ClusterExternalSecretHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *TCPRouteHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("tcproute")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *UDPRouteHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("udproute")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *TLSRouteHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("tlsroute")
+}
+
+// ContractMetadata implements oam.ContractDescriber.
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
