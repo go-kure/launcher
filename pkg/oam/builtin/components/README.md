@@ -5873,7 +5873,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **A store's `provider`, and inside the provider that is authored
     everything the API requires of it.** The list is not written by hand: it
     is generated from the types of the linked module
-    (`zz_generated_externalsecrets_required.go`), 251 paths at this pin, over
+    (`zz_generated_externalsecrets_required.go`), 263 paths at this pin, over
     every provider the API has. `provider.vault.server`,
     `provider.aws.region`, `provider.aws.service`, `provider.webhook.url` and
     `provider.kubernetes.auth.serviceAccount.name` are five of them. The
