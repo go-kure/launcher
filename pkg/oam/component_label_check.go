@@ -29,16 +29,19 @@ import (
 // monitoringGroup is the API group of the Prometheus operator's kinds,
 // volsyncGroup that of VolSync's, certManagerGroup that of cert-manager's
 // kinds, gatewayGroup that of the Gateway API, externalSecretsGroup that of
-// External Secrets and helmGroup that of Flux's HelmRelease; cnpgPoolerKind is
-// the CloudNativePG Pooler.
+// External Secrets and helmGroup that of Flux's HelmRelease; fluxKustomizeGroup
+// and fluxSourceExtensionsGroup are the groups of Flux's Kustomization and
+// ArtifactGenerator; cnpgPoolerKind is the CloudNativePG Pooler.
 const (
-	monitoringGroup      = "monitoring.coreos.com"
-	volsyncGroup         = "volsync.backube"
-	certManagerGroup     = "cert-manager.io"
-	gatewayGroup         = "gateway.networking.k8s.io"
-	externalSecretsGroup = "external-secrets.io"
-	helmGroup            = "helm.toolkit.fluxcd.io"
-	cnpgPoolerKind       = "Pooler"
+	monitoringGroup           = "monitoring.coreos.com"
+	volsyncGroup              = "volsync.backube"
+	certManagerGroup          = "cert-manager.io"
+	gatewayGroup              = "gateway.networking.k8s.io"
+	externalSecretsGroup      = "external-secrets.io"
+	helmGroup                 = "helm.toolkit.fluxcd.io"
+	fluxKustomizeGroup        = "kustomize.toolkit.fluxcd.io"
+	fluxSourceExtensionsGroup = "source.extensions.fluxcd.io"
+	cnpgPoolerKind            = "Pooler"
 )
 
 // listStep, as a step of a holder's path, stands for every element of the list
@@ -143,10 +146,10 @@ type operatorMetadataKind struct {
 }
 
 // operatorMetadataKinds are the kinds whose object holds metadata an operator
-// puts on what it creates: pods, or objects that are no pods (noPods). The
-// wrapper reads it and writes nothing there: the pods of such an object carry
-// the operator's labels, and the component label only where the document or a
-// kind puts it.
+// or a Flux controller puts on what it creates: pods, or objects that are no
+// pods (noPods). The wrapper reads it and writes nothing there: the pods of such
+// an object carry the operator's labels, and the component label only where the
+// document or a kind puts it.
 //
 // Metadata that reaches pods is held to both checks:
 //
@@ -162,7 +165,10 @@ type operatorMetadataKind struct {
 //     ClusterIssuer (spec.acme.solvers[].http01.ingress and .gatewayHTTPRoute)
 //     is the metadata of the pods that answer its challenges;
 //   - a Gateway's spec.infrastructure holds labels and annotations for what
-//     the controller creates for the Gateway, which may be pods.
+//     the controller creates for the Gateway, which may be pods;
+//   - spec.commonMetadata of a Flux Kustomization, HelmRelease and
+//     ArtifactGenerator holds labels and annotations the controller puts on
+//     every object it applies, renders or generates, workloads among them.
 //
 // Metadata an operator copies onto objects it creates that are no pods is held
 // to the consumer's reserved keys alone (go-kure/launcher#790): the component
@@ -206,6 +212,9 @@ var operatorMetadataKinds = slices.Concat(
 		{monitoringGroup, "Alertmanager", metadataHolder{path: []string{"spec", "podMetadata"}, in: ReservedKeyInPodMetadata}},
 		{monitoringGroup, "ThanosRuler", metadataHolder{path: []string{"spec", "podMetadata"}, in: ReservedKeyInPodMetadata}},
 		{gatewayGroup, "Gateway", metadataHolder{path: []string{"spec", "infrastructure"}, in: ReservedKeyInInfrastructure}},
+		{fluxKustomizeGroup, "Kustomization", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
+		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
+		{fluxSourceExtensionsGroup, "ArtifactGenerator", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
 
 		// Metadata that reaches objects that are no pods.
 		{certManagerGroup, "Certificate", metadataHolder{path: []string{"spec", "secretTemplate"}, in: ReservedKeyInSecretTemplate, noPods: true}},
@@ -283,9 +292,8 @@ func moverPodLabels(kind string, movers ...string) []operatorMetadataKind {
 // metadata in: its own first, then its pod template's on a kind that has one
 // (podTemplateKinds), then what an operator hands on (operatorMetadataKinds).
 // The reserved keys are read in every one of them, the component label in all
-// but those that reach no pods (noPods). Neither check reads the metadata a
-// Flux object hands on to what it applies (spec.commonMetadata), or a job
-// template's or a volume claim template's.
+// but those that reach no pods (noPods). Neither check reads a job template's
+// or a volume claim template's metadata.
 func metadataHolders(group, kind string) []metadataHolder {
 	holders := []metadataHolder{{path: []string{"metadata"}, in: ReservedKeyInObjectMetadata}}
 	for _, k := range podTemplateKinds {

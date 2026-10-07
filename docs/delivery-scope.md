@@ -800,8 +800,9 @@ its text:
   - Read: an object's own labels and annotations, the pod template's on the kinds that have
     one, a Cluster's `spec.inheritedMetadata`, a Pooler's pod template,
     `spec.podMetadata` of the Prometheus operator kinds, the `moverPodLabels` of a VolSync
-    mover, the pod template of a cert-manager issuer's HTTP01 solvers and a Gateway's
-    `spec.infrastructure` (all but the first three since go-kure/launcher#790, with the
+    mover, the pod template of a cert-manager issuer's HTTP01 solvers, a Gateway's
+    `spec.infrastructure` and `spec.commonMetadata` of a Flux Kustomization, HelmRelease or
+    ArtifactGenerator (all but the first three since go-kure/launcher#790, with the
     component label's check); and metadata an operator copies onto objects it creates that
     are no pods (a solver's Ingress template and HTTPRoute labels, the Secret templates of a
     Certificate and the external-secrets kinds, a ClusterExternalSecret's
@@ -812,9 +813,9 @@ its text:
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
-    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own; a test
-    derives the fields that hand metadata on from the kinds' API types and holds or lists
-    each: `TestLabelReach_EveryFieldIsHeldOrListed`), and what a controller adds.
+    of its own (`volumeClaimTemplates`, a job template's own; a test derives the fields that
+    hand metadata on from the kinds' API types and holds or lists each:
+    `TestLabelReach_EveryFieldIsHeldOrListed`), and what a controller adds.
   - Not read either: what a config that a consumer wraps around an application's config
     after the transform adds. On a layout a config augments, the check reads the objects the
     config's `AugmentLayout` added and leaves what was on the layout before, so a consumer may

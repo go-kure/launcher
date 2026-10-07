@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -138,7 +141,8 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //     spec.inheritedMetadata, a Pooler's pod template, spec.podMetadata of the
 //     Prometheus operator's pod-running kinds, the moverPodLabels of a VolSync
 //     mover, the pod template of a cert-manager issuer's HTTP01 solvers, a
-//     Gateway's spec.infrastructure;
+//     Gateway's spec.infrastructure, and spec.commonMetadata of a Flux
+//     Kustomization, HelmRelease and ArtifactGenerator;
 //   - what an operator copies onto objects it creates that are no pods
 //     (operatorMetadataKinds, noPods): a solver's Ingress template and HTTPRoute
 //     labels, a Certificate's and an ExternalSecret's Secret template, the
@@ -148,9 +152,8 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //     of a VolSync mover.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
-// read: not the metadata a Flux object hands on to what it applies
-// (spec.commonMetadata), not a volume claim template's or a job template's, and
-// not what a chart that Flux installs renders in the cluster.
+// read: not a volume claim template's or a job template's, and not what a chart
+// that Flux installs renders in the cluster.
 func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
@@ -330,6 +333,11 @@ const (
 	// labels and annotations the controller applies to what it creates for the
 	// Gateway, which may be pods.
 	ReservedKeyInInfrastructure ReservedKeyHolder = "spec.infrastructure"
+	// ReservedKeyInCommonMetadata is spec.commonMetadata of a Flux
+	// Kustomization, HelmRelease or ArtifactGenerator, whose labels and
+	// annotations the controller puts on every object it applies, renders or
+	// generates.
+	ReservedKeyInCommonMetadata ReservedKeyHolder = "spec.commonMetadata"
 
 	// The holders below reach objects an operator creates that are no pods.
 
@@ -440,11 +448,11 @@ func nestedObject(m map[string]any, path ...string) (map[string]any, bool, error
 
 // statedOrTypedKind returns obj's API group and kind: the ones it states, else,
 // for a typed object that states none and is of a kind the checks read more
-// than the metadata of (a pod template, a Cluster's inheritedMetadata), its Go
-// type's, as stampComponentLabel tells the pod template kinds. The Prometheus
-// operator's kinds, VolSync's, cert-manager's issuers and the Gateway are not
-// among them: this package does not import their types, so a typed one is
-// recognized only when it states its kind.
+// than the metadata of (a pod template, a Cluster's inheritedMetadata, a Flux
+// object's commonMetadata), its Go type's, as stampComponentLabel tells the pod
+// template kinds. The Prometheus operator's kinds, VolSync's, cert-manager's
+// issuers and the Gateway are not among them: this package does not import
+// their types, so a typed one is recognized only when it states its kind.
 func statedOrTypedKind(obj client.Object) (group, kind string) {
 	if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
 		return gvk.Group, gvk.Kind
@@ -470,6 +478,12 @@ func statedOrTypedKind(obj client.Object) (group, kind string) {
 		return corev1.GroupName, "ReplicationController"
 	case *corev1.PodTemplate:
 		return corev1.GroupName, "PodTemplate"
+	case *kustv1.Kustomization:
+		return fluxKustomizeGroup, kustv1.KustomizationKind
+	case *helmv2.HelmRelease:
+		return helmGroup, helmv2.HelmReleaseKind
+	case *swv1beta1.ArtifactGenerator:
+		return fluxSourceExtensionsGroup, swv1beta1.ArtifactGeneratorKind
 	}
 	return "", ""
 }

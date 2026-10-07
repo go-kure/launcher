@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	appsv1 "k8s.io/api/apps/v1"
@@ -290,6 +293,40 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 				"spec": map[string]any{"infrastructure": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}},
 			[]string{`Gateway "w"`, `spec.infrastructure annotation "example.org/tenant"`, exact},
 		},
+		// What a Flux object's controller puts on everything it applies, renders
+		// or generates.
+		"a Kustomization's common label": {
+			holding(t, unstructuredObject("kustomize.toolkit.fluxcd.io/v1", "Kustomization"), map[string]string{"platform.example/zone": "a"}, "spec", "commonMetadata"),
+			[]string{`Kustomization "w"`, `spec.commonMetadata label "platform.example/zone"`, prefix},
+		},
+		"a HelmRelease's common annotation": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "metadata": map[string]any{"name": "w"},
+				"spec": map[string]any{"commonMetadata": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}},
+			[]string{`HelmRelease "w"`, `spec.commonMetadata annotation "example.org/tenant"`, exact},
+		},
+		"an ArtifactGenerator's common label": {
+			holding(t, unstructuredObject("source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator"), map[string]string{"example.org/tenant": "a"}, "spec", "commonMetadata"),
+			[]string{`ArtifactGenerator "w"`, `spec.commonMetadata label "example.org/tenant"`, exact},
+		},
+		// A typed Flux object that states no kind is told by its Go type.
+		"a typed Kustomization's common label, no kind stated": {
+			&kustv1.Kustomization{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: kustv1.KustomizationSpec{
+				CommonMetadata: &kustv1.CommonMetadata{Labels: map[string]string{"platform.example/zone": "a"}},
+			}},
+			[]string{`Kustomization "w"`, `spec.commonMetadata label "platform.example/zone"`, prefix},
+		},
+		"a typed HelmRelease's common annotation, no kind stated": {
+			&helmv2.HelmRelease{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: helmv2.HelmReleaseSpec{
+				CommonMetadata: &helmv2.CommonMetadata{Annotations: map[string]string{"example.org/tenant": "a"}},
+			}},
+			[]string{`HelmRelease "w"`, `spec.commonMetadata annotation "example.org/tenant"`, exact},
+		},
+		"a typed ArtifactGenerator's common label, no kind stated": {
+			&swv1beta1.ArtifactGenerator{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: swv1beta1.ArtifactGeneratorSpec{
+				CommonMetadata: &swv1beta1.CommonMetadata{Labels: map[string]string{"example.org/tenant": "a"}},
+			}},
+			[]string{`ArtifactGenerator "w"`, `spec.commonMetadata label "example.org/tenant"`, exact},
+		},
 		"a List member's label": {
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{
 				map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "plain"}},
@@ -548,10 +585,12 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		"infrastructure of another kind of the group": holding(t, unstructuredObject("gateway.networking.k8s.io/v1", "HTTPRoute"),
 			map[string]string{"example.org/tenant": "a"}, "spec", "infrastructure"),
 		"a null solver": solverIssuer("Issuer", nil),
-		"commonMetadata a Flux object hands on": &unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": map[string]any{"name": "k"},
-			"spec": map[string]any{"commonMetadata": map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}},
-		}},
+		"the two labels in a Kustomization's commonMetadata": holding(t, unstructuredObject("kustomize.toolkit.fluxcd.io/v1", "Kustomization"),
+			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "commonMetadata"),
+		"commonMetadata of a Kustomization of another group": holding(t, unstructuredObject("example.com/v1", "Kustomization"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "commonMetadata"),
+		"commonMetadata of another kind of the group": holding(t, unstructuredObject("helm.toolkit.fluxcd.io/v2", "HelmChart"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "commonMetadata"),
 		"a key that only starts like an entry": &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c",
 			Labels:      map[string]string{"example.org/tenants": "a", "platform.example": "a"},
 			Annotations: map[string]string{"sub.platform.example/zone": "a"}}},
