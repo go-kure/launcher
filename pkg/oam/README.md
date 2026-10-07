@@ -193,15 +193,17 @@ A consumer that sets one on a bundle launcher returned gets what kure's Flux wor
 of it. Under `FluxIntegratedPerLayout` placement eleven settings of a bundle reach further
 than its own Kustomization: `Wait`, `Timeout`, `RetryInterval`, `Labels` and `Annotations`
 since go-kure/kure#1016, and `Interval`, `Prune`, `Force`, `Suspend`, `PostBuild` and
-`Patches` since go-kure/kure#1021. They are also on the Kustomization of the layout of each
-component the bundle holds and of each `helmtemplate` hook-group child of such a component
-(`shop-db` and `shop-db-NN-<phase>`, beside `shop`). The bundle they come from is the one
-that holds the component, and kure hands none of them down from a bundle to its child
-bundles. In a flat application that is the application's bundle. In an ordered one the
-components are in the group bundles below it ([Pipeline](#pipeline)), so a consumer sets
-them on each group bundle: on `shop-infra` they reach `shop-infra`, `shop-infra-db` and the
-`shop-db-NN-<phase>` hook groups, and no other group. Set on the application's bundle alone
-they reach its own Kustomization, and no group's and no grouped component's. `HealthChecks`
+`Patches` since go-kure/kure#1021. The ten besides `Patches` are also on the Kustomization
+of the layout of each component the bundle holds and of each `helmtemplate` hook-group child
+of such a component (`shop-db` and `shop-db-NN-<phase>`, beside `shop`); a patch reaches
+those Kustomizations only as the placements below say, some of them or none. The bundle
+they come from is the one that holds the component, and kure hands none of them down from a
+bundle to its child bundles. In a flat application that is the application's bundle. In an
+ordered one the components are in the group bundles below it ([Pipeline](#pipeline)), so a
+consumer sets them on each group bundle: on `shop-infra` the ten reach `shop-infra`,
+`shop-infra-db` and the `shop-db-NN-<phase>` hook groups, and no other group. Set on the
+application's bundle alone they reach its own Kustomization, and no group's and no grouped
+component's. `HealthChecks`
 stays on the bundle's Kustomization alone. Where neither the bundle nor the layout sets
 `Interval` or `Prune`, a per-layout Kustomization keeps the generator's `spec.interval` and
 `spec.prune`; a bundle with `Prune` on turns garbage collection on for the component's and
@@ -261,11 +263,12 @@ value but `"false"` needs a `kind` but no `apiVersion`.
 
 **Breaking output change** for a consumer (go-kure/kure#1016, go-kure/kure#1021,
 go-kure/kure#1022 and go-kure/kure#1020, with the kure commit `go.mod` pins). Under
-`FluxIntegratedPerLayout` placement, a bundle that sets one of the eleven gives it to the
-Kustomizations of the components it holds and of their hook groups; in a bundle with
-per-layout Kustomizations, a plain untargeted patch with no entry before it that is not plain
-moves off the bundle's own Kustomization where that one does not build the patched object;
-and a tree kure refuses
+`FluxIntegratedPerLayout` placement, a bundle that sets one of the ten besides `Patches` gives
+it to the Kustomizations of the components it holds and of their hook groups; its patches go
+there by the four placements above: a targeted one to every one of them, a plain untargeted
+one to each that builds every object it names (with no entry before it that is not plain, it
+moves off the bundle's own Kustomization where that one does not build the patched object),
+and an untargeted one that is not plain to none; and a tree kure refuses
 for one of the first five reasons above no longer renders. Under any placement, a tree with a
 duration kure refuses no longer renders, a bundle with child bundles that sets `Wait` loses
 its child health checks, and a layout holding an object the writers' type check above refuses
