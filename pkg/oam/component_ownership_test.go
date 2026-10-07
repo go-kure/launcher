@@ -605,7 +605,10 @@ func excludingSelector() *metav1.LabelSelector {
 // TestStampComponentLabel_SelectorThatRulesTheLabelOut: a workload whose own
 // selector matches its pod template, and would not with the label, keeps the
 // template as written: the API server refuses a workload whose selector does not
-// match its template. The object itself is still labelled.
+// match its template. The object itself is still labelled. The wrapper refuses
+// such a workload before it labels it
+// (TestOwnedConfig_ComponentLabelSelectorRulesOut); this holds the labelling
+// step on its own.
 func TestStampComponentLabel_SelectorThatRulesTheLabelOut(t *testing.T) {
 	podLabels := func() map[string]string { return map[string]string{"app": "web"} }
 	dep := &appsv1.Deployment{}

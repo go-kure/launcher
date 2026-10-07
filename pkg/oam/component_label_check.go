@@ -511,8 +511,17 @@ func (o *ownedConfig) checkComponentLabel(g generatedObject) error {
 // carry the component's value, and the cluster refuses a workload whose
 // selector does not match its pod template.
 //
-// A selector that rules the key out, or the component's value, is not refused:
-// its pod template stays as written (withComponentLabel).
+// It refuses too a workload whose pod template carries no value for the key
+// and whose selector rules the label out (selectorRulesOut): the label could
+// not be written there, so the pods would carry none, and no NetworkPolicy
+// generated for the component would select them.
+//
+// A selector the check cannot read (not an object, a label selector that does
+// not decode, a label map whose entry for the key is no string) fails
+// generation: a check that read nothing from it would pass a workload it never
+// held to the label. The kinds refuse such a selector at their strict decode,
+// and a passthrough document is refused when the environment policy reads it,
+// both before generation; a consumer's own config passes through neither.
 func (o *ownedConfig) checkWorkloadSelector(g generatedObject, accepted []string) error {
 	for _, k := range podTemplateKinds {
 		// A PodTemplate has no spec around its template and no selector.
@@ -526,20 +535,76 @@ func (o *ownedConfig) checkWorkloadSelector(g generatedObject, accepted []string
 		if !found {
 			continue
 		}
-		selector, isObject := spec["selector"].(map[string]any)
-		if !isObject {
+		path := strings.Join(k.spec, ".") + ".selector"
+		selector, found, err := objectField(spec, "selector")
+		if err != nil {
+			return errors.Errorf("component label: %s: %s: %w", g.where, strings.Join(k.spec, "."), err)
+		}
+		if !found {
 			continue
 		}
-		for _, required := range requiredLabelValues(selector, o.labelKey, k.labelMapSelector) {
+		var decoded *metav1.LabelSelector
+		var required [][]string
+		if k.labelMapSelector {
+			required, err = labelMapRequiredValues(selector, o.labelKey)
+		} else if decoded, err = decodeLabelSelector(selector); err == nil {
+			required = requiredLabelValues(decoded, o.labelKey)
+		}
+		if err != nil {
+			return errors.Errorf("component label: %s: %s: %w", g.where, path, err)
+		}
+		for _, required := range required {
 			if slices.ContainsFunc(required, func(v string) bool { return slices.Contains(accepted, v) }) {
 				continue
 			}
-			refusal := o.componentLabelRefusal(g, ComponentLabelSelectorRequiresAnother, strings.Join(k.spec, ".")+".selector")
+			refusal := o.componentLabelRefusal(g, ComponentLabelSelectorRequiresAnother, path)
 			refusal.Required = slices.Clone(required)
 			return refusal
 		}
+		// A ReplicationController's selector is a plain label map, which a
+		// further label on the pods never fails.
+		if k.labelMapSelector {
+			continue
+		}
+		rulesOut, err := o.selectorRulesOutLabel(spec, decoded)
+		if err != nil {
+			return errors.Errorf("component label: %s: %w", g.where, err)
+		}
+		if rulesOut {
+			return o.componentLabelRefusal(g, ComponentLabelSelectorRulesOut, path)
+		}
 	}
 	return nil
+}
+
+// selectorRulesOutLabel reports whether the workload spec's selector rules out
+// the label the wrapper would write on its pod template (selectorRulesOut). A
+// template that carries the key already is held to its value instead
+// (checkComponentLabel), and an absent or null one has no pods to label.
+func (o *ownedConfig) selectorRulesOutLabel(spec map[string]any, selector *metav1.LabelSelector) (bool, error) {
+	template, found, err := objectField(spec, "template")
+	if err != nil || !found {
+		return false, err
+	}
+	podLabels, err := labelsOf(template)
+	if err != nil {
+		return false, errors.Errorf("template: %w", err)
+	}
+	if _, carried := podLabels[o.labelKey]; carried {
+		return false, nil
+	}
+	return selectorRulesOut(selector, podLabels, o.labelKey, ComponentLabelValue(o.component)), nil
+}
+
+// decodeLabelSelector reads a workload's label selector as the API server
+// decodes it. One that does not decode is an error, not a selector that
+// requires or rules out nothing.
+func decodeLabelSelector(selector map[string]any) (*metav1.LabelSelector, error) {
+	decoded := &metav1.LabelSelector{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selector, decoded); err != nil {
+		return nil, errors.Errorf("the selector cannot be read: %w", err)
+	}
+	return decoded, nil
 }
 
 // componentLabelRefusal is the refusal of g for the owning component, with what
@@ -560,12 +625,13 @@ func (o *ownedConfig) componentLabelRefusal(g generatedObject, refused Component
 }
 
 // ComponentLabelError is the refusal of a component label value that is not the
-// component's (go-kure/launcher#790). Refused says which of four it is: a value
-// an object holds, the values a workload's selector requires, the value a kind
-// component's `labels` property holds, or the value the kinds would write for an
-// entry a lowering rule emitted.
+// component's (go-kure/launcher#790). Refused says which of five it is: a value
+// an object holds, the values a workload's selector requires, a workload's
+// selector that rules the label out, the value a kind component's `labels`
+// property holds, or the value the kinds would write for an entry a lowering
+// rule emitted.
 //
-// Generation returns the first two and the transform the other two, each on its
+// Generation returns the first three and the transform the other two, each on its
 // own or wrapped, so it is found with errors.As. It answers to
 // ErrComponentLabelValue under errors.Is, which it unwraps to.
 type ComponentLabelError struct {
@@ -629,6 +695,12 @@ const (
 	// requires, for the component label's key, values none of which is its
 	// component's.
 	ComponentLabelSelectorRequiresAnother ComponentLabelRefusal = "selector requires another value"
+	// ComponentLabelSelectorRulesOut is a workload whose own selector rules the
+	// component label out of a pod template that carries no value for it: by a
+	// DoesNotExist on the key, or a NotIn that holds the component's value. The
+	// label could not be written there, so no NetworkPolicy generated for the
+	// component would select its pods.
+	ComponentLabelSelectorRulesOut ComponentLabelRefusal = "selector rules the label out"
 	// ComponentLabelInLabelsProperty is a kind component whose `labels`
 	// property holds the component label's key with a value that is not its
 	// component's. The transform refuses it (withObjectMetadata), before there
@@ -647,6 +719,9 @@ func (e *ComponentLabelError) Error() string {
 	case ComponentLabelSelectorRequiresAnother:
 		return fmt.Sprintf("%s: %s requires %s for the label %q, not the component label of component %q (%q): launcher sets that label on the pod template, and the NetworkPolicies generated for the component select by it; take the label out of the selector, or require that value",
 			e.Object, e.Path, quotedValues(e.Required), e.Key, e.Component, e.Want)
+	case ComponentLabelSelectorRulesOut:
+		return fmt.Sprintf("%s: %s rules out the label %q with the component label of component %q (%q): launcher sets that label on the pod template, and the NetworkPolicies generated for the component select by it, so the pods would be outside them; take the label out of the selector",
+			e.Object, e.Path, e.Key, e.Component, e.Want)
 	case ComponentLabelOfAnotherComponent:
 		return fmt.Sprintf("component %q: its lowering emitted %q, whose `app` label value %q is the component label of component %q: with the component label key %q the objects of %q would carry the label the NetworkPolicies generated for %q select by; rename one of the two components",
 			e.Component, e.Entry, e.Value, e.Other, e.Key, e.Entry, e.Other)
@@ -666,28 +741,30 @@ func (e *ComponentLabelError) Error() string {
 // Unwrap makes the error answer to ErrComponentLabelValue under errors.Is.
 func (e *ComponentLabelError) Unwrap() error { return ErrComponentLabelValue }
 
+// labelMapRequiredValues returns the value a plain label map selector (a
+// ReplicationController's) requires the label key to have, as the one set
+// requiredLabelValues returns for a matchLabels entry. A null entry is the
+// empty string the cluster reads it as; an entry that is no string is an error.
+func labelMapRequiredValues(selector map[string]any, key string) ([][]string, error) {
+	v, named := selector[key]
+	if !named {
+		return nil, nil
+	}
+	switch v := v.(type) {
+	case string:
+		return [][]string{{v}}, nil
+	case nil:
+		return [][]string{{""}}, nil
+	default:
+		return nil, errors.Errorf("the selector's entry %q is a %T, not a string", key, v)
+	}
+}
+
 // requiredLabelValues returns the values selector requires the label key to
 // have one of, one set per requirement: a matchLabels entry and each In
-// expression of a label selector, or the entry of a plain label map
-// (labelMap, a ReplicationController's). A requirement that names no values the
-// key must have (Exists, DoesNotExist, NotIn) is none, and a selector that does
-// not decode requires nothing, as it holds no label back (withComponentLabel).
-func requiredLabelValues(selector map[string]any, key string, labelMap bool) [][]string {
-	if labelMap {
-		switch v := selector[key].(type) {
-		case string:
-			return [][]string{{v}}
-		case nil:
-			if _, named := selector[key]; named {
-				return [][]string{{""}}
-			}
-		}
-		return nil
-	}
-	decoded := &metav1.LabelSelector{}
-	if runtime.DefaultUnstructuredConverter.FromUnstructured(selector, decoded) != nil {
-		return nil
-	}
+// expression. A requirement that names no values the key must have (Exists,
+// DoesNotExist, NotIn) is none.
+func requiredLabelValues(decoded *metav1.LabelSelector, key string) [][]string {
 	var required [][]string
 	if v, named := decoded.MatchLabels[key]; named {
 		required = append(required, []string{v})

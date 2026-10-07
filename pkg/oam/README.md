@@ -605,6 +605,16 @@ A workload whose own selector **requires** another value for the key is refused 
 entry of a `ReplicationController`'s label map. Its pods could not carry the component's
 value.
 
+So is a workload whose own selector **rules the label out** of a pod template that carries no
+value for the key: a selector that matches the template and would stop matching it with the
+label, by a `DoesNotExist` on the key or a `NotIn` holding the component's value. The cluster
+refuses a workload whose selector does not match its template, so launcher could not write the
+label there, and no synthesized policy would select its pods. The refusal names the selector
+(`spec.selector`, a CronJob's `spec.jobTemplate.spec.selector`) and says to take the label out
+of it. A selector that rules out only another value, or that does not match the template in
+the first place, is not refused, nor is a `ReplicationController`'s, a plain label map that a
+further label on its pods never fails.
+
 The refusal names the object, the path and the component, and its text is the document
 author's to read:
 
@@ -628,12 +638,13 @@ if errors.As(err, &refused) {
 }
 ```
 
-`Refused` says which of four refusals it is, and all four answer to `ErrComponentLabelValue`:
+`Refused` says which of five refusals it is, and all five answer to `ErrComponentLabelValue`:
 
 | `Refused` | What is refused | Returned by | Fields beside `Component`, `Key` and `Want` |
 |-----------|-----------------|-------------|----------------------------------------------|
 | `ComponentLabelForeignValue` | a value an object holds under the key | generation | the object, `Path` (the labels, `spec.template.metadata.labels`), `Value` |
 | `ComponentLabelSelectorRequiresAnother` | the values a workload's selector requires | generation | the object, `Path` (the selector, `spec.selector`), `Required` |
+| `ComponentLabelSelectorRulesOut` | a workload's selector that rules the label out | generation | the object, `Path` (the selector, `spec.selector`) |
 | `ComponentLabelInLabelsProperty` | a value a kind component's `labels` property holds under the key | the transform | `Path` (`labels`), `Value` |
 | `ComponentLabelOfAnotherComponent` | an entry whose `app` value is another component's (below) | the transform | `Entry`, `Other`, `Value` |
 
@@ -673,21 +684,19 @@ The label is written into a label map of the object's, or the pod template's, ow
 that uses one map for an object's labels, its selector and its pod template keeps that map
 as it is, so a selector never gains the key.
 
-A workload whose own selector rules the label out keeps its pod template as written: a
-selector that matches the template and would stop matching it with the label, by a
-`DoesNotExist` on the key or a `NotIn` holding the component's value. The cluster refuses a
-workload whose selector does not match its template, so launcher does not add the label
-there. Such a workload then carries no component label on its pods, and a synthesized policy
-does not select them. The workload object itself still carries the label. A
-`ReplicationController`'s selector is a plain label map, which a further label on its pods
-never fails, so its pod template always gets the label.
-
 An unstructured object's labels are read as written, on the object and on a workload's pod
 template. Null `metadata` or `labels` are absent ones, as is a null pod `template`, and a null
 label value is the empty string the cluster reads it as. A nil map, which a config built in
 Go can hold in such a place, reads as a null. A label that is not a string is
 refused, with the object named, whether or not the key is there already: generation fails
-rather than drop a label an author wrote.
+rather than drop a label an author wrote. So does a workload's own selector that the check
+cannot read: one that is no object, a label selector that does not decode as one (a
+`matchLabels` that is no map of strings, an expression whose `values` is no list), or a
+`ReplicationController` label map whose entry for the key is no string. A check that read
+nothing from it would pass a workload it never held to the label. A null selector is an
+absent one. The kinds refuse such a selector at their strict decode, and a `passthrough`
+document is refused when the environment policy reads it, as an object that cannot be read,
+both before generation; a config a consumer builds in Go reaches the check with it.
 
 An unstructured list envelope stands for its members when Flux applies it (as the force
 warning reads one: Kustomize's build inlines a `List`, Flux's reader expands what is left, one
@@ -818,6 +827,23 @@ generates. The case is reached only through a consumer's own lowering rule.
   key as a label or an annotation. Before, the job template's own metadata was not read.
 - New exported API: `ReservedKeyInJobTemplate`, the `ReservedKeyHolder` of a CronJob's job
   template (`job template label "…"`).
+
+**Breaking library changes** (go-kure/launcher#790, a selector that rules the label out):
+
+- A document that built before is refused at generation when an owned workload's own selector
+  rules the component label out of a pod template that carries no value for the key (a
+  `DoesNotExist` on the key, or a `NotIn` holding the component's value). Before, the pod
+  template stayed as written: its pods carried no component label, and no synthesized
+  NetworkPolicy selected them. Take the label out of the selector. A chart Flux installs is
+  not read: its post-renderer still sets the label on the pod template.
+- Generation fails on an owned workload whose own selector the check cannot read (no object,
+  a label selector that does not decode, a `ReplicationController` entry for the key that is
+  no string), with the object and the selector's path named. Before, such a selector was
+  read as requiring nothing. The error is no `*ComponentLabelError`: no value is refused. A
+  `passthrough` document with such a selector is refused already, when the environment policy
+  reads it; this reaches a consumer's own config.
+- New exported API: `ComponentLabelSelectorRulesOut`, the `ComponentLabelRefusal` of that
+  refusal.
 
 **New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type

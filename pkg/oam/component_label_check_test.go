@@ -2,6 +2,7 @@ package oam
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -586,9 +588,9 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 
 // TestOwnedConfig_ComponentLabelSelector: a workload whose own selector
 // requires a value for the component label's key that is not the component's is
-// refused. A selector that requires the component's value, or that only rules
-// values out, is not: the second keeps its pod template as written
-// (TestStampComponentLabel_SelectorThatRulesTheLabelOut).
+// refused. A selector that requires the component's value, or that rules only
+// another value out, is not. One that rules the label out is refused as such
+// (TestOwnedConfig_ComponentLabelSelectorRulesOut).
 func TestOwnedConfig_ComponentLabelSelector(t *testing.T) {
 	requirement := func(op metav1.LabelSelectorOperator, values ...string) *metav1.LabelSelector {
 		return &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: op, Values: values}}}
@@ -651,8 +653,6 @@ func TestOwnedConfig_ComponentLabelSelector(t *testing.T) {
 		"matchLabels on another key":             {deployment(&metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}), ""},
 		"In that holds the component's value":    {deployment(requirement(metav1.LabelSelectorOpIn, "db", "web")), ""},
 		"NotIn another value":                    {deployment(requirement(metav1.LabelSelectorOpNotIn, "db")), ""},
-		"NotIn the component's value":            {deployment(requirement(metav1.LabelSelectorOpNotIn, "web")), ""},
-		"DoesNotExist":                           {deployment(requirement(metav1.LabelSelectorOpDoesNotExist)), ""},
 		"Exists":                                 {deployment(requirement(metav1.LabelSelectorOpExists)), ""},
 		"no selector":                            {deployment(nil), ""},
 		// No selector the cluster accepts, and not this check's to refuse.
@@ -662,12 +662,6 @@ func TestOwnedConfig_ComponentLabelSelector(t *testing.T) {
 		// label selector's field is a label.
 		"a ReplicationController label named matchLabels": {
 			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{"matchLabels": "kept"}, "spec"), "",
-		},
-		"a selector that does not decode": {
-			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchLabels": "oops"}, "spec"), "",
-		},
-		"a selector that is no object": {
-			withSelector(unstructuredWorkload("apps/v1", "Deployment"), "oops", "spec"), "",
 		},
 		"a kind of another group": {
 			withSelector(unstructuredWorkload("example.com/v1", "Job"), map[string]any{"matchLabels": map[string]any{ownershipKey: "db"}}, "spec"), "",
@@ -693,6 +687,195 @@ func TestOwnedConfig_ComponentLabelSelector(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not say %s", err, want)
 				}
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_UnreadableSelector: a workload selector the check cannot read
+// fails generation, as metadata it cannot read does, rather than pass a
+// workload it never held to the label (go-kure/launcher#790). The kinds refuse
+// such a selector at their strict decode, and a passthrough document is refused
+// when the environment policy reads it, both before generation; a consumer's own
+// config, as here, reaches the check with it. It is no
+// *ComponentLabelError: no value is refused. A label map entry under another
+// key is not read.
+func TestOwnedConfig_UnreadableSelector(t *testing.T) {
+	withSelector := func(u *unstructured.Unstructured, selector any, path ...string) *unstructured.Unstructured {
+		if err := unstructured.SetNestedField(u.Object, selector, append(slices.Clone(path), "selector")...); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	for name, tc := range map[string]struct {
+		obj client.Object
+		// want is what the error says; empty when the object passes.
+		want string
+	}{
+		"a selector that does not decode": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchLabels": "oops"}, "spec"),
+			`Deployment "w": spec.selector: the selector cannot be read`,
+		},
+		"an expression whose values are no list": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "app", "operator": "In", "values": "web"},
+			}}, "spec"),
+			`Deployment "w": spec.selector: the selector cannot be read`,
+		},
+		"a selector that is no object": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), "oops", "spec"),
+			`Deployment "w": spec: selector is a string, not an object`,
+		},
+		"a CronJob's job selector that does not decode": {
+			withSelector(unstructuredWorkload("batch/v1", "CronJob"), map[string]any{"matchLabels": "oops"}, "spec", "jobTemplate", "spec"),
+			`CronJob "w": spec.jobTemplate.spec.selector: the selector cannot be read`,
+		},
+		"a ReplicationController entry for the key that is no string": {
+			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{ownershipKey: int64(1)}, "spec"),
+			`ReplicationController "w": spec.selector: the selector's entry "` + ownershipKey + `" is a int64, not a string`,
+		},
+
+		"a ReplicationController entry for another key that is no string": {
+			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{"app": int64(1)}, "spec"), "",
+		},
+		"a null selector": {withSelector(unstructuredWorkload("apps/v1", "Deployment"), nil, "spec"), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := &ownershipObjectsConfig{objects: []client.Object{tc.obj}}
+			_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Generate accepted a selector the check cannot read")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not say %s", err, tc.want)
+			}
+			var refused *ComponentLabelError
+			if errors.As(err, &refused) {
+				t.Errorf("error %v is a ComponentLabelError (%q), want another error", err, refused.Refused)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_ComponentLabelSelectorRulesOut: a workload whose own selector
+// matches a pod template that carries no value for the component label's key,
+// and would not match it with the label, is refused: launcher could not label
+// the pods, and no NetworkPolicy generated for the component would select them.
+// The refusal names the selector. A selector that matches no template in the
+// first place, or that rules out only another value, is not this check's.
+func TestOwnedConfig_ComponentLabelSelectorRulesOut(t *testing.T) {
+	ruledOut := func(op metav1.LabelSelectorOperator, values ...string) *metav1.LabelSelector {
+		return &metav1.LabelSelector{
+			MatchLabels:      map[string]string{"app": "web"},
+			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: op, Values: values}},
+		}
+	}
+	podLabels := map[string]string{"app": "web"}
+	deployment := func(selector *metav1.LabelSelector, labels map[string]string) client.Object {
+		d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+		d.Spec.Selector, d.Spec.Template.Labels = selector, maps.Clone(labels)
+		return d
+	}
+	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	statefulSet.Spec.Selector, statefulSet.Spec.Template.Labels = ruledOut(metav1.LabelSelectorOpDoesNotExist), maps.Clone(podLabels)
+	daemonSet := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	daemonSet.Spec.Selector, daemonSet.Spec.Template.Labels = ruledOut(metav1.LabelSelectorOpNotIn, "web"), maps.Clone(podLabels)
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	job.Spec.Selector, job.Spec.Template.Labels = ruledOut(metav1.LabelSelectorOpDoesNotExist), maps.Clone(podLabels)
+	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	cronJob.Spec.JobTemplate.Spec.Selector = ruledOut(metav1.LabelSelectorOpNotIn, "web")
+	cronJob.Spec.JobTemplate.Spec.Template.Labels = maps.Clone(podLabels)
+	rawSelector, err := runtime.DefaultUnstructuredConverter.ToUnstructured(ruledOut(metav1.LabelSelectorOpDoesNotExist))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstructuredWith := func(apiVersion, kind string, spec ...string) *unstructured.Unstructured {
+		u := unstructuredWorkload(apiVersion, kind)
+		if err := unstructured.SetNestedMap(u.Object, rawSelector, append(slices.Clone(spec), "selector")...); err != nil {
+			t.Fatal(err)
+		}
+		if err := unstructured.SetNestedStringMap(u.Object, podLabels, append(slices.Clone(spec), "template", "metadata", "labels")...); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	const rulesOut = "spec.selector rules out the label"
+
+	for name, tc := range map[string]struct {
+		obj client.Object
+		// want is what the refusal says; empty when the object passes.
+		want string
+	}{
+		"DoesNotExist":                {deployment(ruledOut(metav1.LabelSelectorOpDoesNotExist), podLabels), rulesOut},
+		"NotIn the component's value": {deployment(ruledOut(metav1.LabelSelectorOpNotIn, "db", "web"), podLabels), rulesOut},
+		"an empty pod template":       {deployment(&metav1.LabelSelector{MatchExpressions: ruledOut(metav1.LabelSelectorOpDoesNotExist).MatchExpressions}, nil), rulesOut},
+		"a typed StatefulSet":         {statefulSet, rulesOut},
+		"a typed DaemonSet":           {daemonSet, rulesOut},
+		"a typed Job":                 {job, rulesOut},
+		"an unstructured DaemonSet":   {unstructuredWith("apps/v1", "DaemonSet", "spec"), rulesOut},
+		"an unstructured Job":         {unstructuredWith("batch/v1", "Job", "spec"), rulesOut},
+		"a typed CronJob's job selector": {
+			cronJob, "spec.jobTemplate.spec.selector rules out the label",
+		},
+		"an unstructured Deployment": {unstructuredWith("apps/v1", "Deployment", "spec"), rulesOut},
+		"an unstructured CronJob": {
+			unstructuredWith("batch/v1", "CronJob", "spec", "jobTemplate", "spec"), "spec.jobTemplate.spec.selector rules out the label",
+		},
+		"a List member": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{
+				unstructuredWith("apps/v1", "ReplicaSet", "spec").Object,
+			}}}, `ReplicaSet "w": ` + rulesOut,
+		},
+
+		"NotIn another value only": {deployment(ruledOut(metav1.LabelSelectorOpNotIn, "db"), podLabels), ""},
+		// The template matches no selector the cluster would accept with it: not
+		// this check's to refuse.
+		"a selector that matches no template": {deployment(ruledOut(metav1.LabelSelectorOpDoesNotExist), map[string]string{"app": "elsewhere"}), ""},
+		// A template that carries the component's value is held to it, and this
+		// selector does not match it; the cluster refuses that workload.
+		"a template that carries the component's value": {
+			deployment(ruledOut(metav1.LabelSelectorOpDoesNotExist), map[string]string{"app": "web", ownershipKey: "web"}), "",
+		},
+		"a selector that does not parse": {
+			deployment(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: ownershipKey, Operator: "Sometimes"}}}, podLabels), "",
+		},
+		// A ReplicationController's selector is a plain label map, which a further
+		// label on the pods never fails.
+		"a ReplicationController": {
+			func() client.Object {
+				rc := &corev1.ReplicationController{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+				rc.Spec.Selector = map[string]string{"app": "web"}
+				rc.Spec.Template = &corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: maps.Clone(podLabels)}}
+				return rc
+			}(), "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := &ownershipObjectsConfig{objects: []client.Object{tc.obj}}
+			_, err := stack.NewApplication("web", "ns", wrapOwnedConfig(inner, "web", ownershipKey)).Generate()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Generate accepted a selector that rules the component label out")
+			}
+			for _, want := range []string{tc.want, `"` + ownershipKey + `"`, `component "web" ("web")`, "take the label out of the selector"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not say %s", err, want)
+				}
+			}
+			var refused *ComponentLabelError
+			if !errors.As(err, &refused) || refused.Refused != ComponentLabelSelectorRulesOut {
+				t.Errorf("refusal %v is not a ComponentLabelSelectorRulesOut", err)
 			}
 		})
 	}
@@ -959,6 +1142,21 @@ func TestComponentLabelError(t *testing.T) {
 				Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Namespace: "shop", Name: "web",
 				Object: `Deployment "web"`, Path: "spec.selector",
 				Key: ownershipKey, Required: []string{"db", "cache"}, Want: "web",
+			},
+		},
+		"a selector that rules the label out": {
+			generate(nil, func() client.Object {
+				d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "shop"}}
+				d.Spec.Selector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: ownershipKey, Operator: metav1.LabelSelectorOpDoesNotExist},
+				}}
+				return d
+			}()),
+			ComponentLabelError{
+				Refused: ComponentLabelSelectorRulesOut, Component: "web",
+				Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Namespace: "shop", Name: "web",
+				Object: `Deployment "web"`, Path: "spec.selector",
+				Key: ownershipKey, Want: "web",
 			},
 		},
 		"an entry whose value is another component's": {
