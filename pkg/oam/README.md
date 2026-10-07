@@ -1116,6 +1116,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `objectStore`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `objectStoreObjectName` | unless `objectStoreObjectName` is set; not without `objectStore`, since the component then generates none |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 | `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under per-bundle placement it is not read. | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer), shortened to 63 with `-<component>` kept whole (for a component name over 52 characters, the whole name is shortened). | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
+| `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
 
 The `bundle`, `group` and `netpol-synth` names are the hook's to change, and only the hook's.
 The `bundle` and `group` defaults carry no namespace: two applications of one name, or whose
@@ -1132,6 +1133,14 @@ The `volsync` trait's repository Secret has no role either: launcher generates n
 it only names it in the ReplicationSource (`spec.restic.repository`). The author sets that
 reference with `repository`; its default is `<component>-volsync-secret`, and the Secret is the
 consumer's to create under it.
+
+The `generated` role is for a lowering rule or a trait handler outside launcher's own whose
+object no other role names. Such a rule resolves the name with `LoweringContext.ResolveName`,
+such a handler with `(*Trait).ResolveName`, both under `NameRoleGenerated` with the object's
+kind; the name is then put to the hook and claimed as under any role, where without a role it
+would be the handler's alone and compared only by `CheckInDocumentCollisions`. The request
+carries the object's `Kind` and its component, and no field of its own: a hook tells two such
+objects of one component and kind apart by their `Default`.
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
 that resolve to the same prefix are refused: their groups would share names. The names are

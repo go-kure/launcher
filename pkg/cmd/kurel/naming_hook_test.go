@@ -280,7 +280,9 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	}
 
 	// The document has a name of every role, so the list above leaves none out.
-	roles := map[oam.NameRole]bool{}
+	// Role "generated" is the one no builtin asks: it is for a rule or handler
+	// outside launcher's own (TestNameRoleGenerated in pkg/oam).
+	roles := map[oam.NameRole]bool{oam.NameRoleGenerated: true}
 	for _, req := range want {
 		roles[req.Role] = true
 	}

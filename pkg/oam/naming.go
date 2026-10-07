@@ -169,6 +169,15 @@ const (
 	// whole name shortened (ShortenNameWithSuffix). It names neither the layout
 	// nor its directory.
 	NameRoleLayout NameRole = "layout"
+	// NameRoleGenerated is an object a lowering rule or a trait handler generates
+	// that no other role names: the role for a rule or a handler outside
+	// launcher's own, whose object would otherwise have no role to be resolved
+	// under, and so no hook. Default: the one the rule or the handler builds. The
+	// request carries the object's Kind and the component it belongs to; the hook
+	// tells two objects of one component and kind apart by their defaults. No
+	// builtin rule or handler asks it: each object they generate has a role of its
+	// own, or is named by the author.
+	NameRoleGenerated NameRole = "generated"
 )
 
 // nameSyntax is the rule a name that is not the default is held to.
@@ -250,6 +259,7 @@ var nameRoles = []struct {
 	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 	{NameRoleLayout, nameClassLayout, nameSyntaxKustomization},
+	{NameRoleGenerated, nameClassObject, nameSyntaxSubdomain},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
