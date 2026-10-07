@@ -160,6 +160,32 @@ func TestFluxKinds_VerifyProviderDefault(t *testing.T) {
 					}
 				})
 			}
+			// Two spellings of the provider are refused whichever holds the "":
+			// the decode keeps one value and drops the other.
+			for name, verify := range map[string]map[string]any{
+				"the empty one first": {"Provider": "", "provider": "notation"},
+				"the empty one last":  {"Provider": "notation", "provider": ""},
+				"neither empty":       {"Provider": "cosign", "provider": "notation"},
+			} {
+				t.Run("two spellings of the provider, "+name+", are refused", func(t *testing.T) {
+					verify["secretRef"] = secret()
+					_, err := kindConfig(t, k.handler, k.typ, "app", k.props(verify))
+					want := path + ".provider: sets the same field as " + path + ".Provider"
+					if err == nil || !strings.HasPrefix(err.Error(), want) {
+						t.Errorf("ToApplicationConfig error = %v, want it to start with %q", err, want)
+					}
+				})
+			}
+			// So are two spellings of an object on the way to it.
+			t.Run("two spellings of the verification's parent are refused", func(t *testing.T) {
+				props := k.props(map[string]any{"provider": "notation", "secretRef": secret()})
+				first := k.path[0]
+				props[strings.ToUpper(first[:1])+first[1:]] = props[first]
+				_, err := kindConfig(t, k.handler, k.typ, "app", props)
+				if err == nil || !strings.Contains(err.Error(), "sets the same field as") {
+					t.Errorf("ToApplicationConfig error = %v, want two spellings refused", err)
+				}
+			})
 			// Properties built in Go with a typed map or a named string type
 			// encode the same "" and are refused the same way.
 			type provider string

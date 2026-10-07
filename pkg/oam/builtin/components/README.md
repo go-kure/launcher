@@ -6249,7 +6249,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   authored, so the API's default never applies, and the object is then what the API would
   have made of the omitted field. An authored `provider: ""` is refused, since the type
   cannot tell it from an unauthored one and the API's enum (`cosign`, `notation`) refuses it
-  as written. `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the
+  as written. Two spellings of one key on the way (`Provider` and `provider`) are refused,
+  since the decode keeps one value and drops the other. `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the
   markers in the source of the linked Flux modules, which ship no CRD: the required field
   to a refusal shown on a document, and the written value to the default the marker states,
   so an upstream change of that default fails the test. "Required" there is what the
