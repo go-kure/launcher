@@ -20,7 +20,7 @@ import (
 // The API's types publish no field descriptions; the module ships the CRDs its
 // chart installs. TestCertManagerKinds_RequiredMatchCRD holds each kind's
 // required list to them, and TestCertManagerKinds_NoDefaultedZeros the claim
-// that no authored 0 or false is lost on these types.
+// that no CRD default turns an authored 0 or false into another value.
 //
 // cert-manager's validating webhook refuses more than the CRDs do: an Issuer
 // that configures no issuer type or more than one, a keystore with a password

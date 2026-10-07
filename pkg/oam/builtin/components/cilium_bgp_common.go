@@ -16,8 +16,8 @@ import (
 // those, in tests:
 // TestCiliumBGPKinds_RequiredMatchCRD holds each kind's required list to the
 // fields the CRD requires and the type writes unauthored,
-// TestCiliumBGPKinds_DefaultsSitOnPointers the claim that no authored 0 or
-// false is lost on these types, and TestCiliumBGPKinds_ExpressionRules the
+// TestCiliumBGPKinds_DefaultsSitOnPointers the claim that no CRD default turns
+// an authored 0 or false into another value, and TestCiliumBGPKinds_ExpressionRules the
 // CRDs' expression rules to the ones a kind checks or leaves to the API
 // server.
 //

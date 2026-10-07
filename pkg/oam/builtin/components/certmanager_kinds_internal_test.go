@@ -261,10 +261,11 @@ func TestCrdRefusesZero(t *testing.T) {
 // something else, since none of these kinds sets a defaulted-zero list
 // (policyFreeKind.defaultedZeros).
 //
-// Only a default of the CRD replaces an omitted field in the object. One the
-// controller applies when it reads the object (a key size, a rotation policy)
-// reads the same Go type, in which an authored 0 and none are one value, so
-// nothing is lost between the document and what cert-manager sees.
+// This test checks the CRD's defaults only. A default the controller applies
+// when it reads the object (a key size, a rotation policy) is outside it: the
+// controller reads the same Go type, in which an authored 0 and none are one
+// value, so an authored 0 there takes the controller's default whatever
+// launcher writes.
 //
 // At v1.21.2 the Certificate CRD holds no default and the two issuer CRDs four,
 // all strings.

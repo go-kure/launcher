@@ -42,9 +42,9 @@ import (
 // Prometheus operator's kinds. TestExternalSecretsKinds_RequiredMatchSource
 // holds each kind's required list to them, TestExternalSecretsKinds_Rules
 // every expression and property-count rule to what the kinds do about it, and
-// TestExternalSecretsKinds_DefaultedZeros the claim that no authored 0 or
-// false is lost on these types: the stores refuse one on the fields of
-// secretStoreDefaultedZeros, and no other field is of that shape.
+// TestExternalSecretsKinds_DefaultedZeros the claim that a CRD default, read
+// from its marker, can turn an authored 0 or false into another value only on
+// the fields of secretStoreDefaultedZeros, where the stores refuse one.
 //
 // A host these objects name is one the operator reaches, not an artifact
 // source: a provider's API, a Vault, a webhook. None is held to the

@@ -13,8 +13,8 @@ import (
 //
 // The module ships the CRDs of both channels of the API.
 // TestGatewayKinds_RequiredMatchCRD holds each kind's required list to them,
-// and TestGatewayKinds_NoDefaultedZeros the claim that no authored 0 or false
-// is lost on these types.
+// and TestGatewayKinds_NoDefaultedZeros the claim that no CRD default turns an
+// authored 0 or false into another value.
 //
 // A host these objects name is one a Gateway serves or a backend is checked
 // against, not an artifact source: a listener's hostname, a Gateway's
