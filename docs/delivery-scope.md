@@ -1708,8 +1708,9 @@ and by scope, whatever component or trait emits it.
     and one without builds it. **Not held:** what the operator adds on its own (its
     config-reloader containers, the governing Service) is not in the object; its code is
     not in the linked module and was not read.
-  - **`baseImage`, `tag` and `sha` are not authorable** when not empty (an empty one
-    writes nothing): deprecated upstream, and the
+  - **`baseImage`, `tag` and `sha` are not authorable**: not in the schema, so `kurel build`
+    refuses each as an unsupported field, an empty one included, and the kind's conversion
+    refuses one that is not empty (an empty one there writes nothing): deprecated upstream, and the
     image they yield is composed in operator code outside the linked module, so the kind
     cannot say which image runs.
   - **`podMetadata` takes no label.** It is read for reserved keys as a workload's pod
