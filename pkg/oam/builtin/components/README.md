@@ -2596,10 +2596,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     one in an inline chart source's URL (`fluxcd-provider: address must not
     carry a user or password, which would be written in plain text into the
     Provider; …`): it would sit in the object in plain text. An `address`
-    that is no URL with a host is refused only when it holds an `@`, since
-    the API allows a project ID or a namespace there; `bot:pw@host` and
-    `bot@host` parse as URLs with no user, so parsing alone does not clear
-    them. *Assumption, not read
+    or a `proxy` that is no URL with a host is refused when it holds an `@`
+    (an `address` with no `@` passes, since the API allows a project ID or a
+    namespace there); `bot:pw@host` and `bot@host` parse as URLs with no
+    user, so parsing alone does not clear them. *Assumption, not read
     here:* for the webhook types the address itself is the credential and
     belongs in the Secret `secretRef` names, under an `address` key; the
     linked type says only that this Secret holds "the authentication
@@ -2656,7 +2656,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     refused**, under every policy and under none, by the same rule
     (`resourcesetinputprovider: url must not carry a user or password, which
     would be written in plain text into the ResourceSetInputProvider; …`):
-    the credentials belong in the Secret `secretRef` names. **The host of
+    the credentials belong in the Secret `secretRef` names. A `url` that is
+    no URL with a host is refused too when it holds an `@`, as a Provider's
+    `proxy` is. **The host of
     `url` is held to the allowed registries, whatever the type:** the answer
     of that host decides what a ResourceSet deploys, the `ExternalService`
     call sends the referenced credential to it, and one rule holds a type a

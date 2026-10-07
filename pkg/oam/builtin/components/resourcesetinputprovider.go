@@ -85,9 +85,9 @@ func (h *ResourceSetInputProviderHandler) PropertySchema() map[string]oam.Proper
 const resourceSetInputProviderURLRemedy = ", which would be written in plain text into the ResourceSetInputProvider; use secretRef, whose Secret holds the provider's credentials"
 
 // refuseResourceSetInputProviderUserinfo refuses a user or a password in `url`
-// (refuseFieldUserinfo), with or without a policy.
+// (refuseHostedFieldUserinfo), with or without a policy.
 func refuseResourceSetInputProviderUserinfo(spec *fluxoperatorv1.ResourceSetInputProviderSpec) error {
-	return refuseFieldUserinfo(resourceSetInputProviderType, "url", spec.URL, resourceSetInputProviderURLRemedy)
+	return refuseHostedFieldUserinfo(resourceSetInputProviderType, "url", spec.URL, resourceSetInputProviderURLRemedy)
 }
 
 // enforceResourceSetInputProviderURL holds the host of `url` to the allowed
