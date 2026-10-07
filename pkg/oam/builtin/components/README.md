@@ -9353,9 +9353,9 @@ authored-property check refuses the key first, with its own text and no reason
 
 ## Upstream fields a hand-parsed kind does not read
 
-Nine kinds read their properties key by key instead of decoding them into the
+Ten kinds read their properties key by key instead of decoding them into the
 Kubernetes type: `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`,
-`service`, `persistentvolumeclaim`, `configmap` and `serviceaccount`. The first
+`service`, `persistentvolumeclaim`, `configmap`, `secret` and `serviceaccount`. The first
 five build pods and are "the five pod-building kinds" below. For such
 a kind an upstream field its parser does not know is no decode error; it is a
 key the parser never looks at. The rule that closes that gap
@@ -9367,7 +9367,8 @@ key the parser never looks at. The rule that closes that gap
 
 `webservice` and `worker` lower to a `deployment` and refuse what it refuses;
 the `pvc` trait reads a claim through the `persistentvolumeclaim` kind's
-parser and refuses what that kind refuses.
+parser and refuses what that kind refuses, and the `secret` trait reads its
+Secret through the `secret` kind's parser (`ParseSecretProperties`).
 
 ### The two paths
 
@@ -9488,7 +9489,7 @@ refuses an undeclared key whatever its value, null included.
 ### What holds this
 
 - `TestHandParsedKinds_CoverEveryUpstreamField` walks the upstream type of
-  each of the nine kinds, from the object down every level whose fields are
+  each of the ten kinds, from the object down every level whose fields are
   the component's properties, and fails on a field that is neither read, nor
   refused, nor placed in one of the classes above — so a field a later
   `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
