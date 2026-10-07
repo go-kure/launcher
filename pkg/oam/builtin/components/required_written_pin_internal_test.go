@@ -18,6 +18,13 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -65,12 +72,25 @@ const (
 // requiredWrittenValidDefaults are the members whose written value is one the
 // API takes as authored, not an empty one: `instances` 1 is the CRD's own
 // default, and `enabled` false, which the CRD requires and gives no default,
-// is the valid zero value of the Go type. They are left out of the set, by
+// is the valid zero value of the Go type. Of the Flux kinds, `interval` is the
+// kind's own default, a verification's `provider` the API's (which the kind
+// writes, TestFluxKinds_VerifyProviderDefault), and a Kustomization's `prune`
+// false the valid zero value of the Go type. They are left out of the set, by
 // kind and path with the value written; one whose omission no longer builds
 // with that value written fails the test.
 var requiredWrittenValidDefaults = map[string]string{
 	"cnpg-cluster instances": "1",
 	"cnpg-cluster postgresql.syncReplicaElectionConstraint.enabled": "false",
+	"bucket interval":                        `"1h0m0s"`,
+	"fluxcd-kustomization interval":          `"1h0m0s"`,
+	"fluxcd-kustomization prune":             "false",
+	"gitrepository interval":                 `"1h0m0s"`,
+	"helmchart interval":                     `"1h0m0s"`,
+	"helmchart verify.provider":              `"cosign"`,
+	"helmrelease interval":                   `"1h0m0s"`,
+	"helmrelease chart.spec.verify.provider": `"cosign"`,
+	"ocirepository interval":                 `"1h0m0s"`,
+	"ocirepository verify.provider":          `"cosign"`,
 }
 
 // requiredWrittenUnauthorable are the paths a kind refuses whatever is
@@ -226,10 +246,9 @@ func goTypeProps(typ reflect.Type) apiextensionsv1.JSONSchemaProps {
 }
 
 // requiredWrittenKinds are the kind components the set is measured on: every
-// kind whose API is a CRD a linked module ships, and the kinds of the two APIs
-// whose markers a reader of this package reads (the Prometheus operator's and
-// the External Secrets Operator's). The Flux kinds are not measured: no linked
-// module ships their CRDs, and no reader of this package reads their markers.
+// kind whose API is a CRD a linked module ships, and the kinds of the APIs
+// whose markers a reader of this package reads (the Prometheus operator's, the
+// Flux controllers' and the External Secrets Operator's).
 var requiredWrittenKinds = []pinKind{
 	{component: "issuer", handler: &IssuerHandler{}, typ: reflect.TypeFor[certv1.IssuerSpec](),
 		schema: pinCRDSchema(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1"),
@@ -334,6 +353,38 @@ var requiredWrittenKinds = []pinKind{
 	{component: "prometheusrule", handler: &PrometheusRuleHandler{}, typ: reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), false),
 		base:   map[string]any{"groups": []any{map[string]any{"name": "g", "rules": []any{map[string]any{"alert": "Down", "expr": "up == 0"}}}}}},
+	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), false)},
+	{component: "bucket", handler: &BucketHandler{}, typ: reflect.TypeFor[sourcev1.BucketSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.BucketSpec](), false)},
+	{component: "fluxcd-alert", handler: &FluxcdAlertHandler{}, typ: reflect.TypeFor[notificationv1beta3.AlertSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.AlertSpec](), false)},
+	{component: "fluxcd-kustomization", handler: &FluxcdKustomizationHandler{}, typ: reflect.TypeFor[kustv1.KustomizationSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[kustv1.KustomizationSpec](), false),
+		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}}},
+	{component: "gitrepository", handler: &GitRepositoryHandler{}, typ: reflect.TypeFor[sourcev1.GitRepositorySpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.GitRepositorySpec](), false),
+		base:   map[string]any{"url": "https://example.com/fleet.git"}},
+	{component: "helmchart", handler: &HelmChartHandler{}, typ: reflect.TypeFor[sourcev1.HelmChartSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.HelmChartSpec](), false)},
+	{component: "helmrelease", handler: &HelmReleaseHandler{}, typ: reflect.TypeFor[helmv2.HelmReleaseSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[helmv2.HelmReleaseSpec](), false),
+		// A marker schema holds no enum, so a list element whose kind is one is
+		// authored with a valid kind.
+		base: map[string]any{
+			"chartRef":   map[string]any{"kind": "OCIRepository", "name": "app"},
+			"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "values"}},
+		}},
+	{component: "helmrepository", handler: &HelmRepositoryHandler{}, typ: reflect.TypeFor[sourcev1.HelmRepositorySpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.HelmRepositorySpec](), false),
+		base:   map[string]any{"url": "https://charts.example.com"}},
+	{component: "imagepolicy", handler: &ImagePolicyHandler{}, typ: reflect.TypeFor[imagev1.ImagePolicySpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[imagev1.ImagePolicySpec](), false)},
+	{component: "imageupdateautomation", handler: &ImageUpdateAutomationHandler{}, typ: reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), false)},
+	{component: "ocirepository", handler: &OCIRepositoryHandler{}, typ: reflect.TypeFor[sourcev1.OCIRepositorySpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.OCIRepositorySpec](), false),
+		base:   map[string]any{"url": "oci://registry.example.com/app"}},
 	{component: "secretstore", handler: &SecretStoreHandler{}, typ: reflect.TypeFor[esv1.SecretStoreSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[esv1.SecretStoreSpec](), true),
 		base:   map[string]any{"provider": externalSecretsPinFake()}},

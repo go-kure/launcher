@@ -9548,9 +9548,15 @@ match expression), has no member: those are refused on every kind
 | `cnpg-objectstore` | 29 | | | 9 | 20 |
 | `httproute` | 44 | | | | 44 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
+| `helmrelease` | 17 | | | | 17 |
+| `fluxcd-kustomization` | 14 | | | | 14 |
+| `bucket`, `ocirepository` | 7 each | | | | 7 |
+| `gitrepository` | 6 | | | | 6 |
+| `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
 None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
-`listenerset`, `referencegrant`, `backendtlspolicy`, `prometheusrule`, `secretstore`,
+`listenerset`, `referencegrant`, `backendtlspolicy`, `prometheusrule`, `artifactgenerator`,
+`fluxcd-alert`, `imagepolicy`, `imageupdateautomation`, `secretstore`,
 `clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `null` or an
 object of such values.
@@ -9564,8 +9570,13 @@ the operator.
 **Excluded as valid values.** A member whose written value the API takes as authored is not
 listed: `cnpg-cluster`'s `instances` (`1`, the CRD's default) and
 `postgresql.syncReplicaElectionConstraint.enabled` (`false`, which the CRD requires and gives
-no default; the Go type's zero value is a valid one). The test names the two and checks that
-their omission builds and writes exactly that value.
+no default; the Go type's zero value is a valid one); of the Flux kinds, `interval` of
+`bucket`, `fluxcd-kustomization`, `gitrepository`, `helmchart`, `helmrelease` and
+`ocirepository` (`"1h0m0s"`, the kind's own default), a verification's `provider` on
+`helmchart`, `helmrelease` (`chart.spec.verify.provider`) and `ocirepository` (`"cosign"`, the
+API's default, which the kind writes), and `fluxcd-kustomization`'s `prune` (`false`, a valid
+zero value). The test names the twelve and checks that their omission builds and writes
+exactly that value.
 
 **Method.** For each field the kind's API requires and its Go type writes unauthored,
 `TestKindComponents_RequiredWrittenNotRefused` builds the kind with the field authored, with
@@ -9576,10 +9587,9 @@ with their reason: a `cilium-networkpolicy`'s `nodeSelector`, a `cnpg-pooler`'s
 `template.spec.ephemeralContainers`, and the `generatorRef` of an `externalsecret`'s or a
 `clusterexternalsecret`'s `data[].sourceRef`. Any other field that cannot be measured fails the
 test. The
-required lists are those of the CRDs of the linked modules. The Prometheus operator and
+required lists are those of the CRDs of the linked modules. The Prometheus operator, Flux and
 External Secrets kinds are read through the schema markers of their linked sources, by the same
-reader as their own required-list tests. The Flux kinds are not measured: no linked module ships
-their CRDs, and no reader of this package reads their markers. The members are pinned in
+reader as their own required-list tests. The members are pinned in
 `testdata/required-written-not-refused.txt`, one line per field (kind, path, family, written
 value). The test fails on any difference, a new member or one that is gone, so a dependency
 bump or a kind change that moves the set fails CI; `UPDATE_REQUIRED_WRITTEN_PIN=1` rewrites
