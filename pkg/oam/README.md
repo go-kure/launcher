@@ -1556,9 +1556,9 @@ registering a `ComponentHandler` in `pkg/cmd/kurel` does *not* by itself make it
 name authorable — the name must also be added here. A type registered on one side only
 is registered-but-unusable (every document naming it fails to parse) or
 parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
-Every kind component is on this list, those of go-kure/launcher#790 among them: the
-components README's "Kind inventory" (`pkg/oam/builtin/components/README.md`) names each
-beside its object.
+"Component type allowlist" below names every type on this list, one row each; the
+components README's "Kind inventory" (`pkg/oam/builtin/components/README.md`) gives the
+object and the details of each kind.
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are
 also trait types: the two lists are separate, and a component of such a type is the
 authored object, not the trait.
@@ -1576,6 +1576,104 @@ component in no tier is ordered after no tier (see "Pipeline"). A component a lo
 rule emits is read the same way, with one exception: a Flux source the rule orders a
 component after is applied with the application bundle, so a tier on it, from an
 annotation or a `placement` policy, is refused.
+
+### Component type allowlist
+
+The component types parsing accepts without a widening (`validComponentTypes`), in the order
+`sort.Strings` gives them. A change that adds a type adds its row at its position:
+`pkg/cmd/kurel`'s `TestKindLists_Complete` fails on a type of the list with no row here and
+on a row of no type of the list, and `TestKindLists_InOrder` on a row out of place.
+
+| Type |
+|---|
+| `artifactgenerator` |
+| `backendtlspolicy` |
+| `bucket` |
+| `certificate` |
+| `cilium-bgpadvertisement` |
+| `cilium-bgpclusterconfig` |
+| `cilium-bgpnodeconfigoverride` |
+| `cilium-bgppeerconfig` |
+| `cilium-cidrgroup` |
+| `cilium-clusterwidenetworkpolicy` |
+| `cilium-egressgatewaypolicy` |
+| `cilium-loadbalancerippool` |
+| `cilium-localredirectpolicy` |
+| `cilium-networkpolicy` |
+| `cilium-nodeconfig` |
+| `clusterexternalsecret` |
+| `clusterissuer` |
+| `clusterrole` |
+| `clusterrolebinding` |
+| `clustersecretstore` |
+| `cnpg-cluster` |
+| `cnpg-database` |
+| `cnpg-objectstore` |
+| `cnpg-pooler` |
+| `configmap` |
+| `crd` |
+| `cronjob` |
+| `csidriver` |
+| `daemonset` |
+| `deployment` |
+| `endpointslice` |
+| `externalsecret` |
+| `fluxcd-alert` |
+| `fluxcd-kustomization` |
+| `gateway` |
+| `gatewayclass` |
+| `gitrepository` |
+| `helm` |
+| `helmchart` |
+| `helmrelease` |
+| `helmrepository` |
+| `helmtemplate` |
+| `horizontalpodautoscaler` |
+| `httproute` |
+| `imagepolicy` |
+| `imageupdateautomation` |
+| `ingress` |
+| `ingressclass` |
+| `issuer` |
+| `job` |
+| `limitrange` |
+| `listenerset` |
+| `manifests` |
+| `namespace` |
+| `networkpolicy` |
+| `oci` |
+| `ocirepository` |
+| `passthrough` |
+| `persistentvolume` |
+| `persistentvolumeclaim` |
+| `pod` |
+| `poddisruptionbudget` |
+| `podmonitor` |
+| `podtemplate` |
+| `postgresql` |
+| `priorityclass` |
+| `prometheus-probe` |
+| `prometheusrule` |
+| `referencegrant` |
+| `replicaset` |
+| `replicationcontroller` |
+| `replicationdestination` |
+| `replicationsource` |
+| `resourcequota` |
+| `role` |
+| `rolebinding` |
+| `runtimeclass` |
+| `secret` |
+| `secretstore` |
+| `service` |
+| `serviceaccount` |
+| `servicecidr` |
+| `servicemonitor` |
+| `statefulset` |
+| `storageclass` |
+| `volumeattributesclass` |
+| `webservice` |
+| `worker` |
 
 ## Transform & extension
 
