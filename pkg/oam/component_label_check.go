@@ -410,8 +410,8 @@ func (o *ownedConfig) check(obj client.Object) error {
 // document can change it, so it is accepted on that entry's objects. It is no
 // other component's value: the transform refuses a document in which it would
 // be (checkEntryLabelValues). Such an entry's pods then carry the entry's value,
-// and the component's NetworkPolicies, which select the owner's, do not select
-// them.
+// and the NetworkPolicies synthesized for the entry select it beside the
+// owner's (componentPodSelector).
 func (o *ownedConfig) componentLabelValues() []string {
 	values := []string{ComponentLabelValue(o.component)}
 	if o.labelKey == appLabelKey && o.entry != "" && o.entry != o.component {

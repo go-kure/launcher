@@ -121,12 +121,35 @@ func (c *componentAllowPolicyConfig) podSelectorKey() string {
 // policy selects: the authored component owner, the one the label pass stamps on
 // what the entry generates (markComponentOwnership), else the entry's own name.
 // A rule that emits several pod-running entries from one component gets
-// policies that each select the pods of all of them, as a sibling group's does.
+// policies that each select the pods of all of them, as a sibling group's does,
+// except under the key `app`, where an entry's pods carry its own value
+// (componentPodSelector).
 func selectedComponent(owner, name string) string {
 	if owner != "" {
 		return owner
 	}
 	return name
+}
+
+// componentPodSelector returns the pod selector of an entry's synthesized
+// inbound or egress policy: the label key with the authored component's value
+// (selectedComponent). Under the key `app` an entry a lowering rule emitted
+// under a name of its own has a second value, its own, which the kinds write on
+// its pods (ownedConfig.componentLabelValues); the selector then takes both
+// values, so those pods are not left outside the policy (go-kure/launcher#790).
+// Under any other key the entry's pods carry the owner's value only.
+func componentPodSelector(key, owner, name string) metav1.LabelSelector {
+	value := ComponentLabelValue(selectedComponent(owner, name))
+	if key == appLabelKey && name != "" {
+		if own := ComponentLabelValue(name); own != value {
+			return metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key:      key,
+				Operator: metav1.LabelSelectorOpIn,
+				Values:   []string{value, own},
+			}}}
+		}
+	}
+	return metav1.LabelSelector{MatchLabels: map[string]string{key: value}}
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy
@@ -140,10 +163,9 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	np.Annotations = nil
 	// The value is the component's label value, not its raw name: a name over 63
 	// characters is not a valid label value (go-kure/launcher#572). It is the
-	// authored component's, the value the label pass stamps (go-kure/launcher#788).
-	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(selectedComponent(c.Owner, c.ComponentName))},
-	}
+	// authored component's, the value the label pass stamps (go-kure/launcher#788),
+	// and under the key `app` also the entry's own (componentPodSelector).
+	np.Spec.PodSelector = componentPodSelector(c.podSelectorKey(), c.Owner, c.ComponentName)
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	appendIngressTrafficRules(np, c.Rules)
@@ -730,10 +752,8 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	np.Labels = nil
 	np.Annotations = nil
 	// The authored component's label value, as on the inbound side
-	// (go-kure/launcher#572, go-kure/launcher#788).
-	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(selectedComponent(c.Owner, c.ComponentName))},
-	}
+	// (go-kure/launcher#572, go-kure/launcher#788, componentPodSelector).
+	np.Spec.PodSelector = componentPodSelector(c.podSelectorKey(), c.Owner, c.ComponentName)
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
 
 	// Protocol is a deliberate TCP constant: the per-peer signal carries no
