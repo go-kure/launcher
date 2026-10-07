@@ -21,6 +21,17 @@ func cnpgDefaultedZeros(fields map[string]string) defaultedZeroFields {
 	return defaultedZeroFields{api: "CloudNativePG", defaulter: "operator", fields: fields}
 }
 
+// refuseCnpgOperatorImage refuses, under a non-empty registry allowlist, an
+// image the document leaves to the CloudNativePG operator: the build never sees
+// the image the operator then chooses, so no allowlist can hold it. path names
+// the field the document leaves unset. With no list nothing is refused.
+func refuseCnpgOperatorImage(path string, allowed []string) error {
+	if len(allowed) == 0 {
+		return nil
+	}
+	return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("%s: unset, so the CloudNativePG operator chooses the image the pods run, which the allowed registries %v cannot hold; name an image from one of them", path, allowed))
+}
+
 // requireCnpgClusterRef refuses a spec.cluster reference with no name, on every
 // kind that refers to a Cluster. The Pooler, Backup and ScheduledBackup CRDs
 // require the name, and their Go type writes an unauthored one as

@@ -158,7 +158,8 @@ maximum on every claim the Cluster creates (`storage`, `walStorage`, each
 tablespace and the ephemeral volume template), the privileged, capability and
 host-process refusals on the two security contexts, and the registry allowlist
 the workload kinds apply to their image, on an authored `imageName` and on the
-image of each `postgresql.extensions[]` entry.
+image of each `postgresql.extensions[]` entry, with a Cluster that leaves its
+image to the operator refused under a non-empty allowlist.
 
 `cnpg-pooler` polices what the `Pooler` runs: its pod template gets the gates
 the workload kinds apply to their pod (host namespaces, hostPath volumes,
@@ -166,7 +167,9 @@ privilege, host-process, capabilities, the registry allowlist on each authored
 container image and on an image volume's reference, and the cpu and memory
 maxima), plus the storage maximum on a
 generic ephemeral volume's claim, as `cnpg-cluster` caps its ephemeral volume
-template, and an authored `pgbouncer.image` gets the registry allowlist. A
+template, and an authored `pgbouncer.image` gets the registry allowlist; under a
+non-empty allowlist a Pooler that leaves the PgBouncer image to the operator is
+refused (see *What this does not cover*). A
 template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
 or `overhead` is refused at parse, as the workload kinds refuse them: the
 operator copies the template into a Deployment, whose pod template cannot
@@ -244,8 +247,16 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
   `postgresql` always writes it (derived from `version` or authored), so since
   go-kure/launcher#281 a `postgresql` image from a registry outside the list is
   refused. When `imageName` is unset the operator takes the image from the
-  catalog `imageCatalogRef` names or, without one, runs its default image;
-  neither is checked by this kind.
+  catalog `imageCatalogRef` names, which this kind does not check, or,
+  without one, chooses an image of its own. No allowlist can hold that one, so
+  under a non-empty allowlist a Cluster naming neither is refused with the
+  registry class (go-kure/launcher#790). `cnpg-pooler` does the same for the PgBouncer
+  image: under a non-empty allowlist it is refused unless the template's
+  `pgbouncer` container, `pgbouncer.image` or `pgbouncer.imageCatalogRef`
+  names it. `postgresql` writes its `pooler.image` to `pgbouncer.image`, so an
+  enabled pooler without it is refused there. The operator's own image, which
+  it runs as a bootstrap init container in both kinds' pods, is not covered:
+  no field names it.
   The image of a `postgresql.extensions[]` entry is held to the same list
   (go-kure/launcher#790); `postgresql` writes no such entry, so only an
   authored `cnpg-cluster` can meet that refusal. An entry without a reference

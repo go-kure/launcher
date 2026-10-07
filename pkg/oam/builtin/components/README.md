@@ -8737,6 +8737,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   allowed; use an explicit version tag or digest`. An authored `imageName`
   is refused under `imageName`; `version` is read for the default image only
   and is not checked beside one. The default `version` builds.
+  `pooler.image` is the PgBouncer image, written to the Pooler's
+  `pgbouncer.image` and held to the tag rule under its own name
+  (`pooler.image: image "…" rejected: …`) and, by the `cnpg-pooler` the pooler
+  lowers to, to the registry allowlist. Like the other pooler settings it
+  needs `pooler.enabled`. Without it the CloudNativePG operator chooses the
+  PgBouncer image, so under a non-empty allowlist an enabled pooler without
+  `pooler.image` is refused (**breaking**, go-kure/launcher#790: it built
+  before), reported under the Pooler's component name:
+  `pgbouncer.image (pooler.image on a postgresql component): unset, so the
+  CloudNativePG operator chooses the image the pods run, which the allowed
+  registries [...] cannot hold; name an image from one of them`. Set
+  `pooler.image` to an image from the list. With no allowlist nothing
+  changes.
   Any other storage size the Cluster would carry, authored or from the
   policy default, must parse and be positive (`storageSize: quantity must be
   positive, got "0"`): CloudNativePG's webhook parses only the size, so a
@@ -8901,7 +8914,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `enabled` that is not authored is refused (`monitoring.enabled: required
     where monitoring.customQueries is set (…)`).
   - `pooler`: the Pooler is emitted when `enabled` is true, so `instances`,
-    `type`, `poolMode` or `parameters` beside an `enabled` that is not
+    `type`, `poolMode`, `parameters` or `image` beside an `enabled` that is not
     authored is refused (`pooler.enabled: required where pooler.instances is
     set (…)`).
 
@@ -9206,9 +9219,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   to their image applies to an authored `imageName`
   (`imageName: image "…" is not from an allowed registry [...]`). When
   `imageName` is unset, the operator takes the image from the catalog
-  `imageCatalogRef` names or, without one, runs its default image; neither is
-  checked by this kind. A `postgresql` component always writes `imageName` (its
-  derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
+  `imageCatalogRef` names, which this kind does not check, or, without one,
+  chooses an image of its own, which no allowlist can hold: under a non-empty
+  allowlist a Cluster with neither `imageName` nor `imageCatalogRef` is
+  refused, with the registry class (**breaking**, go-kure/launcher#790: it
+  built before): `imageName: unset, so the CloudNativePG operator chooses the
+  image the pods run, which the allowed registries [...] cannot hold; name an
+  image from one of them`. Set `imageName`, or `imageCatalogRef` to take the
+  image from a catalog. With no allowlist nothing changes. The operator's own
+  image, which it runs in the instance pods' bootstrap init container, is not
+  covered: no field of the Cluster names it. A `postgresql` component always
+  writes `imageName` (its derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
   so the allowlist applies to its image too. The allowlist applies as well to
   the image of each `postgresql.extensions[]` entry, which the operator mounts
   into the instance pods as an image volume (**breaking**,
@@ -9310,8 +9331,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
   container that names no image is not checked: the operator supplies the
   PgBouncer image, so that is the ordinary form here, where the pod kinds
-  refuse it. Generation runs the shared parser's
-  request/limit and hugepages checks on the template's pod and container
+  refuse it. The operator takes the PgBouncer image, in order, from the
+  template's regular container named `pgbouncer`, from `pgbouncer.image`, from
+  the catalog `pgbouncer.imageCatalogRef` names (not checked by this kind, as
+  for `cnpg-cluster`), and otherwise chooses one of its own, which no allowlist
+  can hold. Under a non-empty allowlist a Pooler that names its image none of
+  these three ways is refused, with the registry class (**breaking**,
+  go-kure/launcher#790: it built before): `pgbouncer.image (pooler.image on a
+  postgresql component): unset, so the CloudNativePG operator chooses the
+  image the pods run, which the allowed registries [...] cannot hold; name an
+  image from one of them`. An image on an init container or on a container of
+  another name does not count. With no allowlist nothing changes. The
+  operator's own image, which it runs in the pod's bootstrap init container,
+  is not covered: no field of the Pooler names it. Generation runs the shared
+  parser's request/limit and hugepages checks on the template's pod and container
   resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
   2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
   other resource-name rules of the shared parser are left to the API server. A

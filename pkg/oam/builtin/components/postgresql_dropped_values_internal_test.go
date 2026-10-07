@@ -1,7 +1,10 @@
 package components
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -195,6 +198,21 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 			refused: "pooler.enabled: required where pooler.instances is set" + poolerOnly,
 		},
 		{
+			name:    "pooler with an image and no enabled",
+			props:   map[string]any{"pooler": map[string]any{"image": "ghcr.io/cloudnative-pg/pgbouncer:1.24.1"}},
+			refused: "pooler.enabled: required where pooler.image is set" + poolerOnly,
+		},
+		{
+			name:  "pooler with an image, switched on",
+			props: map[string]any{"pooler": map[string]any{"enabled": true, "image": "ghcr.io/cloudnative-pg/pgbouncer:1.24.1"}},
+			pooler: map[string]any{
+				"cluster":   map[string]any{"name": "db"},
+				"type":      "rw",
+				"instances": int64(3),
+				"pgbouncer": map[string]any{"poolMode": "session", "image": "ghcr.io/cloudnative-pg/pgbouncer:1.24.1"},
+			},
+		},
+		{
 			name:  "pooler with instances, switched off",
 			props: map[string]any{"pooler": map[string]any{"enabled": false, "instances": 2, "type": "ro"}},
 		},
@@ -255,6 +273,81 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 			}
 			if !reflect.DeepEqual(held, tc.cluster) {
 				t.Errorf("the lowered cnpg-cluster holds %v at %v, want %v", held, tc.clusterPath, tc.cluster)
+			}
+		})
+	}
+}
+
+// lowerPostgresqlPooler lowers a postgresql component with the given pooler
+// block and builds the cnpg-pooler member it emits.
+func lowerPostgresqlPooler(t *testing.T, pooler map[string]any) (*CnpgPoolerConfig, error) {
+	t.Helper()
+	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"pooler": pooler}}
+	res, err := PostgresqlRule{}.LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
+	if err != nil {
+		return nil, err
+	}
+	for i := range res.Components {
+		if res.Components[i].Type == "cnpg-pooler" {
+			cfg, err := (&CnpgPoolerHandler{}).ToApplicationConfig(&res.Components[i], "default")
+			if err != nil {
+				t.Fatalf("cnpg-pooler refuses the lowered component: %v", err)
+			}
+			return cfg.(*CnpgPoolerConfig), nil
+		}
+	}
+	t.Fatal("the lowering emitted no cnpg-pooler component")
+	return nil, nil
+}
+
+// TestPostgresqlRule_PoolerImage: pooler.image is the Pooler's PgBouncer
+// image. It is held to the tag rule under its own name, and to a registry
+// allowlist by the cnpg-pooler member it is written to; without it, a list
+// refuses the Pooler, naming pooler.image.
+func TestPostgresqlRule_PoolerImage(t *testing.T) {
+	ghcr := &imageFieldPolicy{allowed: []string{"ghcr.io"}}
+	t.Run("an untagged image is refused under its own name", func(t *testing.T) {
+		_, err := lowerPostgresqlPooler(t, map[string]any{"enabled": true, "image": "ghcr.io/cloudnative-pg/pgbouncer"})
+		if err == nil || !strings.HasPrefix(err.Error(), `pooler.image: image "ghcr.io/cloudnative-pg/pgbouncer" rejected`) {
+			t.Errorf("err = %v, want the tag rule's refusal under pooler.image", err)
+		}
+	})
+	t.Run("an image from an allowed registry passes", func(t *testing.T) {
+		c, err := lowerPostgresqlPooler(t, map[string]any{"enabled": true, "image": "ghcr.io/cloudnative-pg/pgbouncer:1.24.1"})
+		if err != nil {
+			t.Fatalf("lowering refused: %v", err)
+		}
+		if err := c.ApplyPolicy(ghcr); err != nil {
+			t.Errorf("ApplyPolicy: %v", err)
+		}
+	})
+	t.Run("an image from another registry is refused", func(t *testing.T) {
+		c, err := lowerPostgresqlPooler(t, map[string]any{"enabled": true, "image": "docker.io/bitnami/pgbouncer:1.24.1"})
+		if err != nil {
+			t.Fatalf("lowering refused: %v", err)
+		}
+		want := `pgbouncer.image: image "docker.io/bitnami/pgbouncer:1.24.1" is not from an allowed registry [ghcr.io]`
+		if err := c.ApplyPolicy(ghcr); err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+	for _, image := range []any{nil, ""} {
+		pooler := map[string]any{"enabled": true}
+		if image != nil {
+			pooler["image"] = image
+		}
+		t.Run(fmt.Sprintf("image %#v is refused under a list, naming pooler.image", image), func(t *testing.T) {
+			c, err := lowerPostgresqlPooler(t, pooler)
+			if err != nil {
+				t.Fatalf("lowering refused: %v", err)
+			}
+			err = c.ApplyPolicy(ghcr)
+			var refusal *oam.PolicyRefusal
+			if err == nil || !strings.Contains(err.Error(), "pooler.image on a postgresql component") || !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry {
+				t.Errorf("err = %v, want a registry refusal naming pooler.image", err)
+			}
+			if err := c.ApplyPolicy(&imageFieldPolicy{}); err != nil {
+				t.Errorf("no list: ApplyPolicy: %v", err)
 			}
 		})
 	}

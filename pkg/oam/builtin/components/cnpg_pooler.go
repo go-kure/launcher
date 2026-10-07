@@ -235,8 +235,12 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 
 // ApplyPolicy enforces environment policy on what the Pooler runs: the pod
 // template, as the workload kinds police their pod (enforcePodTemplatePolicy),
-// and the registry allowlist on an authored pgbouncer.image. It fills no
-// default.
+// and the registry allowlist on an authored pgbouncer.image. Under a non-empty
+// allowlist it refuses a Pooler that leaves the PgBouncer image to the
+// operator (refuseCnpgOperatorImage). It fills no default.
+//
+// The operator's own image, which it runs as the pod's bootstrap-controller
+// init container, is not checked: no field names it.
 //
 // The instance count is deliberately not policed, neither a replica default
 // nor a maximum: postgresql applies no policy to its pooler, so a maximum here
@@ -256,7 +260,31 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
+	// The path names postgresql's property too: postgresql lowers its pooler
+	// onto this kind, and its pooler.image is written to pgbouncer.image.
+	if !c.namesPgBouncerImage() {
+		if err := refuseCnpgOperatorImage("pgbouncer.image (pooler.image on a postgresql component)", p.AllowedRegistries()); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// namesPgBouncerImage reports whether the Pooler names the image PgBouncer
+// runs, from any of the sources the operator takes it from, in its order: the
+// image of the template's regular container named "pgbouncer" (the operator
+// fills that container's image only when it is empty), pgbouncer.image, and
+// pgbouncer.imageCatalogRef. A catalog's images are the catalog's to hold.
+func (c *CnpgPoolerConfig) namesPgBouncerImage() bool {
+	if t := c.Spec.Template; t != nil {
+		for _, ctr := range t.Spec.Containers {
+			if ctr.Name == "pgbouncer" && ctr.Image != "" {
+				return true
+			}
+		}
+	}
+	pgb := c.Spec.PgBouncer
+	return pgb != nil && (pgb.Image != "" || pgb.ImageCatalogRef != nil)
 }
 
 // validateImageRefs holds the images the Pooler names to ValidateImageRef, with
@@ -264,10 +292,11 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 // image of each init and regular container and the reference of each image
 // volume. No untagged image and no :latest, as for a workload's container.
 //
-// A field that names no image is not checked, as the registry allowlist does
-// not check it (ApplyPolicy): the operator supplies the PgBouncer image, so a
-// template container without one is the ordinary form here, where the pod
-// kinds refuse it (validateAuthoredPodSpec).
+// A field that names no image is not checked: without a registry allowlist the
+// operator supplies the PgBouncer image, so a template container without one is
+// the ordinary form here, where the pod kinds refuse it
+// (validateAuthoredPodSpec). Under a list, ApplyPolicy refuses a Pooler that
+// names no PgBouncer image at all.
 func (c *CnpgPoolerConfig) validateImageRefs() error {
 	if pgb := c.Spec.PgBouncer; pgb != nil && pgb.Image != "" {
 		if err := ValidateImageRef(pgb.Image); err != nil {

@@ -45,6 +45,7 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 		{"pooler.type", map[string]any{"pooler": map[string]any{"type": 1}}, "pooler.type"},
 		{"pooler.poolMode", map[string]any{"pooler": map[string]any{"poolMode": 1}}, "pooler.poolMode"},
 		{"pooler.parameters", map[string]any{"pooler": map[string]any{"parameters": "x"}}, "pooler.parameters"},
+		{"pooler.image", map[string]any{"pooler": map[string]any{"image": 1}}, "pooler.image"},
 
 		{"bootstrap", map[string]any{"bootstrap": "x"}, "bootstrap"},
 		{"bootstrap.recovery", map[string]any{"bootstrap": map[string]any{"recovery": "x"}}, "bootstrap.recovery"},

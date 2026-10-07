@@ -137,12 +137,20 @@ var imageFieldTypes = []imageFieldType{
 		// refuses a Cluster without one before it reads an image.
 		name: "cnpg-cluster spec",
 		typ:  reflect.TypeFor[cnpgv1.ClusterSpec](),
+		// Each check names the Cluster's own image, by imageName or a catalog
+		// (the CRD admits one of the two), so that it holds its one field: a
+		// Cluster naming neither is refused under a list by a rule of its own
+		// (TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries).
 		held: map[string]func(string, oam.Policy) error{
 			"imageName": func(reference string, p oam.Policy) error {
-				return (&CnpgClusterConfig{Name: "db", Spec: cnpgv1.ClusterSpec{Instances: 1, ImageName: reference}}).ApplyPolicy(p)
+				spec := cnpgv1.ClusterSpec{Instances: 1, ImageName: reference}
+				if reference == "" {
+					spec.ImageCatalogRef = testCnpgImageCatalogRef()
+				}
+				return (&CnpgClusterConfig{Name: "db", Spec: spec}).ApplyPolicy(p)
 			},
 			"postgresql.extensions[].image": func(reference string, p oam.Policy) error {
-				spec := cnpgv1.ClusterSpec{Instances: 1}
+				spec := cnpgv1.ClusterSpec{Instances: 1, ImageCatalogRef: testCnpgImageCatalogRef()}
 				spec.PostgresConfiguration.Extensions = []cnpgv1.ExtensionConfiguration{{
 					Name:              "ext",
 					ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
@@ -174,9 +182,16 @@ var imageFieldTypes = []imageFieldType{
 		// shared check under template.spec.
 		name: "cnpg-pooler spec",
 		typ:  reflect.TypeFor[cnpgv1.PoolerSpec](),
+		// Each check names the PgBouncer image, as the Cluster's checks name the
+		// Cluster's: a Pooler naming none is refused under a list by a rule of
+		// its own (TestCnpgPoolerConfig_ApplyPolicy).
 		held: map[string]func(string, oam.Policy) error{
 			"pgbouncer.image": func(reference string, p oam.Policy) error {
-				return (&CnpgPoolerConfig{Name: "pool", Spec: cnpgv1.PoolerSpec{PgBouncer: &cnpgv1.PgBouncerSpec{Image: reference}}}).ApplyPolicy(p)
+				pgb := &cnpgv1.PgBouncerSpec{Image: reference}
+				if reference == "" {
+					pgb.ImageCatalogRef = testPgBouncerImageCatalogRef()
+				}
+				return (&CnpgPoolerConfig{Name: "pool", Spec: cnpgv1.PoolerSpec{PgBouncer: pgb}}).ApplyPolicy(p)
 			},
 			"template.spec.containers[].image": func(reference string, p oam.Policy) error {
 				return poolerTemplatePolicy(corev1.PodSpec{Containers: []corev1.Container{{Name: "pgbouncer", Image: reference}}}, p)
@@ -275,12 +290,32 @@ var imageFieldTypes = []imageFieldType{
 }
 
 // poolerTemplatePolicy is the cnpg-pooler kind's policy step on a Pooler whose
-// pod template has the given spec.
+// pod template has the given spec and whose PgBouncer image comes from a
+// catalog.
 func poolerTemplatePolicy(ps corev1.PodSpec, p oam.Policy) error {
 	return (&CnpgPoolerConfig{Name: "pool", Spec: cnpgv1.PoolerSpec{
-		PgBouncer: &cnpgv1.PgBouncerSpec{},
+		PgBouncer: &cnpgv1.PgBouncerSpec{ImageCatalogRef: testPgBouncerImageCatalogRef()},
 		Template:  &cnpgv1.PodTemplateSpec{Spec: ps},
 	}}).ApplyPolicy(p)
+}
+
+// testCnpgImageCatalogRef is a Cluster imageCatalogRef the CRD admits.
+func testCnpgImageCatalogRef() *cnpgv1.ImageCatalogRef {
+	group := "postgresql.cnpg.io"
+	return &cnpgv1.ImageCatalogRef{
+		TypedLocalObjectReference: corev1.TypedLocalObjectReference{APIGroup: &group, Kind: "ClusterImageCatalog", Name: "postgresql"},
+		Major:                     16,
+	}
+}
+
+// testPgBouncerImageCatalogRef is a Pooler pgbouncer.imageCatalogRef the CRD
+// admits.
+func testPgBouncerImageCatalogRef() *cnpgv1.ImageCatalogComponentRef {
+	group := "postgresql.cnpg.io"
+	return &cnpgv1.ImageCatalogComponentRef{
+		TypedLocalObjectReference: corev1.TypedLocalObjectReference{APIGroup: &group, Kind: "ClusterImageCatalog", Name: "pgbouncer"},
+		Key:                       "pgbouncer",
+	}
 }
 
 // isImageField says whether f could name an image: its json name holds

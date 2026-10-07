@@ -70,7 +70,7 @@
   },
   "pooler": {
     "type": "object",
-    "description": "PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters).",
+    "description": "PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses.",
     "additionalProperties": true
   },
   "poolerName": {

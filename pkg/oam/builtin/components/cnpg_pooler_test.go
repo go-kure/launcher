@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -433,6 +434,54 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})
+	// The PgBouncer image comes from, in the operator's order, the template's
+	// "pgbouncer" container, pgbouncer.image, pgbouncer.imageCatalogRef, or else
+	// the operator's own default, which no allowlist can hold.
+	ghcr := &stubPolicy{allowedRegistries: []string{"ghcr.io"}}
+	const unsetImage = `pgbouncer.image (pooler.image on a postgresql component): unset, so the CloudNativePG operator chooses the image the pods run, which the allowed registries [ghcr.io] cannot hold; name an image from one of them`
+	for _, tt := range []struct {
+		name  string
+		props map[string]any
+	}{
+		{"no image source", minimalPooler()},
+		{"a template pgbouncer container without an image", tmpl(container(nil))},
+		{"an image on another template container", tmpl(map[string]any{"containers": []any{
+			map[string]any{"name": "sidecar", "image": "ghcr.io/team/sidecar:1"}}})},
+		{"an image on a template init container named pgbouncer", tmpl(map[string]any{"containers": []any{},
+			"initContainers": []any{map[string]any{"name": "pgbouncer", "image": "ghcr.io/cloudnative-pg/pgbouncer:1"}}})},
+	} {
+		t.Run("unset image refused under a list: "+tt.name, func(t *testing.T) {
+			err := newCnpgPooler(t, tt.props).ApplyPolicy(ghcr)
+			if err == nil || err.Error() != unsetImage {
+				t.Fatalf("err = %v, want %q", err, unsetImage)
+			}
+			var refusal *oam.PolicyRefusal
+			if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry {
+				t.Errorf("err = %v, want a refusal of class %q", err, oam.RefusalRegistry)
+			}
+		})
+	}
+	for _, tt := range []struct {
+		name   string
+		props  map[string]any
+		policy *stubPolicy
+	}{
+		{"pgbouncer.image", map[string]any{"cluster": map[string]any{"name": "db"},
+			"pgbouncer": map[string]any{"image": "ghcr.io/cloudnative-pg/pgbouncer:1"}}, ghcr},
+		// A catalog's images are the catalog's to hold: the build cannot read it.
+		{"pgbouncer.imageCatalogRef", map[string]any{"cluster": map[string]any{"name": "db"},
+			"pgbouncer": map[string]any{"imageCatalogRef": map[string]any{
+				"apiGroup": "postgresql.cnpg.io", "kind": "ClusterImageCatalog", "name": "pgbouncer", "key": "pgbouncer"}}},
+			&stubPolicy{allowedRegistries: []string{"registry.invalid"}}},
+		{"the template's pgbouncer container image", tmpl(container(map[string]any{"image": "ghcr.io/cloudnative-pg/pgbouncer:1"})), ghcr},
+		{"no list", minimalPooler(), &stubPolicy{}},
+	} {
+		t.Run("image source allowed: "+tt.name, func(t *testing.T) {
+			if err := newCnpgPooler(t, tt.props).ApplyPolicy(tt.policy); err != nil {
+				t.Errorf("ApplyPolicy: %v", err)
+			}
+		})
+	}
 	// The instance count is deliberately unpoliced: postgresql applies no
 	// replica policy to its pooler, so neither does the kind it lowers onto.
 	t.Run("instances are not policed", func(t *testing.T) {
