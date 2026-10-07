@@ -274,6 +274,7 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 // new type goes at its position (TestKindLists_InOrder).
 func builtinComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
+		"alertmanager":                    &components.AlertmanagerHandler{},
 		"artifactgenerator":               &components.ArtifactGeneratorHandler{},
 		"backendtlspolicy":                &components.BackendTLSPolicyHandler{},
 		"bucket":                          &components.BucketHandler{},

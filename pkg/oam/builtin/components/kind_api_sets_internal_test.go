@@ -350,6 +350,7 @@ var objectIdentity = []string{"kind", "apiVersion", "metadata"}
 // needs build and a document that holds the field, on which the test shows
 // the refusal.
 var apiSetKinds = []apiSetKind{
+	{component: "alertmanager", typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](), source: markerAPISource, listed: monitoringWorkloadPodOmitted()},
 	{component: "artifactgenerator", typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), source: markerAPISource},
 	// The Gateway API's infrastructure objects (backendtlspolicy, gateway,
 	// gatewayclass, listenerset, referencegrant) are read from the experimental

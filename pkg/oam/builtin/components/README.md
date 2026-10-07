@@ -133,6 +133,7 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
+| `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are refused when not empty (an empty one writes nothing). An unset `image` is not held to the allowed registries: the object then names none and the operator chooses the image. No capability is required — see below. |
 | `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and nothing gates it. The API's expression rule is not checked. No environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
@@ -451,7 +452,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `metallb.CreateL2Advertisement` | metallb.io/v1beta1 L2Advertisement | kind | `metallb-l2advertisement` | strict decode of `L2AdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing is the widest advertisement, of every pool, on every interface, for every Service, with no node excluded. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The pool and interface names are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateServiceBGPStatus` | metallb.io/v1beta1 ServiceBGPStatus | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateServiceL2Status` | metallb.io/v1beta1 ServiceL2Status | not authorable | - | - | Status MetalLB writes. |
-| `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | missing | - | - | - |
+| `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | kind | `alertmanager` | strict decode of `AlertmanagerSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image`, `replicas`, `resources`, the storage a claim template requests, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's. `baseImage`, `tag` and `sha` are refused when not empty. An unset `image` is not held to the allowed registries: the object then names none and the operator chooses the image. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
 | `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | kind | `podmonitor` | strict decode of `PodMonitorSpec` | `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | kind | `prometheus-probe` | strict decode of `ProbeSpec` | `prober.url` must be written, and the three required fields of an `oauth2`. No environment policy applies, and no capability is required. The type name carries a prefix: a probe, in this package, is a container's. |
 | `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | missing | - | - | - |
@@ -2141,7 +2142,7 @@ a class, which a consumer reads from `oam.ViolationError.Class` instead of match
 - **cpu and memory are one class, storage another.** The comparison with a maximum is
   shared and its text is the same for every resource, so the class comes from the caller:
   `oam.RefusalResourceMaximum` for a cpu or memory request or limit (a container's, a
-  pod's, the block a CloudNativePG kind carries, and the pod template of an ACME HTTP01
+  pod's, the block a CloudNativePG kind or an `alertmanager` carries, and the pod template of an ACME HTTP01
   solver on an `issuer` or a `clusterissuer`), `oam.RefusalStorageMaximum` for a claim's
   request, a claim template's, a generic ephemeral volume's, a PersistentVolume's capacity
   and a `cnpg-cluster` volume, the `1Gi` fallback of `postgresql` included, which its
@@ -3596,6 +3597,244 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   an interface, a Service). The object's status is MetalLB's and is not
   written: the type has no field in it, and the YAML the library writes
   leaves an empty status out.
+
+- **alertmanager** (go-kure/launcher#790) is the kind-named projection of an
+  Alertmanager of the Prometheus operator's `monitoring.coreos.com/v1` API. It
+  is built on `policyHeldKind` (`policyFreeKind` with a policy check, see
+  **storageclass**, below) and emits that one object in the build namespace,
+  named after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default, and declares the object as namespaced. Launcher
+  emits no pod, no StatefulSet, no Service and no Secret for it: the operator
+  builds a StatefulSet from the object and runs the pods. What the spec says
+  of those pods is held to the environment policy as a workload kind's own
+  fields are.
+
+  **No capability is required, and nothing gates the kind.** As for the four
+  kinds under **servicemonitor**, below, launcher does not ask
+  whether the cluster serves `monitoring.coreos.com/v1`: where the operator's
+  CRDs are not installed the
+  component builds, and the object is refused at apply. Whoever may author a
+  component may author an Alertmanager, and so make the operator run pods in
+  the namespace; the policy below is what holds them. The open point "No
+  capability gate on component types" on go-kure/launcher#790 carries it.
+
+  **Authored.** The properties are the top-level json fields of
+  `AlertmanagerSpec`, decoded strictly at every depth (an unknown key is
+  refused wherever it sits: a container, a claim template, a web setting),
+  less the three under "Not authorable":
+  - the image: `image`, `version`, `imagePullPolicy`, `imagePullSecrets`;
+  - the pods: `replicas`, `resources`, `storage`, `volumes`, `volumeMounts`,
+    `containers`, `initContainers`, `securityContext`, `podMetadata`, where
+    they are scheduled (`nodeSelector`, `affinity`, `tolerations`,
+    `topologySpreadConstraints`, `schedulerName`, `priorityClassName`) and
+    their settings (`serviceAccountName`, `automountServiceAccountToken`,
+    `hostNetwork`, `hostUsers`, `hostAliases`, `dnsPolicy`, `dnsConfig`,
+    `enableServiceLinks`, `terminationGracePeriodSeconds`);
+  - the StatefulSet: `serviceName`, `podManagementPolicy`, `updateStrategy`,
+    `minReadySeconds`, `persistentVolumeClaimRetentionPolicy`;
+  - Alertmanager itself: `configSecret`, `alertmanagerConfiguration`,
+    `alertmanagerConfigSelector`, `alertmanagerConfigNamespaceSelector`,
+    `alertmanagerConfigMatcherStrategy`, `secrets`, `configMaps`,
+    `retention`, `logLevel`, `logFormat`, `externalUrl`, `routePrefix`,
+    `listenLocal`, `portName`, `web`, `limits`, `enableFeatures`,
+    `additionalArgs`, `paused`;
+  - its cluster: `additionalPeers`, `clusterAdvertiseAddress`,
+    `clusterGossipInterval`, `clusterLabel`, `clusterPushpullInterval`,
+    `clusterPeerTimeout`, `clusterPeerName`, `clusterTLS`,
+    `forceEnableClusterMode`.
+
+  An entry of `containers` named `alertmanager` or `config-reloader`, and one
+  of `initContainers` named `init-config-reloader`, is a patch of the
+  container the operator generates under that name; any other is a further
+  container. `additionalArgs` is passed to the alertmanager container as
+  written and is not read: an argument can change what the other fields
+  configure.
+
+  **Not authorable: `baseImage`, `tag` and `sha`.** Each is refused when not
+  empty, beside an `image` too, with or without a policy (`tag: not
+  authorable: the Prometheus operator deprecates the field, and composes the
+  image it yields outside what the object states; use image`). The three are
+  deprecated upstream, and the image they yield is composed in operator code
+  outside the linked module, so the kind cannot say which image runs and has
+  nothing to hold to the allowed registries or the tag rule. They are not in
+  the published schema. An authored empty string is the object an absent one
+  is, and builds.
+
+  **Required** follows the rule of those four kinds: a field the API
+  requires that the Go type writes whether or not it was authored. No
+  top-level field is one. Of what is authored below them
+  (`clusterTLS.server: required (…)`, `hostAliases[1].hostnames: required
+  (…)`):
+  - an additional argument's `name`, a DNS option's `name`, a host alias's
+    `ip` and `hostnames`;
+  - the `server` and the `client` of a `clusterTLS`;
+  - the `type` of an `updateStrategy`;
+  - under `alertmanagerConfiguration.global`: the `host` and the `port` of
+    `smtp.smartHost`, and the `clientId`, `clientSecret` and `tokenUrl` of
+    `httpConfig.oauth2`;
+  - the `key` and `operator` of a match expression, in every label selector
+    the spec holds (`affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].labelSelector.matchExpressions[0].operator:
+    required (…)`; the selectors are listed under "A label selector's match
+    expressions"). Presence only, as on the monitors.
+
+  `TestMonitoringKinds_RequiredMatchMarkers` holds the list to the markers of
+  the linked module's source. The module ships no CRD, so there is no schema
+  to hold it to, and what the API server requires beyond the markers is not
+  known here. **Not refused:** a required field of a Kubernetes type the spec
+  embeds (a container's `name`, the `key` of a Secret key reference), which is
+  emitted empty; and two fields of a listed container or init container and
+  two of a listed volume that upstream marks required and the type leaves out
+  when empty (the `action` of a container restart rule and the `operator` of
+  its exit codes, the `signerName` and `keyType` of a pod certificate
+  source), as on the **pod** kind.
+
+  **An authored `0` or `""` the type cannot carry is refused.** As on the pod
+  kinds: a `timeoutSeconds`, `periodSeconds`, `successThreshold` or
+  `failureThreshold` written as `0` on a liveness, readiness or startup probe
+  of a listed container or init container
+  (`containers[0].readinessProbe.periodSeconds: 0 cannot be carried by the
+  Prometheus operator API types (…)`). The refusal holds for an entry that
+  patches one of the operator's own containers too: the zero is left out
+  there as anywhere, and what then applies is the operator's value for that
+  container, not the authored one. As on the other kinds of the operator's
+  API: an empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`,
+  which the CRD defaults to `web`, `120h` and `OnNamespace` (`portName: ""
+  cannot be carried by the Prometheus operator API types (…)`).
+  `TestMonitoringWorkloadKinds_DefaultedZeros` derives the list from the type,
+  the default markers of the operator's source and the field comments of the
+  Kubernetes types, and shows each field refused on a document. A string
+  default of the Kubernetes pod types (a container port's `protocol`, a
+  volume source's) is not refused, as on the pod kinds: those types state it
+  only in free text. An authored `hostNetwork: false` is left out, and the API
+  reads an absent one as `false`.
+
+  **The API's expression rules are not checked.** The types the spec reaches
+  state one: an `updateStrategy` with a `rollingUpdate` must have the type
+  `RollingUpdate`. The linked module ships no CRD, so there is no rule text
+  to run through the validator the other kinds use: the rule is listed
+  (`alertmanagerRulesLeft`) and left to the API server, and
+  `TestMonitoringWorkloadKinds_RulesListed` fails when a dependency bump adds,
+  drops or rewords a rule on a reached type. The API's other value rules
+  (formats, enumerations, minima) are left to it as well.
+
+  **What the type writes unauthored.** Every Alertmanager carries
+  `resources: {}` and `alertmanagerConfigMatcherStrategy: {}`; the API
+  defaults the `type` of the second to `OnNamespace`. An authored `storage`
+  carries a `volumeClaimTemplate` whether or not one was authored, with
+  `metadata: {}` and `status: {}` beside its `spec`; upstream documents that
+  an `emptyDir` or an `ephemeral` takes precedence over it.
+
+  **With or without a policy,** an authored `image`, the authored image of a
+  listed container or init container, and the `reference` of an image volume
+  are held to the tag rule (`ValidateImageRef`: `image: image "…" rejected:
+  :latest tag not allowed`), and a resource block's request may not exceed
+  its limit (`resources: cpu: request 2 must not exceed limit 1`,
+  `containers[0] "proxy": resources: memory: request 2Gi must not exceed
+  limit 1Gi`). A listed container that names no image is not checked for
+  one: it is the ordinary form of a patch.
+
+  **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
+  a policy the same component builds. Refused, each with the class a workload
+  kind's refusal has:
+  - `image`, the image of a listed container or init container, and an image
+    volume's reference, outside the allowed registries
+    (`oam.RefusalRegistry`);
+  - `replicas` over the replica maximum (`replicas 4 exceeds enforced maximum
+    3`, `oam.RefusalReplicaMaximum`);
+  - the cpu or memory of `resources`, and of a listed container, over the
+    maxima (`oam.RefusalResourceMaximum`), on a patch of one of the
+    operator's containers as on any other;
+  - the storage a claim requests over the storage maximum
+    (`oam.RefusalStorageMaximum`): `storage.volumeClaimTemplate`,
+    `storage.ephemeral.volumeClaimTemplate`, and a generic ephemeral volume
+    under `volumes`;
+  - `hostNetwork: true` under a policy that does not allow the host network
+    (`oam.RefusalHostNamespace`); the spec has no field for the host's
+    process or IPC namespace;
+  - a hostPath volume under `volumes` (`oam.RefusalHostPath`);
+  - a privileged listed container, and a pod-level
+    `securityContext.windowsOptions.hostProcess`, under a policy that does
+    not allow privileged containers (`oam.RefusalPrivileged`), and a
+    capability the policy does not allow (`oam.RefusalContainerCapability`).
+
+  **An unset `image` is not held to the allowed registries.** Where the spec
+  names no image, the operator chooses the one the pods run, and no registry
+  allowlist reaches that choice: the allowlist holds an authored `image` only.
+  It is the same limit as a `cnpg-cluster` without `imageName` or a
+  `cnpg-pooler` without `pgbouncer.image`. Author `image` to have the
+  registry held.
+
+  `TestMonitoringWorkloadKinds_PodFieldsHeldOrListed` derives, from the type,
+  every field of the spec that shapes the pods and holds each to one of three
+  answers: held to the policy, with a refusal shown on a document (the nine
+  above: `image`, `replicas`, `resources`, `storage`, `volumes`,
+  `containers`, `initContainers`, `securityContext`, `hostNetwork`); read by
+  the wrapper (`podMetadata`, below); or stated with the reason it is neither.
+  A dependency bump that adds such a field fails there, naming it. **Not
+  held:**
+  - **An unset `image`,** as stated above: the object then names no image,
+    and the policy is asked about none. `version` does not name an image.
+  - **What the operator adds on its own:** its config-reloader containers
+    and their image, the arguments it derives, the governing Service it
+    creates where `serviceName` is unset. None of it is in the object. The
+    operator's code is not in the linked module and was not read.
+  - **No policy default is filled.** An unauthored `replicas`, `resources`
+    or `storage` stays unauthored under a policy that states a replica, a
+    resource or a storage default: the operator, not launcher, decides what
+    the omission means.
+  - **The size limit of an `emptyDir`,** under `storage` or `volumes`, here
+    as on every kind.
+  - **Fields the environment policy has no dimension for,** on a pod kind
+    either: where and in which order the pods are scheduled, how the
+    StatefulSet rolls and what becomes of its claims, `serviceAccountName`
+    (launcher creates no ServiceAccount for it and does not check that one
+    exists), `automountServiceAccountToken`, the DNS settings, `hostAliases`,
+    `hostUsers`, `terminationGracePeriodSeconds`, `imagePullPolicy`,
+    `imagePullSecrets` and `volumeMounts`.
+
+  **`podMetadata` is the author's, and nothing is added to it.** The operator
+  copies its labels and annotations onto the pods. The wrapper every
+  component's objects pass reads it as it reads a workload's pod template: a
+  key the consumer reserved (`ReservedMetadataKeys`) is refused, and so is
+  the component label key with another value than the component's. It writes
+  nothing there. So the operator's pods carry the component label only if the
+  author writes the component's own value into `podMetadata.labels`;
+  otherwise the NetworkPolicies generated for the component do not select
+  them. The Alertmanager object itself carries the component label, as every
+  object a component owns. The operator sets five labels of its own on the
+  pods (`alertmanager`, `app.kubernetes.io/instance`,
+  `app.kubernetes.io/managed-by`, `app.kubernetes.io/name`,
+  `app.kubernetes.io/version`) and the annotation
+  `kubectl.kubernetes.io/default-container`; upstream documents that a value
+  authored for one of them does not replace the operator's. Launcher does
+  not refuse such a key.
+
+  **The metadata of a claim template is not read:** the labels and
+  annotations of `storage.volumeClaimTemplate`, of
+  `storage.ephemeral.volumeClaimTemplate` and of a generic ephemeral volume
+  under `volumes` are written as authored, are not checked for reserved keys
+  and take no component label, as the `volumeClaimTemplates` of a
+  `statefulset` are not.
+
+  **No field holds a credential in the clear, and none is checked.** Every
+  credential of the spec is the key of a Secret (a `web` or `clusterTLS` key,
+  an SMTP password, an OAuth2 client secret), and `configSecret`, `secrets`
+  and `imagePullSecrets` name Secrets whose content is not in the object.
+  `TestMonitoringWorkloadKinds_CredentialsHeldOrListed` derives the fields of
+  the operator's types whose name suggests a credential and holds each to a
+  stated reason it holds none. Free text that could hold one is written as
+  authored, under a policy that forbids explicit secrets too:
+  `additionalArgs`, `externalUrl`, and the `env` of a listed container, as on
+  a pod kind.
+
+  **Not covered.** Whether what the object refers to exists (the
+  configuration Secret, a mounted Secret or ConfigMap, the ServiceAccount, a
+  governing Service named by `serviceName`, the AlertmanagerConfig objects
+  the selectors match). Upstream documents that, without the configuration
+  Secret or its `alertmanager.yaml` key, the operator provisions a
+  configuration that drops alert notifications. Launcher points no Prometheus
+  at the Alertmanager. The object's status is the operator's and is not
+  written.
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
@@ -4538,7 +4777,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
   BGP control plane and the five kinds of the Gateway API's infrastructure
   objects are built on it too. The three kinds
-  of cert-manager's API and the two of VolSync's are built on `policyHeldKind`
+  of cert-manager's API, the two of VolSync's and `alertmanager` are built on `policyHeldKind`
   (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
   asks one function of the kind whether the policy refuses the decoded value.
   It refuses or passes; it fills no default. A kind is a value
@@ -4558,7 +4797,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component is only built from properties that went through the decode. A
   kind may list its defaulted zeros (`defaultedZeros`), and an authored `0`,
   `false` or `""` on a listed field is refused, as the secret-store kinds do
-  (see the **secretstore** entry). A kind that lists none suits a type only
+  (see the **secretstore** entry) and `alertmanager` does for the probes of the
+  containers it lists and three strings of its own. A kind that lists none suits a type only
   when none of its omit-when-zero numbers or booleans has a non-zero API
   default; `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of
   every Kubernetes type built on it and fails on one whose comment states such
@@ -10442,6 +10682,7 @@ fields and says nothing of the pair.
 |---|---|---|
 | `servicemonitor`, `podmonitor` | `selector` | the linked type, by the generator's rule (below) |
 | `prometheus-probe` | `targets.ingress.selector` | the same |
+| `alertmanager` | the selectors a `pod` holds, at the top of the spec; the `selector` of the claim template of `storage.volumeClaimTemplate` and of `storage.ephemeral`; `alertmanagerConfigSelector`; `alertmanagerConfigNamespaceSelector` | the same |
 | `cnpg-cluster` | the `labelSelector` and `namespaceSelector` of every `affinity.additionalPodAffinity` and `affinity.additionalPodAntiAffinity` term, required or preferred; `topologySpreadConstraints[].labelSelector`; a `projectedVolumeTemplate` `clusterTrustBundle` source's `labelSelector`; the `selector` of `ephemeralVolumeSource.volumeClaimTemplate.spec` and of the `pvcTemplate` of `storage`, `walStorage` and each tablespace; `podSelectorRefs[].selector` | the Cluster CRD of the linked module |
 | `cnpg-pooler` | under `template.spec`, the selectors a `pod` holds | the Pooler CRD of the linked module |
 | `issuer`, `clusterissuer` | the `labelSelector` and `namespaceSelector` of every pod affinity and anti-affinity term of an HTTP01 solver's `podTemplate.spec.affinity`, under `ingress` and under `gatewayHTTPRoute` | the Issuer and ClusterIssuer CRDs of the linked module |
@@ -10464,8 +10705,10 @@ where `values` is not. `TestMonitoringKinds_RequiredMatchMarkers`,
 the two from that source by that rule, beside the fields the operator's own types mark
 required, and hold each kind's list to them; on the monitoring kinds another field of an
 embedded Kubernetes type that the rule requires fails there unless it is named with the reason
-it is not refused. CloudNativePG's admission webhook runs apimachinery's whole selector
-validation on `podSelectorRefs[].selector`; that fuller check is the operator's, not launcher's.
+it is not refused, except on `alertmanager`, which embeds the pod spec's types and is held to
+their match expressions only, as the `pod` kind is. CloudNativePG's admission webhook runs
+apimachinery's whole selector validation on `podSelectorRefs[].selector`; that fuller check is
+the operator's, not launcher's.
 
 **Not held: the metric selectors of a `horizontalpodautoscaler`**
 (`metrics[].object.metric.selector`, `metrics[].pods.metric.selector`,

@@ -71,6 +71,11 @@ var coreKindSchemas = []struct {
 	}
 	excluded map[string]string
 }{
+	{"alertmanager", reflect.TypeFor[monitoringv1.AlertmanagerSpec](), &components.AlertmanagerHandler{}, map[string]string{
+		"baseImage": "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+		"tag":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+	}},
 	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, nil},
 	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},

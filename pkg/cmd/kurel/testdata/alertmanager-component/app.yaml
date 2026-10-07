@@ -1,0 +1,45 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: alerts
+      type: alertmanager
+      properties:
+        image: quay.io/prometheus/alertmanager:v0.28.1
+        replicas: 3
+        retention: 120h
+        podMetadata:
+          labels:
+            team: payments
+          annotations:
+            example.com/owner: sre
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+        securityContext:
+          runAsNonRoot: true
+          fsGroup: 2000
+        storage:
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 1Gi
+        alertmanagerConfigSelector:
+          matchLabels:
+            team: payments
+        containers:
+          - name: config-reloader
+            resources:
+              limits:
+                memory: 64Mi
+    - name: defaults
+      type: alertmanager

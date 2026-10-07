@@ -114,6 +114,7 @@ at its position.
 
 | `type` | What the fixture builds |
 |---|---|
+| `alertmanager` | An Alertmanager in the build namespace, and nothing else, since the operator runs the pods. What its spec says of those pods is held to the environment policy; no capability is required to build it. |
 | `artifactgenerator` | Two ArtifactGenerators in the build namespace, no Flux namespace being set for the build, one named by `objectName`, with a `pathPattern` and a source of another namespace. No capability is required to build it. |
 | `backendtlspolicy` | A BackendTLSPolicy in the build namespace. No capability is required of the cluster profile to build it. |
 | `certificate` | A Certificate in the build namespace. No capability is required of the cluster profile to build it; the `certificate` trait, which shares the kind's name, still requires its own. |

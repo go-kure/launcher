@@ -27,18 +27,25 @@ import (
 // ships no CRD, so the markers its CRDs are generated from are the source.
 const monitoringModulePath = "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring"
 
-// monitoringKinds lists the kind components of that API with the spec type
-// each decodes into and its required list. validated names the required
-// fields the list cannot hold, because a parent of theirs is written whether
-// or not it was authored; the kind's validate refuses those.
-var monitoringKinds = []struct {
+// monitoringKindRow is one kind component of that API with the spec type it
+// decodes into and its required list. validated names the required fields the
+// list cannot hold, because a parent of theirs is written whether or not it
+// was authored; the kind's validate refuses those.
+type monitoringKindRow struct {
 	component string
 	typ       reflect.Type
 	required  map[string]string
 	validated []string
 	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
 	defaulted map[string]string
-}{
+}
+
+// monitoringKinds lists the kind components of that API whose object runs no
+// pod. The ones whose object makes the operator run pods are
+// monitoringWorkloadKinds: their types reach the Kubernetes pod types, which
+// TestMonitoringKinds_DefaultedZeros does not read
+// (TestMonitoringWorkloadKinds_DefaultedZeros does).
+var monitoringKinds = []monitoringKindRow{
 	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil, serviceMonitorKind.defaultedZeros.fields},
 	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.required, nil, podMonitorKind.defaultedZeros.fields},
 	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.required, []string{"prober.url"}, prometheusProbeKind.defaultedZeros.fields},
@@ -457,13 +464,20 @@ var monitoringEmbeddedNotRefused = map[string]string{
 // and a json tag that does not omit it when empty. Of those, the key and the
 // operator of a label selector's match expression are in the lists; every
 // other is named in monitoringEmbeddedNotRefused with its reason, and one that
-// is neither fails.
+// is neither fails. A workload kind is held to the match expressions only of
+// the Kubernetes types it embeds, as the pod kinds are.
 func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 	all := monitoringFieldMarkers(t)
 	src := markerAPISource(t)
 	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	notRefused := map[string]bool{}
-	for _, kind := range monitoringKinds {
+	kinds := slices.Clone(monitoringKinds)
+	workload := map[string]bool{}
+	for _, kind := range monitoringWorkloadKinds {
+		kinds = append(kinds, kind.monitoringKindRow)
+		workload[kind.component] = true
+	}
+	for _, kind := range kinds {
 		t.Run(kind.component, func(t *testing.T) {
 			listed, validated := map[string]bool{}, map[string]bool{}
 			fields := 0
@@ -486,6 +500,20 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 					return
 				}
 				if !own && f.owner != expression {
+					// A workload kind's spec embeds the pod spec's Kubernetes
+					// types (containers, volumes, affinity, probes). Of those it
+					// is held to the key and the operator of a match expression
+					// only: the convention the package applies where a kind
+					// embeds Kubernetes types. The pod kind's required list is
+					// labelSelectorRequired(podSpecLabelSelectors("")) and no
+					// other field of them (PodHandler.ToApplicationConfig,
+					// pod.go), and TestExternalSecretsKinds_RequiredMatchSource
+					// derives only the two for the External Secrets kinds. Every
+					// other required field of those types is not refused and is
+					// emitted empty, as the kind's README entry says.
+					if workload[kind.component] && strings.HasPrefix(f.owner.PkgPath(), "k8s.io/") {
+						return
+					}
 					name := f.owner.String() + "." + f.field.Name
 					if strings.TrimSpace(monitoringEmbeddedNotRefused[name]) == "" {
 						t.Errorf("%s (%s) is required by the generator's rule and written unauthored; the kind refuses its omission, or monitoringEmbeddedNotRefused says why not", f.path, name)

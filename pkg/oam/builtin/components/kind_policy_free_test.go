@@ -55,9 +55,9 @@ import (
 // whole object in a namespace, and five of MetalLB's API (an address pool, an
 // advertisement on the local network, one over BGP, a BFD profile and a set
 // of community aliases). The three kinds of cert-manager's API, the four of the
-// External Secrets Operator's and MetalLB's BGP peer are held here too: the
-// policy reaches one part of each (held), and everything else of them is the
-// helper's.
+// External Secrets Operator's, MetalLB's BGP peer and the Prometheus
+// operator's Alertmanager are held here too: the policy reaches part of each
+// (held), and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -73,7 +73,11 @@ import (
 // holds a credential in the clear, on a held kind that has one: the full
 // fixture must set it as it sets every field, and a policy that forbids
 // explicit secrets refuses it. minimal is the least a component may author,
-// full a value of every top-level field.
+// full a value of every top-level field. unfixtured names the fields of typ
+// that full cannot set, each with the reason: one the kind refuses whenever
+// the object would carry it, or one whose only value the object carries is
+// refused under the policy a held kind's fixtures are built under. Each has a
+// test of its own.
 type policyFreeKind struct {
 	component   string
 	handler     oam.ComponentHandler
@@ -86,6 +90,7 @@ type policyFreeKind struct {
 	literal     string
 	minimal     map[string]any
 	full        map[string]any
+	unfixtured  map[string]string
 }
 
 // generate builds the kind's object from props, named name. A kind the policy
@@ -129,6 +134,14 @@ func (k policyFreeKind) scope() oam.ObjectScope {
 // policyFreeKinds lists them, in the order of their component type: a new
 // kind's row goes at its position (TestKindLists_InOrder, pkg/cmd/kurel).
 var policyFreeKinds = []policyFreeKind{
+	{
+		component: "alertmanager", handler: &components.AlertmanagerHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("Alertmanager"),
+		typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](), namespaced: true, held: true,
+		minimal:    map[string]any{},
+		full:       alertmanagerFull(),
+		unfixtured: alertmanagerUnfixtured,
+	},
 	{
 		component: "artifactgenerator", handler: &components.ArtifactGeneratorHandler{},
 		gvk: swv1beta1.GroupVersion.WithKind(swv1beta1.ArtifactGeneratorKind),
@@ -1189,7 +1202,8 @@ func TestPolicyFreeKinds_CanHandle(t *testing.T) {
 // TestPolicyFreeKinds_FullCoversEveryField: the full fixture of each kind sets
 // every authorable top-level field of the type it decodes into, so the tests
 // that build from it see each field. A dependency bump that adds a field fails
-// here until the fixture has it.
+// here until the fixture has it. A field the fixture cannot set is named in
+// unfixtured with its reason, and is then no field of the fixture.
 func TestPolicyFreeKinds_FullCoversEveryField(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		t.Run(kind.component, func(t *testing.T) {
@@ -1206,6 +1220,18 @@ func TestPolicyFreeKinds_FullCoversEveryField(t *testing.T) {
 				if _, ok := fields["status"]; ok {
 					t.Errorf("%s has a status field, which a whole-object kind would let an author write", kind.typ)
 				}
+			}
+			for name, reason := range kind.unfixtured {
+				if _, ok := fields[name]; !ok {
+					t.Errorf("unfixtured %q is stale: %s has no such field", name, kind.typ)
+				}
+				if strings.TrimSpace(reason) == "" {
+					t.Errorf("unfixtured %q has no reason", name)
+				}
+				if _, ok := kind.full[name]; ok {
+					t.Errorf("the full fixture sets %q, which unfixtured says it cannot", name)
+				}
+				delete(fields, name)
 			}
 			for name := range fields {
 				if _, ok := kind.full[name]; !ok {
@@ -1385,6 +1411,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 	}
 	// In the order of the component types, as policyFreeKinds.
 	reaches := map[string][]string{
+		"alertmanager": alertmanagerReaches,
 		"artifactgenerator": {
 			".Spec.CommonMetadata", ".Spec.CommonMetadata.Labels", ".Spec.CommonMetadata.Annotations",
 			".Spec.Sources", ".Spec.OutputArtifacts", ".Spec.OutputArtifacts[0].Copy",
@@ -2813,8 +2840,11 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"two spellings", map[string]any{"driverName": "d", "drivername": "e"}, "sets the same field as"},
 		},
 	}
-	// The External Secrets Operator's kinds keep their cases beside their
-	// fixtures.
+	// The alertmanager kind and the External Secrets Operator's kinds keep
+	// their cases beside their fixtures.
+	for _, tc := range alertmanagerRefusals(notA) {
+		cases["alertmanager"] = append(cases["alertmanager"], refusal(tc))
+	}
 	for _, kind := range secretStores {
 		for _, tc := range secretStoreRefusals(notA) {
 			cases[kind.component] = append(cases[kind.component], refusal(tc))
