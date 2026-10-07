@@ -3,6 +3,7 @@ package traits
 import (
 	"strings"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -67,14 +68,15 @@ func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored str
 	return trait.ResolveName(spec)
 }
 
-// The kinds of the routing traits' objects, resolved under their roles
-// (resolveObjectName) or, the CiliumNetworkPolicy, claimed (claimOwnObjectName).
-// A name is claimed by group, kind, namespace and name, so these are what
-// another owner of the same object must agree on.
+// The kinds of the routing and volsync traits' objects, resolved under their
+// roles (resolveObjectName) or, the CiliumNetworkPolicy, claimed
+// (claimOwnObjectName). A name is claimed by group, kind, namespace and name,
+// so these are what another owner of the same object must agree on.
 var (
 	ingressKind             = schema.GroupKind{Group: networkingv1.GroupName, Kind: "Ingress"}
 	httpRouteKind           = schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}
 	ciliumNetworkPolicyKind = schema.GroupKind{Group: ciliumv2.CustomResourceDefinitionGroup, Kind: ciliumv2.CNPKindDefinition}
+	replicationSourceKind   = schema.GroupKind{Group: volsyncv1alpha1.GroupVersion.Group, Kind: "ReplicationSource"}
 )
 
 // The kinds of the Secret family's objects: a Secret a trait's object makes

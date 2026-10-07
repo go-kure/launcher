@@ -72,7 +72,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `pvc` | PersistentVolumeClaim | The `persistentvolumeclaim` kind's twin: every claim field below is parsed, defaulted and built by the kind's own code, so both build the same claim; the trait adds only the claim's `name`, the owner's `app` label, namespace and bundle (go-kure/launcher#741). `name` (a DNS-1123 subdomain), `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName` (a DNS-1123 subdomain; an authored `""` requests no class, i.e. no dynamic provisioning, and is emitted as `storageClassName: ""`; unset or `null` takes the ClusterProfile `pvc` capability's `storageClassName`, as the kind's does (go-kure/launcher#742), else the cluster default. **Pre-GA output change** (go-kure/launcher#702): `""` used to be treated as unset), `accessModes[]` (`ReadWriteOncePod` must be the only mode), `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build), and the kind's `selector`, `dataSourceRef`, `volumeName` and `volumeAttributesClassName`, each with the kind's rules (go-kure/launcher#790; `pkg/oam/builtin/components/README.md`, the `persistentvolumeclaim` entry). **`volumeName` has no policy check and no capability gate**: a claim that names a PersistentVolume binds to that volume only, with no dynamic provisioning (the volume must still match the claim's class, size, access modes and volume mode), so whoever may author the trait may ask for any PersistentVolume of the cluster by name. `dataSource` and a whole `resources` are refused with the kind's reason for each: the trait answers the document check's `UnsupportedFieldHint` with the kind's, so the refusal of either key ends with `; <reason>` in a document as it does for the kind (go-kure/launcher#790; `pkg/oam/README.md`, "A reason on a refused key") (policy: `maxStorageSize`). **Pre-GA tightening** (go-kure/launcher#741): a `name` or `storageClassName` that is not a DNS-1123 subdomain, and `ReadWriteOncePod` combined with another mode, used to build and are now refused, as the kind refuses them; a zero or negative `size` is refused when the trait is applied instead of at generation |
-| `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
+| `volsync` | VolSync ReplicationSource | `name`, `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling
 | `type` | Produces | Key properties |
@@ -1159,7 +1159,7 @@ one that cannot be the name of its object fails the transform with the property 
 (go-kure/launcher#787). The check is the DNS-1123 subdomain rule every one of these objects
 can be named by (at most 253 characters, lower-case alphanumerics, `-` and `.`, starting and ending
 with an alphanumeric). An authored empty string is refused too. For an optional override
-(`name` on a routing trait, on `rbac` and on `networkpolicy`, `hpaName`, `pdbName`,
+(`name` on a routing trait, on `rbac`, on `networkpolicy` and on `volsync`, `hpaName`, `pdbName`,
 `targetSecretName`, `repository`) it is not a way to ask for the
 default: leaving the property out, or null, gets that. The `expose` `secretName` is optional
 too and gets its default when left out. The other names are required.
@@ -1170,8 +1170,8 @@ launcher refuses it. The name also becomes a file name and a `kustomization.yaml
 the written tree, and a colon has not been shown to be safe there. An author who needs such
 a name cannot write it today.
 
-The names of the `scaler`, `rbac`, `networkpolicy`, `ingress` and `httproute` objects are
-resolved under a name role (`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the
+The names of the `scaler`, `rbac`, `networkpolicy`, `ingress` and `httproute` objects and
+the `volsync` ReplicationSource are resolved under a name role (`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the
 author's property, else the consumer's `TransformContext.Naming` hook, else the default. The
 `ingress` and `httproute` traits an `expose` trait lowers to are resolved the same way.
 `Transform` keeps those names apart and refuses two that name one object, naming both: an
@@ -1208,7 +1208,8 @@ can rename it. That name is not the object's: the `configmap`, `secret`, `ingres
 | `configmap` | `name` | The ConfigMap. |
 | `cilium-networkpolicy` | `name` | The CiliumNetworkPolicy. |
 | `pvc` | `name` | The PersistentVolumeClaim. |
-| `volsync` | `repository`, `sourcePVC` | The repository Secret, and the claim to back up (which also starts the ReplicationSource name). |
+| `volsync` | `name` | The ReplicationSource. Without it the name is `<sourcePVC>-backup`, else the hook's (role `volsync-replicationsource`). Two `volsync` traits backing up one claim in one namespace need a `name` on one of them. |
+| `volsync` | `repository`, `sourcePVC` | The repository Secret, which launcher only references and never generates (no role, by design), and the claim to back up (which also starts the default ReplicationSource name). |
 | `scaler` | `hpaName`, `pdbName` | The HorizontalPodAutoscaler, and the PodDisruptionBudget (`pdbName` needs `enablePDB: true`). Neither names the Deployment the HPA scales: `scaleTargetRef` names the component's object, its `objectName` where it has one. |
 | `rbac` | `name` | The Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding: one name for all four, and the `roleRef.name` of both bindings. The ClusterRole and the ClusterRoleBinding are claimed with no namespace (`oam.NameSpec.ClusterScoped`), so a lowering rule's cluster-scoped object of the same kind and name is refused with both named. |
 | `networkpolicy` | `name` | The NetworkPolicy. |

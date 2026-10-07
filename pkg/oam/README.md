@@ -1014,6 +1014,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
 | `ingress` | The `ingress` trait's Ingress. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the Ingress by name. | `<component>-ingress`, `<component>-ingress-<scope>` with a `scope`. | `name` | unless `name` is set |
 | `httproute` | The `httproute` trait's HTTPRoute. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the HTTPRoute by name. | `<component>-httproute`, `<component>-httproute-<scope>` with a `scope`. | `name` | unless `name` is set |
+| `volsync-replicationsource` | The `volsync` trait's ReplicationSource. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the ReplicationSource by name. | `<sourcePVC>-backup`, shortened to 253 with `-backup` kept whole. | `name` | unless `name` is set |
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
 | `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
@@ -1040,6 +1041,11 @@ them apart across applications is the consumer's job, through the `Naming` hook.
 The `cilium-networkpolicy` trait's CiliumNetworkPolicy has no role: it is author-named, and
 the hook is not asked, by design. Its `name` is required, and an authored name is never put to
 the hook. The trait claims the name, so a second owner of it is refused as under any role.
+
+The `volsync` trait's repository Secret has no role either: launcher generates no such Secret,
+it only names it in the ReplicationSource (`spec.restic.repository`). The author sets that
+reference with `repository`; its default is `<component>-volsync-secret`, and the Secret is the
+consumer's to create under it.
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
 that resolve to the same prefix are refused: their groups would share names. The names are

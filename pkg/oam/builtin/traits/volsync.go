@@ -33,6 +33,7 @@ func (h *VolSyncHandler) ValidateAndApplyDefaults(rendering map[string]any) (map
 // PropertySchema declares the volsync trait's user-facing properties.
 func (h *VolSyncHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
+		"name":                    {Type: oam.PropertyTypeString, Description: "Name of the ReplicationSource, used as written or refused; defaults to <sourcePVC>-backup."},
 		"sourcePVC":               {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to back up."},
 		"schedule":                {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule controlling when backups run."},
 		"repository":              {Type: oam.PropertyTypeString, Description: "Name of the Secret holding restic repository credentials (defaults to <component>-volsync-secret)."},
@@ -59,13 +60,21 @@ func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	// The name uses sourcePVC as identifier (not component name) to match
-	// the downstream runtime's stable naming. Two components with the same PVC name in the same
-	// bundle would collide; OAM authors are expected to use unique PVC names.
-	// It is the ReplicationSource's name, so one over 253 characters is
-	// shortened, and the sub-application's default name.
-	config.objectName = oam.ShortenNameWithSuffix(config.SourcePVC, "-backup", oam.ShortenLimitSubdomain)
-	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	// The default uses sourcePVC as identifier (not component name) to match
+	// the downstream runtime's stable naming. It is the ReplicationSource's
+	// name, so one over 253 characters is shortened. Two volsync traits that
+	// back up one claim in one namespace name one ReplicationSource, which the
+	// transform refuses with both named.
+	def := config.Name
+	if def == "" {
+		def = oam.ShortenNameWithSuffix(config.SourcePVC, "-backup", oam.ShortenLimitSubdomain)
+	}
+	if config.objectName, err = resolveObjectName(trait, oam.NameRoleVolSyncReplicationSource, replicationSourceKind, app.Namespace, "name", config.Name, def); err != nil {
+		return err
+	}
+	// The hook's answer names the ReplicationSource alone: the sub-application
+	// keeps the authored name, else launcher's default (go-kure/launcher#787).
+	subAppName, err := resolveSubApplicationName(trait, def)
 	if err != nil {
 		return err
 	}
@@ -99,6 +108,15 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 		RetainWeekly:      4,
 		RetainMonthly:     3,
 		Repository:        oam.ShortenNameWithSuffix(app.Name, "-volsync-secret", oam.ShortenLimitSubdomain),
+	}
+
+	// An authored name is used as written or refused, the empty string too: it
+	// is not a way to ask for the default (go-kure/launcher#787).
+	if name, ok := props["name"].(string); ok {
+		if err := checkAuthoredObjectName("name", "the ReplicationSource", name); err != nil {
+			return nil, err
+		}
+		config.Name = name
 	}
 
 	if repo, ok := props["repository"].(string); ok {
@@ -160,9 +178,11 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 // VolsyncConfig implements stack.ApplicationConfig for volsync traits.
 type VolsyncConfig struct {
 	componentName string
-	// objectName is the ReplicationSource's name as Apply settled it,
-	// <sourcePVC>-backup shortened to fit. "" on a config built directly
-	// (routingObjectNameOr).
+	// Name is the authored `name`, "" when the author left it out.
+	Name string
+	// objectName is the ReplicationSource's name as Apply resolved it: Name,
+	// else the naming hook's, else <sourcePVC>-backup shortened to fit. "" on
+	// a config built directly (routingObjectNameOr).
 	objectName              string
 	SourcePVC               string
 	Schedule                string
