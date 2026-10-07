@@ -143,14 +143,15 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //     Prometheus operator's pod-running kinds, the moverPodLabels of a VolSync
 //     mover, the pod template of a cert-manager issuer's HTTP01 solvers, a
 //     Gateway's spec.infrastructure, and spec.commonMetadata of a Flux
-//     Kustomization and HelmRelease;
+//     Kustomization, HelmRelease and ResourceSet;
 //   - what an operator copies onto objects it creates that are no pods
 //     (operatorMetadataKinds, noPods): a solver's Ingress template and HTTPRoute
 //     labels, a Certificate's and an ExternalSecret's Secret template, the
 //     Service, ServiceAccount and VolumeSnapshot templates of a CloudNativePG
 //     Cluster and a Pooler, the metadata of a ClusterExternalSecret's
-//     ExternalSecrets, a HelmRelease's chart template, an ArtifactGenerator's
-//     spec.commonMetadata, the Service annotations of a VolSync mover.
+//     ExternalSecrets, a HelmRelease's chart template, spec.commonMetadata of an
+//     ArtifactGenerator and a FluxInstance, the Service annotations of a VolSync
+//     mover.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
 // read: not a volume claim template's, and not what a chart that Flux installs
@@ -339,9 +340,11 @@ const (
 	ReservedKeyInInfrastructure ReservedKeyHolder = "spec.infrastructure"
 	// ReservedKeyInCommonMetadata is spec.commonMetadata of a Flux
 	// Kustomization or HelmRelease, whose labels and annotations the controller
-	// puts on every object it applies or renders, and of an ArtifactGenerator,
-	// whose labels and annotations go onto the ExternalArtifacts it generates,
-	// which are no pods.
+	// puts on every object it applies or renders, and of a ResourceSet, which
+	// the Flux Operator puts on every object it generates; and of an
+	// ArtifactGenerator and a FluxInstance, whose labels and annotations go onto
+	// the ExternalArtifacts it generates and the objects of the Flux
+	// installation, which are no pods.
 	ReservedKeyInCommonMetadata ReservedKeyHolder = "spec.commonMetadata"
 
 	// The holders below reach objects an operator creates that are no pods.

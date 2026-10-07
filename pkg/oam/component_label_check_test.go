@@ -263,6 +263,8 @@ func labelHolderRows() []labelHolderRow {
 			return &helmv2.HelmRelease{ObjectMeta: named, Spec: helmv2.HelmReleaseSpec{CommonMetadata: &helmv2.CommonMetadata{Labels: l}}}
 		})},
 		{name: "unstructured HelmRelease", where: `HelmRelease "w"`, path: commonMetadata, build: unstructuredAt(object("helm.toolkit.fluxcd.io/v2", "HelmRelease"), commonMetadata...)},
+		// What the Flux Operator puts on every object a ResourceSet generates.
+		{name: "ResourceSet", where: `ResourceSet "w"`, path: commonMetadata, build: unstructuredAt(object("fluxcd.controlplane.io/v1", "ResourceSet"), commonMetadata...)},
 	}
 	// The labels of a VolSync mover's pods: a label map, of every mover of the
 	// two kinds.
@@ -551,6 +553,11 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 		// TestOwnedConfig_NoPodMetadata holds it unstructured.
 		"commonMetadata of a typed ArtifactGenerator": &swv1beta1.ArtifactGenerator{ObjectMeta: metav1.ObjectMeta{Name: "w"},
 			Spec: swv1beta1.ArtifactGeneratorSpec{CommonMetadata: &swv1beta1.CommonMetadata{Labels: map[string]string{ownershipKey: "db"}}}},
+		// A FluxInstance's goes onto the objects of the Flux installation.
+		"commonMetadata of a FluxInstance": holding(t, unstructuredObject("fluxcd.controlplane.io/v1", "FluxInstance"),
+			foreign, "spec", "commonMetadata"),
+		"commonMetadata of a ResourceSet of another group": holding(t, unstructuredObject("example.com/v1", "ResourceSet"),
+			foreign, "spec", "commonMetadata"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			inner := &ownershipObjectsConfig{objects: []client.Object{obj}}

@@ -515,19 +515,28 @@ The value is read, on every object and on each member of an unstructured list en
 | `spec.<mover>.moverPodLabels` | a `volsync.backube` `ReplicationSource` (`rsync`, `rsyncTLS`, `rclone`, `restic`, `syncthing`) or `ReplicationDestination` (`rsync`, `rsyncTLS`, `rclone`, `restic`) | no |
 | `spec.acme.solvers[].http01.ingress.podTemplate.metadata.labels`, and the same under `http01.gatewayHTTPRoute`, in every solver | a `cert-manager.io` `Issuer` or `ClusterIssuer` | no |
 | `spec.infrastructure.labels` | a `gateway.networking.k8s.io` `Gateway` | no |
-| `spec.commonMetadata.labels` | a `kustomize.toolkit.fluxcd.io` `Kustomization` or a `helm.toolkit.fluxcd.io` `HelmRelease` | no |
+| `spec.commonMetadata.labels` | a `kustomize.toolkit.fluxcd.io` `Kustomization`, a `helm.toolkit.fluxcd.io` `HelmRelease` or a `fluxcd.controlplane.io` `ResourceSet` | no |
 
 The six rows after the CronJob's are metadata an operator puts on the pods it creates (a
 Gateway's `spec.infrastructure` on whatever the controller creates for it, which may be
 pods). The last row is what the Flux controller puts on every object it applies or renders,
-pods among them. Launcher reads them and writes nothing there: such pods carry the component
-label only where the document or a kind puts it. A typed object of a `monitoring.coreos.com`,
-`volsync.backube`, `cert-manager.io` or `gateway.networking.k8s.io` kind is recognized when
-it states its kind; a typed Flux `Kustomization` or `HelmRelease` by its Go type as well. A
-refusal names the labels by their path, with the index of the solver where they are in the
-list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not read: a volume
-claim template's labels, and an `ArtifactGenerator`'s `spec.commonMetadata`, which goes onto
-the ExternalArtifacts it generates, no pods.
+and the Flux Operator on every object a ResourceSet generates, pods among them. Launcher reads
+them and writes nothing there: such pods carry the component label only where the document or
+a kind puts it. A typed object of a `monitoring.coreos.com`, `volsync.backube`,
+`cert-manager.io` or `gateway.networking.k8s.io` kind is recognized when it states its kind; a
+typed Flux `Kustomization` or `HelmRelease` by its Go type as well. A `ResourceSet` has no
+component type: the row holds one that a `manifests` or `passthrough` document carries, as
+every row does. A refusal names the labels by their path, with the index of the solver where
+they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not
+read: a volume claim template's labels, and `spec.commonMetadata` of an `ArtifactGenerator` and
+a `FluxInstance`, which go onto the ExternalArtifacts it generates and onto the objects of the
+Flux installation, no pods.
+
+The five Flux holders of `spec.commonMetadata` put it on the top-level metadata of each object
+they apply, never on a pod template. A `Kustomization`, `HelmRelease` or `ResourceSet` may
+apply a `Pod`, so the label reaches pods there and both checks read it. What an
+`ArtifactGenerator` or a `FluxInstance` applies is no `Pod`, so only the reserved metadata
+keys are read there.
 
 The label and the reserved metadata keys are held wherever an object holds labels that reach
 pods. Metadata an operator copies onto other objects it creates (the Ingress of a solver, the
@@ -733,15 +742,18 @@ generates. The case is reached only through a consumer's own lowering rule.
   Certificate's `secretTemplate`, the Service, ServiceAccount and VolumeSnapshot templates of
   a CloudNativePG `Cluster`, a `Pooler`'s `serviceTemplate`, the Secret template of an
   `ExternalSecret` and a `ClusterExternalSecret`, the `externalSecretMetadata` of a
-  `ClusterExternalSecret`, a `HelmRelease`'s `spec.chart.metadata`, an `ArtifactGenerator`'s
-  `spec.commonMetadata`, and the `serviceAnnotations` of a VolSync `ReplicationDestination`'s
-  `rsync` and `rsyncTLS` movers ([Reserved metadata keys](#reserved-metadata-keys)). A
-  document that set a reserved key there built before and is refused now. The component
-  label is not read there.
+  `ClusterExternalSecret`, a `HelmRelease`'s `spec.chart.metadata`, `spec.commonMetadata` of
+  an `ArtifactGenerator` and a `FluxInstance`, and the `serviceAnnotations` of a VolSync
+  `ReplicationDestination`'s `rsync` and `rsyncTLS` movers
+  ([Reserved metadata keys](#reserved-metadata-keys)). A document that set a reserved key
+  there built before and is refused now. The component label is not read there.
 - Both checks read `spec.commonMetadata` of a Flux `Kustomization` or `HelmRelease`, which
-  the controller puts on every object it applies or renders. A document that set a reserved
+  the controller puts on every object it applies or renders, and of a Flux Operator
+  `ResourceSet`, which goes onto every object it generates. A document that set a reserved
   key there, or the component label's key with a value that is not its component's, built
-  before and is refused now. Launcher writes nothing there.
+  before and is refused now. Launcher writes nothing there. A `ResourceSet` and a
+  `FluxInstance` have no component type: the checks read them in a `manifests` or
+  `passthrough` document.
 
 **Breaking library changes** (go-kure/launcher#790, a CronJob's job template):
 
@@ -873,7 +885,9 @@ Flux applies it (a `List`, or an envelope with `items`):
   `Gateway`, which the controller applies to what it creates for the Gateway;
 - the labels and annotations of `spec.commonMetadata` of a `kustomize.toolkit.fluxcd.io`
   `Kustomization` or a `helm.toolkit.fluxcd.io` `HelmRelease`, which the Flux controller puts
-  on every object it applies or renders: `spec.commonMetadata label "…"`;
+  on every object it applies or renders, and of a `fluxcd.controlplane.io` `ResourceSet`,
+  which the Flux Operator puts on every object it generates: `spec.commonMetadata label
+  "…"`;
 - metadata an operator copies onto objects it creates that are no pods:
   - of each HTTP01 solver of an `Issuer` or `ClusterIssuer`, in every solver of the list,
     the Ingress template's labels and annotations
@@ -894,7 +908,9 @@ Flux applies it (a `List`, or an envelope with `items`):
   - `spec.chart.metadata` of a `helm.toolkit.fluxcd.io` `HelmRelease`, which goes onto the
     HelmChart the controller creates: `chart template label "…"`;
   - `spec.commonMetadata` of a `source.extensions.fluxcd.io` `ArtifactGenerator`, which goes
-    onto the ExternalArtifacts it generates: `spec.commonMetadata label "…"`;
+    onto the ExternalArtifacts it generates, and of a `fluxcd.controlplane.io`
+    `FluxInstance`, which goes onto the objects of the Flux installation (Deployments,
+    Services and the like, not their pod templates): `spec.commonMetadata label "…"`;
   - `serviceAnnotations` of the `rsync` and `rsyncTLS` movers of a `volsync.backube`
     `ReplicationDestination`, which go onto the mover's Service: `mover service annotation
     "…"`.
@@ -905,6 +921,8 @@ reaches no pods: one list serves both checks. A typed object of a `monitoring.co
 `volsync.backube`, `cert-manager.io`, `gateway.networking.k8s.io` or `external-secrets.io`
 kind is recognized when it states its kind. A typed Flux `Kustomization`, `HelmRelease` or
 `ArtifactGenerator` is recognized by its Go type as well, whether or not it states its kind.
+A `ResourceSet` and a `FluxInstance` have no component type; the checks read them in a
+`manifests` or `passthrough` document by the kind it states.
 
 A key is read whatever its value: a value the API server would refuse, or a null, does not
 hide it. Metadata that cannot be read (a `labels` that is a list) fails generation with the

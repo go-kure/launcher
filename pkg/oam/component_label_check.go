@@ -31,7 +31,8 @@ import (
 // kinds, gatewayGroup that of the Gateway API, externalSecretsGroup that of
 // External Secrets and helmGroup that of Flux's HelmRelease; fluxKustomizeGroup
 // and fluxSourceExtensionsGroup are the groups of Flux's Kustomization and
-// ArtifactGenerator; cnpgPoolerKind is the CloudNativePG Pooler.
+// ArtifactGenerator, fluxOperatorGroup that of the Flux Operator's ResourceSet
+// and FluxInstance; cnpgPoolerKind is the CloudNativePG Pooler.
 const (
 	monitoringGroup           = "monitoring.coreos.com"
 	volsyncGroup              = "volsync.backube"
@@ -41,6 +42,7 @@ const (
 	helmGroup                 = "helm.toolkit.fluxcd.io"
 	fluxKustomizeGroup        = "kustomize.toolkit.fluxcd.io"
 	fluxSourceExtensionsGroup = "source.extensions.fluxcd.io"
+	fluxOperatorGroup         = "fluxcd.controlplane.io"
 	cnpgPoolerKind            = "Pooler"
 )
 
@@ -168,7 +170,8 @@ type operatorMetadataKind struct {
 //     the controller creates for the Gateway, which may be pods;
 //   - spec.commonMetadata of a Flux Kustomization and HelmRelease holds labels
 //     and annotations the controller puts on every object it applies or
-//     renders, workloads among them.
+//     renders, workloads among them, and that of a ResourceSet the labels and
+//     annotations the Flux Operator puts on every object it generates.
 //
 // Metadata an operator copies onto objects it creates that are no pods is held
 // to the consumer's reserved keys alone (go-kure/launcher#790): the component
@@ -195,6 +198,9 @@ type operatorMetadataKind struct {
 //     controller creates;
 //   - an ArtifactGenerator's spec.commonMetadata, which goes onto the
 //     ExternalArtifacts it generates;
+//   - a FluxInstance's spec.commonMetadata, which goes onto the objects of the
+//     Flux installation: Deployments, Services and the like, whose pod
+//     templates it does not reach;
 //   - serviceAnnotations of the rsync and rsyncTLS movers of a VolSync
 //     ReplicationDestination, which go onto the Service of the mover: a map of
 //     annotations, with no labels beside it.
@@ -216,6 +222,7 @@ var operatorMetadataKinds = slices.Concat(
 		{gatewayGroup, "Gateway", metadataHolder{path: []string{"spec", "infrastructure"}, in: ReservedKeyInInfrastructure}},
 		{fluxKustomizeGroup, "Kustomization", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
 		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
+		{fluxOperatorGroup, "ResourceSet", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
 
 		// Metadata that reaches objects that are no pods.
 		{certManagerGroup, "Certificate", metadataHolder{path: []string{"spec", "secretTemplate"}, in: ReservedKeyInSecretTemplate, noPods: true}},
@@ -232,6 +239,7 @@ var operatorMetadataKinds = slices.Concat(
 		}},
 		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "chart", "metadata"}, in: ReservedKeyInChartTemplate, noPods: true}},
 		{fluxSourceExtensionsGroup, "ArtifactGenerator", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
+		{fluxOperatorGroup, "FluxInstance", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
 	},
 	moverPodLabels("ReplicationSource", "rsync", "rsyncTLS", "rclone", "restic", "syncthing"),
 	moverPodLabels("ReplicationDestination", "rsync", "rsyncTLS", "rclone", "restic"),
