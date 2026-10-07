@@ -696,9 +696,9 @@ generates. The case is reached only through a consumer's own lowering rule.
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
 `ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
 `ComponentLabelSelectorRequiresAnother`, `ComponentLabelInLabelsProperty` and
-`ComponentLabelOfAnotherComponent`, three values of `ReservedKeyHolder`:
-`ReservedKeyInMoverPodLabels`, `ReservedKeyInSolverPodTemplate` and
-`ReservedKeyInInfrastructure`, and the field `ReservedMetadataKeyError.Path`. The refusal of
+`ComponentLabelOfAnotherComponent`, four values of `ReservedKeyHolder`:
+`ReservedKeyInPodMetadata`, `ReservedKeyInMoverPodLabels`,
+`ReservedKeyInSolverPodTemplate` and `ReservedKeyInInfrastructure`, and the field `ReservedMetadataKeyError.Path`. The refusal of
 a kind component's `labels` property that holds another value under the key, which the
 transform returned before as an error of no type, is a `*ComponentLabelError` now, with the
 same text. Under the key `app` the kinds' own `app` check refused such a value first, with a
