@@ -86,4 +86,35 @@ type PropertySchema struct {
 	// deliberately do not want it reserved, and nothing would keep the sharers from
 	// silently diverging as they evolve independently.
 	PlatformReserved bool `json:"platformReserved,omitempty" yaml:"platformReserved,omitempty"`
+	// Exclusive names groups of this object's Properties keys of which a value sets
+	// exactly one (ExclusiveGroup.Required) or at most one: the published form of an
+	// API's "exactly one of" (go-kure/launcher#790). Meaningful only on a Type==object
+	// node; a handler's top-level keys take their groups from
+	// ExclusivePropertiesProvider, since the top level is a map with no node of its
+	// own. Like Enum/Properties/Items, Exclusive is only meaningful for handler
+	// properties — the two flat call sites reject the key at decode time
+	// (flatschema.go's key allow-sets).
+	//
+	// A consumer that predates Exclusive reads each key as the optional key it is
+	// declared as, so it accepts a value setting both or neither, as it did before
+	// the field existed; the field is additive for it. A malformed group (fewer than
+	// two keys, a key Properties does not declare, a key listed twice or declared
+	// Required) is a schema error validatePropertyValue reports as soon as a value
+	// reaches the object.
+	Exclusive []ExclusiveGroup `json:"exclusive,omitempty" yaml:"exclusive,omitempty"`
+}
+
+// ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at
+// most one of which a value sets, and exactly one when Required. A key counts as set
+// when the Required check would count it present — not absent and not a null.
+//
+// Required follows PropertySchema.Required wherever that one is relaxed: it is not
+// enforced on an authored document's top level, and a capability-bound trait's
+// nested groups are checked on the properties merged with the capability rendering.
+// At most one is enforced at every level.
+type ExclusiveGroup struct {
+	// Keys are the group's keys, at least two.
+	Keys []string `json:"keys" yaml:"keys"`
+	// Required makes the group exactly one of Keys rather than at most one.
+	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 }

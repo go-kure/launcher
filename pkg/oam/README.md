@@ -2445,9 +2445,9 @@ Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]Pr
 to declare a constrained schema for their user-facing properties. `PropertySchema` is launcher's
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
-`Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, and `AdditionalProperties`
-(default false; escape-hatch fields set it true). The rich fields (`Types`, `Enum`, `Properties`, `Items`,
-`AdditionalProperties`) are meaningful only for handler properties: the two flat call sites (kurel
+`Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
+(default false; escape-hatch fields set it true), and `Exclusive`. The rich fields (`Types`, `Enum`, `Properties`, `Items`,
+`AdditionalProperties`, `Exclusive`) are meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
 
@@ -2470,10 +2470,28 @@ union, is a schema error reported as soon as a value reaches the leaf. Every Kub
 `storage`) declares `string`/`number`, because their parsers take a fractional number too. `Type`
 stays empty on a union leaf, so a schema consumer that does not read `Types` sees an untyped leaf and
 keeps accepting every member. A completeness test (`pkg/cmd/kurel`) enforces that every built-in
-schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits, Policies }`
+schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits, Policies, Exclusive }`
 of every registered handler and lowering rule that declares one, so the downstream runtime's validator can check a
 component's, trait's or policy's properties before the handler is invoked. Built-in examples: the `configmap` trait and the
 `passthrough` component.
+
+`Exclusive` is the one-of idiom (go-kure/launcher#790): on an `object` node it lists groups of that
+object's `Properties` keys, `ExclusiveGroup{ Keys, Required }`, of which a value sets at most one, and
+exactly one when the group is `Required`. A key counts as set when it is present and not a null, as
+for `Required`. A handler's top level is a map with no node to carry the groups, so a handler or
+lowering rule declares them through the optional `ExclusivePropertiesProvider`
+(`ExclusiveProperties() []ExclusiveGroup`), and `HandlerSchemaSet.Exclusive` publishes them by
+position and type name. `Exclusive` is nil when no handler declares a top-level group, so a set
+without one marshals as it did before the field existed; the nested groups travel in the schemas
+themselves. A group's `Required` is relaxed exactly where field `Required` is: an authored document's
+top level is held to at most one only, and a capability-bound trait's nested groups are checked on
+the properties merged with the rendering, where a merge that sets two keys of a group is refused
+naming the capability. A component's capability defaults (`ComponentCapabilityDefaults`) are held to
+the authored bound once merged: a default that fills one key of a top-level group beside an authored
+key of it is refused, naming the capability. Emitted properties are held to both bounds at every level. A group of fewer
+than two keys, a key the object does not declare, a key in two groups, a `Required` key, or groups
+on a non-object node is a schema error reported as soon as a value reaches the object. A consumer
+that does not read `Exclusive` sees each key as the optional key it is declared as.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
 including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in

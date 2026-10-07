@@ -321,12 +321,49 @@ type HandlerSchemaSet struct {
 	Components map[string]map[string]PropertySchema
 	Traits     map[string]map[string]PropertySchema
 	Policies   map[string]map[string]PropertySchema
+	// Exclusive holds the top-level exclusive groups of the handlers and rules above
+	// that also implement ExclusivePropertiesProvider, by the same position and type
+	// name (a nested object's groups are its PropertySchema.Exclusive). It is nil when
+	// none declares a group, so a set without one marshals exactly as it did before
+	// the field existed (go-kure/launcher#790).
+	Exclusive *HandlerExclusiveSet `json:",omitempty" yaml:",omitempty"`
 }
+
+// HandlerExclusiveSet is HandlerSchemaSet.Exclusive: top-level exclusive groups by
+// position and type name. A position no type declares a group in is nil.
+type HandlerExclusiveSet struct {
+	Components map[string][]ExclusiveGroup `json:",omitempty" yaml:",omitempty"`
+	Traits     map[string][]ExclusiveGroup `json:",omitempty" yaml:",omitempty"`
+	Policies   map[string][]ExclusiveGroup `json:",omitempty" yaml:",omitempty"`
+}
+
+// addExclusive records handler's top-level groups, if it declares any, under name in
+// the position position selects, creating set.Exclusive and that map on first use.
+func (set *HandlerSchemaSet) addExclusive(position func(*HandlerExclusiveSet) *map[string][]ExclusiveGroup, name string, handler any) {
+	groups := exclusiveProperties(handler)
+	if len(groups) == 0 {
+		return
+	}
+	if set.Exclusive == nil {
+		set.Exclusive = &HandlerExclusiveSet{}
+	}
+	m := position(set.Exclusive)
+	if *m == nil {
+		*m = make(map[string][]ExclusiveGroup)
+	}
+	(*m)[name] = groups
+}
+
+func exclusiveComponents(e *HandlerExclusiveSet) *map[string][]ExclusiveGroup { return &e.Components }
+func exclusiveTraits(e *HandlerExclusiveSet) *map[string][]ExclusiveGroup     { return &e.Traits }
+func exclusivePolicies(e *HandlerExclusiveSet) *map[string][]ExclusiveGroup   { return &e.Policies }
 
 // HandlerSchemas returns the property schemas of every registered component,
 // trait and policy handler, and every component, trait and policy lowering rule,
-// that implements PropertySchemaProvider. Handlers and rules that do not
-// implement it are omitted. The maps are always non-nil.
+// that implements PropertySchemaProvider, with the top-level exclusive groups of
+// those that also implement ExclusivePropertiesProvider. Handlers and rules that do
+// not implement PropertySchemaProvider are omitted. The three schema maps are always
+// non-nil.
 func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	set := HandlerSchemaSet{
 		Components: make(map[string]map[string]PropertySchema),
@@ -338,11 +375,13 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	for name, h := range t.componentHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
 			set.Components[name] = withObjectProperties(h, p.PropertySchema())
+			set.addExclusive(exclusiveComponents, name, h)
 		}
 	}
 	for name, h := range t.traitHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
 			set.Traits[name] = p.PropertySchema()
+			set.addExclusive(exclusiveTraits, name, h)
 		}
 	}
 	// A trait type reachable only through a TraitLoweringRule (e.g. "expose", which
@@ -352,6 +391,7 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	for name, r := range t.traitLoweringRules {
 		if p, ok := r.(PropertySchemaProvider); ok {
 			set.Traits[name] = p.PropertySchema()
+			set.addExclusive(exclusiveTraits, name, r)
 		}
 	}
 	// Mirror the trait-lowering-rule loop above for component-lowering rules: a
@@ -364,6 +404,7 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	for name, r := range t.componentLoweringRules {
 		if p, ok := r.(PropertySchemaProvider); ok {
 			set.Components[name] = p.PropertySchema()
+			set.addExclusive(exclusiveComponents, name, r)
 		}
 	}
 	// Policies publish from both of their registries for the same reason:
@@ -373,11 +414,13 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	for name, h := range t.policyHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
 			set.Policies[name] = p.PropertySchema()
+			set.addExclusive(exclusivePolicies, name, h)
 		}
 	}
 	for name, r := range t.policyLoweringRules {
 		if p, ok := r.(PropertySchemaProvider); ok {
 			set.Policies[name] = p.PropertySchema()
+			set.addExclusive(exclusivePolicies, name, r)
 		}
 	}
 	return set
@@ -1532,7 +1575,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					// Nested Required is checked on the merged properties, where a
 					// rendering may have supplied a required key the author left out
 					// (go-kure/launcher#765). It runs whether or not a binding matched.
-					if err := checkNestedRequired(p.PropertySchema(), resolved.Properties, "properties", boundCapability(matched, matchedKey)); err != nil {
+					if err := checkNestedRequired(p.PropertySchema(), exclusiveProperties(p), resolved.Properties, "properties", boundCapability(matched, matchedKey)); err != nil {
 						return nil, &TransformError{
 							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 							Cause:   err,
@@ -1778,7 +1821,8 @@ func mergeRenderedProperties(rendered, authored map[string]any) map[string]any {
 // that is not a property value (checkRenderedValue) is an error, never shared
 // instead; TransformWithPolicy refuses one before this runs (checkCapabilityRenderings).
 // Each filled value is then validated against the component's schema
-// (validateCapabilityFill).
+// (validateCapabilityFill), and the merged properties against its top-level
+// exclusive groups.
 func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
 	key, keys := d.CapabilityDefaults()
 	binding, ok := ctx.Capabilities[key]
@@ -1814,6 +1858,14 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 		out = make(map[string]any, len(fill))
 	}
 	maps.Copy(out, copied)
+	// A filled key may join an authored key of the same exclusive group. The
+	// merged properties are held to the bound the authored ones were held to:
+	// at most one.
+	if p, ok := d.(PropertySchemaProvider); ok {
+		if err := checkExclusive(exclusiveProperties(d), p.PropertySchema(), out, false, "properties", ""); err != nil {
+			return nil, errors.Wrapf(err, "capability %q defaults", key)
+		}
+	}
 	return out, nil
 }
 

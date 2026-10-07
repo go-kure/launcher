@@ -71,8 +71,17 @@ import (
 // The top level never tolerates an undeclared key: a handler declares its complete
 // accepted property set, so there is no top-level AdditionalProperties escape —
 // that applies only within a nested object field that declares it.
+//
+// It checks no top-level exclusive groups; validateTopLevelProperties takes them.
 func validateProperties(schema map[string]PropertySchema, props map[string]any, path string) error {
-	return validateObjectProperties(schema, false, props, path)
+	return validateTopLevelProperties(schema, nil, props, path)
+}
+
+// validateTopLevelProperties is validateProperties with the handler's top-level
+// exclusive groups (ExclusivePropertiesProvider), held as a nested object's
+// PropertySchema.Exclusive is.
+func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path string) error {
+	return validateObjectProperties(schema, exclusive, false, props, path)
 }
 
 // validateObjectProperties is validateProperties widened with additionalAllowed, for
@@ -80,8 +89,10 @@ func validateProperties(schema map[string]PropertySchema, props map[string]any, 
 // PropertySchema.AdditionalProperties.
 //
 // Keys are visited in sorted order at both stages so a props map with several
-// problems always reports the same one, rather than a different error per run.
-func validateObjectProperties(schema map[string]PropertySchema, additionalAllowed bool, props map[string]any, path string) error {
+// problems always reports the same one, rather than a different error per run. The
+// exclusive groups are checked with Required, before any value: both are rules of
+// which keys are present.
+func validateObjectProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, additionalAllowed bool, props map[string]any, path string) error {
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
 		if !schema[key].Required {
 			continue
@@ -97,6 +108,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		if v, present := props[key]; !present || isNullValue(v) {
 			return errors.Errorf("%s: %q is required", path, key)
 		}
+	}
+	if err := checkExclusive(exclusive, schema, props, true, path, ""); err != nil {
+		return err
 	}
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
@@ -169,7 +183,14 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 //
 // capability is the matched binding's key, "" when none matched; it only words the
 // error.
-func checkNestedRequired(schema map[string]PropertySchema, props map[string]any, path, capability string) error {
+//
+// exclusive is the top level's groups, held to at most one: the rendering may set a
+// top-level key the author also set. Their Required is not checked, as top-level
+// Required is not; a nested object's groups are checked in full, with its Required.
+func checkNestedRequired(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path, capability string) error {
+	if err := checkExclusive(exclusive, schema, props, false, path, capability); err != nil {
+		return err
+	}
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
 		v, present := props[key]
 		if !present || isNullValue(v) {
@@ -203,7 +224,10 @@ func checkRequiredIn(field PropertySchema, value any, path, capability string) e
 				return errors.Errorf("%s: %q is required; neither the trait nor capability %q's rendering sets it", path, key, capability)
 			}
 		}
-		return checkNestedRequired(field.Properties, obj, path, capability)
+		if err := checkExclusive(field.Exclusive, field.Properties, obj, true, path, capability); err != nil {
+			return err
+		}
+		return checkNestedRequired(field.Properties, nil, obj, path, capability)
 	case PropertyTypeArray:
 		items, ok := asArrayValue(value)
 		if !ok || field.Items == nil {
@@ -231,6 +255,78 @@ func boundCapability(matched bool, key string) string {
 		return ""
 	}
 	return key
+}
+
+// checkExclusive holds props to groups, the exclusive groups of the object schema
+// declares: at most one key of a group set, and, with required, at least one of a
+// Required group. A key is set when Required would count it present: present and not
+// a null as isNullValue reads it. required is false where Required is not enforced
+// either: an authored document's top level, and a top level after a capability merge.
+//
+// The groups are checked first, since it is the schema that is wrong when they fail.
+// capability is checkNestedRequired's, "" outside it; it only words the error.
+func checkExclusive(groups []ExclusiveGroup, schema map[string]PropertySchema, props map[string]any, required bool, path, capability string) error {
+	if err := checkExclusiveGroups(groups, schema, path); err != nil {
+		return err
+	}
+	for _, group := range groups {
+		var set []string
+		for _, key := range group.Keys {
+			if v, present := props[key]; present && !isNullValue(v) {
+				set = append(set, key)
+			}
+		}
+		if len(set) > 1 {
+			if capability == "" {
+				return errors.Errorf("%s: %s are mutually exclusive", path, quotedKeys(set))
+			}
+			return errors.Errorf("%s: %s are mutually exclusive; the trait merged with capability %q's rendering sets them together", path, quotedKeys(set), capability)
+		}
+		if len(set) == 0 && required && group.Required {
+			if capability == "" {
+				return errors.Errorf("%s: exactly one of %s is required", path, quotedKeys(group.Keys))
+			}
+			return errors.Errorf("%s: exactly one of %s is required; neither the trait nor capability %q's rendering sets one", path, quotedKeys(group.Keys), capability)
+		}
+	}
+	return nil
+}
+
+// checkExclusiveGroups reports a malformed group: fewer than two keys, a key schema
+// does not declare, a key listed twice across the groups, or a key declared Required,
+// which would make every other key of its group unsettable.
+func checkExclusiveGroups(groups []ExclusiveGroup, schema map[string]PropertySchema, path string) error {
+	seen := make(map[string]bool)
+	for i, group := range groups {
+		if len(group.Keys) < 2 {
+			return errors.Errorf("%s: schema declares exclusive group %d with %d key(s); a group needs at least two", path, i, len(group.Keys))
+		}
+		for _, key := range group.Keys {
+			field, declared := schema[key]
+			switch {
+			case !declared:
+				return errors.Errorf("%s: schema declares exclusive key %q, which is not a declared property", path, key)
+			case seen[key]:
+				return errors.Errorf("%s: schema lists exclusive key %q twice", path, key)
+			case field.Required:
+				return errors.Errorf("%s: schema declares exclusive key %q Required; a group's keys are optional, and the group's Required says one is set", path, key)
+			}
+			seen[key] = true
+		}
+	}
+	return nil
+}
+
+// quotedKeys renders keys for an error as "a" and "b", or "a", "b" and "c".
+func quotedKeys(keys []string) string {
+	quoted := make([]string, len(keys))
+	for i, key := range keys {
+		quoted[i] = strconv.Quote(key)
+	}
+	if len(quoted) < 2 {
+		return strings.Join(quoted, "")
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
 }
 
 // validatePropertyValue checks one value against its declared PropertySchema: the
@@ -303,6 +399,9 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// A schema, not a document, is wrong here — the same loud failure as an
 		// unsupported Type below.
 		return value, errors.Errorf("%s: schema declares both type %q and types %v; set exactly one", path, schema.Type, schema.Types)
+	}
+	if len(schema.Exclusive) > 0 && schema.Type != PropertyTypeObject {
+		return value, errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
 	}
 
 	switch schema.Type {
@@ -388,7 +487,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// closed) is exactly what decides whether that is accepted. Skipping the call
 		// here previously let AdditionalProperties:false silently accept anything when
 		// a handler declared an object-typed field with no sub-schema at all.
-		if err := validateObjectProperties(schema.Properties, schema.AdditionalProperties, obj, path); err != nil {
+		if err := validateObjectProperties(schema.Properties, schema.Exclusive, schema.AdditionalProperties, obj, path); err != nil {
 			return value, err
 		}
 		value = obj
@@ -1398,7 +1497,7 @@ func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) e
 				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
 			}
 			if p, declares := h.(PropertySchemaProvider); declares {
-				return validateEmittedAgainst(withObjectProperties(h, p.PropertySchema()), &comp.Properties, path)
+				return validateEmittedAgainst(withObjectProperties(h, p.PropertySchema()), exclusiveProperties(h), &comp.Properties, path)
 			}
 		}
 		return validateEmittedProperties(h, &comp.Properties, path)
@@ -1458,14 +1557,14 @@ func validateEmittedProperties(handler any, props *map[string]any, path string) 
 	if !ok {
 		return nil
 	}
-	return validateEmittedAgainst(p.PropertySchema(), props, path)
+	return validateEmittedAgainst(p.PropertySchema(), exclusiveProperties(handler), props, path)
 }
 
-// validateEmittedAgainst is validateEmittedProperties for a schema already in
-// hand.
-func validateEmittedAgainst(schema map[string]PropertySchema, props *map[string]any, path string) error {
+// validateEmittedAgainst is validateEmittedProperties for a schema and top-level
+// exclusive groups already in hand.
+func validateEmittedAgainst(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props *map[string]any, path string) error {
 	*props = copyPropertyMap(*props)
-	return validateProperties(schema, *props, path)
+	return validateTopLevelProperties(schema, exclusive, *props, path)
 }
 
 // copyPropertyMap copies m and every map, slice and array in it, whatever its Go

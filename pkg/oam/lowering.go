@@ -1548,7 +1548,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					}
 					// Nested Required on the merged properties, as applyTraits checks it
 					// (go-kure/launcher#765).
-					if err := checkNestedRequired(p.PropertySchema(), resolvedTrait.Properties, "properties", boundCapability(matched, matchedKey)); err != nil {
+					if err := checkNestedRequired(p.PropertySchema(), exclusiveProperties(p), resolvedTrait.Properties, "properties", boundCapability(matched, matchedKey)); err != nil {
 						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 					}
 				}
