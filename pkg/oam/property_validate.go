@@ -104,7 +104,7 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 			if additionalAllowed {
 				continue
 			}
-			return errors.Errorf("%s: unsupported field %q (allowed: %s)", path, key, declaredFields(schema))
+			return &unsupportedFieldError{path: path, key: key, allowed: declaredFields(schema)}
 		}
 		// Normalize an explicit null under an optional declared key to absence, so
 		// the classification the Required loop above already makes is what a
@@ -147,7 +147,7 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		}
 		normalized, err := validatePropertyValue(field, props[key], path+"."+key)
 		if err != nil {
-			return err
+			return withUnsupportedFieldParent(err, key)
 		}
 		props[key] = normalized
 	}

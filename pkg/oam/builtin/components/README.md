@@ -9384,12 +9384,25 @@ An authored key reaches a kind on one of two paths, and both give the reason:
   The kind gives the reason through `UnsupportedFieldHint`
   (`pkg/oam`'s README, "A reason on a refused key").
 
-A hint answers for a kind's **top-level** keys. A refusal that sits inside a
-property the kind declares — a key of a `volumeClaimTemplates` entry, of the
-`affinity` shorthand, of a container's `resources` — reaches a caller of the
-handler with its reason; in a document the check refuses the key at that
-position with its own text and no reason
-(`properties.affinity: unsupported field "nodeAffinity" (allowed: …)`).
+### Below the top level
+
+`UnsupportedFieldHint` answers for a kind's **top-level** keys. A refusal that
+sits inside a property the kind declares reaches a caller of the handler with
+its reason. In a document, the check refuses the key at that position with its
+own text and appends the same reason, which the kind gives through
+`NestedUnsupportedFieldHint` (go-kure/launcher#790):
+`properties.affinity: unsupported field "nodeAffinity" (allowed: …); affinity.nodeAffinity: not read — …`.
+The positions are:
+
+| Position | On | Keys |
+|----------|----|------|
+| a container's `resources`: the main container's, and an `initContainers` or `sidecars` entry's | every workload kind | `claims` |
+| an `initContainers` entry | every workload kind | `probes`, `lifecycle` (see [Container fields](#container-fields)) |
+| the `affinity` shorthand | `webservice`, `worker` | `nodeAffinity`, `podAffinity`, `podAntiAffinity` |
+| a `volumeClaimTemplates` entry | `statefulset` | `volumeName`, `dataSource`, `volumeMount` |
+
+`podResources` refuses `claims` as an unknown key, with no reason, at both
+paths.
 
 A key that is **no field of the upstream type** is not in a refusal map. The
 check refuses it as it refuses any undeclared key, with nothing appended; a
@@ -9411,7 +9424,7 @@ name, which a `cronjob` document retyped to `job` leaves behind.
 | `externalIPs`, `clusterIPs` | `service` | See the `service` kind. |
 | `dataSource` | `persistentvolumeclaim`, the `pvc` trait | Authored through `dataSourceRef`. |
 | `secrets` | `serviceaccount` | The list limits mountable Secrets only under an annotation upstream deprecates since Kubernetes 1.32; it is no way to find or create a token. |
-| `resources.claims` | a container's `resources`, on every kind that reads them | An entry names one of the pod's `resourceClaims`, and a container's resources are read without them; upstream puts the field behind the `DynamicResourceAllocation` feature gate. One level down: see above. |
+| `resources.claims` | a container's `resources`, on every kind that reads them | An entry names one of the pod's `resourceClaims`, and a container's resources are read without them; upstream puts the field behind the `DynamicResourceAllocation` feature gate. See [Below the top level](#below-the-top-level). |
 
 ### Read in another shape
 
