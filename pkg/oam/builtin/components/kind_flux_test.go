@@ -470,8 +470,9 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 // TestFluxProvider_RefusesAUserOrPassword: a user or a password in a
 // fluxcd-provider's `address` or `proxy` is refused when the component is
 // read, so under every policy and under none, and the refusal does not repeat
-// the value. An address that is no URL is written as authored, and so is a
-// credential in a path or a query, which the kind cannot tell from a path.
+// the value. An address that is no URL with a host is written as authored
+// unless it holds an `@`, and so is a credential in a path or a query, which
+// the kind cannot tell from a path.
 func TestFluxProvider_RefusesAUserOrPassword(t *testing.T) {
 	const secret = "s3cr3t-token"
 	cases := []struct {
@@ -480,7 +481,11 @@ func TestFluxProvider_RefusesAUserOrPassword(t *testing.T) {
 	}{
 		{"a user and a password in the address", "address", "https://bot:" + secret + "@hooks.example/services", "fluxcd-provider: address must not carry a user or password"},
 		{"a user alone in the address", "address", "https://" + secret + "@hooks.example/services", "fluxcd-provider: address must not carry a user or password"},
-		{"an address with an @ that is no URL", "address", "https://bot:" + secret + "%zz@hooks.example", "fluxcd-provider: address holds an @ and is not a valid URL"},
+		{"an address with an @ that is no URL", "address", "https://bot:" + secret + "%zz@hooks.example", "fluxcd-provider: address holds an @ and is no URL with a host"},
+		{"a user and a password in an address with no scheme", "address", "bot:" + secret + "@hooks.example", "fluxcd-provider: address holds an @ and is no URL with a host"},
+		{"a user in an address with no scheme", "address", secret + "@hooks.example", "fluxcd-provider: address holds an @ and is no URL with a host"},
+		{"a user in a URL with no host", "address", "https://bot:" + secret + "@/services", "fluxcd-provider: address holds an @ and is no URL with a host"},
+		{"an @ in the path of a URL", "address", "https://hooks.example/team@shop", ""},
 		{"a user and a password in the proxy", "proxy", "http://bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy must not carry a user or password"},
 		{"a proxy that is no URL", "proxy", "http://proxy.example:" + secret, "fluxcd-provider: proxy is not a valid URL"},
 		{"an address with no user", "address", "https://hooks.example/services", ""},
