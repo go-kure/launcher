@@ -109,8 +109,8 @@ github.com/evanphx/json-patch v5.9.11+incompatible h1:ixHHqfcGvxhWkniF1tWxBHA0yb
 github.com/evanphx/json-patch v5.9.11+incompatible/go.mod h1:50XU6AFN0ol/bzJsmQLiYLvXMP4fmwYFNcr97nuDLSk=
 github.com/evanphx/json-patch/v5 v5.9.11 h1:/8HVnzMq13/3x9TPvjG08wUGqBTmZBsCWzjTM0wiaDU=
 github.com/evanphx/json-patch/v5 v5.9.11/go.mod h1:3j+LviiESTElxA4p3EMKAB9HXj3/XEtnUf6OZxqIQTM=
-github.com/external-secrets/external-secrets/apis v0.0.0-20260918141056-e8f12e1f1646 h1:XVX58Wv7a58DPy7i1UP8vxULdygwPeAaYhZHim1x9uI=
-github.com/external-secrets/external-secrets/apis v0.0.0-20260918141056-e8f12e1f1646/go.mod h1:1HdrhQd9BpjfoAAn0I7Jo4NVMPwLj3OWw4C4VQWju5w=
+github.com/external-secrets/external-secrets/apis v0.0.0-20261006075617-9d17906e8e4c h1:WF+UC3x0WH3IoMq5XBTNWzuneMMF8EtMygPHaqsY74s=
+github.com/external-secrets/external-secrets/apis v0.0.0-20261006075617-9d17906e8e4c/go.mod h1:1HdrhQd9BpjfoAAn0I7Jo4NVMPwLj3OWw4C4VQWju5w=
 github.com/extism/go-sdk v1.7.1 h1:lWJos6uY+tRFdlIHR+SJjwFDApY7OypS/2nMhiVQ9Sw=
 github.com/extism/go-sdk v1.7.1/go.mod h1:IT+Xdg5AZM9hVtpFUA+uZCJMge/hbvshl8bwzLtFyKA=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
@@ -157,8 +157,8 @@ github.com/go-errors/errors v1.5.1 h1:ZwEMSLRCapFLflTpT7NKaAc7ukJ8ZPEjzlxt8rPN8b
 github.com/go-errors/errors v1.5.1/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
-github.com/go-kure/kure v0.2.0-beta.15.0.20261005182950-3afb93e06660 h1:MBRgHTGOYXdQcz5UAbuzhVb3ZLZtlOdrOf4MBrU3M6s=
-github.com/go-kure/kure v0.2.0-beta.15.0.20261005182950-3afb93e06660/go.mod h1:ZsiYAbol5vukBn9LKB8g+aan0/wwMPvQH5WKFm1Bf9k=
+github.com/go-kure/kure v0.2.0-beta.15.0.20261007183923-3978ab14c665 h1:ya3PI5ExNuY101KiJIhk0+n6wTL0j0JHwCv8y4lxU30=
+github.com/go-kure/kure v0.2.0-beta.15.0.20261007183923-3978ab14c665/go.mod h1:bA4763zeDgxihbqiusKcMoSyKgrYavoCgSfjTqr9hHQ=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
@@ -564,8 +564,8 @@ sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 h1:/YpDJ4vReG7Zm
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0/go.mod h1:tJo1aepTXyR+8Xs3sUsGBDk4Ub2AM5dPAPKJx0mpm5c=
 sigs.k8s.io/controller-runtime v0.25.2 h1:bEkK3PVOIVK9X8QWLGVhJgmFc++47vfT6wakSzAOLsQ=
 sigs.k8s.io/controller-runtime v0.25.2/go.mod h1:4QqLdT6z/L6Olj8JJCtvztid4/fnIiYsfaTFScegctc=
-sigs.k8s.io/gateway-api v1.6.2 h1:vh5YzKlbdBivEaLX61+APKLGRq4tZ7Fj4XfGkv08xB4=
-sigs.k8s.io/gateway-api v1.6.2/go.mod h1:FVfx3t389ybeXOqvDghLbdvJdSCfI/PReqCUI3lu3mY=
+sigs.k8s.io/gateway-api v1.6.3 h1:lKpJa5bGlraC/QeACvCpsHLdmO6y0iKfzVl6gzaFEYc=
+sigs.k8s.io/gateway-api v1.6.3/go.mod h1:FVfx3t389ybeXOqvDghLbdvJdSCfI/PReqCUI3lu3mY=
 sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 h1:IpInykpT6ceI+QxKBbEflcR5EXP7sU1kvOlxwZh5txg=
 sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730/go.mod h1:mdzfpAEoE6DHQEN0uh9ZbOCuHbLK5wOm7dK4ctXE9Tg=
 sigs.k8s.io/kustomize/api v0.21.2 h1:MRyw+zLnFBP+G40gZJoKZErAuRiOPEPao+ddS9L6xt4=

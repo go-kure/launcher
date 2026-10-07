@@ -241,7 +241,7 @@ func TestBundleSettings_OrderedApplicationTakesTheGroupBundle(t *testing.T) {
 // held here so that a pin move that changes one is seen.
 func TestBundleSettings_Refused(t *testing.T) {
 	doc := hookApp("shop", hookComponent("db", "helmtemplate", serveHookChart(t), ""), "")
-	const durationRefusal = `validation failed for Bundle 'shop' field 'timeout': timeout "1us" is written as "1µs", which the Flux API does not take: it takes digits with a unit of ms, s, m or h, so no negative duration and none under a millisecond`
+	const durationRefusal = `validation failed for Bundle 'shop' field 'timeout': timeout "1us" is written as "1µs", which the Flux API does not take: it takes digits with a unit of ms, s, m or h, so no negative duration and no positive one under a millisecond`
 	for _, tc := range []struct {
 		name string
 		set  func(b *stack.Bundle)
