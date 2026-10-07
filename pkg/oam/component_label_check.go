@@ -166,9 +166,9 @@ type operatorMetadataKind struct {
 //     is the metadata of the pods that answer its challenges;
 //   - a Gateway's spec.infrastructure holds labels and annotations for what
 //     the controller creates for the Gateway, which may be pods;
-//   - spec.commonMetadata of a Flux Kustomization, HelmRelease and
-//     ArtifactGenerator holds labels and annotations the controller puts on
-//     every object it applies, renders or generates, workloads among them.
+//   - spec.commonMetadata of a Flux Kustomization and HelmRelease holds labels
+//     and annotations the controller puts on every object it applies or
+//     renders, workloads among them.
 //
 // Metadata an operator copies onto objects it creates that are no pods is held
 // to the consumer's reserved keys alone (go-kure/launcher#790): the component
@@ -193,6 +193,8 @@ type operatorMetadataKind struct {
 //     (spec.externalSecretSpec.target.template.metadata);
 //   - a HelmRelease's spec.chart.metadata, which goes onto the HelmChart the
 //     controller creates;
+//   - an ArtifactGenerator's spec.commonMetadata, which goes onto the
+//     ExternalArtifacts it generates;
 //   - serviceAnnotations of the rsync and rsyncTLS movers of a VolSync
 //     ReplicationDestination, which go onto the Service of the mover: a map of
 //     annotations, with no labels beside it.
@@ -214,7 +216,6 @@ var operatorMetadataKinds = slices.Concat(
 		{gatewayGroup, "Gateway", metadataHolder{path: []string{"spec", "infrastructure"}, in: ReservedKeyInInfrastructure}},
 		{fluxKustomizeGroup, "Kustomization", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
 		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
-		{fluxSourceExtensionsGroup, "ArtifactGenerator", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata}},
 
 		// Metadata that reaches objects that are no pods.
 		{certManagerGroup, "Certificate", metadataHolder{path: []string{"spec", "secretTemplate"}, in: ReservedKeyInSecretTemplate, noPods: true}},
@@ -230,6 +231,7 @@ var operatorMetadataKinds = slices.Concat(
 			path: []string{"spec", "externalSecretSpec", "target", "template", "metadata"}, in: ReservedKeyInSecretTemplate, noPods: true,
 		}},
 		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "chart", "metadata"}, in: ReservedKeyInChartTemplate, noPods: true}},
+		{fluxSourceExtensionsGroup, "ArtifactGenerator", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
 	},
 	moverPodLabels("ReplicationSource", "rsync", "rsyncTLS", "rclone", "restic", "syncthing"),
 	moverPodLabels("ReplicationDestination", "rsync", "rsyncTLS", "rclone", "restic"),
