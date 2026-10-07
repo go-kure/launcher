@@ -47,7 +47,7 @@ func (h *GRPCRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"useDefaultGateways": {
 			Type:        oam.PropertyTypeString,
-			Description: "GRPCRoute spec.useDefaultGateways: the scope of default Gateways the route also attaches to (All, None). An experimental-channel field: a cluster whose GRPCRoute CRD is the standard channel's refuses it.",
+			Description: "GRPCRoute spec.useDefaultGateways: the scope of default Gateways the route also attaches to (All, None). An experimental-channel field: the standard channel's GRPCRoute CRD does not hold it.",
 		},
 		"hostnames": {
 			Type:        oam.PropertyTypeArray,
