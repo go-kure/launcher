@@ -2240,6 +2240,35 @@ func TestRoleClaims_NoCollisionAcrossHyphenatedNames(t *testing.T) {
 	}
 }
 
+// TestRoleClaims_ClaimObjectNameWithoutANamer: driven outside the engine (a
+// context with no Namer), a volume's claimObjectName still names its claim and
+// the reference, and two volumes of one call that author the same name are
+// still refused, by the allocator the call makes for itself
+// (go-kure/launcher#787).
+func TestRoleClaims_ClaimObjectNameWithoutANamer(t *testing.T) {
+	vol := func(name, claim string) map[string]any {
+		return map[string]any{"name": name, "type": "pvc", "mountPath": "/" + name, "size": "1Gi", claimObjectNameProperty: claim}
+	}
+	props := map[string]any{"volumes": []any{vol("data", "store")}}
+	traits, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{})
+	if err != nil {
+		t.Fatalf("roleClaims: %v", err)
+	}
+	if len(traits) != 1 || traits[0].Properties["name"] != "store" {
+		t.Fatalf("traits = %#v, want one claim named store", traits)
+	}
+	got := props["volumes"].([]any)[0].(map[string]any)
+	if _, kept := got[claimObjectNameProperty]; kept || got["claimName"] != "store" {
+		t.Errorf("volumes[0] = %#v, want claimName store and no claimObjectName", got)
+	}
+
+	props = map[string]any{"volumes": []any{vol("data", "store"), vol("logs", "store")}}
+	const want = `volume "logs": naming the PersistentVolumeClaim: name collision: PersistentVolumeClaim "store"`
+	if _, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want one containing %q", err, want)
+	}
+}
+
 // TestRoleClaims_InvalidDNS_Error: the qualified claim name must be a
 // DNS-1123 subdomain, which an uppercase component name is not.
 func TestRoleClaims_InvalidDNS_Error(t *testing.T) {

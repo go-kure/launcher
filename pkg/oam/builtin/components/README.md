@@ -1287,7 +1287,10 @@ limit and default now apply to that claim, not to the volume.
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its
 `deployment` member, named `<component>-<volume>` as before, and rewrites the
-volume to reference it by `claimName`. The output is unchanged.
+volume to reference it by `claimName`. The output is unchanged. The volume's
+`claimObjectName` names that claim instead (go-kure/launcher#787, role
+`workload-volume-claim`; see "`deploymentObjectName`, `serviceObjectName` and
+`serviceAccountObjectName`" below).
 
 Such a volume that leaves `storageClass` unauthored (absent or `null`) takes
 the ClusterProfile `pvc` capability's `storageClassName`, as an authored `pvc`
@@ -1309,6 +1312,8 @@ properties").
 - `size` and `storageClass` are refused alongside it, because the referenced
   claim states its own (`volume "data": size cannot be set with claimName; …`).
 - `claimName: ""` is refused, not read as absent.
+- `claimObjectName` is refused alongside it: it names the claim a
+  `webservice` or `worker` volume generates, and this volume generates none.
 - `accessModes` stays: it states the referenced claim's modes, defaulting to
   `ReadWriteOnce` as on a claim a role kind describes. The workload still reads them. A
   non-RWX claim still forces `strategy: Recreate` on a Deployment, still
@@ -2157,8 +2162,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `member type "serviceaccount" has no component handler`.
   - **Both rules turn each claim a `pvc` volume describes into a synthesized
     `pvc` trait** on the `deployment` member (go-kure/launcher#702), named
-    `<component>-<volume>` as before, and rewrite the volume to reference it by
-    `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
+    `<component>-<volume>` as before unless the volume's `claimObjectName` or
+    the `Naming` hook names it (below), and rewrite the volume to reference it
+    by `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
     The claims are generated as before, after the component's own objects. A
     registry that lowers `webservice` or `worker` must register the `pvc` trait
     handler too.
@@ -2229,9 +2235,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     refused as a name collision with both named.
     - *They name the objects alone.* The members keep the component's name, so
       the `app` label, the pod template's labels, the Deployment's and the
-      Service's selectors, the main container, the claims (`<component>-<volume>`)
-      and every name a trait derives (`<component>-hpa`, `<component>-httproute`)
-      stay as they were.
+      Service's selectors, the main container, the claims' default names
+      (`<component>-<volume>`) and every name a trait derives (`<component>-hpa`,
+      `<component>-httproute`) stay as they were.
+    - *A `pvc` volume's `claimObjectName` names the claim that volume
+      generates* (role `workload-volume-claim`), in place of
+      `<component>-<volume>`, used as written: a DNS-1123 subdomain, never
+      shortened. The volume mounts the claim by that name. Without it the
+      `Naming` hook is asked once per such volume. A volume with `claimName`
+      references an existing claim and generates none, so `claimObjectName`
+      beside it is refused and the hook is not asked for it. Two volumes, or
+      a volume and another component, that give one claim name are refused as
+      a name collision.
     - *What launcher writes to a renamed object follows it.* The `scaler`
       trait's `scaleTargetRef` names the Deployment, whatever the Service and
       the ServiceAccount are named. A routing trait's own backend (`expose`,
