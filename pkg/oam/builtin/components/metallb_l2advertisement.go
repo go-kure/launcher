@@ -19,8 +19,9 @@ import (
 // (decodeKindSpec). It emits the L2Advertisement, named after the component
 // unless `objectName` names it, in the build namespace, and nothing else. The
 // API requires no top-level field, and each one narrows the advertisement: a
-// component that authors none limits it to no pool, node, interface or
-// Service. TestCoreKindSchemas_CoverSpec keeps the published key set equal to
+// component that authors none is the widest advertisement, of every pool, on
+// every interface, for every Service, with no node excluded.
+// TestCoreKindSchemas_CoverSpec keeps the published key set equal to
 // the upstream json tags.
 type MetalLBL2AdvertisementHandler struct{}
 
