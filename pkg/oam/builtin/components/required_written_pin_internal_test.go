@@ -17,11 +17,13 @@ import (
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
@@ -399,6 +401,10 @@ var requiredWrittenKinds = []pinKind{
 		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.BucketSpec](), false)},
 	{component: "fluxcd-alert", handler: &FluxcdAlertHandler{}, typ: reflect.TypeFor[notificationv1beta3.AlertSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.AlertSpec](), false)},
+	{component: "fluxcd-provider", handler: &FluxcdProviderHandler{}, typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.ProviderSpec](), false)},
+	{component: "fluxcd-receiver", handler: &FluxcdReceiverHandler{}, typ: reflect.TypeFor[notificationv1.ReceiverSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1.ReceiverSpec](), false)},
 	{component: "fluxcd-kustomization", handler: &FluxcdKustomizationHandler{}, typ: reflect.TypeFor[kustv1.KustomizationSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[kustv1.KustomizationSpec](), false),
 		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}}},
@@ -420,11 +426,15 @@ var requiredWrittenKinds = []pinKind{
 		base:   map[string]any{"url": "https://charts.example.com"}},
 	{component: "imagepolicy", handler: &ImagePolicyHandler{}, typ: reflect.TypeFor[imagev1.ImagePolicySpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[imagev1.ImagePolicySpec](), false)},
+	{component: "imagerepository", handler: &ImageRepositoryHandler{}, typ: reflect.TypeFor[imagev1.ImageRepositorySpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[imagev1.ImageRepositorySpec](), false)},
 	{component: "imageupdateautomation", handler: &ImageUpdateAutomationHandler{}, typ: reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), false)},
 	{component: "ocirepository", handler: &OCIRepositoryHandler{}, typ: reflect.TypeFor[sourcev1.OCIRepositorySpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[sourcev1.OCIRepositorySpec](), false),
 		base:   map[string]any{"url": "oci://registry.example.com/app"}},
+	{component: "resourcesetinputprovider", handler: &ResourceSetInputProviderHandler{}, typ: reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](),
+		schema: pinCRDSchema("github.com/controlplaneio-fluxcd/flux-operator", fluxOperatorCRDs[resourceSetInputProviderType], fluxoperatorv1.GroupVersion.Version)},
 	{component: "secretstore", handler: &SecretStoreHandler{}, typ: reflect.TypeFor[esv1.SecretStoreSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[esv1.SecretStoreSpec](), true),
 		base:   map[string]any{"provider": externalSecretsPinFake()}},
