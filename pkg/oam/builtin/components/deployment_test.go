@@ -634,8 +634,8 @@ func TestDeploymentHandler_PropertySchemaComposition(t *testing.T) {
 		}
 	}
 	// go-kure/launcher#412 published `affinity` here, but as the raw
-	// corev1.Affinity shape — NOT the four-key shorthand webservice/worker/
-	// statefulset carry. That distinction is the whole reason the property is
+	// corev1.Affinity shape — NOT the four-key shorthand webservice/worker
+	// carry. That distinction is the whole reason the property is
 	// admissible on this kind at all (go-kure/launcher#343 excluded the shorthand, not the API
 	// field), so assert which of the two arrived rather than merely that the
 	// key exists.
