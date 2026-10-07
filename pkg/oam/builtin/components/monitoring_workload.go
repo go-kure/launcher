@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -20,12 +21,15 @@ import (
 // that value, with or without an environment policy
 // (validateMonitoringWorkload) and under one (enforceMonitoringWorkloadPolicy).
 //
-// What is held is what the object's author wrote. What the operator adds to
-// the pods on its own is not in the object and is not held: its
-// config-reloader containers, the arguments it derives. Where the spec names
-// no image, the operator chooses the one the pods run; under a policy with
-// allowed registries that choice cannot be held, so the unset image is
-// refused. The operator's code is not in the linked module and was not read.
+// What is held is what the object's author wrote, and, where the operator
+// fills a value the policy has a dimension for into what the author left unset,
+// the value it fills: a replica count, a memory request. Each such value is
+// read from the operator's source at the version the linked module is cut
+// from, and is cited where the kind maps it; it is held, not written into the
+// object. The images of the containers the operator generates are its own
+// choice where the spec names none, for them or in a listed entry that patches
+// them; under a policy with allowed registries that choice cannot be held, so
+// it is refused. The arguments the operator derives are not held.
 
 // monitoringWorkloadDefaultedZeros is a workload kind's defaulted-zero list for
 // refuseUncarriedSpecValues: the probe fields of the containers its spec lists
@@ -63,15 +67,20 @@ type monitoringWorkload struct {
 	// one the operator generates is a patch of that container, and is held like
 	// any other.
 	pod corev1.PodSpec
+	// generated names the containers the operator generates, by the property
+	// that lists them (containers, initContainers): a listed entry of one of
+	// these names is merged into that container, and may name no image.
+	generated map[string][]string
 	// images are the full image references the spec names outside pod. An
 	// empty value names no image and is not listed.
 	images []fieldValue
-	// unsetImages are the paths of the image fields the spec leaves unset or
-	// empty where the operator then runs an image of its own choosing.
+	// unsetImages name the images of the containers the operator generates
+	// that the spec leaves to it: unset or empty in their own field, and named
+	// by no listed entry that patches the container.
 	unsetImages []string
-	// replicas is the number of pods the spec asks for in total, nil where it
-	// leaves the number to the operator. replicasPath names the property, or
-	// the properties, it was read from.
+	// replicas is the number of pods the operator runs: the count the spec
+	// asks for in total, or the operator's own where the spec leaves it unset.
+	// replicasPath names the property, or the properties, it was read from.
 	replicas     *int64
 	replicasPath string
 	// storage is the spec's storage block, nil where it has none.
@@ -79,6 +88,9 @@ type monitoringWorkload struct {
 	// resources are the resource blocks the spec names outside pod: the ones of
 	// the containers the operator generates.
 	resources []fieldResources
+	// memoryRequests is the memory request the operator fills into a block of
+	// resources that names none, by the path of the block.
+	memoryRequests map[string]string
 	// literals are the paths of the credentials the spec holds in the clear.
 	literals []string
 }
@@ -87,9 +99,11 @@ type monitoringWorkload struct {
 // or without an environment policy: an image reference without a tag or a
 // digest, or tagged latest (ValidateImageRef), on every image the workload
 // names, and a resource block whose request exceeds its limit
-// (validateCnpgResources). A container or an image volume that names no image
-// is not checked, whatever its name: a listed container named for one the
-// operator generates is merged into it, so such a patch may name none.
+// (validateCnpgResources). A listed container named for one the operator
+// generates is merged into it, so such a patch may name no image; any other
+// listed container is added to the pods as written, and one that names no
+// image is refused, since no pod runs it. An image volume that names no image
+// is not checked.
 func validateMonitoringWorkload(w monitoringWorkload) error {
 	for _, image := range w.images {
 		if err := ValidateImageRef(image.value); err != nil {
@@ -102,10 +116,13 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	}{{"initContainers", w.pod.InitContainers}, {"containers", w.pod.Containers}} {
 		for i, c := range list.containers {
 			where := fmt.Sprintf("%s[%d] %q", list.name, i, c.Name)
-			if c.Image != "" {
+			switch {
+			case c.Image != "":
 				if err := ValidateImageRef(c.Image); err != nil {
 					return errors.Wrap(err, where)
 				}
+			case !slices.Contains(w.generated[list.name], c.Name):
+				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
 			if err := validateCnpgResources(where, c.Resources); err != nil {
 				return err
@@ -143,22 +160,25 @@ func validateResourcesAt(path string, r corev1.ResourceRequirements) error {
 //
 //   - a credential in the clear, under a policy that forbids explicit secrets;
 //   - an image outside the allowed registries;
-//   - an image field left unset, under a policy that lists allowed
-//     registries: the operator would choose the image, and no allowlist
-//     reaches that choice;
-//   - more pods than the replica maximum;
+//   - an image of a container the operator generates that the spec leaves to
+//     it, under a policy that lists allowed registries: the operator would
+//     choose the image, and no allowlist reaches that choice;
+//   - more pods than the replica maximum, the operator's count included where
+//     the spec leaves it unset;
 //   - a claim that requests more than the storage maximum, in the storage
-//     block's volumeClaimTemplate or in the claim template of its ephemeral
-//     volume;
-//   - a resource block over the cpu or memory maximum;
+//     block's arm the operator uses: emptyDir, then ephemeral, then
+//     volumeClaimTemplate, so a claim template is held only where no arm
+//     before it is set;
+//   - a resource block over the cpu or memory maximum, the memory request the
+//     operator fills included where the block names none;
 //   - the pod fields, as a workload kind's pod template is held
 //     (enforcePodTemplatePolicy): host namespaces, hostPath volumes, privilege
 //     and capabilities, and the images, resources and claims of the listed
 //     containers and volumes.
 //
 // The size limit of an emptyDir is not held, here or on any kind. No replica,
-// resource or storage default of the policy is applied: the operator, not
-// launcher, decides what an omitted field means.
+// resource or storage default of the policy is applied, and nothing is
+// written: the operator's own values are held, not filled in.
 func enforceMonitoringWorkloadPolicy(w monitoringWorkload, p oam.Policy) error {
 	if len(w.literals) > 0 && !oam.ExplicitSecretsAllowed(p) {
 		return oam.NewPolicyRefusal(oam.RefusalExplicitSecret, fmt.Sprintf("%s: holds a credential in the object, and the environment policy forbids explicit secrets; name the key of a Secret created out of band instead", w.literals[0]))
@@ -175,16 +195,10 @@ func enforceMonitoringWorkloadPolicy(w monitoringWorkload, p oam.Policy) error {
 	if max := p.MaxReplicas(); w.replicas != nil && max != nil && *w.replicas > int64(*max) {
 		return oam.NewPolicyRefusal(oam.RefusalReplicaMaximum, fmt.Sprintf("%s %d exceeds enforced maximum %d", w.replicasPath, *w.replicas, *max))
 	}
-	if s := w.storage; s != nil {
-		claims := []fieldResources{{"storage.volumeClaimTemplate.spec.resources.requests.storage", corev1.ResourceRequirements{Requests: s.VolumeClaimTemplate.Spec.Resources.Requests}}}
-		if e := s.Ephemeral; e != nil && e.VolumeClaimTemplate != nil {
-			claims = append(claims, fieldResources{"storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage", corev1.ResourceRequirements{Requests: e.VolumeClaimTemplate.Spec.Resources.Requests}})
-		}
-		for _, claim := range claims {
-			if q, ok := claim.resources.Requests[corev1.ResourceStorage]; ok {
-				if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), claim.path); err != nil {
-					return err
-				}
+	if claim, ok := storageClaim(w.storage); ok {
+		if q, ok := claim.resources.Requests[corev1.ResourceStorage]; ok {
+			if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), claim.path); err != nil {
+				return err
 			}
 		}
 	}
@@ -192,6 +206,45 @@ func enforceMonitoringWorkloadPolicy(w monitoringWorkload, p oam.Policy) error {
 		if err := enforceMaxContainerResources(r.resources, p); err != nil {
 			return errors.Wrap(err, r.path)
 		}
+		if q, ok := w.memoryRequests[r.path]; ok {
+			if _, named := r.resources.Requests[corev1.ResourceMemory]; !named {
+				if err := enforceMaxResource(q, p.MaxMemory(), "memory request"); err != nil {
+					return errors.Wrap(err, fmt.Sprintf("%s, whose unset memory request the Prometheus operator fills as %s", r.path, q))
+				}
+			}
+		}
 	}
 	return enforcePodTemplatePolicy("", &w.pod, p)
+}
+
+// storageClaim returns the claim the operator makes for the pods' data from
+// the storage block s, with the path of its storage request, and false where
+// it makes none: s is nil, or names an emptyDir, or an ephemeral volume
+// without a claim template. The operator reads the arms in that order and
+// uses the first that is set, the volumeClaimTemplate last; an arm after the
+// one it uses makes no claim.
+func storageClaim(s *monitoringv1.StorageSpec) (fieldResources, bool) {
+	switch {
+	case s == nil, s.EmptyDir != nil:
+		return fieldResources{}, false
+	case s.Ephemeral != nil:
+		if s.Ephemeral.VolumeClaimTemplate == nil {
+			return fieldResources{}, false
+		}
+		return fieldResources{"storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage", corev1.ResourceRequirements{Requests: s.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests}}, true
+	default:
+		return fieldResources{"storage.volumeClaimTemplate.spec.resources.requests.storage", corev1.ResourceRequirements{Requests: s.VolumeClaimTemplate.Spec.Resources.Requests}}, true
+	}
+}
+
+// patchedImage returns the image a listed entry of containers named name
+// writes into the container of that name the operator generates, and "" where
+// no entry of that name names one.
+func patchedImage(containers []corev1.Container, name string) string {
+	for _, c := range containers {
+		if c.Name == name && c.Image != "" {
+			return c.Image
+		}
+	}
+	return ""
 }

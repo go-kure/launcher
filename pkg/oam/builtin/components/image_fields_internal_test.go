@@ -30,6 +30,17 @@ func amListedImage() *string {
 	return &image
 }
 
+// amPatched is spec with both config-reloader containers the operator
+// generates patched with an image from the registry
+// TestImageFields_HeldOrListed allows: under allowed registries an unpatched
+// one is refused, as the operator would choose its image.
+func amPatched(spec monitoringv1.AlertmanagerSpec) *monitoringv1.AlertmanagerSpec {
+	const reloader = "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"
+	spec.Containers = append(slices.Clone(spec.Containers), corev1.Container{Name: "config-reloader", Image: reloader})
+	spec.InitContainers = append(slices.Clone(spec.InitContainers), corev1.Container{Name: "init-config-reloader", Image: reloader})
+	return &spec
+}
+
 // imageFieldType is a type whose document can name an image, and how each of
 // its fields that could is accounted for.
 type imageFieldType struct {
@@ -302,28 +313,29 @@ var imageFieldTypes = []imageFieldType{
 	},
 	{
 		// The alertmanager kind: its own image, and the containers and volumes
-		// it lists through the shared check. A listed container may leave its
-		// image out and is not refused for it; one named for a container the
-		// operator generates is merged into that container. The spec's own
-		// image may not under allowed registries, so the checks of the other
-		// fields name one from the allowed registry.
+		// it lists through the shared check. A listed container named for none
+		// the operator generates must name its image; one named for a container
+		// the operator generates is merged into that container and may leave it
+		// out. Under allowed registries the spec's own image and the images of
+		// the two config-reloaders may not be left to the operator, so the
+		// checks of the other fields name them from the allowed registry.
 		name: "alertmanager spec",
 		typ:  reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 		held: map[string]func(string, oam.Policy) error{
 			"image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: &reference}, p)
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: &reference}), p)
 			},
 			"containers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}, p)
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}), p)
 			},
 			"initContainers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}), p)
 			},
 			"volumes[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(&monitoringv1.AlertmanagerSpec{Image: amListedImage(), Volumes: []corev1.Volume{{
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Volumes: []corev1.Volume{{
 					Name:         "ext",
 					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}}, p)
+				}}}), p)
 			},
 		},
 		tagged: map[string]imageTagCheck{
@@ -332,10 +344,10 @@ var imageFieldTypes = []imageFieldType{
 			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
 			"containers[].image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
-			}},
+			}, emptyRefused: "a listed container the operator generates none of is added as written, and no pod runs one without an image"},
 			"initContainers[].image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
-			}},
+			}, emptyRefused: "a listed init container the operator generates none of is added as written, and no pod runs one without an image"},
 			"volumes[].image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Volumes: []corev1.Volume{{
 					Name:         "ext",

@@ -133,7 +133,7 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
-| `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are not in the schema, and are refused when not empty (an empty one writes nothing where the properties are not first validated against the schema, which refuses all three). An unset `image` is refused under a policy with allowed registries: the object then names none and the operator chooses the image. No capability is required — see below. |
+| `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are not in the schema, and are refused when not empty (an empty one writes nothing where the properties are not first validated against the schema, which refuses all three). The replica count and memory request the operator fills where they are unset are held, not written. An image the operator chooses, for `alertmanager` or one of its two reloaders, is refused under a policy with allowed registries. No capability is required — see below. |
 | `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and nothing gates it. The API's expression rule is not checked. No environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
@@ -452,7 +452,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `metallb.CreateL2Advertisement` | metallb.io/v1beta1 L2Advertisement | kind | `metallb-l2advertisement` | strict decode of `L2AdvertisementSpec` | The object is named after the component unless `objectName` names it. No field is required: one that authors nothing is the widest advertisement, of every pool, on every interface, for every Service, with no node excluded. It is written in the build namespace; MetalLB reads its objects in the one namespace it is configured to watch, by default the one it runs in. The pool and interface names are not read. No capability is required. No environment policy applies. |
 | `metallb.CreateServiceBGPStatus` | metallb.io/v1beta1 ServiceBGPStatus | not authorable | - | - | Status MetalLB writes. |
 | `metallb.CreateServiceL2Status` | metallb.io/v1beta1 ServiceL2Status | not authorable | - | - | Status MetalLB writes. |
-| `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | kind | `alertmanager` | strict decode of `AlertmanagerSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image`, `replicas`, `resources`, the storage a claim template requests, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's. `baseImage`, `tag` and `sha` are refused when not empty. An unset `image` is refused under a policy with allowed registries: the object then names none and the operator chooses the image. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
+| `prometheus.CreateAlertmanager` | monitoring.coreos.com/v1 Alertmanager | kind | `alertmanager` | strict decode of `AlertmanagerSpec` | Held to the environment policy as a workload is, for what the spec says of the pods the operator runs: `image`, `replicas`, `resources`, the storage of the claim the operator makes, and `containers`, `initContainers`, `volumes`, `securityContext` and `hostNetwork` as a pod's; the replica count and memory request the operator fills where they are unset are held, not written. `baseImage`, `tag` and `sha` are refused when not empty, and so are a `retention` and a cluster duration of 0 or less. An image the operator chooses, for `alertmanager` or one of its two reloaders, is refused under a policy with allowed registries. `podMetadata` is read for reserved keys and takes no label: the operator's pods carry the component label only where the author writes it there. No capability is required. |
 | `prometheus.CreatePodMonitor` | monitoring.coreos.com/v1 PodMonitor | kind | `podmonitor` | strict decode of `PodMonitorSpec` | `selector` must be written, and the three required fields of an endpoint's `oauth2`. No environment policy applies, and no capability is required. |
 | `prometheus.CreateProbe` | monitoring.coreos.com/v1 Probe | kind | `prometheus-probe` | strict decode of `ProbeSpec` | `prober.url` must be written, and the three required fields of an `oauth2`. No environment policy applies, and no capability is required. The type name carries a prefix: a probe, in this package, is a container's. |
 | `prometheus.CreatePrometheus` | monitoring.coreos.com/v1 Prometheus | missing | - | - | - |
@@ -3644,12 +3644,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `forceEnableClusterMode`.
 
   The type's comments say that an entry sharing its name with a container the
-  operator generates is merged into it, and name those containers:
-  `alertmanager`, `config-reloader` and `thanos-sidecar` under `containers`,
-  `init-config-reloader` under `initContainers`. Whether the operator
-  generates a `thanos-sidecar` for an Alertmanager, and so whether an entry of
-  that name patches one or adds one, is in its code, which was not read.
-  Launcher holds every entry the same way either way. `additionalArgs` is
+  operator generates is merged into it. For an Alertmanager the operator
+  generates `alertmanager` and `config-reloader` under `containers`, and
+  `init-config-reloader` under `initContainers` (`makeStatefulSetSpec` in
+  `pkg/alertmanager/statefulset.go` of prometheus-operator v0.94.1, the
+  version the linked module is cut from); it generates no `thanos-sidecar`,
+  so an entry of that name is a container of its own. Of the three, only
+  `alertmanager` takes its image from the spec; the two reloaders run the
+  image of the operator's own configuration unless an entry patches them.
+  Launcher holds every entry the same way, patch or not. `additionalArgs` is
   passed to the alertmanager container as written and is not read: an
   argument can change what the other fields configure.
 
@@ -3736,28 +3739,45 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   :latest tag not allowed`), and a resource block's request may not exceed
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
-  limit 1Gi`). A listed container that names no image is not checked for
-  one, whatever its name. An entry named for a container the operator
-  generates is merged into it, so such a patch may name none.
+  limit 1Gi`). An entry named for a container the operator generates, in
+  the list the operator generates it in, is merged into it, so such a patch
+  may name no image; any other listed entry that names none is refused, as
+  no pod could run it (`containers[1] "proxy": names no image, and the
+  Prometheus operator generates no container of that name to merge it into;
+  …`). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  `clusterPeerTimeout` are refused where they parse as a duration of 0 or
+  less (`retention: "0s" is not a positive duration: …`): the operator
+  empties such a value before it builds the StatefulSet and runs the pods as
+  if the field were unset (`discardZeroDurations`, same source). A value
+  that does not parse is left to the API's pattern.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload
   kind's refusal has:
-  - `image`, the image of a listed container or init container, and an image
-    volume's reference, outside the allowed registries
-    (`oam.RefusalRegistry`);
-  - an unset or empty `image` under a policy that lists allowed registries
-    (`oam.RefusalRegistry`): the operator then chooses the image the pods
-    run, and the allowlist cannot hold that choice;
-  - `replicas` over the replica maximum (`replicas 4 exceeds enforced maximum
-    3`, `oam.RefusalReplicaMaximum`);
+  - `image`, the image of a listed container or init container (a patch of
+    `alertmanager` included), and an image volume's reference, outside the
+    allowed registries (`oam.RefusalRegistry`);
+  - under a policy that lists allowed registries, an image of a container
+    the operator generates that the spec leaves to it (`oam.RefusalRegistry`):
+    the `alertmanager` container's where neither `image` nor a patch of it
+    names one, and `config-reloader`'s or `init-config-reloader`'s where no
+    patch names one. See below;
+  - `replicas` over the replica maximum, an unset one counted as the 1 the
+    operator runs (`replicas 1 exceeds enforced maximum 0`,
+    `oam.RefusalReplicaMaximum`);
   - the cpu or memory of `resources`, and of a listed container, over the
     maxima (`oam.RefusalResourceMaximum`), on a patch of one of the
-    operator's containers as on any other;
+    operator's containers as on any other. Where `resources` names no memory
+    request, the 200Mi the operator requests for the alertmanager container
+    is held in its place (`resources, whose unset memory request the
+    Prometheus operator fills as 200Mi: memory request "200Mi" exceeds
+    enforced maximum "128Mi"`);
   - the storage a claim requests over the storage maximum
-    (`oam.RefusalStorageMaximum`): `storage.volumeClaimTemplate`,
-    `storage.ephemeral.volumeClaimTemplate`, and a generic ephemeral volume
-    under `volumes`;
+    (`oam.RefusalStorageMaximum`): of `storage`, the arm the operator uses,
+    reading `emptyDir`, then `ephemeral`, then `volumeClaimTemplate` and
+    taking the first that is set, so a claim template after an arm in use
+    is not held, as no claim is made from it; and a generic ephemeral
+    volume under `volumes`;
   - `hostNetwork: true` under a policy that does not allow the host network
     (`oam.RefusalHostNamespace`); the spec has no field for the host's
     process or IPC namespace;
@@ -3767,16 +3787,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     not allow privileged containers (`oam.RefusalPrivileged`), and a
     capability the policy does not allow (`oam.RefusalContainerCapability`).
 
-  **An unset `image` is refused under a registry allowlist.** Where the spec
-  names no image, the operator chooses the one the pods run, and no registry
-  allowlist reaches that choice, so a policy with a non-empty
-  `AllowedRegistries` refuses it (`image: unset, so the Prometheus operator
-  chooses the image the pods run, …`) and the author names an image from one
-  of the listed registries. Without such a list, it builds. A listed
-  container that names no image is not refused. The type's comments say an
-  entry named for a container the operator generates is merged into it;
-  what the operator does with an entry of another name that names no image
-  is in its code, which was not read.
+  **An image the operator chooses is refused under a registry allowlist.**
+  Where the spec names no image for a container the operator generates, the
+  operator chooses the one it runs, and no registry allowlist reaches that
+  choice, so a policy with a non-empty `AllowedRegistries` refuses it
+  (`image: unset, so the Prometheus operator chooses the image the pods run,
+  …`; `the image of the config-reloader container (containers): unset, …`)
+  and the author names an image from one of the listed registries: `image`
+  or a patch of `alertmanager` for the first, a patch of each reloader for
+  the other two. Without such a list, it builds.
+
+  **The operator's own values are held, not written.** Where the spec leaves
+  `replicas` or the alertmanager container's memory request unset, the
+  operator fills 1 and 200Mi before it builds the StatefulSet
+  (`makeStatefulSet`, same source); the policy holds those values as if
+  authored, and the emitted object still leaves both unset.
 
   `TestMonitoringWorkloadKinds_PodFieldsHeldOrListed` derives, from the type,
   every field of the spec that shapes the pods and holds each to one of three
@@ -3786,16 +3811,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the wrapper (`podMetadata`, below); or stated with the reason it is neither.
   A dependency bump that adds such a field fails there, naming it. **Not
   held:**
-  - **An unset `image` under a policy without allowed registries,** as stated
-    above. `version` does not name an image.
-  - **What the operator adds on its own:** its config-reloader containers
-    and their image, the arguments it derives, the governing Service it
-    creates where `serviceName` is unset. None of it is in the object. The
-    operator's code is not in the linked module and was not read.
+  - **An image the operator chooses, under a policy without allowed
+    registries,** as stated above. `version` does not name an image.
+  - **What the operator adds on its own, beyond the images, the replica
+    count and the memory request above:** the resources of a reloader no
+    entry patches, the arguments it derives, the governing Service it
+    creates where `serviceName` is unset. None of it is in the object.
   - **No policy default is filled.** An unauthored `replicas`, `resources`
     or `storage` stays unauthored under a policy that states a replica, a
     resource or a storage default: the operator, not launcher, decides what
-    the omission means.
+    the omission means, and its own value is what the policy holds.
   - **The size limit of an `emptyDir`,** under `storage` or `volumes`, here
     as on every kind.
   - **Fields the environment policy has no dimension for,** on a pod kind
