@@ -320,6 +320,15 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 			holding(t, unstructuredObject("source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator"), map[string]string{"example.org/tenant": "a"}, "spec", "commonMetadata"),
 			[]string{`ArtifactGenerator "w"`, `spec.commonMetadata label "example.org/tenant"`, exact},
 		},
+		"a ResourceSet's common label": {
+			holding(t, unstructuredObject("fluxcd.controlplane.io/v1", "ResourceSet"), map[string]string{"platform.example/zone": "a"}, "spec", "commonMetadata"),
+			[]string{`ResourceSet "w"`, `spec.commonMetadata label "platform.example/zone"`, prefix},
+		},
+		"a FluxInstance's common annotation": {
+			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "fluxcd.controlplane.io/v1", "kind": "FluxInstance", "metadata": map[string]any{"name": "w"},
+				"spec": map[string]any{"commonMetadata": map[string]any{"annotations": map[string]any{"example.org/tenant": "a"}}}}},
+			[]string{`FluxInstance "w"`, `spec.commonMetadata annotation "example.org/tenant"`, exact},
+		},
 		// A typed Flux object that states no kind is told by its Go type.
 		"a typed Kustomization's common label, no kind stated": {
 			&kustv1.Kustomization{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: kustv1.KustomizationSpec{
@@ -467,6 +476,8 @@ func noPodHolderRows() []noPodHolderRow {
 			[]string{"spec", "externalSecretSpec", "target", "template", "metadata"}, "metadata"},
 		{"a HelmRelease's chart template", "helm.toolkit.fluxcd.io/v2", "HelmRelease", ReservedKeyInChartTemplate, []string{"spec", "chart", "metadata"}, "metadata"},
 		{"an ArtifactGenerator's common metadata", "source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator", ReservedKeyInCommonMetadata,
+			[]string{"spec", "commonMetadata"}, "metadata"},
+		{"a FluxInstance's common metadata", "fluxcd.controlplane.io/v1", "FluxInstance", ReservedKeyInCommonMetadata,
 			[]string{"spec", "commonMetadata"}, "metadata"},
 		{"a ReplicationDestination's rsync service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
 			[]string{"spec", "rsync", "serviceAnnotations"}, "annotations"},
