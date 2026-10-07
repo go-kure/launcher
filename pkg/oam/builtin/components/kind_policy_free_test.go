@@ -783,7 +783,7 @@ var policyFreeKinds = []policyFreeKind{
 		component: "prometheus", handler: &components.PrometheusHandler{},
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("Prometheus"),
 		typ: reflect.TypeFor[monitoringv1.PrometheusSpec](), namespaced: true, held: true,
-		minimal:    map[string]any{},
+		minimal:    pmHeld(map[string]any{}),
 		full:       prometheusFull(),
 		unfixtured: prometheusUnfixtured,
 	},

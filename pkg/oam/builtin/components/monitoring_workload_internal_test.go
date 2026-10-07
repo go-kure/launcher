@@ -362,12 +362,24 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 				class:  oam.RefusalHostPath,
 			},
 			"containers": {
-				props:  map[string]any{"containers": []any{map[string]any{"name": "sidecar", "securityContext": map[string]any{"privileged": true}}}},
+				// A patch of the container the operator generates, which may
+				// name no image.
+				props:  map[string]any{"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"privileged": true}}}},
 				policy: &workloadPolicy{noPrivileged: true},
 				class:  oam.RefusalPrivileged,
 			},
 			"initContainers": {
-				props:  map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}}},
+				// The spec's own image and both reloaders' are authored from the
+				// allowed registry, so that the unset-image refusal does not
+				// answer for this field.
+				props: map[string]any{
+					"image":      "registry.example/prometheus/prometheus:v3.5.0",
+					"containers": []any{map[string]any{"name": "config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"}},
+					"initContainers": []any{
+						map[string]any{"name": "init-config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"},
+						map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"},
+					},
+				},
 				policy: &workloadPolicy{allowed: []string{"registry.example"}},
 				class:  oam.RefusalRegistry,
 			},

@@ -130,8 +130,14 @@ func prometheusFull() map[string]any {
 				"resources":       map[string]any{"limits": map[string]any{"cpu": "500m", "memory": "64Mi"}},
 				"securityContext": map[string]any{"capabilities": map[string]any{"drop": []any{"ALL"}}},
 			},
+			// The reloaders, patched with an image of the allowed registry:
+			// unpatched, the operator would choose theirs.
+			map[string]any{"name": "config-reloader", "image": amReloader},
 		},
-		"initContainers":                     []any{map[string]any{"name": "prepare", "image": "registry.example/team/prepare:1.0.0"}},
+		"initContainers": []any{
+			map[string]any{"name": "prepare", "image": "registry.example/team/prepare:1.0.0"},
+			map[string]any{"name": "init-config-reloader", "image": amReloader},
+		},
 		"additionalScrapeConfigs":            secretKey("prometheus-scrape", "scrape.yml"),
 		"apiserverConfig":                    map[string]any{"host": "https://kubernetes.default.svc", "authorization": map[string]any{"credentials": secretKey("apiserver", "token")}},
 		"priorityClassName":                  "monitoring",
@@ -287,6 +293,24 @@ func prometheusRefusals(notA string) []struct {
 	}
 }
 
+// pmImage is a Prometheus image of the registry ptStrictPolicy allows.
+const pmImage = "registry.example/prometheus/prometheus:v3.5.0"
+
+// thanosImage is a Thanos image of the registry ptStrictPolicy allows.
+const thanosImage = "registry.example/thanos/thanos:v0.39.2"
+
+// pmHeld returns props with image pmImage where props names none, and both
+// reloaders patched (amReloaders), so that a document built under
+// ptStrictPolicy is not refused for an image left to the operator. props is
+// not changed.
+func pmHeld(props map[string]any) map[string]any {
+	out := amReloaders(props)
+	if _, named := out["image"]; !named {
+		out["image"] = pmImage
+	}
+	return out
+}
+
 // prometheusOf builds the Prometheus of props under the given policies, in
 // turn (generateCoreKindUnder).
 func prometheusOf(t *testing.T, props map[string]any, policies ...oam.Policy) *monitoringv1.Prometheus {
@@ -363,7 +387,7 @@ func TestPrometheus_DeprecatedImageFields(t *testing.T) {
 			}
 		})
 	}
-	p := prometheusOf(t, map[string]any{"thanos": map[string]any{"version": "v0.39.2"}}, ptStrictPolicy())
+	p := prometheusOf(t, pmHeld(map[string]any{"thanos": map[string]any{"version": "v0.39.2", "image": "registry.example/thanos/thanos:v0.39.2"}}), ptStrictPolicy())
 	if p.Spec.Thanos == nil || p.Spec.Thanos.Version == nil || *p.Spec.Thanos.Version != "v0.39.2" {
 		t.Errorf("thanos = %+v, want the authored version", p.Spec.Thanos)
 	}
@@ -378,7 +402,6 @@ func TestPrometheus_Unauthored(t *testing.T) {
 	defaulting := &stubPolicy{
 		defaultReplicas: &two, defaultCPURequest: "100m", defaultMemoryRequest: "64Mi",
 		defaultCPULimit: "1", defaultMemoryLimit: "128Mi", defaultStorageSize: "1Gi",
-		allowedRegistries: []string{"registry.example"},
 	}
 	p := prometheusOf(t, map[string]any{}, defaulting, nil)
 	if p.Spec.Image != nil || p.Spec.Replicas != nil || p.Spec.Shards != nil || p.Spec.Storage != nil {
@@ -399,27 +422,33 @@ func TestPrometheus_Unauthored(t *testing.T) {
 }
 
 // TestPrometheus_ReplicasTimesShards: the pods the policy's replica maximum
-// holds are those of all shards, replicas times shards, each 1 where unset,
-// as the type counts them; where neither is authored, nothing is held.
+// holds are those of all shards, replicas times shards, as the operator counts
+// them (ReplicasNumberPtr and shardsNumber, pkg/prometheus/common.go:118-143
+// at prometheus-operator v0.94.1): an unset or negative replica count as 1,
+// an unset shard count or one of 1 or less as 1. Where neither is authored,
+// one pod is held.
 func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	for name, tc := range map[string]struct {
 		props   map[string]any
 		refused bool
 	}{
-		"neither":                  {map[string]any{}, false},
-		"replicas within":          {map[string]any{"replicas": 3}, false},
-		"replicas over":            {map[string]any{"replicas": 4}, true},
-		"shards within":            {map[string]any{"shards": 3}, false},
-		"shards over":              {map[string]any{"shards": 4}, true},
-		"both within":              {map[string]any{"replicas": 1, "shards": 3}, false},
-		"both over, each within":   {map[string]any{"replicas": 2, "shards": 2}, true},
-		"a replica count of 0":     {map[string]any{"replicas": 0, "shards": 4}, false},
-		"a null shard count":       {map[string]any{"replicas": 3, "shards": nil}, false},
-		"a null count beside over": {map[string]any{"replicas": nil, "shards": 4}, true},
+		"neither":                        {map[string]any{}, false},
+		"replicas within":                {map[string]any{"replicas": 3}, false},
+		"replicas over":                  {map[string]any{"replicas": 4}, true},
+		"shards within":                  {map[string]any{"shards": 3}, false},
+		"shards over":                    {map[string]any{"shards": 4}, true},
+		"both within":                    {map[string]any{"replicas": 1, "shards": 3}, false},
+		"both over, each within":         {map[string]any{"replicas": 2, "shards": 2}, true},
+		"a replica count of 0":           {map[string]any{"replicas": 0, "shards": 4}, false},
+		"a null shard count":             {map[string]any{"replicas": 3, "shards": nil}, false},
+		"a null count beside over":       {map[string]any{"replicas": nil, "shards": 4}, true},
+		"a negative replica count":       {map[string]any{"replicas": -1, "shards": 4}, true},
+		"a shard count of 0 beside over": {map[string]any{"replicas": 4, "shards": 0}, true},
+		"a negative shard count":         {map[string]any{"replicas": 3, "shards": -2}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := pvTransform("prometheus", h, tc.props, ptStrictPolicy())
+			_, err := pvTransform("prometheus", h, pmHeld(tc.props), ptStrictPolicy())
 			if !tc.refused {
 				if err != nil {
 					t.Errorf("err = %v, want it built", err)
@@ -467,7 +496,7 @@ func TestPrometheus_PolicyRefusals(t *testing.T) {
 		{"claim over the storage maximum", map[string]any{"storage": claim("1Ti")}, oam.RefusalStorageMaximum, "storage.volumeClaimTemplate.spec.resources.requests.storage"},
 		{"ephemeral claim over the storage maximum", map[string]any{"storage": map[string]any{"ephemeral": claim("1Ti")}}, oam.RefusalStorageMaximum, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage"},
 		{"cpu over the maximum", map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "4"}}}, oam.RefusalResourceMaximum, "resources: "},
-		{"sidecar memory over the maximum", map[string]any{"thanos": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}}, oam.RefusalResourceMaximum, "thanos.resources: "},
+		{"sidecar memory over the maximum", map[string]any{"thanos": map[string]any{"image": thanosImage, "resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}}, oam.RefusalResourceMaximum, "thanos.resources: "},
 		{"host network", map[string]any{"hostNetwork": true}, oam.RefusalHostNamespace, "hostNetwork"},
 		{"hostPath volume", map[string]any{"volumes": []any{map[string]any{"name": "host", "hostPath": map[string]any{"path": "/etc"}}}}, oam.RefusalHostPath, "hostPath"},
 		{"image volume outside the allowed registries", map[string]any{"volumes": []any{map[string]any{"name": "data", "image": map[string]any{"reference": "other.example/team/data:1.0.0"}}}}, oam.RefusalRegistry, "other.example"},
@@ -475,7 +504,11 @@ func TestPrometheus_PolicyRefusals(t *testing.T) {
 		{"init container image outside the allowed registries", container("initContainers", map[string]any{"name": "prepare", "image": "other.example/team/prepare:1.0.0"}), oam.RefusalRegistry, "prepare"},
 		// A patch of a container the operator generates is held like any other.
 		{"patch over the memory maximum", container("containers", map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}), oam.RefusalResourceMaximum, "config-reloader"},
-		{"privileged sidecar patch", container("containers", map[string]any{"name": "thanos-sidecar", "securityContext": map[string]any{"privileged": true}}), oam.RefusalPrivileged, "thanos-sidecar"},
+		// thanos-sidecar is generated where thanos is set, and only there.
+		{"privileged sidecar patch", map[string]any{
+			"thanos":     map[string]any{"image": thanosImage},
+			"containers": []any{map[string]any{"name": "thanos-sidecar", "securityContext": map[string]any{"privileged": true}}},
+		}, oam.RefusalPrivileged, "thanos-sidecar"},
 		{"privileged init container", container("initContainers", map[string]any{"name": "init-config-reloader", "securityContext": map[string]any{"privileged": true}}), oam.RefusalPrivileged, "init-config-reloader"},
 		{"host process", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}}, oam.RefusalPrivileged, "securityContext.windowsOptions.hostProcess is not allowed"},
 		{"forbidden capability", container("containers", map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "securityContext": map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}}}), oam.RefusalContainerCapability, "NET_ADMIN"},
@@ -496,6 +529,7 @@ func TestPrometheus_PolicyRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			props := map[string]any{"image": image}
 			maps.Copy(props, tc.props)
+			props = pmHeld(props)
 			_, err := pvTransform("prometheus", &components.PrometheusHandler{}, props, esPolicy{stubPolicy: ptStrictPolicy()})
 			rcWantClass(t, err, tc.class)
 			if err != nil && !strings.Contains(err.Error(), tc.want) {
@@ -512,11 +546,11 @@ func TestPrometheus_PolicyRefusals(t *testing.T) {
 // (TestPrometheus_PolicyRefusals); an authored false is the object an absent
 // one is, since the type omits it.
 func TestPrometheus_HostNetwork(t *testing.T) {
-	p := prometheusOf(t, map[string]any{"hostNetwork": true}, hostNetworkOK{ptStrictPolicy()})
+	p := prometheusOf(t, pmHeld(map[string]any{"hostNetwork": true}), hostNetworkOK{ptStrictPolicy()})
 	if !p.Spec.HostNetwork {
 		t.Error("hostNetwork = false, want the authored true under a policy that allows the host network")
 	}
-	off := prometheusOf(t, map[string]any{"hostNetwork": false}, ptStrictPolicy())
+	off := prometheusOf(t, pmHeld(map[string]any{"hostNetwork": false}), ptStrictPolicy())
 	if spec, _ := policyFreeJSON(t, off)["spec"].(map[string]any); spec["hostNetwork"] != nil {
 		t.Errorf("hostNetwork = %v, want it omitted: the API reads an absent one as false", spec["hostNetwork"])
 	}
@@ -528,7 +562,7 @@ func TestPrometheus_HostNetwork(t *testing.T) {
 // a remote read entry and of the tracing configuration. Every other credential
 // of the spec is the key of a Secret or the path of a file in the container.
 func TestPrometheus_CredentialsStatedNotHeld(t *testing.T) {
-	p := prometheusOf(t, map[string]any{
+	p := prometheusOf(t, pmHeld(map[string]any{
 		"remoteWrite": []any{map[string]any{
 			"url":     "https://user:s3cr3t@metrics.example.com/api/v1/write",
 			"headers": map[string]any{"X-Api-Key": "s3cr3t"},
@@ -538,7 +572,7 @@ func TestPrometheus_CredentialsStatedNotHeld(t *testing.T) {
 			"headers": map[string]any{"X-Api-Key": "s3cr3t"},
 		}},
 		"tracingConfig": map[string]any{"endpoint": "tempo.monitoring.svc:4317", "headers": map[string]any{"X-Api-Key": "s3cr3t"}},
-	}, esPolicy{stubPolicy: ptStrictPolicy()})
+	}), esPolicy{stubPolicy: ptStrictPolicy()})
 	if got := p.Spec.RemoteWrite[0].Headers["X-Api-Key"]; got != "s3cr3t" {
 		t.Errorf("the remote write header = %q, want it carried as authored", got)
 	}
@@ -594,19 +628,215 @@ func TestPrometheus_ExcludedGroupFilled(t *testing.T) {
 	}
 }
 
-// TestPrometheus_NoImageIsNotHeld: a spec that names no image, and a sidecar
-// that names none, build under a policy with allowed registries. The object
-// then names no image, and which image runs is the operator's to decide; the
-// policy is not asked about it. The same holds for a listed container that
-// names none.
-func TestPrometheus_NoImageIsNotHeld(t *testing.T) {
-	p := prometheusOf(t, map[string]any{
-		"version":    "v3.5.0",
-		"thanos":     map[string]any{"version": "v0.39.2"},
-		"containers": []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
-	}, ptStrictPolicy())
-	if p.Spec.Image != nil || p.Spec.Thanos.Image != nil || p.Spec.Containers[0].Image != "" {
-		t.Errorf("image = %v, sidecar image = %v, container image = %q; want none written", p.Spec.Image, p.Spec.Thanos.Image, p.Spec.Containers[0].Image)
+// TestPrometheus_UnsetImage: a spec that names no image, a null one or an
+// empty one leaves the image to the operator, which no registry allowlist
+// reaches: it is refused with the registry class under a policy with allowed
+// registries, and builds under one without and under none, where an unset or
+// null image writes none. A listed container named for one the operator
+// generates, as here, is merged into it and may name no image.
+func TestPrometheus_UnsetImage(t *testing.T) {
+	patch := []any{map[string]any{"name": "prometheus", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
+	h := &components.PrometheusHandler{}
+	for name, props := range map[string]map[string]any{
+		"unset": amReloaders(map[string]any{"version": "v3.5.0"}),
+		"null":  amReloaders(map[string]any{"version": "v3.5.0", "image": nil}),
+		"empty": amReloaders(map[string]any{"version": "v3.5.0", "image": ""}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name != "empty" {
+				if p := prometheusOf(t, props); p.Spec.Image != nil {
+					t.Errorf("image = %q under no policy, want none written", *p.Spec.Image)
+				}
+			}
+			_, err := pvTransform("prometheus", h, props, ptStrictPolicy())
+			rcWantClass(t, err, oam.RefusalRegistry)
+			if err != nil && !strings.Contains(err.Error(), "image: unset") {
+				t.Errorf("err = %v, want one naming the unset image", err)
+			}
+			open := ptStrictPolicy()
+			open.allowedRegistries = nil
+			if _, err := pvTransform("prometheus", h, props, open); err != nil {
+				t.Errorf("under a policy without allowed registries: %v, want it built", err)
+			}
+		})
+	}
+	p := prometheusOf(t, pmHeld(map[string]any{"containers": patch}), ptStrictPolicy())
+	if p.Spec.Containers[0].Image != "" {
+		t.Errorf("container image = %q, want none written", p.Spec.Containers[0].Image)
+	}
+}
+
+// TestPrometheus_PatchedImage: the operator merges an entry of containers
+// named prometheus into the container it generates (makeStatefulSetSpec,
+// pkg/prometheus/server/statefulset.go:366 at prometheus-operator v0.94.1), so
+// an image named there is the one that runs. With image unset it answers for
+// it: held to the allowed registries as any listed container's image is, and
+// not refused as unset.
+func TestPrometheus_PatchedImage(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	patched := func(image string) map[string]any {
+		return amReloaders(map[string]any{"containers": []any{map[string]any{"name": "prometheus", "image": image}}})
+	}
+	p := prometheusOf(t, patched(pmImage), ptStrictPolicy())
+	if p.Spec.Image != nil || p.Spec.Containers[0].Image != pmImage {
+		t.Errorf("image = %v, patch image = %q; want none and the authored one", p.Spec.Image, p.Spec.Containers[0].Image)
+	}
+	_, err := pvTransform("prometheus", h, patched("other.example/prometheus/prometheus:v3.5.0"), ptStrictPolicy())
+	rcWantClass(t, err, oam.RefusalRegistry)
+	if err != nil && !strings.Contains(err.Error(), "other.example") {
+		t.Errorf("err = %v, want one naming the patch's image", err)
+	}
+}
+
+// TestPrometheus_ReloaderImages: the operator generates config-reloader and
+// init-config-reloader on every Prometheus (pkg/prometheus/server/
+// statefulset.go:307-318 and :356-363 at prometheus-operator v0.94.1) from
+// the image of its own configuration, which no allowlist reaches. Under a
+// policy with allowed registries each is refused with the registry class
+// unless a listed entry of its name patches it with an image, which is then
+// held to the registries; under a policy without allowed registries, and
+// under none, neither needs a patch.
+func TestPrometheus_ReloaderImages(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	open := ptStrictPolicy()
+	open.allowedRegistries = nil
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"config-reloader unpatched": {
+			map[string]any{"image": pmImage, "initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
+			"the image of the config-reloader container (containers): unset, so the Prometheus operator chooses the image the pods run, which the allowed registries [registry.example] cannot hold; name an image from one of them",
+		},
+		"init-config-reloader unpatched": {
+			map[string]any{"image": pmImage, "containers": []any{map[string]any{"name": "config-reloader", "image": amReloader}}},
+			"the image of the init-config-reloader container (initContainers): unset",
+		},
+		"config-reloader patched without an image": {
+			map[string]any{"image": pmImage,
+				"containers":     []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+				"initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
+			"the image of the config-reloader container (containers): unset",
+		},
+		"init-config-reloader patched in containers": {
+			map[string]any{"image": pmImage, "containers": []any{
+				map[string]any{"name": "config-reloader", "image": amReloader},
+				map[string]any{"name": "init-config-reloader", "image": amReloader},
+			}},
+			"the image of the init-config-reloader container (initContainers): unset",
+		},
+		"config-reloader patched outside the allowed registries": {
+			amReloaders(map[string]any{"image": pmImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),
+			`containers[0] "config-reloader"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("prometheus", h, tc.props, ptStrictPolicy())
+			rcWantClass(t, err, oam.RefusalRegistry)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+			if _, err := pvTransform("prometheus", h, tc.props, open); err != nil {
+				t.Errorf("under a policy without allowed registries: %v, want it built", err)
+			}
+			prometheusOf(t, tc.props)
+		})
+	}
+	if _, err := pvTransform("prometheus", h, pmHeld(map[string]any{}), ptStrictPolicy()); err != nil {
+		t.Errorf("both reloaders patched with an allowed image: %v, want it built", err)
+	}
+}
+
+// TestPrometheus_SidecarImage: the operator generates thanos-sidecar where
+// thanos is set, and only there (createThanosContainer,
+// pkg/prometheus/server/statefulset.go:544-547 at prometheus-operator
+// v0.94.1). A sidecar that names no image, a null one or an empty one leaves
+// the image to the operator: refused with the registry class under a policy
+// with allowed registries unless an entry of containers named thanos-sidecar
+// patches it with an image, which is then held to the registries, and built
+// under one without. Without thanos, no sidecar is generated, so an entry of
+// that name is a container of its own and must name an image.
+func TestPrometheus_SidecarImage(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	open := ptStrictPolicy()
+	open.allowedRegistries = nil
+	for name, thanos := range map[string]map[string]any{
+		"unset": {"version": "v0.39.2"},
+		"null":  {"version": "v0.39.2", "image": nil},
+		"empty": {"version": "v0.39.2", "image": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := pmHeld(map[string]any{"thanos": thanos})
+			_, err := pvTransform("prometheus", h, props, ptStrictPolicy())
+			rcWantClass(t, err, oam.RefusalRegistry)
+			if err != nil && !strings.Contains(err.Error(), "thanos.image: unset") {
+				t.Errorf("err = %v, want one naming the unset sidecar image", err)
+			}
+			if _, err := pvTransform("prometheus", h, props, open); err != nil {
+				t.Errorf("under a policy without allowed registries: %v, want it built", err)
+			}
+			prometheusOf(t, props)
+		})
+	}
+	patched := func(image string) map[string]any {
+		return pmHeld(map[string]any{
+			"thanos":     map[string]any{"version": "v0.39.2"},
+			"containers": []any{map[string]any{"name": "thanos-sidecar", "image": image}},
+		})
+	}
+	p := prometheusOf(t, patched(thanosImage), ptStrictPolicy())
+	if p.Spec.Thanos.Image != nil || p.Spec.Containers[0].Image != thanosImage {
+		t.Errorf("thanos.image = %v, patch image = %q; want none and the authored one", p.Spec.Thanos.Image, p.Spec.Containers[0].Image)
+	}
+	_, err := pvTransform("prometheus", h, patched("other.example/thanos/thanos:v0.39.2"), ptStrictPolicy())
+	rcWantClass(t, err, oam.RefusalRegistry)
+	if err != nil && !strings.Contains(err.Error(), "other.example") {
+		t.Errorf("err = %v, want one naming the patch's image", err)
+	}
+	err = coreKindErr(h, "prometheus", "main", map[string]any{"containers": []any{map[string]any{"name": "thanos-sidecar", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}})
+	if want := `containers[0] "thanos-sidecar": names no image, and the Prometheus operator generates no container of that name to merge it into`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("a thanos-sidecar entry without thanos: err = %v, want %q", err, want)
+	}
+}
+
+// TestPrometheus_OperatorDefaultsHeld: where the spec leaves the replica
+// count unset, the operator runs one pod a shard (ReplicasNumberPtr,
+// pkg/prometheus/common.go:131-143 at prometheus-operator v0.94.1), which the
+// policy's maximum holds; nothing is written into the object. The operator
+// fills no memory request of its own (makeStatefulSet,
+// pkg/prometheus/server/statefulset.go:56-153), so an unset one holds none.
+func TestPrometheus_OperatorDefaultsHeld(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	zero := ptStrictPolicy()
+	zero.maxReplicas = int32ptr(0)
+	small := ptStrictPolicy()
+	small.maxMemory = "1Mi"
+	for name, tc := range map[string]struct {
+		props  map[string]any
+		policy *stubPolicy
+		want   string // "" when the component builds
+	}{
+		"replicas unset under a maximum of 0":      {map[string]any{}, zero, "replicas times shards 1 exceeds enforced maximum 0"},
+		"replicas 0 under a maximum of 0":          {map[string]any{"replicas": 0}, zero, ""},
+		"memory request unset under a 1Mi maximum": {map[string]any{}, small, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("prometheus", h, pmHeld(tc.props), tc.policy)
+			if tc.want == "" {
+				if err != nil {
+					t.Errorf("err = %v, want it built", err)
+				}
+				return
+			}
+			rcWantClass(t, err, oam.RefusalReplicaMaximum)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+	p := prometheusOf(t, pmHeld(map[string]any{}), ptStrictPolicy())
+	if p.Spec.Replicas != nil || p.Spec.Shards != nil || len(p.Spec.Resources.Requests) != 0 {
+		t.Errorf("replicas = %v, shards = %v, requests = %v; want none written", p.Spec.Replicas, p.Spec.Shards, p.Spec.Resources.Requests)
 	}
 }
 
