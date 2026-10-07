@@ -3739,7 +3739,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   :latest tag not allowed`), and a resource block's request may not exceed
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
-  limit 1Gi`). An entry named for a container the operator generates, in
+  limit 1Gi`). The operator fills an unset memory request of `resources` as
+  200Mi whatever the limit, so a memory limit under 200Mi with no request is
+  refused, as the API would refuse the pods (`resources: memory: the unset
+  request the Prometheus operator fills as 200Mi must not exceed limit
+  100Mi; …`). An entry named for a container the operator generates, in
   the list the operator generates it in, is merged into it, so such a patch
   may name no image; any other listed entry that names none is refused, as
   no pod could run it (`containers[1] "proxy": names no image, and the

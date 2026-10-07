@@ -224,6 +224,11 @@ func alertmanagerRefusals(notA string) []struct {
 		{"hugepages without cpu or memory", map[string]any{"resources": map[string]any{
 			"requests": map[string]any{"hugepages-2Mi": "64Mi"}, "limits": map[string]any{"hugepages-2Mi": "64Mi"},
 		}}, "resources: hugepages require cpu or memory in requests or limits"},
+		// The operator fills an unset memory request as 200Mi whatever the
+		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
+		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
+			"limits": map[string]any{"memory": "100Mi"},
+		}}, "resources: memory: the unset request the Prometheus operator fills as 200Mi must not exceed limit 100Mi; name a request no larger than the limit"},
 		{"container request over its limit", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "resources": map[string]any{
 			"requests": map[string]any{"memory": "2Gi"}, "limits": map[string]any{"memory": "1Gi"},
 		}}), `containers[0] "proxy": resources: memory: request 2Gi must not exceed limit 1Gi`},
@@ -666,13 +671,13 @@ func TestAlertmanager_OperatorDefaultsHeld(t *testing.T) {
 		class  oam.RefusalClass
 		want   string // "" when the component builds
 	}{
-		"replicas unset under a maximum of 0": {map[string]any{}, zero, oam.RefusalReplicaMaximum, "replicas 1 exceeds enforced maximum 0"},
-		"replicas 0 under a maximum of 0":     {map[string]any{"replicas": 0}, zero, "", ""},
-		"memory request unset under 128Mi":    {map[string]any{}, small, oam.RefusalResourceMaximum, `resources, whose unset memory request the Prometheus operator fills as 200Mi: memory request "200Mi" exceeds enforced maximum "128Mi"`},
-		"memory request unset, a limit only":  {map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "100Mi"}}}, small, oam.RefusalResourceMaximum, "fills as 200Mi"},
-		"memory request unset under 200Mi":    {map[string]any{}, exact, "", ""},
-		"memory request authored under 128Mi": {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "64Mi"}}}, small, "", ""},
-		"memory request authored over 128Mi":  {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}, small, oam.RefusalResourceMaximum, `resources: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+		"replicas unset under a maximum of 0":    {map[string]any{}, zero, oam.RefusalReplicaMaximum, "replicas 1 exceeds enforced maximum 0"},
+		"replicas 0 under a maximum of 0":        {map[string]any{"replicas": 0}, zero, "", ""},
+		"memory request unset under 128Mi":       {map[string]any{}, small, oam.RefusalResourceMaximum, `resources, whose unset memory request the Prometheus operator fills as 200Mi: memory request "200Mi" exceeds enforced maximum "128Mi"`},
+		"memory request unset, a limit of 200Mi": {map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "200Mi"}}}, exact, "", ""},
+		"memory request unset under 200Mi":       {map[string]any{}, exact, "", ""},
+		"memory request authored under 128Mi":    {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "64Mi"}}}, small, "", ""},
+		"memory request authored over 128Mi":     {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}, small, oam.RefusalResourceMaximum, `resources: memory request "256Mi" exceeds enforced maximum "128Mi"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			props := amReloaders(map[string]any{"image": amImage})
