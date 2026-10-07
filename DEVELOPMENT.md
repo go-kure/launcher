@@ -274,6 +274,11 @@ all — launcher must not lead the kure release it imports (see `AGENTS.md`
 The disable list lives in `renovate.json` and must be kept in step with that
 guard's shared-direct set.
 
+`k8s.io/kube-openapi` is not proposed either, by a rule of its own: it is not
+shared-direct, but it has no releases, so a lone digest bump can run ahead of
+`k8s.io/apimachinery` and break the build. It moves only when the `k8s.io/*`
+modules move.
+
 ## Makefile Targets Reference
 
 ### Development
