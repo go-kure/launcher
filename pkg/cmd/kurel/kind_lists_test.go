@@ -189,6 +189,56 @@ func TestKindLists_Complete(t *testing.T) {
 	})
 }
 
+// parityKindsFile is the source of parityKinds, the hand-parsed kinds whose
+// properties TestHandParsedKinds_CoverEveryUpstreamField holds to every field
+// of their upstream type. It is not a list of kindLists: its rows stand in no
+// order of their types, and it names only the hand-parsed kinds.
+const parityKindsFile = "../../oam/builtin/components/hand_parsed_parity_internal_test.go"
+
+// TestKindLists_OwnPropertiesHaveParityRows fails where the types
+// kindListExceptions excepts with ownProperties and the rows of parityKinds
+// disagree. ownProperties says a kind decodes its properties into no upstream
+// type; the parity rows are what then hold it to that type, so a kind given the
+// reason without a row would be held by nothing.
+func TestKindLists_OwnPropertiesHaveParityRows(t *testing.T) {
+	var owned []string
+	for _, exceptions := range kindListExceptions {
+		for typ, reason := range exceptions {
+			if reason == ownProperties && !slices.Contains(owned, typ) {
+				owned = append(owned, typ)
+			}
+		}
+	}
+	sort.Strings(owned)
+	if len(owned) == 0 {
+		t.Fatal("kindListExceptions gives no type the ownProperties reason: the check would pass vacuously")
+	}
+	rows := goListKeys(t, parityKindsFile, "parityKinds")
+	if len(rows) == 0 {
+		t.Fatalf("%s: parityKinds holds no entry", parityKindsFile)
+	}
+	for _, defect := range ownPropertiesParityGaps(owned, rows) {
+		t.Errorf("%s: in parityKinds, %s", parityKindsFile, defect)
+	}
+}
+
+// ownPropertiesParityGaps names every type with the ownProperties reason and
+// no parity row, and every parity row of a type without that reason.
+func ownPropertiesParityGaps(owned, rows []string) []string {
+	var defects []string
+	for _, typ := range owned {
+		if !slices.Contains(rows, typ) {
+			defects = append(defects, fmt.Sprintf("%q reads its own properties (ownProperties) and has no row: add one, or the kind is held to its upstream type by nothing", typ))
+		}
+	}
+	for _, row := range rows {
+		if !slices.Contains(owned, row) {
+			defects = append(defects, fmt.Sprintf("the row %q names no type kindListExceptions excepts with ownProperties", row))
+		}
+	}
+	return defects
+}
+
 // allowlistTableGaps names every type of the allowlist with no row and every
 // row that names no type of it. A row written twice is left to
 // kindListMisplaced.
@@ -266,6 +316,22 @@ func TestKindListChecks_NameEachDefect(t *testing.T) {
 	for _, tt := range table {
 		t.Run("allowlist/"+tt.name, func(t *testing.T) {
 			expectDefects(t, allowlistTableGaps(allowed, tt.rows), tt.want)
+		})
+	}
+
+	owned := []string{"alpha", "beta"}
+	parity := []struct {
+		name string
+		rows []string
+		want []string
+	}{
+		{"complete", []string{"beta", "alpha"}, nil},
+		{"missing row", []string{"alpha"}, []string{`"beta" reads its own properties (ownProperties) and has no row`}},
+		{"row of no such type", []string{"alpha", "beta", "delta"}, []string{`the row "delta" names no type`}},
+	}
+	for _, tt := range parity {
+		t.Run("parity/"+tt.name, func(t *testing.T) {
+			expectDefects(t, ownPropertiesParityGaps(owned, tt.rows), tt.want)
 		})
 	}
 }

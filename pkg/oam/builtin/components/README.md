@@ -439,6 +439,7 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | `validComponentTypes` | `pkg/oam/validate.go` | `TestKindLists_InOrder` |
 | `wantHandlers`, `componentLabelFixtures` | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder` |
 | `coreKindSchemas`, `apiSetKinds` | the tests of this package | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a registered type with no row and no reason in `kindListExceptions` |
+| `parityKinds`, for a kind excepted there because it reads its own properties (`ownProperties`) | `hand_parsed_parity_internal_test.go` | not in order; `TestKindLists_OwnPropertiesHaveParityRows` (`pkg/cmd/kurel`) fails on a type with that reason and no row, and on a row of a type without it |
 | `policyFreeKinds` and the two maps of its tests, for a kind built on `policyFreeKind` | the tests of this package | `TestKindLists_InOrder` |
 | `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
 | "Component types" | this file | `TestKindLists_InOrder` |
