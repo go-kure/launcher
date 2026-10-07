@@ -21,8 +21,12 @@ import (
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -131,6 +135,7 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 var strictlyDecodedTypes = map[string]reflect.Type{
 	"appsv1.ReplicaSetSpec":                      reflect.TypeFor[appsv1.ReplicaSetSpec](),
 	"autoscalingv2.HorizontalPodAutoscalerSpec":  reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](),
+	"autov1.ImageUpdateAutomationSpec":           reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
 	"barmanv1.ObjectStoreSpec":                   reflect.TypeFor[barmanv1.ObjectStoreSpec](),
 	"certv1.CertificateSpec":                     reflect.TypeFor[certv1.CertificateSpec](),
 	"certv1.IssuerSpec":                          reflect.TypeFor[certv1.IssuerSpec](),
@@ -167,6 +172,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"helmTemplateProperties":                     reflect.TypeFor[helmTemplateProperties](),
 	"helmValuesFromSpec":                         reflect.TypeFor[helmValuesFromSpec](),
 	"helmv2.HelmReleaseSpec":                     reflect.TypeFor[helmv2.HelmReleaseSpec](),
+	"imagev1.ImagePolicySpec":                    reflect.TypeFor[imagev1.ImagePolicySpec](),
 	"kustv1.KustomizationSpec":                   reflect.TypeFor[kustv1.KustomizationSpec](),
 	"monitoringv1.PodMonitorSpec":                reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 	"monitoringv1.ProbeSpec":                     reflect.TypeFor[monitoringv1.ProbeSpec](),
@@ -177,6 +183,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"networkingv1.NetworkPolicySpec":             reflect.TypeFor[networkingv1.NetworkPolicySpec](),
 	"networkingv1.ServiceCIDRSpec":               reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
 	"nodev1.RuntimeClass":                        reflect.TypeFor[nodev1.RuntimeClass](),
+	"notificationv1beta3.AlertSpec":              reflect.TypeFor[notificationv1beta3.AlertSpec](),
 	"podTemplateProperties":                      reflect.TypeFor[podTemplateProperties](),
 	"policyv1.PodDisruptionBudgetSpec":           reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](),
 	"rbacv1.ClusterRole":                         reflect.TypeFor[rbacv1.ClusterRole](),
@@ -192,6 +199,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"storagev1.CSIDriverSpec":                    reflect.TypeFor[storagev1.CSIDriverSpec](),
 	"storagev1.StorageClass":                     reflect.TypeFor[storagev1.StorageClass](),
 	"storagev1.VolumeAttributesClass":            reflect.TypeFor[storagev1.VolumeAttributesClass](),
+	"swv1beta1.ArtifactGeneratorSpec":            reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
 	"volsyncv1alpha1.ReplicationDestinationSpec": reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
 	"volsyncv1alpha1.ReplicationSourceSpec":      reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
 }
@@ -563,6 +571,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		ground: externalSecretsRuleGround,
 	},
 	{
+		component: "imageupdateautomation", typ: "autov1.ImageUpdateAutomationSpec", config: kindConfig(&ImageUpdateAutomationHandler{}),
+		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}, "interval": "30m"},
+		ground: fluxRuleGround,
+	},
+	{
 		component: "replicationsource", typ: "volsyncv1alpha1.ReplicationSourceSpec", config: kindConfig(&ReplicationSourceHandler{}),
 		base: map[string]any{"sourcePVC": "data"},
 		crds: crdFileVersion(volsyncModulePath, volsyncCRDs+"replicationsources.yaml", "v1alpha1"),
@@ -592,6 +605,9 @@ const generatorRuleGround = "the source of the linked metav1.LabelSelectorRequir
 // externalSecretsRuleGround is generatorRuleGround for the External Secrets
 // Operator's kinds.
 const externalSecretsRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestExternalSecretsKinds_RequiredMatchSource derives the expressions of the kind's required list; the module ships no CRD to read"
+
+// fluxRuleGround is generatorRuleGround for the kinds of the Flux APIs.
+const fluxRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestFluxKinds_RequiredMatchMarkers derives the expressions of the kind's required list; the module ships no CRD to read"
 
 // hpaMetricSelectorReason is why the horizontalpodautoscaler kind holds no
 // metric selector.

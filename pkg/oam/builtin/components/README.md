@@ -2250,7 +2250,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - An `imageupdateautomation`: `sourceRef` with its `kind` and `name`, and
     `interval`. Of an authored `git`, `commit` with its `author` and the
     author's `email`; of an authored `git.checkout`, its `ref`; of an
-    authored `git.commit.signingKey`, its `secretRef` with its `name`.
+    authored `git.commit.signingKey`, its `secretRef` with its `name`. Of a
+    match expression of `policySelector`, its `key` and its `operator`
+    (`policySelector.matchExpressions[0].operator: required (…)`); its
+    `values` and the operator's value are the API server's.
   - An `artifactgenerator`: `sources` and `artifacts`; of each source its
     `alias`, `kind` and `name`; of each artifact its `name` and `copy`; of
     each copy its `from` and `to`.
@@ -2260,7 +2263,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   so `TestFluxKinds_RequiredMatchMarkers` derives each list from the
   `+required` markers of the linked modules' source, as the kinds of the
   Prometheus operator's API are derived: every field so marked that the type
-  writes unauthored is listed, and nothing else is. A dependency bump that
+  writes unauthored is listed, and nothing else is. The `key` and `operator`
+  of a match expression belong to a Kubernetes type with no such marker, and
+  are read from its source by the schema generators' rule, as there: a field
+  with no optional marker whose json tag keeps it when empty is required. A
+  dependency bump that
   adds, drops or moves one fails there. Nothing here is held to the API
   server's own validator, which answers from a CRD. **Not refused:**
   - a list the API wants an item of that is authored empty
@@ -2283,11 +2290,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `originRevision`, a copy's `from` and `to`), the lengths and the
     enumerations (a source's `kind`, a copy's `strategy`); that an alias is
     unique and that a path, a `revision` or an `originRevision` names an
-    alias that is declared, which the type documents and no marker states;
-  - the `key` and the `operator` of a `policySelector.matchExpressions`
-    entry: they are fields of a Kubernetes type, whose source carries no
-    marker for them and is not read for these lists, and each left out is
-    written empty.
+    alias that is declared, which the type documents and no marker states.
 
   **The APIs' expression rules are not checked.** A kind checks an
   expression rule only where the check is held to the API server's own
@@ -8822,14 +8825,16 @@ fields and says nothing of the pair.
 | `cilium-nodeconfig` | `nodeSelector` | the CiliumNodeConfig CRD of the linked module |
 | `secretstore`, `clustersecretstore` | `conditions[].namespaceSelector` | the linked type, by the generator's rule (below) |
 | `clusterexternalsecret` | `namespaceSelector`; every entry of `namespaceSelectors` | the same |
+| `imageupdateautomation` | `policySelector` | the same |
 | `replicationsource`, `replicationdestination` | the `labelSelector` and `namespaceSelector` of every pod affinity and anti-affinity term of a mover's `moverAffinity`, required or preferred: `rclone`, `restic`, `rsyncTLS`, and on a source `syncthing` | the ReplicationSource and ReplicationDestination CRDs of the linked module |
 
-The Prometheus operator's module and the External Secrets Operator's ship no CRD to read, so
-the ground of their kinds is the source of the linked `metav1.LabelSelectorRequirement`: the
-schema generators require a field that carries no optional marker and whose json tag keeps it
-when empty, and `key` and `operator` are such fields where `values` is not.
-`TestMonitoringKinds_RequiredMatchMarkers` and `TestExternalSecretsKinds_RequiredMatchSource`
-derive the two from that source by that rule, beside the fields the operator's own types mark
+The Prometheus operator's module, the External Secrets Operator's and Flux's image automation
+module ship no CRD to read, so the ground of their kinds is the source of the linked
+`metav1.LabelSelectorRequirement`: the schema generators require a field that carries no
+optional marker and whose json tag keeps it when empty, and `key` and `operator` are such fields
+where `values` is not. `TestMonitoringKinds_RequiredMatchMarkers`,
+`TestExternalSecretsKinds_RequiredMatchSource` and `TestFluxKinds_RequiredMatchMarkers` derive
+the two from that source by that rule, beside the fields the operator's own types mark
 required, and hold each kind's list to them; on the monitoring kinds another field of an
 embedded Kubernetes type that the rule requires fails there unless it is named with the reason
 it is not refused. CloudNativePG's admission webhook runs apimachinery's whole selector

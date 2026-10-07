@@ -72,14 +72,18 @@ func (h *ImageUpdateAutomationHandler) PropertySchema() map[string]oam.PropertyS
 // checkout its `ref`, and of an authored signing key its `secretRef` with its
 // `name`; the type would write each one empty. The API defaults
 // `sourceRef.kind`, and it is required here all the same: the type writes it
-// empty, which is a value and not the default.
-// TestFluxKinds_RequiredMatchMarkers holds the list to the markers of the
-// upstream source. `interval` is held to the form its pattern takes. The
-// object reads one Secret from its own namespace, the signing key's.
+// empty, which is a value and not the default. Of a match expression of
+// `policySelector` it requires the key and the operator
+// (labelSelectorRequired), fields of a Kubernetes type with no +required
+// marker. TestFluxKinds_RequiredMatchMarkers holds the list to the markers of
+// the upstream source, and the two of an expression to the source of
+// metav1.LabelSelectorRequirement by the schema generators' rule.
+// `interval` is held to the form its pattern takes. The object reads one
+// Secret from its own namespace, the signing key's.
 var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 	policyFreeKind: policyFreeKind[autov1.ImageUpdateAutomationSpec]{
 		upstream: "image.toolkit.fluxcd.io/v1 ImageUpdateAutomationSpec",
-		required: map[string]string{
+		required: requiredFields(map[string]string{
 			"sourceRef":                            "the GitRepository that gives access to the repository the automation commits to",
 			"sourceRef.kind":                       "the kind of the source: `GitRepository`, the API's default, which the object would otherwise write empty",
 			"sourceRef.name":                       "the name of the GitRepository",
@@ -90,7 +94,7 @@ var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 			"git.commit.author.email":              "the email address of the author of the commits",
 			"git.commit.signingKey.secretRef":      "the Secret that holds the signing key",
 			"git.commit.signingKey.secretRef.name": "the name of the Secret that holds the signing key, in the namespace the object lands in",
-		},
+		}, labelSelectorRequired("policySelector")),
 		build: func(name, namespace string, spec *autov1.ImageUpdateAutomationSpec) client.Object {
 			automation := fluxcd.CreateImageUpdateAutomation(name, namespace)
 			spec.DeepCopyInto(&automation.Spec)
