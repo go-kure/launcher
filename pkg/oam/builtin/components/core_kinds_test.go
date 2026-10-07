@@ -166,6 +166,9 @@ var coreKindSchemas = []struct {
 	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
 	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
 	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
+	{"tcproute", reflect.TypeFor[gatewayv1.TCPRouteSpec](), &components.TCPRouteHandler{}, nil},
+	{"tlsroute", reflect.TypeFor[gatewayv1.TLSRouteSpec](), &components.TLSRouteHandler{}, nil},
+	{"udproute", reflect.TypeFor[gatewayv1.UDPRouteSpec](), &components.UDPRouteHandler{}, nil},
 	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
 }
 

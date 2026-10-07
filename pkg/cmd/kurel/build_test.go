@@ -557,6 +557,9 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"servicemonitor",
 		"statefulset",
 		"storageclass",
+		"tcproute",
+		"tlsroute",
+		"udproute",
 		"volumeattributesclass",
 	}
 	sort.Strings(wantHandlers)

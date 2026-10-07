@@ -1,0 +1,38 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: UDPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: dns
+  name: dns
+  namespace: default
+spec:
+  parentRefs:
+  - name: edge
+    sectionName: dns
+  rules:
+  - backendRefs:
+    - name: dns
+      port: 53
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: UDPRoute
+metadata:
+  labels:
+    launcher.gokure.dev/component: syslog
+  name: syslog-collectors
+  namespace: default
+spec:
+  parentRefs:
+  - name: shared
+    namespace: gateways
+    port: 514
+  rules:
+  - backendRefs:
+    - name: syslog
+      port: 514
+      weight: 3
+    - name: syslog
+      namespace: logging
+      port: 514
+      weight: 1
+    name: collectors

@@ -228,6 +228,9 @@ reads it.
 | `servicemonitor` | ServiceMonitor | Kind-named Prometheus operator ServiceMonitor: the whole `ServiceMonitorSpec`, strictly decoded; `endpoints` and `selector` are required. The selector is the author's. No environment policy applies and no capability is required — see below. |
 | `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
 | `storageclass` | StorageClass | Kind-named StorageClass: the object's fields beside its identity (`provisioner`, required, `parameters`, `reclaimPolicy`, …), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
+| `tcproute` | TCPRoute | Kind-named Gateway API TCPRoute: the whole `TCPRouteSpec`, strictly decoded; `rules` and a rule's `backendRefs` are required, with the `name` of a backend and the `port` of one that is a Service. An authored object, as the `httproute` kind is: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it, no capability is required and no environment policy applies — see below. |
+| `tlsroute` | TLSRoute | Kind-named Gateway API TLSRoute: the whole `TLSRouteSpec`, strictly decoded; `hostnames` is required, and the rest as on a `tcproute`. An authored object on the same terms — see below. |
+| `udproute` | UDPRoute | Kind-named Gateway API UDPRoute: the whole `UDPRouteSpec`, strictly decoded; required as on a `tcproute`, and an authored object on the same terms — see below. |
 | `volumeattributesclass` | VolumeAttributesClass | Kind-named VolumeAttributesClass: `driverName` and `parameters` (both required, `parameters` with at least one entry), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
@@ -272,8 +275,33 @@ Status is one of:
 - `trait`: a trait emits it and no component does; Type is the trait `type`.
 - `missing`: authorable, with no component yet. go-kure/launcher#790 adds these group by group.
 - `held`: authorable, with no component until something named is in place; Notes gives the
-  reason. A component for it would not do what the kind is authored for.
+  reason. A component for it would not do what the kind is authored for, or would act
+  where no check of the build reaches.
 - `not authorable`: no component is planned; Notes gives the reason.
+
+**Held: cluster-wide admission and API registration** (go-kure/launcher#790). Seven kinds
+have no kind component: ValidatingWebhookConfiguration, MutatingWebhookConfiguration,
+ValidatingAdmissionPolicy and its binding, MutatingAdmissionPolicy and its binding
+(`admissionregistration.k8s.io/v1`), and APIService (`apiregistration.k8s.io/v1`). One rule
+holds the group, and it rests on what the Kubernetes documentation says these objects do,
+not on anything this package reads:
+
+- **They act on every other document's objects, or on the API itself.** The API server
+  applies an admission object to the requests its rules match, in any namespace and from
+  any author; an APIService hands a group and version of the API to the Service it names.
+- **The mutating ones undo what the environment policy checked at build.** A
+  MutatingWebhookConfiguration or a MutatingAdmissionPolicy changes an object after it left
+  the build, so what the policy held at build need not hold of the object that is stored.
+- **The environment policy has no dimension for cluster-wide admission.** Nothing in it
+  could bound what such a component matches.
+- **A ValidatingAdmissionPolicy and its binding** change nothing and send nothing anywhere,
+  but they can deny writes for the whole cluster, and no consumer has asked for them. They
+  are taken up when one does.
+
+An RBAC grant, which launcher does emit, is different: it names its subjects, and the
+document that makes the grant states it. These seven act on objects no document of the build
+names. The rows hold the kind components only; what `manifests`, `passthrough` and template
+delivery do with such a document is said in their own entries.
 
 Decode is how the properties become the object: `hand-written parser` (a schema and parser this
 package or `../traits` maintains) or a strict decode into the named upstream type, where an
@@ -283,7 +311,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 
 | Constructor | Kind | Status | Type | Decode | Notes |
 |---|---|---|---|---|---|
-| `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateAPIService` | apiregistration.k8s.io/v1 APIService (cluster-scoped) | held | - | - | It hands a group and version of the API to the Service it names. See "Held: cluster-wide admission and API registration" above. |
 | `kubernetes.CreateBackendTLSPolicy` | gateway.networking.k8s.io/v1 BackendTLSPolicy | kind | `backendtlspolicy` | strict decode of `BackendTLSPolicySpec` | `targetRefs`, at least one, and `validation` with its `hostname` must be written; of a target, a CA certificate reference and a subject alternative name that are authored, the fields the API requires that the type would write empty. The hostnames it validates are not held to the allowed registries. No capability is required. No environment policy applies. |
 | `kubernetes.CreateBinding` | v1 Binding | not authorable | - | - | A request body for a pod's `binding` subresource, not a stored object. |
 | `kubernetes.CreateCSIDriver` | storage.k8s.io/v1 CSIDriver (cluster-scoped) | kind | `csidriver` | strict decode of `CSIDriverSpec` | The object's name, the component's or its `objectName`, is the CSI driver's name. The API documents a limit of 63 characters for it and the API server does not hold the object to that limit. Its labels and annotations are the `labels` and `annotations` properties. No environment policy applies. |
@@ -314,9 +342,9 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
 | `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | kind | `listenerset` | strict decode of `ListenerSetSpec` | `parentRef` with its `name` and `listeners`, at least one, must be written, and of each listener its `name`, `port` and `protocol`, as on a Gateway's. No capability is required. No environment policy applies. |
-| `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | held | - | - | It changes objects of any namespace after the build. See "Held: cluster-wide admission and API registration" above. |
+| `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | held | - | - | It puts a MutatingAdmissionPolicy into effect. See "Held: cluster-wide admission and API registration" above. |
+| `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | held | - | - | It changes objects of any namespace after the build. See "Held: cluster-wide admission and API registration" above. |
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels and annotations are the `labels` and `annotations` properties. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | kind | `networkpolicy` | strict decode of `NetworkPolicySpec` | No type under `NetworkPolicySpec` unmarshals itself except `intstr.IntOrString` (a port), a scalar with no nested key to drop. The `networkpolicy` trait builds its own NetworkPolicy with a hand-written parser and scopes it to its component's pods; the kind selects what the author wrote. The transform's NetworkPolicy synthesis in `pkg/oam` emits NetworkPolicies of its own and reads neither. |
 | `kubernetes.CreateNode` | v1 Node (cluster-scoped) | not authorable | - | - | Registered by the kubelet. |
@@ -340,12 +368,12 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. At least one of `cidrs` must be written. No environment policy applies. |
 | `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
 | `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties, the default-class annotation (`storageclass.kubernetes.io/is-default-class`) included. No environment policy applies. |
-| `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | missing | - | - | - |
-| `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | missing | - | - | - |
-| `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | missing | - | - | - |
-| `kubernetes.CreateValidatingAdmissionPolicy` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | missing | - | - | - |
-| `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | missing | - | - | - |
+| `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | kind | `tcproute` | strict decode of `TCPRouteSpec` | No type under `TCPRouteSpec` unmarshals itself, so the decode reaches every depth. The kind refuses a route without `rules`, a rule without `backendRefs` and a Service backend without its `port`, which the API server refuses too; of a parent and a backend that are authored, the `name` must be written. A parent and a backend of another namespace are written as authored, as the `httproute` kind writes them. No capability is required. No environment policy applies. |
+| `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | kind | `tlsroute` | strict decode of `TLSRouteSpec` | As the `tcproute` row, and the kind refuses a route without `hostnames` too, which the API requires of a TLSRoute. The host names are not held to the allowed registries, and their form is left to the API server. |
+| `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | kind | `udproute` | strict decode of `UDPRouteSpec` | As the `tcproute` row: the decode reaches every depth, the kind refuses a route without `rules`, a rule without `backendRefs` and a Service backend without its `port`, and a parent and a backend of another namespace are written as authored. No capability is required. No environment policy applies. |
+| `kubernetes.CreateValidatingAdmissionPolicy` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (cluster-scoped) | held | - | - | It can deny writes for the whole cluster, and no consumer has asked for it. See "Held: cluster-wide admission and API registration" above. |
+| `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | held | - | - | It puts a ValidatingAdmissionPolicy into effect. See "Held: cluster-wide admission and API registration" above. |
+| `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | held | - | - | It has the API server call a webhook on the requests of any namespace. See "Held: cluster-wide admission and API registration" above. |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
 | `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
 | `certmanager.CreateCertificate` | cert-manager.io/v1 Certificate | kind | `certificate` | strict decode of `CertificateSpec` | Its labels and annotations are the `labels` and `annotations` properties. `secretName` and `issuerRef` with its `name` must be written. A keystore password in the object is refused under a policy that forbids explicit secrets. No capability is required. The `certificate` trait builds a Certificate for a workload through the same constructor, from a hand-written parser. |
@@ -5652,7 +5680,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   default. A `gatewayclass` is emitted with no namespace and declares its
   object as cluster-scoped, so its name is claimed in no namespace. The other
   four are emitted in the build namespace and declare their object as
-  namespaced. The routes of the same API are their own kinds (`httproute`).
+  namespaced. The routes of the same API are their own kinds (`httproute`,
+  `tcproute`, `udproute`, `tlsroute`).
 
   **No capability is required, and nothing gates these kinds.** Launcher does
   not ask whether the cluster serves `gateway.networking.k8s.io/v1`: where the
@@ -5832,6 +5861,125 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a Secret, a ConfigMap, a Service and its port), and whether a controller of
   the cluster implements the class. The object's status is the controller's
   and is not written.
+- **tcproute**, **udproute**, **tlsroute** (go-kure/launcher#790) are the
+  kind-named projections of the routes of the Gateway API's
+  `gateway.networking.k8s.io/v1` that carry no HTTP: a TCPRoute, a UDPRoute
+  and a TLSRoute. Each is built on `policyFreeKind` (above), as the kinds of
+  the API's infrastructure objects are, and emits that one object in the build
+  namespace, named after the component unless `objectName` names it; the
+  handler adds no label, no annotation and no default. The object is written at
+  `v1`, the version the CRDs of both channels store; the older versions
+  (`v1alpha2`, and `v1alpha3` of a TLSRoute) are served by the experimental
+  channel's CRDs only, as deprecated.
+
+  **No capability is required, and nothing gates these kinds,** on the terms of
+  the infrastructure kinds above: launcher does not ask whether the cluster
+  serves the API, and where the CRD is not installed the component builds and
+  the object is refused at apply. Whoever may author a component may author a
+  route, one that attaches to a Gateway of another namespace or sends traffic
+  to a backend of another namespace included (below).
+
+  **Authored.** The properties are the top-level json fields of the spec type,
+  those of the `CommonRouteSpec` it inlines included, decoded strictly at
+  every depth: an unknown key is refused wherever it sits (a parent, a rule, a
+  backend).
+  - `tcproute` (`TCPRouteSpec`) and `udproute` (`UDPRouteSpec`):
+    `parentRefs`, `useDefaultGateways` and `rules`. The API accepts exactly
+    one rule.
+  - `tlsroute` (`TLSRouteSpec`): the same three and `hostnames`, the server
+    names (SNI) of the TLS handshakes the route takes. A name may start with
+    the wildcard label `*.`. The route holds no certificate and no key: by the
+    Gateway API's documentation the listener it attaches to passes the
+    connection through or terminates it.
+  - **`useDefaultGateways` is an experimental-channel field:** the Go types
+    hold it and the standard channel's CRDs do not, so a cluster on that
+    channel does not keep it. It is the only such field of these specs at
+    v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+  - **No default is filled.** The defaults are the CRDs', and the API server
+    applies them to what the object leaves out: the `group` and `kind` of a
+    parent (a Gateway), and the `group`, `kind` and `weight` of a backend (a
+    core Service, weight 1).
+
+  **Required,** by the rule of the infrastructure kinds above, is the `name`
+  of a parent and of a backend that are authored (`parentRefs[0].name:
+  required (…)`): the API requires it and the type would write it empty.
+
+  **A required field the type omits is refused by the kind itself,** absent or
+  authored empty, as the API server refuses the object:
+  - a route with no `rules` (`rules: required (…)`);
+  - a rule with no `backendRefs` (`rules[0].backendRefs: required (…)`);
+  - a `tlsroute` with no `hostnames` (`hostnames: required (…)`).
+
+  The `httproute` kind refuses none of these: the HTTPRoute API requires no
+  rule, no backend and no host name.
+
+  **A Service backend must name its port**
+  (`rules[0].backendRefs[1].port: required (…)`). The CRDs write that as an
+  expression rule, `(size(self.group) == 0 && self.kind == 'Service') ?
+  has(self.port) : true`, which the API server evaluates after it has filled
+  the defaults: a backend that names no `group` and no `kind` is a Service,
+  and so is one that names the core group or the kind alone. A backend of
+  another group or kind needs no port. It is the one expression rule the kinds
+  hold, since it asks for a field that was left out, and the rule reads the
+  same in both channels and on the three kinds.
+
+  `TestGatewayKinds_RequiredMatchCRD` holds each required list (2 paths) and
+  the refused omissions to the CRDs the linked module ships, as it does for
+  the infrastructure kinds. `TestGatewayRouteKinds_OmissionsAreTheAPIServers`
+  and `TestGatewayRouteKinds_ExpressionRules` go one step further: they run
+  the CRD of each channel through the API server's own creation path
+  (defaulting, the schema, the expression rules), and hold each refusal of a
+  kind to a refusal of that path, and the object the kind emits for an
+  accepted route to being accepted there. The second names every expression
+  rule a CRD declares: the one above, which it shows with routes that break
+  it and routes that keep it, or a rule left to the API server with its
+  reason. A dependency bump that adds or rewrites a rule fails there.
+  **Not refused:**
+  - more than one rule, more than 16 backends in a rule, and every other
+    value rule of the CRDs: lengths, patterns, minima, maxima and item limits;
+  - the two expression rules on `parentRefs`, which tell two references to one
+    parent apart (by `sectionName`, and in the experimental channel by `port`
+    too). The channels write them differently, so a refusal by the kind would
+    be wider than one of them;
+  - the three expression rules on a TLSRoute's `hostnames` (a name is no IP
+    address, it is a DNS name, and a wildcard is its first label alone): they
+    hold the form of a value that is authored, as a pattern does;
+  - what a Gateway API controller refuses when it reads the object, which
+    shows in the object's status, not at creation.
+
+  **A route is an authored object,** as an `httproute` is. A parent and a
+  backend are references carried as written; launcher points neither at a
+  component and does not look for the target in the document. To refer to
+  another component's object, name it: the component name, or its
+  `objectName`.
+  - **References across namespaces are not gated.** `parentRefs[].namespace`
+    and `backendRefs[].namespace` are written as authored, on the terms of the
+    infrastructure kinds above and as the `httproute` kind writes them: by the
+    Gateway API's documentation a route attaches only where the Gateway's
+    listener allows routes of its namespace (`allowedRoutes`), and a backend of
+    another namespace is used only where a ReferenceGrant of that namespace
+    allows it; launcher checks neither.
+  - **No NetworkPolicy allow rule.** As for `httproute` above: the
+    NetworkPolicy synthesis reads a routing trait's traffic sources and target
+    component, which these kinds do not report, so it allows nothing for a
+    route's backends. An author who wants the allow rule authors the
+    NetworkPolicy.
+  - **No parent from a capability.** `parentRefs` is what the author wrote;
+    unwritten, the route has no parent.
+
+  **Policy.** No dimension of the environment policy reaches these objects:
+  they run no pod, hold no image, request no storage and have no replica
+  count, and no field of one holds a literal secret. A nil policy and a strict
+  one build the same object. A TLSRoute's `hostnames` are names the route
+  serves, not artifact sources, and are not held to the policy's allowed
+  registries, as an HTTPRoute's are not. The policy's capability lists gate
+  trait types, so none of them refuses a component of these types; a consumer
+  that restricts routing restricts the component types it registers.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+  **Not covered:** whether what is referred to exists (a Gateway, a listener,
+  a Service and its port), whether the cluster's controller implements the
+  route kind, and the object's `status`, which the controller writes.
 - **secretstore**, **clustersecretstore**, **externalsecret**,
   **clusterexternalsecret** (go-kure/launcher#790) are the kind-named
   projections of four objects of the External Secrets Operator, in its

@@ -26,7 +26,8 @@ const gatewayAPIModulePath = "sigs.k8s.io/gateway-api"
 var gatewayAPIChannels = []string{"experimental", "standard"}
 
 // gatewayAPIKinds lists the kind components of the Gateway API's
-// infrastructure objects with the CRD of the object each emits, the spec type
+// infrastructure objects, and of its routes that carry no HTTP
+// (gateway_route_common.go), with the CRD of the object each emits, the spec type
 // it decodes into and its required list. experimental names the properties
 // only the experimental channel's CRD holds, and omitted the numbers,
 // booleans and strings the type omits when zero.
@@ -60,7 +61,24 @@ var gatewayAPIKinds = []struct {
 		component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required,
 		omitted: []string{"validation.subjectAltNames[].hostname", "validation.subjectAltNames[].uri"},
 	},
+	{
+		component: "tcproute", crd: "tcproutes", typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](), required: tcpRouteKind.required,
+		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
+	},
+	{
+		component: "udproute", crd: "udproutes", typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](), required: udpRouteKind.required,
+		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
+	},
+	{
+		component: "tlsroute", crd: "tlsroutes", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](), required: tlsRouteKind.required,
+		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
+	},
 }
+
+// gatewayRouteExperimental names the property of a route that only the
+// experimental channel's CRD holds. It is also the one string of a route the
+// type omits when empty.
+var gatewayRouteExperimental = []string{"useDefaultGateways"}
 
 // gatewayAPICRDFile is the path of one CRD under the directory of the linked
 // module, in one channel.
@@ -269,8 +287,8 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 		}
 	}
 	// Vacuity guard: the rows hold the refusals this test reads.
-	if refusals != 5 {
-		t.Errorf("read %d refusals, want 5: a ListenerSet's listeners with a listener's name, port and protocol, and a BackendTLSPolicy's targetRefs", refusals)
+	if refusals != 12 {
+		t.Errorf("read %d refusals, want 12: a ListenerSet's listeners with a listener's name, port and protocol, a BackendTLSPolicy's targetRefs, a TCPRoute's, a UDPRoute's and a TLSRoute's rules with a rule's backendRefs, and a TLSRoute's hostnames", refusals)
 	}
 }
 
