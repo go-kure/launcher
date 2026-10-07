@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -154,6 +157,7 @@ func labelHolderRows() []labelHolderRow {
 	inherited := []string{"spec", "inheritedMetadata"}
 	podMetadata := []string{"spec", "podMetadata"}
 	infrastructure := []string{"spec", "infrastructure"}
+	commonMetadata := []string{"spec", "commonMetadata"}
 	named := metav1.ObjectMeta{Name: "w"}
 
 	rows := []labelHolderRow{
@@ -249,6 +253,20 @@ func labelHolderRows() []labelHolderRow {
 		{name: "Alertmanager", where: `Alertmanager "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "Alertmanager"), podMetadata...)},
 		{name: "ThanosRuler", where: `ThanosRuler "w"`, path: podMetadata, build: unstructuredAt(object("monitoring.coreos.com/v1", "ThanosRuler"), podMetadata...)},
 		{name: "Gateway", where: `Gateway "w"`, path: infrastructure, build: unstructuredAt(object("gateway.networking.k8s.io/v1", "Gateway"), infrastructure...)},
+
+		// What a Flux object hands on to what it applies: read, and never written.
+		{name: "typed Kustomization", where: `Kustomization "w"`, path: commonMetadata, build: typed(func(l map[string]string) client.Object {
+			return &kustv1.Kustomization{ObjectMeta: named, Spec: kustv1.KustomizationSpec{CommonMetadata: &kustv1.CommonMetadata{Labels: l}}}
+		})},
+		{name: "unstructured Kustomization", where: `Kustomization "w"`, path: commonMetadata, build: unstructuredAt(object("kustomize.toolkit.fluxcd.io/v1", "Kustomization"), commonMetadata...)},
+		{name: "typed HelmRelease", where: `HelmRelease "w"`, path: commonMetadata, build: typed(func(l map[string]string) client.Object {
+			return &helmv2.HelmRelease{ObjectMeta: named, Spec: helmv2.HelmReleaseSpec{CommonMetadata: &helmv2.CommonMetadata{Labels: l}}}
+		})},
+		{name: "unstructured HelmRelease", where: `HelmRelease "w"`, path: commonMetadata, build: unstructuredAt(object("helm.toolkit.fluxcd.io/v2", "HelmRelease"), commonMetadata...)},
+		{name: "typed ArtifactGenerator", where: `ArtifactGenerator "w"`, path: commonMetadata, build: typed(func(l map[string]string) client.Object {
+			return &swv1beta1.ArtifactGenerator{ObjectMeta: named, Spec: swv1beta1.ArtifactGeneratorSpec{CommonMetadata: &swv1beta1.CommonMetadata{Labels: l}}}
+		})},
+		{name: "unstructured ArtifactGenerator", where: `ArtifactGenerator "w"`, path: commonMetadata, build: unstructuredAt(object("source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator"), commonMetadata...)},
 	}
 	// The labels of a VolSync mover's pods: a label map, of every mover of the
 	// two kinds.
@@ -496,7 +514,9 @@ func TestOwnedConfig_ComponentLabelNotRead(t *testing.T) {
 		"the key as an annotation":        annotated,
 		"a job template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "CronJob"),
 			foreign, "spec", "jobTemplate", "metadata"),
-		"commonMetadata a Flux object hands on": holding(t, unstructuredObject("kustomize.toolkit.fluxcd.io/v1", "Kustomization"),
+		"commonMetadata of a Kustomization of another group": holding(t, unstructuredObject("example.com/v1", "Kustomization"),
+			foreign, "spec", "commonMetadata"),
+		"commonMetadata of another kind of the group": holding(t, unstructuredObject("helm.toolkit.fluxcd.io/v2", "HelmChart"),
 			foreign, "spec", "commonMetadata"),
 		"a pod template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "Job"),
 			foreign, "spec", "template", "metadata"),
