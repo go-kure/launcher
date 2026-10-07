@@ -88,9 +88,8 @@ type monitoringWorkload struct {
 // digest, or tagged latest (ValidateImageRef), on every image the workload
 // names, and a resource block whose request exceeds its limit
 // (validateCnpgResources). A container or an image volume that names no image
-// is not checked: the operator supplies the image of the containers it
-// generates, so a listed container without one is the ordinary form of a
-// patch.
+// is not checked, whatever its name: a listed container named for one the
+// operator generates is merged into it, so such a patch may name none.
 func validateMonitoringWorkload(w monitoringWorkload) error {
 	for _, image := range w.images {
 		if err := ValidateImageRef(image.value); err != nil {

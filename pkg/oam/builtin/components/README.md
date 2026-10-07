@@ -3734,8 +3734,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
   limit 1Gi`). A listed container that names no image is not checked for
-  one: it is the ordinary form of a patch of a container the operator
-  generates.
+  one, whatever its name. An entry named for a container the operator
+  generates is merged into it, so such a patch may name none.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload
