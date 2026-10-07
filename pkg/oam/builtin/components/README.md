@@ -9586,8 +9586,10 @@ is a member when the second build succeeds and the object still holds the field.
 a path the kind refuses whatever is authored there is skipped, and the test names those paths
 with their reason: a `cilium-networkpolicy`'s `nodeSelector`, a `cnpg-pooler`'s
 `template.spec.ephemeralContainers`, and the `generatorRef` of an `externalsecret`'s or a
-`clusterexternalsecret`'s `data[].sourceRef`. Any other field that cannot be measured fails the
-test. The
+`clusterexternalsecret`'s `data[].sourceRef`. A refused omission counts only where the error
+names the field or one under it, by its full path; the two Cilium policy kinds refuse a label's
+`key` and an ICMP field's `type` in their decode instead, with an error naming no field, and the
+test names those with their reason. Any other field that cannot be measured fails the test. The
 required lists are those of the CRDs of the linked modules. The Prometheus operator, Flux and
 External Secrets kinds are read through the schema markers of their linked sources, by the same
 reader as their own required-list tests. The members are pinned in
