@@ -80,9 +80,10 @@ func fluxReceiverMinimal() map[string]any {
 	}
 }
 
-// fluxReceiverFull sets every field of a ReceiverSpec. It breaks two of the
-// API's expression rules, which tie secretRef and oidcProviders to the type:
-// the kind checks none of them (fluxRulesLeft), so it builds. Its Secret is
+// fluxReceiverFull sets every field of a ReceiverSpec. It breaks one of the
+// API's expression rules, which tie secretRef and oidcProviders to the type (a
+// generic-oidc receiver takes no secretRef): the kind checks none of them
+// (fluxRulesLeft), so it builds. Its Secret is
 // read from the namespace the object lands in.
 func fluxReceiverFull() map[string]any {
 	return map[string]any{
@@ -659,6 +660,48 @@ func TestResourceSetInputProvider_RefusesAUserOrPassword(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			props := map[string]any{"type": "ExternalService", "url": tc.url}
 			_, err := (&components.ResourceSetInputProviderHandler{}).ToApplicationConfig(&oam.Component{Name: "inputs", Type: "resourcesetinputprovider", Properties: props}, coreKindNamespace)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("ToApplicationConfig = %v, want no refusal", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ToApplicationConfig = %v, want an error that says %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("the refusal repeats the credential: %v", err)
+			}
+		})
+	}
+}
+
+// TestFluxReceiver_RefusesAUserOrPassword: a user or a password in the
+// `issuerURL` of any OIDC provider of a fluxcd-receiver, the second here, is
+// refused when the component is read, and the refusal names the provider but
+// does not repeat the value.
+func TestFluxReceiver_RefusesAUserOrPassword(t *testing.T) {
+	const secret = "s3cr3t-token"
+	cases := []struct {
+		name, issuer, wantErr string
+	}{
+		{"a user and a password in an https issuer", "https://bot:" + secret + "@issuer.example", "fluxcd-receiver: oidcProviders[1].issuerURL must not carry a user or password"},
+		{"a user alone in an issuer", "https://" + secret + "@issuer.example", "fluxcd-receiver: oidcProviders[1].issuerURL must not carry a user or password"},
+		{"an issuer that is no URL", "https://issuer.example:" + secret, "fluxcd-receiver: oidcProviders[1].issuerURL is not a valid URL"},
+		{"a user and a password in an issuer with no scheme", "bot:" + secret + "@issuer.example", "fluxcd-receiver: oidcProviders[1].issuerURL holds an @ and is no URL with a host"},
+		{"an issuer with no user", "https://issuer.example/tenant", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := func(issuer string) map[string]any {
+				return map[string]any{"issuerURL": issuer, "validations": []any{map[string]any{"expression": "true", "message": "never"}}}
+			}
+			props := map[string]any{
+				"type":          "generic-oidc",
+				"resources":     []any{fluxReceiverResource()},
+				"oidcProviders": []any{provider("https://token.actions.example"), provider(tc.issuer)},
+			}
+			_, err := (&components.FluxcdReceiverHandler{}).ToApplicationConfig(&oam.Component{Name: "hook", Type: "fluxcd-receiver", Properties: props}, coreKindNamespace)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Errorf("ToApplicationConfig = %v, want no refusal", err)

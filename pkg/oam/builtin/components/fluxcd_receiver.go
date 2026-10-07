@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strconv"
+
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -79,6 +81,23 @@ func (h *FluxcdReceiverHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// receiverIssuerRemedy completes refuseHostedFieldUserinfo's message for an
+// OIDC provider's `issuerURL`, which is written to the object in plain text.
+const receiverIssuerRemedy = ", which would be written in plain text into the Receiver; an issuer URL names the issuer and carries no credential"
+
+// refuseReceiverUserinfo refuses a user or a password in the `issuerURL` of
+// each OIDC provider (refuseHostedFieldUserinfo): the API takes only an http
+// or https URL there, so one with no host that holds an `@` is refused too,
+// and the refusal does not name the value.
+func refuseReceiverUserinfo(spec *notificationv1.ReceiverSpec) error {
+	for i, p := range spec.OIDCProviders {
+		if err := refuseHostedFieldUserinfo(fluxcdReceiverType, "oidcProviders["+strconv.Itoa(i)+"].issuerURL", p.IssuerURL, receiverIssuerRemedy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // fluxcdReceiverKind is the fluxcd-receiver kind: see fluxKind. The API
 // requires `type` and `resources`, of a resource its `kind` and `name`, of an
 // authored `secretRef` its `name`, and of an OIDC provider its `issuerURL` and
@@ -86,11 +105,13 @@ func (h *FluxcdReceiverHandler) PropertySchema() map[string]oam.PropertySchema {
 // write each one empty. TestFluxKinds_RequiredMatchMarkers holds the list to
 // the markers of the upstream source. The API's expression rules, which tie
 // `secretRef` and `oidcProviders` to `type`, are left to the API server
-// (fluxRulesLeft). The object reads the Secret of `secretRef` from its own
-// namespace.
+// (fluxRulesLeft). A user or a password in an issuer URL is refused
+// (refuseReceiverUserinfo). The object reads the Secret of `secretRef` from
+// its own namespace.
 var fluxcdReceiverKind = &fluxKind[notificationv1.ReceiverSpec]{
 	policyFreeKind: policyFreeKind[notificationv1.ReceiverSpec]{
 		upstream: "notification.toolkit.fluxcd.io/v1 ReceiverSpec",
+		validate: refuseReceiverUserinfo,
 		required: map[string]string{
 			"type":                        "the sender of the webhook, such as `github` or `generic-hmac`",
 			"resources":                   "the Flux objects a webhook makes the controller reconcile",

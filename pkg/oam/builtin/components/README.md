@@ -2225,7 +2225,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a `generic-oidc` Receiver validates a request by the OIDC issuers of
     `oidcProviders` instead. **`oidcProviders[].issuerURL` names a host
     outside the cluster**, which the controller discovers the issuer at;
-    launcher writes it as authored and does not hold it. A Receiver names no
+    launcher writes it as authored and holds its host to no policy; a user
+    or a password in it is refused (Policy, below). A Receiver names no
     account.
   - `imagepolicy`: `imageRepositoryRef.namespace` names the namespace of
     the ImageRepository whose scanned tags the policy selects from, so an
@@ -2487,7 +2488,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     written as authored unless it holds an `@` (Policy, below);
   - of a `fluxcd-receiver`, the enumerations (`type`, a resource's `kind`),
     the lengths of a resource's `name` and `namespace`, the pattern of an
-    `issuerURL` (an `http` or `https` URL), a `validations` list authored
+    `issuerURL` (an `http` or `https` URL; one that is no URL with a host is
+    written as authored unless it holds an `@`), a `validations` list authored
     empty, two OIDC providers of one `issuerURL`, which the type keys the
     list by, and that a resource with `matchLabels` is named `*`, which the
     type documents and no marker states;
@@ -2583,7 +2585,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     certificates of `secretRef`, `proxySecretRef` and `certSecretRef` are
     Secrets the object names, not values.
   - **No field of a Receiver holds an image or a secret.** The token is in
-    the Secret `secretRef` names. **The host of an OIDC provider's
+    the Secret `secretRef` names. **A user or a password in an OIDC
+    provider's `issuerURL` is refused**, under every policy and under none,
+    by the same rule as a Provider's `proxy` (`fluxcd-receiver:
+    oidcProviders[1].issuerURL must not carry a user or password, which
+    would be written in plain text into the Receiver; …`), and so is one
+    that is no URL with a host and holds an `@`; the refusal names the
+    provider's index, not the value. **The host of an OIDC provider's
     `issuerURL` is not held:** the controller discovers an issuer there and
     fetches no artifact, so no dimension of the policy speaks of it. That a
     Receiver opens an inbound path is not a dimension of the policy either.
