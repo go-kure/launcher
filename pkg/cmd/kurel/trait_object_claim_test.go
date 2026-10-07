@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// The `ingress`, `httproute` and `cilium-networkpolicy` traits name their one
-// object themselves, under no name role: the trait's `name`, else its default.
-// The name is claimed all the same (oam.Trait.ClaimObjectName), so a second
-// owner of that object is refused with both named, as it is for a name a role
-// resolves.
+// The `ingress` and `httproute` traits resolve their one object's name under
+// their roles (`ingress`, `httproute`); the `cilium-networkpolicy` trait names
+// its object itself, under no role, and claims the name
+// (oam.Trait.ClaimObjectName). Either way a second owner of that object is
+// refused with both named.
 
 const (
 	claimIngressTrait = `        - type: ingress
@@ -72,16 +72,16 @@ func TestTraitObjectClaim_TwoTraitsNameOneObject(t *testing.T) {
 			web:  claimIngressTrait + "            name: api-ingress\n", api: claimIngressTrait,
 			off: claimIngressTrait,
 			want: `name collision: Ingress.networking.k8s.io "default/api-ingress" is named by ` +
-				`component "web" traits[0] "ingress" (its own object, set by name) and by ` +
-				`component "api" traits[0] "ingress" (its own object, its default name); give one of them another name`,
+				`component "web" traits[0] "ingress" (role "ingress", set by name) and by ` +
+				`component "api" traits[0] "ingress" (role "ingress", its default); give one of them another name`,
 		},
 		{
 			name: "httproute",
 			web:  claimHTTPRouteTrait + "            name: api-httproute\n", api: claimHTTPRouteTrait,
 			off: claimHTTPRouteTrait,
 			want: `name collision: HTTPRoute.gateway.networking.k8s.io "default/api-httproute" is named by ` +
-				`component "web" traits[0] "httproute" (its own object, set by name) and by ` +
-				`component "api" traits[0] "httproute" (its own object, its default name); give one of them another name`,
+				`component "web" traits[0] "httproute" (role "httproute", set by name) and by ` +
+				`component "api" traits[0] "httproute" (role "httproute", its default); give one of them another name`,
 		},
 		{
 			name: "cilium-networkpolicy",
@@ -114,8 +114,8 @@ func TestTraitObjectClaim_TwoTraitsNameOneObject(t *testing.T) {
 func TestTraitObjectClaim_SameTraitTwiceOnOneComponent(t *testing.T) {
 	err := buildErr(t, claimWorkload("web", claimIngressTrait+claimIngressTrait))
 	const want = `name collision: Ingress.networking.k8s.io "default/web-ingress" is named by ` +
-		`component "web" traits[0] "ingress" (its own object, its default name) and by ` +
-		`component "web" traits[1] "ingress" (its own object, its default name); give one of them another name`
+		`component "web" traits[0] "ingress" (role "ingress", its default) and by ` +
+		`component "web" traits[1] "ingress" (role "ingress", its default); give one of them another name`
 	if err == nil {
 		t.Fatalf("two ingress traits under one default name were accepted, want %q", want)
 	}
