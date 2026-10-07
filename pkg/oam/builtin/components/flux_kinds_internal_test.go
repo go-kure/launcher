@@ -123,12 +123,23 @@ func fluxMarkersRead(t *testing.T, markers func(kindField) (fieldMarkers, bool))
 //
 // The source read is the Flux modules' (fluxMarkerModules): a kind's own
 // package, the packages of its module it embeds, and the shared reference
-// types. A field of a Kubernetes type these specs embed (the key and operator
-// of a label selector requirement) is not derived, and no kind refuses its
-// omission.
+// types. The key and the operator of a match expression are fields of a
+// Kubernetes type, which carries no +required marker: they are read from the
+// source of metav1.LabelSelectorRequirement by the schema generators' rule
+// (markerAPISource), as TestMonitoringKinds_RequiredMatchMarkers reads them.
+// No other field of a Kubernetes type these specs embed is derived.
 func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
-	markers := linkedFieldMarkers(t, fluxMarkerModules)
-	fluxMarkersRead(t, markers)
+	flux := linkedFieldMarkers(t, fluxMarkerModules)
+	fluxMarkersRead(t, flux)
+	src := markerAPISource(t)
+	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
+	markers := func(f kindField) (fieldMarkers, bool) {
+		if f.owner == expression {
+			required := src.required(f)
+			return fieldMarkers{required: required, optional: !required}, src.known(f)
+		}
+		return flux(f)
+	}
 	for _, kind := range fluxKindRows {
 		t.Run(kind.component, func(t *testing.T) {
 			listed, validated := map[string]bool{}, map[string]bool{}
