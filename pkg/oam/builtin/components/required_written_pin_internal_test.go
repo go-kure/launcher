@@ -59,8 +59,9 @@ import (
 // A control the kind refuses at an ancestor that requiredWrittenUnauthorable
 // lists means the field cannot be authored on the kind at all, and it is not
 // a member. Any other refusal of the control, a refusal of the omission that
-// does not name the field, and a member the object does not show fail the
-// test: the measurement did not answer for that field.
+// names neither the field nor one under it (unless requiredWrittenDecodeRefused
+// lists it), and a member the object does not show fail the test: the
+// measurement did not answer for that field.
 
 // requiredWrittenPinFile is the checked-in set, and requiredWrittenPinUpdate
 // the switch under which TestKindComponents_RequiredWrittenNotRefused writes
@@ -105,6 +106,28 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
 	"clusterexternalsecret externalSecretSpec.data[].sourceRef.generatorRef": "the object always carries a storeRef there, and the API takes exactly one",
+}
+
+// requiredWrittenDecodeRefused are the fields whose omission the kind refuses
+// in its decode, by kind and path, each with the reason: a type of the API
+// decodes itself, and the error names no field. Every other refusal of an
+// omission must name the field or one under it; a listed omission that builds,
+// or is refused another way, fails the test.
+var requiredWrittenDecodeRefused = ciliumPolicyDecodeRefused()
+
+// ciliumPolicyDecodeRefused lists the two policy kinds' decode refusals, under
+// spec and under each entry of specs.
+func ciliumPolicyDecodeRefused() map[string]string {
+	refused := map[string]string{}
+	for _, component := range []string{"cilium-networkpolicy", "cilium-clusterwidenetworkpolicy"} {
+		for _, prefix := range []string{"spec.", "specs[]."} {
+			refused[component+" "+prefix+"labels[].key"] = "Cilium's label type decodes itself and refuses a label without a key"
+			for _, rule := range []string{"ingress", "ingressDeny", "egress", "egressDeny"} {
+				refused[component+" "+prefix+rule+"[].icmps[].fields[].type"] = "Cilium's ICMP field type decodes itself and fails on an omitted type, which the kind's decode refuses"
+			}
+		}
+	}
+	return refused
 }
 
 // pinSchema is what the measurement reads of a kind's API: the properties by
@@ -448,8 +471,8 @@ func (m pinMember) String() string {
 // the omission wrote and the unauthorable ancestors the controls met, each by
 // kind and path.
 type pinMeasure struct {
-	members                          []pinMember
-	refused, defaulted, unauthorable []string
+	members                                         []pinMember
+	refused, decodeRefused, defaulted, unauthorable []string
 }
 
 // measureRequiredWritten measures the set on one kind.
@@ -496,7 +519,11 @@ func measureRequiredWritten(t *testing.T, k pinKind) (m pinMeasure) {
 			delete(parent, name)
 			obj, err := pinBuild(k, without)
 			if err != nil {
-				if !strings.Contains(err.Error(), pinLeaf(path)) {
+				if !pinRefusalNames(path, err) {
+					if _, listed := requiredWrittenDecodeRefused[k.component+" "+path]; listed && strings.Contains(err.Error(), "do not decode into") {
+						m.decodeRefused = append(m.decodeRefused, k.component+" "+path)
+						return
+					}
 					t.Errorf("%s: the omission is refused for another reason: %v", path, err)
 					return
 				}
@@ -544,9 +571,48 @@ func pinRefusedAncestor(path string, err error) (string, bool) {
 	return "", false
 }
 
+// pinRefusalNames reports whether err is the kind's refusal of the field at
+// path: the error names its full path or a field under it (omitting a struct
+// is refused through the field of it the kind requires), at the start or after
+// a space, with an index for a list element and any key for a map entry, and
+// followed by what a refusal writes after it (": required", " is required", a
+// field under it). A leaf name alone would also match another field's error
+// (name in namespace, key in secretKey) or the text of a decode failure.
+func pinRefusalNames(path string, err error) bool {
+	pattern := regexp.QuoteMeta(path)
+	pattern = strings.ReplaceAll(pattern, `\[\]`, `\[[0-9]+\]`)
+	pattern = strings.ReplaceAll(pattern, `\{\}`, `(\[[^\]]+\]|\.[^.:\s]+)`)
+	return regexp.MustCompile(`(^|\s)` + pattern + `(:|\.|\[| is )`).MatchString(err.Error())
+}
+
 func pinLeaf(path string) string {
 	segments := strings.Split(path, ".")
 	return strings.TrimSuffix(strings.TrimSuffix(segments[len(segments)-1], "[]"), "{}")
+}
+
+// TestPinRefusalNames holds the match of a refusal to the field's full path: a
+// field under it counts, another field that shares its leaf or its prefix
+// does not.
+func TestPinRefusalNames(t *testing.T) {
+	for _, c := range []struct {
+		path, err string
+		want      bool
+	}{
+		{"secretRef.name", "secretRef.name: required (the Secret's name)", true},
+		{"valuesFrom[].kind", "helmrelease: valuesFrom[1].kind is required: one of Secret, ConfigMap", true},
+		{"cluster", "cluster.name: required (the Cluster's name)", true},
+		{"tablespaceStorage{}.name", "tablespaceStorage[data].name: required (the name)", true},
+		{"tablespaceStorage{}.name", "tablespaceStorage.data.name: required (the name)", true},
+		{"secretRef.name", "secretRef.namespace: required (the namespace)", false},
+		{"cluster", "clusterName: required (the name)", false},
+		{"key", "secretKey: required (the key)", false},
+		{"key", "invalid Label: '{}' does not contain label key", false},
+		{"fields[].type", "a type under it decodes itself and does not handle what was written", false},
+	} {
+		if got := pinRefusalNames(c.path, errors.New(c.err)); got != c.want {
+			t.Errorf("pinRefusalNames(%q, %q) = %v, want %v", c.path, c.err, got, c.want)
+		}
+	}
 }
 
 // pinRequiredError is a kind's refusal of a missing field, which the control
@@ -866,13 +932,16 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		t.Fatalf("%s=1 rewrites %s and compares nothing; it is refused where CI is set", requiredWrittenPinUpdate, requiredWrittenPinFile)
 	}
 	var all []pinMember
-	refused, defaulted, unauthorable := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	refused, decodeRefused, defaulted, unauthorable := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, k := range requiredWrittenKinds {
 		t.Run(k.component, func(t *testing.T) {
 			m := measureRequiredWritten(t, k)
 			all = append(all, m.members...)
 			for _, key := range m.refused {
 				refused[key] = true
+			}
+			for _, key := range m.decodeRefused {
+				decodeRefused[key] = true
 			}
 			for _, key := range m.defaulted {
 				defaulted[key] = true
@@ -922,6 +991,11 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	for _, key := range slices.Sorted(maps.Keys(requiredWrittenUnauthorable)) {
 		if !unauthorable[key] {
 			t.Errorf("%s: no control is refused there any more; drop it from requiredWrittenUnauthorable", key)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(requiredWrittenDecodeRefused)) {
+		if !decodeRefused[key] {
+			t.Errorf("%s: the omission is no longer refused in the decode; drop it from requiredWrittenDecodeRefused", key)
 		}
 	}
 
