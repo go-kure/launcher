@@ -5640,7 +5640,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     **`defaultScope` is an experimental-channel field:** the Go type holds it
     and the standard channel's Gateway CRD does not, so a cluster on that
     channel does not keep it. It is the only such field of these five specs
-    at v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+    at v1.6.3, and `TestGatewayKinds_RequiredMatchCRD` holds that.
   - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
     entries take the fields of a Gateway's listener.
   - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
@@ -5707,7 +5707,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **A required field the type omits is refused by the kind itself,** since no
   required list can name it: the type leaves it out where it is not authored
   and where it is authored empty alike, and the API server refuses the object
-  either way. There are five at v1.6.2:
+  either way. There are five at v1.6.3:
   - a `listenerset` with no `listeners` and a `backendtlspolicy` with no
     `targetRefs`, absent or empty (`listeners: required (…)`), as a
     `servicecidr` with no `cidrs` is;
