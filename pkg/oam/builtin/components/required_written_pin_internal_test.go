@@ -27,6 +27,8 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -362,6 +364,20 @@ var requiredWrittenKinds = []pinKind{
 	{component: "httproute", handler: &HTTPRouteHandler{}, typ: reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "httproutes"), "v1"),
 		base:   map[string]any{"parentRefs": []any{map[string]any{"name": "public"}}}},
+	// MetalLB's BFD profile and Community are not listed: their CRDs require
+	// no field, so there is nothing to measure.
+	{component: "metallb-ipaddresspool", handler: &MetalLBIPAddressPoolHandler{}, typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
+		schema: pinCRDSchema(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion),
+		base:   map[string]any{"addresses": []any{"192.168.10.0/24"}}},
+	{component: "metallb-l2advertisement", handler: &MetalLBL2AdvertisementHandler{}, typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
+		schema: pinCRDSchema(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion),
+		base:   map[string]any{}},
+	{component: "metallb-bgpadvertisement", handler: &MetalLBBGPAdvertisementHandler{}, typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),
+		schema: pinCRDSchema(metallbModulePath, metallbCRDDir+"/metallb.io_bgpadvertisements.yaml", metallbVersion),
+		base:   map[string]any{}},
+	{component: "metallb-bgppeer", handler: &MetalLBBGPPeerHandler{}, typ: reflect.TypeFor[metallbv1beta2.BGPPeerSpec](),
+		schema: pinCRDSchema(metallbModulePath, metallbCRDDir+"/metallb.io_bgppeers.yaml", metallbPeerVersion),
+		base:   map[string]any{"myASN": 64500}},
 	{component: "servicemonitor", handler: &ServiceMonitorHandler{}, typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), false),
 		base:   map[string]any{"selector": map[string]any{}, "endpoints": []any{map[string]any{"port": "http"}}}},
