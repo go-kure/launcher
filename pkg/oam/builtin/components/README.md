@@ -4189,6 +4189,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
   BGP CRDs to a field that is a pointer in the Go type.
 
+  **Authored empty lists the API defaults.** A defaulted-zero list may also
+  hold a list the type omits when empty, and an authored `[]` there is
+  refused the same way (`metrics: [] cannot be carried by the Kubernetes API
+  types (the field is omitted when empty, so the API server would apply its
+  default …)`). Three lists are refused: a `horizontalpodautoscaler`'s
+  `metrics` and its scaling rules' `policies`, and a `networkpolicy`'s
+  `policyTypes`. Two lists the API defaults are not refused, because an
+  empty list already means their default: `csidriver`'s
+  `volumeLifecycleModes` (an empty list means `Persistent`) and
+  `imagerepository`'s `exclusionList` (the image-reflector controller
+  filters tags through `GetExclusionList`, which returns the default list
+  when the list is empty, so an API client's `[]` means the default too). `TestKindComponents_DefaultedEmptyLists` walks every
+  kind in its table of API sources, finds each list omitted when empty that
+  its source gives a default (a CRD schema or a default marker) or whose
+  field comment mentions a default, and holds each to an answer: refused,
+  or not refused with the reason. A newly defaulted list fails it until it
+  is answered. Two limits: the Kubernetes types are defaulted in the API
+  server's own code, which is not in the module graph, so a default their
+  field comment does not mention is not found; and the table of kinds it
+  walks is not itself proven to hold every kind component.
+
   **What is authored.**
   - `ingressclass` and `csidriver` have a spec type, and the properties are
     its json fields: `controller` and `parameters` (`IngressClassSpec`), and
@@ -4385,7 +4406,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     denies all egress. Here `policyTypes` is what the author wrote; unwritten,
     the API server derives it: `Ingress` always, `Egress` only when `egress`
     holds a rule. So on the kind `egress: []` alone isolates no egress; a
-    policy that denies all egress writes `policyTypes: [Egress]`.
+    policy that denies all egress writes `policyTypes: [Egress]`. An authored
+    `policyTypes: []` is refused: the type omits it, and the API server would
+    derive it as above (`policyTypes: [] cannot be carried by the Kubernetes
+    API types (…)`).
   - **An empty rule allows everything in its direction.** `ingress: [{}]` is
     the API's allow-all, and is carried when written. It is never the result
     of a null: a null rule, peer or port (`ingress: [null]`,
@@ -4771,6 +4795,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`stabilizationWindowSeconds: 0`). The type has no number or boolean
     that is omitted when zero, which
     `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
+  - **An empty `metrics` or `policies` list is refused.** The type omits
+    `metrics` and a scaling rule's `policies` when empty, and the API server
+    then applies its default: 80% average CPU utilization for `metrics`, and
+    its default policies for `behavior.scaleUp` and `behavior.scaleDown`. So
+    an authored `[]` cannot be carried (`metrics: [] cannot be carried by the
+    Kubernetes API types (the field is omitted when empty, so the API server
+    would apply its default …)`). See *Authored empty lists the API defaults*
+    below.
   - **Required** are the two top-level fields the API server refuses an
     autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
     `maxReplicas` (`maxReplicas: required …`; an authored `0` is refused

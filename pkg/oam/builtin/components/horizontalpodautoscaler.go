@@ -50,7 +50,7 @@ func (h *HorizontalPodAutoscalerHandler) PropertySchema() map[string]oam.Propert
 		},
 		"metrics": {
 			Type:        oam.PropertyTypeArray,
-			Description: "HorizontalPodAutoscaler spec.metrics: the metrics the desired replica count is calculated from; the largest result is used. Unset, the API server scales on 80% average CPU utilization.",
+			Description: "HorizontalPodAutoscaler spec.metrics: the metrics the desired replica count is calculated from; the largest result is used. Unset, the API server scales on 80% average CPU utilization. An empty list is refused: it is omitted, so that default would apply.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
 				Description: "One metric: type (Resource, ContainerResource, Pods, Object or External) and the source of that name. Decoded strictly into the Kubernetes API type: see MetricSpec in the Kubernetes API reference.",
@@ -58,10 +58,21 @@ func (h *HorizontalPodAutoscalerHandler) PropertySchema() map[string]oam.Propert
 		},
 		"behavior": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
-			Description: "HorizontalPodAutoscaler spec.behavior: the scaling rules per direction (scaleUp, scaleDown). Decoded strictly into the Kubernetes API type: see HorizontalPodAutoscalerBehavior in the Kubernetes API reference.",
+			Description: "HorizontalPodAutoscaler spec.behavior: the scaling rules per direction (scaleUp, scaleDown). Decoded strictly into the Kubernetes API type: see HorizontalPodAutoscalerBehavior in the Kubernetes API reference. An empty policies list in either direction is refused: it is omitted, so the API server's default policies would apply.",
 		},
 	}
 }
+
+// hpaDefaultedZeros lists the lists of HorizontalPodAutoscalerSpec that the
+// type omits when empty and that the API server then defaults, so an authored
+// [] there is refused (refuseUncarriedSpecValues). The defaults are the field
+// comments' (SwaggerDoc); TestKindComponents_DefaultedEmptyLists holds the list
+// to them.
+var hpaDefaultedZeros = defaultedZeroFields{api: "Kubernetes", defaulter: "API server", fields: map[string]string{
+	"metrics":                     `[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":80}}}]`,
+	"behavior.scaleUp.policies":   `[{"type":"Pods","value":4,"periodSeconds":15},{"type":"Percent","value":100,"periodSeconds":15}]`,
+	"behavior.scaleDown.policies": `[{"type":"Percent","value":100,"periodSeconds":15}]`,
+}}
 
 // ToApplicationConfig decodes an OAM horizontalpodautoscaler component into a
 // HorizontalPodAutoscalerConfig, under the package's null contract and the
@@ -71,7 +82,7 @@ func (h *HorizontalPodAutoscalerHandler) ToApplicationConfig(component *oam.Comp
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, hpaDefaultedZeros); err != nil {
 		return nil, err
 	}
 	cfg := &HorizontalPodAutoscalerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}

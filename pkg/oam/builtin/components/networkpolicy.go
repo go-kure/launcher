@@ -60,7 +60,7 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"policyTypes": {
 			Type:        oam.PropertyTypeArray,
-			Description: "NetworkPolicy spec.policyTypes: the directions the policy isolates. Unset, the API server derives it: Ingress always, Egress when an egress rule is authored. So an empty egress list alone isolates no egress, unlike on the networkpolicy trait: denying all egress takes policyTypes [Egress].",
+			Description: "NetworkPolicy spec.policyTypes: the directions the policy isolates. Unset, the API server derives it: Ingress always, Egress when an egress rule is authored. So an empty egress list alone isolates no egress, unlike on the networkpolicy trait: denying all egress takes policyTypes [Egress]. An empty list is refused: it is omitted, so the derived default would apply.",
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A policy type: Ingress or Egress."},
 		},
 	}
@@ -77,6 +77,15 @@ var networkPolicyLabelSelectors = []string{
 	"egress[].to[].namespaceSelector",
 }
 
+// networkPolicyDefaultedZeros lists the lists of NetworkPolicySpec that the
+// type omits when empty and that the API server then defaults, so an authored
+// [] there is refused (refuseUncarriedSpecValues): policyTypes, which the API
+// server derives from the rules, as its field comment (SwaggerDoc) states.
+// TestKindComponents_DefaultedEmptyLists holds the list to it.
+var networkPolicyDefaultedZeros = defaultedZeroFields{api: "Kubernetes", defaulter: "API server", fields: map[string]string{
+	"policyTypes": `["Ingress"], with "Egress" when an egress rule is authored`,
+}}
+
 // ToApplicationConfig decodes an OAM networkpolicy component into a
 // NetworkPolicyConfig, under the package's null contract and the strict decode
 // every spec-projecting kind uses. A null rule or peer is refused by path
@@ -88,7 +97,7 @@ func (h *NetworkPolicyHandler) ToApplicationConfig(component *oam.Component, nam
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, networkPolicyDefaultedZeros); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(props, labelSelectorRequired(networkPolicyLabelSelectors...)); err != nil {
