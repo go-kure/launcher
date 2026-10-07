@@ -511,7 +511,11 @@ func TestLabelReach_EveryFieldIsHeldOrListed(t *testing.T) {
 		}
 	}
 	for _, entry := range labelReachUnwalked {
-		at, there := types[entry.typ], true
+		at, there := types[entry.typ]
+		if !there {
+			t.Errorf("labelReachUnwalked names %s, which is no kind component's type any more: take the entry out", entry.typ)
+			continue
+		}
 		for _, step := range strings.Split(entry.path, ".") {
 			at = indirect(at)
 			for at != nil && (at.Kind() == reflect.Slice || at.Kind() == reflect.Map) {
