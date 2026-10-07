@@ -2076,6 +2076,253 @@ type for every field it reads, so an out-of-range `replicas` or
 reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
 go-kure/launcher#512 (see the `postgresql` entry below).
 
+- **fluxcd-alert, imagepolicy, imageupdateautomation, artifactgenerator**
+  (go-kure/launcher#790) are the kind-named projections of objects of the
+  Flux APIs beside the sources, the HelmRelease and the Kustomization: a
+  notification.toolkit.fluxcd.io/v1beta3 Alert, an
+  image.toolkit.fluxcd.io/v1 ImagePolicy and ImageUpdateAutomation, and a
+  source.extensions.fluxcd.io/v1beta1 ArtifactGenerator. Each is
+  built on `policyFreeKind` (see the **storageclass** entry) with two
+  additions, the Flux namespace and the
+  check of its durations (`fluxKind`), and emits that one object, named
+  after the component unless `objectName` names it; the handler adds no
+  label, no annotation and no default. The type is `fluxcd-alert` rather
+  than `alert`, which beside a `prometheusrule` would read as an alerting
+  rule.
+
+  **Nothing gates what a Flux object reaches outside its namespace, or the
+  identity it acts under.** A Flux object may name objects of another
+  namespace, and some may act under an account that is not their
+  controller's. Launcher writes such a field as authored and refuses none,
+  under a nil policy and a strict one alike: the environment policy has no
+  rule for the namespace or the account a Flux object names, and
+  `ApplyPolicy` is a no-op here as it is on `helmrelease` (its
+  `chart.spec.sourceRef.namespace`, `chartRef.namespace`,
+  `serviceAccountName` and `kubeConfig`) and on `fluxcd-kustomization` (its
+  `sourceRef.namespace`, `serviceAccountName` and `kubeConfig`). Whoever may
+  author a component may author these fields, and a consumer that restricts
+  them restricts the component types it registers.
+  *Assumption, not read here:* a cluster's Flux controllers can be started so
+  that they refuse a reference into another namespace. Launcher reads no such
+  setting, and no build depends on it.
+
+  **In the Flux namespace these objects share a namespace with every other
+  application's Flux objects.** When a Flux namespace is set, the objects of
+  this group land there (Namespace, below), and so do those of every other
+  application built with that Flux namespace. A reference without a
+  namespace, and a selector over "the object's namespace", then reach them:
+  an Alert's `providerRef` may name another application's Provider, an
+  ImagePolicy's `imageRepositoryRef` another application's ImageRepository,
+  the source of an ImageUpdateAutomation or of an ArtifactGenerator another
+  application's source, and an ImageUpdateAutomation without a
+  `policySelector` takes every ImagePolicy there. Nothing gates this
+  either, and no `namespace` has to be written for it.
+
+  The fields, per kind:
+  - `fluxcd-alert`: `eventSources[].namespace` names the namespace of the
+    objects whose events are sent, and a source's `name: "*"` takes every
+    object of its kind there, or, with `matchLabels`, every one that carries
+    those labels. The events
+    go to the Provider `providerRef` names, so an Alert sends what happens
+    to another namespace's Flux objects to a receiver its author chose.
+    `providerRef` holds a name and no namespace: the Provider is one of the
+    namespace the Alert lands in. An Alert names no account.
+  - `imagepolicy`: `imageRepositoryRef.namespace` names the namespace of
+    the ImageRepository whose scanned tags the policy selects from, so an
+    ImagePolicy may name the ImageRepository of another namespace and read
+    the tags it scanned. The API documents, on the
+    ImageRepository, an `accessFrom` list "for allowing cross-namespace
+    references to the ImageRepository object based on the caller's namespace
+    labels"; launcher reads no ImageRepository to see whether the one named
+    allows it. An ImagePolicy names no account.
+  - `imageupdateautomation`: `sourceRef.namespace` names the namespace of
+    the GitRepository that, in the API's words, gives "access details to a
+    git repository". **An ImageUpdateAutomation makes its controller commit
+    to that repository and push**, to the branch the GitRepository or
+    `git.checkout.ref` names, or to `git.push.branch` and `git.push.refspec`;
+    so one that names another namespace's GitRepository writes to a
+    repository with the access details that GitRepository gives. Nothing
+    holds the
+    branch or the refspec either. It names no account. The ImagePolicies
+    whose selections it applies are those of the namespace it lands in
+    (`policySelector` narrows them; it names no other namespace), and the
+    Secret of `git.commit.signingKey` is one of that namespace too.
+    **In the Flux namespace, an ImageUpdateAutomation without a
+    `policySelector` selects every ImagePolicy there, those of other
+    applications included** (the API: "By default includes all policies in
+    namespace"), and the automation then commits their selections through
+    its own GitRepository.
+  - `artifactgenerator`: `sources[].namespace` names the namespace of a
+    Flux source (a Bucket, GitRepository, OCIRepository, HelmChart or
+    ExternalArtifact); left out, the API takes "the same namespace as the
+    ArtifactGenerator". **An ArtifactGenerator copies files out of the
+    sources it names into the artifacts it generates**, which the API
+    describes as ExternalArtifacts, so one that names another namespace's
+    source republishes that source's content as an artifact its author
+    named. It names no account.
+
+  **Authored.** The properties are the top-level json fields of the spec
+  type, decoded strictly at every depth: an unknown key is refused wherever
+  it sits (a source, a reference, a policy).
+  - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
+    `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
+    `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
+  - `imagepolicy` (`ImagePolicySpec`): `imageRepositoryRef`, `policy`
+    (`semver`, `alphabetical`, `numerical`), `filterTags`,
+    `digestReflectionPolicy`, `interval` and `suspend`. An authored
+    `filterTags` is written with both its `pattern` and its `extract`, the
+    one left out as the empty string: the Go type omits neither.
+  - `imageupdateautomation` (`ImageUpdateAutomationSpec`): `sourceRef`,
+    `git` (`checkout`, `commit`, `push`), `interval`, `policySelector`,
+    `update` and `suspend`. `git.commit.messageTemplate` is a template the
+    controller renders; launcher writes it as authored and does not parse
+    it.
+  - `artifactgenerator` (`ArtifactGeneratorSpec`): `commonMetadata`,
+    `sources`, `pathPattern` and `artifacts` (each a `name`, `revision`,
+    `originRevision` and `copy`; a copy a `from`, `to`, `exclude` and
+    `strategy`). **`commonMetadata` is not the object's own metadata:** its
+    `labels` and `annotations` are written into the spec, where the API says
+    they are "applied to all resources"; the ArtifactGenerator's own labels
+    and annotations are the `labels` and `annotations` properties. The
+    aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
+    written as authored: launcher resolves none of them.
+  - **No default is filled.** The API's own (`eventSeverity: info`,
+    `digestReflectionPolicy: Never`, a policy's `order: asc`,
+    `update: {strategy: Setters}`) is applied by the API server to what the
+    object leaves out. One default cannot apply: `sourceRef.kind`, which
+    the API defaults to `GitRepository` and the Go type writes empty when
+    it is left out, an empty value being a value. It is required instead
+    (below).
+    `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
+    boolean that is omitted when zero and that the API defaults to something
+    else.
+  - **A duration is held to the pattern its field declares**, as on the Flux
+    kinds below (go-kure/launcher#601): unsigned, in the units `ms`, `s`,
+    `m` and `h`. A value outside it is refused (`imagepolicy: interval
+    "-5m" is invalid: must be a Flux duration (…)`), and so is one below a
+    millisecond, which would be written in a unit the pattern does not take
+    (`0.5ms` as `500µs`). It is written as Go formats it (`10m` as
+    `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
+    of durations to its type and to the pattern markers of the linked
+    source: the `interval` of an ImagePolicy and of an
+    ImageUpdateAutomation; an Alert and an ArtifactGenerator have none.
+
+  **Required** is a field the API requires that the Go type writes whether or
+  not it was authored, the rule every kind follows (see the Prometheus
+  operator's kinds below). Each must be authored (`providerRef: required
+  (…)`, `eventSources[1].name: required (…)`); an authored empty value is a
+  value, and the API server's to refuse.
+  - A `fluxcd-alert`: `providerRef` with its `name`, and `eventSources`; of
+    each source its `kind` and `name`.
+  - An `imagepolicy`: `imageRepositoryRef` with its `name`, and `policy`; of
+    a `semver` policy its `range`.
+  - An `imageupdateautomation`: `sourceRef` with its `kind` and `name`, and
+    `interval`. Of an authored `git`, `commit` with its `author` and the
+    author's `email`; of an authored `git.checkout`, its `ref`; of an
+    authored `git.commit.signingKey`, its `secretRef` with its `name`.
+  - An `artifactgenerator`: `sources` and `artifacts`; of each source its
+    `alias`, `kind` and `name`; of each artifact its `name` and `copy`; of
+    each copy its `from` and `to`.
+
+  **The lists are read from the markers of the Go source, not from a CRD.**
+  The API modules of the Flux controllers hold the Go types and ship no CRD,
+  so `TestFluxKinds_RequiredMatchMarkers` derives each list from the
+  `+required` markers of the linked modules' source, as the kinds of the
+  Prometheus operator's API are derived: every field so marked that the type
+  writes unauthored is listed, and nothing else is. A dependency bump that
+  adds, drops or moves one fails there. Nothing here is held to the API
+  server's own validator, which answers from a CRD. **Not refused:**
+  - a list the API wants an item of that is authored empty
+    (the `sources`, `artifacts` and `copy` of an `artifactgenerator`), and
+    one longer than the API allows;
+  - every value rule of the API but the pattern of a duration: enumerations
+    (`eventSeverity`, a source's `kind`, `digestReflectionPolicy`, a
+    policy's `order`), lengths (a source's `name` and `namespace`,
+    `summary`), and that a source with `matchLabels` is named `*`, which
+    the type documents and no marker states;
+  - a `policy` that names none of `semver`, `alphabetical` and `numerical`,
+    or more than one: the type calls it a union, and no marker holds it to
+    one;
+  - an `imageupdateautomation` with no `git`, which the type documents as
+    "technically optional, but in practice mandatory" and no marker
+    requires; the pattern of `git.push.refspec` and the enumerations
+    (`sourceRef.kind`, `update.strategy`, a signing key's `type`);
+  - of an `artifactgenerator`, the patterns (a source's `alias`, `name` and
+    `namespace`, `pathPattern`, an artifact's `revision` and
+    `originRevision`, a copy's `from` and `to`), the lengths and the
+    enumerations (a source's `kind`, a copy's `strategy`); that an alias is
+    unique and that a path, a `revision` or an `originRevision` names an
+    alias that is declared, which the type documents and no marker states;
+  - the `key` and the `operator` of a `policySelector.matchExpressions`
+    entry: they are fields of a Kubernetes type, whose source carries no
+    marker for them and is not read for these lists, and each left out is
+    written empty.
+
+  **The APIs' expression rules are not checked.** A kind checks an
+  expression rule only where the check is held to the API server's own
+  validator, which answers from a CRD (go-kure/launcher#874), and the linked
+  modules of these APIs ship none. A component that breaks one of the rules
+  below builds, and the API server refuses the object at apply.
+  `TestFluxKinds_ExpressionRules` reads every such rule from the markers of
+  the linked source and holds the list (`fluxRulesLeft`) to them, so a
+  dependency bump that adds or rewords one fails there.
+  - The types of an Alert and of an ImageUpdateAutomation declare none.
+  - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
+    and `digestReflectionPolicy: Always` without `interval`. Each builds and
+    is refused at apply.
+  - An `artifactgenerator`: where no `pathPattern` is set, every artifact's
+    `name` must be a Kubernetes object name (lower case letters, digits,
+    `-` and `.`). One that is not, `App_Manifests` for one, builds and is
+    refused at apply.
+
+  **Policy.** No dimension of the environment policy reaches these objects:
+  they run no pod, request no storage and have no replica count.
+  - **No field of an Alert holds a secret or a host.** The address and the
+    credentials are the Provider's. `eventMetadata` is a free map, written to
+    the object as authored under a policy that forbids explicit secrets too.
+  - **No field of an ImagePolicy holds an image, a secret or a host.** The
+    image and the credentials of its registry are the ImageRepository's; the
+    policy holds the rule by which one of that image's tags is selected.
+    The allowed registries and the tag rule of the environment policy are
+    not applied to it.
+  - **No field of an ImageUpdateAutomation holds a secret or a host.** The
+    address of the repository and its credentials are the GitRepository's,
+    and the signing key is a Secret named by `git.commit.signingKey`, not a
+    value. `git.commit.messageTemplateValues` and `git.push.options` are
+    free maps, written to the object as authored under a policy that
+    forbids explicit secrets too. **The images the automation writes into
+    the repository are not held to the allowed registries or the tag
+    rule:** they are what the ImagePolicies select at run time, and no
+    build sees them.
+  - **No field of an ArtifactGenerator holds a secret or a host.** The
+    addresses and the credentials are those of the sources it names.
+    `commonMetadata` holds two free maps, written to the object as authored
+    under a policy that forbids explicit secrets too. **What an artifact
+    carries is not checked:** the copy is the controller's to perform, and no
+    build sees the files, so the rules a policy holds a workload or a Secret to
+    do not reach manifests that travel inside an artifact.
+
+  **Namespace.** The object lands in the Flux namespace when one is
+  configured, else in the build namespace (`SetFluxNamespace`), as the Flux
+  kinds below do, and its name is claimed there. A reference without a
+  namespace of its own is written without one, under a Flux namespace too:
+  launcher fills none in. The Flux objects of the same document
+  (`helmrelease`, `fluxcd-kustomization`, the sources) land in the Flux
+  namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
+  a kind reads by name from the namespace it lands in, so that a trait's
+  object one of them names moves with it; an Alert, an ImagePolicy and an ArtifactGenerator read
+  none, and an ImageUpdateAutomation reads the Secret of
+  `git.commit.signingKey.secretRef`.
+
+  **Labels and annotations** are the `labels` and `annotations` properties.
+
+  **Not covered.** Whether what is referred to exists (the Provider, the
+  objects of a source, the ImageRepository, the GitRepository, the signing
+  key's Secret, the sources of an ArtifactGenerator), whether a `filterTags`
+  pattern, a `semver` range, a commit message template or a `pathPattern`
+  parses, and whether the cluster serves the API: the
+  component builds where the CRD is not installed, and the object is refused
+  at apply. The object's status is the controller's and is not written.
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
@@ -6756,253 +7003,6 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   identity (see **helm**). An authored source component exposes the whole spec
   (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
   generates a `helmchart`.
-- **fluxcd-alert, imagepolicy, imageupdateautomation, artifactgenerator**
-  (go-kure/launcher#790) are the kind-named projections of objects of the
-  Flux APIs beside the sources, the HelmRelease and the Kustomization: a
-  notification.toolkit.fluxcd.io/v1beta3 Alert, an
-  image.toolkit.fluxcd.io/v1 ImagePolicy and ImageUpdateAutomation, and a
-  source.extensions.fluxcd.io/v1beta1 ArtifactGenerator. Each is
-  built on
-  `policyFreeKind` (above) with two additions, the Flux namespace and the
-  check of its durations (`fluxKind`), and emits that one object, named
-  after the component unless `objectName` names it; the handler adds no
-  label, no annotation and no default. The type is `fluxcd-alert` rather
-  than `alert`, which beside a `prometheusrule` would read as an alerting
-  rule.
-
-  **Nothing gates what a Flux object reaches outside its namespace, or the
-  identity it acts under.** A Flux object may name objects of another
-  namespace, and some may act under an account that is not their
-  controller's. Launcher writes such a field as authored and refuses none,
-  under a nil policy and a strict one alike: the environment policy has no
-  rule for the namespace or the account a Flux object names, and
-  `ApplyPolicy` is a no-op here as it is on `helmrelease` (its
-  `chart.spec.sourceRef.namespace`, `chartRef.namespace`,
-  `serviceAccountName` and `kubeConfig`) and on `fluxcd-kustomization` (its
-  `sourceRef.namespace`, `serviceAccountName` and `kubeConfig`). Whoever may
-  author a component may author these fields, and a consumer that restricts
-  them restricts the component types it registers.
-  *Assumption, not read here:* a cluster's Flux controllers can be started so
-  that they refuse a reference into another namespace. Launcher reads no such
-  setting, and no build depends on it.
-
-  **In the Flux namespace these objects share a namespace with every other
-  application's Flux objects.** When a Flux namespace is set, the objects of
-  this group land there (Namespace, below), and so do those of every other
-  application built with that Flux namespace. A reference without a
-  namespace, and a selector over "the object's namespace", then reach them:
-  an Alert's `providerRef` may name another application's Provider, an
-  ImagePolicy's `imageRepositoryRef` another application's ImageRepository,
-  the source of an ImageUpdateAutomation or of an ArtifactGenerator another
-  application's source, and an ImageUpdateAutomation without a
-  `policySelector` takes every ImagePolicy there. Nothing gates this
-  either, and no `namespace` has to be written for it.
-
-  The fields, per kind:
-  - `fluxcd-alert`: `eventSources[].namespace` names the namespace of the
-    objects whose events are sent, and a source's `name: "*"` takes every
-    object of its kind there, or, with `matchLabels`, every one that carries
-    those labels. The events
-    go to the Provider `providerRef` names, so an Alert sends what happens
-    to another namespace's Flux objects to a receiver its author chose.
-    `providerRef` holds a name and no namespace: the Provider is one of the
-    namespace the Alert lands in. An Alert names no account.
-  - `imagepolicy`: `imageRepositoryRef.namespace` names the namespace of
-    the ImageRepository whose scanned tags the policy selects from, so an
-    ImagePolicy may name the ImageRepository of another namespace and read
-    the tags it scanned. The API documents, on the
-    ImageRepository, an `accessFrom` list "for allowing cross-namespace
-    references to the ImageRepository object based on the caller's namespace
-    labels"; launcher reads no ImageRepository to see whether the one named
-    allows it. An ImagePolicy names no account.
-  - `imageupdateautomation`: `sourceRef.namespace` names the namespace of
-    the GitRepository that, in the API's words, gives "access details to a
-    git repository". **An ImageUpdateAutomation makes its controller commit
-    to that repository and push**, to the branch the GitRepository or
-    `git.checkout.ref` names, or to `git.push.branch` and `git.push.refspec`;
-    so one that names another namespace's GitRepository writes to a
-    repository with the access details that GitRepository gives. Nothing
-    holds the
-    branch or the refspec either. It names no account. The ImagePolicies
-    whose selections it applies are those of the namespace it lands in
-    (`policySelector` narrows them; it names no other namespace), and the
-    Secret of `git.commit.signingKey` is one of that namespace too.
-    **In the Flux namespace, an ImageUpdateAutomation without a
-    `policySelector` selects every ImagePolicy there, those of other
-    applications included** (the API: "By default includes all policies in
-    namespace"), and the automation then commits their selections through
-    its own GitRepository.
-  - `artifactgenerator`: `sources[].namespace` names the namespace of a
-    Flux source (a Bucket, GitRepository, OCIRepository, HelmChart or
-    ExternalArtifact); left out, the API takes "the same namespace as the
-    ArtifactGenerator". **An ArtifactGenerator copies files out of the
-    sources it names into the artifacts it generates**, which the API
-    describes as ExternalArtifacts, so one that names another namespace's
-    source republishes that source's content as an artifact its author
-    named. It names no account.
-
-  **Authored.** The properties are the top-level json fields of the spec
-  type, decoded strictly at every depth: an unknown key is refused wherever
-  it sits (a source, a reference, a policy).
-  - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
-    `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
-    `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
-  - `imagepolicy` (`ImagePolicySpec`): `imageRepositoryRef`, `policy`
-    (`semver`, `alphabetical`, `numerical`), `filterTags`,
-    `digestReflectionPolicy`, `interval` and `suspend`. An authored
-    `filterTags` is written with both its `pattern` and its `extract`, the
-    one left out as the empty string: the Go type omits neither.
-  - `imageupdateautomation` (`ImageUpdateAutomationSpec`): `sourceRef`,
-    `git` (`checkout`, `commit`, `push`), `interval`, `policySelector`,
-    `update` and `suspend`. `git.commit.messageTemplate` is a template the
-    controller renders; launcher writes it as authored and does not parse
-    it.
-  - `artifactgenerator` (`ArtifactGeneratorSpec`): `commonMetadata`,
-    `sources`, `pathPattern` and `artifacts` (each a `name`, `revision`,
-    `originRevision` and `copy`; a copy a `from`, `to`, `exclude` and
-    `strategy`). **`commonMetadata` is not the object's own metadata:** its
-    `labels` and `annotations` are written into the spec, where the API says
-    they are "applied to all resources"; the ArtifactGenerator's own labels
-    and annotations are the `labels` and `annotations` properties. The
-    aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
-    written as authored: launcher resolves none of them.
-  - **No default is filled.** The API's own (`eventSeverity: info`,
-    `digestReflectionPolicy: Never`, a policy's `order: asc`,
-    `update: {strategy: Setters}`) is applied by the API server to what the
-    object leaves out. One default cannot apply: `sourceRef.kind`, which
-    the API defaults to `GitRepository` and the Go type writes empty when
-    it is left out, an empty value being a value. It is required instead
-    (below).
-    `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
-    boolean that is omitted when zero and that the API defaults to something
-    else.
-  - **A duration is held to the pattern its field declares**, as on the Flux
-    kinds above (go-kure/launcher#601): unsigned, in the units `ms`, `s`,
-    `m` and `h`. A value outside it is refused (`imagepolicy: interval
-    "-5m" is invalid: must be a Flux duration (…)`), and so is one below a
-    millisecond, which would be written in a unit the pattern does not take
-    (`0.5ms` as `500µs`). It is written as Go formats it (`10m` as
-    `10m0s`). `TestFluxKinds_DurationsMatchMarkers` holds each kind's list
-    of durations to its type and to the pattern markers of the linked
-    source: the `interval` of an ImagePolicy and of an
-    ImageUpdateAutomation; an Alert and an ArtifactGenerator have none.
-
-  **Required** is a field the API requires that the Go type writes whether or
-  not it was authored, the rule every kind follows (see the Prometheus
-  operator's kinds above). Each must be authored (`providerRef: required
-  (…)`, `eventSources[1].name: required (…)`); an authored empty value is a
-  value, and the API server's to refuse.
-  - A `fluxcd-alert`: `providerRef` with its `name`, and `eventSources`; of
-    each source its `kind` and `name`.
-  - An `imagepolicy`: `imageRepositoryRef` with its `name`, and `policy`; of
-    a `semver` policy its `range`.
-  - An `imageupdateautomation`: `sourceRef` with its `kind` and `name`, and
-    `interval`. Of an authored `git`, `commit` with its `author` and the
-    author's `email`; of an authored `git.checkout`, its `ref`; of an
-    authored `git.commit.signingKey`, its `secretRef` with its `name`.
-  - An `artifactgenerator`: `sources` and `artifacts`; of each source its
-    `alias`, `kind` and `name`; of each artifact its `name` and `copy`; of
-    each copy its `from` and `to`.
-
-  **The lists are read from the markers of the Go source, not from a CRD.**
-  The API modules of the Flux controllers hold the Go types and ship no CRD,
-  so `TestFluxKinds_RequiredMatchMarkers` derives each list from the
-  `+required` markers of the linked modules' source, as the kinds of the
-  Prometheus operator's API are derived: every field so marked that the type
-  writes unauthored is listed, and nothing else is. A dependency bump that
-  adds, drops or moves one fails there. Nothing here is held to the API
-  server's own validator, which answers from a CRD. **Not refused:**
-  - a list the API wants an item of that is authored empty
-    (the `sources`, `artifacts` and `copy` of an `artifactgenerator`), and
-    one longer than the API allows;
-  - every value rule of the API but the pattern of a duration: enumerations
-    (`eventSeverity`, a source's `kind`, `digestReflectionPolicy`, a
-    policy's `order`), lengths (a source's `name` and `namespace`,
-    `summary`), and that a source with `matchLabels` is named `*`, which
-    the type documents and no marker states;
-  - a `policy` that names none of `semver`, `alphabetical` and `numerical`,
-    or more than one: the type calls it a union, and no marker holds it to
-    one;
-  - an `imageupdateautomation` with no `git`, which the type documents as
-    "technically optional, but in practice mandatory" and no marker
-    requires; the pattern of `git.push.refspec` and the enumerations
-    (`sourceRef.kind`, `update.strategy`, a signing key's `type`);
-  - of an `artifactgenerator`, the patterns (a source's `alias`, `name` and
-    `namespace`, `pathPattern`, an artifact's `revision` and
-    `originRevision`, a copy's `from` and `to`), the lengths and the
-    enumerations (a source's `kind`, a copy's `strategy`); that an alias is
-    unique and that a path, a `revision` or an `originRevision` names an
-    alias that is declared, which the type documents and no marker states;
-  - the `key` and the `operator` of a `policySelector.matchExpressions`
-    entry: they are fields of a Kubernetes type, whose source carries no
-    marker for them and is not read for these lists, and each left out is
-    written empty.
-
-  **The APIs' expression rules are not checked.** A kind checks an
-  expression rule only where the check is held to the API server's own
-  validator, which answers from a CRD (go-kure/launcher#874), and the linked
-  modules of these APIs ship none. A component that breaks one of the rules
-  below builds, and the API server refuses the object at apply.
-  `TestFluxKinds_ExpressionRules` reads every such rule from the markers of
-  the linked source and holds the list (`fluxRulesLeft`) to them, so a
-  dependency bump that adds or rewords one fails there.
-  - The types of an Alert and of an ImageUpdateAutomation declare none.
-  - An `imagepolicy`: `interval` without `digestReflectionPolicy: Always`,
-    and `digestReflectionPolicy: Always` without `interval`. Each builds and
-    is refused at apply.
-  - An `artifactgenerator`: where no `pathPattern` is set, every artifact's
-    `name` must be a Kubernetes object name (lower case letters, digits,
-    `-` and `.`). One that is not, `App_Manifests` for one, builds and is
-    refused at apply.
-
-  **Policy.** No dimension of the environment policy reaches these objects:
-  they run no pod, request no storage and have no replica count.
-  - **No field of an Alert holds a secret or a host.** The address and the
-    credentials are the Provider's. `eventMetadata` is a free map, written to
-    the object as authored under a policy that forbids explicit secrets too.
-  - **No field of an ImagePolicy holds an image, a secret or a host.** The
-    image and the credentials of its registry are the ImageRepository's; the
-    policy holds the rule by which one of that image's tags is selected.
-    The allowed registries and the tag rule of the environment policy are
-    not applied to it.
-  - **No field of an ImageUpdateAutomation holds a secret or a host.** The
-    address of the repository and its credentials are the GitRepository's,
-    and the signing key is a Secret named by `git.commit.signingKey`, not a
-    value. `git.commit.messageTemplateValues` and `git.push.options` are
-    free maps, written to the object as authored under a policy that
-    forbids explicit secrets too. **The images the automation writes into
-    the repository are not held to the allowed registries or the tag
-    rule:** they are what the ImagePolicies select at run time, and no
-    build sees them.
-  - **No field of an ArtifactGenerator holds a secret or a host.** The
-    addresses and the credentials are those of the sources it names.
-    `commonMetadata` holds two free maps, written to the object as authored
-    under a policy that forbids explicit secrets too. **What an artifact
-    carries is not checked:** the copy is the controller's to perform, and no
-    build sees the files, so the rules a policy holds a workload or a Secret to
-    do not reach manifests that travel inside an artifact.
-
-  **Namespace.** The object lands in the Flux namespace when one is
-  configured, else in the build namespace (`SetFluxNamespace`), as the Flux
-  kinds above do, and its name is claimed there. A reference without a
-  namespace of its own is written without one, under a Flux namespace too:
-  launcher fills none in. The Flux objects of the same document
-  (`helmrelease`, `fluxcd-kustomization`, the sources) land in the Flux
-  namespace with it. `FluxNamespaceReads` reports the ConfigMaps and Secrets
-  a kind reads by name from the namespace it lands in, so that a trait's
-  object one of them names moves with it; an Alert, an ImagePolicy and an ArtifactGenerator read
-  none, and an ImageUpdateAutomation reads the Secret of
-  `git.commit.signingKey.secretRef`.
-
-  **Labels and annotations** are the `labels` and `annotations` properties.
-
-  **Not covered.** Whether what is referred to exists (the Provider, the
-  objects of a source, the ImageRepository, the GitRepository, the signing
-  key's Secret, the sources of an ArtifactGenerator), whether a `filterTags`
-  pattern, a `semver` range, a commit message template or a `pathPattern`
-  parses, and whether the cluster serves the API: the
-  component builds where the CRD is not installed, and the object is refused
-  at apply. The object's status is the controller's and is not written.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `poolerName`, `managedRoles`,
