@@ -320,6 +320,38 @@ func TestNamingHook_AnswerIsUsed(t *testing.T) {
 	}
 }
 
+// TestNamingHook_RoutingObjectsRenamedAlone: the hook's answer for the
+// ingress and httproute roles names the object, and the sub-application keeps
+// launcher's default. An authored `name` is not put to the hook.
+func TestNamingHook_RoutingObjectsRenamedAlone(t *testing.T) {
+	routing := claimIngressTrait + claimHTTPRouteTrait
+	cluster, apps := namingTransform(t, namingApp(routing, ""), namingContext(renameBy(map[string]string{
+		"ingress web-ingress":     "web-public",
+		"httproute web-httproute": "web-route",
+	})))
+	got := generatedNames(cluster, apps)
+	for _, line := range []string{
+		"web-ingress: Ingress default/web-public",
+		"web-httproute: HTTPRoute default/web-route",
+	} {
+		if !slices.Contains(got, line) {
+			t.Errorf("missing %q in\n  %s", line, strings.Join(got, "\n  "))
+		}
+	}
+
+	authored := claimIngressTrait + "            name: shop-front\n"
+	var requests []oam.NameRequest
+	cluster, apps = namingTransform(t, namingApp(authored, ""), namingContext(declineEveryName(&requests)))
+	for _, req := range requests {
+		if req.Role == oam.NameRoleIngress {
+			t.Errorf("the hook was asked for the name the ingress trait's name sets: %+v", req)
+		}
+	}
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "shop-front: Ingress default/shop-front") {
+		t.Errorf("the authored name was not used:\n  %s", strings.Join(got, "\n  "))
+	}
+}
+
 func TestNamingHook_NotAskedForANameTheAuthorSet(t *testing.T) {
 	doc := strings.Replace(namingApp("", ""), "            enablePDB: true\n", "            enablePDB: true\n            hpaName: mine\n", 1)
 	var requests []oam.NameRequest
