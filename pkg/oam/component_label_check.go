@@ -464,7 +464,10 @@ type ComponentLabelError struct {
 	// Refused says what is refused.
 	Refused ComponentLabelRefusal
 	// Component is the component that owns the object, the property or the
-	// entry.
+	// entry. For ComponentLabelInLabelsProperty under the key `app`, the
+	// property is held first to the `app` value the kinds write, that of the
+	// name of the component after lowering, then to the owner's: Component and
+	// Want are those of the one the value fails.
 	Component string
 	// Kind is the object's group and kind: the ones it states, else, for a typed
 	// object of a kind the check reads more than the metadata of, its Go type's.
