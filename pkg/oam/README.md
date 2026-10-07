@@ -1379,6 +1379,19 @@ ExternalSecret (`secretName`). A required name leaves no default for a hook to r
 Secret an ExternalSecret produces is the `external-secret` role's, and is claimed under kind
 `Secret` too, so a `certificate` trait's Secret of the same name is refused.
 
+These three move with the component's Flux object to the Flux namespace
+(`TransformContext.FluxNamespace`) when that object reads the Secret by name, and are claimed in
+the namespace they land in, decided by the same test that moves them: a Secret a HelmRepository
+reads from its own trait no longer collides with a same-named Secret another component makes in
+the application namespace, while two that land in the Flux namespace still collide. A Secret the
+hook renames is no longer the one the Flux object reads: it stays, and is claimed, in the
+application namespace. The trait says so with `NameSpec.FluxInput` on the role it resolves, and
+with `(*Trait).ClaimFluxInputName(kind, namespace, name, property, readKind, readName)` for an
+object claimed under no role, `readKind` and `readName` naming the ConfigMap or Secret whose read
+decides where it lands. Both are trait-only: a lowering rule's Flux object is `FluxScoped`, and
+a `FluxInput` NameSpec outside a trait is refused. The `configmap` and `secret` traits move the
+same way but claim no name.
+
 ### `objectName`: the object of a kind component
 
 A kind component (`deployment`, `service`, `configmap`, `cnpg-cluster`, `helmrelease`, …) is
