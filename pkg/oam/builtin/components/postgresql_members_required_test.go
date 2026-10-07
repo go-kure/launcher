@@ -74,8 +74,9 @@ func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 	}
 }
 
-// isNull reports a value the engine reads as null: nil, or a nil map, slice or
-// pointer held in an any. It mirrors pkg/oam's unexported isNullValue.
+// isNull reports a value the engine reads as null: nil, or a nil map, slice,
+// pointer, channel or function held in an any. It mirrors pkg/oam's unexported
+// isNullValue.
 func isNull(v any) bool {
 	if v == nil {
 		return true
