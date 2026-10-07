@@ -713,19 +713,9 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if err := c.enforceMaxStorage(p.MaxStorageSize()); err != nil {
 		return err
 	}
-	// Without imageName the operator takes the image from the catalog
-	// imageCatalogRef names, whose images are the catalog's to hold (the build
-	// cannot read it), or, without one, chooses an image of its own: under a
-	// list that is refused, since no list can hold it. The operator's own image
-	// (the bootstrap init container) is not covered: no field names it.
-	switch {
-	case c.Spec.ImageName != "":
+	if c.Spec.ImageName != "" {
 		if err := enforceAllowedRegistries(c.Spec.ImageName, p.AllowedRegistries()); err != nil {
 			return errors.Wrap(err, "imageName")
-		}
-	case c.Spec.ImageCatalogRef == nil:
-		if err := refuseCnpgOperatorImage("imageName", p.AllowedRegistries()); err != nil {
-			return err
 		}
 	}
 	// An extension's image is mounted into the instance pods as an image volume,
@@ -752,6 +742,17 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if psc := c.Spec.PodSecurityContext; psc != nil && !p.AllowPrivileged() {
 		if wo := psc.WindowsOptions; wo != nil && wo.HostProcess != nil && *wo.HostProcess {
 			return oam.NewPolicyRefusal(oam.RefusalPrivileged, "podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
+		}
+	}
+	// Without imageName the operator takes the image from the catalog
+	// imageCatalogRef names, whose images are the catalog's to hold (the build
+	// cannot read it), or, without one, chooses an image of its own: under a
+	// list that is refused, since no list can hold it. Last, so that a Cluster
+	// refused for something it authors is refused for that. The operator's own
+	// image (the bootstrap init container) is not covered: no field names it.
+	if c.Spec.ImageName == "" && c.Spec.ImageCatalogRef == nil {
+		if err := refuseCnpgOperatorImage("imageName", p.AllowedRegistries()); err != nil {
+			return err
 		}
 	}
 	return nil

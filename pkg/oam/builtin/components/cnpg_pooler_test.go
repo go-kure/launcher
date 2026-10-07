@@ -461,6 +461,14 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 			}
 		})
 	}
+	// Last, as on cnpg-cluster: a Pooler refused for something it authors is
+	// refused for that.
+	t.Run("an authored refusal comes before the unset image", func(t *testing.T) {
+		err := newCnpgPooler(t, tmpl(container(map[string]any{"securityContext": map[string]any{"privileged": true}}))).ApplyPolicy(ghcr)
+		if want := `template.spec.containers[0] "pgbouncer": securityContext.privileged is not allowed by environment policy`; err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
 	for _, tt := range []struct {
 		name   string
 		props  map[string]any
