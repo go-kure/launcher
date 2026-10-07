@@ -220,9 +220,11 @@ const LayoutKustomizationNameProperty = "layoutKustomizationName"
 // (AuthoredLayoutKustomizationName), else the answer of
 // TransformContext.Naming, else the default "<bundle>-<component>", the bundle
 // as launcher named it, shortened to 63 characters by the one shortening rule
-// with "-<component>" kept whole. It calls SetLayoutKustomizationName with an
-// authored or hook-given name, and with a default it shortened; not at all
-// for a default that fits, which is the base library's own. A name it is
+// with "-<component>" kept whole (ShortenNameWithSuffix: for a component name
+// over 52 characters the whole name is shortened). It calls
+// SetLayoutKustomizationName with an authored or hook-given name, and with a
+// default it shortened; not at all for a default that fits, which is the base
+// library's own. A name it is
 // handed is set on the layout (ManifestLayout.KustomizationName) and nowhere
 // else. A config built directly, outside a transform, is never handed one.
 type LayoutKustomizationNameSetter interface {

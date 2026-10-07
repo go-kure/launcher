@@ -6424,7 +6424,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The component's own layout, the parent of the hook-group children, also gets a Flux
   Kustomization under `FluxIntegratedPerLayout`, which kure names `<bundle>-<component>` and
   refuses past 63 characters. Where that default is over 63, the transform shortens it to 63
-  by the same rule, `-<component>` kept whole, and `AugmentLayout` sets it on the layout
+  by the same rule, `-<component>` kept whole (for a component name over 52 characters the
+  whole name is shortened instead), and `AugmentLayout` sets it on the layout
   (`KustomizationName`), whatever the number of hook groups; where it fits, the layout is left
   to kure's default and nothing changes. The `layoutKustomizationName` property, or the
   `Naming` hook's answer for the `layout` role, sets another name, a DNS-1123 subdomain of at

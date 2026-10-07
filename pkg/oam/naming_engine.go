@@ -91,8 +91,9 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 // named it: a consumer that renames the bundle afterwards
 // (Bundle.KustomizationName) is not seen here. A default that fits is left for
 // the base library to make, so no output changes where it did not fail; a
-// longer one is shortened to 63 by the one shortening rule, with "-<app>" kept
-// whole. component names the owner, in the hook's request and in a refusal.
+// longer one is shortened to 63 by ShortenNameWithSuffix, with "-<app>" kept
+// whole unless the application's name is over 52 characters, when the whole
+// name is shortened. component names the owner, in the hook's request and in a refusal.
 func (r *nameResolver) resolveLayoutKustomizationName(bundle, app, component string, config LayoutKustomizationNameSetter) error {
 	full := bundle + "-" + app
 	def := ShortenNameWithSuffix(bundle, "-"+app, stack.KustomizationNameMaxLength)

@@ -402,7 +402,9 @@ Decided in the ticket:
   placement for the layout of a chart (`helmtemplate`, or `helm` under `delivery: template`),
   by `layoutKustomizationName`, else the hook, else kure's own `<bundle>-<component>`.
   - Over 63 characters the default is shortened to 63 by the one shortening rule,
-    `-<component>` kept whole, and set on the layout; kure refused it before. Where it fits
+    `-<component>` kept whole (for a component name over 52 characters the whole name is
+    shortened instead, as `ShortenNameWithSuffix` does), and set on the layout; kure refused
+    it before. Where it fits
     nothing is set and the output does not change. An authored or hook-given name is never
     shortened, and is refused in the transform unless it is a DNS-1123 subdomain of at most 63
     characters.
