@@ -467,14 +467,14 @@ func TestContainerFields_AuthoredCheckAcceptsTheFullSurface(t *testing.T) {
 	}
 }
 
-// TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys: the two
-// corev1.Container fields this package does not read stay undeclared, so the
-// authored-property check refuses them on every container of a webservice
-// (authoredApp). On job and cronjob a top-level restartPolicy is the pod's, a
-// different key.
+// TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys: the container's
+// own restartPolicy and restartPolicyRules are read on an init container only
+// (parseInitContainerRestart), so the authored-property check refuses them on
+// the main container and on a sidecar of a webservice (authoredApp). On job
+// and cronjob a top-level restartPolicy is the pod's, a different key.
 func TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys(t *testing.T) {
 	for _, key := range []string{"restartPolicy", "restartPolicyRules"} {
-		for _, list := range []string{"", "initContainers", "sidecars"} {
+		for _, list := range []string{"", "sidecars"} {
 			t.Run(key+"/"+list, func(t *testing.T) {
 				props := map[string]any{"image": "ghcr.io/org/app:v1"}
 				if list == "" {

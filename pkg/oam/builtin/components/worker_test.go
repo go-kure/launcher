@@ -31,8 +31,9 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // deliberate change to a schema worker shares updates the capture with it:
 // go-kure/launcher#660 closed the sidecar port entry and added its protocol enum;
 // go-kure/launcher#790 added the shared container fields (schemaContainerFields)
-// to the main container, to an init container and to a sidecar;
-// go-kure/launcher#787 added deploymentObjectName and serviceAccountObjectName
+// to the main container, to an init container and to a sidecar,
+// securityContext.windowsOptions to every container, and an init container's
+// restartPolicy and restartPolicyRules; go-kure/launcher#787 added deploymentObjectName and serviceAccountObjectName
 // (schemaRoleObjectNames).
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
