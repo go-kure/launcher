@@ -1113,6 +1113,16 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 			}
 			templates = append(templates, labelSet(tl))
 		}
+		// A CronJob's job template is the metadata of every Job it creates.
+		if kind == "CronJob" {
+			spec, _ := doc["spec"].(map[string]any)
+			jt, _ := spec["jobTemplate"].(map[string]any)
+			jmd, _ := jt["metadata"].(map[string]any)
+			jobLabels, _ := jmd["labels"].(map[string]any)
+			if _, has := jobLabels[componentKey]; !has {
+				t.Errorf("%s: the job template carries no %s label", where, componentKey)
+			}
+		}
 		if tl, stored := storedPodTemplateLabels(doc); stored {
 			storedTemplates++
 			if _, has := tl[componentKey]; !has {

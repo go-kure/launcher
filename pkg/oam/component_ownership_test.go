@@ -374,8 +374,9 @@ func TestStampComponentLabel_NullPodTemplateLabelValue(t *testing.T) {
 // TestStampComponentLabel_NullPodTemplateMetadata: YAML's explicit null is an
 // absent value, and so is a nil map, which a config built in Go can hold where
 // YAML has a null. A pod template whose metadata or labels are null gets the
-// label; a workload with no pod template, or a null one, is left as it is.
-// A PodTemplate has no spec around its pod template.
+// label; a workload with no pod template, or a null one, is left as it is,
+// but for a CronJob's job template, which gets the label all the same. A
+// PodTemplate has no spec around its pod template.
 func TestStampComponentLabel_NullPodTemplateMetadata(t *testing.T) {
 	for nullName, nullValue := range map[string]any{"null": nil, "nil-map": map[string]any(nil)} {
 		testStampComponentLabelNullPodTemplateMetadata(t, nullName, nullValue)
@@ -423,6 +424,13 @@ func testStampComponentLabelNullPodTemplateMetadata(t *testing.T, nullName strin
 				}
 				want := u.DeepCopy()
 				want.SetLabels(map[string]string{ownershipKey: "web"})
+				// A CronJob with no pod template still has its job template, which
+				// gets the label.
+				if kind.kind == "CronJob" && name == "template" {
+					if err := unstructured.SetNestedField(want.Object, map[string]any{ownershipKey: "web"}, "spec", "jobTemplate", "metadata", "labels"); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if err := stampComponentLabel(u, ownershipKey, "web"); err != nil {
 					t.Fatalf("stampComponentLabel: %v", err)
 				}

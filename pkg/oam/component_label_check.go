@@ -280,16 +280,19 @@ func moverPodLabels(kind string, movers ...string) []operatorMetadataKind {
 }
 
 // metadataHolders returns every place an object of group and kind holds
-// metadata in: its own first, then its pod template's on a kind that has one
-// (podTemplateKinds), then what an operator hands on (operatorMetadataKinds).
-// The reserved keys are read in every one of them, the component label in all
-// but those that reach no pods (noPods). Neither check reads the metadata a
-// Flux object hands on to what it applies (spec.commonMetadata), or a job
-// template's or a volume claim template's.
+// metadata in: its own first, then a CronJob's job template's and its pod
+// template's on a kind that has one (podTemplateKinds), then what an operator
+// hands on (operatorMetadataKinds). The reserved keys are read in every one of
+// them, the component label in all but those that reach no pods (noPods).
+// Neither check reads the metadata a Flux object hands on to what it applies
+// (spec.commonMetadata), or a volume claim template's.
 func metadataHolders(group, kind string) []metadataHolder {
 	holders := []metadataHolder{{path: []string{"metadata"}, in: ReservedKeyInObjectMetadata}}
 	for _, k := range podTemplateKinds {
 		if group == k.group && kind == k.kind {
+			if k.jobTemplate != nil {
+				holders = append(holders, metadataHolder{path: append(slices.Clone(k.jobTemplate), "metadata"), in: ReservedKeyInJobTemplate})
+			}
 			holders = append(holders, metadataHolder{path: append(slices.Clone(k.spec), "template", "metadata"), in: ReservedKeyInPodTemplate})
 		}
 	}

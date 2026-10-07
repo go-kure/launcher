@@ -7,7 +7,7 @@
 +    launcher.gokure.dev/component: prometheus
    name: prometheus
    namespace: default
-@@ -14,3 +16,131 @@
+@@ -14,3 +16,134 @@
        version: 69.3.2
    interval: 1h0m0s
 +  postRenderers:
@@ -76,6 +76,9 @@
 +            name: component-label
 +          spec:
 +            jobTemplate:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: prometheus
 +              spec:
 +                template:
 +                  metadata:

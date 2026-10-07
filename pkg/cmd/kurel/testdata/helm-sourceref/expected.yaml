@@ -81,6 +81,9 @@ spec:
             name: component-label
           spec:
             jobTemplate:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: prometheus
               spec:
                 template:
                   metadata:

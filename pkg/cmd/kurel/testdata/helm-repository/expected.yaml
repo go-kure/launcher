@@ -89,6 +89,9 @@ spec:
             name: component-label
           spec:
             jobTemplate:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: metrics
               spec:
                 template:
                   metadata:

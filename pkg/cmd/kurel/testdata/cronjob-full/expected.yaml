@@ -13,6 +13,7 @@ spec:
     metadata:
       labels:
         app: cleanup
+        launcher.gokure.dev/component: cleanup
     spec:
       activeDeadlineSeconds: 600
       backoffLimit: 4

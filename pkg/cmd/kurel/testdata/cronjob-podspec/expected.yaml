@@ -12,6 +12,7 @@ spec:
     metadata:
       labels:
         app: cleanup
+        launcher.gokure.dev/component: cleanup
     spec:
       activeDeadlineSeconds: 900
       template:
