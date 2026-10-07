@@ -88,8 +88,10 @@ func (h *CertificateHandler) Apply(trait *oam.Trait, app *stack.Application, bun
 	}
 	// The Secret cert-manager writes is named by the required secretName, so no
 	// hook could be asked for it, and what refers to it (a secret volume, an
-	// ingress trait's tls entry) is authored apart: its name is claimed as written.
-	if err := trait.ClaimObjectName(secretKind, app.Namespace, config.SecretName, "secretName"); err != nil {
+	// ingress trait's tls entry) is authored apart: its name is claimed as written,
+	// in the namespace it lands in (a Flux object that reads it moves it).
+	if err := trait.ClaimFluxInputName(secretKind, app.Namespace, config.SecretName, "secretName",
+		"Secret", config.SecretName); err != nil {
 		return err
 	}
 

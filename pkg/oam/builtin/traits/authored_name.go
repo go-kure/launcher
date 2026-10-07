@@ -47,6 +47,13 @@ func resolveObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKin
 	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, Default: def}, property, authored)
 }
 
+// resolveFluxInputName is resolveObjectName for a ConfigMap or Secret a
+// component's Flux object can read by name, which moves with that object to the
+// Flux namespace when it does (oam.NameSpec.FluxInput), so it is claimed there.
+func resolveFluxInputName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (string, error) {
+	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, FluxInput: true, Default: def}, property, authored)
+}
+
 // resolveClusterObjectName is resolveObjectName for a cluster-scoped object,
 // which has no namespace (oam.NameSpec.ClusterScoped).
 func resolveClusterObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, property, authored, def string) (string, error) {

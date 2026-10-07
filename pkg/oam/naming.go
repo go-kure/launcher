@@ -328,6 +328,17 @@ type NameSpec struct {
 	// A trait names the namespace itself, and a trait's spec that sets this is
 	// refused, as is one that sets it beside ClusterScoped.
 	FluxScoped bool
+	// FluxInput says, on a trait's spec only, that the object is a ConfigMap or
+	// Secret (Kind, core group) the component's Flux object may read by name from
+	// its own namespace: under TransformContext.FluxNamespace a trait object it
+	// reads moves there with it (a trait sub-application's FluxNamespaceInput).
+	// The name is resolved as ever, then claimed in the namespace the object
+	// lands in: the Flux namespace when the Flux object reads the resolved name,
+	// else Namespace. A name the hook changed away from the one the Flux object
+	// reads therefore stays, and is claimed, in Namespace. A lowering rule's spec
+	// that sets it is refused (FluxScoped says where its object lands), as is one
+	// beside ClusterScoped or on any other kind.
+	FluxInput bool
 	// Property names the property the author wrote Authored in ("hpaName"). It is
 	// empty when the author wrote none, and Authored is then not read: a present
 	// property holding the empty string is an authored name, and is refused.
@@ -557,6 +568,11 @@ type traitNaming struct {
 	// objectName is the name of the object of the component the trait is applied
 	// on (Component.ObjectName).
 	objectName string
+	// fluxNamespace is the transform's TransformContext.FluxNamespace, and owner
+	// the application the trait is applied on, whose Flux object a trait object
+	// may follow there (landingNamespace).
+	fluxNamespace string
+	owner         *stack.Application
 	// subApps holds, by name, every sub-application name this trait resolved
 	// since the engine last took them.
 	subApps map[string][]subAppName
@@ -617,13 +633,24 @@ func hookDefaults(resolved []subAppName, created int) []string {
 // consulted and nothing is claimed.
 func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 	owner := nameOwner{role: spec.Role, trait: t.Type, def: spec.Default}
+	// A FluxInput name is claimed where its object lands, known only once the name
+	// is resolved (landingNamespace).
+	var landing func(name string) string
+	if spec.FluxInput {
+		if err := fluxInputProblem(fmt.Sprintf("the NameSpec for role %q", spec.Role), spec.Kind, spec.ClusterScoped); err != nil {
+			return "", err
+		}
+		namespace, kind := spec.Namespace, spec.Kind.Kind
+		spec.FluxInput = false
+		landing = func(name string) string { return t.naming.landingNamespace(namespace, kind, name) }
+	}
 	if t.naming == nil {
 		return (*nameResolver)(nil).resolve(owner, spec)
 	}
 	owner.component, owner.member = t.naming.component, t.naming.member
 	owner.slot, owner.authored = t.naming.slot, t.naming.authored
 	owner.apply, owner.nth = t.naming.apply, t.naming.nth
-	name, source, err := t.naming.resolver.resolveFrom(owner, spec)
+	name, source, err := t.naming.resolver.resolveLanding(owner, spec, landing)
 	// Recorded with its source: a name the hook gave is the hook's even when it is
 	// the default, since what the sibling-group check asks is who named it.
 	if err == nil && spec.Role == NameRoleSubApplication {
@@ -652,6 +679,56 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 // On a trait built outside a transform (a handler's Apply called directly)
 // nothing is claimed, as ResolveName claims nothing there.
 func (t *Trait) ClaimObjectName(kind schema.GroupKind, namespace, name, property string) error {
+	return t.claimObjectName(kind, name, property, func() string { return namespace })
+}
+
+// ClaimFluxInputName is ClaimObjectName for an object of a trait
+// sub-application that moves to the Flux namespace with the component's Flux
+// object when that object reads the ConfigMap or Secret (readKind) of readName
+// from its own namespace (the sub-application's FluxNamespaceInput): the
+// certificate trait's Secret, or an external-secret trait's ExternalSecret,
+// which moves when its produced Secret is read. The name is claimed in the
+// namespace the object lands in, the Flux namespace when the transform has one
+// and the Flux object reads readName, else namespace, as NameSpec.FluxInput
+// claims a resolved name. Only a trait has it.
+func (t *Trait) ClaimFluxInputName(kind schema.GroupKind, namespace, name, property, readKind, readName string) error {
+	if err := fluxInputProblem(fmt.Sprintf("the claim of %s %q", kind, name), schema.GroupKind{Kind: readKind}, false); err != nil {
+		return err
+	}
+	return t.claimObjectName(kind, name, property, func() string {
+		return t.naming.landingNamespace(namespace, readKind, readName)
+	})
+}
+
+// landingNamespace returns the namespace a trait object generated in namespace
+// lands in when it is a Flux namespace input of the ConfigMap or Secret (kind)
+// name: the Flux namespace when the transform has one and the Flux object of
+// the application the trait is applied on reads name (fluxObjectReads, the test
+// moveFluxNamespaceInputs moves by), else namespace.
+func (n *traitNaming) landingNamespace(namespace, kind, name string) string {
+	if n == nil || n.fluxNamespace == "" || !fluxObjectReads(n.owner, kind, name) {
+		return namespace
+	}
+	return n.fluxNamespace
+}
+
+// fluxInputProblem refuses a Flux namespace input that is not a namespaced
+// ConfigMap or Secret of the core group: no other object follows a Flux object
+// to the Flux namespace.
+// what names the caller's spec or claim in the error.
+func fluxInputProblem(what string, kind schema.GroupKind, clusterScoped bool) error {
+	if kind.Group != "" || (kind.Kind != "ConfigMap" && kind.Kind != "Secret") {
+		return errors.Errorf("naming: %s reads a Flux namespace input of kind %q; only a ConfigMap or a Secret follows a Flux object", what, kind)
+	}
+	if clusterScoped {
+		return errors.Errorf("naming: %s is ClusterScoped and FluxInput; a cluster-scoped object is in no namespace", what)
+	}
+	return nil
+}
+
+// claimObjectName claims name for the trait, as ClaimObjectName says, in the
+// namespace namespace returns, asked only when there is a claim space.
+func (t *Trait) claimObjectName(kind schema.GroupKind, name, property string, namespace func() string) error {
 	if kind.Kind == "" {
 		return errors.New("naming: an object claim has no Kind")
 	}
@@ -673,7 +750,7 @@ func (t *Trait) ClaimObjectName(kind schema.GroupKind, namespace, name, property
 		source = nameFromAuthor
 	}
 	key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
-		group: kind.Group, kind: kind.Kind, namespace: namespace, name: name,
+		group: kind.Group, kind: kind.Kind, namespace: namespace(), name: name,
 	}}
 	return t.naming.resolver.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: property})
 }
@@ -698,6 +775,13 @@ func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {
 
 // resolveFrom is resolve, also returning where the name came from.
 func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, nameSource, error) {
+	return r.resolveLanding(owner, spec, nil)
+}
+
+// resolveLanding is resolveFrom for an object claimed in the namespace landing
+// gives for the resolved name, in place of spec.Namespace, when landing is not
+// nil (a trait's NameSpec.FluxInput, Trait.ResolveName).
+func (r *nameResolver) resolveLanding(owner nameOwner, spec NameSpec, landing func(name string) string) (string, nameSource, error) {
 	class, syntax, known := classOfNameRole(spec.Role)
 	if !known {
 		return "", nameFromDefault, errors.Errorf("naming: %q is not a name role (the roles: %s)", spec.Role, joinNameRoles())
@@ -714,6 +798,10 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 	// A lowering rule's spec has it set aside by now (LoweringContext.lowerName).
 	if spec.FluxScoped {
 		return "", nameFromDefault, errors.Errorf("naming: the NameSpec for role %q is FluxScoped, which only a lowering rule's is; name the namespace the object is generated in", spec.Role)
+	}
+	// A trait's spec has it set aside by now (Trait.ResolveName).
+	if spec.FluxInput {
+		return "", nameFromDefault, errors.Errorf("naming: the NameSpec for role %q is FluxInput, which only a trait's is; a lowering rule's object that lands in the Flux namespace is FluxScoped", spec.Role)
 	}
 	if spec.Default == "" {
 		return "", nameFromDefault, errors.Errorf("naming: role %q has no default name", spec.Role)
@@ -752,6 +840,9 @@ func (r *nameResolver) resolveFrom(owner nameOwner, spec NameSpec) (string, name
 		key.group, key.kind = spec.Kind.Group, spec.Kind.Kind
 		if !spec.ClusterScoped {
 			key.namespace = spec.Namespace
+		}
+		if landing != nil {
+			key.namespace = landing(name)
 		}
 	}
 	if err := r.claims.claimName(key, resolvedNameClaim{owner: owner, source: source, property: spec.Property}); err != nil {
