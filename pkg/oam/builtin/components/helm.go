@@ -202,8 +202,9 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"valuesFrom": {Type: oam.PropertyTypeArray, Description: "HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values. Refused under delivery: template.", Items: &oam.PropertySchema{
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional).",
 		}},
-		oam.HookGroupNamePrefixProperty: str(hookGroupNamePrefixDescription + " Under delivery: template only; refused under delivery: flux, where a HelmRelease installs the chart and no hook-group layout exists."),
-		scopeOverridesKey:               scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
+		oam.HookGroupNamePrefixProperty:     str(hookGroupNamePrefixDescription + " Under delivery: template only; refused under delivery: flux, where a HelmRelease installs the chart and no hook-group layout exists."),
+		oam.LayoutKustomizationNameProperty: str(layoutKustomizationNameDescription + " Under delivery: template only; refused under delivery: flux, where the HelmRelease is applied with the bundle and the component has no layout of its own."),
+		scopeOverridesKey:                   scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
 	}
 }
 
@@ -226,6 +227,10 @@ type helmProperties struct {
 	// template, forwarded to the helmtemplate terminal as written; nil when
 	// absent or null.
 	HookGroupNamePrefix *string `json:"hookGroupNamePrefix"`
+	// The authored name of the Flux Kustomization of the component's own layout
+	// under delivery: template, forwarded to the helmtemplate terminal as
+	// written; nil when absent or null.
+	LayoutKustomizationName *string `json:"layoutKustomizationName"`
 }
 
 // helmSource is an inline source or a reference to an existing source CR
@@ -442,6 +447,10 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	// named something.
 	if props.HookGroupNamePrefix != nil {
 		return oam.LoweringResult{}, errors.Errorf("%s: %s: names the hook-group layouts of a chart rendered at build time, and under delivery: flux the chart is installed by a HelmRelease, so it names nothing; remove it, or set delivery: template", helmType, oam.HookGroupNamePrefixProperty)
+	}
+	// Nor a layout of its own: the HelmRelease is applied with the bundle.
+	if props.LayoutKustomizationName != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: %s: names the Flux Kustomization of the layout of a chart rendered at build time, and under delivery: flux the chart is installed by a HelmRelease, so it names nothing; remove it, or set delivery: template", helmType, oam.LayoutKustomizationNameProperty)
 	}
 	// The names this rule resolves are the component's, also where a caller
 	// built the context without it.
@@ -1034,6 +1043,9 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, 
 	// helmtemplate component, under the same property name.
 	if props.HookGroupNamePrefix != nil {
 		rendered[oam.HookGroupNamePrefixProperty] = *props.HookGroupNamePrefix
+	}
+	if props.LayoutKustomizationName != nil {
+		rendered[oam.LayoutKustomizationNameProperty] = *props.LayoutKustomizationName
 	}
 	// The helmtemplate reads scopeOverrides with the same parser; a malformed
 	// entry is refused here first, so the message names the component type the

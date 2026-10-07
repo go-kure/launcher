@@ -1123,9 +1123,18 @@ func (t *Transformer) buildCluster(app *Application, order *componentOrder, ctx 
 
 // buildBundle creates the bundle name holding entries' applications and applies
 // the entries' traits to it.
+//
+// The name of the Flux Kustomization of a component's own layout is resolved
+// here (LayoutKustomizationNameSetter), where the name of the bundle holding
+// the component is known, and before any trait wraps the component's config.
 func (t *Transformer) buildBundle(app *Application, name string, entries []componentEntry, ctx TransformContext) (*stack.Bundle, error) {
 	apps := make([]*stack.Application, 0, len(entries))
 	for _, e := range entries {
+		if named, ok := e.app.Config.(LayoutKustomizationNameSetter); ok {
+			if err := ctx.names.resolveLayoutKustomizationName(name, e.component.Name, named); err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", e.component.Name), Cause: err}
+			}
+		}
 		apps = append(apps, e.app)
 	}
 	bundle, err := stack.NewBundle(name, apps, nil)

@@ -216,6 +216,8 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		// so that group is numbered: a group carries a tier's name only when it is
 		// that tier and nothing else.
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-00"},
+		// The Kustomization of the chart's own layout, asked as that group is built.
+		{Application: "shop", Component: "jobs", Role: oam.NameRoleLayout, Default: "shop-00-jobs"},
 		// The sub-application of each trait the helm rule added, named as its object.
 		{Application: "shop", Component: "chart", Role: subApp, Default: chartConfigMapDefault},
 		{Application: "shop", Component: "chart", Role: subApp, Default: chartSecretDefault},

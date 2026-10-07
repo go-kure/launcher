@@ -79,6 +79,36 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 	return nil
 }
 
+// resolveLayoutKustomizationName resolves the name of the Flux Kustomization of
+// component's own layout (NameRoleLayout), in the bundle launcher named bundle,
+// and hands config every name that is not the base library's own default:
+// the author's, the hook's answer, or the default launcher shortened.
+//
+// The base library names that Kustomization "<unit>-<layout name>", the unit
+// being the Kustomization name of the bundle, and refuses one over 63
+// characters. Launcher's default is the same name, "<bundle>-<component>",
+// measured with the bundle as launcher named it: a consumer that renames the
+// bundle afterwards (Bundle.KustomizationName) is not seen here. A default that
+// fits is left for the base library to make, so no output changes where it
+// did not fail; a longer one is shortened to 63 by the one shortening rule,
+// with "-<component>" kept whole.
+func (r *nameResolver) resolveLayoutKustomizationName(bundle, component string, config LayoutKustomizationNameSetter) error {
+	full := bundle + "-" + component
+	def := ShortenNameWithSuffix(bundle, "-"+component, stack.KustomizationNameMaxLength)
+	spec := NameSpec{Role: NameRoleLayout, Default: def}
+	if authored, ok := config.AuthoredLayoutKustomizationName(); ok {
+		spec.Property, spec.Authored = LayoutKustomizationNameProperty, authored
+	}
+	name, source, err := r.resolveFrom(nameOwner{component: component, role: NameRoleLayout, def: def}, spec)
+	if err != nil {
+		return err
+	}
+	if source != nameFromDefault || def != full {
+		config.SetLayoutKustomizationName(name)
+	}
+	return nil
+}
+
 // synthesizedPolicy is a config of the NetworkPolicy synthesis: one generated
 // NetworkPolicy, named by the transform after the synthesis has run.
 type synthesizedPolicy interface {

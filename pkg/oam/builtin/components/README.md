@@ -5396,7 +5396,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive part of the
   values tree, see below), `valuesSecretName`, `helmReleaseName` (the name of
   the HelmRelease object, see below),
-  `scopeOverrides` and `hookGroupNamePrefix` (each under `delivery: template` only, see below),
+  `scopeOverrides`, `hookGroupNamePrefix` and `layoutKustomizationName` (each under
+  `delivery: template` only, see below),
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
@@ -5666,7 +5667,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (go-kure/launcher#785; see **helmrelease**). An authored `hookGroupNamePrefix`
     (go-kure/launcher#787) is passed on as written and is the `helmtemplate`'s; under
     `delivery: flux` it is refused with a `helm:` message, since a HelmRelease installs the
-    chart, no hook-group layout exists and the prefix would name nothing. No source is emitted, and an authored
+    chart, no hook-group layout exists and the prefix would name nothing. An authored
+    `layoutKustomizationName` (go-kure/launcher#787) is passed on and refused the same way:
+    under `delivery: flux` the component has no layout of its own. No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
@@ -5914,6 +5917,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   states the scope of a kind the chart renders (see **Scope overrides** below).
   `hookGroupNamePrefix` (go-kure/launcher#787) is the prefix of the names of the hook-group
   layouts, in place of `<application>-<component>`; see the hook-group paragraph below.
+  `layoutKustomizationName` (go-kure/launcher#787) is the name of the Flux Kustomization of
+  the component's own layout, in place of `<bundle>-<component>`; see the same paragraph.
 
   `secretValues` (go-kure/launcher#786) is a second open object, for the sensitive part of the
   values tree; it is what the `helm` rule forwards its own `secretValues` as. The chart is
@@ -6415,7 +6420,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   give one Kustomization name (a shortened default that equals a written prefix; a prefix
   that ends as another chart's phase begins). kure refuses that name, used twice, when the
   walked tree is integrated; another `hookGroupNamePrefix` on one of the components is the
-  way out (`pkg/oam/README.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`. `GenerateCoversAugmentLayout` is always true —
+  way out (`pkg/oam/README.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`.
+  The component's own layout, the parent of the hook-group children, also gets a Flux
+  Kustomization under `FluxIntegratedPerLayout`, which kure names `<bundle>-<component>` and
+  refuses past 63 characters. Where that default is over 63, the transform shortens it to 63
+  by the same rule, `-<component>` kept whole, and `AugmentLayout` sets it on the layout
+  (`KustomizationName`), whatever the number of hook groups; where it fits, the layout is left
+  to kure's default and nothing changes. The `layoutKustomizationName` property, or the
+  `Naming` hook's answer for the `layout` role, sets another name, a DNS-1123 subdomain of at
+  most 63 characters used as written and never shortened; any other fails the transform,
+  naming the component and the role. It is read under per-layout placement only. A
+  `HelmTemplateConfig` built directly sets `LayoutKustomizationName`; `AugmentLayout` never
+  overwrites a `KustomizationName` the layout already carries. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
   which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
