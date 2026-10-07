@@ -2,6 +2,8 @@ package components
 
 import (
 	"maps"
+	"math"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -20,14 +22,9 @@ import (
 // k8s.io/kubernetes pkg/apis/core/v1/defaults.go: the pull policy from the
 // image reference, /dev/termination-log, File).
 //
-// Two corev1.Container fields stay unread:
-//   - `restartPolicy` on an init container is what makes it restartable (a
-//     native sidecar), a container this package does not model: the probes and
-//     lifecycle hooks such a container may carry are what
-//     initContainerRejectedKeys refuses on an init entry.
-//   - `restartPolicyRules` requires `restartPolicy` ("must specify
-//     restartPolicy when restart rules are used",
-//     validateContainerRestartPolicy), so it waits with it.
+// An init container's own `restartPolicy` and `restartPolicyRules` are read
+// apart from these, by parseInitContainerRestart: they are init-entry keys
+// only, and restartPolicy Always is refused there.
 type ContainerFields struct {
 	ImagePullPolicy          corev1.PullPolicy
 	TerminationMessagePath   string
@@ -63,6 +60,34 @@ var (
 	resizeResources = []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory}
 
 	resizeRestartPolicies = []corev1.ResourceResizeRestartPolicy{corev1.NotRequired, corev1.RestartContainer}
+)
+
+// The restart policy and rules of an init container (parseInitContainerRestart)
+// are held to upstream's validateInitContainerRestartPolicy and
+// validateContainerRestartPolicy (k8s.io/kubernetes
+// pkg/apis/core/validation/validation.go): a rule needs the container's own
+// policy, a container takes at most 20 rules, a rule's action is Restart and
+// its exitCodes are required, with an operator of In or NotIn and at most 255
+// values. Upstream's Always is left out of initContainerRestartPolicies: it
+// makes the init container restartable (a native sidecar), which this package
+// does not model, and RestartAllContainers is left out of restartRuleActions:
+// it needs the RestartAllContainersOnContainerExits gate.
+const (
+	maxRestartPolicyRules   = 20
+	maxRestartRuleExitCodes = 255
+)
+
+var (
+	initContainerRestartPolicies = []corev1.ContainerRestartPolicy{corev1.ContainerRestartPolicyNever, corev1.ContainerRestartPolicyOnFailure}
+
+	restartRuleActions = []corev1.ContainerRestartRuleAction{corev1.ContainerRestartRuleActionRestart}
+
+	restartRuleOperators = []corev1.ContainerRestartRuleOnExitCodesOperator{
+		corev1.ContainerRestartRuleOnExitCodesOpIn, corev1.ContainerRestartRuleOnExitCodesOpNotIn,
+	}
+
+	restartRuleKeys          = []string{"action", "exitCodes"}
+	restartRuleExitCodesKeys = []string{"operator", "values"}
 )
 
 // enumValues returns a typed string set as the []any a PropertySchema.Enum takes.
@@ -229,6 +254,152 @@ func parseContainerFields(raw map[string]any, initContainer bool) (ContainerFiel
 		out.ResizePolicy = append(out.ResizePolicy, corev1.ContainerResizePolicy{ResourceName: name, RestartPolicy: policy})
 	}
 	return out, nil
+}
+
+// parseInitContainerRestart reads one `initContainers` entry's own
+// `restartPolicy` and `restartPolicyRules` (go-kure/launcher#790), held to the
+// upstream rules named above. Never and OnFailure override the pod's restart
+// policy for that container; Always is refused, as it makes the container a
+// native sidecar. Kubernetes accepts a policy other than Always on an init
+// container only with the ContainerRestartRules feature gate, on by default
+// from 1.35; the cluster's version is not known here, so that is documented,
+// not checked. Errors name the field only; the caller adds the entry label.
+func parseInitContainerRestart(raw map[string]any) (*corev1.ContainerRestartPolicy, []corev1.ContainerRestartRule, error) {
+	var policy *corev1.ContainerRestartPolicy
+	if v, present, err := parseRawStringField(raw, "restartPolicy", "restartPolicy"); err != nil {
+		return nil, nil, err
+	} else if present {
+		p := corev1.ContainerRestartPolicy(v)
+		if p == corev1.ContainerRestartPolicyAlways {
+			return nil, nil, errors.Errorf("restartPolicy: %s is not accepted on an init container; it makes the container restartable (a native sidecar), which this package does not model; author a sidecar instead", p)
+		}
+		if !containsValue(initContainerRestartPolicies, p) {
+			return nil, nil, errors.Errorf("restartPolicy: invalid value %q, must be one of %s", v, joinValues(initContainerRestartPolicies))
+		}
+		policy = &p
+	}
+
+	entries, _, err := parseObjectList(raw, "restartPolicyRules")
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(entries) == 0 {
+		return policy, nil, nil
+	}
+	if policy == nil {
+		return nil, nil, errors.New("restartPolicyRules: restartPolicy is required when restart rules are used")
+	}
+	if len(entries) > maxRestartPolicyRules {
+		return nil, nil, errors.Errorf("restartPolicyRules: %d rules, Kubernetes accepts at most %d", len(entries), maxRestartPolicyRules)
+	}
+	rules := make([]corev1.ContainerRestartRule, 0, len(entries))
+	for i, entry := range entries {
+		label := indexedLabel("restartPolicyRules", i)
+		if err := rejectUnknownKeys(entry, restartRuleKeys, label); err != nil {
+			return nil, nil, err
+		}
+		action, present, err := parseRawStringField(entry, "action", label+".action")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !present {
+			return nil, nil, errors.Errorf("%s: action is required", label)
+		}
+		if !containsValue(restartRuleActions, corev1.ContainerRestartRuleAction(action)) {
+			return nil, nil, errors.Errorf("%s.action: invalid value %q, must be one of %s", label, action, joinValues(restartRuleActions))
+		}
+		exitCodes, present, err := parseObjectField(entry, "exitCodes", label+".exitCodes")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !present {
+			return nil, nil, errors.Errorf("%s: exitCodes is required", label)
+		}
+		onExit, err := parseRestartRuleExitCodes(exitCodes, label+".exitCodes")
+		if err != nil {
+			return nil, nil, err
+		}
+		rules = append(rules, corev1.ContainerRestartRule{Action: corev1.ContainerRestartRuleAction(action), ExitCodes: onExit})
+	}
+	return policy, rules, nil
+}
+
+// parseRestartRuleExitCodes reads the `exitCodes` of one restart rule; label
+// is its path, for the errors.
+func parseRestartRuleExitCodes(raw map[string]any, label string) (*corev1.ContainerRestartRuleOnExitCodes, error) {
+	if err := rejectUnknownKeys(raw, restartRuleExitCodesKeys, label); err != nil {
+		return nil, err
+	}
+	operator, present, err := parseRawStringField(raw, "operator", label+".operator")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, errors.Errorf("%s: operator is required", label)
+	}
+	op := corev1.ContainerRestartRuleOnExitCodesOperator(operator)
+	if !containsValue(restartRuleOperators, op) {
+		return nil, errors.Errorf("%s.operator: invalid value %q, must be one of %s", label, operator, joinValues(restartRuleOperators))
+	}
+	out := &corev1.ContainerRestartRuleOnExitCodes{Operator: op}
+	v, present := authoredValue(raw, "values")
+	if !present {
+		return out, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s.values: must be an array, got %T", label, v)
+	}
+	if len(arr) > maxRestartRuleExitCodes {
+		return nil, errors.Errorf("%s.values: %d values, Kubernetes accepts at most %d", label, len(arr), maxRestartRuleExitCodes)
+	}
+	// values is a +listType=set list: a server-side apply refuses a repeated
+	// value, so it is refused here, before the object is written.
+	out.Values = make([]int32, 0, len(arr))
+	for i, item := range arr {
+		code, err := oam.IntegerInRange(item, math.MinInt32, math.MaxInt32)
+		if err != nil {
+			return nil, errors.Errorf("%s: %w", indexedLabel(label+".values", i), err)
+		}
+		value := int32(code) //nolint:gosec // bounded to int32 by IntegerInRange
+		if slices.Contains(out.Values, value) {
+			return nil, errors.Errorf("%s: duplicate value %d", indexedLabel(label+".values", i), value)
+		}
+		out.Values = append(out.Values, value)
+	}
+	return out, nil
+}
+
+// schemaInitContainerRestart describes the two keys parseInitContainerRestart
+// reads, which only an `initContainers` entry takes.
+func schemaInitContainerRestart() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"restartPolicy": {
+			Type: oam.PropertyTypeString, Enum: enumValues(initContainerRestartPolicies),
+			Description: "The init container's own restart policy, overriding the pod's for this container. Always is not accepted: it makes the container a native sidecar, which this package does not model. Needs the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
+		},
+		"restartPolicyRules": {
+			Type:        oam.PropertyTypeArray,
+			Description: "Rules on the init container's exit code that decide whether it is restarted, checked in order; at most 20. They require restartPolicy.",
+			Items: &oam.PropertySchema{
+				Type:        oam.PropertyTypeObject,
+				Description: "One restart rule.",
+				Properties: map[string]oam.PropertySchema{
+					"action": {Type: oam.PropertyTypeString, Required: true, Enum: enumValues(restartRuleActions), Description: "What is done when the rule matches: Restart restarts the container."},
+					"exitCodes": {
+						Type: oam.PropertyTypeObject, Required: true, Description: "The exit codes the rule matches.",
+						Properties: map[string]oam.PropertySchema{
+							"operator": {Type: oam.PropertyTypeString, Required: true, Enum: enumValues(restartRuleOperators), Description: "In matches an exit code among the values, NotIn one outside them."},
+							"values": {
+								Type: oam.PropertyTypeArray, Description: "The exit codes the operator compares against; at most 255, each once.",
+								Items: &oam.PropertySchema{Type: oam.PropertyTypeInteger, Description: "One exit code."},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // apply writes the authored fields onto a container under construction. The

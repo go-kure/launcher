@@ -126,9 +126,9 @@ func TestWorkloadKinds_ApplyPolicy_HostProcessDenied(t *testing.T) {
 
 // TestEnforcePrivileged_WindowsHostProcess: the container-level spelling of the
 // same privilege escalation is checked by enforcePrivileged, reached here
-// through a workload's own container securityContext. windowsOptions is not
-// authorable on a container today, so this exercises the policy path through
-// the pod-level key and pins that privileged and hostProcess share one switch.
+// through a workload's own container securityContext. This pins the
+// privileged arm of that switch; TestEnforcePrivileged_ContainerHostProcess
+// pins the container's windowsOptions.hostProcess arm.
 func TestEnforcePrivileged_WindowsHostProcess(t *testing.T) {
 	props := map[string]any{
 		"image":           "ghcr.io/org/app:v1",

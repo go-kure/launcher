@@ -244,6 +244,15 @@ func schemaSecurityContext(reserved bool) oam.PropertySchema {
 			"seLinuxOptions":  schemaSELinuxOptions("the container"),
 			"appArmorProfile": schemaAppArmorProfile("the container"),
 			"procMount":       {Type: oam.PropertyTypeString, Enum: []any{"Default", "Unmasked"}, Description: "Procfs mount behavior for the container (Linux-only)."},
+			"windowsOptions": {
+				Type: oam.PropertyTypeObject, Description: "Windows-specific options for the container, overriding podSecurityContext.windowsOptions field by field (ignored on Linux; refused with os.name linux).",
+				Properties: map[string]oam.PropertySchema{
+					"gmsaCredentialSpecName": {Type: oam.PropertyTypeString, Description: "Name of the GMSA credential spec to use."},
+					"gmsaCredentialSpec":     {Type: oam.PropertyTypeString, Description: "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."},
+					"runAsUserName":          {Type: oam.PropertyTypeString, Description: "Windows user name to run the container entrypoint as."},
+					"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the container as a Windows HostProcess container. Must equal podSecurityContext.windowsOptions.hostProcess when both are set; a pod with one HostProcess container must have only HostProcess containers and hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."},
+				},
+			},
 		},
 	}
 }
@@ -587,15 +596,18 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 
 // schemaInitContainers describes the `initContainers` property. An init
 // container takes no `probes` or `lifecycle` — Kubernetes forbids both on one
-// (see initContainerRejectedKeys) — and no `ports`.
+// (see initContainerRejectedKeys) — and no `ports`; it takes its own
+// restartPolicy and restartPolicyRules (schemaInitContainerRestart).
 func schemaInitContainers() oam.PropertySchema {
+	props := schemaContainerEntry()
+	maps.Copy(props, schemaInitContainerRestart())
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "Init containers run to completion, in order, before the main container starts.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
 			Description: "A single init container definition. Probes and lifecycle hooks are not accepted: Kubernetes forbids them on an init container.",
-			Properties:  schemaContainerEntry(),
+			Properties:  props,
 		},
 	}
 }

@@ -622,6 +622,63 @@ func validateContainerOSFields(ps *corev1.PodSpec) error {
 	return check("containers", ps.Containers)
 }
 
+// validateHostProcessContainers is upstream's validateWindowsHostProcessPod
+// (k8s.io/kubernetes pkg/apis/core/validation), which runs on every pod
+// whatever its os, applied to the assembled containers: a container's
+// windowsOptions.hostProcess must equal the pod-level value when both are set;
+// a container is a HostProcess container when its own value, or else the
+// pod's, is true; and a pod with one must have only HostProcess containers and
+// hostNetwork. validatePodNamespaceFields already refuses the pod-level value
+// without hostNetwork when the pod spec is parsed.
+func validateHostProcessContainers(ps *corev1.PodSpec) error {
+	var pod *bool
+	if sc := ps.SecurityContext; sc != nil && sc.WindowsOptions != nil {
+		pod = sc.WindowsOptions.HostProcess
+	}
+	hostProcess, other := "", ""
+	check := func(list string, containers []corev1.Container) error {
+		for i, c := range containers {
+			label := indexedLabel(list, i) + ".securityContext.windowsOptions.hostProcess"
+			var own *bool
+			if sc := c.SecurityContext; sc != nil && sc.WindowsOptions != nil {
+				own = sc.WindowsOptions.HostProcess
+			}
+			if pod != nil && own != nil && *pod != *own {
+				return errors.Errorf("%s: must equal podSecurityContext.windowsOptions.hostProcess (%t) when both are set", label, *pod)
+			}
+			effective := own
+			if effective == nil {
+				effective = pod
+			}
+			switch {
+			case effective != nil && *effective:
+				if hostProcess == "" {
+					hostProcess = indexedLabel(list, i)
+				}
+			case other == "":
+				other = indexedLabel(list, i)
+			}
+		}
+		return nil
+	}
+	if err := check("initContainers", ps.InitContainers); err != nil {
+		return err
+	}
+	if err := check("containers", ps.Containers); err != nil {
+		return err
+	}
+	if hostProcess == "" {
+		return nil
+	}
+	if other != "" {
+		return errors.Errorf("%s is a HostProcess container and %s is not; a pod with one must have only HostProcess containers", hostProcess, other)
+	}
+	if !ps.HostNetwork {
+		return errors.Errorf("%s is a HostProcess container: hostNetwork must be true", hostProcess)
+	}
+	return nil
+}
+
 // parseObjectList reads an optional array-of-objects property: absent is
 // (nil, false, nil); a present non-array, or any non-object element, is an
 // error rather than silently skipped. An explicit null — including the typed
@@ -1341,6 +1398,9 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 		ps.AutomountServiceAccountToken = &automount
 	}
 	if err := validateContainerOSFields(&ps); err != nil {
+		return corev1.PodSpec{}, err
+	}
+	if err := validateHostProcessContainers(&ps); err != nil {
 		return corev1.PodSpec{}, err
 	}
 	if err := checkResizePolicyRestart(&ps); err != nil {

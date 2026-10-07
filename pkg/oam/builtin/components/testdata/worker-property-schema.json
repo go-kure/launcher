@@ -642,6 +642,56 @@
             }
           }
         },
+        "restartPolicy": {
+          "type": "string",
+          "description": "The init container's own restart policy, overriding the pod's for this container. Always is not accepted: it makes the container a native sidecar, which this package does not model. Needs the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
+          "enum": [
+            "Never",
+            "OnFailure"
+          ]
+        },
+        "restartPolicyRules": {
+          "type": "array",
+          "description": "Rules on the init container's exit code that decide whether it is restarted, checked in order; at most 20. They require restartPolicy.",
+          "items": {
+            "type": "object",
+            "description": "One restart rule.",
+            "properties": {
+              "action": {
+                "type": "string",
+                "description": "What is done when the rule matches: Restart restarts the container.",
+                "required": true,
+                "enum": [
+                  "Restart"
+                ]
+              },
+              "exitCodes": {
+                "type": "object",
+                "description": "The exit codes the rule matches.",
+                "required": true,
+                "properties": {
+                  "operator": {
+                    "type": "string",
+                    "description": "In matches an exit code among the values, NotIn one outside them.",
+                    "required": true,
+                    "enum": [
+                      "In",
+                      "NotIn"
+                    ]
+                  },
+                  "values": {
+                    "type": "array",
+                    "description": "The exit codes the operator compares against; at most 255, each once.",
+                    "items": {
+                      "type": "integer",
+                      "description": "One exit code."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "securityContext": {
           "type": "object",
           "description": "Container-level security context (runAsUser, capabilities, seccompProfile, …). Setting any field here opts this container out of a downstream platform's nil-only default backfill for ALL securityContext fields — see parseSecurityContext's doc comment.",
@@ -757,6 +807,28 @@
                     "RuntimeDefault",
                     "Unconfined"
                   ]
+                }
+              }
+            },
+            "windowsOptions": {
+              "type": "object",
+              "description": "Windows-specific options for the container, overriding podSecurityContext.windowsOptions field by field (ignored on Linux; refused with os.name linux).",
+              "properties": {
+                "gmsaCredentialSpec": {
+                  "type": "string",
+                  "description": "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."
+                },
+                "gmsaCredentialSpecName": {
+                  "type": "string",
+                  "description": "Name of the GMSA credential spec to use."
+                },
+                "hostProcess": {
+                  "type": "boolean",
+                  "description": "Run the container as a Windows HostProcess container. Must equal podSecurityContext.windowsOptions.hostProcess when both are set; a pod with one HostProcess container must have only HostProcess containers and hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."
+                },
+                "runAsUserName": {
+                  "type": "string",
+                  "description": "Windows user name to run the container entrypoint as."
                 }
               }
             }
@@ -1413,6 +1485,28 @@
             ]
           }
         }
+      },
+      "windowsOptions": {
+        "type": "object",
+        "description": "Windows-specific options for the container, overriding podSecurityContext.windowsOptions field by field (ignored on Linux; refused with os.name linux).",
+        "properties": {
+          "gmsaCredentialSpec": {
+            "type": "string",
+            "description": "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."
+          },
+          "gmsaCredentialSpecName": {
+            "type": "string",
+            "description": "Name of the GMSA credential spec to use."
+          },
+          "hostProcess": {
+            "type": "boolean",
+            "description": "Run the container as a Windows HostProcess container. Must equal podSecurityContext.windowsOptions.hostProcess when both are set; a pod with one HostProcess container must have only HostProcess containers and hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."
+          },
+          "runAsUserName": {
+            "type": "string",
+            "description": "Windows user name to run the container entrypoint as."
+          }
+        }
       }
     }
   },
@@ -1903,6 +1997,28 @@
                     "RuntimeDefault",
                     "Unconfined"
                   ]
+                }
+              }
+            },
+            "windowsOptions": {
+              "type": "object",
+              "description": "Windows-specific options for the container, overriding podSecurityContext.windowsOptions field by field (ignored on Linux; refused with os.name linux).",
+              "properties": {
+                "gmsaCredentialSpec": {
+                  "type": "string",
+                  "description": "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."
+                },
+                "gmsaCredentialSpecName": {
+                  "type": "string",
+                  "description": "Name of the GMSA credential spec to use."
+                },
+                "hostProcess": {
+                  "type": "boolean",
+                  "description": "Run the container as a Windows HostProcess container. Must equal podSecurityContext.windowsOptions.hostProcess when both are set; a pod with one HostProcess container must have only HostProcess containers and hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."
+                },
+                "runAsUserName": {
+                  "type": "string",
+                  "description": "Windows user name to run the container entrypoint as."
                 }
               }
             }

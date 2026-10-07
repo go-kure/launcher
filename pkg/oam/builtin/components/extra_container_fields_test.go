@@ -184,8 +184,14 @@ func TestExtraContainer_Errors(t *testing.T) {
 		{
 			name:  "init unknown key",
 			key:   "initContainers",
+			entry: map[string]any{"restartpolicy": "Never"},
+			want:  []string{`initContainers[0] "c"`, `unrecognized key "restartpolicy"`},
+		},
+		{
+			name:  "init restartPolicy Always is a sidecar",
+			key:   "initContainers",
 			entry: map[string]any{"restartPolicy": "Always"},
-			want:  []string{`initContainers[0] "c"`, `unrecognized key "restartPolicy"`},
+			want:  []string{`initContainers[0] "c"`, "restartPolicy: Always is not accepted on an init container", "author a sidecar instead"},
 		},
 		{
 			name:  "init ports are not an init container key",

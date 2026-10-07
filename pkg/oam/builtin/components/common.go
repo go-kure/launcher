@@ -199,6 +199,10 @@ type InitContainerConfig struct {
 	// Fields are the container fields every container of the pod accepts
 	// (parseContainerFields).
 	Fields ContainerFields
+	// RestartPolicy and RestartPolicyRules are the init container's own
+	// restart policy and rules (parseInitContainerRestart); nil when unauthored.
+	RestartPolicy      *corev1.ContainerRestartPolicy
+	RestartPolicyRules []corev1.ContainerRestartRule
 }
 
 // SidecarContainerConfig holds the parsed OAM fields for a sidecar container.
@@ -234,11 +238,13 @@ type SidecarContainerConfig struct {
 // lifecycle built cleanly and reached no container.
 //
 // Both end with containerFieldKeys, the fields parseContainerFields reads for
-// every container of the pod (go-kure/launcher#790).
+// every container of the pod (go-kure/launcher#790). An init entry also takes
+// its own restartPolicy and restartPolicyRules (parseInitContainerRestart).
 var (
 	initContainerPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
 		"volumeMounts", "volumeDevices", "securityContext", "workingDir",
+		"restartPolicy", "restartPolicyRules",
 	}, containerFieldKeys...)
 	sidecarPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
@@ -1812,15 +1818,12 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // corev1.SecurityContext (same structural pattern as ProbeConfig/parseEnvVarSource
 // above): runAsUser/runAsGroup/runAsNonRoot, readOnlyRootFilesystem,
 // allowPrivilegeEscalation, privileged, capabilities add/drop, seccompProfile,
-// seLinuxOptions, appArmorProfile, and procMount. Deliberately NOT covered:
-// windowsOptions — this project targets Linux-only podman/distroless images per
-// meta/CLAUDE.md ("Container runtime: podman", "Base image: distroless"); Windows
-// containers are out of scope for this project entirely, not just this field.
-// (procMount was deferred alongside windowsOptions in round 1 under the same
-// "alpha feature" rationale; that premise was factually wrong — in the pinned
-// k8s.io/api v0.36.3, corev1.ProcMountType's constants carry no +featureGate
-// annotation, unlike FileKeyRef's explicit "+featureGate=EnvFiles" — i.e.
-// procMount is unconditional/GA, not alpha, so round 2 adds it below.)
+// seLinuxOptions, appArmorProfile, procMount and windowsOptions. windowsOptions
+// is read as the pod-level podSecurityContext reads it (parseWindowsOptions in
+// podspec.go): the pod level already named it, so a container could not
+// override what its pod set (go-kure/launcher#790). Its hostProcess is gated by
+// enforcePrivileged, and the rules upstream ties it to across the pod's
+// containers are checked on the assembled pod (validateHostProcessContainers).
 //
 // IMPORTANT interaction: setting ANY field here makes the built container's
 // SecurityContext non-nil. A downstream runtime's admission-time
@@ -2211,7 +2214,7 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if err := rejectUnknownKeys(raw, []string{
 		"runAsUser", "runAsGroup", "runAsNonRoot", "readOnlyRootFilesystem",
 		"allowPrivilegeEscalation", "privileged", "capabilities", "seccompProfile",
-		"seLinuxOptions", "appArmorProfile", "procMount",
+		"seLinuxOptions", "appArmorProfile", "procMount", "windowsOptions",
 	}, "securityContext"); err != nil {
 		return nil, err
 	}
@@ -2355,6 +2358,18 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		default:
 			return nil, errors.Errorf("securityContext.procMount: invalid value %q, must be Default or Unmasked", pm)
+		}
+	}
+	if raw, present, err := parseObjectField(raw, "windowsOptions", "securityContext.windowsOptions"); err != nil {
+		return nil, err
+	} else if present {
+		wo, err := parseWindowsOptions(raw, "securityContext.windowsOptions")
+		if err != nil {
+			return nil, err
+		}
+		if wo != nil {
+			sc.WindowsOptions = wo
+			set = true
 		}
 	}
 
@@ -3033,6 +3048,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			ic.WorkingDir = wd
 		}
 		if ic.Fields, err = parseContainerFields(m, true); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
+		if ic.RestartPolicy, ic.RestartPolicyRules, err = parseInitContainerRestart(m); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		out = append(out, ic)
@@ -4739,6 +4757,8 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container.EnvFrom = copyEnvFrom(ic.EnvFrom)
 	container.WorkingDir = ic.WorkingDir
 	ic.Fields.apply(container)
+	container.RestartPolicy = ic.RestartPolicy
+	container.RestartPolicyRules = ic.RestartPolicyRules
 	return container, nil
 }
 

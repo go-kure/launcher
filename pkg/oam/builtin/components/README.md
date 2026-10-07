@@ -980,12 +980,17 @@ rejection as `seccompProfile` above), `procMount` (`Default`|`Unmasked`; a prese
 value, e.g. `procMount: false`, is rejected rather than silently omitted
 (`parseStringField`); an explicit empty
 string is still treated as absent, not an error, which is `parseStringField`'s
-own convention); `windowsOptions` is
-deliberately not covered — this project's own container images are
-Linux-only (distroless base images run under podman), so a Windows-specific
-security context has no target to apply to here, and `procMount` is
-Linux-specific by definition, so excluding `windowsOptions` does not extend to
-it), `workingDir` (a bare pass-through — `corev1.Container.WorkingDir`'s own
+own convention), `windowsOptions` (`gmsaCredentialSpecName`,
+`gmsaCredentialSpec`, `runAsUserName` and `hostProcess`, the closed key set the
+pod-level `podSecurityContext.windowsOptions` reads, go-kure/launcher#790; an
+`os.name: linux` pod refuses it, as it refuses the pod-level one. Upstream's
+`validateWindowsHostProcessPod` rules are held on the assembled pod, so they
+are reported at `Generate`: a container's `hostProcess` must equal the pod's
+when both are set; a pod with one HostProcess container — its own
+`hostProcess`, or the pod's when it sets none — must have only HostProcess
+containers, init containers included; and such a pod must set
+`hostNetwork: true`. `hostProcess: true` is policy-gated, see below)),
+`workingDir` (a bare pass-through — `corev1.Container.WorkingDir`'s own
 doc comment states only that the container runtime's default applies when
 unset, and real admission enforces no path shape for it, so this schema does
 not invent a stricter constraint upstream itself does not have; a
@@ -1260,14 +1265,33 @@ as keys of each `initContainers` and `sidecars` entry. One parser
 - On an `initContainers` or `sidecars` entry every message carries the entry
   label first (`sidecars[0] "proxy": tty: must be a boolean, got string`).
 
-Two container fields stay unread: `restartPolicy`, which on an init container
-is what makes it restartable (a native sidecar) — a container this package does
-not model, the same reason `probes` and `lifecycle` are refused on an init
-entry — and `restartPolicyRules`, which upstream accepts only together with
-`restartPolicy` (`validateContainerRestartPolicy`). Both are refused as unknown
-keys on an `initContainers` or `sidecars` entry. At the top level neither is a
-container key either. `restartPolicyRules` is refused there on every workload
-kind, with that reason. `restartPolicy` there is the *pod's* restart policy: a
+An `initContainers` entry also reads its own `restartPolicy` and
+`restartPolicyRules` (go-kure/launcher#790), held to upstream's
+`validateInitContainerRestartPolicy` and `validateContainerRestartPolicy`:
+
+- `restartPolicy` is `Never` or `OnFailure`, overriding the pod's restart
+  policy for that container. `Always` is refused with its reason: it makes the
+  init container restartable (a native sidecar), which this package does not
+  model, the same reason `probes` and `lifecycle` are refused on an init entry;
+  author a `sidecars` entry instead;
+- `restartPolicyRules` needs `restartPolicy` and holds at most 20 rules. A rule
+  is a closed object: `action` is required and is `Restart` (upstream's
+  `RestartAllContainers` needs a separate feature gate, and is refused), and
+  `exitCodes` is required: a closed object whose `operator` is required and is
+  `In` or `NotIn`, and whose optional `values` is a list of at most 255 int32
+  exit codes, each once (the field is a set);
+- Kubernetes keeps either field on an init container only with the
+  `ContainerRestartRules` feature gate, on by default from Kubernetes 1.35. A
+  cluster with the gate off drops both fields when it creates the pod, without
+  an error, so the init container falls back to the pod's restart policy. This
+  package does not see the target cluster's version, so that is a documented
+  limit, not a check.
+
+On a `sidecars` entry neither key is read, and both are refused as unknown
+keys. At the top level neither is a container key either.
+`restartPolicyRules` is refused there on every workload kind, with the reason
+that upstream accepts a container's rules only together with the container's
+own `restartPolicy`. `restartPolicy` there is the *pod's* restart policy: a
 key of `job` and `cronjob`, where the main container's own `restartPolicy`
 therefore has no name to be authored or refused under, and refused with its
 reason on the other kinds, whose pod template apps/v1 validation holds to
@@ -1465,12 +1489,9 @@ generated ServiceAccount carries the same name.
 `AllowedContainerCapabilities()`/`ForbiddenContainerCapabilities()` (see above,
 `enforce.go`'s `enforceContainerCapabilities`). `enforcePrivileged` gates a
 second field besides `privileged`: `securityContext.windowsOptions.hostProcess`
-is rejected under the same `AllowPrivileged()` (`enforce.go:122-124`). That
-branch is **not reachable from an authored document** — `windowsOptions` is not
-in the container `securityContext` key set, so `rejectUnknownKeys`
-(`common.go:1926`) refuses it before any policy check runs — so it is
-defence in depth against a future parser change, not a gate an author can trip
-today. Those three fields are the whole container-level policy surface:
+is rejected under the same `AllowPrivileged()`, on any container that authors
+it (go-kure/launcher#790 made the container `windowsOptions` authorable).
+Those three fields are the whole container-level policy surface:
 `enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
 taking a `*corev1.SecurityContext`, and every policy call outside `enforce.go`
 that touches a container `securityContext` is a call site of one of them. The
@@ -1483,13 +1504,13 @@ every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
 
 The pod-level `podSecurityContext` has a **separate** hook —
-`enforcePodHostProcess` (`enforce.go:136-145`) rejects
+`enforcePodHostProcess` (`enforce.go`) rejects
 `podSecurityContext.windowsOptions.hostProcess` under `AllowPrivileged()`. It is
 a different object, not an exception to the container-level list above:
 `PodSpecConfig` embeds `corev1.PodSpec`, so its `SecurityContext` is a
-`*corev1.PodSecurityContext`, which `enforcePrivileged` never sees. Unlike the
-container-level spelling, this one **is** authorable — see the
-`podSecurityContext` row under "Pod-level properties".
+`*corev1.PodSecurityContext`, which `enforcePrivileged` never sees. Both
+spellings are authorable — see the `podSecurityContext` row under "Pod-level
+properties".
 
 The pod-level surface carries two policy checks of its own, both called from
 all seven kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
@@ -9040,7 +9061,7 @@ name, which a `cronjob` document retyped to `job` leaves behind.
 | `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `deployment`, `statefulset`, `daemonset` (`webservice`, `worker`) | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. On `job` and `cronjob` both names are read: the pod's `restartPolicy`, and the JobSpec's `activeDeadlineSeconds`. |
 | `ephemeralContainers`, `priority`, `overhead`, `serviceAccount` | every workload kind | See [Pod-level properties](#pod-level-properties). |
 | `evictionResponders` | every workload kind | Alpha upstream, behind the `EvictionRequestAPI` feature gate. |
-| `restartPolicyRules` (the main container's) | every workload kind | Upstream accepts a container's restart rules only with the container's own `restartPolicy`, which no kind reads. |
+| `restartPolicyRules` (the main container's) | every workload kind | Upstream accepts a container's restart rules only with the container's own `restartPolicy`, which no kind reads on the main container. An `initContainers` entry reads both (see [Container fields](#container-fields)). |
 | `externalIPs`, `clusterIPs` | `service` | See the `service` kind. |
 | `dataSource` | `persistentvolumeclaim`, the `pvc` trait | Authored through `dataSourceRef`. |
 | `secrets` | `serviceaccount` | The list limits mountable Secrets only under an annotation upstream deprecates since Kubernetes 1.32; it is no way to find or create a token. |
@@ -9066,6 +9087,24 @@ property of the kind already: `securityContext` as `podSecurityContext` and
 `resources` as `podResources` (both names are the main container's), and on
 `job` and `cronjob` the pod's `activeDeadlineSeconds` as
 `podActiveDeadlineSeconds` (the name is the JobSpec's).
+
+### One level down
+
+Inside a container, go-kure/launcher#790 reads `securityContext.windowsOptions`
+on every container, and an init container's own `restartPolicy` and
+`restartPolicyRules` (see [Container fields](#container-fields)). Three upstream
+fields one level down stay unread, and are refused at their position as an
+unknown key:
+
+- **`lifecycle.stopSignal`**: upstream puts it behind the `ContainerStopSignals`
+  feature gate, alpha and off by default through Kubernetes 1.37, and holds the
+  signal to the pod's `os.name`. A container's `lifecycle` reads `postStart`
+  and `preStop`.
+- **`ports[].hostPort` and `ports[].hostIP`**: they bind a port on the node.
+  No environment-policy switch covers that (`AllowHostNetwork()` gates the
+  node's network namespace, not a port bound from the pod's own), and whether
+  the port is free is the scheduler's question, on cluster state. A `ports`
+  entry reads `containerPort`, `name` and `protocol`.
 
 ### Not authorable, and not refusable by name
 

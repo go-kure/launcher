@@ -140,9 +140,8 @@ func enforceMaxStorageSize(current, max string) error {
 // values to agree and forbids mixing HostProcess and non-HostProcess
 // containers), so gating it behind AllowPrivileged keeps one policy switch for
 // one privilege level rather than letting the Windows spelling through
-// unchecked. The container-level field is not authorable today (parseSecurityContext
-// has no windowsOptions key, see common.go) — the check is here so the spelling
-// cannot arrive unchecked when it becomes authorable.
+// unchecked. The container-level field is authorable (parseSecurityContext in
+// common.go); the pod-wide rules are validateHostProcessContainers' in podspec.go.
 func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 	if sc == nil || allowed {
 		return nil

@@ -37,11 +37,12 @@ import (
 // `initContainers` or `sidecars` entry several of the names are the entry's own
 // keys.
 //
-// One is read by no type. The others are read in another shape, and the reason
-// names it, so the upstream name is not dropped in silence either.
+// One is read on no main container. The others are read in another shape, and
+// the reason names it, so the upstream name is not dropped in silence either.
 var mainContainerRejectedKeys = map[string]string{
 	// validateContainerRestartPolicy (pkg/apis/core/validation) refuses rules
-	// on a container that sets no restartPolicy of its own.
+	// on a container that sets no restartPolicy of its own. An init entry
+	// reads both (parseInitContainerRestart); a main container reads neither.
 	"restartPolicyRules": "restartPolicyRules: not authorable — upstream accepts a container's restart rules only together with the container's own restartPolicy, which this component does not read",
 	// buildMainContainer names the container after the component.
 	"name":           "name: not authorable — the main container is named after the component",
