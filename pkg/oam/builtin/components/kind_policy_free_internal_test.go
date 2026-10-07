@@ -43,9 +43,9 @@ var policyFreeTypes = []policyFreeType{
 	policyFreeTypeOf(clusterRoleBindingKind),
 }
 
-// TestPolicyFreeKinds_NoDefaultedZeros: policyFreeKind.config passes no
-// defaulted-zero list to refuseUncarriedSpecValues, so no type it decodes may
-// hold a field on which an authored 0 or false would be silently replaced: a
+// TestPolicyFreeKinds_NoDefaultedZeros: none of these kinds sets a
+// defaulted-zero list (policyFreeKind.defaultedZeros), so no type they decode
+// may hold a field on which an authored 0 or false would be silently replaced: a
 // non-pointer omitempty number or boolean whose field comment states a default
 // that is not zero (TestPodSpecDefaultedZeros_MatchFieldDocs reads the same
 // source). A kind with such a field fails here, naming it, as does a
@@ -73,7 +73,7 @@ func TestPolicyFreeKinds_NoDefaultedZeros(t *testing.T) {
 			continue
 		}
 		if def := strings.ToLower(m[1]); !crdDefaultIsZero(def) {
-			t.Errorf("%s is omitted when zero and documents the default %s: an authored zero would be replaced; the kind needs a defaulted-zero list, which policyFreeKind does not carry", field, def)
+			t.Errorf("%s is omitted when zero and documents the default %s: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", field, def)
 		}
 	}
 }

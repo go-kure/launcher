@@ -268,8 +268,8 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 // TestGatewayKinds_NoDefaultedZeros is TestCertManagerKinds_NoDefaultedZeros
 // for the kinds of the Gateway API's infrastructure objects: no field these
 // kinds decode may be a number or a boolean that is omitted when zero and that
-// a CRD of either channel defaults to something else, since
-// policyFreeKind.config carries no defaulted-zero list.
+// a CRD of either channel defaults to something else, since none of these
+// kinds sets a defaulted-zero list (policyFreeKind.defaultedZeros).
 //
 // The numbers and booleans a type omits when zero are held to the kind's row,
 // so the reflection walk is seen to reach them and a dependency bump that adds
@@ -293,7 +293,7 @@ func TestGatewayKinds_NoDefaultedZeros(t *testing.T) {
 				}
 				for path, def := range schemaScalarDefaults(spec, "integer", "number", "boolean") {
 					if omitted[path] && !crdDefaultIsZero(def) {
-						t.Errorf("%s is omitted when zero and defaults to %s in the %s channel: an authored zero would be replaced; the kind needs a defaulted-zero list, which policyFreeKind does not carry", path, def, channel)
+						t.Errorf("%s is omitted when zero and defaults to %s in the %s channel: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", path, def, channel)
 					}
 				}
 			}

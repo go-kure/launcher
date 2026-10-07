@@ -159,7 +159,8 @@ func schemaDefaults(s apiextensionsv1.JSONSchemaProps) ([]string, int) {
 
 // TestVolsyncKinds_NoDefaults: the CRDs of the linked module default nothing
 // under spec, on a property, on the elements of a list or on the values of a
-// map. policyFreeKind.config carries no defaulted-zero list, so a number or a
+// map. Neither kind sets a defaulted-zero list (policyFreeKind.defaultedZeros),
+// so a number or a
 // boolean that the type omits when zero must have no default an authored 0 or
 // false would be replaced by; these CRDs have no default at all, and the test
 // holds them to that, which is more than the kinds need and simpler to read. A

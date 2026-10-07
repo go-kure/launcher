@@ -304,9 +304,9 @@ func TestCiliumBGPKinds_RequiredMatchCRD(t *testing.T) {
 // under spec sits on a field that is a pointer in the Go type. Such a field is
 // left out when it is not authored, so the API server fills its default, and
 // an authored 0 or false is written and kept. A default on a field that is no
-// pointer would need a list policyFreeKind does not carry: a defaulted-zero
-// one where the field is omitted when zero, a written default where it is
-// always encoded.
+// pointer would need what none of these kinds sets: a defaulted-zero list
+// (policyFreeKind.defaultedZeros) where the field is omitted when zero, a
+// written default where it is always encoded.
 func TestCiliumBGPKinds_DefaultsSitOnPointers(t *testing.T) {
 	found := map[string]string{}
 	for _, kind := range ciliumBGPKinds {

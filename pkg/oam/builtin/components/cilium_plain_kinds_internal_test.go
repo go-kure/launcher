@@ -191,7 +191,8 @@ func TestCiliumPlainKinds_RequiredMatchCRD(t *testing.T) {
 // where that default is the empty value itself an authored one comes back the
 // same: `disabled: false` is a pool that allocates, written or not. A default
 // of another value on such a field would turn an authored false into it, and
-// policyFreeKind carries no list to refuse that.
+// none of these kinds sets a defaulted-zero list (policyFreeKind.defaultedZeros)
+// to refuse that.
 func TestCiliumPlainKinds_NoDefaultIsLost(t *testing.T) {
 	found := map[string]string{}
 	for _, kind := range ciliumPlainKinds {
