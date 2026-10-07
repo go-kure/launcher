@@ -16,7 +16,7 @@ all. Each issue links back to this document.
 
 **Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
 Paths are relative to the repository root. Kure paths refer to the kure commit `go.mod`
-pins, `v0.2.0-beta.15.0.20261005182950-3afb93e06660`: a commit of kure's `main` after
+pins, `v0.2.0-beta.15.0.20261007183923-3978ab14c665`: a commit of kure's `main` after
 v0.2.0-beta.15, pinned while both libraries are being worked on. Everything here is
 pre-release: output, names and the library contract may change, and live-cluster upgrade
 effects are not a constraint. A section or
