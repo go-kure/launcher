@@ -344,6 +344,32 @@ var requiredWrittenKinds = []pinKind{
 	{component: "cnpg-cluster", handler: &CnpgClusterHandler{}, typ: reflect.TypeFor[cnpgv1.ClusterSpec](),
 		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"clusters.yaml", "v1"),
 		base:   map[string]any{"instances": 1, "storage": map[string]any{"size": "1Gi"}}},
+	// A catalog's images are held to the tag rule, which the sample "x" fails,
+	// so each image list is authored with one.
+	{component: "cnpg-imagecatalog", handler: &CnpgImageCatalogHandler{}, typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"imagecatalogs.yaml", "v1"),
+		base:   cnpgCatalogPinBase()},
+	{component: "cnpg-clusterimagecatalog", handler: &CnpgClusterImageCatalogHandler{}, typ: reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"clusterimagecatalogs.yaml", "v1"),
+		base:   cnpgCatalogPinBase()},
+	{component: "cnpg-backup", handler: &CnpgBackupHandler{}, typ: reflect.TypeFor[cnpgv1.BackupSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"backups.yaml", "v1"),
+		base:   map[string]any{"cluster": map[string]any{"name": "db"}}},
+	{component: "cnpg-scheduledbackup", handler: &CnpgScheduledBackupHandler{}, typ: reflect.TypeFor[cnpgv1.ScheduledBackupSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"scheduledbackups.yaml", "v1"),
+		base:   map[string]any{"cluster": map[string]any{"name": "db"}, "schedule": "0 0 3 * * *"}},
+	{component: "cnpg-databaserole", handler: &CnpgDatabaseRoleHandler{}, typ: reflect.TypeFor[cnpgv1.DatabaseRoleSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"databaseroles.yaml", "v1"),
+		base:   map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app"}},
+	{component: "cnpg-publication", handler: &CnpgPublicationHandler{}, typ: reflect.TypeFor[cnpgv1.PublicationSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"publications.yaml", "v1"),
+		base:   map[string]any{"cluster": map[string]any{"name": "db"}, "name": "pub", "dbname": "app", "target": map[string]any{"allTables": true}}},
+	{component: "cnpg-subscription", handler: &CnpgSubscriptionHandler{}, typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](),
+		schema: pinCRDSchema(cnpgModulePath, cnpgCRDs+"subscriptions.yaml", "v1"),
+		base: map[string]any{
+			"cluster": map[string]any{"name": "db"}, "name": "sub", "dbname": "app",
+			"publicationName": "pub", "externalClusterName": "origin",
+		}},
 	{component: "gatewayclass", handler: &GatewayClassHandler{}, typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1"),
 		base:   map[string]any{"controllerName": "example.com/gateway"}},
@@ -540,6 +566,13 @@ func TestRequiredWrittenKinds_CoverEveryCRDKind(t *testing.T) {
 		if _, ok := crdKinds[component]; !ok {
 			t.Errorf("requiredWrittenUnmeasured lists %s, which is no kind row of a CRD-backed API in README.md's kind inventory", component)
 		}
+	}
+}
+
+func cnpgCatalogPinBase() map[string]any {
+	return map[string]any{
+		"images":          []any{map[string]any{"major": 16, "image": "registry.example/postgresql:16.6"}},
+		"componentImages": []any{map[string]any{"key": "pgbouncer", "image": "registry.example/pgbouncer:1.24.0"}},
 	}
 }
 

@@ -10412,7 +10412,9 @@ match expression), has no member: those are refused on every kind
 None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
 `metallb-ipaddresspool`,
-`metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `prometheusrule`,
+`metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
+`cnpg-clusterimagecatalog`, `cnpg-backup`, `cnpg-scheduledbackup`, `cnpg-databaserole`,
+`cnpg-publication`, `cnpg-subscription`, `prometheusrule`,
 `artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation`, `resourcesetinputprovider`, `secretstore`,
 `clustersecretstore`, `externalsecret` and `clusterexternalsecret`. `metallb-bfdprofile` and
