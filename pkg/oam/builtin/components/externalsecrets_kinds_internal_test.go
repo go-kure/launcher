@@ -256,7 +256,7 @@ func (s externalSecretsSource) unappliedDefault(t *testing.T, f kindField, m fie
 		t.Errorf("%s is a pointer the type writes unauthored, with the default %s; this test knows no such field", f.path, m.def)
 		return "", false
 	}
-	if m.def == "" || crdDefaultIsZero(m.def) {
+	if m.def == "" || f.defaultIsZero(m.def) {
 		return "", false
 	}
 	return m.def, true
@@ -828,18 +828,13 @@ func TestExternalSecretsKinds_FakeData(t *testing.T) {
 // TestExternalSecretsKinds_DefaultedZeros is
 // TestPolicyFreeKinds_NoDefaultedZeros for the kinds of the External Secrets
 // Operator's API, whose types publish no field description to read a default
-// from. A number or a boolean these kinds decode that is omitted when zero
-// and that the CRD defaults to something else is one on which an authored 0
-// or false would be replaced: each kind's defaulted-zero list
+// from. A number, a boolean or a string these kinds decode that is omitted
+// when zero and that the CRD defaults to something else is one on which an
+// authored 0, false or "" would be replaced: each kind's defaulted-zero list
 // (policyFreeKind.defaultedZeros) must hold exactly those fields, each with
-// its default, so that the value is refused. The default is the field's
-// kubebuilder marker, read from the linked module's source. A field of that
-// shape on a type whose source is not read fails too.
-//
-// The two external-secret kinds have none at this pin: the API's defaults on
-// their types are strings and durations. An authored empty string there is
-// omitted and defaulted, as on every kind: only an authored 0 or false is
-// held to be carried.
+// its default as a JSON literal, so that the value is refused. The default is
+// the field's kubebuilder marker, read from the linked module's source. A
+// field of that shape on a type whose source is not read fails too.
 func TestExternalSecretsKinds_DefaultedZeros(t *testing.T) {
 	src := readExternalSecretsSource(t)
 	// Vacuity guard: a default marker is read.
@@ -859,8 +854,8 @@ func TestExternalSecretsKinds_DefaultedZeros(t *testing.T) {
 			switch {
 			case !read:
 				t.Errorf("%s (%s.%s) is omitted when zero, and its default cannot be read: the source of its type is not", at, f.owner, f.field.Name)
-			case m.hasDefault && !crdDefaultIsZero(m.def):
-				derived[f.path] = m.def
+			case m.hasDefault && !f.defaultIsZero(m.def):
+				derived[f.path] = f.defaultLiteral(m.def)
 			}
 		})
 		for _, path := range slices.Sorted(maps.Keys(derived)) {
@@ -889,6 +884,17 @@ func TestExternalSecretsKinds_DefaultedZeros(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("an authored false on a defaulted-zero field: got %v, want %s", err, want)
 		}
+	}
+	// An authored "" on a listed string field is refused too, on both
+	// external-secret kinds, under the cluster kind's prefix.
+	target := map[string]any{"target": map[string]any{"creationPolicy": ""}}
+	if _, err := externalSecretKind.config(&oam.Component{Name: "secret", Properties: target}); err == nil ||
+		err.Error() != `target.creationPolicy: "" cannot be carried by the external-secrets API types (the field is omitted when zero, so the API server would apply its default "Owner")` {
+		t.Errorf("an authored empty string on a defaulted field of the externalsecret kind: got %v", err)
+	}
+	if _, err := clusterExternalSecretKind.config(&oam.Component{Name: "secret", Properties: map[string]any{"externalSecretSpec": target}}); err == nil ||
+		err.Error() != `externalSecretSpec.target.creationPolicy: "" cannot be carried by the external-secrets API types (the field is omitted when zero, so the API server would apply its default "Owner")` {
+		t.Errorf("an authored empty string on a defaulted field of the clusterexternalsecret kind: got %v", err)
 	}
 	for _, at := range []string{
 		"ExternalSecretSpec: target.immutable",

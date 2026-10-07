@@ -52,7 +52,7 @@ func TestCnpgKindsDefaultedZeroFields_MatchCRD(t *testing.T) {
 			reflect.TypeFor[barmanv1.ObjectStoreSpec](), cnpgObjectStoreDefaultedZeroFields, 1, 5},
 	} {
 		t.Run(tt.kind, func(t *testing.T) {
-			defaults := crdSpecScalarDefaults(t, tt.crd, "integer", "number", "boolean")
+			defaults := crdSpecScalarDefaults(t, tt.crd, "integer", "number", "boolean", "string")
 			omitted := omitemptyScalarPaths(tt.typ)
 			if len(defaults) < tt.minDefaults {
 				t.Fatalf("found %d scalar defaults under the %s CRD's spec, want >= %d; the CRD walk is broken", len(defaults), tt.kind, tt.minDefaults)

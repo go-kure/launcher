@@ -130,6 +130,10 @@ func TestCnpgDatabaseHandler_Refusals(t *testing.T) {
 		{"reserved name template0", with("name", "template0"), `name "template0": reserved by PostgreSQL, the Database CRD refuses it`},
 		{"reserved name template1", with("name", "template1"), `name "template1": reserved by PostgreSQL, the Database CRD refuses it`},
 		{"no owner", without("owner"), "owner: required (the role that owns the database)"},
+		{"empty reclaim policy", with("databaseReclaimPolicy", ""),
+			`databaseReclaimPolicy: "" cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default "retain")`},
+		{"empty fdw option ensure", with("fdws", []any{map[string]any{"name": "f", "options": []any{map[string]any{"name": "o", "value": "v", "ensure": ""}}}}),
+			`fdws[0].options[0].ensure: "" cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default "present")`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := cnpgDatabaseErr(t, tt.props); err == nil || err.Error() != tt.wantErr {

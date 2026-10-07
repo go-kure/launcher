@@ -104,10 +104,25 @@ func (h *CnpgPoolerHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // cnpgPoolerDefaultedZeroFields lists the PoolerSpec fields on which an
-// authored 0 or false would be silently replaced, keyed and valued as
+// authored 0, false or "" would be silently replaced, keyed and valued as
 // cnpgClusterDefaultedZeroFields is. TestCnpgKindsDefaultedZeroFields_MatchCRD
 // derives it from the linked CloudNativePG module.
-var cnpgPoolerDefaultedZeroFields = map[string]string{}
+var cnpgPoolerDefaultedZeroFields = map[string]string{
+	"monitoring.podMonitorMetricRelabelings[].action":      `"replace"`,
+	"monitoring.podMonitorRelabelings[].action":            `"replace"`,
+	"pgbouncer.poolMode":                                   `"session"`,
+	"serviceTemplate.spec.ports[].protocol":                `"TCP"`,
+	"template.spec.containers[].ports[].protocol":          `"TCP"`,
+	"template.spec.ephemeralContainers[].ports[].protocol": `"TCP"`,
+	"template.spec.initContainers[].ports[].protocol":      `"TCP"`,
+	"template.spec.volumes[].iscsi.iscsiInterface":         `"default"`,
+	"template.spec.volumes[].rbd.keyring":                  `"/etc/ceph/keyring"`,
+	"template.spec.volumes[].rbd.pool":                     `"rbd"`,
+	"template.spec.volumes[].rbd.user":                     `"admin"`,
+	"template.spec.volumes[].scaleIO.fsType":               `"xfs"`,
+	"template.spec.volumes[].scaleIO.storageMode":          `"ThinProvisioned"`,
+	"type": `"rw"`,
+}
 
 // ToApplicationConfig decodes an OAM cnpg-pooler component into a
 // CnpgPoolerConfig, under the same null contract and strict decode as

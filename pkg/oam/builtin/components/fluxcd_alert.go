@@ -85,7 +85,8 @@ func (h *FluxcdAlertHandler) PropertySchema() map[string]oam.PropertySchema {
 // Provider it names does.
 var fluxcdAlertKind = &fluxKind[notificationv1beta3.AlertSpec]{
 	policyFreeKind: policyFreeKind[notificationv1beta3.AlertSpec]{
-		upstream: "notification.toolkit.fluxcd.io/v1beta3 AlertSpec",
+		upstream:       "notification.toolkit.fluxcd.io/v1beta3 AlertSpec",
+		defaultedZeros: fluxDefaultedZeros(map[string]string{"eventSeverity": `"info"`}),
 		required: map[string]string{
 			"providerRef":         "the Provider the events are sent to",
 			"providerRef.name":    "the name of the Provider, in the namespace the Alert lands in",

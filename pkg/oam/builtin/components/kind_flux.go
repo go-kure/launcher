@@ -33,6 +33,15 @@ type fluxKind[T any] struct {
 	durations []fluxDurationField[T]
 }
 
+// fluxDefaultedZeros is a Flux kind's defaulted-zero list for
+// refuseUncarriedSpecValues: fields maps a json path of its spec type that the
+// encoding omits when empty to the other default the CRD gives it, as its JSON
+// literal. TestFluxKinds_DefaultedZeros holds each kind's list to the default
+// markers of the linked modules' source.
+func fluxDefaultedZeros(fields map[string]string) defaultedZeroFields {
+	return defaultedZeroFields{api: "Flux", defaulter: "API server", fields: fields}
+}
+
 // config is policyFreeKind.config and the check of the authored durations,
 // returning a config that moves to the Flux namespace. The durations are
 // checked on the authored text, after the strict decode

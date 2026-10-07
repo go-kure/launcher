@@ -82,7 +82,8 @@ func (h *ImageUpdateAutomationHandler) PropertySchema() map[string]oam.PropertyS
 // Secret from its own namespace, the signing key's.
 var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 	policyFreeKind: policyFreeKind[autov1.ImageUpdateAutomationSpec]{
-		upstream: "image.toolkit.fluxcd.io/v1 ImageUpdateAutomationSpec",
+		upstream:       "image.toolkit.fluxcd.io/v1 ImageUpdateAutomationSpec",
+		defaultedZeros: fluxDefaultedZeros(map[string]string{"update.strategy": `"Setters"`}),
 		required: requiredFields(map[string]string{
 			"sourceRef":                            "the GitRepository that gives access to the repository the automation commits to",
 			"sourceRef.kind":                       "the kind of the source: `GitRepository`, the API's default, which the object would otherwise write empty",

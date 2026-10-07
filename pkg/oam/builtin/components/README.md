@@ -2232,10 +2232,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     object leaves out. One default cannot apply: `sourceRef.kind`, which
     the API defaults to `GitRepository` and the Go type writes empty when
     it is left out, an empty value being a value. It is required instead
-    (below).
-    `TestFluxKinds_NoDefaultedZeros` holds the types to having no number or
-    boolean that is omitted when zero and that the API defaults to something
-    else.
+    (below). The other four are strings the type omits when empty, so an
+    authored `""` on one would be left out and defaulted: it is refused
+    (`eventSeverity: "" cannot be carried by the Flux API types (…)`).
+    `TestFluxKinds_DefaultedZeros` holds each kind's list of such fields to
+    the numbers, booleans and strings that are omitted when zero and that
+    the API defaults to something else.
   - **A duration is held to the pattern its field declares**, as on the Flux
     kinds below (go-kure/launcher#601): unsigned, in the units `ms`, `s`,
     `m` and `h`. A value outside it is refused (`imagepolicy: interval
@@ -2964,7 +2966,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of the linked `k8s.io/api` types (every non-pointer `omitempty` number or
     boolean under `PodSpec` whose comment states a non-zero default) and fails
     when the two differ. It holds the list to the documented defaults, not to
-    the API server's defaulting code.
+    the API server's defaulting code. An authored empty string is not on it:
+    on a string field the API server defaults (a port's `protocol`,
+    `restartPolicy`, `dnsPolicy`, an `httpGet` probe's `scheme`) the type
+    omits `""` and the API server's defaulting applies its default. The field
+    comments state those defaults only in free text, some conditionally
+    (`imagePullPolicy`) and some not at all, so no list held to the API can
+    be built for them. This is a known gap.
   - A match expression without its `key` or `operator`, with an operator that
     is none of the four, or with `values` that do not go with the operator, in
     every label selector of the spec: a pod affinity or anti-affinity term's
@@ -3248,17 +3256,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   object name the config carries, with a deep copy of what was decoded, so two
   builds of one config share nothing. The config type is unexported: a
   component is only built from properties that went through the decode. A
-  kind may list its defaulted zeros (`defaultedZeros`), and an authored `0` or
-  `false` on a listed field is refused, as the secret-store kinds do (see the
-  **secretstore** entry). A kind that lists none suits a type only when none
-  of its omit-when-zero numbers or booleans has a non-zero API default;
-  `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of every
-  Kubernetes type built on it and fails on one whose comment states such a
-  default in a form it recognises (`Defaults to 1`, `Default is true`). A
-  default the comment words otherwise, or does not state, is not found. The
-  types of the Prometheus operator's API publish no field comment;
-  `TestMonitoringKinds_NoDefaultedZeros` reads the default markers of their
-  source instead. Cilium's publish none either, and its module ships the CRDs:
+  kind may list its defaulted zeros (`defaultedZeros`), and an authored `0`,
+  `false` or `""` on a listed field is refused, as the secret-store kinds do
+  (see the **secretstore** entry). A kind that lists none suits a type only
+  when none of its omit-when-zero numbers or booleans has a non-zero API
+  default; `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of
+  every Kubernetes type built on it and fails on one whose comment states such
+  a default in a form it recognises (`Defaults to 1`, `Default is true`). A
+  default the comment words otherwise, or does not state, is not found, and
+  a string's default is not read from a comment. The types of the Prometheus
+  operator's API publish no field comment; `TestMonitoringKinds_DefaultedZeros`
+  reads the default markers of their source instead, strings included. Cilium's publish none either, and its module ships the CRDs:
   `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
   BGP CRDs to a field that is a pointer in the Go type.
 
@@ -3931,11 +3939,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`honorLabels: false`). A quantity written as a number is emitted in its
     canonical string form (`nativeHistogramMinBucketFactor: 1.1` as `1100m`).
     The API's two defaults are strings (a prober's `path`, `/probe`, and a
-    relabeling rule's `action`, `replace`): an authored empty string there is
-    omitted and defaulted. `TestMonitoringKinds_NoDefaultedZeros` holds the
-    types to having no number or boolean that is omitted when zero and
-    defaulted to something else, from the default markers of the linked
-    module's source.
+    relabeling rule's `action`, `replace`): the type omits an empty string
+    there, so an authored `""` would be defaulted, and it is refused
+    (`prober.path: "" cannot be carried by the Prometheus operator API types
+    (…)`). `TestMonitoringKinds_DefaultedZeros` holds each kind's list of
+    such fields to the numbers, booleans and strings that are omitted when
+    zero and defaulted to something else, from the default markers of the
+    linked module's source.
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, so that the object would not show the omission. It is
@@ -4093,8 +4103,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     field (`encodeUsagesInRequest: false`, a keystore's `create: false`, a
     solver pod's `runAsUser: 0`), and left out where the type omits a zero
     that means the same (`isCA: false`). `TestCertManagerKinds_NoDefaultedZeros`
-    holds the types to having no number or boolean that is omitted when zero
-    and that the CRD defaults to something else. A default cert-manager
+    holds the types to having no number, boolean or string that is omitted
+    when zero and that the CRD defaults to something else. A default cert-manager
     applies when it reads the object (a key size, a rotation policy) reads
     the same type, in which an authored `0` and none are one value.
 
@@ -4728,10 +4738,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - One number of these types is omitted when zero, a ListenerSet listener's
     `port`, and the CRD gives it no default: an authored `port: 0` is left out
     as an unset one is, the API accepts neither, and the kind refuses both
-    (below).
-    `TestGatewayKinds_NoDefaultedZeros` holds the types to having no number or
-    boolean that is omitted when zero and that a CRD of either channel
-    defaults to something else.
+    (below). Of the strings the types omit when empty, the CRDs default one:
+    the `mode` of a Gateway's frontend TLS validation (`AllowValidOnly`), so
+    an authored `mode: ""` would be left out and defaulted, and it is refused
+    (`tls.frontend.default.validation.mode: "" cannot be carried by the
+    Gateway API types (…)`).
+    `TestGatewayKinds_DefaultedZeros` holds each kind's list of such fields to
+    the numbers, booleans and strings that are omitted when zero and that a
+    CRD of either channel defaults to something else.
 
   **Required** is a field the API requires that the Go type writes whether or
   not it was authored, so that the object would not show the omission: the
@@ -7746,10 +7760,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `false`.
   A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
   a quantity `cpu: 0`) is emitted as authored. An authored
-  empty string is not refused — `storage.size: ""` keeps its meaning above —
-  so an empty string on a defaulted field such as `primaryUpdateStrategy` is
-  still omitted. The two pod-certificate fields above are the exception: an
-  empty `signerName` or `keyType` is refused as an unauthored one is.
+  empty string the type omits on a field the CRD defaults (`primaryUpdateStrategy:
+  ""`, `logLevel: ""`) is refused as a defaulted `0` is
+  (`cnpgClusterDefaultedZeroFields`); elsewhere it is not refused —
+  `storage.size: ""`, which the CRD does not default, keeps its meaning
+  above. The two pod-certificate fields above are refused too: an empty
+  `signerName` or `keyType` is refused as an unauthored one is.
   A match expression authored in one of the spec's label selectors without
   its `key` or its `operator` is refused by path
   (`podSelectorRefs[0].selector.matchExpressions[0].operator: required (…)`):

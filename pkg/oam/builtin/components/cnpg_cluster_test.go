@@ -210,12 +210,12 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 	}
 }
 
-// TestCnpgClusterHandler_RefusesUncarriedValues: an authored 0 or false that
-// the typed spec decodes but omits when encoded (omitempty on a non-pointer
-// field) reaches the API server as absent. Where the CRD default is not zero
-// the operator would apply it instead, so the value is refused by path rather
-// than silently changed; where the default is zero or false the result is the
-// same and the value is accepted.
+// TestCnpgClusterHandler_RefusesUncarriedValues: an authored 0, false or ""
+// that the typed spec decodes but omits when encoded (omitempty on a
+// non-pointer field) reaches the API server as absent. Where the CRD default
+// is not zero the operator would apply it instead, so the value is refused by
+// path rather than silently changed; where the field has no default or a zero
+// one the result is the same and the value is accepted.
 func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 	role := func(k string, v any) map[string]any {
 		return map[string]any{"managed": map[string]any{"roles": []any{map[string]any{"name": "a", k: v}}}}
@@ -237,6 +237,8 @@ func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 		{"negative zero", map[string]any{"stopDelay": json.Number("-0")}, "stopDelay: -0" + why("1800")},
 		{"nested field", map[string]any{"replicationSlots": map[string]any{"updateInterval": 0}},
 			"replicationSlots.updateInterval: 0" + why("30")},
+		{"empty string", map[string]any{"primaryUpdateStrategy": ""}, `primaryUpdateStrategy: ""` + why(`"unsupervised"`)},
+		{"empty string in a list item", role("ensure", ""), `managed.roles[0].ensure: ""` + why(`"present"`)},
 		{"two spellings of one field", map[string]any{"storage": map[string]any{"size": "1Gi", "Size": "2Gi"}},
 			"storage.size: sets the same field as storage.Size (field names match case-insensitively, so one value would be dropped)"},
 		// The decoder keeps size "", which is omitted, so neither spelling is in

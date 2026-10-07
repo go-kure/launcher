@@ -41,10 +41,11 @@ func (h *CnpgObjectStoreHandler) PropertySchema() map[string]oam.PropertySchema 
 }
 
 // cnpgObjectStoreDefaultedZeroFields lists the ObjectStoreSpec fields on which
-// an authored 0 or false would be silently replaced, keyed and valued as
+// an authored 0, false or "" would be silently replaced, keyed and valued as
 // cnpgClusterDefaultedZeroFields is. TestCnpgKindsDefaultedZeroFields_MatchCRD
 // derives it from the linked Barman Cloud plugin module.
 var cnpgObjectStoreDefaultedZeroFields = map[string]string{
+	"instanceSidecarConfiguration.logLevel":                       `"info"`,
 	"instanceSidecarConfiguration.retentionPolicyIntervalSeconds": "1800",
 }
 

@@ -68,7 +68,7 @@ func validateCnpgClusterName(name string) error {
 // Deep blocks are published as open objects and decoded strictly into the
 // typed cnpgv1 structs (builtin.DecodeStrictJSON), so a misspelt key at any
 // depth or a wrongly typed value is refused rather than dropped, as is an
-// authored 0 or false the typed spec would omit and the operator would replace
+// authored 0, false or "" the typed spec would omit and the operator would replace
 // with a non-zero default (refuseUncarriedSpecValues).
 // TestCnpgClusterSchema_CoversClusterSpec keeps the published key set equal to
 // the upstream json tags.
@@ -345,20 +345,33 @@ var cnpgClusterLabelSelectors = slices.Concat(
 )
 
 // cnpgClusterDefaultedZeroFields lists the ClusterSpec fields on which an
-// authored 0 or false would be silently replaced: non-pointer and omitempty,
-// so the value is omitted when the Cluster is encoded, with a CRD default that
-// is not zero, so the API server then applies that default instead. Each key
-// is a json path with [] for an array element; each value is the CRD default,
-// quoted in the refusal. A field whose default is itself zero or false
-// (minSyncReplicas), or that has none (managed.roles[].login), is not listed:
-// omitting its zero leaves the same value. TestCnpgClusterDefaultedZeroFields_MatchCRD derives this set
-// from the linked CloudNativePG module, so a bump that changes it fails CI.
+// authored 0, false or "" would be silently replaced: non-pointer and
+// omitempty, so the value is omitted when the Cluster is encoded, with a CRD
+// default that is not zero, so the API server then applies that default
+// instead. Each key is a json path with [] for an array element; each value is
+// the CRD default as its JSON literal, quoted in the refusal. A field whose
+// default is itself zero, false or "" (minSyncReplicas), or that has none
+// (managed.roles[].login, storage.size), is not listed: omitting its zero
+// leaves the same value. TestCnpgClusterDefaultedZeroFields_MatchCRD derives
+// this set from the linked CloudNativePG module, so a bump that changes it
+// fails CI.
 var cnpgClusterDefaultedZeroFields = map[string]string{
+	"backup.target": `"prefer-standby"`,
+	"backup.volumeSnapshot.snapshotOwnerReference": `"none"`,
+	"logLevel":                        `"info"`,
 	"managed.roles[].connectionLimit": "-1",
-	"postgresGID":                     "26",
-	"postgresUID":                     "26",
+	"managed.roles[].ensure":          `"present"`,
+	"managed.services.additional[].serviceTemplate.spec.ports[].protocol": `"TCP"`,
+	"managed.services.additional[].updateStrategy":                        `"patch"`,
+	"monitoring.podMonitorMetricRelabelings[].action":                     `"replace"`,
+	"monitoring.podMonitorRelabelings[].action":                           `"replace"`,
+	"postgresGID":           "26",
+	"postgresUID":           "26",
+	"primaryUpdateMethod":   `"restart"`,
+	"primaryUpdateStrategy": `"unsupervised"`,
 	"probes.liveness.isolationCheck.connectionTimeout": "1000",
 	"probes.liveness.isolationCheck.requestTimeout":    "1000",
+	"replicationSlots.highAvailability.slotPrefix":     `"_cnpg_"`,
 	"replicationSlots.updateInterval":                  "30",
 	"startDelay":                                       "3600",
 	"stopDelay":                                        "1800",
@@ -383,12 +396,15 @@ func encodedKey(e map[string]any, k string) (string, bool) {
 }
 
 // isOmittedZero reports whether an authored leaf is a value omitempty drops:
-// false, or a number whose digits are all zero (0, -0, 0.0, 0e5), decided on
-// the literal so no float conversion can round a non-zero value to zero.
+// false, the empty string, or a number whose digits are all zero (0, -0, 0.0,
+// 0e5), decided on the literal so no float conversion can round a non-zero
+// value to zero.
 func isOmittedZero(v any) bool {
 	switch x := v.(type) {
 	case bool:
 		return !x
+	case string:
+		return x == ""
 	case json.Number:
 		mantissa, _, _ := strings.Cut(strings.ToLower(x.String()), "e")
 		return strings.Trim(mantissa, "-0.") == ""

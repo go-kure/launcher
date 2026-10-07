@@ -41,9 +41,10 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 // left to the API server.
 var externalSecretKind = &policyHeldKind[esv1.ExternalSecretSpec]{
 	policyFreeKind: policyFreeKind[esv1.ExternalSecretSpec]{
-		upstream: "external-secrets.io/v1 ExternalSecretSpec",
-		required: externalSecretRequired,
-		validate: validateExternalSecret,
+		upstream:       "external-secrets.io/v1 ExternalSecretSpec",
+		required:       externalSecretRequired,
+		defaultedZeros: externalSecretDefaultedZeros(""),
+		validate:       validateExternalSecret,
 		build: func(name, namespace string, spec *esv1.ExternalSecretSpec) client.Object {
 			secret := externalsecrets.CreateExternalSecret(name, namespace)
 			spec.DeepCopyInto(&secret.Spec)

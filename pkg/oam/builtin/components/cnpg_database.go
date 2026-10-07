@@ -80,10 +80,17 @@ func (h *CnpgDatabaseHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // cnpgDatabaseDefaultedZeroFields lists the DatabaseSpec fields on which an
-// authored 0 or false would be silently replaced, keyed and valued as
+// authored 0, false or "" would be silently replaced, keyed and valued as
 // cnpgClusterDefaultedZeroFields is. TestCnpgKindsDefaultedZeroFields_MatchCRD
 // derives it from the linked CloudNativePG module.
-var cnpgDatabaseDefaultedZeroFields = map[string]string{}
+var cnpgDatabaseDefaultedZeroFields = map[string]string{
+	"databaseReclaimPolicy":      `"retain"`,
+	"ensure":                     `"present"`,
+	"fdws[].options[].ensure":    `"present"`,
+	"fdws[].usage[].type":        `"grant"`,
+	"servers[].options[].ensure": `"present"`,
+	"servers[].usage[].type":     `"grant"`,
+}
 
 // cnpgDatabaseAlwaysEncodedDefaults lists the DatabaseSpec fields the Go type
 // always encodes (no omitempty) although the CRD gives them a default: an
