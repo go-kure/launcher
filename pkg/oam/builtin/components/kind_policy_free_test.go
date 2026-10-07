@@ -2902,9 +2902,10 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 		len(got.IPAddressPoolSelectors) != 1 || len(got.NodeSelectors) != 1 || len(got.ServiceSelectors) != 1 {
 		t.Errorf("spec = %+v, want the two pools and the two interfaces in order and a selector of each kind", got)
 	}
-	// An advertisement that authors nothing carries an empty spec, which limits
-	// the announcement to no pool, node, interface or Service. An authored empty
-	// list is the same advertisement and is left out, as the type omits it.
+	// An advertisement that authors nothing carries an empty spec, the widest
+	// advertisement: every pool, on every interface, for every Service, with no
+	// node excluded. An authored empty list is the same advertisement and is
+	// left out, as the type omits it.
 	for name, props := range map[string]map[string]any{
 		"nothing": {}, "an empty list of pools": {"ipAddressPools": []any{}}, "an empty list of node selectors": {"nodeSelectors": []any{}},
 	} {

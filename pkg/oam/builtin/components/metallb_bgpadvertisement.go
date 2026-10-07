@@ -21,7 +21,8 @@ import (
 // component unless `objectName` names it, in the build namespace, and nothing
 // else. The API requires no top-level field, and the fields that name or
 // select something narrow the advertisement: a component that authors none
-// limits it to no pool, node, peer or Service. TestCoreKindSchemas_CoverSpec
+// is the widest advertisement, of every pool, to every peer, for every
+// Service, with no node excluded. TestCoreKindSchemas_CoverSpec
 // keeps the published key set equal to the upstream json tags.
 type MetalLBBGPAdvertisementHandler struct{}
 
