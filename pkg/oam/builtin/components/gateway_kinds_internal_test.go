@@ -293,7 +293,8 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 }
 
 // TestGatewayKinds_DefaultedZeros is TestMonitoringKinds_DefaultedZeros for
-// the kinds of the Gateway API's infrastructure objects, with the CRD of each
+// the policy-free kinds of the Gateway API, its infrastructure objects and
+// the TCP, UDP and TLS routes, with the CRD of each
 // channel as the source of the defaults: a number, a boolean or a string these
 // kinds decode that is omitted when zero and that a CRD defaults to something
 // else must be in the kind's defaulted-zero list
@@ -302,8 +303,9 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 //
 // The numbers, booleans and strings a type omits when zero are held to the
 // kind's row, so the reflection walk is seen to reach them and a dependency
-// bump that adds one fails here, naming it. At v1.6.3 there are nine, two of
-// which the CRDs default: the mode of a Gateway's frontend TLS validation.
+// bump that adds one fails here, naming it. At v1.6.3 there are twelve, three
+// of them each route's useDefaultGateways, and two of the twelve the CRDs
+// default: the mode of a Gateway's frontend TLS validation.
 func TestGatewayKinds_DefaultedZeros(t *testing.T) {
 	for _, kind := range gatewayAPIKinds {
 		t.Run(kind.component, func(t *testing.T) {
