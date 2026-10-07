@@ -228,14 +228,16 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	config.objectName = config.Name
-	if config.objectName == "" {
-		config.objectName = routingObjectName(app.Name, "ingress", config.Scope)
+	def := config.Name
+	if def == "" {
+		def = routingObjectName(app.Name, "ingress", config.Scope)
 	}
-	if err := claimOwnObjectName(trait, ingressKind, app.Namespace, config.objectName, config.Name); err != nil {
+	if config.objectName, err = resolveObjectName(trait, oam.NameRoleIngress, ingressKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
 	}
-	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	// The hook's answer names the Ingress alone: the sub-application keeps the
+	// authored name, else launcher's default (go-kure/launcher#787).
+	subAppName, err := resolveSubApplicationName(trait, def)
 	if err != nil {
 		return err
 	}
@@ -557,8 +559,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 type IngressConfig struct {
 	Name  string
 	Scope string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
-	// objectName is the Ingress's name as Apply settled it: Name, else the
-	// default. "" on a config built directly (routingObjectNameOr).
+	// objectName is the Ingress's name as Apply resolved it: Name, else the
+	// naming hook's, else the default. "" on a config built directly
+	// (routingObjectNameOr).
 	objectName    string
 	componentName string
 	Annotations   map[string]string
