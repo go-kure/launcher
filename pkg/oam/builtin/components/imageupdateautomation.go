@@ -5,6 +5,7 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -32,6 +33,17 @@ type ImageUpdateAutomationHandler struct{}
 // CanHandle returns true for the imageupdateautomation component type.
 func (h *ImageUpdateAutomationHandler) CanHandle(componentType string) bool {
 	return componentType == imageUpdateAutomationType
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ImageUpdateAutomationHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(imageUpdateAutomationType)
+}
+
+// ComponentObject declares the imageupdateautomation kind's
+// ImageUpdateAutomation, which lands in the Flux namespace when one is set.
+func (h *ImageUpdateAutomationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: autov1.GroupVersion.Group, Kind: autov1.ImageUpdateAutomationKind}, oam.ObjectScopeFlux
 }
 
 // PropertySchema declares every top-level autov1.ImageUpdateAutomationSpec

@@ -4,6 +4,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -29,6 +30,17 @@ type ArtifactGeneratorHandler struct{}
 // CanHandle returns true for the artifactgenerator component type.
 func (h *ArtifactGeneratorHandler) CanHandle(componentType string) bool {
 	return componentType == artifactGeneratorType
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ArtifactGeneratorHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(artifactGeneratorType)
+}
+
+// ComponentObject declares the artifactgenerator kind's ArtifactGenerator,
+// which lands in the Flux namespace when one is set.
+func (h *ArtifactGeneratorHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: swv1beta1.GroupVersion.Group, Kind: swv1beta1.ArtifactGeneratorKind}, oam.ObjectScopeFlux
 }
 
 // PropertySchema declares every top-level swv1beta1.ArtifactGeneratorSpec

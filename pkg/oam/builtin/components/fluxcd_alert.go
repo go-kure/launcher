@@ -4,6 +4,7 @@ import (
 	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -31,6 +32,17 @@ type FluxcdAlertHandler struct{}
 // CanHandle returns true for the fluxcd-alert component type.
 func (h *FluxcdAlertHandler) CanHandle(componentType string) bool {
 	return componentType == fluxcdAlertType
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *FluxcdAlertHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(fluxcdAlertType)
+}
+
+// ComponentObject declares the fluxcd-alert kind's Alert, which lands in the
+// Flux namespace when one is set.
+func (h *FluxcdAlertHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: notificationv1beta3.GroupVersion.Group, Kind: notificationv1beta3.AlertKind}, oam.ObjectScopeFlux
 }
 
 // PropertySchema declares every top-level notificationv1beta3.AlertSpec field
