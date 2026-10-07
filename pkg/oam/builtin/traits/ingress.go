@@ -196,7 +196,7 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // routingObjectName is the default name of the object a routing trait generates
-// for a component, which is also its sub-application's name:
+// for a component, which is also its sub-application's default name:
 // <component>-<kind>, or <component>-<kind>-<scope> when the trait sets a scope.
 // A name over 253 characters is shortened by the one rule, the suffix kept whole.
 func routingObjectName(component, kind, scope string) string {
@@ -208,9 +208,9 @@ func routingObjectName(component, kind, scope string) string {
 }
 
 // routingObjectNameOr is the name of a routing trait's object at Generate: the
-// one Apply stored, which is also the sub-application's default name, or the
-// application's on a config built directly. The object is not named after the
-// sub-application it ends up in: a consumer may name that apart
+// one Apply stored, or the application's on a config built directly. The
+// object is not named after the sub-application it ends up in, and the two are
+// resolved apart: the naming hook may rename either one alone
 // (go-kure/launcher#787).
 func routingObjectNameOr(objectName string, app *stack.Application) string {
 	if objectName != "" {
