@@ -199,6 +199,10 @@ func helmtemplateLabelProps(t *testing.T) map[string]any {
 // of the types: a new type's entry goes at its position
 // (TestKindLists_InOrder).
 var componentLabelFixtures = map[string]componentLabelFixture{
+	// An Alertmanager emits identity and the authored fields too, namespaced,
+	// with no `app` label. Its operator runs the pods: the object holds no pod
+	// template and no selector, and its podMetadata takes no label.
+	"alertmanager": {props: map[string]any{"version": "v0.28.1", "replicas": 1}},
 	"artifactgenerator": {props: map[string]any{
 		"sources": []any{map[string]any{"alias": "app", "kind": "GitRepository", "name": "app"}},
 		"artifacts": []any{map[string]any{

@@ -196,6 +196,7 @@ var strictlyDecodedTypes = map[string]reflect.Type{
 	"metallbv1beta1.IPAddressPoolSpec":            reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
 	"metallbv1beta1.L2AdvertisementSpec":          reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
 	"metallbv1beta2.BGPPeerSpec":                  reflect.TypeFor[metallbv1beta2.BGPPeerSpec](),
+	"monitoringv1.AlertmanagerSpec":               reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 	"monitoringv1.PodMonitorSpec":                 reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 	"monitoringv1.ProbeSpec":                      reflect.TypeFor[monitoringv1.ProbeSpec](),
 	"monitoringv1.PrometheusRuleSpec":             reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
@@ -599,6 +600,11 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "prometheus-probe", typ: "monitoringv1.ProbeSpec", config: kindConfig(&PrometheusProbeHandler{}),
 		base:   map[string]any{"prober": map[string]any{"url": "blackbox-exporter:9115"}},
+		ground: generatorRuleGround,
+	},
+	{
+		component: "alertmanager", typ: "monitoringv1.AlertmanagerSpec", config: kindConfig(&AlertmanagerHandler{}),
+		base:   map[string]any{},
 		ground: generatorRuleGround,
 	},
 	{

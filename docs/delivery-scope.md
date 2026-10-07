@@ -1688,6 +1688,41 @@ and by scope, whatever component or trait emits it.
     that could hold one (`params`, `endpointParams`, a proxy URL) is written as authored.
   - The labels a Prometheus selects monitors and rules by are written under `labels`,
     as on every kind component.
+- **Shipped: `alertmanager`, the Alertmanager of the same API** (`alertmanager.go`,
+  with what it shares with the kinds to come in `monitoring_workload.go`): the strict
+  projection of `AlertmanagerSpec`, built on `policyHeldKind`, namespaced, declaring its
+  object and taking `objectName`. Launcher emits the Alertmanager and nothing else: the
+  operator builds a StatefulSet from it and runs the pods.
+  - **No capability is required and nothing gates it,** as for the four kinds above.
+  - **What the spec says of the pods is held to the environment policy as a workload
+    kind's own fields are:** `image` and the images of the listed containers and image
+    volumes (allowed registries, and the tag rule with or without a policy), `replicas`,
+    the cpu and memory of `resources` and of a listed container, the storage a claim
+    requests, `hostNetwork`, hostPath volumes, privilege and capabilities. It refuses or
+    passes; no policy default is filled, since the operator decides what an omitted
+    field means. A test derives every field of the spec that shapes the pods and holds
+    each to a shown refusal or a stated reason.
+  - **Not held: an unset `image` is not held to the allowed registries.** The object
+    then names none and the operator chooses the image the pods run; no registry
+    allowlist reaches that choice, as for an absent `pgbouncer.image`. What the operator adds on its
+    own (its config-reloader containers, the governing Service) is not in the object
+    either; its code is not in the linked module and was not read.
+  - **`baseImage`, `tag` and `sha` are not authorable** when not empty (an empty one
+    writes nothing): deprecated upstream, and the
+    image they yield is composed in operator code outside the linked module, so the kind
+    cannot say which image runs.
+  - **`podMetadata` takes no label.** It is read for reserved keys as a workload's pod
+    template is, and nothing is written there: the operator's pods carry the component
+    label only if the author writes the component's own value into `podMetadata.labels`;
+    otherwise the NetworkPolicies generated for the component do not select them.
+  - **The module ships no CRD.** The required fields are held to the markers of its
+    source, and the one expression rule the spec reaches (an `updateStrategy` with a
+    `rollingUpdate` must be of type `RollingUpdate`) is listed and left to the API
+    server. An authored `0` on a probe timing of a listed container is refused as on the
+    pod kinds, on a patch of one of the operator's own containers too, and so is an
+    empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`, which the
+    CRD defaults, as on the other kinds of the operator's API. A string default of the
+    Kubernetes pod types is not refused, as on the pod kinds.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

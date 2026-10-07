@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  labels:
+    launcher.gokure.dev/component: alerts
+  name: alerts
+  namespace: default
+spec:
+  alertmanagerConfigMatcherStrategy: {}
+  alertmanagerConfigSelector:
+    matchLabels:
+      team: payments
+  containers:
+  - name: config-reloader
+    resources:
+      limits:
+        memory: 64Mi
+  image: quay.io/prometheus/alertmanager:v0.28.1
+  podMetadata:
+    annotations:
+      example.com/owner: sre
+    labels:
+      team: payments
+  replicas: 3
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  retention: 120h
+  securityContext:
+    fsGroup: 2000
+    runAsNonRoot: true
+  storage:
+    volumeClaimTemplate:
+      metadata: {}
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+      status: {}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  labels:
+    launcher.gokure.dev/component: defaults
+  name: defaults
+  namespace: default
+spec:
+  alertmanagerConfigMatcherStrategy: {}
+  resources: {}
