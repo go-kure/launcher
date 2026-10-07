@@ -5,6 +5,7 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -30,6 +31,17 @@ type ImagePolicyHandler struct{}
 // CanHandle returns true for the imagepolicy component type.
 func (h *ImagePolicyHandler) CanHandle(componentType string) bool {
 	return componentType == imagePolicyType
+}
+
+// ContractMetadata implements oam.ContractDescriber.
+func (h *ImagePolicyHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(imagePolicyType)
+}
+
+// ComponentObject declares the imagepolicy kind's ImagePolicy, which lands in
+// the Flux namespace when one is set.
+func (h *ImagePolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return schema.GroupKind{Group: imagev1.GroupVersion.Group, Kind: imagev1.ImagePolicyKind}, oam.ObjectScopeFlux
 }
 
 // PropertySchema declares every top-level imagev1.ImagePolicySpec field by its
