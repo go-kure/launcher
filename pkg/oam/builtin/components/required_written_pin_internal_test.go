@@ -445,6 +445,8 @@ var requiredWrittenKinds = []pinKind{
 	{component: "prometheusrule", handler: &PrometheusRuleHandler{}, typ: reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), false),
 		base:   map[string]any{"groups": []any{map[string]any{"name": "g", "rules": []any{map[string]any{"alert": "Down", "expr": "up == 0"}}}}}},
+	{component: "alertmanager", handler: &AlertmanagerHandler{}, typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.AlertmanagerSpec](), false)},
 	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), false)},
 	{component: "bucket", handler: &BucketHandler{}, typ: reflect.TypeFor[sourcev1.BucketSpec](),

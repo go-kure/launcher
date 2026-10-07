@@ -10762,7 +10762,7 @@ section states the ones that are not, as they are at this pin.
 | `AFF` | the `core/v1` affinity terms: `NodeSelectorRequirement`, `PodAffinityTerm`, `PreferredSchedulingTerm`, `WeightedPodAffinityTerm` | a node selector requirement's `key` and `operator`; a pod affinity term's `topologyKey`; a weighted or preferred term's `weight`, `podAffinityTerm` and `preference` |
 | `SEC` | `SeccompProfile`, `AppArmorProfile`, `Sysctl` | a profile's `type`; a sysctl's `name` and `value` |
 | `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; an `imageCatalogRef`'s `kind` and `name` |
-| `KIND` | a type of the kind's own API | an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a CloudNativePG secret reference's `name` and `key`; a Database's `schemas[].name` |
+| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | an alertmanager's ephemeral claim template's `ownerReferences[]` fields; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a CloudNativePG secret reference's `name` and `key`; a Database's `schemas[].name` |
 
 A fifth family of the test, `SEL` (the `key` and `operator` of a `metav1` label selector's
 match expression), has no member: those are refused on every kind
@@ -10782,6 +10782,7 @@ match expression), has no member: those are refused on every kind
 | `httproute` | 44 | | | | 44 |
 | `grpcroute` | 34 | | | | 34 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
+| `alertmanager` | 242 | 18 | 8 | 208 | 8 |
 | `helmrelease` | 17 | | | | 17 |
 | `fluxcd-kustomization` | 14 | | | | 14 |
 | `bucket`, `ocirepository` | 7 each | | | | 7 |
