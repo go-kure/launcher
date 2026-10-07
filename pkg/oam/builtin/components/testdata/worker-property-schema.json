@@ -272,7 +272,16 @@
             }
           }
         }
-      }
+      },
+      "exclusive": [
+        {
+          "keys": [
+            "configMapRef",
+            "secretRef"
+          ],
+          "required": true
+        }
+      ]
     }
   },
   "hostAliases": {
@@ -540,7 +549,16 @@
                   }
                 }
               }
-            }
+            },
+            "exclusive": [
+              {
+                "keys": [
+                  "configMapRef",
+                  "secretRef"
+                ],
+                "required": true
+              }
+            ]
           }
         },
         "image": {
@@ -1275,7 +1293,16 @@
           "type": "string",
           "description": "Name of a ResourceClaimTemplate a claim is created from per pod."
         }
-      }
+      },
+      "exclusive": [
+        {
+          "keys": [
+            "resourceClaimName",
+            "resourceClaimTemplateName"
+          ],
+          "required": true
+        }
+      ]
     }
   },
   "resources": {
@@ -1714,7 +1741,16 @@
                   }
                 }
               }
-            }
+            },
+            "exclusive": [
+              {
+                "keys": [
+                  "configMapRef",
+                  "secretRef"
+                ],
+                "required": true
+              }
+            ]
           }
         },
         "image": {
@@ -2222,7 +2258,16 @@
           ]
         }
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "exclusive": [
+        {
+          "keys": [
+            "mountPath",
+            "devicePath"
+          ],
+          "required": true
+        }
+      ]
     }
   },
   "workingDir": {

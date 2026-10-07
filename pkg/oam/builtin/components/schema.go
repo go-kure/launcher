@@ -140,6 +140,7 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 					},
 				},
 			},
+			Exclusive: []oam.ExclusiveGroup{{Keys: []string{"configMapRef", "secretRef"}, Required: true}},
 		},
 	}
 }
@@ -460,6 +461,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 					"resourceClaimName":         {Type: oam.PropertyTypeString, Description: "Name of an existing ResourceClaim in the pod's namespace."},
 					"resourceClaimTemplateName": {Type: oam.PropertyTypeString, Description: "Name of a ResourceClaimTemplate a claim is created from per pod."},
 				},
+				Exclusive: []oam.ExclusiveGroup{{Keys: []string{"resourceClaimName", "resourceClaimTemplateName"}, Required: true}},
 			},
 		},
 		"podResources":     podResources,
@@ -533,13 +535,15 @@ func schemaVolumes() oam.PropertySchema {
 			Properties: map[string]oam.PropertySchema{
 				"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
 				"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
-				// mountPath is no longer schema-Required: a volumeMode: Block pvc
-				// authors devicePath instead. parseVolumes requires exactly one.
+				// mountPath is not schema-Required: a volumeMode: Block pvc authors
+				// devicePath instead. The exclusive group below and parseVolumes
+				// both require exactly one.
 				"mountPath":  {Type: oam.PropertyTypeString, Description: "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."},
 				"devicePath": {Type: oam.PropertyTypeString, Description: "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."},
 				"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "pvc only: the claim's volumeMode. Filesystem (the apiserver default when omitted) pairs with mountPath; Block pairs with devicePath."},
 				"readOnly":   {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
 			},
+			Exclusive: []oam.ExclusiveGroup{{Keys: []string{"mountPath", "devicePath"}, Required: true}},
 		},
 	}
 }
@@ -770,6 +774,7 @@ func schemaJobSpec(reserved bool) map[string]oam.PropertySchema {
 								},
 							},
 						},
+						Exclusive: []oam.ExclusiveGroup{{Keys: []string{"onExitCodes", "onPodConditions"}, Required: true}},
 					},
 				},
 			},
@@ -848,6 +853,7 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 			Type:        oam.PropertyTypeObject,
 			Description: "A single volume claim template: the corev1.PersistentVolumeClaimSpec fields, plus mountPath or devicePath.",
 			Properties:  props,
+			Exclusive:   []oam.ExclusiveGroup{{Keys: []string{"mountPath", "devicePath"}, Required: true}},
 		},
 	}
 }

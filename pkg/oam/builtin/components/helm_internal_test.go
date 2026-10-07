@@ -8,10 +8,14 @@ import (
 	"testing"
 )
 
-// jsonKeys returns the json tag names of struct type t's fields.
+// jsonKeys returns the json tag names of struct type t's exported fields.
 func jsonKeys(t reflect.Type) []string {
 	keys := make([]string, 0, t.NumField())
 	for i := range t.NumField() {
+		// The decode, as encoding/json, never reads an unexported field.
+		if !t.Field(i).IsExported() {
+			continue
+		}
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
 		keys = append(keys, name)
 	}

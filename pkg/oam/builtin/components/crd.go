@@ -17,14 +17,17 @@ type CRDHandler struct{}
 func (h *CRDHandler) CanHandle(componentType string) bool { return componentType == "crd" }
 
 // PropertySchema declares the crd component's properties. Exactly one of
-// `inline` (raw CRD YAML) / `url` is required — the one-of rule is enforced in
-// parseManifestSource and is not expressible in the schema vocabulary.
+// `inline` (raw CRD YAML) / `url` is required: ExclusiveProperties publishes the
+// rule, and parseManifestSource enforces it.
 func (h *CRDHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"inline": {Type: oam.PropertyTypeString, Description: "Raw CRD YAML emitted inline (mutually exclusive with url)."},
 		"url":    {Type: oam.PropertyTypeString, Description: "URL of the CRD YAML source (mutually exclusive with inline)."},
 	}
 }
+
+// ExclusiveProperties declares exactly one of inline and url.
+func (h *CRDHandler) ExclusiveProperties() []oam.ExclusiveGroup { return manifestSourceExclusive() }
 
 func (h *CRDHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	src, err := parseManifestSource(component.Properties)

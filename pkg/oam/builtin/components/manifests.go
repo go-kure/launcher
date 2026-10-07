@@ -22,8 +22,8 @@ type ManifestsHandler struct{}
 func (h *ManifestsHandler) CanHandle(componentType string) bool { return componentType == "manifests" }
 
 // PropertySchema declares the manifests component's properties. Exactly one of
-// `inline` (raw multi-doc YAML) / `url` is required (enforced in
-// parseManifestSource); `scopeOverrides` states a kind's scope explicitly and
+// `inline` (raw multi-doc YAML) / `url` is required (published by
+// ExclusiveProperties, enforced in parseManifestSource); `scopeOverrides` states a kind's scope explicitly and
 // outranks kure's own table, but not the Kubernetes API's own scoping
 // (isAPIGovernedScope) and not a CRD bundled in the same source, which it may
 // not contradict (stampManifestNamespaces).
@@ -33,6 +33,11 @@ func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 		"url":             {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
 		scopeOverridesKey: scopeOverridesSchema("Explicit scope entries, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD in this same source is an error)."),
 	}
+}
+
+// ExclusiveProperties declares exactly one of inline and url.
+func (h *ManifestsHandler) ExclusiveProperties() []oam.ExclusiveGroup {
+	return manifestSourceExclusive()
 }
 
 // scopeOverridesKey is the property that states a kind's scope, on the

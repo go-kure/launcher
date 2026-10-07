@@ -45,6 +45,13 @@ type manifestSource struct {
 	cached []client.Object // memoized resolve() result
 }
 
+// manifestSourceExclusive is the top-level group of the crd and manifests
+// components: exactly one of inline and url, counted as parseManifestSource
+// counts them (present and not null).
+func manifestSourceExclusive() []oam.ExclusiveGroup {
+	return []oam.ExclusiveGroup{{Keys: []string{"inline", "url"}, Required: true}}
+}
+
 // parseManifestSource reads a component's properties strictly: exactly one of
 // inline/url must be set; unknown keys and recognized-but-unsupported sources
 // (chart, oci:// urls) get distinct errors.

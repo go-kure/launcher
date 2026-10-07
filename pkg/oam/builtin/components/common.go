@@ -1876,6 +1876,16 @@ func authoredValue(raw map[string]any, key string) (any, bool) {
 	return v, true
 }
 
+// bothAuthored reports whether raw authors both a and b, each present and not
+// null, an empty string included. It is the "both set" test of an exclusive
+// pair (oam.ExclusiveGroup), which counts a key as the published schema does,
+// where parseStringField reads "" as absent.
+func bothAuthored(raw map[string]any, a, b string) bool {
+	_, hasA := authoredValue(raw, a)
+	_, hasB := authoredValue(raw, b)
+	return hasA && hasB
+}
+
 // authoredInAnySpelling reports whether raw authors field under a key that
 // matches it case-insensitively. It is authoredValue for a map that is decoded
 // into a Go type afterwards, where encoding/json folds field names: there the
@@ -2554,7 +2564,10 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		if devicePresent && volType != "pvc" {
 			return result, errors.Errorf("volume %q: devicePath is only valid on a pvc volume with volumeMode: Block, not on type %q", volName, volType)
 		}
-		if mountPresent && devicePresent {
+		// Both authored is refused even when one is "", which parseStringField
+		// reads as absent: the published schema counts an empty member as set
+		// (go-kure/launcher#790), and a direct call must refuse what it refuses.
+		if bothAuthored(m, "mountPath", "devicePath") {
 			return result, errors.Errorf("volume %q: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem volume or devicePath for a volumeMode: Block claim", volName)
 		}
 		if !mountPresent && !devicePresent {
@@ -4261,7 +4274,9 @@ func parseJobPodFailurePolicyRule(obj map[string]any, label string) (*batchv1.Po
 		rule.OnExitCodes = req
 	}
 
-	if raw, present := obj["onPodConditions"]; present && !isExplicitNull(raw) {
+	raw, podConditionsAuthored := obj["onPodConditions"]
+	podConditionsAuthored = podConditionsAuthored && !isExplicitNull(raw)
+	if podConditionsAuthored {
 		patterns, err := parseJobPodFailurePolicyOnPodConditions(raw, label+".onPodConditions")
 		if err != nil {
 			return nil, err
@@ -4272,10 +4287,12 @@ func parseJobPodFailurePolicyRule(obj map[string]any, label string) (*batchv1.Po
 	// Upstream requires exactly one of the two, in two separate checks: both is
 	// "specifying both OnExitCodes and OnPodConditions is not supported",
 	// neither is "specifying one of OnExitCodes and OnPodConditions is
-	// required". An authored `onPodConditions: []` counts as neither, there and
-	// here — upstream tests len(), not nil-ness.
+	// required". Alone, an authored `onPodConditions: []` counts as neither,
+	// there and here — upstream tests len(), not nil-ness. Beside onExitCodes it
+	// counts as authored, as the rule's exclusive group in the published schema
+	// does, so the pair is refused as both.
 	switch {
-	case rule.OnExitCodes != nil && len(rule.OnPodConditions) > 0:
+	case rule.OnExitCodes != nil && podConditionsAuthored:
 		return nil, errors.Errorf("%s: onExitCodes and onPodConditions are mutually exclusive; specify exactly one", label)
 	case rule.OnExitCodes == nil && len(rule.OnPodConditions) == 0:
 		return nil, errors.Errorf("%s: exactly one of onExitCodes or onPodConditions is required", label)
@@ -4957,7 +4974,8 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if vct.MountPath == "" && vct.DevicePath == "" {
 			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath' (or 'devicePath' for a volumeMode: Block claim)", vct.Name)
 		}
-		if vct.MountPath != "" && vct.DevicePath != "" {
+		// An empty path beside the other counts as authored, as in parseVolumes.
+		if bothAuthored(m, "mountPath", "devicePath") {
 			return nil, errors.Errorf("%s: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem claim or devicePath for a volumeMode: Block claim", entryLabel)
 		}
 		// sizeAuthored comes from parseStringField's `present`, which is false

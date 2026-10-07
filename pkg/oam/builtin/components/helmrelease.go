@@ -142,6 +142,12 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// ExclusiveProperties declares exactly one of chart and chartRef, the rule
+// validate enforces.
+func (h *HelmReleaseHandler) ExclusiveProperties() []oam.ExclusiveGroup {
+	return []oam.ExclusiveGroup{{Keys: []string{"chart", "chartRef"}, Required: true}}
+}
+
 // helmReleaseValuesModeHint points a helmrelease document that still sets the
 // removed valuesMode key at what replaced it.
 const helmReleaseValuesModeHint = `helmrelease no longer takes valuesMode (go-kure/launcher#702); values in a ConfigMap are the helm component's valuesMode: configMap, or a configmap trait plus a valuesFrom entry`

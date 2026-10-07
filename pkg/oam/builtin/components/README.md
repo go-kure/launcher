@@ -1400,11 +1400,14 @@ all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
   rule with `devicePath`, and `volumeMode: Block` is now accepted (it was
   rejected before). A Block template renders a claim template with
   `volumeMode: Block` and a main-container `volumeDevices` entry.
-- **Known limit: the published schema cannot say "exactly one of".** The
-  property schema has no one-of form, so a `volumes[]` entry and a
+- **The published schema says "exactly one of".** A `volumes[]` entry and a
   `volumeClaimTemplates[]` entry publish `mountPath` and `devicePath` as two
-  optional keys. A validator built from the schema accepts an entry with
-  both or neither; the build refuses it, as above.
+  optional keys plus a required `exclusive` group of the two
+  (go-kure/launcher#790), so a validator built from the schema refuses both
+  and neither, as the build does. A key counts as authored when it is present
+  and not null, an empty string included: `mountPath: ""` beside a
+  `devicePath` is both, through the transform and through a direct handler
+  call alike.
 - **`initContainers[]` / `sidecars[]` entry.** Adds `volumeDevices:
   [{name, devicePath}]`, a closed key set with both keys required. A
   `volumeDevices` name must be a Block volume this component declares (a
@@ -1461,7 +1464,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`; the `windowsOptions` strings are held to upstream's rules as on a container (see "Container fields"). `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
-| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources), and a `hugepages-<size>` entry needs `cpu` or `memory` in `requests` or `limits` (admission's "HugePages require cpu or memory"; pod-level resources get no defaults); claim names must be unique and name exactly one source. `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
+| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources), and a `hugepages-<size>` entry needs `cpu` or `memory` in `requests` or `limits` (admission's "HugePages require cpu or memory"; pod-level resources get no defaults); claim names must be unique and name exactly one source (an empty name beside the other counts as a second; the schema publishes the pair as an `exclusive` group, go-kure/launcher#790). `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
 
 Deliberately **not** accepted — each is rejected with an error naming the
 reason rather than silently ignored: `ephemeralContainers` (added to a running
@@ -6590,7 +6593,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
   | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
   | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
-  | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
+  | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). An empty `onPodConditions: []` alone is neither; beside `onExitCodes` it is both, as the rule's published `exclusive` group counts it (go-kure/launcher#790). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
   | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
   | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. `cronjob` refuses the three as well (go-kure/launcher#790): its job is the same JobSpec, and its parser read none of them and said nothing. | **Behavior-changing** (see below) |
   | `scheduling` | — | **Rejected outright** on `job` and `cronjob` (go-kure/launcher#790): alpha upstream, behind the `WorkloadWithJob` feature gate, and read by neither. | **Behavior-changing** for a caller that skips the authored-property check |
@@ -6965,7 +6968,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     means a Helm repository) and emits a `gitrepository` with the URL (`http://`
     or `https://`) and `source.ref`, which must set exactly one of
     `branch`, `tag`, `semver`, `name`, `commit`: Flux would otherwise check out
-    branch `master`, or pick one of several fields by precedence. `kind: Bucket`
+    branch `master`, or pick one of several fields by precedence. The schema
+    publishes the rule as an `exclusive` group on `source.ref`, and a field
+    authored as an empty string beside a set one counts as a second field.
+    `kind: Bucket`
     with `endpoint` and `bucketName` (and optionally `provider`, `region`,
     `prefix`), and no `url`, emits a `bucket` with exactly those keys.
     Credentials (`secretRef` and the like) have no inline form: author the
@@ -7208,9 +7214,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `uninstall.timeout`, and `install.strategy.retryInterval` and
   `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
   the decode does. Exactly one of
-  `chart` and `chartRef` is required. That is a known limit of the published schema, which
-  has no one-of form and lists both as optional: a validator built from it accepts neither or
-  both, and the build refuses either. Under an authored `chart`, `chart.spec.sourceRef.kind`
+  `chart` and `chartRef` is required. The published schema lists both as optional and says
+  so in the handler's `exclusive` group (go-kure/launcher#790): a validator built from it
+  refuses both and neither, as the build does. Under an authored `chart`, `chart.spec.sourceRef.kind`
   is required (go-kure/launcher#790): the API requires it and takes `HelmRepository`,
   `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
   kind does not choose a source's kind for the author, so a reference without one is

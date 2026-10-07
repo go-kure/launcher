@@ -18,7 +18,8 @@ rather than a dropped field; a number in an interface-typed field stays an exact
 It decodes only: no defaulting, no semantic checks. A panic inside the decode comes back as
 an error naming `T` and the panic's value, so an external type whose own `UnmarshalJSON` does
 not expect a value an author can write fails the build instead of crashing it (Cilium's ICMP
-field does this when `type` is left out). It shares one limitation with
+field does this when `type` is left out); a launcher type that decodes itself (the helm rule's
+`source.ref`) is covered the same way. It shares one limitation with
 `encoding/json`: unknown keys nested inside a type that has its own `UnmarshalJSON` are still
 dropped. A caller that knows what such a type reads its value into closes that for the type:
 `UnknownJSONFieldPathIn[T](props, shapes, owned...)` walks a value of a type named in `shapes`
