@@ -123,6 +123,16 @@ func TestComponentLabel_AuthoritativeOnEveryPath(t *testing.T) {
 			kind:    oam.ComponentLabelSelectorRequiresAnother,
 		},
 		{
+			name: "passthrough Deployment, selector rules the label out", typ: "passthrough", handler: &components.PassthroughHandler{},
+			props: func(t *testing.T) map[string]any {
+				return map[string]any{"object": ptObject(t, "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  selector:\n"+
+					"    matchLabels:\n      tier: front\n    matchExpressions:\n    - key: "+key+"\n      operator: DoesNotExist\n"+
+					"  template:\n    metadata:\n      labels:\n        tier: front\n"+podSpec)}
+			},
+			refused: []string{`Deployment "web"`, `spec.selector rules out the label "` + key + `"`, `component "web" ("web")`},
+			kind:    oam.ComponentLabelSelectorRulesOut,
+		},
+		{
 			name: "passthrough Deployment, the component's own value", typ: "passthrough", handler: &components.PassthroughHandler{},
 			props: func(t *testing.T) map[string]any {
 				return map[string]any{"object": ptObject(t, deployment("tier: front\n", "tier: front\n"+key+": web\n"))}

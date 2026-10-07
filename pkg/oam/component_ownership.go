@@ -495,7 +495,8 @@ func synthesizedPolicyComponent(cfg stack.ApplicationConfig) string {
 // entry of the component. It is never overwritten: with a key a workload
 // selects on, an overwrite of the pod template's would part the selector from
 // the template. For the same reason a pod template stays as written when the
-// workload's own selector rules the label out (withComponentLabel).
+// workload's own selector rules the label out (withComponentLabel), a workload
+// the wrapper has refused before this runs (ownedConfig.checkWorkloadSelector).
 //
 // An unstructured list envelope stands for its members when Flux applies it
 // (appliedObjects), so each member is labelled as an object handed out on its
@@ -562,30 +563,42 @@ func stampComponentLabel(obj client.Object, key, value string) error {
 
 // withComponentLabel returns a pod template's labels with key: value added.
 // They are returned as written when they carry the key already, and when the
-// workload's own selector matches them but would not match them with the label:
-// a selector that rules the key out (DoesNotExist), or this value (NotIn). The
-// API server refuses a workload whose selector does not match its template, so
-// such a workload's pods carry no component label.
-//
-// A selector that does not parse, or that does not match the template in the
-// first place, holds nothing back: neither is this function's to refuse.
+// workload's own selector rules the label out (selectorRulesOut): the API
+// server refuses a workload whose selector does not match its template. The
+// wrapper refuses such a workload before it labels anything
+// (ownedConfig.checkWorkloadSelector), so this never parts a selector from its
+// template.
 func withComponentLabel(podLabels map[string]string, selector *metav1.LabelSelector, key, value string) map[string]string {
 	if _, exists := podLabels[key]; exists {
 		return podLabels
 	}
-	if selector != nil {
-		if sel, err := metav1.LabelSelectorAsSelector(selector); err == nil && sel.Matches(labels.Set(podLabels)) {
-			labelled := make(labels.Set, len(podLabels)+1)
-			for k, v := range podLabels {
-				labelled[k] = v
-			}
-			labelled[key] = value
-			if !sel.Matches(labelled) {
-				return podLabels
-			}
-		}
+	if selectorRulesOut(selector, podLabels, key, value) {
+		return podLabels
 	}
 	return ownLabels(podLabels, key, value)
+}
+
+// selectorRulesOut reports whether a workload's selector matches its pod
+// template's labels but would not match them with key: value added: a selector
+// that rules the key out (DoesNotExist), or this value (NotIn).
+//
+// A nil selector, one that does not parse, and one that does not match the
+// template in the first place rule nothing out: neither of the last two is the
+// label's to refuse.
+func selectorRulesOut(selector *metav1.LabelSelector, podLabels map[string]string, key, value string) bool {
+	if selector == nil {
+		return false
+	}
+	sel, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil || !sel.Matches(labels.Set(podLabels)) {
+		return false
+	}
+	labelled := make(labels.Set, len(podLabels)+1)
+	for k, v := range podLabels {
+		labelled[k] = v
+	}
+	labelled[key] = value
+	return !sel.Matches(labelled)
 }
 
 // ownLabels returns labels with key: value added where key is absent, in a map
@@ -617,7 +630,7 @@ func ownLabels(labels map[string]string, key, value string) map[string]string {
 // the reach the ReplicationController's has.
 //
 // labelMapSelector says the selector is that plain label map, which the check
-// of the values a selector requires reads as one (requiredLabelValues).
+// of the values a selector requires reads as one (labelMapRequiredValues).
 //
 // jobTemplate is the path of a CronJob's job template, whose metadata every
 // Job the CronJob creates carries: it takes the label and is read as the pod

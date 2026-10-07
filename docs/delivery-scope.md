@@ -507,7 +507,7 @@ Decided in the ticket:
   and the transform refuses a document in which such an entry's value is another
   component's. Each refusal, and the one of a kind component's `labels` property that
   holds another value under the key, is a `*ComponentLabelError`, found with `errors.As`
-  and answering to `ErrComponentLabelValue`: it says which of the four it is, the
+  and answering to `ErrComponentLabelValue`: it says which of the five it is, the
   component, the object, the path, the key and the value.
   - Chart output under Flux delivery: through one post-renderer on the HelmRelease, after
     the authored ones, with a strategic-merge patch per kind with a pod template
@@ -521,8 +521,11 @@ Decided in the ticket:
   - Chart output under template delivery: labels added to the rendered objects, where the
     key is absent. A value the chart set under the key that is not the component's is
     refused under template delivery, overwritten when Flux installs.
-  - A generated workload whose own selector rules the label out keeps its pod template as
-    written, and its pods carry no component label.
+  - A generated workload whose own selector rules the label out of a pod template that
+    carries no value for the key (`DoesNotExist`, or `NotIn` holding the component's value)
+    is refused at generation: its pods could carry no component label, and no synthesized
+    policy would select them. A workload selector the check cannot read fails generation
+    rather than pass unchecked.
   - `GeneratedApplication.Component` is the authored component for the pooler, a database,
     an object store and a component's synthesized NetworkPolicies.
   - A synthesized inbound or egress NetworkPolicy selects the authored component's value,
