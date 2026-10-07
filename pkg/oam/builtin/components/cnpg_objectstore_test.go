@@ -127,6 +127,10 @@ func TestCnpgObjectStoreHandler_Refusals(t *testing.T) {
 			"configuration":                minimalObjectStore()["configuration"],
 			"instanceSidecarConfiguration": map[string]any{"retentionPolicyIntervalSeconds": 0},
 		}, "instanceSidecarConfiguration.retentionPolicyIntervalSeconds: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default 1800)"},
+		{"empty sidecar log level", map[string]any{
+			"configuration":                minimalObjectStore()["configuration"],
+			"instanceSidecarConfiguration": map[string]any{"logLevel": ""},
+		}, `instanceSidecarConfiguration.logLevel: "" cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default "info")`},
 		{"unknown top-level key", map[string]any{"configuration": minimalObjectStore()["configuration"], "retention": "30d"}, `unknown field "retention"`},
 		{"misspelt nested key", map[string]any{"configuration": map[string]any{"destinationPath": "s3://b", "endpointUrl2": "x"}}, `unknown field "endpointUrl2"`},
 		{"wrong scalar type", map[string]any{"configuration": minimalObjectStore()["configuration"], "retentionPolicy": 30}, "cannot unmarshal number"},

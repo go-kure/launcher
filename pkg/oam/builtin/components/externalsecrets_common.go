@@ -43,8 +43,9 @@ import (
 // holds each kind's required list to them, TestExternalSecretsKinds_Rules
 // every expression and property-count rule to what the kinds do about it, and
 // TestExternalSecretsKinds_DefaultedZeros the claim that a CRD default, read
-// from its marker, can turn an authored 0 or false into another value only on
-// the fields of secretStoreDefaultedZeros, where the stores refuse one.
+// from its marker, can turn an authored 0, false or "" into another value only
+// on the fields of a kind's defaultedZeros (secretStoreDefaultedZeros,
+// externalSecretDefaultedZeros), where the kind refuses one.
 //
 // A host these objects name is one the operator reaches, not an artifact
 // source: a provider's API, a Vault, a webhook. None is held to the
@@ -116,18 +117,58 @@ func generatedRequired(paths []string) map[string]string {
 
 // secretStoreDefaultedZeros is the stores' defaulted-zero list for
 // refuseUncarriedSpecValues: the fields of esv1.SecretStoreSpec whose encoding
-// omits a 0 or false and to which the CRD gives another default, so that the
-// API server would replace the authored value. Each maps to that default.
-// TestExternalSecretsKinds_DefaultedZeros holds the list to the default
-// markers of the linked module's source, in both directions.
+// omits a 0, false or "" and to which the CRD gives another default, so that
+// the API server would replace the authored value. Each maps to that default
+// as its JSON literal. TestExternalSecretsKinds_DefaultedZeros holds the list
+// to the default markers of the linked module's source, in both directions.
 var secretStoreDefaultedZeros = defaultedZeroFields{
 	api:       "external-secrets",
 	defaulter: "API server",
-	fields: map[string]string{
+	fields: map[string]string{ //nolint:gosec // G101: field paths and their CRD defaults, no credential
+		"provider.aws.sessionTagsPolicy":                         `"None"`,
+		"provider.azurekv.environmentType":                       `"PublicCloud"`,
 		"provider.beyondtrust.server.decrypt":                    "true",
+		"provider.crd.server.url":                                `"kubernetes.default"`,
+		"provider.gcpsm.secretVersionSelectionPolicy":            `"LatestOrFail"`,
+		"provider.github.secretType":                             `"Actions"`,
+		"provider.github.url":                                    `"https://github.com/"`,
+		"provider.infisical.hostAPI":                             `"https://app.infisical.com/api"`,
 		"provider.infisical.secretsScope.expandSecretReferences": "true",
+		"provider.infisical.secretsScope.secretsPath":            `"/"`,
+		"provider.kubernetes.remoteNamespace":                    `"default"`,
+		"provider.kubernetes.server.url":                         `"kubernetes.default"`,
+		"provider.ngrok.apiUrl":                                  `"https://api.ngrok.com"`,
 		"provider.onepasswordSDK.cache.maxSize":                  "100",
+		"provider.onepasswordSDK.integrationInfo.name":           `"1Password SDK"`,
+		"provider.onepasswordSDK.integrationInfo.version":        `"v1.0.0"`,
+		"provider.pulumi.apiUrl":                                 `"https://api.pulumi.com/api/esc"`,
+		"provider.vault.auth.gcp.path":                           `"gcp"`,
 	},
+}
+
+// externalSecretDefaultedZeros is secretStoreDefaultedZeros for an
+// esv1.ExternalSecretSpec whose fields sit under prefix in the authored
+// properties: "" for the externalsecret kind, "externalSecretSpec." for the
+// clusterexternalsecret kind, which embeds the spec there.
+func externalSecretDefaultedZeros(prefix string) defaultedZeroFields {
+	fields := map[string]string{}
+	for path, def := range map[string]string{
+		"data[].sourceRef.generatorRef.apiVersion":                    `"generators.external-secrets.io/v1alpha1"`,
+		"dataFrom[].rewrite[].merge.conflictPolicy":                   `"Error"`,
+		"dataFrom[].rewrite[].merge.priorityPolicy":                   `"Strict"`,
+		"dataFrom[].rewrite[].merge.strategy":                         `"Extract"`,
+		"dataFrom[].sourceRef.generatorRef.apiVersion":                `"generators.external-secrets.io/v1alpha1"`,
+		"target.creationPolicy":                                       `"Owner"`,
+		"target.deletionPolicy":                                       `"Retain"`,
+		"target.template.engineVersion":                               `"v2"`,
+		"target.template.mergePolicy":                                 `"Replace"`,
+		"target.template.templateFrom[].configMap.items[].templateAs": `"Values"`,
+		"target.template.templateFrom[].secret.items[].templateAs":    `"Values"`,
+		"target.template.templateFrom[].target":                       `"Data"`,
+	} {
+		fields[prefix+path] = def
+	}
+	return defaultedZeroFields{api: "external-secrets", defaulter: "API server", fields: fields}
 }
 
 // secretStoreSchema returns the properties of the secretstore and

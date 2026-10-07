@@ -86,9 +86,10 @@ func cnpgModuleDir(t *testing.T) string {
 	return dir
 }
 
-// clusterCRDScalarDefaults returns the default of every integer, number and
-// boolean property under the Cluster CRD's spec, keyed by json path with []
-// for an array element, as its JSON literal (26, -1, true, false).
+// clusterCRDScalarDefaults returns the default of every integer, number,
+// boolean and string property under the Cluster CRD's spec, keyed by json
+// path with [] for an array element, as its JSON literal (26, -1, true, false,
+// "ext4").
 func clusterCRDScalarDefaults(t *testing.T, moduleDir string) map[string]string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(moduleDir, "config", "crd", "bases", "postgresql.cnpg.io_clusters.yaml"))
@@ -110,7 +111,7 @@ func clusterCRDScalarDefaults(t *testing.T, moduleDir string) map[string]string 
 	var walk func(s apiextensionsv1.JSONSchemaProps, path string)
 	walk = func(s apiextensionsv1.JSONSchemaProps, path string) {
 		switch s.Type {
-		case "integer", "number", "boolean":
+		case "integer", "number", "boolean", "string":
 			if s.Default != nil {
 				out[path] = strings.TrimSpace(string(s.Default.Raw))
 			}
@@ -131,9 +132,10 @@ func clusterCRDScalarDefaults(t *testing.T, moduleDir string) map[string]string 
 }
 
 // crdDefaultIsZero reports whether a CRD default literal is the value omitempty
-// drops: false or a numeric zero.
+// drops: false, a numeric zero or the empty string, quoted as a JSON literal
+// or not (a source marker's default is read unquoted).
 func crdDefaultIsZero(def string) bool {
-	if def == "false" {
+	if def == "false" || def == `""` || def == "" {
 		return true
 	}
 	f, err := strconv.ParseFloat(def, 64)
@@ -141,7 +143,7 @@ func crdDefaultIsZero(def string) bool {
 }
 
 // omitemptyScalarPaths returns the json path of every non-pointer bool,
-// integer or float field tagged omitempty under typ, following what
+// integer, float or string field tagged omitempty under typ, following what
 // encoding/json encodes: exported fields by json name, embedded structs
 // promoted, pointers and slices (as []) descended, maps and types with their
 // own JSON or text encoding not descended.
@@ -187,7 +189,7 @@ func omitemptyScalarPaths(typ reflect.Type) map[string]bool {
 				child = path + "." + name
 			}
 			switch f.Type.Kind() {
-			case reflect.Bool,
+			case reflect.Bool, reflect.String,
 				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 				reflect.Float32, reflect.Float64:

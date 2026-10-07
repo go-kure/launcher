@@ -21,10 +21,10 @@ func policyFreeTypeOf[T any](k *policyFreeKind[T]) policyFreeType {
 // policyFreeTypes lists every policyFreeKind of the package whose type
 // publishes its field comments (SwaggerDoc). A kind added without a row here
 // is not held by the tests below. The kinds of the Prometheus operator's API
-// publish none and are held by TestMonitoringKinds_NoDefaultedZeros instead,
+// publish none and are held by TestMonitoringKinds_DefaultedZeros instead,
 // from the markers of their source. The kinds of cert-manager publish none
 // either and are held by TestCertManagerKinds_NoDefaultedZeros, from their
-// CRDs, as those of the Gateway API are by TestGatewayKinds_NoDefaultedZeros.
+// CRDs, as those of the Gateway API are by TestGatewayKinds_DefaultedZeros.
 // The kinds of VolSync's API are held by TestVolsyncKinds_NoDefaults, which
 // holds their CRDs to defaulting nothing under spec.
 var policyFreeTypes = []policyFreeType{

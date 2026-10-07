@@ -13,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // gatewayAPIModulePath is the module whose CRDs the tests below read. It
@@ -26,8 +28,8 @@ var gatewayAPIChannels = []string{"experimental", "standard"}
 // gatewayAPIKinds lists the kind components of the Gateway API's
 // infrastructure objects with the CRD of the object each emits, the spec type
 // it decodes into and its required list. experimental names the properties
-// only the experimental channel's CRD holds, and omitted the numbers and
-// booleans the type omits when zero.
+// only the experimental channel's CRD holds, and omitted the numbers,
+// booleans and strings the type omits when zero.
 //
 // The fields the CRD requires that the type omits when they are not authored,
 // which no required list can name, are answered in the kind's row of
@@ -39,18 +41,25 @@ var gatewayAPIKinds = []struct {
 	required     map[string]string
 	experimental []string
 	omitted      []string
+	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
+	defaulted map[string]string
 }{
 	{component: "gatewayclass", crd: "gatewayclasses", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), required: gatewayClassKind.required},
 	{
 		component: "gateway", crd: "gateways", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), required: gatewayKind.required,
 		experimental: []string{"defaultScope"},
+		omitted:      []string{"addresses[].value", "defaultScope", "tls.frontend.default.validation.mode", "tls.frontend.perPort[].tls.validation.mode"},
+		defaulted:    gatewayKind.defaultedZeros.fields,
 	},
 	{
 		component: "listenerset", crd: "listenersets", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), required: listenerSetKind.required,
-		omitted: []string{"listeners[].port"},
+		omitted: []string{"listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
 	{component: "referencegrant", crd: "referencegrants", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), required: referenceGrantKind.required},
-	{component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required},
+	{
+		component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required,
+		omitted: []string{"validation.subjectAltNames[].hostname", "validation.subjectAltNames[].uri"},
+	},
 }
 
 // gatewayAPICRDFile is the path of one CRD under the directory of the linked
@@ -265,22 +274,24 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 	}
 }
 
-// TestGatewayKinds_NoDefaultedZeros is TestCertManagerKinds_NoDefaultedZeros
-// for the kinds of the Gateway API's infrastructure objects: no field these
-// kinds decode may be a number or a boolean that is omitted when zero and that
-// a CRD of either channel defaults to something else, since none of these
-// kinds sets a defaulted-zero list (policyFreeKind.defaultedZeros).
+// TestGatewayKinds_DefaultedZeros is TestMonitoringKinds_DefaultedZeros for
+// the kinds of the Gateway API's infrastructure objects, with the CRD of each
+// channel as the source of the defaults: a number, a boolean or a string these
+// kinds decode that is omitted when zero and that a CRD defaults to something
+// else must be in the kind's defaulted-zero list
+// (policyFreeKind.defaultedZeros) with that default, and the list must hold
+// nothing else.
 //
-// The numbers and booleans a type omits when zero are held to the kind's row,
-// so the reflection walk is seen to reach them and a dependency bump that adds
-// one fails here, naming it. At v1.6.2 there is one, a ListenerSet's listener
-// port, which the CRD does not default.
-func TestGatewayKinds_NoDefaultedZeros(t *testing.T) {
+// The numbers, booleans and strings a type omits when zero are held to the
+// kind's row, so the reflection walk is seen to reach them and a dependency
+// bump that adds one fails here, naming it. At v1.6.2 there are nine, two of
+// which the CRDs default: the mode of a Gateway's frontend TLS validation.
+func TestGatewayKinds_DefaultedZeros(t *testing.T) {
 	for _, kind := range gatewayAPIKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			omitted := omitemptyScalarPaths(kind.typ)
 			if got := slices.Sorted(maps.Keys(omitted)); !slices.Equal(got, kind.omitted) {
-				t.Fatalf("numbers and booleans omitted when zero = %v, want %v", got, kind.omitted)
+				t.Fatalf("numbers, booleans and strings omitted when zero = %v, want %v", got, kind.omitted)
 			}
 			for _, channel := range gatewayAPIChannels {
 				spec := gatewayAPICRDSpec(t, channel, kind.crd)
@@ -291,12 +302,23 @@ func TestGatewayKinds_NoDefaultedZeros(t *testing.T) {
 						t.Fatalf("%s has the default %s in the %s channel, want \"Same\"; the CRD's defaults are not being read", from, def, channel)
 					}
 				}
-				for path, def := range schemaScalarDefaults(spec, "integer", "number", "boolean") {
+				derived := map[string]string{}
+				for path, def := range schemaScalarDefaults(spec, "integer", "number", "boolean", "string") {
 					if omitted[path] && !crdDefaultIsZero(def) {
-						t.Errorf("%s is omitted when zero and defaults to %s in the %s channel: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", path, def, channel)
+						derived[path] = def
 					}
 				}
+				compareDefaultedZeros(t, kind.component+" ("+channel+" channel)", derived, kind.defaulted)
 			}
 		})
+	}
+	// The list refuses: an authored "" on a listed field does not reach the
+	// object.
+	_, err := gatewayKind.config(&oam.Component{Name: "gateway", Properties: map[string]any{
+		"tls": map[string]any{"frontend": map[string]any{"default": map[string]any{"validation": map[string]any{"mode": ""}}}},
+	}})
+	const want = `tls.frontend.default.validation.mode: "" cannot be carried by the Gateway API types (the field is omitted when zero, so the API server would apply its default "AllowValidOnly")`
+	if err == nil || err.Error() != want {
+		t.Errorf("an authored empty string on a defaulted field: got %v, want %s", err, want)
 	}
 }

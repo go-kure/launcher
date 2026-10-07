@@ -111,10 +111,16 @@ var gatewayRequired = func() map[string]string {
 // protocol, and of what is authored below them the fields gatewayRequired
 // lists; the type would write each one empty. The API's value rules, those it
 // writes as expressions included (a listener's tls against its protocol, the
-// uniqueness of a listener), are left to the API server.
+// uniqueness of a listener), are left to the API server. An authored "" on a
+// frontend TLS validation's mode, which the type omits and the CRD defaults to
+// AllowValidOnly, is refused (refuseUncarriedSpecValues).
 var gatewayKind = &policyFreeKind[gatewayv1.GatewaySpec]{
 	upstream: "gateway.networking.k8s.io/v1 GatewaySpec",
 	required: gatewayRequired,
+	defaultedZeros: defaultedZeroFields{api: "Gateway", defaulter: "API server", fields: map[string]string{
+		"tls.frontend.default.validation.mode":       `"AllowValidOnly"`,
+		"tls.frontend.perPort[].tls.validation.mode": `"AllowValidOnly"`,
+	}},
 	build: func(name, namespace string, spec *gatewayv1.GatewaySpec) client.Object {
 		gateway := kubernetes.CreateGateway(name, namespace)
 		spec.DeepCopyInto(&gateway.Spec)

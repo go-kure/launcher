@@ -75,6 +75,11 @@ func (h *ImagePolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 var imagePolicyKind = &fluxKind[imagev1.ImagePolicySpec]{
 	policyFreeKind: policyFreeKind[imagev1.ImagePolicySpec]{
 		upstream: "image.toolkit.fluxcd.io/v1 ImagePolicySpec",
+		defaultedZeros: fluxDefaultedZeros(map[string]string{
+			"digestReflectionPolicy":    `"Never"`,
+			"policy.alphabetical.order": `"asc"`,
+			"policy.numerical.order":    `"asc"`,
+		}),
 		required: map[string]string{
 			"imageRepositoryRef":      "the ImageRepository whose tags the policy selects from",
 			"imageRepositoryRef.name": "the name of the ImageRepository",

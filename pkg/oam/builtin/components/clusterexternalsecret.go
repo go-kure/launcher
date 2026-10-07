@@ -41,9 +41,10 @@ func (h *ClusterExternalSecretHandler) PropertySchema() map[string]oam.PropertyS
 // (enforceTargetManifest). The API's other rules are left to the API server.
 var clusterExternalSecretKind = &policyHeldKind[esv1.ClusterExternalSecretSpec]{
 	policyFreeKind: policyFreeKind[esv1.ClusterExternalSecretSpec]{
-		upstream: "external-secrets.io/v1 ClusterExternalSecretSpec",
-		required: clusterExternalSecretRequired,
-		validate: validateClusterExternalSecret,
+		upstream:       "external-secrets.io/v1 ClusterExternalSecretSpec",
+		required:       clusterExternalSecretRequired,
+		defaultedZeros: externalSecretDefaultedZeros("externalSecretSpec."),
+		validate:       validateClusterExternalSecret,
 		build: func(name, _ string, spec *esv1.ClusterExternalSecretSpec) client.Object {
 			secret := externalsecrets.CreateClusterExternalSecret(name)
 			spec.DeepCopyInto(&secret.Spec)

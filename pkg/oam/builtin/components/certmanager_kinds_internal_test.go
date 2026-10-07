@@ -257,7 +257,7 @@ func TestCrdRefusesZero(t *testing.T) {
 // TestCertManagerKinds_NoDefaultedZeros is TestPolicyFreeKinds_NoDefaultedZeros
 // for the kinds of cert-manager's API, whose types publish no field
 // description to read a default from: no field these kinds decode may be a
-// number or a boolean that is omitted when zero and that the CRD defaults to
+// number, a boolean or a string that is omitted when zero and that the CRD defaults to
 // something else, since none of these kinds sets a defaulted-zero list
 // (policyFreeKind.defaultedZeros).
 //
@@ -298,7 +298,7 @@ func TestCertManagerKinds_NoDefaultedZeros(t *testing.T) {
 					t.Fatalf("%s has the default %s, want \"gateway.networking.k8s.io\"; the CRD's defaults are not being read", group, def)
 				}
 			}
-			for path, def := range crdSpecScalarDefaults(t, file, "integer", "number", "boolean") {
+			for path, def := range crdSpecScalarDefaults(t, file, "integer", "number", "boolean", "string") {
 				if omitted[path] && !crdDefaultIsZero(def) {
 					t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", path, def)
 				}

@@ -20,6 +20,7 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
@@ -53,11 +54,13 @@ var fluxKindRows = []struct {
 	required  map[string]string
 	validated []string
 	durations map[string]fluxduration.Form
+	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
+	defaulted map[string]string
 }{
-	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations)},
-	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations)},
-	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations)},
-	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), artifactGeneratorKind.required, nil, durationForms(artifactGeneratorKind.durations)},
+	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
+	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations), imagePolicyKind.defaultedZeros.fields},
+	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations), imageUpdateAutomationKind.defaultedZeros.fields},
+	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), artifactGeneratorKind.required, nil, durationForms(artifactGeneratorKind.durations), artifactGeneratorKind.defaultedZeros.fields},
 }
 
 // durationForms is a kind's duration fields by path, each with its form.
@@ -197,18 +200,20 @@ func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
 	}
 }
 
-// TestFluxKinds_NoDefaultedZeros is TestMonitoringKinds_NoDefaultedZeros for
-// the kinds of the Flux APIs: no field these kinds decode may be a number or a
-// boolean that is omitted when zero and that the API defaults to something
-// else, since none of these kinds sets a defaulted-zero list
-// (policyFreeKind.defaultedZeros). The default is the field's marker, read from the linked modules' source, the
-// Kubernetes types these specs embed included. A field of that shape on a type
-// whose source is not read fails too.
-func TestFluxKinds_NoDefaultedZeros(t *testing.T) {
+// TestFluxKinds_DefaultedZeros is TestMonitoringKinds_DefaultedZeros for the
+// kinds of the Flux APIs: a number, a boolean or a string these kinds decode
+// that is omitted when zero and that the API defaults to something else must
+// be in the kind's defaulted-zero list (policyFreeKind.defaultedZeros) with
+// that default, and the list must hold nothing else. The default is the
+// field's marker, read from the linked modules' source, the Kubernetes types
+// these specs embed included. A field of that shape on a type whose source is
+// not read fails too.
+func TestFluxKinds_DefaultedZeros(t *testing.T) {
 	markers := linkedFieldMarkers(t, markerModules)
 	fluxMarkersRead(t, markers)
 	walked := map[string]bool{}
 	for _, kind := range fluxKindRows {
+		derived := map[string]string{}
 		walkFluxFields(kind.typ, markers, func(f kindField) {
 			if !f.omitemptyScalar() {
 				return
@@ -219,10 +224,18 @@ func TestFluxKinds_NoDefaultedZeros(t *testing.T) {
 			switch {
 			case !read:
 				t.Errorf("%s (%s.%s) is omitted when zero, and its default cannot be read: the source of its type is not", at, f.owner, f.field.Name)
-			case m.hasDefault && !crdDefaultIsZero(m.def):
-				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", at, m.def)
+			case m.hasDefault && !f.defaultIsZero(m.def):
+				derived[f.path] = f.defaultLiteral(m.def)
 			}
 		})
+		compareDefaultedZeros(t, kind.component, derived, kind.defaulted)
+	}
+	// The list refuses: an authored "" on a listed field does not reach the
+	// object.
+	_, err := fluxcdAlertKind.config(&oam.Component{Name: "alert", Properties: map[string]any{"eventSeverity": ""}})
+	const want = `eventSeverity: "" cannot be carried by the Flux API types (the field is omitted when zero, so the API server would apply its default "info")`
+	if err == nil || err.Error() != want {
+		t.Errorf("an authored empty string on a defaulted field: got %v, want %s", err, want)
 	}
 	for _, at := range []string{"AlertSpec: suspend", "ImagePolicySpec: suspend", "ImageUpdateAutomationSpec: suspend"} {
 		if !walked[at] {
@@ -461,6 +474,7 @@ func TestFluxKinds_ExpressionRules(t *testing.T) {
 			required  map[string]string
 			validated []string
 			durations map[string]fluxduration.Form
+			defaulted map[string]string
 		}) bool {
 			return row.component == component
 		}) {

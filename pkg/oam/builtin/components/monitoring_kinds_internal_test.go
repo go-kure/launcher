@@ -12,11 +12,14 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // monitoringModulePath is the module whose Go source the tests below read: the
@@ -33,11 +36,13 @@ var monitoringKinds = []struct {
 	typ       reflect.Type
 	required  map[string]string
 	validated []string
+	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
+	defaulted map[string]string
 }{
-	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil},
-	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.required, nil},
-	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.required, []string{"prober.url"}},
-	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), prometheusRuleKind.required, nil},
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil, serviceMonitorKind.defaultedZeros.fields},
+	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.required, nil, podMonitorKind.defaultedZeros.fields},
+	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.required, []string{"prober.url"}, prometheusProbeKind.defaultedZeros.fields},
+	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), prometheusRuleKind.required, nil, prometheusRuleKind.defaultedZeros.fields},
 }
 
 // fieldMarkers is what the comment of one struct field says of it to the CRD
@@ -207,17 +212,69 @@ func (f kindField) writtenUnauthored() bool {
 	return f.field.Type.Kind() == reflect.Struct || !slices.Contains(opts, "omitempty")
 }
 
-// omitemptyScalar says the field is a number or a boolean that is no pointer
-// and is omitted when zero.
+// omitemptyScalar says the field is a number, a boolean or a string that is
+// no pointer and is omitted when zero.
 func (f kindField) omitemptyScalar() bool {
 	switch f.field.Type.Kind() {
-	case reflect.Bool,
+	case reflect.Bool, reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64:
 		return slices.Contains(f.jsonOptions(), "omitempty")
 	default:
 		return false
+	}
+}
+
+// defaultLiteral is def, a default marker's value as markersOf reads it
+// (unquoted), as the JSON literal a defaulted-zero list holds: quoted when
+// the field is a string.
+func (f kindField) defaultLiteral(def string) string {
+	if f.field.Type.Kind() == reflect.String {
+		return strconv.Quote(def)
+	}
+	return def
+}
+
+// defaultIsZero says whether def, a default marker's value as markersOf reads
+// it, is the zero value of the field: it is classified as its JSON literal, so
+// a string default "false" or "0" is not taken for a zero.
+func (f kindField) defaultIsZero(def string) bool {
+	return crdDefaultIsZero(f.defaultLiteral(def))
+}
+
+// TestKindField_DefaultIsZero: a marker default is classified by the type of
+// its field, so a string default that reads like a zero number or boolean is
+// one the defaulted-zero lists must hold, and the zero of each type is not.
+func TestKindField_DefaultIsZero(t *testing.T) {
+	type sample struct {
+		S string
+		B bool
+		I int32
+		F float64
+	}
+	field := func(name string) kindField {
+		sf, _ := reflect.TypeFor[sample]().FieldByName(name)
+		return kindField{owner: reflect.TypeFor[sample](), field: sf}
+	}
+	for _, tt := range []struct {
+		field, def string
+		zero       bool
+	}{
+		{"S", "", true},
+		{"S", "false", false},
+		{"S", "0", false},
+		{"S", "0.0", false},
+		{"S", "info", false},
+		{"B", "false", true},
+		{"B", "true", false},
+		{"I", "0", true},
+		{"I", "5", false},
+		{"F", "0.0", true},
+	} {
+		if got := field(tt.field).defaultIsZero(tt.def); got != tt.zero {
+			t.Errorf("%s default %q: zero = %v, want %v", tt.field, tt.def, got, tt.zero)
+		}
 	}
 }
 
@@ -288,21 +345,20 @@ func walkKindFields(typ reflect.Type, required func(kindField) bool, visit func(
 	walk(typ, "", false, nil)
 }
 
-// TestMonitoringKinds_NoDefaultedZeros is TestPolicyFreeKinds_NoDefaultedZeros
+// TestMonitoringKinds_DefaultedZeros is TestExternalSecretsKinds_DefaultedZeros
 // for the kinds of the Prometheus operator's API, whose types publish no field
-// description to read a default from: no field these kinds decode may be a
-// number or a boolean that is omitted when zero and that the CRD defaults to
-// something else, since none of these kinds sets a defaulted-zero list
-// (policyFreeKind.defaultedZeros).
-// The default is the field's default marker, read from the source of the
-// linked modules (markerAPISource): the Prometheus operator's, and those of
-// the Kubernetes types its specs embed. A field of that shape on a type whose
-// source is not read fails too.
+// description to read a default from: a number, a boolean or a string these
+// kinds decode that is omitted when zero and that the CRD defaults to
+// something else must be in the kind's defaulted-zero list
+// (policyFreeKind.defaultedZeros) with that default, and the list must hold
+// nothing else. The default is the field's default marker, read from the
+// source of the linked modules (markerAPISource): the Prometheus operator's,
+// and those of the Kubernetes types its specs embed. A field of that shape on
+// a type whose source is not read fails too.
 //
 // The API's two defaults at v0.94.1 are strings (a prober's path, a relabeling
-// rule's action). An authored empty string there is omitted and defaulted, as
-// on every kind: only an authored 0 or false is held to be carried.
-func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
+// rule's action), so an authored "" there is refused.
+func TestMonitoringKinds_DefaultedZeros(t *testing.T) {
 	src := markerAPISource(t)
 	// Vacuity guards: the markers are read, and in both spellings of the
 	// default marker.
@@ -320,6 +376,7 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 	}
 	walked := map[string]bool{}
 	for _, kind := range monitoringKinds {
+		derived := map[string]string{}
 		walkKindFields(kind.typ, src.required, func(f kindField) {
 			if !f.omitemptyScalar() {
 				return
@@ -330,10 +387,20 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 			switch {
 			case !src.known(f):
 				t.Errorf("%s (%s.%s) is omitted when zero, and its default cannot be read: the source of its type is not", at, f.owner, f.field.Name)
-			case defaulted && !crdDefaultIsZero(def):
-				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", at, def)
+			case defaulted && !f.defaultIsZero(def):
+				derived[f.path] = f.defaultLiteral(def)
 			}
 		})
+		compareDefaultedZeros(t, kind.component, derived, kind.defaulted)
+	}
+	// The list refuses: an authored "" on a listed field does not reach the
+	// object.
+	_, err := prometheusProbeKind.config(&oam.Component{Name: "probe", Properties: map[string]any{
+		"prober": map[string]any{"url": "blackbox:9115", "path": ""},
+	}})
+	const want = `prober.path: "" cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default "/probe")`
+	if err == nil || err.Error() != want {
+		t.Errorf("an authored empty string on a defaulted field: got %v, want %s", err, want)
 	}
 	for _, at := range []string{
 		"ServiceMonitorSpec: endpoints[].honorLabels",
@@ -343,6 +410,25 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 	} {
 		if !walked[at] {
 			t.Errorf("the walk did not reach %s; it found %v", at, slices.Sorted(maps.Keys(walked)))
+		}
+	}
+}
+
+// compareDefaultedZeros requires a kind's defaulted-zero list to equal the
+// fields derived from the source, each with its default.
+func compareDefaultedZeros(t *testing.T, component string, derived, listed map[string]string) {
+	t.Helper()
+	for _, path := range slices.Sorted(maps.Keys(derived)) {
+		switch def, ok := listed[path]; {
+		case !ok:
+			t.Errorf("%s: %s is omitted when zero and defaults to %s: an authored zero would be replaced, and the kind's defaulted-zero list (policyFreeKind.defaultedZeros) does not hold the field", component, path, derived[path])
+		case def != derived[path]:
+			t.Errorf("%s: the defaulted-zero list gives %s the default %s; the source says %s", component, path, def, derived[path])
+		}
+	}
+	for _, path := range slices.Sorted(maps.Keys(listed)) {
+		if _, ok := derived[path]; !ok {
+			t.Errorf("%s: the defaulted-zero list holds %s, which the source does not show as omitted when zero and defaulted to another value", component, path)
 		}
 	}
 }

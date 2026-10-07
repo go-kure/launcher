@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -47,7 +48,7 @@ func decodeKindSpec[T any](props map[string]any, kind string) (*T, map[string]an
 }
 
 // defaultedZeroFields lists the fields of one upstream spec type on which an
-// authored 0 or false cannot be carried: the type's encoding omits a zero
+// authored 0, false or "" cannot be carried: the type's encoding omits a zero
 // there, and the object's defaulter applies a non-zero default in its place.
 // The zero value lists none.
 type defaultedZeroFields struct {
@@ -55,13 +56,14 @@ type defaultedZeroFields struct {
 	api string
 	// defaulter is who applies the default to an omitted field ("operator").
 	defaulter string
-	// fields maps a json path, with [] for an array element, to that default.
+	// fields maps a json path, with [] for an array element, to that default,
+	// as its JSON literal (5, true, "retain").
 	fields map[string]string
 }
 
 // refuseUncarriedSpecValues refuses an authored value that the typed spec
-// decodes but the emitted object would not carry with its meaning: a 0 or
-// false that spec's encoding omits on a field of defaulted, where the
+// decodes but the emitted object would not carry with its meaning: a 0, false
+// or "" that spec's encoding omits on a field of defaulted, where the
 // defaulter would apply its non-zero default instead, and two spellings of one
 // field in the same object, of which encoding/json keeps only one. The spec is
 // encoded as Generate's object will be and the authored tree (jsonProperties'
@@ -87,10 +89,8 @@ func refuseUncarriedSpecValues(authored map[string]any, spec any, defaulted defa
 // the encoding's json names with [] for an index, the form defaulted.fields is
 // keyed by. A leaf present in encoded in any spelling or type (a Quantity
 // written as a number, say) is carried. A leaf absent from encoded is refused
-// when it is a numeric zero or false on a field of defaulted; elsewhere
-// omitting the zero leaves the same value, and an authored empty string is not
-// refused at all (cnpg-cluster's storage.size "" is a value that kind
-// supports, authoredStorageRequest).
+// when it is a numeric zero, false or the empty string on a field of
+// defaulted; elsewhere omitting the zero leaves the same value.
 func compareCarriedIn(authored, encoded any, path, field string, defaulted defaultedZeroFields) error {
 	switch a := authored.(type) {
 	case map[string]any:
@@ -121,7 +121,11 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 				}
 				unmatched = append(unmatched, k)
 				if def, ok := lookupFolded(defaulted.fields, join(field, k)); ok && isOmittedZero(a[k]) {
-					return errors.Errorf("%s: %v cannot be carried by the %s API types (the field is omitted when zero, so the %s would apply its default %s)", child, a[k], defaulted.api, defaulted.defaulter, def)
+					value := fmt.Sprint(a[k])
+					if s, isString := a[k].(string); isString {
+						value = strconv.Quote(s)
+					}
+					return errors.Errorf("%s: %s cannot be carried by the %s API types (the field is omitted when zero, so the %s would apply its default %s)", child, value, defaulted.api, defaulted.defaulter, def)
 				}
 				if err := foldedDuplicateIn(a[k], child); err != nil {
 					return err

@@ -14,8 +14,10 @@ import (
 //
 // The API's types publish no field descriptions and the module ships no CRD,
 // so what the types cannot be asked is read from their source, in tests:
-// TestMonitoringKinds_NoDefaultedZeros holds the claim that no CRD default,
-// read from its marker, turns an authored 0 or false into another value, and TestMonitoringKinds_RequiredMatchMarkers
+// TestMonitoringKinds_DefaultedZeros holds the claim that a CRD default, read
+// from its marker, turns an authored 0, false or "" into another value only on
+// the fields of a kind's defaultedZeros (monitoringDefaultedZeros), where the
+// kind refuses one, and TestMonitoringKinds_RequiredMatchMarkers
 // holds each kind's required list to the fields the source marks required.
 //
 // One pair of required fields is of a Kubernetes type, which carries no
@@ -38,6 +40,24 @@ func oauth2Required(at string) map[string]string {
 		at + ".clientSecret": "the Secret key that holds the OAuth2 client secret",
 		at + ".tokenUrl":     "the URL the token is fetched from",
 	}
+}
+
+// monitoringDefaultedZeros is a monitoring kind's defaulted-zero list for
+// refuseUncarriedSpecValues: the fields of its spec type that the encoding
+// omits when empty and to which the CRD gives another default, each mapped to
+// that default as its JSON literal. The API's defaults are the action of a
+// relabeling rule at each of the given lists of rules, and any of extra.
+// TestMonitoringKinds_DefaultedZeros holds each kind's list to the default
+// markers of the linked module's source.
+func monitoringDefaultedZeros(relabelings []string, extra map[string]string) defaultedZeroFields {
+	fields := maps.Clone(extra)
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	for _, at := range relabelings {
+		fields[at+"[].action"] = `"replace"`
+	}
+	return defaultedZeroFields{api: "Prometheus operator", defaulter: "API server", fields: fields}
 }
 
 // requiredFields merges the required lists of one kind.
@@ -130,6 +150,6 @@ func monitoringSchema(shared, own map[string]oam.PropertySchema) map[string]oam.
 func relabelItems() *oam.PropertySchema {
 	return &oam.PropertySchema{
 		Type: oam.PropertyTypeObject, AdditionalProperties: true,
-		Description: "One relabeling rule: sourceLabels, separator, targetLabel, regex, modulus, replacement, action. An unset or empty action is read as replace. Decoded strictly into the Prometheus operator's API type: see RelabelConfig in its API reference.",
+		Description: "One relabeling rule: sourceLabels, separator, targetLabel, regex, modulus, replacement, action. An unset action is read as replace; an empty one is refused, since the API server would replace it. Decoded strictly into the Prometheus operator's API type: see RelabelConfig in its API reference.",
 	}
 }

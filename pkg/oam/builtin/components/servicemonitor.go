@@ -94,6 +94,7 @@ var serviceMonitorKind = &policyFreeKind[monitoringv1.ServiceMonitorSpec]{
 		"endpoints": "how the endpoints of the selected Services are scraped; [] is an authored empty list",
 		"selector":  "the label query over the Services to scrape; no default selector is filled, use {} to select every Service of the selected namespaces",
 	}, oauth2Required("endpoints[].oauth2"), labelSelectorRequired("selector")),
+	defaultedZeros: monitoringDefaultedZeros([]string{"endpoints[].metricRelabelings", "endpoints[].relabelings"}, nil),
 	build: func(name, namespace string, spec *monitoringv1.ServiceMonitorSpec) client.Object {
 		monitor := prometheus.CreateServiceMonitor(name, namespace)
 		spec.DeepCopyInto(&monitor.Spec)

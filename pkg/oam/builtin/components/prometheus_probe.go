@@ -41,7 +41,7 @@ func (h *PrometheusProbeHandler) PropertySchema() map[string]oam.PropertySchema 
 		},
 		"prober": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true,
-			Description: "Required. Probe spec.prober: the prober that probes the targets: url (required: its address as address:port, without a scheme), scheme, path and the proxy fields (proxyUrl, noProxy, proxyFromEnvironment, proxyConnectHeader). An unset or empty path is read as /probe. Decoded strictly into the Prometheus operator's API type: see ProberSpec in its API reference.",
+			Description: "Required. Probe spec.prober: the prober that probes the targets: url (required: its address as address:port, without a scheme), scheme, path and the proxy fields (proxyUrl, noProxy, proxyFromEnvironment, proxyConnectHeader). An unset path is read as /probe; an empty one is refused, since the API server would replace it. Decoded strictly into the Prometheus operator's API type: see ProberSpec in its API reference.",
 		},
 		"module": {
 			Type:        oam.PropertyTypeString,
@@ -118,6 +118,10 @@ func (h *PrometheusProbeHandler) PropertySchema() map[string]oam.PropertySchema 
 var prometheusProbeKind = &policyFreeKind[monitoringv1.ProbeSpec]{
 	upstream: "monitoring.coreos.com/v1 ProbeSpec",
 	required: requiredFields(oauth2Required("oauth2"), labelSelectorRequired("targets.ingress.selector")),
+	defaultedZeros: monitoringDefaultedZeros(
+		[]string{"metricRelabelings", "targets.ingress.relabelingConfigs", "targets.staticConfig.relabelingConfigs"},
+		map[string]string{"prober.path": `"/probe"`},
+	),
 	validate: func(spec *monitoringv1.ProbeSpec) error {
 		if spec.ProberSpec.URL == "" {
 			return errors.New("prober.url: required (the address of the prober, as address:port; the object always holds a prober, and the API server refuses one without a url)")

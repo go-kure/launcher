@@ -84,6 +84,7 @@ var podMonitorKind = &policyFreeKind[monitoringv1.PodMonitorSpec]{
 	required: requiredFields(map[string]string{
 		"selector": "the label query over the Pods to scrape; no default selector is filled, use {} to select every Pod of the selected namespaces",
 	}, oauth2Required("podMetricsEndpoints[].oauth2"), labelSelectorRequired("selector")),
+	defaultedZeros: monitoringDefaultedZeros([]string{"podMetricsEndpoints[].metricRelabelings", "podMetricsEndpoints[].relabelings"}, nil),
 	build: func(name, namespace string, spec *monitoringv1.PodMonitorSpec) client.Object {
 		monitor := prometheus.CreatePodMonitor(name, namespace)
 		spec.DeepCopyInto(&monitor.Spec)
