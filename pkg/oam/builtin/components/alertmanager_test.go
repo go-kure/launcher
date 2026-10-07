@@ -3,6 +3,7 @@ package components_test
 import (
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,8 +29,9 @@ var alertmanagerUnfixtured = map[string]string{
 }
 
 // alertmanagerFull sets every other top-level field of the spec, inside
-// ptStrictPolicy: images of registry.example with a tag, three replicas, no
-// more than 2 cpu, 1Gi of memory and 10Gi of storage, and nothing of the host.
+// ptStrictPolicy: images of registry.example with a tag, the two reloaders
+// patched with one, three replicas, no more than 2 cpu, 1Gi of memory and 10Gi
+// of storage, and nothing of the host.
 func alertmanagerFull() map[string]any {
 	webTLS := map[string]any{
 		"keySecret": secretKey("alertmanager-tls", "tls.key"),
@@ -98,8 +100,13 @@ func alertmanagerFull() map[string]any {
 				"resources":       map[string]any{"limits": map[string]any{"cpu": "500m", "memory": "64Mi"}},
 				"securityContext": map[string]any{"capabilities": map[string]any{"drop": []any{"ALL"}}},
 			},
+			// The reloader's patch, with an image from the allowed registry.
+			map[string]any{"name": "config-reloader", "image": amReloader},
 		},
-		"initContainers":                      []any{map[string]any{"name": "prepare", "image": "registry.example/team/prepare:1.0.0"}},
+		"initContainers": []any{
+			map[string]any{"name": "prepare", "image": "registry.example/team/prepare:1.0.0"},
+			map[string]any{"name": "init-config-reloader", "image": amReloader},
+		},
 		"priorityClassName":                   "monitoring",
 		"additionalPeers":                     []any{"alertmanager.other.example.com:9094"},
 		"clusterAdvertiseAddress":             "192.0.2.10:9094",
@@ -217,9 +224,25 @@ func alertmanagerRefusals(notA string) []struct {
 		{"hugepages without cpu or memory", map[string]any{"resources": map[string]any{
 			"requests": map[string]any{"hugepages-2Mi": "64Mi"}, "limits": map[string]any{"hugepages-2Mi": "64Mi"},
 		}}, "resources: hugepages require cpu or memory in requests or limits"},
-		{"container request over its limit", container(map[string]any{"name": "proxy", "resources": map[string]any{
+		{"container request over its limit", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "resources": map[string]any{
 			"requests": map[string]any{"memory": "2Gi"}, "limits": map[string]any{"memory": "1Gi"},
 		}}), `containers[0] "proxy": resources: memory: request 2Gi must not exceed limit 1Gi`},
+		// A listed container that patches none the operator generates is added
+		// as written, and a pod cannot run one without an image.
+		{"container without an image", container(map[string]any{"name": "proxy"}),
+			`containers[0] "proxy": names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (alertmanager, config-reloader)`},
+		{"init container without an image", map[string]any{"initContainers": []any{map[string]any{"name": "prepare"}}},
+			`initContainers[0] "prepare": names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (init-config-reloader)`},
+		{"init reloader's name in containers", container(map[string]any{"name": "init-config-reloader"}),
+			`containers[0] "init-config-reloader": names no image`},
+		{"the sidecar of a Prometheus", container(map[string]any{"name": "thanos-sidecar"}),
+			`containers[0] "thanos-sidecar": names no image`},
+		// A duration the operator discards (0 or less) is refused, naming the field.
+		{"retention of 0", map[string]any{"retention": "0h"},
+			`retention: "0h" is not a positive duration: the Prometheus operator ignores it and runs the pods as if the field were unset; name a positive one, or leave it unset`},
+		{"gossip interval of 0", map[string]any{"clusterGossipInterval": "0s"}, `clusterGossipInterval: "0s" is not a positive duration`},
+		{"push-pull interval of 0", map[string]any{"clusterPushpullInterval": "0"}, `clusterPushpullInterval: "0" is not a positive duration`},
+		{"negative peer timeout", map[string]any{"clusterPeerTimeout": "-15s"}, `clusterPeerTimeout: "-15s" is not a positive duration`},
 		// An authored 0 the type omits, on a container that patches one of the
 		// operator's own as on any other.
 		{"probe period of 0 on a patch", container(map[string]any{"name": "alertmanager", "readinessProbe": map[string]any{"periodSeconds": 0}}),
@@ -233,6 +256,40 @@ func alertmanagerRefusals(notA string) []struct {
 // amImage is an image from the one registry ptStrictPolicy allows: under it an
 // unset image is refused (TestAlertmanager_UnsetImage).
 const amImage = "registry.example/prometheus/alertmanager:v0.28.1"
+
+// amReloader is an image from that registry for the two config-reloader
+// containers the operator generates: under ptStrictPolicy each is refused
+// unless a listed entry patches it with an allowed image
+// (TestAlertmanager_ReloaderImages).
+const amReloader = "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"
+
+// amReloaders returns props with both reloaders patched with amReloader, so
+// that a document built under ptStrictPolicy is not refused for them: an
+// entry of a reloader's name that names no image takes it, and one is
+// appended where the list has none. props is not changed.
+func amReloaders(props map[string]any) map[string]any {
+	out := maps.Clone(props)
+	for list, name := range map[string]string{"containers": "config-reloader", "initContainers": "init-config-reloader"} {
+		entries, _ := out[list].([]any)
+		entries = slices.Clone(entries)
+		patched := false
+		for i, entry := range entries {
+			if c, ok := entry.(map[string]any); ok && c["name"] == name {
+				patched = true
+				if _, named := c["image"]; !named {
+					c = maps.Clone(c)
+					c["image"] = amReloader
+					entries[i] = c
+				}
+			}
+		}
+		if !patched {
+			entries = append(entries, map[string]any{"name": name, "image": amReloader})
+		}
+		out[list] = entries
+	}
+	return out
+}
 
 // alertmanagerOf builds the Alertmanager of props under the given policies, in
 // turn (generateCoreKindUnder).
@@ -335,7 +392,7 @@ func TestAlertmanager_Unauthored(t *testing.T) {
 // block that names no claim template still encodes one, empty: the type holds
 // it by value. The operator reads an emptyDir before it.
 func TestAlertmanager_AuthoredStorageWritesAClaimSkeleton(t *testing.T) {
-	am := alertmanagerOf(t, map[string]any{"image": amImage, "storage": map[string]any{"emptyDir": map[string]any{"sizeLimit": "1Ti"}}}, ptStrictPolicy())
+	am := alertmanagerOf(t, amReloaders(map[string]any{"image": amImage, "storage": map[string]any{"emptyDir": map[string]any{"sizeLimit": "1Ti"}}}), ptStrictPolicy())
 	if am.Spec.Storage == nil || am.Spec.Storage.EmptyDir == nil {
 		t.Fatalf("storage = %+v, want the authored emptyDir", am.Spec.Storage)
 	}
@@ -387,6 +444,7 @@ func TestAlertmanager_PolicyRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			props := map[string]any{"image": image}
 			maps.Copy(props, tc.props)
+			props = amReloaders(props)
 			_, err := pvTransform("alertmanager", &components.AlertmanagerHandler{}, props, ptStrictPolicy())
 			rcWantClass(t, err, tc.class)
 			if err != nil && !strings.Contains(err.Error(), tc.want) {
@@ -403,11 +461,11 @@ func TestAlertmanager_PolicyRefusals(t *testing.T) {
 // (TestAlertmanager_PolicyRefusals); an authored false is the object an absent
 // one is, since the type omits it.
 func TestAlertmanager_HostNetwork(t *testing.T) {
-	am := alertmanagerOf(t, map[string]any{"image": amImage, "hostNetwork": true}, hostNetworkOK{ptStrictPolicy()})
+	am := alertmanagerOf(t, amReloaders(map[string]any{"image": amImage, "hostNetwork": true}), hostNetworkOK{ptStrictPolicy()})
 	if !am.Spec.HostNetwork {
 		t.Error("hostNetwork = false, want the authored true under a policy that allows the host network")
 	}
-	off := alertmanagerOf(t, map[string]any{"image": amImage, "hostNetwork": false}, ptStrictPolicy())
+	off := alertmanagerOf(t, amReloaders(map[string]any{"image": amImage, "hostNetwork": false}), ptStrictPolicy())
 	if spec, _ := policyFreeJSON(t, off)["spec"].(map[string]any); spec["hostNetwork"] != nil {
 		t.Errorf("hostNetwork = %v, want it omitted: the API reads an absent one as false", spec["hostNetwork"])
 	}
@@ -417,11 +475,11 @@ func TestAlertmanager_HostNetwork(t *testing.T) {
 // Windows HostProcess pod is refused under a policy that does not allow
 // privileged containers, as on a workload kind.
 func TestAlertmanager_HostProcess(t *testing.T) {
-	props := map[string]any{
+	props := amReloaders(map[string]any{
 		"image":           amImage,
 		"hostNetwork":     true,
 		"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}},
-	}
+	})
 	h := &components.AlertmanagerHandler{}
 	_, err := pvTransform("alertmanager", h, props, hostNetworkOK{ptStrictPolicy()})
 	rcWantClass(t, err, oam.RefusalPrivileged)
@@ -436,16 +494,15 @@ func TestAlertmanager_HostProcess(t *testing.T) {
 // empty one leaves the image to the operator, which no registry allowlist
 // reaches: it is refused with the registry class under a policy with allowed
 // registries, and builds under one without and under none, where an unset or
-// null image writes none. A listed container that names no image is not
-// refused; one named for a container the operator generates, as here, is
-// merged into it.
+// null image writes none. A listed container named for one the operator
+// generates, as here, is merged into it and may name no image.
 func TestAlertmanager_UnsetImage(t *testing.T) {
-	patch := []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
+	patch := []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
 	h := &components.AlertmanagerHandler{}
 	for name, props := range map[string]map[string]any{
-		"unset": {"version": "v0.28.1"},
-		"null":  {"version": "v0.28.1", "image": nil},
-		"empty": {"version": "v0.28.1", "image": ""},
+		"unset": amReloaders(map[string]any{"version": "v0.28.1"}),
+		"null":  amReloaders(map[string]any{"version": "v0.28.1", "image": nil}),
+		"empty": amReloaders(map[string]any{"version": "v0.28.1", "image": ""}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if name != "empty" {
@@ -465,12 +522,177 @@ func TestAlertmanager_UnsetImage(t *testing.T) {
 			}
 		})
 	}
-	am := alertmanagerOf(t, map[string]any{
+	am := alertmanagerOf(t, amReloaders(map[string]any{
 		"image":      amImage,
 		"containers": patch,
-	}, ptStrictPolicy())
+	}), ptStrictPolicy())
 	if am.Spec.Containers[0].Image != "" {
 		t.Errorf("container image = %q, want none written", am.Spec.Containers[0].Image)
+	}
+}
+
+// TestAlertmanager_PatchedImage: the operator merges an entry of containers
+// named alertmanager into the container it generates, so an image named there
+// is the one that runs. With image unset it answers for it: held to the
+// allowed registries as any listed container's image is, and not refused as
+// unset.
+func TestAlertmanager_PatchedImage(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	patched := func(image string) map[string]any {
+		return amReloaders(map[string]any{"containers": []any{map[string]any{"name": "alertmanager", "image": image}}})
+	}
+	am := alertmanagerOf(t, patched(amImage), ptStrictPolicy())
+	if am.Spec.Image != nil || am.Spec.Containers[0].Image != amImage {
+		t.Errorf("image = %v, patch image = %q; want none and the authored one", am.Spec.Image, am.Spec.Containers[0].Image)
+	}
+	_, err := pvTransform("alertmanager", h, patched("other.example/prometheus/alertmanager:v0.28.1"), ptStrictPolicy())
+	rcWantClass(t, err, oam.RefusalRegistry)
+	if err != nil && !strings.Contains(err.Error(), "other.example") {
+		t.Errorf("err = %v, want one naming the patch's image", err)
+	}
+}
+
+// TestAlertmanager_ReloaderImages: the operator generates config-reloader and
+// init-config-reloader from the image of its own configuration, which no
+// allowlist reaches. Under a policy with allowed registries each is refused
+// with the registry class unless a listed entry of its name patches it with an
+// image, which is then held to the registries; under a policy without allowed
+// registries, and under none, neither needs a patch.
+func TestAlertmanager_ReloaderImages(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	open := ptStrictPolicy()
+	open.allowedRegistries = nil
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"config-reloader unpatched": {
+			map[string]any{"image": amImage, "initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
+			"the image of the config-reloader container (containers): unset, so the Prometheus operator chooses the image the pods run, which the allowed registries [registry.example] cannot hold; name an image from one of them",
+		},
+		"init-config-reloader unpatched": {
+			map[string]any{"image": amImage, "containers": []any{map[string]any{"name": "config-reloader", "image": amReloader}}},
+			"the image of the init-config-reloader container (initContainers): unset",
+		},
+		"config-reloader patched without an image": {
+			map[string]any{"image": amImage,
+				"containers":     []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+				"initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
+			"the image of the config-reloader container (containers): unset",
+		},
+		"init-config-reloader patched in containers": {
+			map[string]any{"image": amImage, "containers": []any{
+				map[string]any{"name": "config-reloader", "image": amReloader},
+				map[string]any{"name": "init-config-reloader", "image": amReloader},
+			}},
+			"the image of the init-config-reloader container (initContainers): unset",
+		},
+		"config-reloader patched outside the allowed registries": {
+			amReloaders(map[string]any{"image": amImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),
+			`containers[0] "config-reloader"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("alertmanager", h, tc.props, ptStrictPolicy())
+			rcWantClass(t, err, oam.RefusalRegistry)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+			if _, err := pvTransform("alertmanager", h, tc.props, open); err != nil {
+				t.Errorf("under a policy without allowed registries: %v, want it built", err)
+			}
+			alertmanagerOf(t, tc.props)
+		})
+	}
+	if _, err := pvTransform("alertmanager", h, amReloaders(map[string]any{"image": amImage}), ptStrictPolicy()); err != nil {
+		t.Errorf("both reloaders patched with an allowed image: %v, want it built", err)
+	}
+}
+
+// TestAlertmanager_StoragePrecedence: the operator uses the first storage arm
+// that is set, emptyDir, then ephemeral, then volumeClaimTemplate, so the
+// storage maximum holds the claim of that arm and none after it.
+func TestAlertmanager_StoragePrecedence(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	claim := func(size string) map[string]any {
+		return map[string]any{"spec": map[string]any{
+			"accessModes": []any{"ReadWriteOnce"},
+			"resources":   map[string]any{"requests": map[string]any{"storage": size}},
+		}}
+	}
+	for name, tc := range map[string]struct {
+		storage map[string]any
+		want    string // "" when the component builds
+	}{
+		"an emptyDir before an oversized claim template":        {map[string]any{"emptyDir": map[string]any{}, "volumeClaimTemplate": claim("1Ti")}, ""},
+		"an emptyDir before an oversized ephemeral claim":       {map[string]any{"emptyDir": map[string]any{}, "ephemeral": map[string]any{"volumeClaimTemplate": claim("1Ti")}}, ""},
+		"an ephemeral claim before an oversized claim template": {map[string]any{"ephemeral": map[string]any{"volumeClaimTemplate": claim("1Gi")}, "volumeClaimTemplate": claim("1Ti")}, ""},
+		"an oversized ephemeral claim before a claim template":  {map[string]any{"ephemeral": map[string]any{"volumeClaimTemplate": claim("1Ti")}, "volumeClaimTemplate": claim("1Gi")}, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage"},
+		"an oversized claim template, the only arm":             {map[string]any{"volumeClaimTemplate": claim("1Ti")}, "storage.volumeClaimTemplate.spec.resources.requests.storage"},
+		"a claim template within the maximum, the only arm":     {map[string]any{"volumeClaimTemplate": claim("10Gi")}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("alertmanager", h, amReloaders(map[string]any{"image": amImage, "storage": tc.storage}), ptStrictPolicy())
+			if tc.want == "" {
+				if err != nil {
+					t.Errorf("err = %v, want it built", err)
+				}
+				return
+			}
+			rcWantClass(t, err, oam.RefusalStorageMaximum)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestAlertmanager_OperatorDefaultsHeld: where the spec leaves the replica
+// count or the memory request unset, the Prometheus operator fills 1 and 200Mi
+// (pkg/alertmanager/statefulset.go:133-135 and :144-149 at prometheus-operator
+// v0.94.1), and those values are held to the policy's maxima; neither is
+// written into the object.
+func TestAlertmanager_OperatorDefaultsHeld(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	zero := ptStrictPolicy()
+	zero.maxReplicas = int32ptr(0)
+	small := ptStrictPolicy()
+	small.maxMemory = "128Mi"
+	exact := ptStrictPolicy()
+	exact.maxMemory = "200Mi"
+	for name, tc := range map[string]struct {
+		props  map[string]any
+		policy *stubPolicy
+		class  oam.RefusalClass
+		want   string // "" when the component builds
+	}{
+		"replicas unset under a maximum of 0": {map[string]any{}, zero, oam.RefusalReplicaMaximum, "replicas 1 exceeds enforced maximum 0"},
+		"replicas 0 under a maximum of 0":     {map[string]any{"replicas": 0}, zero, "", ""},
+		"memory request unset under 128Mi":    {map[string]any{}, small, oam.RefusalResourceMaximum, `resources, whose unset memory request the Prometheus operator fills as 200Mi: memory request "200Mi" exceeds enforced maximum "128Mi"`},
+		"memory request unset, a limit only":  {map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "100Mi"}}}, small, oam.RefusalResourceMaximum, "fills as 200Mi"},
+		"memory request unset under 200Mi":    {map[string]any{}, exact, "", ""},
+		"memory request authored under 128Mi": {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "64Mi"}}}, small, "", ""},
+		"memory request authored over 128Mi":  {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}, small, oam.RefusalResourceMaximum, `resources: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := amReloaders(map[string]any{"image": amImage})
+			maps.Copy(props, tc.props)
+			_, err := pvTransform("alertmanager", h, props, tc.policy)
+			if tc.want == "" {
+				if err != nil {
+					t.Errorf("err = %v, want it built", err)
+				}
+				return
+			}
+			rcWantClass(t, err, tc.class)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+	am := alertmanagerOf(t, amReloaders(map[string]any{"image": amImage}), exact)
+	if am.Spec.Replicas != nil || len(am.Spec.Resources.Requests) != 0 {
+		t.Errorf("replicas = %v, requests = %v; want neither written", am.Spec.Replicas, am.Spec.Resources.Requests)
 	}
 }
 

@@ -1698,17 +1698,24 @@ and by scope, whatever component or trait emits it.
   - **What the spec says of the pods is held to the environment policy as a workload
     kind's own fields are:** `image` and the images of the listed containers and image
     volumes (allowed registries, and the tag rule with or without a policy), `replicas`,
-    the cpu and memory of `resources` and of a listed container, the storage a claim
-    requests, `hostNetwork`, hostPath volumes, privilege and capabilities. It refuses or
-    passes; no policy default is filled, since the operator decides what an omitted
-    field means. A test derives every field of the spec that shapes the pods and holds
-    each to a shown refusal or a stated reason.
-  - **An unset `image` is refused under a registry allowlist.** The object then names
-    none and the operator chooses the image the pods run; no registry allowlist reaches
-    that choice, so a policy with allowed registries refuses it (`oam.RefusalRegistry`)
-    and one without builds it. **Not held:** what the operator adds on its own (its
-    config-reloader containers, the governing Service) is not in the object; its code is
-    not in the linked module and was not read.
+    the cpu and memory of `resources` and of a listed container, the storage of the claim
+    the operator makes from the arm of `storage` it uses, `hostNetwork`, hostPath volumes,
+    privilege and capabilities. It refuses or passes; no policy default is filled, since
+    the operator decides what an omitted field means. Where it fills a value the policy
+    has a dimension for (1 replica, a 200Mi memory request, read from the operator's
+    source at v0.94.1), that value is held, and nothing is written. A test derives every
+    field of the spec that shapes the pods and holds each to a shown refusal or a stated
+    reason.
+  - **An image the operator chooses is refused under a registry allowlist.** It
+    generates the `alertmanager`, `config-reloader` and `init-config-reloader`
+    containers; where the spec names no image for one (for the first, in `image` or a
+    patch; for the two reloaders, in a patch), the operator chooses it, no registry
+    allowlist reaches that choice, so a policy with allowed registries refuses it
+    (`oam.RefusalRegistry`) and one without builds it. A listed entry that names no
+    image and patches none of these is refused with or without a policy, and so are a
+    `retention` and a cluster duration of 0 or less, which the operator ignores. **Not
+    held:** what else the operator adds on its own (the arguments it derives, the
+    governing Service) is not in the object.
   - **`baseImage`, `tag` and `sha` are not authorable**: not in the schema, so `kurel build`
     refuses each as an unsupported field, an empty one included, and the kind's conversion
     refuses one that is not empty (an empty one there writes nothing): deprecated upstream, and the

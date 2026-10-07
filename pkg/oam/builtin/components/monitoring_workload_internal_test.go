@@ -138,16 +138,23 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 				class:  oam.RefusalHostPath,
 			},
 			"containers": {
-				props:  map[string]any{"containers": []any{map[string]any{"name": "sidecar", "securityContext": map[string]any{"privileged": true}}}},
+				// A patch of the container the operator generates, which may
+				// name no image.
+				props:  map[string]any{"containers": []any{map[string]any{"name": "alertmanager", "securityContext": map[string]any{"privileged": true}}}},
 				policy: &workloadPolicy{noPrivileged: true},
 				class:  oam.RefusalPrivileged,
 			},
 			"initContainers": {
-				// The spec's own image is authored from the allowed registry, so
-				// that the unset-image refusal does not answer for this field.
+				// The spec's own image and both reloaders' are authored from the
+				// allowed registry, so that the unset-image refusal does not
+				// answer for this field.
 				props: map[string]any{
-					"image":          "registry.example/prometheus/alertmanager:v0.28.1",
-					"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}},
+					"image":      "registry.example/prometheus/alertmanager:v0.28.1",
+					"containers": []any{map[string]any{"name": "config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"}},
+					"initContainers": []any{
+						map[string]any{"name": "init-config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"},
+						map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"},
+					},
 				},
 				policy: &workloadPolicy{allowed: []string{"registry.example"}},
 				class:  oam.RefusalRegistry,
@@ -514,7 +521,15 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 			}
 			for path, def := range derived {
 				build := func(value any) error {
-					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: authoredAt(path, value)}, "data")
+					props := authoredAt(path, value)
+					// A listed container that patches none the operator
+					// generates must name an image (validateMonitoringWorkload).
+					for _, list := range []string{"containers", "initContainers"} {
+						if entries, ok := props[list].([]any); ok {
+							entries[0].(map[string]any)["image"] = "registry.example/team/probe:1.0.0"
+						}
+					}
+					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
 					return err
 				}
 				var zero, other any = 0, 2
@@ -829,6 +844,13 @@ func TestMonitoringWorkload_HeldOnASyntheticValue(t *testing.T) {
 		"a request over its limit in a block the spec holds deeper": {
 			monitoringWorkload{resources: []fieldResources{{"thanos.resources", over}}},
 			"thanos: resources: cpu: request 2 must not exceed limit 1",
+		},
+		"a listed container without an image, named for none the operator generates": {
+			monitoringWorkload{
+				generated: map[string][]string{"containers": {"prometheus", "config-reloader"}},
+				pod:       corev1.PodSpec{Containers: []corev1.Container{{Name: "prometheus"}, {Name: "proxy"}}},
+			},
+			`containers[1] "proxy": names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (prometheus, config-reloader)`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

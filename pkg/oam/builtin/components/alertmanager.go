@@ -1,6 +1,9 @@
 package components
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -77,7 +80,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	return map[string]oam.PropertySchema{
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
-		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the object names no image and the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
+		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
 		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
@@ -89,9 +92,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"configSecret": text("configSecret: the name of the Secret, in the Alertmanager's namespace, that holds the Alertmanager configuration under the key alertmanager.yaml. Unset, alertmanager-<name of the Alertmanager>. Where the Secret or the key is missing the operator provisions a configuration that drops every notification."),
 		"logLevel":     text("logLevel: the log level of Alertmanager: debug, info, warn or error."),
 		"logFormat":    text("logFormat: the log format of Alertmanager: logfmt or json."),
-		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. Held to the EnvironmentPolicy's replica maximum. Unset, the number is the operator's to decide: no replica default of the policy is applied."),
-		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it."),
-		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage a claim template requests is held to the EnvironmentPolicy's storage maximum; the size limit of an emptyDir is not. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
+		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. Held to the EnvironmentPolicy's replica maximum. Unset, the operator runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
+		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores."),
+		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
 		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
 		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container.",
@@ -102,7 +105,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"paused":                               flag("paused: true stops the operator from acting on the objects it manages for this Alertmanager, deletion excepted."),
 		"nodeSelector":                         object("nodeSelector: the node labels a node must carry for the pods to be scheduled on it."),
 		"schedulerName":                        text("schedulerName: the scheduler that places the pods. Unset, the default scheduler. Not empty."),
-		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. No resource default of the policy is applied." + core + "ResourceRequirements in the Kubernetes API reference."),
+		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, which is held to the memory maximum; nothing is written, and no resource default of the policy is applied." + core + "ResourceRequirements in the Kubernetes API reference."),
 		"affinity":                             object("affinity: the scheduling constraints of the pods." + core + "Affinity in the Kubernetes API reference."),
 		"tolerations": objects("tolerations: the taints the pods tolerate.",
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
@@ -117,18 +120,18 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates is merged into it (the API reference names alertmanager, config-reloader and thanos-sidecar). Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. An entry without an image is not checked for one.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
 		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one."),
-		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration."),
+		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
-		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration."),
-		"clusterPeerTimeout":                  text("clusterPeerTimeout: the timeout of cluster peering, as a Go duration."),
+		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
+		"clusterPeerTimeout":                  text("clusterPeerTimeout: the timeout of cluster peering, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterPeerName":                     text("clusterPeerName: the name this instance advertises to its peers; may refer to environment variables of the alertmanager container, as $(POD_NAME). Unset, the pod's name. Requires Alertmanager v0.30.0 or later. Not empty."),
 		"portName":                            text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it."),
 		"forceEnableClusterMode":              flag("forceEnableClusterMode: true keeps the cluster mode on with a single replica, for a cluster that spans several Kubernetes clusters."),
@@ -227,34 +230,79 @@ var alertmanagerRulesLeft = map[string]string{
 }
 
 // validateAlertmanager refuses, with or without an environment policy, the
-// three deprecated fields that name the image in parts, and what
-// validateMonitoringWorkload refuses of the workload.
+// three deprecated fields that name the image in parts, a duration the
+// operator discards, and what validateMonitoringWorkload refuses of the
+// workload.
 //
 // baseImage, tag and sha are refused when not empty: the operator composes
 // the image from them, and from version, in code that is not in the linked
 // module, so the kind cannot say which image runs and has nothing to hold to
 // the allowed registries or the tag rule. An authored empty string is the same
 // object as none, and is left out as the type leaves it out.
+//
+// retention and the three durations of the cluster are refused where they
+// parse as a Go duration of 0 or less: the operator empties such a value
+// before it builds the StatefulSet and reports the field as ignored, so the
+// pods run with the value an unset one gets, not the authored one
+// (discardZeroDurations, pkg/alertmanager/statefulset.go:81-115 at
+// prometheus-operator v0.94.1). A value that does not parse is left to the
+// API's own pattern, as the operator leaves it.
 func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 	for _, field := range []fieldValue{{"baseImage", spec.BaseImage}, {"sha", spec.SHA}, {"tag", spec.Tag}} {
 		if field.value != "" {
 			return errors.Errorf("%s: not authorable: the Prometheus operator deprecates the field, and composes the image it yields outside what the object states; use image", field.path)
 		}
 	}
+	for _, field := range []fieldValue{
+		{"retention", string(spec.Retention)},
+		{"clusterGossipInterval", string(spec.ClusterGossipInterval)},
+		{"clusterPushpullInterval", string(spec.ClusterPushpullInterval)},
+		{"clusterPeerTimeout", string(spec.ClusterPeerTimeout)},
+	} {
+		if d, err := time.ParseDuration(field.value); field.value != "" && err == nil && d <= 0 {
+			return errors.Errorf("%s: %q is not a positive duration: the Prometheus operator ignores it and runs the pods as if the field were unset; name a positive one, or leave it unset", field.path, field.value)
+		}
+	}
 	return validateMonitoringWorkload(alertmanagerWorkload(spec))
+}
+
+// What the Prometheus operator fills into an Alertmanager whose spec leaves
+// the field unset, before it builds the StatefulSet (makeStatefulSet,
+// pkg/alertmanager/statefulset.go:133-135 and :144-149 at prometheus-operator
+// v0.94.1). Held to the environment policy, never written.
+const (
+	alertmanagerOperatorReplicas      = 1
+	alertmanagerOperatorMemoryRequest = "200Mi"
+)
+
+// alertmanagerGenerated names the containers the operator generates for the
+// pods, by the property that lists patches of them (makeStatefulSetSpec,
+// pkg/alertmanager/statefulset.go:793-838 at prometheus-operator v0.94.1). Of
+// them only alertmanager takes its image from the spec; the two reloaders run
+// the image of the operator's own configuration unless a listed entry patches
+// one.
+var alertmanagerGenerated = map[string][]string{
+	"containers":     {"alertmanager", "config-reloader"},
+	"initContainers": {"init-config-reloader"},
 }
 
 // alertmanagerWorkload maps an Alertmanager spec into the workload the two
 // shared functions read. It only reads spec.
 //
-// Held through it: image; replicas; storage; resources, the alertmanager
-// container's; and, as pod fields, containers, initContainers, volumes,
-// securityContext and hostNetwork. The spec has no hostPID or hostIPC field,
-// and no credential in the clear: every one is the key of a Secret.
-// TestMonitoringWorkloadKinds_PodFieldsHeldOrListed and
+// Held through it: image; replicas, an unset one as the operator's 1;
+// storage; resources, the alertmanager container's, an unset memory request as
+// the operator's 200Mi; the images of the three containers the operator
+// generates, where the spec leaves them to it; and, as pod fields, containers,
+// initContainers, volumes, securityContext and hostNetwork. The spec has no
+// hostPID or hostIPC field, and no credential in the clear: every one is the
+// key of a Secret. TestMonitoringWorkloadKinds_PodFieldsHeldOrListed and
 // TestMonitoringWorkloadKinds_CredentialsHeldOrListed derive both claims from
 // the type.
 func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkload {
+	replicas := int64(alertmanagerOperatorReplicas)
+	if spec.Replicas != nil {
+		replicas = int64(*spec.Replicas)
+	}
 	w := monitoringWorkload{
 		pod: corev1.PodSpec{
 			InitContainers:  spec.InitContainers,
@@ -263,18 +311,27 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 			SecurityContext: spec.SecurityContext,
 			HostNetwork:     spec.HostNetwork,
 		},
-		replicasPath: "replicas",
-		storage:      spec.Storage,
-		resources:    []fieldResources{{"resources", spec.Resources}},
+		generated:      alertmanagerGenerated,
+		replicas:       &replicas,
+		replicasPath:   "replicas",
+		storage:        spec.Storage,
+		resources:      []fieldResources{{"resources", spec.Resources}},
+		memoryRequests: map[string]string{"resources": alertmanagerOperatorMemoryRequest},
 	}
-	if spec.Image != nil && *spec.Image != "" {
+	switch {
+	case spec.Image != nil && *spec.Image != "":
 		w.images = []fieldValue{{"image", *spec.Image}}
-	} else {
+	case patchedImage(spec.Containers, "alertmanager") == "":
 		w.unsetImages = []string{"image"}
 	}
-	if spec.Replicas != nil {
-		replicas := int64(*spec.Replicas)
-		w.replicas = &replicas
+	for _, reloader := range []struct {
+		list       string
+		containers []corev1.Container
+		name       string
+	}{{"containers", spec.Containers, "config-reloader"}, {"initContainers", spec.InitContainers, "init-config-reloader"}} {
+		if patchedImage(reloader.containers, reloader.name) == "" {
+			w.unsetImages = append(w.unsetImages, fmt.Sprintf("the image of the %s container (%s)", reloader.name, reloader.list))
+		}
 	}
 	return w
 }

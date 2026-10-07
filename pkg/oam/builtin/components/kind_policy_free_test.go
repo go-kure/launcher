@@ -139,8 +139,10 @@ var policyFreeKinds = []policyFreeKind{
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("Alertmanager"),
 		typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](), namespaced: true, held: true,
 		// Under ptStrictPolicy's allowed registries an unset image is refused
-		// (TestAlertmanager_UnsetImage), so the least is the image.
-		minimal:    map[string]any{"image": amImage},
+		// (TestAlertmanager_UnsetImage), and so is each reloader left
+		// unpatched (TestAlertmanager_ReloaderImages): the least is the image
+		// and the two patches.
+		minimal:    amReloaders(map[string]any{"image": amImage}),
 		full:       alertmanagerFull(),
 		unfixtured: alertmanagerUnfixtured,
 	},
