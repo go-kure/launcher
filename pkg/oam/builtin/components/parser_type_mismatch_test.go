@@ -65,11 +65,12 @@ func TestParseSidecars_AbsentIsAbsent(t *testing.T) {
 }
 
 func TestParseAffinity_WrongContainerType(t *testing.T) {
-	// A list where the schema wants an object. statefulset is the kind to
-	// compare against here, since it authors both affinity and properties that
-	// already rejected this shape: its updateStrategy and ordinals are read
-	// through the optional* helpers, so the inconsistency was visible between
-	// two properties an author writes beside each other in one document.
+	// A list where the schema wants an object. statefulset was the kind to
+	// compare against when this was fixed: it read this shorthand until
+	// go-kure/launcher#790 moved it to the raw shape, beside properties that
+	// already rejected this shape (its updateStrategy and ordinals, read
+	// through the optional* helpers), so the inconsistency was visible between
+	// two properties an author wrote beside each other in one document.
 	_, err := parseAffinity(map[string]any{
 		"affinity": []any{map[string]any{"topologyKey": "kubernetes.io/hostname"}},
 	})

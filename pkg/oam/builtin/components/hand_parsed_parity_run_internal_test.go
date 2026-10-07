@@ -173,16 +173,15 @@ type paritySelectorSite struct {
 }
 
 // paritySelectorSites lists every label selector the nine hand-parsed kinds
-// parse: 39.
+// parse: 47.
 //
-//   - deployment, daemonset, job and cronjob read the raw `affinity`: two arms
-//     (podAffinity, podAntiAffinity), each with required and preferred terms,
-//     each term with a labelSelector and a namespaceSelector — eight selectors
-//     — and the labelSelector of a `topologySpreadConstraints` entry: nine a
-//     kind, 36;
-//   - statefulset reads no raw affinity (its `affinity` is launcher's own
-//     anti-affinity switch), so it has the topology spread selector and the
-//     `selector` of a `volumeClaimTemplates` entry: two;
+//   - deployment, statefulset, daemonset, job and cronjob read the raw
+//     `affinity`: two arms (podAffinity, podAntiAffinity), each with required
+//     and preferred terms, each term with a labelSelector and a
+//     namespaceSelector — eight selectors — and the labelSelector of a
+//     `topologySpreadConstraints` entry: nine a kind, 45;
+//   - statefulset also has the `selector` of a `volumeClaimTemplates` entry:
+//     one;
 //   - persistentvolumeclaim has its `selector`: one. The `pvc` trait reads a
 //     claim through the same parser (ParseClaimProperties).
 //
@@ -215,7 +214,7 @@ func paritySelectorSites() []paritySelectorSite {
 			},
 		}
 	}
-	for _, componentType := range []string{"deployment", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"deployment", "statefulset", "daemonset", "job", "cronjob"} {
 		for _, arm := range []string{"podAffinity", "podAntiAffinity"} {
 			for _, mode := range []string{required, preferred} {
 				for _, field := range []string{"labelSelector", "namespaceSelector"} {
@@ -270,7 +269,7 @@ func paritySelectorSites() []paritySelectorSite {
 		}
 		sites = append(sites, topologySpread(componentType))
 	}
-	sites = append(sites, topologySpread("statefulset"), paritySelectorSite{
+	sites = append(sites, paritySelectorSite{
 		componentType: "statefulset",
 		path:          "volumeClaimTemplates[0].selector",
 		author: func(sel map[string]any) (string, any) {
@@ -305,8 +304,8 @@ func paritySelectorSites() []paritySelectorSite {
 // not write, or as an object the API server turns away.
 func TestHandParsedKinds_MatchExpressionsAtEverySelector(t *testing.T) {
 	sites := paritySelectorSites()
-	if len(sites) != 39 {
-		t.Fatalf("paritySelectorSites lists %d sites, want 39: a site was added or lost, so recount its comment", len(sites))
+	if len(sites) != 47 {
+		t.Fatalf("paritySelectorSites lists %d sites, want 47:a site was added or lost, so recount its comment", len(sites))
 	}
 	whole := map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}
 	wantWhole := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{

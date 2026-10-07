@@ -8514,7 +8514,7 @@ refuses an undeclared key whatever its value, null included.
   map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
   refusals inside a declared property.
 - `TestHandParsedKinds_MatchExpressionsAtEverySelector` runs a match
-  expression through each of the 39 label selectors these kinds read, to the
+  expression through each of the 47 label selectors these kinds read, to the
   generated object, and five defective ones to their refusal.
 - `TestHandParsedKinds_TemplateMetadataAndContainerName` and
   `TestHandParsedKinds_ServicePortFieldsReachTheObject` pin the template's
