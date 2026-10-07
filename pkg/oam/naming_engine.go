@@ -85,16 +85,17 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 // the author's, the hook's answer, or the default launcher shortened.
 //
 // The base library names that Kustomization "<unit>-<layout name>", the unit
-// being the Kustomization name of the bundle, and refuses one over 63
-// characters. Launcher's default is the same name, "<bundle>-<component>",
-// measured with the bundle as launcher named it: a consumer that renames the
-// bundle afterwards (Bundle.KustomizationName) is not seen here. A default that
-// fits is left for the base library to make, so no output changes where it
-// did not fail; a longer one is shortened to 63 by the one shortening rule,
-// with "-<component>" kept whole.
-func (r *nameResolver) resolveLayoutKustomizationName(bundle, component string, config LayoutKustomizationNameSetter) error {
-	full := bundle + "-" + component
-	def := ShortenNameWithSuffix(bundle, "-"+component, stack.KustomizationNameMaxLength)
+// being the Kustomization name of the bundle and the layout being named after
+// the application, app, and refuses one over 63 characters. Launcher's default
+// is the same name, "<bundle>-<app>", measured with the bundle as launcher
+// named it: a consumer that renames the bundle afterwards
+// (Bundle.KustomizationName) is not seen here. A default that fits is left for
+// the base library to make, so no output changes where it did not fail; a
+// longer one is shortened to 63 by the one shortening rule, with "-<app>" kept
+// whole. component names the owner, in the hook's request and in a refusal.
+func (r *nameResolver) resolveLayoutKustomizationName(bundle, app, component string, config LayoutKustomizationNameSetter) error {
+	full := bundle + "-" + app
+	def := ShortenNameWithSuffix(bundle, "-"+app, stack.KustomizationNameMaxLength)
 	spec := NameSpec{Role: NameRoleLayout, Default: def}
 	if authored, ok := config.AuthoredLayoutKustomizationName(); ok {
 		spec.Property, spec.Authored = LayoutKustomizationNameProperty, authored
