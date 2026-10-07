@@ -207,11 +207,16 @@ stays on the bundle's Kustomization alone. Where neither the bundle nor the layo
 `spec.prune`; a bundle with `Prune` on turns garbage collection on for the component's and
 the hook groups' Kustomizations. `PostBuild` is copied whole, and where the substitution of
 the build above would change a per-layout Kustomization's postBuild or patches, kure writes
-`kustomize.toolkit.fluxcd.io/substitute: disabled` on it. A bundle's `Patches` are placed by
-object: a patch with a `Target` is on the bundle's Kustomization and on every per-layout one;
-an untargeted strategic-merge patch is only on the Kustomizations whose build holds every
-object it names, so it leaves the bundle's own Kustomization where that one does not build
-the object; any other untargeted patch stays on the bundle's own Kustomization alone. With
+`kustomize.toolkit.fluxcd.io/substitute: disabled` on it. Where a bundle has per-layout
+Kustomizations its `Patches` are placed by object: a patch with a `Target` is on the bundle's
+Kustomization and on every per-layout one; a plain untargeted strategic-merge patch is only on
+the Kustomizations whose build holds every object it names, so it leaves the bundle's own
+Kustomization where that one does not build the object; any other untargeted patch stays on
+the bundle's own Kustomization alone. An untargeted strategic-merge patch that comes after an
+entry that is not a plain strategic-merge patch (a JSON6902 patch, say) is not placed by
+object: it stays on the bundle's own Kustomization, is written besides on each per-layout one
+whose build holds every object it names, and is never refused. A bundle without per-layout
+Kustomizations keeps every patch on its own, as before. With
 `Wait`, a hook group's Kustomization is
 Ready once the objects it applied are, not once it has applied them, so the next group, whose
 `spec.dependsOn` names it, starts after that. A hook group depends on the group before it and
@@ -221,13 +226,16 @@ integration (`ManifestLayout.Wait`, `Timeout`, `RetryInterval`, `Labels`, `Annot
 `Interval`, `Prune`, `Force`, `Suspend`; postBuild and patches have no layout field): one
 `Timeout` inherited by the bundle's, the component's and the hook groups' Kustomizations gives
 the innermost as long as the outermost, and a shorter one on the layouts below is the
-consumer's to set. kure refuses five things it wrote out before: a bundle label or annotation
+consumer's to set. kure refuses six things it wrote out before: a bundle label or annotation
 the Kubernetes API does not accept, where a per-layout Kustomization inherits it; a layout a
 consumer added that depends on the application layout above it, once the bundle sets `Wait`
-(set `Wait` to a pointer to `false` on the application's layout); an untargeted
-strategic-merge patch of a bundle when no Kustomization of the bundle builds an object it
-names, and one whose documents name objects no one Kustomization builds together (give the
-patch a `Target`, one patch per object); and, under any placement, a duration the Flux API
+(set `Wait` to a pointer to `false` on the application's layout); a plain untargeted
+strategic-merge patch, placed by object as above, when no Kustomization of the bundle builds
+an object it names, and one whose documents name objects no one Kustomization builds together
+(give the patch a `Target`, one patch per object); a per-layout Kustomization whose postBuild
+or patches the build above would substitute when that build also substitutes its labels,
+annotations or path, which the opt-out would stop (remove the `${...}` expressions from one
+of the two); and, under any placement, a duration the Flux API
 does not take, a negative one or one above zero and under a millisecond, in a bundle's
 `Interval`, `Timeout` or `RetryInterval` (in a layout's only where the layout gets a
 Kustomization of its own). kure's `pkg/stack/fluxcd` README has the rules under "Per-layout
@@ -238,19 +246,23 @@ application's bundle above its group bundles) that sets `Wait` no longer carries
 `spec.healthChecks` entry per child on its Kustomization (go-kure/kure#1022): Flux ignores
 health checks under `wait`, so nothing changes on a cluster, but the generated object does.
 kure's layout writers (`WriteManifest`, `ManifestLayout.WriteToDisk` and `WriteToTar`) refuse
-a layout that holds an object written without a `kind` or an `apiVersion`
-(go-kure/kure#1020), where they wrote it before.
+a layout that holds an object written without a `kind`, or without an `apiVersion`
+(go-kure/kure#1020), where they wrote it before. Each item of a List is judged, not the List
+itself, and an object with kustomize's `config.kubernetes.io/local-config` annotation at any
+value but `"false"` needs a `kind` but no `apiVersion`.
 
 **Breaking output change** for a consumer (go-kure/kure#1016, go-kure/kure#1021,
-go-kure/kure#1022 and go-kure/kure#1020, with the kure commit `go.mod` pins). Under `FluxIntegratedPerLayout` placement, a bundle that sets one
-of the eleven gives it to the Kustomizations of the components it holds and of their hook
-groups, a bundle's untargeted strategic-merge patch moves off its own Kustomization where
-that one does not build the patched object, and a tree kure refuses for one of the first four
-reasons above no longer renders. Under any placement, a tree with a duration kure refuses no
-longer renders, a bundle with child bundles that sets `Wait` loses its child health checks,
-and a layout with an object written without a `kind` or an `apiVersion` is no longer written.
-What launcher returns does not change, and a tree that sets none of the eleven, no `Wait`
-on a bundle with child bundles and no such duration renders as before.
+go-kure/kure#1022 and go-kure/kure#1020, with the kure commit `go.mod` pins). Under
+`FluxIntegratedPerLayout` placement, a bundle that sets one of the eleven gives it to the
+Kustomizations of the components it holds and of their hook groups, a bundle's plain
+untargeted strategic-merge patch moves off its own Kustomization where that one does not
+build the patched object, and a tree kure refuses for one of the first five reasons above no
+longer renders. Under any placement, a tree with a duration kure refuses no longer renders, a
+bundle with child bundles that sets `Wait` loses its child health checks, and a layout with
+an object written without a `kind` or an `apiVersion` is no longer written. What launcher
+returns does not change, and a tree that sets none of the eleven, no `Wait` on a bundle with
+child bundles and no such duration, and holds no object the writers now refuse, renders and
+is written as before.
 
 kure reads the resources a layout holds as kustomize builds them, a List standing for its
 items, by one rule in its pre-write checks and in its Flux integration (go-kure/kure#1017).
