@@ -9858,7 +9858,8 @@ match expression), has no member: those are refused on every kind
 None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`, `metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `prometheusrule`,
-`artifactgenerator`, `fluxcd-alert`, `imagepolicy`, `imageupdateautomation`, `secretstore`,
+`artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
+`imagerepository`, `imageupdateautomation`, `resourcesetinputprovider`, `secretstore`,
 `clustersecretstore`, `externalsecret` and `clusterexternalsecret`. `metallb-bfdprofile` and
 `metallb-community` are not measured: their CRDs require no field. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
@@ -9894,7 +9895,8 @@ names the field or one under it, by its full path; the two Cilium policy kinds r
 test names those with their reason. Any other field that cannot be measured fails the test. The
 required lists are those of the CRDs of the linked modules. The Prometheus operator, Flux and
 External Secrets kinds are read through the schema markers of their linked sources, by the same
-reader as their own required-list tests. The members are pinned in
+reader as their own required-list tests; `resourcesetinputprovider` is read from the CRD the
+flux-operator module ships. The members are pinned in
 `testdata/required-written-not-refused.txt`, one line per field (kind, path, family, written
 value). The test fails on any difference, a new member or one that is gone, so a dependency
 bump or a kind change that moves the set fails CI; `UPDATE_REQUIRED_WRITTEN_PIN=1` rewrites
