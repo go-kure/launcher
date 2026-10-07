@@ -16,11 +16,11 @@ import (
 )
 
 // This file holds what the kind components share whose object makes the
-// Prometheus operator run pods (go-kure/launcher#790): alertmanager and
-// thanosruler. The
-// operator builds a StatefulSet from the object's spec, so the fields of that
-// spec that shape the pods are held as a workload kind's own are: each kind
-// maps its spec into one monitoringWorkload, and the two functions below read
+// Prometheus operator run pods (go-kure/launcher#790): alertmanager,
+// thanosruler and prometheus. The operator builds a StatefulSet from the
+// object's spec, so the fields of that spec that shape the pods are held as a
+// workload kind's own are: each kind maps its spec into one
+// monitoringWorkload, and the two functions below read
 // that value, with or without an environment policy
 // (validateMonitoringWorkload) and under one (enforceMonitoringWorkloadPolicy).
 //

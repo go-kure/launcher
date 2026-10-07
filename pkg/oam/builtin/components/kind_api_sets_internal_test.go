@@ -141,13 +141,15 @@ func crdAPISource(modulePath, file, version string) func(*testing.T) apiSource {
 var markerModules = append([]string{monitoringModulePath, "k8s.io/apimachinery", "k8s.io/api", "k8s.io/kube-aggregator"}, fluxMarkerModules...)
 
 // linkedFieldMarkers returns the lookup of a field's markers in the Go source
-// of the linked modules named, and whether that source declares the field. A
-// package is read once, when the first of its fields is asked for.
+// of the linked modules named, and whether that source declares the field
+// (on the type declaredAs names). A package is read once, when the first of
+// its fields is asked for.
 func linkedFieldMarkers(t *testing.T, modules []string) func(kindField) (fieldMarkers, bool) {
 	t.Helper()
 	dirs, packages := map[string]string{}, map[string]map[string]fieldMarkers{}
 	return func(f kindField) (fieldMarkers, bool) {
-		pkg := f.owner.PkgPath()
+		owner := declaredAs(f.owner)
+		pkg := owner.PkgPath()
 		markers, loaded := packages[pkg]
 		if !loaded {
 			for _, module := range modules {
@@ -164,9 +166,22 @@ func linkedFieldMarkers(t *testing.T, modules []string) func(kindField) (fieldMa
 			}
 			packages[pkg] = markers
 		}
-		m, ok := markers[f.owner.Name()+"."+f.field.Name]
+		m, ok := markers[owner.Name()+"."+f.field.Name]
 		return m, ok
 	}
+}
+
+// declaredAs is the type whose source declares the fields of typ: typ itself,
+// or, for a struct type defined on another, that other. The monitoring
+// package defines CoreV1TopologySpreadConstraint on the Kubernetes type, so
+// its fields, their markers included, are the Kubernetes type's. A type
+// missing here leaves its fields undescribed, which the tests that read the
+// source refuse.
+func declaredAs(typ reflect.Type) reflect.Type {
+	if typ == reflect.TypeFor[monitoringv1.CoreV1TopologySpreadConstraint]() {
+		return reflect.TypeFor[corev1.TopologySpreadConstraint]()
+	}
+	return typ
 }
 
 // markerAPISource is the markers of the linked modules' source, for an API
@@ -573,6 +588,12 @@ var apiSetKinds = []apiSetKind{
 	{component: "podtemplate", typ: reflect.TypeFor[corev1.PodTemplate](), source: markerAPISource, skip: objectIdentity, listed: podSpecOmitted("template.spec.")},
 	{component: "priorityclass", typ: reflect.TypeFor[schedulingv1.PriorityClass](), source: markerAPISource, skip: objectIdentity},
 	{
+		component: "prometheus", typ: reflect.TypeFor[monitoringv1.PrometheusSpec](), source: markerAPISource, listed: monitoringWorkloadPodOmitted(),
+		// withExcludedGroups: the type writes an empty group, which the API's
+		// enum refuses.
+		filled: map[string]string{"excludedFromEnforcement[].group": monitoringExcludedGroup},
+	},
+	{
 		component: "prometheus-probe", typ: reflect.TypeFor[monitoringv1.ProbeSpec](), source: markerAPISource,
 		build: handlerBuild(&PrometheusProbeHandler{}, "prometheus-probe"),
 		documents: []func() map[string]any{func() map[string]any {
@@ -626,7 +647,7 @@ var apiSetKinds = []apiSetKind{
 		// The kind writes the group into an entry that names none
 		// (withExcludedGroups): the type writes an empty one, which the API's
 		// enum refuses.
-		filled: map[string]string{"excludedFromEnforcement[].group": thanosRulerExcludedGroup},
+		filled: map[string]string{"excludedFromEnforcement[].group": monitoringExcludedGroup},
 	},
 	{
 		component: "tlsroute", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),

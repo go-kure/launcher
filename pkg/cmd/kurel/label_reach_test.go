@@ -317,6 +317,10 @@ var labelReachNotRead = []labelReachUnread{
 		reason: "no metadata of any object: the external labels Thanos Ruler adds to the alerts and series it produces (the externalLabels property)",
 	},
 	{
+		field:  "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.CommonPrometheusFields.ExternalLabels",
+		reason: "no metadata of any object: the external labels Prometheus adds to the series and alerts it sends to other systems",
+	},
+	{
 		field:  "github.com/cilium/cilium/pkg/policy/api.AWSGroup.Labels",
 		reason: "no metadata of any object: the tags a rule selects cloud instances by",
 	},
@@ -524,7 +528,7 @@ func labelReachHeld(t *testing.T, gvk schema.GroupVersionKind, reach labelReach)
 // outside its status.
 //
 // Its limits: it walks registered kinds only, so a row for a kind that has no
-// kind component (the Prometheus operator's) is held by the tests of the table
+// kind component (a PrometheusAgent's, for one) is held by the tests of the table
 // alone; and a field that hands labels on under a name and a type that say
 // neither is not found (labelReachUnwalked).
 func TestLabelReach_EveryFieldIsHeldOrListed(t *testing.T) {

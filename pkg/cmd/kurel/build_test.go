@@ -548,6 +548,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"podmonitor",
 		"podtemplate",
 		"priorityclass",
+		"prometheus",
 		"prometheus-probe",
 		"prometheusrule",
 		"referencegrant",

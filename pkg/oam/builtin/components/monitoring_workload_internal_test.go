@@ -73,8 +73,8 @@ type monitoringWorkloadKind struct {
 	// cites where it lists it.
 	podCopies map[string]string
 
-	// around is the required fields an entry of a top-level list needs, by the
-	// list's json name, so that a document authoring a defaulted field inside
+	// around is the required fields an entry of a list needs, by the list's
+	// json path, so that a document authoring a defaulted field inside
 	// that entry (TestMonitoringWorkloadKinds_DefaultedZeros) reaches the
 	// field's refusal and, with the default, builds.
 	around map[string]map[string]any
@@ -319,6 +319,121 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 			"remoteWrite[].oauth2.tokenUrl":               "the URL tokens are fetched from; the client's secret is the key of a Secret (clientSecret)",
 			"web.tlsConfig.keyFile":                       keyPathField,
 			"web.tlsConfig.clientAuthType":                authTypeField,
+		},
+	},
+	{
+		monitoringKindRow: monitoringKindRow{"prometheus", reflect.TypeFor[monitoringv1.PrometheusSpec](), prometheusKind.required, nil, prometheusKind.defaultedZerosFor(&monitoringv1.PrometheusSpec{}).fields},
+		handler:           &PrometheusHandler{},
+		rulesLeft:         prometheusRulesLeft,
+		around: map[string]map[string]any{
+			"remoteWrite":            {"url": "https://remote.example/api/v1/write"},
+			"alerting.alertmanagers": {"name": "alertmanager-operated", "port": "web"},
+			"scrapeClasses":          {"name": "default"},
+		},
+		// Held beyond what podShapingFields recognises: shards, with replicas
+		// (TestPrometheus_ReplicasTimesShards), and the Thanos sidecar's image
+		// and resources (TestPrometheus_PolicyRefusals).
+		held: map[string]heldField{
+			"image": {
+				props:  map[string]any{"image": "other.example/prometheus/prometheus:v3.5.0"},
+				policy: &workloadPolicy{allowed: []string{"registry.example"}},
+				class:  oam.RefusalRegistry,
+			},
+			"replicas": {
+				props:  map[string]any{"replicas": 5},
+				policy: &workloadPolicy{maxReplicas: new(int32(3))},
+				class:  oam.RefusalReplicaMaximum,
+			},
+			"resources": {
+				props:  map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "4"}}},
+				policy: &workloadPolicy{maxCPU: "2"},
+				class:  oam.RefusalResourceMaximum,
+			},
+			"storage": {
+				props: map[string]any{"storage": map[string]any{"volumeClaimTemplate": map[string]any{
+					"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "100Gi"}}},
+				}}},
+				policy: &workloadPolicy{maxStorage: "10Gi"},
+				class:  oam.RefusalStorageMaximum,
+			},
+			"volumes": {
+				props:  map[string]any{"volumes": []any{map[string]any{"name": "host", "hostPath": map[string]any{"path": "/var/lib"}}}},
+				policy: &workloadPolicy{noHostPath: true},
+				class:  oam.RefusalHostPath,
+			},
+			"containers": {
+				props:  map[string]any{"containers": []any{map[string]any{"name": "sidecar", "securityContext": map[string]any{"privileged": true}}}},
+				policy: &workloadPolicy{noPrivileged: true},
+				class:  oam.RefusalPrivileged,
+			},
+			"initContainers": {
+				props:  map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}}},
+				policy: &workloadPolicy{allowed: []string{"registry.example"}},
+				class:  oam.RefusalRegistry,
+			},
+			"securityContext": {
+				props:  map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+				policy: &workloadPolicy{noPrivileged: true},
+				class:  oam.RefusalPrivileged,
+			},
+			"hostNetwork": {
+				props:  map[string]any{"hostNetwork": true},
+				policy: &workloadPolicy{noHostNetwork: true},
+				class:  oam.RefusalHostNamespace,
+			},
+		},
+		owned: map[string]string{
+			"podMetadata": "read by the wrapper every component's objects pass (pkg/oam), which refuses a key the consumer reserves in its labels and annotations and writes nothing there: the pods carry the component label only where the author writes it",
+		},
+		stated: map[string]string{
+			"affinity":                             schedulingField,
+			"nodeSelector":                         schedulingField,
+			"tolerations":                          schedulingField,
+			"topologySpreadConstraints":            schedulingField,
+			"schedulerName":                        schedulingField,
+			"priorityClassName":                    schedulingField,
+			"minReadySeconds":                      rolloutField,
+			"podManagementPolicy":                  rolloutField,
+			"updateStrategy":                       rolloutField,
+			"persistentVolumeClaimRetentionPolicy": rolloutField,
+			"serviceName":                          "names the governing Service of the StatefulSets; launcher creates none for it and reads none",
+			"terminationGracePeriodSeconds":        podSettingField,
+			"automountServiceAccountToken":         podSettingField,
+			"serviceAccountName":                   podSettingField,
+			"dnsConfig":                            podSettingField,
+			"dnsPolicy":                            podSettingField,
+			"enableServiceLinks":                   podSettingField,
+			"hostAliases":                          podSettingField,
+			"hostUsers":                            podSettingField,
+			"imagePullPolicy":                      pullPolicyField,
+			"imagePullSecrets":                     "names the Secrets holding registry credentials, not an image",
+			"volumeMounts":                         "mounts, into the prometheus container, volumes that are held where they are declared (volumes)",
+			"storage.volumeClaimTemplate.metadata": claimMetadata,
+			"storage.ephemeral.volumeClaimTemplate.metadata":   claimMetadata,
+			"volumes[].ephemeral.volumeClaimTemplate.metadata": claimMetadata,
+		},
+		literals: []string{"apiserverConfig.bearerToken", "remoteRead[].bearerToken", "remoteWrite[].bearerToken"},
+		notCredentials: map[string]string{
+			"secrets": secretNameField,
+			"alerting.alertmanagers[].bearerTokenFile":      keyPathField,
+			"alerting.alertmanagers[].tlsConfig.keyFile":    keyPathField,
+			"apiserverConfig.authorization.credentialsFile": keyPathField,
+			"apiserverConfig.bearerTokenFile":               keyPathField,
+			"apiserverConfig.tlsConfig.keyFile":             keyPathField,
+			"remoteRead[].authorization.credentialsFile":    keyPathField,
+			"remoteRead[].bearerTokenFile":                  keyPathField,
+			"remoteRead[].tlsConfig.keyFile":                keyPathField,
+			"remoteWrite[].authorization.credentialsFile":   keyPathField,
+			"remoteWrite[].bearerTokenFile":                 keyPathField,
+			"remoteWrite[].tlsConfig.keyFile":               keyPathField,
+			"scrapeClasses[].authorization.credentialsFile": keyPathField,
+			"scrapeClasses[].tlsConfig.keyFile":             keyPathField,
+			"thanos.grpcServerTlsConfig.keyFile":            keyPathField,
+			"tracingConfig.tlsConfig.keyFile":               keyPathField,
+			"web.tlsConfig.keyFile":                         keyPathField,
+			"remoteRead[].oauth2.tokenUrl":                  "the URL tokens are fetched from; the client's secret is the key of a Secret (clientSecret)",
+			"remoteWrite[].oauth2.tokenUrl":                 "the URL tokens are fetched from; the client's secret is the key of a Secret (clientSecret)",
+			"web.tlsConfig.clientAuthType":                  authTypeField,
 		},
 	},
 }
@@ -689,7 +804,7 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 					}
 					for list, fields := range kind.around {
 						if strings.HasPrefix(path, list+"[].") {
-							maps.Copy(props[list].([]any)[0].(map[string]any), fields)
+							maps.Copy(firstEntryAt(props, list), fields)
 						}
 					}
 					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
@@ -755,6 +870,19 @@ func TestMonitoringWorkloadKinds_HostNetworkHostPort(t *testing.T) {
 			})
 		}
 	}
+}
+
+// firstEntryAt is the first entry of the list at the json path of properties
+// authoredAt built, taking the first element of each list on the way.
+func firstEntryAt(props map[string]any, path string) map[string]any {
+	var at any = props
+	for name := range strings.SplitSeq(path, ".") {
+		at = at.(map[string]any)[name]
+		if list, ok := at.([]any); ok {
+			at = list[0]
+		}
+	}
+	return at.(map[string]any)
 }
 
 // authoredAt is properties that hold value at the json path, in the first
@@ -918,8 +1046,9 @@ func isTextField(typ reflect.Type) bool {
 // and is named for a credential (credentialName), and fails on one that is
 // neither reported by the kind's workload as a credential in the clear nor
 // listed with the reason it holds none. The refusal a reported one yields is
-// shown in TestMonitoringWorkload_HeldOnASyntheticValue, and on the one kind
-// that reports one, through its handler (TestThanosRuler_PolicyRefusals). A
+// shown in TestMonitoringWorkload_HeldOnASyntheticValue, and on the two kinds
+// that report one, through their handlers (TestThanosRuler_PolicyRefusals and
+// TestPrometheus_PolicyRefusals). A
 // field of a Kubernetes type is not
 // derived: an environment variable's value is no more held here than on a pod
 // kind. That is the whole of what is recognised: a credential under a name
@@ -930,7 +1059,7 @@ func TestMonitoringWorkloadKinds_CredentialsHeldOrListed(t *testing.T) {
 			var candidates []string
 			walkKindFields(kind.typ, func(kindField) bool { return true }, func(f kindField) {
 				name, _, _ := strings.Cut(f.field.Tag.Get("json"), ",")
-				if f.owner.PkgPath() == kind.typ.PkgPath() && isTextField(f.field.Type) && credentialName.MatchString(name) {
+				if declaredAs(f.owner).PkgPath() == kind.typ.PkgPath() && isTextField(f.field.Type) && credentialName.MatchString(name) {
 					candidates = append(candidates, f.path)
 				}
 			})
@@ -957,7 +1086,8 @@ func TestMonitoringWorkloadKinds_CredentialsHeldOrListed(t *testing.T) {
 // to each refusal they state, on workloads no kind maps. A kind reaches only
 // the branches its spec has fields for: the alertmanager and thanosruler
 // kinds name one image and one resource block, both at the top of their spec,
-// and the thanosruler kind reports one credential per entry of a list. A
+// and the prometheus kind two of each, the Thanos sidecar's included; the
+// thanosruler and prometheus kinds report one credential per entry of a list. A
 // branch nothing reaches is not shown to work.
 //
 // Each workload of the first table is valid without a policy, passes under one

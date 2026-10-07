@@ -209,6 +209,7 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"monitoringv1.PodMonitorSpec", reflect.TypeFor[monitoringv1.PodMonitorSpec]()},
 	{"monitoringv1.ProbeSpec", reflect.TypeFor[monitoringv1.ProbeSpec]()},
 	{"monitoringv1.PrometheusRuleSpec", reflect.TypeFor[monitoringv1.PrometheusRuleSpec]()},
+	{"monitoringv1.PrometheusSpec", reflect.TypeFor[monitoringv1.PrometheusSpec]()},
 	{"monitoringv1.ServiceMonitorSpec", reflect.TypeFor[monitoringv1.ServiceMonitorSpec]()},
 	{"monitoringv1.ThanosRulerSpec", reflect.TypeFor[monitoringv1.ThanosRulerSpec]()},
 	{"networkingv1.IngressClassSpec", reflect.TypeFor[networkingv1.IngressClassSpec]()},
@@ -713,6 +714,11 @@ var labelSelectorKinds = []labelSelectorKind{
 		component: "thanosruler", typ: "monitoringv1.ThanosRulerSpec", config: kindConfig(&ThanosRulerHandler{}),
 		// The storage arm a selector is written into must claim storage.
 		base:   map[string]any{"storage": amClaimingStorage()},
+		ground: generatorRuleGround,
+	},
+	{
+		component: "prometheus", typ: "monitoringv1.PrometheusSpec", config: kindConfig(&PrometheusHandler{}),
+		base:   map[string]any{},
 		ground: generatorRuleGround,
 	},
 	{

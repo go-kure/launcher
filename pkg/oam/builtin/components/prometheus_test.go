@@ -1,0 +1,646 @@
+package components_test
+
+import (
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+)
+
+// The prometheus kind (go-kure/launcher#790): the fixtures the shared tests of
+// kind_policy_free_test.go build it from, and what the kind does beyond the
+// shared helper: the six image fields it refuses, the environment policy on
+// the pods the Prometheus operator runs for it, the Thanos sidecar's included,
+// the credentials its spec holds in the clear, the external labels under their
+// own name, and the pods' metadata.
+
+// prometheusUnfixtured names the fields of the spec the full fixture cannot
+// set.
+var prometheusUnfixtured = map[string]string{
+	"baseImage":   "refused when not empty; an empty one writes nothing (TestPrometheus_DeprecatedImageFields)",
+	"tag":         "refused when not empty; an empty one writes nothing (TestPrometheus_DeprecatedImageFields)",
+	"sha":         "refused when not empty; an empty one writes nothing (TestPrometheus_DeprecatedImageFields)",
+	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestPrometheus_HostNetwork)",
+}
+
+// prometheusFull sets every other top-level field of the spec, inside
+// ptStrictPolicy: images of registry.example with a tag, one replica of each
+// of two shards, no more than 2 cpu, 1Gi of memory and 10Gi of storage,
+// nothing of the host, and no credential in the object.
+func prometheusFull() map[string]any {
+	webTLS := map[string]any{
+		"keySecret": secretKey("prometheus-tls", "tls.key"),
+		"cert":      map[string]any{"secret": secretKey("prometheus-tls", "tls.crt")},
+	}
+	selector := map[string]any{"matchLabels": map[string]any{"team": "payments"}}
+	everywhere := map[string]any{}
+	return map[string]any{
+		"podMetadata": map[string]any{
+			"labels":      map[string]any{"team": "payments"},
+			"annotations": map[string]any{"example.com/owner": "sre"},
+		},
+		"serviceMonitorSelector":             selector,
+		"serviceMonitorNamespaceSelector":    everywhere,
+		"podMonitorSelector":                 selector,
+		"podMonitorNamespaceSelector":        map[string]any{"matchExpressions": []any{map[string]any{"key": "team", "operator": "In", "values": []any{"payments"}}}},
+		"probeSelector":                      selector,
+		"probeNamespaceSelector":             everywhere,
+		"scrapeConfigSelector":               selector,
+		"scrapeConfigNamespaceSelector":      everywhere,
+		"version":                            "v3.5.0",
+		"paused":                             true,
+		"image":                              "registry.example/prometheus/prometheus:v3.5.0",
+		"imagePullPolicy":                    "IfNotPresent",
+		"imagePullSecrets":                   []any{map[string]any{"name": "registry-credentials"}},
+		"replicas":                           1,
+		"shards":                             2,
+		"shardingStrategy":                   map[string]any{"mode": "Address"},
+		"replicaExternalLabelName":           "replica",
+		"prometheusExternalLabelName":        "",
+		"logLevel":                           "info",
+		"logFormat":                          "json",
+		"scrapeInterval":                     "15s",
+		"scrapeTimeout":                      "10s",
+		"scrapeProtocols":                    []any{"PrometheusProto", "OpenMetricsText1.0.0"},
+		"externalLabels":                     map[string]any{"cluster": "eu-1"},
+		"enableRemoteWriteReceiver":          true,
+		"enableOTLPReceiver":                 true,
+		"remoteWriteReceiverMessageVersions": []any{"V1.0", "V2.0"},
+		"enableFeatures":                     []any{"exemplar-storage"},
+		"externalUrl":                        "https://prometheus.example.com",
+		"routePrefix":                        "/",
+		"storage": map[string]any{"volumeClaimTemplate": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"tier": "monitoring"}},
+			"spec": map[string]any{
+				"accessModes": []any{"ReadWriteOnce"}, "storageClassName": "fast",
+				"resources": map[string]any{"requests": map[string]any{"storage": "10Gi"}},
+			},
+		}},
+		"volumes":                              []any{map[string]any{"name": "scratch", "emptyDir": map[string]any{"sizeLimit": "1Gi"}}},
+		"volumeMounts":                         []any{map[string]any{"name": "scratch", "mountPath": "/scratch"}},
+		"persistentVolumeClaimRetentionPolicy": map[string]any{"whenDeleted": "Retain", "whenScaled": "Delete"},
+		"web":                                  map[string]any{"tlsConfig": webTLS, "pageTitle": "Payments", "maxConnections": 512},
+		"resources": map[string]any{
+			"requests": map[string]any{"cpu": "100m", "memory": "128Mi"},
+			"limits":   map[string]any{"cpu": 2, "memory": "1Gi"},
+		},
+		"nodeSelector":                 map[string]any{"kubernetes.io/os": "linux"},
+		"schedulerName":                "default-scheduler",
+		"serviceAccountName":           "prometheus",
+		"automountServiceAccountToken": true,
+		"secrets":                      []any{"etcd-client"},
+		"configMaps":                   []any{"scrape-targets"},
+		"affinity": map[string]any{"podAntiAffinity": map[string]any{
+			"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+				"topologyKey":   "kubernetes.io/hostname",
+				"labelSelector": map[string]any{"matchLabels": map[string]any{"prometheus": "main"}},
+			}},
+		}},
+		"tolerations": []any{map[string]any{"key": "dedicated", "operator": "Equal", "value": "monitoring", "effect": "NoSchedule"}},
+		"topologySpreadConstraints": []any{map[string]any{
+			"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsatisfiable": "ScheduleAnyway",
+			"labelSelector":            map[string]any{"matchLabels": map[string]any{"prometheus": "main"}},
+			"additionalLabelSelectors": "OnShard",
+		}},
+		"remoteWrite": []any{map[string]any{
+			"url":       "https://metrics.example.com/api/v1/write",
+			"basicAuth": map[string]any{"username": secretKey("remote-write", "username"), "password": secretKey("remote-write", "password")},
+			"headers":   map[string]any{"X-Scope-OrgID": "payments"},
+		}},
+		"otlp":                map[string]any{"promoteResourceAttributes": []any{"service.instance.id"}},
+		"securityContext":     map[string]any{"runAsNonRoot": true, "runAsUser": 1000, "fsGroup": 2000},
+		"dnsPolicy":           "None",
+		"dnsConfig":           map[string]any{"nameservers": []any{"192.0.2.53"}, "searches": []any{"example.com"}, "options": []any{map[string]any{"name": "ndots", "value": "2"}}},
+		"listenLocal":         true,
+		"podManagementPolicy": "OrderedReady",
+		"updateStrategy":      map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": 1}},
+		"enableServiceLinks":  false,
+		"containers": []any{
+			// A patch of the container the operator generates: no image.
+			map[string]any{"name": "prometheus", "readinessProbe": map[string]any{"periodSeconds": 5}},
+			map[string]any{
+				"name": "proxy", "image": "registry.example/team/proxy:1.2.3",
+				"resources":       map[string]any{"limits": map[string]any{"cpu": "500m", "memory": "64Mi"}},
+				"securityContext": map[string]any{"capabilities": map[string]any{"drop": []any{"ALL"}}},
+			},
+		},
+		"initContainers":                     []any{map[string]any{"name": "prepare", "image": "registry.example/team/prepare:1.0.0"}},
+		"additionalScrapeConfigs":            secretKey("prometheus-scrape", "scrape.yml"),
+		"apiserverConfig":                    map[string]any{"host": "https://kubernetes.default.svc", "authorization": map[string]any{"credentials": secretKey("apiserver", "token")}},
+		"priorityClassName":                  "monitoring",
+		"portName":                           "http-web",
+		"arbitraryFSAccessThroughSMs":        map[string]any{"deny": true},
+		"overrideHonorLabels":                true,
+		"overrideHonorTimestamps":            true,
+		"ignoreNamespaceSelectors":           true,
+		"enforcedNamespaceLabel":             "namespace",
+		"enforcedSampleLimit":                100000,
+		"enforcedTargetLimit":                1000,
+		"enforcedLabelLimit":                 64,
+		"enforcedLabelNameLengthLimit":       128,
+		"enforcedLabelValueLengthLimit":      1024,
+		"enforcedKeepDroppedTargets":         100,
+		"enforcedBodySizeLimit":              "10MB",
+		"nameValidationScheme":               "UTF8",
+		"nameEscapingScheme":                 "Underscores",
+		"convertClassicHistogramsToNHCB":     true,
+		"scrapeNativeHistograms":             true,
+		"scrapeClassicHistograms":            false,
+		"minReadySeconds":                    0,
+		"hostAliases":                        []any{map[string]any{"ip": "192.0.2.20", "hostnames": []any{"metrics.internal"}}},
+		"additionalArgs":                     []any{map[string]any{"name": "storage.tsdb.no-lockfile"}},
+		"walCompression":                     true,
+		"excludedFromEnforcement":            []any{map[string]any{"group": "monitoring.coreos.com", "resource": "servicemonitors", "namespace": "monitoring", "name": "global"}},
+		"podTargetLabels":                    []any{"team"},
+		"tracingConfig":                      map[string]any{"endpoint": "tempo.monitoring.svc:4317", "clientType": "grpc", "samplingFraction": "0.1"},
+		"bodySizeLimit":                      "5MB",
+		"sampleLimit":                        50000,
+		"targetLimit":                        500,
+		"labelLimit":                         32,
+		"labelNameLengthLimit":               64,
+		"labelValueLengthLimit":              512,
+		"keepDroppedTargets":                 50,
+		"reloadStrategy":                     "HTTP",
+		"maximumStartupDurationSeconds":      600,
+		"scrapeClasses":                      []any{map[string]any{"name": "default", "default": true}},
+		"serviceDiscoveryRole":               "EndpointSlice",
+		"tsdb":                               map[string]any{"outOfOrderTimeWindow": "10m"},
+		"scrapeFailureLogFile":               "scrape-failures.log",
+		"serviceName":                        "prometheus",
+		"runtime":                            map[string]any{"goGC": 75},
+		"terminationGracePeriodSeconds":      0,
+		"hostUsers":                          false,
+		"retention":                          "15d",
+		"retentionSize":                      "8GB",
+		"retentionPercentage":                80,
+		"shardRetentionPolicy":               map[string]any{"whenScaled": "Retain", "retain": map[string]any{"retentionPeriod": "3d"}},
+		"disableCompaction":                  true,
+		"rules":                              map[string]any{"alert": map[string]any{"forOutageTolerance": "1h", "forGracePeriod": "10m", "resendDelay": "1m"}},
+		"prometheusRulesExcludedFromEnforce": []any{map[string]any{"ruleNamespace": "monitoring", "ruleName": "global"}},
+		"ruleSelector":                       map[string]any{"matchLabels": map[string]any{"role": "alert-rules"}},
+		"ruleNamespaceSelector":              everywhere,
+		"query":                              map[string]any{"lookbackDelta": "5m", "maxConcurrency": 20, "timeout": "2m"},
+		"alerting":                           map[string]any{"alertmanagers": []any{map[string]any{"namespace": "monitoring", "name": "alertmanager-operated", "port": "web"}}},
+		"additionalAlertRelabelConfigs":      secretKey("prometheus-alert-relabel", "relabel.yml"),
+		"additionalAlertManagerConfigs":      secretKey("prometheus-alertmanagers", "alertmanagers.yml"),
+		"remoteRead": []any{map[string]any{
+			"url":       "https://metrics.example.com/api/v1/read",
+			"basicAuth": map[string]any{"username": secretKey("remote-read", "username"), "password": secretKey("remote-read", "password")},
+			"headers":   map[string]any{"X-Scope-OrgID": "payments"},
+		}},
+		"thanos": map[string]any{
+			"image":               "registry.example/thanos/thanos:v0.39.2",
+			"version":             "v0.39.2",
+			"resources":           map[string]any{"limits": map[string]any{"cpu": "500m", "memory": "256Mi"}},
+			"objectStorageConfig": secretKey("thanos-objstore", "objstore.yml"),
+			"blockSize":           "2h",
+		},
+		"queryLogFile":           "/dev/stdout",
+		"allowOverlappingBlocks": true,
+		"exemplars":              map[string]any{"maxSize": 100000},
+		"evaluationInterval":     "30s",
+		"ruleQueryOffset":        "30s",
+		"enableAdminAPI":         true,
+	}
+}
+
+// prometheusReaches names references of the full fixture's object that the
+// copy test must find (TestPolicyFreeKinds_GenerateCopies).
+var prometheusReaches = []string{
+	".Spec.CommonPrometheusFields.PodMetadata.Labels", ".Spec.CommonPrometheusFields.ServiceMonitorSelector.MatchLabels",
+	".Spec.CommonPrometheusFields.PodMonitorNamespaceSelector.MatchExpressions[0].Values",
+	".Spec.CommonPrometheusFields.Image", ".Spec.CommonPrometheusFields.Replicas", ".Spec.CommonPrometheusFields.Shards",
+	".Spec.CommonPrometheusFields.ShardingStrategy", ".Spec.CommonPrometheusFields.ReplicaExternalLabelName",
+	".Spec.CommonPrometheusFields.ScrapeProtocols", ".Spec.CommonPrometheusFields.ExternalLabels",
+	".Spec.CommonPrometheusFields.EnableOTLPReceiver", ".Spec.CommonPrometheusFields.Storage.VolumeClaimTemplate.Spec.Resources.Requests",
+	".Spec.CommonPrometheusFields.Volumes[0].VolumeSource.EmptyDir", ".Spec.CommonPrometheusFields.Web",
+	".Spec.CommonPrometheusFields.Resources.Limits", ".Spec.CommonPrometheusFields.Secrets",
+	".Spec.CommonPrometheusFields.TopologySpreadConstraints[0].AdditionalLabelSelectors",
+	".Spec.CommonPrometheusFields.RemoteWrite[0].Headers", ".Spec.CommonPrometheusFields.OTLP",
+	".Spec.CommonPrometheusFields.Containers[0].ReadinessProbe", ".Spec.CommonPrometheusFields.APIServerConfig",
+	".Spec.CommonPrometheusFields.EnforcedSampleLimit", ".Spec.CommonPrometheusFields.ExcludedFromEnforcement",
+	".Spec.CommonPrometheusFields.TracingConfig.SamplingFraction", ".Spec.CommonPrometheusFields.ScrapeClasses",
+	".Spec.CommonPrometheusFields.TSDB", ".Spec.CommonPrometheusFields.Runtime", ".Spec.CommonPrometheusFields.HostUsers",
+	".Spec.RetentionPercentage", ".Spec.ShardRetentionPolicy.Retain", ".Spec.PrometheusRulesExcludedFromEnforce",
+	".Spec.RuleSelector", ".Spec.Query", ".Spec.Alerting.Alertmanagers", ".Spec.RemoteRead[0].Headers",
+	".Spec.Thanos", ".Spec.Thanos.Image", ".Spec.Thanos.Resources.Limits", ".Spec.Exemplars", ".Spec.RuleQueryOffset",
+}
+
+// prometheusRefusals are the kind's refusal cases with or without an
+// environment policy (TestPolicyFreeKinds_Refusals). The kind requires no
+// top-level field.
+func prometheusRefusals(notA string) []struct {
+	name  string
+	props map[string]any
+	want  string
+} {
+	container := func(c map[string]any) map[string]any { return map[string]any{"containers": []any{c}} }
+	return []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"unknown key", map[string]any{"replicaCount": 3}, notA + "monitoring.coreos.com/v1 PrometheusSpec"},
+		{"the object's spec", map[string]any{"spec": map[string]any{"replicas": 3}}, notA},
+		{"shards a string", map[string]any{"shards": "two"}, notA},
+		{"thanos sub-key", map[string]any{"thanos": map[string]any{"sidecar": true}}, notA},
+		{"container sub-key", container(map[string]any{"name": "proxy", "registry": "registry.example"}), notA},
+		{"null container", map[string]any{"containers": []any{map[string]any{"name": "proxy"}, nil}}, "containers[1]"},
+		{"two spellings", map[string]any{"shards": 1, "Shards": 2}, "sets the same field as"},
+
+		{"remote write without a URL", map[string]any{"remoteWrite": []any{map[string]any{"headers": map[string]any{"X-Scope-OrgID": "payments"}}}}, "remoteWrite[0].url: required"},
+		{"remote read without a URL", map[string]any{"remoteRead": []any{map[string]any{"readRecent": true}}}, "remoteRead[0].url: required"},
+		{"an Alertmanager endpoint without a name", map[string]any{"alerting": map[string]any{"alertmanagers": []any{map[string]any{"port": "web"}}}}, "alerting.alertmanagers[0].name: required"},
+		{"a scrape class without a name", map[string]any{"scrapeClasses": []any{map[string]any{"default": true}}}, "scrapeClasses[0].name: required"},
+
+		{"image without a tag", map[string]any{"image": "registry.example/prometheus/prometheus"},
+			`image: image "registry.example/prometheus/prometheus" rejected: no tag or digest specified`},
+		{"image tagged latest", map[string]any{"image": "registry.example/prometheus/prometheus:latest"},
+			`image: image "registry.example/prometheus/prometheus:latest" rejected: :latest tag not allowed`},
+		{"sidecar image tagged latest", map[string]any{"thanos": map[string]any{"image": "registry.example/thanos/thanos:latest"}},
+			`thanos.image: image "registry.example/thanos/thanos:latest" rejected: :latest tag not allowed`},
+		{"container image tagged latest", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:latest"}),
+			`containers[0] "proxy": image "registry.example/team/proxy:latest" rejected: :latest tag not allowed`},
+		{"request over its limit", map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"},
+		}}, "resources: cpu: request 2 must not exceed limit 1"},
+		{"sidecar request over its limit", map[string]any{"thanos": map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"memory": "2Gi"}, "limits": map[string]any{"memory": "1Gi"},
+		}}}, "thanos: resources: memory: request 2Gi must not exceed limit 1Gi"},
+		// An authored 0 the type omits, on a container that patches one of the
+		// operator's own as on any other.
+		{"probe period of 0 on a patch", container(map[string]any{"name": "prometheus", "readinessProbe": map[string]any{"periodSeconds": 0}}),
+			"containers[0].readinessProbe.periodSeconds: 0 cannot be carried by the "},
+		// An authored "" on a string of the operator's own types that the CRD
+		// defaults, at the top and on the Thanos sidecar.
+		{"empty scrapeInterval", map[string]any{"scrapeInterval": ""},
+			`scrapeInterval: "" cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default "30s")`},
+		{"empty thanos blockSize", map[string]any{"thanos": map[string]any{"blockSize": ""}},
+			`thanos.blockSize: "" cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default "2h")`},
+	}
+}
+
+// prometheusOf builds the Prometheus of props under the given policies, in
+// turn (generateCoreKindUnder).
+func prometheusOf(t *testing.T, props map[string]any, policies ...oam.Policy) *monitoringv1.Prometheus {
+	t.Helper()
+	obj := generateCoreKindUnder(t, &components.PrometheusHandler{}, "prometheus", "main", props, policies...)
+	p, ok := obj.(*monitoringv1.Prometheus)
+	if !ok {
+		t.Fatalf("the kind built a %T, want a Prometheus", obj)
+	}
+	return p
+}
+
+// prometheusThrough is the one Prometheus the transform builds for component
+// web from props, under no policy.
+func prometheusThrough(t *testing.T, props map[string]any) (*monitoringv1.Prometheus, error) {
+	t.Helper()
+	objs, err := policyFreeTransform("prometheus", &components.PrometheusHandler{}, nil, oam.Component{Name: "web", Properties: props})
+	if err != nil {
+		return nil, err
+	}
+	var found []client.Object
+	for _, obj := range objs {
+		if _, ok := obj.(*monitoringv1.Prometheus); ok {
+			found = append(found, obj)
+		}
+	}
+	if len(objs) != 1 || len(found) != 1 {
+		t.Fatalf("built %d objects, %d of them a Prometheus; want the one Prometheus", len(objs), len(found))
+	}
+	return found[0].(*monitoringv1.Prometheus), nil
+}
+
+// TestPrometheus_DeprecatedImageFields: baseImage, tag and sha, of the spec
+// and of the Thanos sidecar, are refused wherever the object would carry them,
+// whatever else is authored, without a policy, each naming the field that replaces it; the
+// spec's three are no property of the kind's schema. An empty one of the
+// spec is the object an absent one is, and builds. The sidecar's are pointers
+// the type writes whenever set, so an empty one is refused too, under any
+// spelling the decode folds onto the field; a null one sets none and builds.
+// thanos.version is not one of them.
+func TestPrometheus_DeprecatedImageFields(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	schema := h.PropertySchema()
+	for _, field := range []string{"baseImage", "tag", "sha"} {
+		t.Run(field, func(t *testing.T) {
+			if _, published := schema[field]; published {
+				t.Errorf("the schema publishes %q, which the kind refuses", field)
+			}
+			for name, tc := range map[string]struct {
+				props map[string]any
+				path  string
+				use   string
+			}{
+				"alone":                             {map[string]any{field: "v3.5.0"}, field, "use image"},
+				"beside image":                      {map[string]any{field: "v3.5.0", "image": "registry.example/prometheus/prometheus:v3.5.0"}, field, "use image"},
+				"the sidecar's":                     {map[string]any{"thanos": map[string]any{field: "v0.39.2"}}, "thanos." + field, "use thanos.image"},
+				"beside thanos.image":               {map[string]any{"thanos": map[string]any{field: "v0.39.2", "image": "registry.example/thanos/thanos:v0.39.2"}}, "thanos." + field, "use thanos.image"},
+				"another sidecar text":              {map[string]any{"thanos": map[string]any{field: "registry.example/thanos/thanos"}}, "thanos." + field, "use thanos.image"},
+				"the sidecar's, empty":              {map[string]any{"thanos": map[string]any{field: ""}}, "thanos." + field, "use thanos.image"},
+				"the sidecar's, empty, in capitals": {map[string]any{"thanos": map[string]any{strings.ToUpper(field): ""}}, "thanos." + field, "use thanos.image"},
+			} {
+				want := tc.path + ": not authorable: the Prometheus operator deprecates the field"
+				if err := coreKindErr(h, "prometheus", "main", tc.props); err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), tc.use) {
+					t.Errorf("%s: err = %v, want one mentioning %q and %q", name, err, want, tc.use)
+				}
+			}
+			p := prometheusOf(t, map[string]any{field: ""})
+			if p.Spec.BaseImage != "" || p.Spec.Tag != "" || p.Spec.SHA != "" {
+				t.Errorf("an empty %s built baseImage %q, tag %q, sha %q; want none", field, p.Spec.BaseImage, p.Spec.Tag, p.Spec.SHA)
+			}
+			p = prometheusOf(t, map[string]any{"thanos": map[string]any{field: nil}})
+			if th := p.Spec.Thanos; th == nil || th.BaseImage != nil || th.Tag != nil || th.SHA != nil {
+				t.Errorf("a null thanos.%s built thanos %+v; want a sidecar with none of the three set", field, th)
+			}
+		})
+	}
+	p := prometheusOf(t, map[string]any{"thanos": map[string]any{"version": "v0.39.2"}}, ptStrictPolicy())
+	if p.Spec.Thanos == nil || p.Spec.Thanos.Version == nil || *p.Spec.Thanos.Version != "v0.39.2" {
+		t.Errorf("thanos = %+v, want the authored version", p.Spec.Thanos)
+	}
+}
+
+// TestPrometheus_Unauthored: a component that authors nothing builds a
+// Prometheus whose spec holds no image, no replica or shard count and no
+// storage, so the operator's own defaults apply and no policy default is
+// written; and the fields the type always encodes, empty.
+func TestPrometheus_Unauthored(t *testing.T) {
+	two := int32(2)
+	defaulting := &stubPolicy{
+		defaultReplicas: &two, defaultCPURequest: "100m", defaultMemoryRequest: "64Mi",
+		defaultCPULimit: "1", defaultMemoryLimit: "128Mi", defaultStorageSize: "1Gi",
+		allowedRegistries: []string{"registry.example"},
+	}
+	p := prometheusOf(t, map[string]any{}, defaulting, nil)
+	if p.Spec.Image != nil || p.Spec.Replicas != nil || p.Spec.Shards != nil || p.Spec.Storage != nil {
+		t.Errorf("image = %v, replicas = %v, shards = %v, storage = %v; want none of them written", p.Spec.Image, p.Spec.Replicas, p.Spec.Shards, p.Spec.Storage)
+	}
+	if len(p.Spec.Resources.Requests) != 0 || len(p.Spec.Resources.Limits) != 0 {
+		t.Errorf("resources = %+v, want no default of the policy filled", p.Spec.Resources)
+	}
+	spec, _ := policyFreeJSON(t, p)["spec"].(map[string]any)
+	want := map[string]any{
+		"arbitraryFSAccessThroughSMs": map[string]any{},
+		"resources":                   map[string]any{},
+		"rules":                       map[string]any{"alert": map[string]any{}},
+	}
+	if !reflect.DeepEqual(spec, want) {
+		t.Errorf("spec = %v, want %v: the fields the type encodes whether or not they were authored, empty", spec, want)
+	}
+}
+
+// TestPrometheus_ReplicasTimesShards: the pods the policy's replica maximum
+// holds are those of all shards, replicas times shards, each 1 where unset,
+// as the type counts them; where neither is authored, nothing is held.
+func TestPrometheus_ReplicasTimesShards(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	for name, tc := range map[string]struct {
+		props   map[string]any
+		refused bool
+	}{
+		"neither":                  {map[string]any{}, false},
+		"replicas within":          {map[string]any{"replicas": 3}, false},
+		"replicas over":            {map[string]any{"replicas": 4}, true},
+		"shards within":            {map[string]any{"shards": 3}, false},
+		"shards over":              {map[string]any{"shards": 4}, true},
+		"both within":              {map[string]any{"replicas": 1, "shards": 3}, false},
+		"both over, each within":   {map[string]any{"replicas": 2, "shards": 2}, true},
+		"a replica count of 0":     {map[string]any{"replicas": 0, "shards": 4}, false},
+		"a null shard count":       {map[string]any{"replicas": 3, "shards": nil}, false},
+		"a null count beside over": {map[string]any{"replicas": nil, "shards": 4}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("prometheus", h, tc.props, ptStrictPolicy())
+			if !tc.refused {
+				if err != nil {
+					t.Errorf("err = %v, want it built", err)
+				}
+				return
+			}
+			rcWantClass(t, err, oam.RefusalReplicaMaximum)
+			if err != nil && !strings.Contains(err.Error(), "replicas times shards 4 exceeds enforced maximum 3") {
+				t.Errorf("err = %v, want one naming replicas times shards", err)
+			}
+		})
+	}
+}
+
+// TestPrometheus_PolicyRefusals: under an environment policy, what the spec
+// says of the pods is refused as a workload kind's own fields are, the Thanos
+// sidecar's image and resources too, with the class of the refusal and the
+// path of the property; and so is each credential the spec holds in the clear.
+// Without a policy the same component builds.
+func TestPrometheus_PolicyRefusals(t *testing.T) {
+	const image = "registry.example/prometheus/prometheus:v3.5.0"
+	container := func(list string, c map[string]any) map[string]any { return map[string]any{list: []any{c}} }
+	claim := func(size string) map[string]any {
+		return map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+			"accessModes": []any{"ReadWriteOnce"},
+			"resources":   map[string]any{"requests": map[string]any{"storage": size}},
+		}}}
+	}
+	endpoints := func(list string, entries ...map[string]any) map[string]any {
+		all := make([]any, 0, len(entries))
+		for _, e := range entries {
+			all = append(all, e)
+		}
+		return map[string]any{list: all}
+	}
+	cases := []struct {
+		name  string
+		props map[string]any
+		class oam.RefusalClass
+		want  string
+	}{
+		{"image outside the allowed registries", map[string]any{"image": "other.example/prometheus/prometheus:v3.5.0"}, oam.RefusalRegistry, "image: "},
+		{"sidecar image outside the allowed registries", map[string]any{"thanos": map[string]any{"image": "other.example/thanos/thanos:v0.39.2"}}, oam.RefusalRegistry, "thanos.image: "},
+		{"replicas over the maximum", map[string]any{"replicas": 4}, oam.RefusalReplicaMaximum, "replicas times shards 4 exceeds enforced maximum 3"},
+		{"claim over the storage maximum", map[string]any{"storage": claim("1Ti")}, oam.RefusalStorageMaximum, "storage.volumeClaimTemplate.spec.resources.requests.storage"},
+		{"ephemeral claim over the storage maximum", map[string]any{"storage": map[string]any{"ephemeral": claim("1Ti")}}, oam.RefusalStorageMaximum, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage"},
+		{"cpu over the maximum", map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "4"}}}, oam.RefusalResourceMaximum, "resources: "},
+		{"sidecar memory over the maximum", map[string]any{"thanos": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}}, oam.RefusalResourceMaximum, "thanos.resources: "},
+		{"host network", map[string]any{"hostNetwork": true}, oam.RefusalHostNamespace, "hostNetwork"},
+		{"hostPath volume", map[string]any{"volumes": []any{map[string]any{"name": "host", "hostPath": map[string]any{"path": "/etc"}}}}, oam.RefusalHostPath, "hostPath"},
+		{"image volume outside the allowed registries", map[string]any{"volumes": []any{map[string]any{"name": "data", "image": map[string]any{"reference": "other.example/team/data:1.0.0"}}}}, oam.RefusalRegistry, "other.example"},
+		{"container image outside the allowed registries", container("containers", map[string]any{"name": "proxy", "image": "other.example/team/proxy:1.2.3"}), oam.RefusalRegistry, "proxy"},
+		{"init container image outside the allowed registries", container("initContainers", map[string]any{"name": "prepare", "image": "other.example/team/prepare:1.0.0"}), oam.RefusalRegistry, "prepare"},
+		// A patch of a container the operator generates is held like any other.
+		{"patch over the memory maximum", container("containers", map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}), oam.RefusalResourceMaximum, "config-reloader"},
+		{"privileged sidecar patch", container("containers", map[string]any{"name": "thanos-sidecar", "securityContext": map[string]any{"privileged": true}}), oam.RefusalPrivileged, "thanos-sidecar"},
+		{"privileged init container", container("initContainers", map[string]any{"name": "init-config-reloader", "securityContext": map[string]any{"privileged": true}}), oam.RefusalPrivileged, "init-config-reloader"},
+		{"host process", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}}, oam.RefusalPrivileged, "securityContext.windowsOptions.hostProcess is not allowed"},
+		{"forbidden capability", container("containers", map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "securityContext": map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}}}), oam.RefusalContainerCapability, "NET_ADMIN"},
+		// The deprecated bearer tokens, the credentials in the clear, by the
+		// index of their entry.
+		{"a remote write bearer token", endpoints("remoteWrite",
+			map[string]any{"url": "https://a.example.com/api/v1/write"},
+			map[string]any{"url": "https://b.example.com/api/v1/write", "bearerToken": "s3cr3t"},
+		), oam.RefusalExplicitSecret, "remoteWrite[1].bearerToken: holds a credential in the object, and the environment policy forbids explicit secrets"},
+		{"a remote read bearer token", endpoints("remoteRead",
+			map[string]any{"url": "https://a.example.com/api/v1/read"},
+			map[string]any{"url": "https://b.example.com/api/v1/read", "bearerToken": "s3cr3t"},
+		), oam.RefusalExplicitSecret, "remoteRead[1].bearerToken: holds a credential in the object"},
+		{"an API server bearer token", map[string]any{"apiserverConfig": map[string]any{"host": "https://kubernetes.default.svc", "bearerToken": "s3cr3t"}},
+			oam.RefusalExplicitSecret, "apiserverConfig.bearerToken: holds a credential in the object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"image": image}
+			maps.Copy(props, tc.props)
+			_, err := pvTransform("prometheus", &components.PrometheusHandler{}, props, esPolicy{stubPolicy: ptStrictPolicy()})
+			rcWantClass(t, err, tc.class)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+			// Without a policy applied, the same component builds.
+			prometheusOf(t, props)
+		})
+	}
+}
+
+// TestPrometheus_HostNetwork: an authored true is carried under a policy that
+// allows the host network and refused under one that does not
+// (TestPrometheus_PolicyRefusals); an authored false is the object an absent
+// one is, since the type omits it.
+func TestPrometheus_HostNetwork(t *testing.T) {
+	p := prometheusOf(t, map[string]any{"hostNetwork": true}, hostNetworkOK{ptStrictPolicy()})
+	if !p.Spec.HostNetwork {
+		t.Error("hostNetwork = false, want the authored true under a policy that allows the host network")
+	}
+	off := prometheusOf(t, map[string]any{"hostNetwork": false}, ptStrictPolicy())
+	if spec, _ := policyFreeJSON(t, off)["spec"].(map[string]any); spec["hostNetwork"] != nil {
+		t.Errorf("hostNetwork = %v, want it omitted: the API reads an absent one as false", spec["hostNetwork"])
+	}
+}
+
+// TestPrometheus_CredentialsStatedNotHeld: a credential under a name that does
+// not say so is not read, under a policy that forbids explicit secrets: a
+// header value and the user information of a URL build, of a remote write and
+// a remote read entry and of the tracing configuration. Every other credential
+// of the spec is the key of a Secret or the path of a file in the container.
+func TestPrometheus_CredentialsStatedNotHeld(t *testing.T) {
+	p := prometheusOf(t, map[string]any{
+		"remoteWrite": []any{map[string]any{
+			"url":     "https://user:s3cr3t@metrics.example.com/api/v1/write",
+			"headers": map[string]any{"X-Api-Key": "s3cr3t"},
+		}},
+		"remoteRead": []any{map[string]any{
+			"url":     "https://user:s3cr3t@metrics.example.com/api/v1/read",
+			"headers": map[string]any{"X-Api-Key": "s3cr3t"},
+		}},
+		"tracingConfig": map[string]any{"endpoint": "tempo.monitoring.svc:4317", "headers": map[string]any{"X-Api-Key": "s3cr3t"}},
+	}, esPolicy{stubPolicy: ptStrictPolicy()})
+	if got := p.Spec.RemoteWrite[0].Headers["X-Api-Key"]; got != "s3cr3t" {
+		t.Errorf("the remote write header = %q, want it carried as authored", got)
+	}
+	if got := p.Spec.RemoteRead[0].Headers["X-Api-Key"]; got != "s3cr3t" {
+		t.Errorf("the remote read header = %q, want it carried as authored", got)
+	}
+}
+
+// TestPrometheus_ExternalLabels: the spec's external labels are published
+// under their own name, and land in the spec as authored; the object's own
+// labels are the engine's `labels`, beside the component label. The engine's
+// checks of object labels do not reach the external labels.
+func TestPrometheus_ExternalLabels(t *testing.T) {
+	key := oam.ComponentLabelKeyForDomain("")
+	p, err := prometheusThrough(t, map[string]any{
+		"labels":         map[string]any{"team": "payments"},
+		"externalLabels": map[string]any{"cluster": "eu-1", key: "other"},
+	})
+	if err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+	if got, want := p.GetLabels(), map[string]string{"team": "payments", key: "web"}; !maps.Equal(got, want) {
+		t.Errorf("the object's labels = %v, want the authored labels and the component label: %v", got, want)
+	}
+	if got, want := p.Spec.ExternalLabels, map[string]string{"cluster": "eu-1", key: "other"}; !maps.Equal(got, want) {
+		t.Errorf("the external labels = %v, want the authored externalLabels: %v", got, want)
+	}
+}
+
+// TestPrometheus_ExcludedGroupFilled: an entry of excludedFromEnforcement that leaves its group out, or writes it null,
+// carries the one group the API allows; an authored group is kept, and an
+// authored empty one refused by the entry's index.
+func TestPrometheus_ExcludedGroupFilled(t *testing.T) {
+	p := prometheusOf(t, map[string]any{"excludedFromEnforcement": []any{
+		map[string]any{"resource": "servicemonitors", "namespace": "monitoring"},
+		map[string]any{"group": nil, "resource": "podmonitors", "namespace": "monitoring"},
+		map[string]any{"group": "example.com", "resource": "probes", "namespace": "monitoring"},
+	}})
+	want := []string{"monitoring.coreos.com", "monitoring.coreos.com", "example.com"}
+	got := make([]string, 0, len(p.Spec.ExcludedFromEnforcement))
+	for _, ref := range p.Spec.ExcludedFromEnforcement {
+		got = append(got, ref.Group)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("excludedFromEnforcement groups = %q, want %q", got, want)
+	}
+	err := coreKindErr(&components.PrometheusHandler{}, "prometheus", "main", map[string]any{"excludedFromEnforcement": []any{
+		map[string]any{"resource": "servicemonitors", "namespace": "monitoring"},
+		map[string]any{"group": "", "resource": "podmonitors", "namespace": "monitoring"},
+	}})
+	if wantErr := "excludedFromEnforcement[1].group: empty: the API admits only monitoring.coreos.com"; err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("an authored empty group: err = %v, want %q", err, wantErr)
+	}
+}
+
+// TestPrometheus_NoImageIsNotHeld: a spec that names no image, and a sidecar
+// that names none, build under a policy with allowed registries. The object
+// then names no image, and which image runs is the operator's to decide; the
+// policy is not asked about it. The same holds for a listed container that
+// names none.
+func TestPrometheus_NoImageIsNotHeld(t *testing.T) {
+	p := prometheusOf(t, map[string]any{
+		"version":    "v3.5.0",
+		"thanos":     map[string]any{"version": "v0.39.2"},
+		"containers": []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+	}, ptStrictPolicy())
+	if p.Spec.Image != nil || p.Spec.Thanos.Image != nil || p.Spec.Containers[0].Image != "" {
+		t.Errorf("image = %v, sidecar image = %v, container image = %q; want none written", p.Spec.Image, p.Spec.Thanos.Image, p.Spec.Containers[0].Image)
+	}
+}
+
+// TestPrometheus_PodMetadata: through the transform, the metadata the
+// operator copies onto the pods is the author's and nothing else. The object
+// itself takes the component label; podMetadata takes none, so the pods carry
+// it only where the author writes it.
+func TestPrometheus_PodMetadata(t *testing.T) {
+	key := oam.ComponentLabelKeyForDomain("")
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  *monitoringv1.EmbeddedObjectMetadata
+	}{
+		"unauthored": {map[string]any{}, nil},
+		"labels": {
+			map[string]any{"podMetadata": map[string]any{"labels": map[string]any{"team": "payments"}}},
+			&monitoringv1.EmbeddedObjectMetadata{Labels: map[string]string{"team": "payments"}},
+		},
+		"the component label with the component's own value": {
+			map[string]any{"podMetadata": map[string]any{"labels": map[string]any{key: "web"}}},
+			&monitoringv1.EmbeddedObjectMetadata{Labels: map[string]string{key: "web"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := prometheusThrough(t, tc.props)
+			if err != nil {
+				t.Fatalf("transform: %v", err)
+			}
+			if tc.want == nil && p.Spec.PodMetadata != nil || tc.want != nil && (p.Spec.PodMetadata == nil || !maps.Equal(p.Spec.PodMetadata.Labels, tc.want.Labels)) {
+				t.Errorf("podMetadata = %+v, want it as authored: %+v", p.Spec.PodMetadata, tc.want)
+			}
+			if got := p.GetLabels(); !maps.Equal(got, map[string]string{key: "web"}) {
+				t.Errorf("the object's labels = %v, want the component label alone", got)
+			}
+		})
+	}
+}

@@ -57,7 +57,7 @@ import (
 // advertisement on the local network, one over BGP, a BFD profile and a set
 // of community aliases). The three kinds of cert-manager's API, the four of the
 // External Secrets Operator's, MetalLB's BGP peer and the Prometheus
-// operator's Alertmanager and ThanosRuler are held here too: the policy
+// operator's Alertmanager, ThanosRuler and Prometheus are held here too: the policy
 // reaches part of each (held), and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
@@ -778,6 +778,14 @@ var policyFreeKinds = []policyFreeKind{
 			"description":      "Workloads that must not be preempted.",
 			"preemptionPolicy": "Never",
 		},
+	},
+	{
+		component: "prometheus", handler: &components.PrometheusHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("Prometheus"),
+		typ: reflect.TypeFor[monitoringv1.PrometheusSpec](), namespaced: true, held: true,
+		minimal:    map[string]any{},
+		full:       prometheusFull(),
+		unfixtured: prometheusUnfixtured,
 	},
 	{
 		component: "prometheus-probe", handler: &components.PrometheusProbeHandler{},
@@ -1651,6 +1659,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.Selector.MatchLabels", ".Spec.Selector.MatchExpressions", ".Spec.KeepDroppedTargets", ".Spec.BodySizeLimit",
 		},
 		"priorityclass": {".PreemptionPolicy"},
+		"prometheus":    prometheusReaches,
 		"prometheus-probe": {
 			".Spec.ProberSpec.Scheme", ".Spec.ProberSpec.ProxyConfig.ProxyURL", ".Spec.Targets.StaticConfig",
 			".Spec.Targets.StaticConfig.Targets", ".Spec.Targets.StaticConfig.Labels", ".Spec.Targets.Ingress",
@@ -2956,13 +2965,16 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"two spellings", map[string]any{"driverName": "d", "drivername": "e"}, "sets the same field as"},
 		},
 	}
-	// The alertmanager and thanosruler kinds and the External Secrets
+	// The alertmanager, thanosruler and prometheus kinds and the External Secrets
 	// Operator's kinds keep their cases beside their fixtures.
 	for _, tc := range alertmanagerRefusals(notA) {
 		cases["alertmanager"] = append(cases["alertmanager"], refusal(tc))
 	}
 	for _, tc := range thanosRulerRefusals(notA) {
 		cases["thanosruler"] = append(cases["thanosruler"], refusal(tc))
+	}
+	for _, tc := range prometheusRefusals(notA) {
+		cases["prometheus"] = append(cases["prometheus"], refusal(tc))
 	}
 	for _, kind := range secretStores {
 		for _, tc := range secretStoreRefusals(notA) {

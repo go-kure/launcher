@@ -1,0 +1,70 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  labels:
+    launcher.gokure.dev/component: metrics
+    team: payments
+  name: metrics
+  namespace: default
+spec:
+  alerting:
+    alertmanagers:
+    - name: alertmanager-operated
+      namespace: monitoring
+      port: web
+  arbitraryFSAccessThroughSMs: {}
+  excludedFromEnforcement:
+  - group: monitoring.coreos.com
+    namespace: monitoring
+    resource: servicemonitors
+  externalLabels:
+    cluster: eu-1
+  image: quay.io/prometheus/prometheus:v3.5.0
+  podMetadata:
+    labels:
+      team: payments
+  remoteWrite:
+  - url: https://metrics.example.com/api/v1/write
+  replicas: 2
+  resources:
+    limits:
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  retention: 15d
+  ruleSelector:
+    matchLabels:
+      role: alert-rules
+  rules:
+    alert: {}
+  serviceMonitorSelector:
+    matchLabels:
+      team: payments
+  shards: 2
+  storage:
+    volumeClaimTemplate:
+      metadata: {}
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+      status: {}
+  thanos:
+    image: quay.io/thanos/thanos:v0.39.2
+    resources: {}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  labels:
+    launcher.gokure.dev/component: defaults
+  name: defaults
+  namespace: default
+spec:
+  arbitraryFSAccessThroughSMs: {}
+  resources: {}
+  rules:
+    alert: {}

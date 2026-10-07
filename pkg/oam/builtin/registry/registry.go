@@ -130,6 +130,7 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 		"podmonitor":                      &components.PodMonitorHandler{},
 		"podtemplate":                     &components.PodTemplateHandler{},
 		"priorityclass":                   &components.PriorityClassHandler{},
+		"prometheus":                      &components.PrometheusHandler{},
 		"prometheus-probe":                &components.PrometheusProbeHandler{},
 		"prometheusrule":                  &components.PrometheusRuleHandler{},
 		"referencegrant":                  &components.ReferenceGrantHandler{},

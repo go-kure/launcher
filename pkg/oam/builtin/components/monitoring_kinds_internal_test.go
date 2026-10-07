@@ -482,7 +482,7 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 			listed, validated := map[string]bool{}, map[string]bool{}
 			fields := 0
 			walkKindFields(kind.typ, src.required, func(f kindField) {
-				own := f.owner.PkgPath() == kind.typ.PkgPath()
+				own := declaredAs(f.owner).PkgPath() == kind.typ.PkgPath()
 				if own {
 					fields++
 				}
@@ -510,8 +510,10 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 					// pod.go), and TestExternalSecretsKinds_RequiredMatchSource
 					// derives only the two for the External Secrets kinds. Every
 					// other required field of those types is not refused and is
-					// emitted empty, as the kind's README entry says.
-					if workload[kind.component] && strings.HasPrefix(f.owner.PkgPath(), "k8s.io/") {
+					// emitted empty, as the kind's README entry says. A type the
+					// monitoring package declares as one of them is one of them
+					// (declaredAs).
+					if workload[kind.component] && strings.HasPrefix(declaredAs(f.owner).PkgPath(), "k8s.io/") {
 						return
 					}
 					name := f.owner.String() + "." + f.field.Name

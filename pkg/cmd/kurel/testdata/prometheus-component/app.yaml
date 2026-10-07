@@ -1,0 +1,55 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: metrics
+      type: prometheus
+      properties:
+        labels:
+          team: payments
+        externalLabels:
+          cluster: eu-1
+        image: quay.io/prometheus/prometheus:v3.5.0
+        replicas: 2
+        shards: 2
+        retention: 15d
+        serviceMonitorSelector:
+          matchLabels:
+            team: payments
+        ruleSelector:
+          matchLabels:
+            role: alert-rules
+        excludedFromEnforcement:
+          - resource: servicemonitors
+            namespace: monitoring
+        alerting:
+          alertmanagers:
+            - name: alertmanager-operated
+              namespace: monitoring
+              port: web
+        remoteWrite:
+          - url: https://metrics.example.com/api/v1/write
+        thanos:
+          image: quay.io/thanos/thanos:v0.39.2
+        podMetadata:
+          labels:
+            team: payments
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        storage:
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi
+    - name: defaults
+      type: prometheus

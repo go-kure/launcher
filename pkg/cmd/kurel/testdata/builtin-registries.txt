@@ -81,6 +81,7 @@ component poddisruptionbudget *components.PodDisruptionBudgetHandler
 component podmonitor *components.PodMonitorHandler
 component podtemplate *components.PodTemplateHandler
 component priorityclass *components.PriorityClassHandler
+component prometheus *components.PrometheusHandler
 component prometheus-probe *components.PrometheusProbeHandler
 component prometheusrule *components.PrometheusRuleHandler
 component referencegrant *components.ReferenceGrantHandler

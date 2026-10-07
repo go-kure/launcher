@@ -18,7 +18,8 @@ library instead of keeping its own list. `kurel build` registers exactly these
 Each function returns a new map on every call: a caller may delete, replace or add
 entries, and the change reaches no other caller. A type launcher adds later appears in the
 map of its kind without a change on the caller's side. Adding one takes two lines in one
-commit: its entry in `registry.go`, at its position, and its line in kurel's
+commit: its entry in `registry.go`, at its position in the order `sort.Strings` gives the
+types (`prometheus` before `prometheus-probe`, which it prefixes), and its line in kurel's
 `testdata/builtin-registries.txt`. The table names the maps, not the types: the kind
 components themselves, each with what it emits and refuses, are listed in
 [`pkg/oam/builtin/components`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components),

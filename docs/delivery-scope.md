@@ -1857,6 +1857,43 @@ and by scope, whatever component or trait emits it.
     source, and the two expression rules the spec reaches (a `remoteWrite[].sigv4`
     `externalId` needs a `roleArn`; an `updateStrategy` with a `rollingUpdate` must be of
     type `RollingUpdate`) are listed and left to the API server.
+- **Shipped: `prometheus`, the Prometheus of the same API** (`prometheus.go`, on what
+  `monitoring_workload.go` shares): the strict projection of `PrometheusSpec`, built on
+  `policyHeldKind`, namespaced, declaring its object and taking `objectName`. Launcher
+  emits the Prometheus and nothing else; the operator runs the pods, one StatefulSet per
+  shard.
+  - **No field is renamed.** The spec has no top-level `labels` or `annotations`, so
+    `externalLabels` keeps its upstream name; it is not checked as Kubernetes labels are.
+  - **The pods are held as the Alertmanager's are, those of every shard:** `replicas`
+    times `shards`, each 1 where unset, is held to the replica maximum where either is
+    authored, and the Thanos sidecar's `image` and `resources` are held as the prometheus
+    container's are. `baseImage`, `tag` and `sha` are not authorable: the spec's when not
+    empty (an empty one writes nothing), the sidecar's whenever set, the empty string
+    included. An unset `image` or `thanos.image` is not held to the allowed registries:
+    the operator chooses the image. No capability is required and no
+    default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
+    `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
+    so is an empty `action` of a relabeling rule in the five lists of rules the spec
+    holds (a remote write entry's, an Alertmanager endpoint's two, a scrape class's
+    two); a string default of the Kubernetes pod types is not, as on the pod kinds.
+  - **Credentials: three are held, the rest are stated.** A literal `bearerToken`
+    (deprecated upstream) of a `remoteWrite` or `remoteRead` entry or of
+    `apiserverConfig` is refused under a policy that forbids explicit secrets. A
+    credential in a `headers` value or the userinfo of a URL is written as authored and
+    not held.
+  - **An `excludedFromEnforcement` entry that leaves `group` out is written with
+    `monitoring.coreos.com`,** and an authored empty group is refused by the entry's
+    index: the Go type writes the field even when empty, and the API admits only that
+    one group, which it defaults where the field is absent.
+  - **The module ships no CRD.** The required fields are held to the markers of its
+    source, and the five expression rules the spec reaches (two on the Topology sharding
+    strategy, the `updateStrategy` type, and a `sigv4` `externalId` without a `roleArn`
+    on a remote write entry and an Alertmanager endpoint) are listed and left to the API
+    server.
+  - **A test-derivation limit:** the check that every pod-shaping field is held or listed
+    derives top-level fields only. `shards`, `thanos.image` and `thanos.resources` are
+    held by tests of their own; the other fields of the sidecar (its volume mounts,
+    arguments, listen settings) are written as authored and are not derived.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

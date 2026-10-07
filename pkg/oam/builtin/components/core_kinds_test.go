@@ -169,6 +169,11 @@ var coreKindSchemas = []struct {
 		"metadata":   "launcher sets the object's name and namespace, as on every kind component; the pods' metadata is template.metadata",
 	}},
 	{"priorityclass", reflect.TypeFor[schedulingv1.PriorityClass](), &components.PriorityClassHandler{}, objectIdentityExcluded("a scheduling.k8s.io/v1 PriorityClass")},
+	{"prometheus", reflect.TypeFor[monitoringv1.PrometheusSpec](), &components.PrometheusHandler{}, map[string]string{
+		"baseImage": "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+		"tag":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
+	}},
 	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
 	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
 	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
