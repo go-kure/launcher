@@ -54,7 +54,8 @@ type imageTagCheck struct {
 	check func(reference string) error
 	// emptyRefused says why the field must name an image. Left empty for a
 	// field the document may leave out: an empty reference names no image
-	// there, and the tag rule skips it as the registry rule does.
+	// there, and the tag rule skips it, as the registry rule does unless
+	// emptyNotAllowed says otherwise.
 	emptyRefused string
 	// emptyNotAllowed says why the registry rule refuses an empty reference
 	// that the tag rule skips: the document may leave the field out, and
@@ -302,7 +303,8 @@ var imageFieldTypes = []imageFieldType{
 	{
 		// The alertmanager kind: its own image, and the containers and volumes
 		// it lists through the shared check. A listed container may leave its
-		// image out: it then patches one the operator generates. The spec's own
+		// image out and is not refused for it; one named for a container the
+		// operator generates is merged into that container. The spec's own
 		// image may not under allowed registries, so the checks of the other
 		// fields name one from the allowed registry.
 		name: "alertmanager spec",
@@ -523,7 +525,8 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 					}
 				}
 				// An empty reference names no image where the document may leave
-				// the field out, and both rules skip it there.
+				// the field out. The tag rule skips it there, and so does the
+				// registry rule, except on a field listed with emptyNotAllowed.
 				err := tag.check("")
 				switch {
 				case tag.emptyRefused != "" && err == nil:

@@ -3734,7 +3734,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
   limit 1Gi`). A listed container that names no image is not checked for
-  one: it is the ordinary form of a patch.
+  one: it is the ordinary form of a patch of a container the operator
+  generates.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload
@@ -3769,8 +3770,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `AllowedRegistries` refuses it (`image: unset, so the Prometheus operator
   chooses the image the pods run, …`) and the author names an image from one
   of the listed registries. Without such a list, it builds. A listed
-  container that names no image is not refused: the operator supplies the
-  image of the container it patches.
+  container that names no image is not refused. The type's comments say an
+  entry named for a container the operator generates is merged into it;
+  what the operator does with an entry of another name that names no image
+  is in its code, which was not read.
 
   `TestMonitoringWorkloadKinds_PodFieldsHeldOrListed` derives, from the type,
   every field of the spec that shapes the pods and holds each to one of three
