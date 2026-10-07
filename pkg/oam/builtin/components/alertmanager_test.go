@@ -21,9 +21,9 @@ import (
 // alertmanagerUnfixtured names the fields of the spec the full fixture cannot
 // set.
 var alertmanagerUnfixtured = map[string]string{
-	"baseImage":   "refused when not empty; an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
-	"tag":         "refused when not empty; an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
-	"sha":         "refused when not empty; an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
+	"baseImage":   "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
+	"tag":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
+	"sha":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
 	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestAlertmanager_HostNetwork)",
 }
 
@@ -248,11 +248,20 @@ func alertmanagerOf(t *testing.T, props map[string]any, policies ...oam.Policy) 
 
 // TestAlertmanager_DeprecatedImageFields: baseImage, tag and sha are refused
 // when not empty, whatever else is authored, without a policy, and are
-// no property of the kind's schema. An empty one is the object an absent one
-// is, and builds.
+// no property of the kind's schema. The check of the authored properties
+// against that schema, which kurel build runs first, refuses each as an
+// unsupported field, an empty one included; converted without that check, an
+// empty one is the object an absent one is, and builds.
 func TestAlertmanager_DeprecatedImageFields(t *testing.T) {
 	h := &components.AlertmanagerHandler{}
 	schema := h.PropertySchema()
+	authoredErr := func(props map[string]any) error {
+		app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{{Name: "main", Type: "alertmanager", Properties: props}}}}
+		return oam.NewTransformer(map[string]oam.ComponentHandler{"alertmanager": h}, nil).ValidateAuthoredProperties(app)
+	}
+	if err := authoredErr(map[string]any{"image": amImage}); err != nil {
+		t.Fatalf("the authored check refuses a document with an image alone: %v", err)
+	}
 	for _, field := range []string{"baseImage", "tag", "sha"} {
 		t.Run(field, func(t *testing.T) {
 			if _, published := schema[field]; published {
@@ -271,6 +280,9 @@ func TestAlertmanager_DeprecatedImageFields(t *testing.T) {
 			am := alertmanagerOf(t, map[string]any{field: ""})
 			if am.Spec.BaseImage != "" || am.Spec.Tag != "" || am.Spec.SHA != "" {
 				t.Errorf("an empty %s built baseImage %q, tag %q, sha %q; want none", field, am.Spec.BaseImage, am.Spec.Tag, am.Spec.SHA)
+			}
+			if err := authoredErr(map[string]any{field: ""}); err == nil || !strings.Contains(err.Error(), `unsupported field "`+field+`"`) {
+				t.Errorf("an empty %s through the authored check: err = %v, want it refused as an unsupported field", field, err)
 			}
 		})
 	}

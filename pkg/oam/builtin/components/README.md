@@ -133,7 +133,7 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
-| `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are refused when not empty (an empty one writes nothing). An unset `image` is refused under a policy with allowed registries: the object then names none and the operator chooses the image. No capability is required — see below. |
+| `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are not in the schema, and are refused when not empty (an empty one writes nothing where the properties are not first validated against the schema, which refuses all three). An unset `image` is refused under a policy with allowed registries: the object then names none and the operator chooses the image. No capability is required — see below. |
 | `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and nothing gates it. The API's expression rule is not checked. No environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
@@ -3660,8 +3660,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   deprecated upstream, and the image they yield is composed in operator code
   outside the linked module, so the kind cannot say which image runs and has
   nothing to hold to the allowed registries or the tag rule. They are not in
-  the published schema. An authored empty string is the object an absent one
-  is, and builds.
+  the schema, so a caller that validates the properties against it first, as
+  `kurel build` does, refuses each as an unsupported field whatever its value,
+  an empty one included. A caller that converts the component without that
+  validation gets the text above, and there an authored empty string is the
+  object an absent one is, and builds.
 
   **Required** follows the rule of those four kinds: a field the API
   requires that the Go type writes whether or not it was authored. No
