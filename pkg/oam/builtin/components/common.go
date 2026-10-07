@@ -2651,7 +2651,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes", "claimName"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes", "claimName", claimObjectNameProperty}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
 				return result, err
 			}
 			var volumeMode corev1.PersistentVolumeMode
@@ -2802,6 +2802,10 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 		if _, present := authoredValue(m, key); present {
 			return PVCConfig{}, errors.Errorf("volume %q: %s cannot be set with claimName; the referenced claim already exists and states its own", volName, key)
 		}
+	}
+	if _, present := authoredValue(m, claimObjectNameProperty); present {
+		return PVCConfig{}, errors.Errorf("volume %q: %s cannot be set with claimName; claimName references an existing claim, so the volume generates none for %s to name",
+			volName, claimObjectNameProperty, claimObjectNameProperty)
 	}
 	if errs := validation.IsDNS1123Subdomain(claimName); len(errs) > 0 {
 		return PVCConfig{}, errors.Errorf("volume %q: invalid claimName %q: %s", volName, claimName, strings.Join(errs, "; "))

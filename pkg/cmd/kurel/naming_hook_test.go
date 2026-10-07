@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -137,6 +138,20 @@ func generatedNames(cluster *stack.Cluster, apps []oam.GeneratedApplication) []s
 	return out
 }
 
+// withWebVolume gives component web of doc a `pvc` volume `data` that
+// describes its claim, so that the webservice rule generates one; extra is
+// appended to the volume's keys. ReadWriteMany keeps the scaler's two replicas.
+func withWebVolume(doc, extra string) string {
+	return strings.Replace(doc, "        port: 8080\n", `        port: 8080
+        volumes:
+          - name: data
+            type: pvc
+            mountPath: /data
+            size: 1Gi
+            accessModes: [ReadWriteMany]
+`+extra, 1)
+}
+
 func declineEveryName(requests *[]oam.NameRequest) func(oam.NameRequest) (string, bool) {
 	return func(req oam.NameRequest) (string, bool) {
 		*requests = append(*requests, req)
@@ -173,7 +188,8 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
 	artifact := ociNamesComponent("artifact", "artifact", "", "")
-	namingTransform(t, namingApp("", namingDBStore+namingChart+jobs+artifact), namingContext(declineEveryName(&requests)))
+	doc := withWebVolume(namingApp("", namingDBStore+namingChart+jobs+artifact), "")
+	namingTransform(t, doc, namingContext(declineEveryName(&requests)))
 
 	const (
 		np      = "NetworkPolicy.networking.k8s.io"
@@ -189,12 +205,14 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// members the webservice, postgresql and helm rules emit are named by their
 	// rule, and the hook is not asked for them under the object role. The helm
 	// rule's generated source is the document's, so its request carries no
-	// component. The webservice rule asks for its Deployment, its Service and its
-	// ServiceAccount, the helm rule for its HelmRelease and the oci rule for the
-	// two objects it names after its component, each under its own role. The
-	// postgresql rule asks for its Cluster first and its ObjectStore next, each
-	// named after the component, before the Pooler and the Database.
+	// component. The webservice rule asks for the claim of web's `pvc` volume
+	// first, then for its Deployment, its Service and its ServiceAccount, the
+	// helm rule for its HelmRelease and the oci rule for the two objects it names
+	// after its component, each under its own role. The postgresql rule asks for
+	// its Cluster first and its ObjectStore next, each named after the component,
+	// before the Pooler and the Database.
 	want := []oam.NameRequest{
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadVolumeClaim, Kind: "PersistentVolumeClaim", Default: "web-data"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
@@ -222,6 +240,9 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "chart", Role: subApp, Default: chartConfigMapDefault},
 		{Application: "shop", Component: "chart", Role: subApp, Default: chartSecretDefault},
 		{Application: "shop", Role: oam.NameRoleGroup, Default: "shop-apps"},
+		// The pvc trait the webservice rule synthesized for the claim comes
+		// before the authored traits.
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-data"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleHPA, Kind: "HorizontalPodAutoscaler.autoscaling", Default: "web-hpa"},
 		{Application: "shop", Component: "web", Role: oam.NameRolePDB, Kind: "PodDisruptionBudget.policy", Default: "web-pdb"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-scaler"},
@@ -362,6 +383,113 @@ func TestNamingHook_Refusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := transformErr(t, namingApp("", api), namingContext(renameBy(tc.names)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// webClaimRefs lists the claims web's Deployment mounts, by claimName.
+func webClaimRefs(t *testing.T, apps []oam.GeneratedApplication) []string {
+	t.Helper()
+	for _, a := range apps {
+		for _, p := range a.Objects {
+			if p == nil {
+				continue
+			}
+			if dep, ok := (*p).(*appsv1.Deployment); ok && dep.Name == "web" {
+				var refs []string
+				for _, v := range dep.Spec.Template.Spec.Volumes {
+					if v.PersistentVolumeClaim != nil {
+						refs = append(refs, v.PersistentVolumeClaim.ClaimName)
+					}
+				}
+				return refs
+			}
+		}
+	}
+	t.Fatal("no Deployment web")
+	return nil
+}
+
+// The claim a role component's `pvc` volume generates is named like every
+// other generated object: the volume's claimObjectName, else the hook's
+// answer, else `<component>-<volume>`; the volume mounts it by that name.
+func TestNamingHook_VolumeClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		names       map[string]string
+		want        string
+		asked       bool
+	}{
+		{name: "the default", want: "web-data", asked: true},
+		{name: "the hook's answer", names: map[string]string{"workload-volume-claim web-data": "web-store"}, want: "web-store", asked: true},
+		{name: "the author's", extra: "            claimObjectName: store\n", names: map[string]string{"workload-volume-claim web-data": "web-store"}, want: "store"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests []oam.NameRequest
+			hook := renameBy(tc.names)
+			cluster, apps := namingTransform(t, withWebVolume(namingApp("", ""), tc.extra), namingContext(func(req oam.NameRequest) (string, bool) {
+				requests = append(requests, req)
+				return hook(req)
+			}))
+			asked := slices.ContainsFunc(requests, func(req oam.NameRequest) bool { return req.Role == oam.NameRoleWorkloadVolumeClaim })
+			if asked != tc.asked {
+				t.Errorf("hook asked for the claim = %v, want %v", asked, tc.asked)
+			}
+			got := generatedNames(cluster, apps)
+			if !slices.ContainsFunc(got, func(line string) bool { return strings.HasSuffix(line, ": PersistentVolumeClaim default/"+tc.want) }) {
+				t.Errorf("no PersistentVolumeClaim %q in\n  %s", tc.want, strings.Join(got, "\n  "))
+			}
+			if refs := webClaimRefs(t, apps); !slices.Equal(refs, []string{tc.want}) {
+				t.Errorf("web mounts %v, want [%s]", refs, tc.want)
+			}
+		})
+	}
+}
+
+func TestNamingHook_VolumeClaimRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, doc, want string
+	}{
+		{
+			name: "beside claimName",
+			doc: strings.Replace(withWebVolume(namingApp("", ""), "            claimObjectName: store\n"),
+				"            size: 1Gi\n", "            claimName: existing\n", 1),
+			want: `volume "data": claimObjectName cannot be set with claimName; claimName references an existing claim, so the volume generates none for claimObjectName to name`,
+		},
+		{
+			name: "no subdomain",
+			doc:  withWebVolume(namingApp("", ""), "            claimObjectName: Data_1\n"),
+			want: `volumes[0].claimObjectName "Data_1" cannot be the name for role "workload-volume-claim": not a valid DNS-1123 subdomain`,
+		},
+		{
+			name: "one claim named twice",
+			doc: withWebVolume(namingApp("", ""), `            claimObjectName: store
+          - name: logs
+            type: pvc
+            mountPath: /logs
+            size: 1Gi
+            accessModes: [ReadWriteMany]
+            claimObjectName: store
+`),
+			want: `volume "logs": naming the PersistentVolumeClaim: name collision: PersistentVolumeClaim "store" is named by ` +
+				`component "web" (role "workload-volume-claim", set by volumes[0].claimObjectName) and by ` +
+				`component "web" (role "workload-volume-claim", set by volumes[1].claimObjectName); give one of them another name`,
+		},
+		{
+			name: "a claim another component generates",
+			doc: withWebVolume(namingApp("", `    - name: store
+      type: persistentvolumeclaim
+      properties:
+        size: 1Gi
+`), "            claimObjectName: store\n"),
+			want: `name collision: PersistentVolumeClaim "default/store"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := transformErr(t, tc.doc, namingContext(nil))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v\nwant one containing %q", err, tc.want)
 			}

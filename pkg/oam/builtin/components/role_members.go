@@ -1,10 +1,9 @@
 package components
 
 import (
+	"fmt"
 	"maps"
 	"strings"
-
-	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -24,6 +23,10 @@ const (
 	deploymentObjectNameProperty     = "deploymentObjectName"
 	serviceObjectNameProperty        = "serviceObjectName"
 	serviceAccountObjectNameProperty = "serviceAccountObjectName"
+	// claimObjectNameProperty is a `pvc` volume's key: the name of the claim
+	// the volume generates (roleClaims). `claimName` already references an
+	// existing claim on the same volume.
+	claimObjectNameProperty = "claimObjectName"
 )
 
 // schemaRoleObjectNames declares the properties a role component names its
@@ -118,13 +121,15 @@ func roleServiceAccount(comp *oam.Component, depProps map[string]any, traits []o
 // its deployment member into synthesized `pvc` traits (go-kure/launcher#702),
 // one per volume that does not reference an existing claim, in volume order.
 // Each trait carries the claim the deployment kind built before it stopped
-// generating claims — the component-qualified name (escapeForPVCQualification),
-// size, storageClassName (an authored "" included), accessModes and
-// volumeMode — and its volume is rewritten to
-// reference that claim by claimName, keeping accessModes so the non-RWX
-// constraints still see it. depProps must be the rule's own copy: its
-// `volumes` list is replaced, never edited in place. parseVolumes has already
-// accepted every volume, so only the shape this rewrite reads is assumed.
+// generating claims — size, storageClassName (an authored "" included),
+// accessModes and volumeMode — under the name resolved for it
+// (go-kure/launcher#787, role oam.NameRoleWorkloadVolumeClaim): the volume's
+// claimObjectName, else the Naming hook's answer, else the component-qualified
+// name (escapeForPVCQualification). Its volume is rewritten to reference that
+// claim by claimName, keeping accessModes so the non-RWX constraints still see
+// it. depProps must be the rule's own copy: its `volumes` list is replaced,
+// never edited in place. parseVolumes has already accepted every volume, so
+// only the shape this rewrite reads is assumed.
 //
 // A synthesized trait is sealed, so the engine merges no capability rendering
 // into it. A volume that leaves storageClass unauthored (absent or null)
@@ -142,6 +147,16 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 	var platformClass any
 	platformRead := false
 	rewritten := make([]any, len(vols))
+	// The claims are the component's own, whatever context the rule was handed.
+	lctx.Component = comp
+	if lctx.Namer == nil {
+		// A webservice or worker rule driven directly, outside the engine, keeps
+		// working as before, as nameRoleMember does: no Naming hook is asked, the
+		// name is the author's or the default, and no transform follows to claim
+		// it. An allocator of this call's own only holds its volumes' claims
+		// apart.
+		lctx.Namer = oam.NewNameAllocator()
+	}
 	for i, v := range vols {
 		rewritten[i] = v
 		m, ok := nullElem(v).(map[string]any)
@@ -152,18 +167,29 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 			continue
 		}
 		volName, _ := m["name"].(string)
-		// Kubernetes PersistentVolumeClaim names must be DNS-1123 subdomains.
-		// The characters are checked on the name as built, before shortening
-		// can replace an invalid one by the digest; only the length may be over.
-		claimBase, claimSuffix := escapeForPVCQualification(comp.Name), "-"+escapeForPVCQualification(volName)
-		if errs := oam.SubdomainSyntaxErrors(claimBase + claimSuffix); len(errs) > 0 {
-			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claimBase+claimSuffix, strings.Join(errs, "; "))
+		spec := oam.NameSpec{Role: oam.NameRoleWorkloadVolumeClaim, Kind: coreKind("PersistentVolumeClaim")}
+		property := fmt.Sprintf("volumes[%d].%s", i, claimObjectNameProperty)
+		authored, named, err := parseRawStringField(m, claimObjectNameProperty, property)
+		if err != nil {
+			return nil, err
 		}
-		// A claim name over 253 characters is shortened by the one rule: the
+		if named {
+			spec.Property, spec.Authored = property, authored
+		}
+		// Kubernetes PersistentVolumeClaim names must be DNS-1123 subdomains.
+		// The characters of the default are checked on the name as built, before
+		// shortening can replace an invalid one by the digest; only the length
+		// may be over. An authored name stands in for a default that cannot be
+		// built (LoweringContext.ResolveName).
+		claimBase, claimSuffix := escapeForPVCQualification(comp.Name), escapeForPVCQualification(volName)
+		if errs := oam.SubdomainSyntaxErrors(claimBase + "-" + claimSuffix); len(errs) > 0 && !named {
+			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claimBase+"-"+claimSuffix, strings.Join(errs, "; "))
+		}
+		// A default over 253 characters is shortened by the one rule: the
 		// escaped component is cut, the escaped volume kept whole.
-		claim := oam.ShortenNameWithSuffix(claimBase, claimSuffix, oam.ShortenLimitSubdomain)
-		if errs := validation.IsDNS1123Subdomain(claim); len(errs) > 0 {
-			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claim, strings.Join(errs, "; "))
+		claim, err := lctx.ResolveName(claimBase, claimSuffix, spec)
+		if err != nil {
+			return nil, errors.Wrapf(err, "volume %q: naming the PersistentVolumeClaim", volName)
 		}
 		props := map[string]any{"name": claim, "size": m["size"]}
 		if !platformRead {
@@ -189,6 +215,7 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 		vol := maps.Clone(m)
 		delete(vol, "size")
 		delete(vol, "storageClass")
+		delete(vol, claimObjectNameProperty)
 		vol["claimName"] = claim
 		rewritten[i] = vol
 	}

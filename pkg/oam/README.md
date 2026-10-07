@@ -938,10 +938,10 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 
 | Role | What it names | Default | Author property | Hook asked |
 |------|---------------|---------|-----------------|------------|
-| `bundle` | The application's bundle. | The Application's `metadata.name`. | none | always |
-| `group` | The bundle of one ordered group, a child of the application's. | `<application>-<tier>` or `<application>-<NN>`, shortened to 253. | none | always |
+| `bundle` | The application's bundle. | The Application's `metadata.name`. | none, by design: the author names the bundle with `metadata.name` | always |
+| `group` | The bundle of one ordered group, a child of the application's. | `<application>-<tier>` or `<application>-<NN>`, shortened to 253. | none, by design: a group is derived from the order, and has no authored home | always |
 | `sub-application` | An application launcher adds beside a component's own: each one a trait creates, and the one holding each synthesized NetworkPolicy. It is no object. | What the trait or the synthesis names it (`<component>-scaler`, `<component>-rbac`, the policy's default name, …). | none | always |
-| `netpol-synth` | A synthesized NetworkPolicy. | `{owner}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`. | none | always |
+| `netpol-synth` | A synthesized NetworkPolicy. | `{owner}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`. | none, by design: a synthesized policy has no authored home | always |
 | `hpa` | The `scaler` trait's HorizontalPodAutoscaler. | `<component>-hpa` | `hpaName` | unless `hpaName` is set |
 | `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
 | `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
@@ -958,10 +958,16 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `workload-deployment` | The Deployment a `webservice` or `worker` component generates. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name. | The component's name. | `deploymentObjectName` | unless `deploymentObjectName` is set |
 | `workload-service` | The Service a `webservice` component generates; a DNS-1035 label. Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
 | `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
+| `workload-volume-claim` | The PersistentVolumeClaim a `pvc` volume of a `webservice` or `worker` component generates, asked once per such volume. The volume mounts the claim by this name. | `<component>-<volume>`, each half hyphen-escaped, shortened to 253 with `-<volume>` kept whole. | `volumes[].claimObjectName` | unless that volume's `claimObjectName` is set; not for a volume whose `claimName` references an existing claim, since it then generates none |
 | `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
 | `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `objectStore`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `objectStoreObjectName` | unless `objectStoreObjectName` is set; not without `objectStore`, since the component then generates none |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 | `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under per-bundle placement it is not read. | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer), shortened to 63 with `-<component>` kept whole (for a component name over 52 characters, the whole name is shortened). | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
+
+The `bundle`, `group` and `netpol-synth` names are the hook's to change, and only the hook's.
+The `bundle` and `group` defaults carry no namespace: two applications of one name, or whose
+order gives the same group name, get the same bundle names wherever they are deployed. Keeping
+them apart across applications is the consumer's job, through the `Naming` hook.
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
 that resolve to the same prefix are refused: their groups would share names. The names are
@@ -1051,7 +1057,7 @@ document rule may still change. Most names are made after lowering, and carry th
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
 lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
 `helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`, `workload-service`,
-`workload-serviceaccount`, `postgresql-cluster`, `postgresql-objectstore`)
+`workload-serviceaccount`, `workload-volume-claim`, `postgresql-cluster`, `postgresql-objectstore`)
 carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then

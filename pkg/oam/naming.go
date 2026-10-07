@@ -55,7 +55,8 @@ const (
 	// one it lets the author or the hook name is asked for under the rule's own
 	// role (NameRoleHelmRelease, NameRoleOCIKustomization, NameRoleOCISource,
 	// NameRoleWorkloadDeployment, NameRoleWorkloadService,
-	// NameRoleWorkloadServiceAccount, NameRolePostgresqlCluster,
+	// NameRoleWorkloadServiceAccount, NameRoleWorkloadVolumeClaim,
+	// NameRolePostgresqlCluster,
 	// NameRolePostgresqlObjectStore). A component of a
 	// document a document rule returned is authored input.
 	NameRoleObject NameRole = "object"
@@ -106,6 +107,14 @@ const (
 	// The hook is asked with the component, and not at all for a component that
 	// names an existing account with `serviceAccountName`: it generates none.
 	NameRoleWorkloadServiceAccount NameRole = "workload-serviceaccount"
+	// NameRoleWorkloadVolumeClaim is the PersistentVolumeClaim a `pvc` volume of
+	// a `webservice` or `worker` component generates, asked once per such
+	// volume. Default: "<component>-<volume>", each half hyphen-escaped and
+	// shortened to 253 with the volume half kept whole. The hook is asked with
+	// the component, and not at all for a volume that references an existing
+	// claim with `claimName`: it generates none. The volume mounts the claim by
+	// this name.
+	NameRoleWorkloadVolumeClaim NameRole = "workload-volume-claim"
 	// NameRolePostgresqlCluster is the CloudNativePG Cluster a `postgresql`
 	// component generates. Default: the component name. The hook is asked with
 	// the component. A name that is not the default must be a DNS-1035 label, and
@@ -207,6 +216,7 @@ var nameRoles = []struct {
 	{NameRoleWorkloadDeployment, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleWorkloadService, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleWorkloadServiceAccount, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleWorkloadVolumeClaim, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
 	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
