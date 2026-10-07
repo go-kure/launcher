@@ -11,12 +11,8 @@ import (
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
-	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
-	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -653,28 +649,4 @@ func (h *HelmReleaseHandler) ComponentObject() (schema.GroupKind, oam.ObjectScop
 // lands in the Flux namespace when one is set.
 func (h *FluxcdKustomizationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return schema.GroupKind{Group: kustv1.GroupVersion.Group, Kind: kustv1.KustomizationKind}, oam.ObjectScopeFlux
-}
-
-// ComponentObject declares the fluxcd-alert kind's Alert, which lands in the
-// Flux namespace when one is set.
-func (h *FluxcdAlertHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return schema.GroupKind{Group: notificationv1beta3.GroupVersion.Group, Kind: notificationv1beta3.AlertKind}, oam.ObjectScopeFlux
-}
-
-// ComponentObject declares the imagepolicy kind's ImagePolicy, which lands in
-// the Flux namespace when one is set.
-func (h *ImagePolicyHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return schema.GroupKind{Group: imagev1.GroupVersion.Group, Kind: imagev1.ImagePolicyKind}, oam.ObjectScopeFlux
-}
-
-// ComponentObject declares the imageupdateautomation kind's
-// ImageUpdateAutomation, which lands in the Flux namespace when one is set.
-func (h *ImageUpdateAutomationHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return schema.GroupKind{Group: autov1.GroupVersion.Group, Kind: autov1.ImageUpdateAutomationKind}, oam.ObjectScopeFlux
-}
-
-// ComponentObject declares the artifactgenerator kind's ArtifactGenerator,
-// which lands in the Flux namespace when one is set.
-func (h *ArtifactGeneratorHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return schema.GroupKind{Group: swv1beta1.GroupVersion.Group, Kind: swv1beta1.ArtifactGeneratorKind}, oam.ObjectScopeFlux
 }

@@ -74,26 +74,6 @@ func (h *FluxcdKustomizationHandler) ContractMetadata() oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
-func (h *FluxcdAlertHandler) ContractMetadata() oam.ContractMetadata {
-	return contract(fluxcdAlertType)
-}
-
-// ContractMetadata implements oam.ContractDescriber.
-func (h *ImagePolicyHandler) ContractMetadata() oam.ContractMetadata {
-	return contract(imagePolicyType)
-}
-
-// ContractMetadata implements oam.ContractDescriber.
-func (h *ImageUpdateAutomationHandler) ContractMetadata() oam.ContractMetadata {
-	return contract(imageUpdateAutomationType)
-}
-
-// ContractMetadata implements oam.ContractDescriber.
-func (h *ArtifactGeneratorHandler) ContractMetadata() oam.ContractMetadata {
-	return contract(artifactGeneratorType)
-}
-
-// ContractMetadata implements oam.ContractDescriber.
 func (h *HelmRepositoryHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("helmrepository")
 }
