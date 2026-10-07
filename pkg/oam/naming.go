@@ -133,7 +133,9 @@ const (
 	// (a helmtemplate component, or a helm component under delivery: template).
 	// Default: "<bundle>-<component>", the bundle as launcher named it, the base
 	// library's own default; past 63 characters launcher shortens it to 63 with
-	// "-<component>" kept whole. It names neither the layout nor its directory.
+	// "-<component>" kept whole, or, for a component name over 52 characters, the
+	// whole name shortened (ShortenNameWithSuffix). It names neither the layout
+	// nor its directory.
 	NameRoleLayout NameRole = "layout"
 )
 
