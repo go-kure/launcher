@@ -1111,7 +1111,7 @@ its text:
     and an `externalsecret` names its own store.
   - The required lists follow the rule of the Prometheus operator's kinds, read from the
     Go source of the linked
-    module, which ships no CRD. **A store's list is generated** (251 paths over every
+    module, which ships no CRD. **A store's list is generated** (263 paths over every
     provider at this pin, in `zz_generated_externalsecrets_required.go`), and a test
     fails where the file and the derivation differ. Four more fields of a store are
     ones the API would default and the type always writes, so the default never
