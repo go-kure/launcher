@@ -2235,11 +2235,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `originRevision` and `copy`; a copy a `from`, `to`, `exclude` and
     `strategy`). **`commonMetadata` is not the object's own metadata:** its
     `labels` and `annotations` are written into the spec, where the API says
-    they are "applied to all resources"; the ArtifactGenerator's own labels
-    and annotations are the `labels` and `annotations` properties. At
-    generation they are held to the reserved metadata keys and to the
-    component label's value, as an object's own are (`pkg/oam` README,
-    "Reserved metadata keys"); launcher writes nothing there. The
+    they are "applied to all resources", the ExternalArtifacts it generates;
+    the ArtifactGenerator's own labels and annotations are the `labels` and
+    `annotations` properties. At generation they are held to the reserved
+    metadata keys (`pkg/oam` README, "Reserved metadata keys"), and not to
+    the component label's value: an ExternalArtifact is no pod. Launcher
+    writes nothing there. The
     aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
     written as authored: launcher resolves none of them.
   - **No default is filled.** The API's own (`eventSeverity: info`,
@@ -2359,7 +2360,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     addresses and the credentials are those of the sources it names.
     `commonMetadata` holds two free maps, written to the object as authored
     under a policy that forbids explicit secrets too, and held to the
-    reserved metadata keys and the component label at generation. **What an artifact
+    reserved metadata keys alone at generation. **What an artifact
     carries is not checked:** the copy is the controller's to perform, and no
     build sees the files, so the rules a policy holds a workload or a Secret to
     do not reach manifests that travel inside an artifact.

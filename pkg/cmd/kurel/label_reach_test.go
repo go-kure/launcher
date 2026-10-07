@@ -258,6 +258,10 @@ var labelReachReservedOnly = []struct {
 		says:  "HelmChartTemplate defines the template from which the controller will generate a v1.HelmChart object",
 	},
 	{
+		field: "github.com/fluxcd/source-watcher/api/v2/v1beta1.ArtifactGeneratorSpec.CommonMetadata",
+		says:  "CommonMetadata specifies the common labels and annotations that are applied to all resources. Any existing label or annotation will be overridden if its key matches a common one.",
+	},
+	{
 		field: "github.com/backube/volsync/api/v1alpha1.ReplicationDestinationRsyncSpec.ServiceAnnotations",
 		says:  "serviceAnnotations defines annotations that will be added to the service created for incoming SSH connections.",
 	},
