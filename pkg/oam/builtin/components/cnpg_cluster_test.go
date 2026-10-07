@@ -784,6 +784,27 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})
+	// The refusal of an unnamed image comes last: a Cluster refused for
+	// something it authors is refused for that.
+	t.Run("an authored refusal comes before the unset imageName", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			props map[string]any
+			want  string
+		}{
+			{"privileged", map[string]any{"securityContext": map[string]any{"privileged": true}},
+				"securityContext.privileged is not allowed by environment policy"},
+			{"an extension image outside the list", cnpgExtensions("other.example/team/pgvector:1.0.0"),
+				`postgresql.extensions[0].image.reference: image "other.example/team/pgvector:1.0.0" is not from an allowed registry [ghcr.io]`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				err := newCnpgCluster(t, tc.props).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+				if err == nil || err.Error() != tc.want {
+					t.Errorf("err = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
 	t.Run("unset imageName with no list is not checked", func(t *testing.T) {
 		if err := newCnpgCluster(t, map[string]any{}).ApplyPolicy(&stubPolicy{}); err != nil {
 			t.Errorf("ApplyPolicy: %v", err)
