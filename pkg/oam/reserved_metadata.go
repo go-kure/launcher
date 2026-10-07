@@ -133,6 +133,7 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //   - the object's own labels and annotations;
 //   - the pod template's, on a kind that has one (podTemplateKinds): they become
 //     the metadata of the pods;
+//   - a CronJob's job template's: they become the metadata of its Jobs;
 //   - what an operator hands on (operatorMetadataKinds), which is not metadata
 //     of an object launcher writes: a CloudNativePG Cluster's
 //     spec.inheritedMetadata, a Pooler's pod template, spec.podMetadata of the
@@ -149,8 +150,8 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
 // read: not the metadata a Flux object hands on to what it applies
-// (spec.commonMetadata), not a volume claim template's or a job template's, and
-// not what a chart that Flux installs renders in the cluster.
+// (spec.commonMetadata), not a volume claim template's, and not what a chart
+// that Flux installs renders in the cluster.
 func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
@@ -307,6 +308,9 @@ const (
 	// which becomes the metadata of its pods: a workload's, a PodTemplate's, a
 	// CloudNativePG Pooler's.
 	ReservedKeyInPodTemplate ReservedKeyHolder = "pod template"
+	// ReservedKeyInJobTemplate is spec.jobTemplate.metadata of a CronJob, which
+	// becomes the metadata of every Job the CronJob creates.
+	ReservedKeyInJobTemplate ReservedKeyHolder = "job template"
 	// ReservedKeyInInheritedMetadata is spec.inheritedMetadata of a
 	// CloudNativePG Cluster, which the operator copies onto every object it
 	// creates for the cluster.

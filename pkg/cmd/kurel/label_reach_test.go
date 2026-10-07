@@ -207,9 +207,9 @@ type labelReachUnread struct {
 const (
 	// unreadFlux: decided with the rest of what Flux hands on.
 	unreadFlux = "what a Flux object hands on to the objects it applies: the triage of go-kure/launcher#790"
-	// unreadTemplate: these become the metadata of a Job or a
-	// PersistentVolumeClaim, not of a pod.
-	unreadTemplate = "a job template's or a volume claim template's metadata: its own item of go-kure/launcher#790"
+	// unreadTemplate: these become the metadata of a PersistentVolumeClaim, not
+	// of a pod.
+	unreadTemplate = "a volume claim template's metadata: its own item of go-kure/launcher#790"
 )
 
 // labelReachReservedOnly names every field the walk finds that hands metadata
@@ -277,11 +277,10 @@ var labelReachNotRead = []labelReachUnread{
 	{field: "github.com/fluxcd/helm-controller/api/v2.HelmReleaseSpec.CommonMetadata", reason: unreadFlux},
 	{field: "github.com/fluxcd/source-watcher/api/v2/v1beta1.ArtifactGeneratorSpec.CommonMetadata", reason: unreadFlux},
 
-	// A job template's and a volume claim template's: a CronJob's
-	// spec.jobTemplate.metadata, a StatefulSet's spec.volumeClaimTemplates, and
+	// A volume claim template's: a StatefulSet's spec.volumeClaimTemplates, and
 	// the claim template of an ephemeral volume, in every pod spec and in a
-	// CloudNativePG Cluster's spec.ephemeralVolumeSource.
-	{field: "k8s.io/api/batch/v1.JobTemplateSpec.ObjectMeta", reason: unreadTemplate},
+	// CloudNativePG Cluster's spec.ephemeralVolumeSource. A CronJob's job
+	// template is held (pkg/oam podTemplateKinds).
 	{field: "k8s.io/api/core/v1.PersistentVolumeClaim.ObjectMeta", reason: unreadTemplate},
 	{field: "k8s.io/api/core/v1.PersistentVolumeClaimTemplate.ObjectMeta", reason: unreadTemplate},
 

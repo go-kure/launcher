@@ -14,7 +14,7 @@
 +    launcher.gokure.dev/component: cert-manager
    name: cert-manager
    namespace: default
-@@ -21,5 +23,133 @@
+@@ -21,5 +23,136 @@
    chartRef:
      kind: OCIRepository
 -    name: cert-manager
@@ -86,6 +86,9 @@
 +            name: component-label
 +          spec:
 +            jobTemplate:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: cert-manager
 +              spec:
 +                template:
 +                  metadata:

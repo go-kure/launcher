@@ -14,7 +14,7 @@
 +    launcher.gokure.dev/component: metrics
    name: metrics
    namespace: default
-@@ -19,7 +21,135 @@
+@@ -19,7 +21,138 @@
        sourceRef:
          kind: HelmRepository
 -        name: metrics
@@ -87,6 +87,9 @@
 +            name: component-label
 +          spec:
 +            jobTemplate:
++              metadata:
++                labels:
++                  launcher.gokure.dev/component: metrics
 +              spec:
 +                template:
 +                  metadata:

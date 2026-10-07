@@ -91,6 +91,9 @@ spec:
             name: component-label
           spec:
             jobTemplate:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: podinfo
               spec:
                 template:
                   metadata:
@@ -236,6 +239,9 @@ spec:
             name: component-label
           spec:
             jobTemplate:
+              metadata:
+                labels:
+                  launcher.gokure.dev/component: exporter
               spec:
                 template:
                   metadata:

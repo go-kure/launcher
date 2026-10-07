@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -37,6 +38,9 @@ metadata:
 spec:
   schedule: "@daily"
   jobTemplate:
+    metadata:
+      labels:
+        app: cron
     spec:
       template:
         metadata:
@@ -170,7 +174,8 @@ func applyComponentLabelPostRenderer(t *testing.T, key, value string) map[string
 }
 
 // TestComponentLabelPostRenderer_AppliedByKustomize: the component's value
-// replaces whatever the chart set, every pod template and a bare Pod get it,
+// replaces whatever the chart set, every pod template, a CronJob's job template
+// and a bare Pod get it,
 // each object keeps its own name, and an object that runs no pod is left alone.
 func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 	byName := applyComponentLabelPostRenderer(t, ownershipKey, "web")
@@ -192,6 +197,15 @@ func TestComponentLabelPostRenderer_AppliedByKustomize(t *testing.T) {
 		if len(labels) != 2 {
 			t.Errorf("%s pod template labels = %v, want the chart's own label kept beside the component's", name, labels)
 		}
+	}
+	// A CronJob's job template, the metadata of each Job it creates, gets the
+	// label in the same patch, beside the chart's own.
+	jobLabels, _, err := unstructured.NestedStringMap(byName["chart-cron"], "spec", "jobTemplate", "metadata", "labels")
+	if err != nil {
+		t.Fatalf("chart-cron job template labels: %v", err)
+	}
+	if want := map[string]string{"app": "cron", ownershipKey: "web"}; !maps.Equal(jobLabels, want) {
+		t.Errorf("chart-cron job template labels = %v, want %v", jobLabels, want)
 	}
 	// A ReplicationController's selector is a plain label map; the patch leaves it
 	// as the chart wrote it.
