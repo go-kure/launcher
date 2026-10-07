@@ -292,7 +292,8 @@ func walkKindFields(typ reflect.Type, required func(kindField) bool, visit func(
 // for the kinds of the Prometheus operator's API, whose types publish no field
 // description to read a default from: no field these kinds decode may be a
 // number or a boolean that is omitted when zero and that the CRD defaults to
-// something else, since policyFreeKind.config carries no defaulted-zero list.
+// something else, since none of these kinds sets a defaulted-zero list
+// (policyFreeKind.defaultedZeros).
 // The default is the field's default marker, read from the source of the
 // linked modules (markerAPISource): the Prometheus operator's, and those of
 // the Kubernetes types its specs embed. A field of that shape on a type whose
@@ -330,7 +331,7 @@ func TestMonitoringKinds_NoDefaultedZeros(t *testing.T) {
 			case !src.known(f):
 				t.Errorf("%s (%s.%s) is omitted when zero, and its default cannot be read: the source of its type is not", at, f.owner, f.field.Name)
 			case defaulted && !crdDefaultIsZero(def):
-				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs a defaulted-zero list, which policyFreeKind does not carry", at, def)
+				t.Errorf("%s is omitted when zero and defaults to %s: an authored zero would be replaced; the kind needs the field in its defaulted-zero list (policyFreeKind.defaultedZeros), which it does not set", at, def)
 			}
 		})
 	}
