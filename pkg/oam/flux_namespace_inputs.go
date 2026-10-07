@@ -1,6 +1,10 @@
 package oam
 
-import "github.com/go-kure/kure/pkg/stack"
+import (
+	"slices"
+
+	"github.com/go-kure/kure/pkg/stack"
+)
 
 // fluxNamespaceReader is implemented by a config that moves to the Flux
 // namespace (fluxNamespaceSettable) and reports the ConfigMaps and Secrets its
@@ -42,29 +46,38 @@ type traitSubApps struct {
 // chart's values cannot be seen here.
 func moveFluxNamespaceInputs(owned []traitSubApps, ns string) {
 	for _, o := range owned {
-		reader, ok := o.owner.Config.(fluxNamespaceReader)
-		if !ok {
-			continue
-		}
-		configMaps, secrets := reader.FluxNamespaceReads()
-		if len(configMaps) == 0 && len(secrets) == 0 {
-			continue
-		}
-		reads := map[string]map[string]bool{"ConfigMap": {}, "Secret": {}}
-		for _, n := range configMaps {
-			reads["ConfigMap"][n] = true
-		}
-		for _, n := range secrets {
-			reads["Secret"][n] = true
-		}
 		for _, sub := range o.subApps {
 			in, ok := sub.Config.(fluxNamespaceInput)
 			if !ok {
 				continue
 			}
-			if kind, name := in.FluxNamespaceInput(); reads[kind][name] {
+			if kind, name := in.FluxNamespaceInput(); fluxObjectReads(o.owner, kind, name) {
 				sub.Namespace = ns
 			}
 		}
 	}
+}
+
+// fluxObjectReads reports whether owner's Flux object reads the ConfigMap or
+// Secret (kind) of name from its own namespace (fluxNamespaceReader), so that a
+// trait object of that name moves with it to the Flux namespace. It is the one
+// test of that move: moveFluxNamespaceInputs moves by it, and a trait's claim of
+// such an object (NameSpec.FluxInput, Trait.ClaimFluxInputName) is held in the
+// namespace it gives, so the claim and the move cannot disagree.
+func fluxObjectReads(owner *stack.Application, kind, name string) bool {
+	if owner == nil {
+		return false
+	}
+	reader, ok := owner.Config.(fluxNamespaceReader)
+	if !ok {
+		return false
+	}
+	configMaps, secrets := reader.FluxNamespaceReads()
+	switch kind {
+	case "ConfigMap":
+		return slices.Contains(configMaps, name)
+	case "Secret":
+		return slices.Contains(secrets, name)
+	}
+	return false
 }

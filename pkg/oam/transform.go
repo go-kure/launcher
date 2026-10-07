@@ -1542,6 +1542,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
 			if resolved.naming != nil {
 				resolved.naming.objectName = entry.component.ObjectName()
+				resolved.naming.fluxNamespace, resolved.naming.owner = ctx.FluxNamespace, entry.app
 			}
 			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {

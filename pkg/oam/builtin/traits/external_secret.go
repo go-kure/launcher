@@ -56,19 +56,23 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 	if err != nil {
 		return err
 	}
-	// The ExternalSecret is named by the required secretName, so no hook could be
-	// asked for it: its name is claimed as written.
-	if err := trait.ClaimObjectName(externalSecretKind, app.Namespace, config.SecretName, "secretName"); err != nil {
-		return err
-	}
 	// The produced Secret, before anything reads its name: the ExternalSecret's
-	// target.name and the decorator's envFrom and volume below.
+	// target.name and the decorator's envFrom and volume below. A Flux object of
+	// the component that reads it moves it to the Flux namespace, so it is
+	// claimed where it lands.
 	if config.createsTarget() {
-		config.TargetSecretName, err = resolveObjectName(trait, oam.NameRoleExternalSecret, secretKind,
+		config.TargetSecretName, err = resolveFluxInputName(trait, oam.NameRoleExternalSecret, secretKind,
 			app.Namespace, "targetSecretName", config.targetSecretAuthored, config.SecretName)
 		if err != nil {
 			return err
 		}
+	}
+	// The ExternalSecret is named by the required secretName, so no hook could be
+	// asked for it: its name is claimed as written, in the namespace it lands in,
+	// which follows its target (FluxNamespaceInput) under every creationPolicy.
+	if err := trait.ClaimFluxInputName(externalSecretKind, app.Namespace, config.SecretName, "secretName",
+		"Secret", config.TargetSecretName); err != nil {
+		return err
 	}
 	if err := config.checkMountedSecretName(); err != nil {
 		return err
