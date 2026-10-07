@@ -232,8 +232,8 @@ func markerPackageDir(t *testing.T, pkg string) (string, bool) {
 
 // packageRules is the expression rules the source of one Go package states to
 // the CRD generator: on a type, by its name, and on a struct field, by
-// "<type>.<Go field name>". Each rule is its message, or its text where it
-// has none.
+// "<type>.<Go field name>". Each rule is its expression followed by its
+// message, so that a change to either is a change of the rule.
 type packageRules struct {
 	types, fields map[string][]string
 	// markers counts the rule markers of the package's source, whether or not
@@ -243,9 +243,13 @@ type packageRules struct {
 
 const ruleMarkerPrefix = "+kubebuilder:validation:XValidation:"
 
-var ruleMarkerMessage = regexp.MustCompile(`message="((?:[^"\\]|\\.)*)"`)
+var (
+	ruleMarkerRule    = regexp.MustCompile(`(?:^|,)rule="((?:[^"\\]|\\.)*)"`)
+	ruleMarkerMessage = regexp.MustCompile(`,message="((?:[^"\\]|\\.)*)"`)
+)
 
-// rulesOf reads the rule markers of one comment.
+// rulesOf reads the rule markers of one comment, each as "<expression>
+// (<message>)", or as the marker's whole text where it names no expression.
 func rulesOf(doc *ast.CommentGroup) []string {
 	if doc == nil {
 		return nil
@@ -257,8 +261,12 @@ func rulesOf(doc *ast.CommentGroup) []string {
 		if !ok {
 			continue
 		}
-		if m := ruleMarkerMessage.FindStringSubmatch(rule); m != nil {
-			rule = m[1]
+		if expr := ruleMarkerRule.FindStringSubmatch(rule); expr != nil {
+			if msg := ruleMarkerMessage.FindStringSubmatch(rule); msg != nil {
+				rule = expr[1] + " (" + msg[1] + ")"
+			} else {
+				rule = expr[1]
+			}
 		}
 		out = append(out, rule)
 	}

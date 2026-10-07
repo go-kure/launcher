@@ -230,6 +230,10 @@ func alertmanagerRefusals(notA string) []struct {
 	}
 }
 
+// amImage is an image from the one registry ptStrictPolicy allows: under it an
+// unset image is refused (TestAlertmanager_UnsetImage).
+const amImage = "registry.example/prometheus/alertmanager:v0.28.1"
+
 // alertmanagerOf builds the Alertmanager of props under the given policies, in
 // turn (generateCoreKindUnder).
 func alertmanagerOf(t *testing.T, props map[string]any, policies ...oam.Policy) *monitoringv1.Alertmanager {
@@ -296,7 +300,6 @@ func TestAlertmanager_Unauthored(t *testing.T) {
 	defaulting := &stubPolicy{
 		defaultReplicas: &two, defaultCPURequest: "100m", defaultMemoryRequest: "64Mi",
 		defaultCPULimit: "1", defaultMemoryLimit: "128Mi", defaultStorageSize: "1Gi",
-		allowedRegistries: []string{"registry.example"},
 	}
 	am := alertmanagerOf(t, map[string]any{}, defaulting, nil)
 	if am.Spec.Image != nil || am.Spec.Replicas != nil || am.Spec.Storage != nil {
@@ -320,7 +323,7 @@ func TestAlertmanager_Unauthored(t *testing.T) {
 // block that names no claim template still encodes one, empty: the type holds
 // it by value. The operator reads an emptyDir before it.
 func TestAlertmanager_AuthoredStorageWritesAClaimSkeleton(t *testing.T) {
-	am := alertmanagerOf(t, map[string]any{"storage": map[string]any{"emptyDir": map[string]any{"sizeLimit": "1Ti"}}}, ptStrictPolicy())
+	am := alertmanagerOf(t, map[string]any{"image": amImage, "storage": map[string]any{"emptyDir": map[string]any{"sizeLimit": "1Ti"}}}, ptStrictPolicy())
 	if am.Spec.Storage == nil || am.Spec.Storage.EmptyDir == nil {
 		t.Fatalf("storage = %+v, want the authored emptyDir", am.Spec.Storage)
 	}
@@ -335,7 +338,7 @@ func TestAlertmanager_AuthoredStorageWritesAClaimSkeleton(t *testing.T) {
 // class of the refusal and the path of the property. Without a policy the same
 // component builds.
 func TestAlertmanager_PolicyRefusals(t *testing.T) {
-	const image = "registry.example/prometheus/alertmanager:v0.28.1"
+	const image = amImage
 	container := func(list string, c map[string]any) map[string]any { return map[string]any{list: []any{c}} }
 	claim := func(size string) map[string]any {
 		return map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
@@ -388,11 +391,11 @@ func TestAlertmanager_PolicyRefusals(t *testing.T) {
 // (TestAlertmanager_PolicyRefusals); an authored false is the object an absent
 // one is, since the type omits it.
 func TestAlertmanager_HostNetwork(t *testing.T) {
-	am := alertmanagerOf(t, map[string]any{"hostNetwork": true}, hostNetworkOK{ptStrictPolicy()})
+	am := alertmanagerOf(t, map[string]any{"image": amImage, "hostNetwork": true}, hostNetworkOK{ptStrictPolicy()})
 	if !am.Spec.HostNetwork {
 		t.Error("hostNetwork = false, want the authored true under a policy that allows the host network")
 	}
-	off := alertmanagerOf(t, map[string]any{"hostNetwork": false}, ptStrictPolicy())
+	off := alertmanagerOf(t, map[string]any{"image": amImage, "hostNetwork": false}, ptStrictPolicy())
 	if spec, _ := policyFreeJSON(t, off)["spec"].(map[string]any); spec["hostNetwork"] != nil {
 		t.Errorf("hostNetwork = %v, want it omitted: the API reads an absent one as false", spec["hostNetwork"])
 	}
@@ -403,6 +406,7 @@ func TestAlertmanager_HostNetwork(t *testing.T) {
 // privileged containers, as on a workload kind.
 func TestAlertmanager_HostProcess(t *testing.T) {
 	props := map[string]any{
+		"image":           amImage,
 		"hostNetwork":     true,
 		"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}},
 	}
@@ -416,17 +420,37 @@ func TestAlertmanager_HostProcess(t *testing.T) {
 	}
 }
 
-// TestAlertmanager_NoImageIsNotHeld: a spec that names no image builds under a
-// policy with allowed registries. The object then names no image, and which
-// image runs is the operator's to decide, which the policy is not asked about;
-// the same holds for a listed container that names none.
-func TestAlertmanager_NoImageIsNotHeld(t *testing.T) {
+// TestAlertmanager_UnsetImage: a spec that names no image, or an empty one,
+// leaves the image to the operator, which no registry allowlist reaches: it is
+// refused with the registry class under a policy with allowed registries, and
+// builds under one without. A listed container that names no image is a patch
+// of one the operator generates and is not refused.
+func TestAlertmanager_UnsetImage(t *testing.T) {
+	patch := []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
+	h := &components.AlertmanagerHandler{}
+	for name, props := range map[string]map[string]any{
+		"unset": {"version": "v0.28.1"},
+		"empty": {"version": "v0.28.1", "image": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("alertmanager", h, props, ptStrictPolicy())
+			rcWantClass(t, err, oam.RefusalRegistry)
+			if err != nil && !strings.Contains(err.Error(), "image: unset") {
+				t.Errorf("err = %v, want one naming the unset image", err)
+			}
+			open := ptStrictPolicy()
+			open.allowedRegistries = nil
+			if _, err := pvTransform("alertmanager", h, props, open); err != nil {
+				t.Errorf("under a policy without allowed registries: %v, want it built", err)
+			}
+		})
+	}
 	am := alertmanagerOf(t, map[string]any{
-		"version":    "v0.28.1",
-		"containers": []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+		"image":      amImage,
+		"containers": patch,
 	}, ptStrictPolicy())
-	if am.Spec.Image != nil || am.Spec.Containers[0].Image != "" {
-		t.Errorf("image = %v, container image = %q; want neither written", am.Spec.Image, am.Spec.Containers[0].Image)
+	if am.Spec.Containers[0].Image != "" {
+		t.Errorf("container image = %q, want none written", am.Spec.Containers[0].Image)
 	}
 }
 

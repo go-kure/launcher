@@ -1703,11 +1703,12 @@ and by scope, whatever component or trait emits it.
     passes; no policy default is filled, since the operator decides what an omitted
     field means. A test derives every field of the spec that shapes the pods and holds
     each to a shown refusal or a stated reason.
-  - **Not held: an unset `image` is not held to the allowed registries.** The object
-    then names none and the operator chooses the image the pods run; no registry
-    allowlist reaches that choice, as for an absent `pgbouncer.image`. What the operator adds on its
-    own (its config-reloader containers, the governing Service) is not in the object
-    either; its code is not in the linked module and was not read.
+  - **An unset `image` is refused under a registry allowlist.** The object then names
+    none and the operator chooses the image the pods run; no registry allowlist reaches
+    that choice, so a policy with allowed registries refuses it (`oam.RefusalRegistry`)
+    and one without builds it. **Not held:** what the operator adds on its own (its
+    config-reloader containers, the governing Service) is not in the object; its code is
+    not in the linked module and was not read.
   - **`baseImage`, `tag` and `sha` are not authorable** when not empty (an empty one
     writes nothing): deprecated upstream, and the
     image they yield is composed in operator code outside the linked module, so the kind
