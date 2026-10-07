@@ -2516,8 +2516,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     written as authored unless it holds an `@` (Policy, below);
   - of a `fluxcd-receiver`, the enumerations (`type`, a resource's `kind`),
     the lengths of a resource's `name` and `namespace`, the pattern of an
-    `issuerURL` (an `http` or `https` URL; one that is no URL with a host is
-    written as authored unless it holds an `@`), a `validations` list authored
+    `issuerURL` (an `http` or `https` URL; one that parses with no host is
+    written as authored unless it holds an `@`, and one that does not parse
+    is refused without naming the value), a `validations` list authored
     empty, two OIDC providers of one `issuerURL`, which the type keys the
     list by, and that a resource with `matchLabels` is named `*`, which the
     type documents and no marker states;
@@ -2618,7 +2619,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     by the same rule as a Provider's `proxy` (`fluxcd-receiver:
     oidcProviders[1].issuerURL must not carry a user or password, which
     would be written in plain text into the Receiver; …`), and so is one
-    that is no URL with a host and holds an `@`; the refusal names the
+    that does not parse, or is no URL with a host and holds an `@`; the
+    refusal names the
     provider's index, not the value. **The host of an OIDC provider's
     `issuerURL` is not held:** the controller discovers an issuer there and
     fetches no artifact, so no dimension of the policy speaks of it. That a
