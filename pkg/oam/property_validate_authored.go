@@ -210,7 +210,7 @@ func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string
 	if !ok {
 		return nil
 	}
-	return validateAuthoredProperties(withObjectProperties(handler, p.PropertySchema()), props, path)
+	return validateAuthoredTopLevel(withObjectProperties(handler, p.PropertySchema()), exclusiveProperties(handler), props, path)
 }
 
 // unsupportedFieldHinter is implemented by a component handler, a component
@@ -310,18 +310,20 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, 
 		return withUnsupportedFieldHint(handler, validateAuthoredTraitAgainst(handler, trait.Properties, path))
 	}
 	schema := withEngineTraitProperties(p.PropertySchema())
-	if err := validateAuthoredProperties(relaxObjectRequired(schema), trait.Properties, path); err != nil {
+	exclusive := exclusiveProperties(handler)
+	if err := validateAuthoredTopLevel(relaxObjectRequired(schema), exclusive, trait.Properties, path); err != nil {
 		return withUnsupportedFieldHint(handler, err)
 	}
 	// Looked up only after validation, which normalizes what the author wrote: a scope
 	// of a named string type matches its binding here, as it does in Transform.
 	merged, matchedKey, _ := resolveCapability(*trait, capabilities)
-	return checkNestedRequired(schema, merged.Properties, path, matchedKey)
+	return checkNestedRequired(schema, exclusive, merged.Properties, path, matchedKey)
 }
 
 // relaxObjectRequired returns schema with Required cleared on every field of an
 // object reached from the top level through object fields alone, the objects a
-// capability rendering merges into. The top level keeps its flags (authored
+// capability rendering merges into, and on that object's exclusive groups: the
+// rendering may supply a group's key too. The top level keeps its flags (authored
 // validation ignores them), and so does everything under an array's Items: a list
 // is authored whole, never merged into, so a required key of one of its elements is
 // genuinely missing when the author leaves it out. schema is never mutated, as in
@@ -334,6 +336,10 @@ func relaxObjectRequired(schema map[string]PropertySchema) map[string]PropertySc
 			for k, sub := range field.Properties {
 				sub.Required = false
 				field.Properties[k] = sub
+			}
+			field.Exclusive = slices.Clone(field.Exclusive)
+			for i := range field.Exclusive {
+				field.Exclusive[i].Required = false
 			}
 		}
 		out[key] = field
@@ -405,7 +411,7 @@ func validateAuthoredTraitAgainst(handler any, props map[string]any, path string
 	if !ok {
 		return validateEngineTraitProperties(props, path)
 	}
-	return validateAuthoredProperties(withEngineTraitProperties(p.PropertySchema()), props, path)
+	return validateAuthoredTopLevel(withEngineTraitProperties(p.PropertySchema()), exclusiveProperties(handler), props, path)
 }
 
 // validateEngineTraitProperties checks only the engineTraitProperties keys present
@@ -465,7 +471,7 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 	if !ok {
 		return nil
 	}
-	return validateAuthoredProperties(p.PropertySchema(), props, path)
+	return validateAuthoredTopLevel(p.PropertySchema(), exclusiveProperties(handler), props, path)
 }
 
 // validateAuthoredProperties is validateProperties minus the top-level Required
@@ -505,7 +511,17 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 // back: validatePropertyValue may normalize an array or object into a fresh
 // []any/map[string]any, and the handler downstream must see the shape validation
 // actually checked.
+//
+// It checks no top-level exclusive groups; validateAuthoredTopLevel takes them.
 func validateAuthoredProperties(schema map[string]PropertySchema, props map[string]any, path string) error {
+	return validateAuthoredTopLevel(schema, nil, props, path)
+}
+
+// validateAuthoredTopLevel is validateAuthoredProperties with the handler's top-level
+// exclusive groups (ExclusivePropertiesProvider). They are held to at most one, after
+// every key is checked; their Required is not enforced, for the reasons top-level
+// Required is not.
+func validateAuthoredTopLevel(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path string) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
@@ -517,5 +533,5 @@ func validateAuthoredProperties(schema map[string]PropertySchema, props map[stri
 		}
 		props[key] = normalized
 	}
-	return nil
+	return checkExclusive(exclusive, schema, props, false, path, "")
 }

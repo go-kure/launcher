@@ -91,6 +91,23 @@ type PropertySchemaProvider interface {
 	PropertySchema() map[string]PropertySchema
 }
 
+// ExclusivePropertiesProvider is an optional interface implemented by a handler or
+// lowering rule whose top-level properties hold an "exactly one of" or "at most one
+// of" rule: PropertySchema.Exclusive for the top level, which is a map with no node
+// to carry it. Read only alongside PropertySchemaProvider, and published through
+// HandlerSchemaSet.Exclusive.
+type ExclusivePropertiesProvider interface {
+	ExclusiveProperties() []ExclusiveGroup
+}
+
+// exclusiveProperties returns handler's top-level groups, nil when it declares none.
+func exclusiveProperties(handler any) []ExclusiveGroup {
+	if p, ok := handler.(ExclusivePropertiesProvider); ok {
+		return p.ExclusiveProperties()
+	}
+	return nil
+}
+
 // ContractMetadata is optional registration metadata describing the contract a
 // handler or lowering rule implements: its family, version, the ClusterProfile
 // capability keys it requires, and deprecation status. It is primarily a discovery/

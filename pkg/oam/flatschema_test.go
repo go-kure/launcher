@@ -40,6 +40,7 @@ func TestParsePackage_RejectsRichParamFields(t *testing.T) {
 		"items-null":                 `items: null`,
 		"additionalProperties-false": `additionalProperties: false`,
 		"additionalProperties-true":  `additionalProperties: true`,
+		"exclusive-empty":            `exclusive: []`,
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -151,6 +152,7 @@ func TestLoadCapabilityDefinitions_RejectsRichPropFields(t *testing.T) {
 		"items-null":                 `        items: null`,
 		"additionalProperties-false": `        additionalProperties: false`,
 		"additionalProperties-true":  `        additionalProperties: true`,
+		"exclusive-empty":            `        exclusive: []`,
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
