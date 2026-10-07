@@ -206,6 +206,22 @@ func refuseFieldUserinfo(owner, field, rawURL, remedy string) error {
 	return nil
 }
 
+// refuseHostedFieldUserinfo is refuseFieldUserinfo for a field whose API
+// pattern takes only a URL with a scheme and a host (`http://`, `oci://`). A
+// value with no host that holds an `@` is refused too: `bot:pw@host` parses as
+// an opaque URL of scheme `bot` and `bot@host` as a path, neither with a user,
+// and the object would carry it in plain text before the API server refused
+// the pattern. The refusal does not name the value.
+func refuseHostedFieldUserinfo(owner, field, rawURL, remedy string) error {
+	if err := refuseFieldUserinfo(owner, field, rawURL, remedy); err != nil {
+		return err
+	}
+	if u, _ := url.Parse(rawURL); u.Host == "" && strings.Contains(rawURL, "@") {
+		return errors.Errorf("%s: %s holds an @ and is no URL with a host, so a user or password in it cannot be ruled out%s", owner, field, remedy)
+	}
+	return nil
+}
+
 // chartRender is a chart's client-side render, cached and split by Helm hook
 // phase and weight. HelmTemplateConfig embeds it and declares its own
 // AugmentLayout; chartRender must never gain one, since kure's layout walker

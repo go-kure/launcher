@@ -488,6 +488,8 @@ func TestFluxProvider_RefusesAUserOrPassword(t *testing.T) {
 		{"an @ in the path of a URL", "address", "https://hooks.example/team@shop", ""},
 		{"a user and a password in the proxy", "proxy", "http://bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy must not carry a user or password"},
 		{"a proxy that is no URL", "proxy", "http://proxy.example:" + secret, "fluxcd-provider: proxy is not a valid URL"},
+		{"a user and a password in a proxy with no scheme", "proxy", "bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy holds an @ and is no URL with a host"},
+		{"a user in a proxy with no scheme", "proxy", secret + "@proxy.example", "fluxcd-provider: proxy holds an @ and is no URL with a host"},
 		{"an address with no user", "address", "https://hooks.example/services", ""},
 		{"a project ID", "address", "shop-fleet", ""},
 		{"a host and a port that parse as no URL", "address", "10.0.0.7:4222", ""},
@@ -647,7 +649,10 @@ func TestResourceSetInputProvider_RefusesAUserOrPassword(t *testing.T) {
 		{"a user and a password in an https url", "https://bot:" + secret + "@git.example/shop/fleet", "resourcesetinputprovider: url must not carry a user or password"},
 		{"a user alone in an oci url", "oci://" + secret + "@registry.example/shop/app", "resourcesetinputprovider: url must not carry a user or password"},
 		{"a url that is no URL", "https://git.example:" + secret, "resourcesetinputprovider: url is not a valid URL"},
+		{"a user and a password in a url with no scheme", "bot:" + secret + "@git.example/shop/fleet", "resourcesetinputprovider: url holds an @ and is no URL with a host"},
+		{"a user in a url with no scheme", secret + "@git.example/shop/fleet", "resourcesetinputprovider: url holds an @ and is no URL with a host"},
 		{"a url with no user", "https://git.example/shop/fleet", ""},
+		{"an @ in the path of a url", "https://git.example/shop/fleet@main", ""},
 		{"a token in the query", "https://inputs.example/api?token=" + secret, ""},
 	}
 	for _, tc := range cases {

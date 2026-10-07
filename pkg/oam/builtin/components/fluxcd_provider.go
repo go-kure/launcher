@@ -89,6 +89,8 @@ const (
 // parses as an opaque URL of scheme `bot`, and `bot@host` as a path, neither
 // with a user. A credential in a path or a query, as a webhook URL has, is not
 // something this can tell: the README says where such an address belongs.
+// `proxy`, which the API takes only as an http or https URL, is held the same
+// way (refuseHostedFieldUserinfo).
 func refuseProviderUserinfo(spec *notificationv1beta3.ProviderSpec) error {
 	if u, err := url.Parse(spec.Address); err == nil && u.Host != "" {
 		if err := refuseFieldUserinfo(fluxcdProviderType, "address", spec.Address, providerAddressRemedy); err != nil {
@@ -97,7 +99,7 @@ func refuseProviderUserinfo(spec *notificationv1beta3.ProviderSpec) error {
 	} else if strings.Contains(spec.Address, "@") {
 		return errors.Errorf("%s: address holds an @ and is no URL with a host, so a user or password in it cannot be ruled out; an address that holds a credential belongs in the Secret secretRef names", fluxcdProviderType)
 	}
-	return refuseFieldUserinfo(fluxcdProviderType, "proxy", spec.Proxy, providerProxyRemedy)
+	return refuseHostedFieldUserinfo(fluxcdProviderType, "proxy", spec.Proxy, providerProxyRemedy)
 }
 
 // fluxcdProviderKind is the fluxcd-provider kind: see fluxKind. The API
