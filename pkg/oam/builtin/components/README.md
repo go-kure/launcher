@@ -9556,9 +9556,11 @@ match expression), has no member: those are refused on every kind
 | `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
 None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
-`listenerset`, `referencegrant`, `backendtlspolicy`, `prometheusrule`, `artifactgenerator`,
-`fluxcd-alert`, `imagepolicy`, `imageupdateautomation`, `secretstore`,
-`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Most members are written
+`listenerset`, `referencegrant`, `backendtlspolicy`, `metallb-ipaddresspool`,
+`metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `prometheusrule`,
+`artifactgenerator`, `fluxcd-alert`, `imagepolicy`, `imageupdateautomation`, `secretstore`,
+`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. `metallb-bfdprofile` and
+`metallb-community` are not measured: their CRDs require no field. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
 an object of such values.
 
