@@ -206,6 +206,33 @@ type HookGroupNameChecker interface {
 	CheckHookGroupNames() error
 }
 
+// LayoutKustomizationNameProperty is the component property an author writes
+// the name of the Flux Kustomization of a component's own layout in
+// (NameRoleLayout).
+const LayoutKustomizationNameProperty = "layoutKustomizationName"
+
+// LayoutKustomizationNameSetter is an optional interface for component
+// ApplicationConfig types the base library's walker gives a layout of their
+// own (a helmtemplate component), which its Flux integration under per-layout
+// placement gives a Kustomization named "<unit>-<layout name>". The transform
+// resolves the name once per component under NameRoleLayout, where it builds
+// the bundle holding the component: the name the config says its author wrote
+// (AuthoredLayoutKustomizationName), else the answer of
+// TransformContext.Naming, else the default "<bundle>-<component>", the bundle
+// as launcher named it, shortened to 63 characters by the one shortening rule
+// with "-<component>" kept whole. It calls SetLayoutKustomizationName with an
+// authored or hook-given name, and with a default it shortened; not at all
+// for a default that fits, which is the base library's own. A name it is
+// handed is set on the layout (ManifestLayout.KustomizationName) and nowhere
+// else. A config built directly, outside a transform, is never handed one.
+type LayoutKustomizationNameSetter interface {
+	// AuthoredLayoutKustomizationName returns the name the author wrote and
+	// whether the author wrote one: a present empty string is an authored name,
+	// and refused.
+	AuthoredLayoutKustomizationName() (name string, authored bool)
+	SetLayoutKustomizationName(name string)
+}
+
 // ServiceAccountNamer is an optional interface for component ApplicationConfig
 // types. name is the ServiceAccount the component's pods run as: the authored
 // `serviceAccountName`, or "" when none was authored — no pod kind generates a

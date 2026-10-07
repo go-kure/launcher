@@ -9,7 +9,8 @@ import (
 )
 
 // ErrNameCollision is what every name collision answers to under errors.Is: the
-// refusal of one object, bundle or hook-group name prefix that two members of a
+// refusal of one object, bundle, hook-group name prefix or layout Kustomization
+// name that two members of a
 // transform named (go-kure/launcher#787). errors.As with a *NameCollisionError
 // finds the same error and says what was named and by whom.
 var ErrNameCollision = errors.New("oam: name collision")
@@ -24,7 +25,8 @@ var ErrNameCollision = errors.New("oam: name collision")
 type NameCollisionError struct {
 	// Kind is the group and kind of the object that was named. It is zero for a
 	// name that is no object's: a bundle's (the members' Role is "bundle" or
-	// "group") or a hook-group name prefix (their Role is "hook-group").
+	// "group"), a hook-group name prefix (their Role is "hook-group") or the
+	// Kustomization of a component's own layout (their Role is "layout").
 	Kind schema.GroupKind
 	// Namespace is the object's namespace as the text prints it. It is empty for
 	// a cluster-scoped object and for a name that is no object's. It is also
@@ -82,16 +84,21 @@ func (e *NameCollisionError) Error() string {
 func (e *NameCollisionError) Is(target error) bool { return target == ErrNameCollision }
 
 // named is what was named, as the text prints it: nameClaimKey.String, from the
-// exported fields. What tells a bundle from a hook-group name prefix is the
-// role, since a role has one class (classOfNameRole).
+// exported fields. What tells a bundle from a hook-group name prefix or a
+// layout Kustomization is the role, since a role has one class
+// (classOfNameRole).
 func (e *NameCollisionError) named() string {
 	key := nameClaimKey{class: nameClassObject, objectIdentity: objectIdentity{
 		group: e.Kind.Group, kind: e.Kind.Kind, namespace: e.Namespace, name: e.Name,
 	}}
 	if e.Kind.Kind == "" {
-		key.class = nameClassBundle
-		if e.First.Role == NameRoleHookGroup {
+		switch e.First.Role {
+		case NameRoleHookGroup:
 			key.class = nameClassHookGroupPrefix
+		case NameRoleLayout:
+			key.class = nameClassLayout
+		default:
+			key.class = nameClassBundle
 		}
 	}
 	return key.String()

@@ -65,14 +65,19 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
 			Description: "Sensitive part of the Helm values tree, merged over values for the client-side render and written nowhere else by this component; whatever the chart renders from it is in the output in clear form. A path set in both values and secretValues is refused, and so is a key named global below the top level. Must be representable as JSON. An environment policy may forbid it.",
 		},
-		scopeOverridesKey:               scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
-		oam.HookGroupNamePrefixProperty: {Type: oam.PropertyTypeString, Description: hookGroupNamePrefixDescription},
+		scopeOverridesKey:                   scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
+		oam.HookGroupNamePrefixProperty:     {Type: oam.PropertyTypeString, Description: hookGroupNamePrefixDescription},
+		oam.LayoutKustomizationNameProperty: {Type: oam.PropertyTypeString, Description: layoutKustomizationNameDescription},
 	}
 }
 
 // hookGroupNamePrefixDescription describes hookGroupNamePrefix for the
 // helmtemplate component, and for a helm component under delivery: template.
 const hookGroupNamePrefixDescription = "Prefix of the names of the component's hook-group layouts, in place of <application>-<component>: each layout, its directory and the Flux Kustomization generated for it under per-layout placement, is named <prefix>-<NN>-<phase>. A DNS-1123 subdomain, used as written and never shortened: a layout name over 63 characters built from it is refused. It must differ from the prefix of every other component of the document."
+
+// layoutKustomizationNameDescription describes layoutKustomizationName for the
+// helmtemplate component, and for a helm component under delivery: template.
+const layoutKustomizationNameDescription = "Name of the Flux Kustomization generated under per-layout placement for the component's own layout, in place of <bundle>-<component> (shortened to 63 characters when longer). It names neither the layout nor its directory, and is not read under per-bundle placement. A DNS-1123 subdomain of at most 63 characters, used as written and never shortened. It must differ from that of every other component of the document."
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values, secretValues and scopeOverrides excepted, which are split off before
@@ -89,6 +94,10 @@ type helmTemplateProperties struct {
 	// The authored prefix of the hook-group layout names; nil when absent or
 	// null. A present empty string is an authored prefix, and refused.
 	HookGroupNamePrefix *string `json:"hookGroupNamePrefix"`
+	// The authored name of the Flux Kustomization of the component's own
+	// layout; nil when absent or null. A present empty string is an authored
+	// name, and refused.
+	LayoutKustomizationName *string `json:"layoutKustomizationName"`
 }
 
 // helmTemplateSource is the inline chart source: a URL, and optionally the
@@ -157,6 +166,11 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	if props.HookGroupNamePrefix != nil {
 		cfg.HookGroupNamePrefix, cfg.prefixAuthored = *props.HookGroupNamePrefix, true
 	}
+	// As authored: the transform checks it where it resolves the name
+	// (oam.LayoutKustomizationNameSetter).
+	if props.LayoutKustomizationName != nil {
+		cfg.LayoutKustomizationName, cfg.layoutNameAuthored = *props.LayoutKustomizationName, true
+	}
 	return cfg, nil
 }
 
@@ -212,6 +226,16 @@ type HelmTemplateConfig struct {
 	// (CheckHookGroupNames). Empty means the default, whose Kustomization name
 	// is shortened to 63 characters.
 	HookGroupNamePrefix string
+	// LayoutKustomizationName is the name of the Flux Kustomization the base
+	// library generates under per-layout placement for the component's own
+	// layout, which AugmentLayout sets on that layout
+	// (ManifestLayout.KustomizationName) unless the layout already carries one:
+	// the author's layoutKustomizationName, the answer of the consumer's Naming
+	// hook for role "layout", the default the transform shortened to 63
+	// characters (SetLayoutKustomizationName), or what the builder of a direct
+	// config set. Empty leaves the base library's default,
+	// "<unit>-<layout name>". It names neither the layout nor its directory.
+	LayoutKustomizationName string
 	// Namespace is the application namespace: the render's .Release.Namespace,
 	// and the namespace given to a namespaced rendered object that carries none
 	// (stampRenderedNamespaces). Empty leaves .Release.Namespace at kure's
@@ -260,6 +284,10 @@ type HelmTemplateConfig struct {
 	// prefixAuthored says the author wrote hookGroupNamePrefix, also where what
 	// the author wrote is the empty string, which the transform refuses.
 	prefixAuthored bool
+	// layoutNameAuthored says the author wrote layoutKustomizationName, also
+	// where what the author wrote is the empty string, which the transform
+	// refuses.
+	layoutNameAuthored bool
 
 	// renderChart renders the chart. ToApplicationConfig sets helm.RenderChart,
 	// which a nil value also means; tests inject a stub.
@@ -347,20 +375,45 @@ func (c *HelmTemplateConfig) AuthoredHookGroupNamePrefix() (string, bool) {
 // transform hands over the prefix it resolved when that is not the default.
 func (c *HelmTemplateConfig) SetHookGroupNamePrefix(prefix string) { c.HookGroupNamePrefix = prefix }
 
+// AuthoredLayoutKustomizationName implements oam.LayoutKustomizationNameSetter:
+// the name the author wrote in layoutKustomizationName. A config built
+// directly with LayoutKustomizationName set answers as if its builder were the
+// author, so a transform it is handed to checks and claims that name and asks
+// no hook.
+func (c *HelmTemplateConfig) AuthoredLayoutKustomizationName() (string, bool) {
+	return c.LayoutKustomizationName, c.layoutNameAuthored || c.LayoutKustomizationName != ""
+}
+
+// SetLayoutKustomizationName implements oam.LayoutKustomizationNameSetter:
+// the transform hands over the name it resolved when that is not the base
+// library's own default.
+func (c *HelmTemplateConfig) SetLayoutKustomizationName(name string) {
+	c.LayoutKustomizationName = name
+}
+
 // AugmentLayout repartitions the render Generate returned flat into one child
 // layout per Helm hook group, chained in execution order
 // (chartRender.partition) and named after c.HookGroupNamePrefix, or by default
-// after c.Application and ml. A chart with at most one hook group leaves ml
-// unchanged. A child name built from c.HookGroupNamePrefix that cannot be a
+// after c.Application and ml. A chart with at most one hook group is not
+// partitioned. A child name built from c.HookGroupNamePrefix that cannot be a
 // Flux Kustomization's is refused, and ml is then left as it was: one over 63
 // characters with an *oam.HookGroupNameError. A transform returns that refusal
 // before any layout is built (CheckHookGroupNames), so this one is met by a
 // config built directly, or one whose prefix was set after its transform.
+//
+// Whatever the number of hook groups, c.LayoutKustomizationName, when set,
+// becomes ml's KustomizationName, unless ml already carries one.
 func (c *HelmTemplateConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err
 	}
-	return c.partition(c.hookGroupNaming(), ml)
+	if err := c.partition(c.hookGroupNaming(), ml); err != nil {
+		return err
+	}
+	if c.LayoutKustomizationName != "" && ml.KustomizationName == "" {
+		ml.KustomizationName = c.LayoutKustomizationName
+	}
+	return nil
 }
 
 // hookGroupNaming is what c names its hook-group child layouts by.
@@ -395,4 +448,6 @@ var (
 	_ oam.ApplicationNameSetter      = (*HelmTemplateConfig)(nil)
 	_ oam.HookGroupNamePrefixSetter  = (*HelmTemplateConfig)(nil)
 	_ oam.HookGroupNameChecker       = (*HelmTemplateConfig)(nil)
+
+	_ oam.LayoutKustomizationNameSetter = (*HelmTemplateConfig)(nil)
 )

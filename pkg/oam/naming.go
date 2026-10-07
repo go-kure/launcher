@@ -8,6 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/go-kure/kure/pkg/stack"
+
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
@@ -126,6 +128,13 @@ const (
 	// answer is a prefix and not a name: how many groups a chart has is known only
 	// once it is rendered, and the prefix is resolved before that.
 	NameRoleHookGroup NameRole = "hook-group"
+	// NameRoleLayout is the Flux Kustomization the base library generates under
+	// per-layout placement for a component's own layout: the layout of a chart
+	// (a helmtemplate component, or a helm component under delivery: template).
+	// Default: "<bundle>-<component>", the bundle as launcher named it, the base
+	// library's own default; past 63 characters launcher shortens it to 63 with
+	// "-<component>" kept whole. It names neither the layout nor its directory.
+	NameRoleLayout NameRole = "layout"
 )
 
 // nameSyntax is the rule a name that is not the default is held to.
@@ -136,6 +145,9 @@ const (
 	nameSyntaxSubdomain nameSyntax = iota
 	// nameSyntaxLabel1035 is a DNS-1035 label of at most 63 characters.
 	nameSyntaxLabel1035
+	// nameSyntaxKustomization is a Flux Kustomization name: a DNS-1123 subdomain
+	// of at most 63 characters (stack.ValidateKustomizationName).
+	nameSyntaxKustomization
 )
 
 // nameClass is how a role's names are held apart.
@@ -159,6 +171,12 @@ const (
 	// each other here: they exist only after the render
 	// (resolveHookGroupNamePrefix).
 	nameClassHookGroupPrefix
+	// nameClassLayout is the Flux Kustomization of a component's own layout:
+	// claimed by name across the document, so two components never share one. It
+	// is held against no bundle name: the base library reads it only under
+	// per-layout placement, and refuses a Kustomization name two layouts, or a
+	// layout and a bundle, share where it integrates the walked tree.
+	nameClassLayout
 )
 
 // nameRoles is the closed set, in the order NameRoles returns it.
@@ -190,6 +208,7 @@ var nameRoles = []struct {
 	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
 	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
+	{NameRoleLayout, nameClassLayout, nameSyntaxKustomization},
 }
 
 // NameRoles returns every role a name is resolved under, in a fixed order. A
@@ -412,6 +431,8 @@ func (k nameClaimKey) String() string {
 		return fmt.Sprintf("bundle %q", k.name)
 	case nameClassHookGroupPrefix:
 		return fmt.Sprintf("hook-group name prefix %q", k.name)
+	case nameClassLayout:
+		return fmt.Sprintf("layout Kustomization %q", k.name)
 	case nameClassObject, nameClassSubApplication:
 	}
 	return k.objectIdentity.String()
@@ -723,7 +744,9 @@ func clusterScopeProblem(spec NameSpec) error {
 // characters: an object's own rule for the kinds launcher names, and launcher's
 // rule for a bundle, a group and a sub-application, whose defaults are built
 // from an application or component name it already holds to it. A role whose
-// object lends its name to a Service (the pooler) takes the DNS-1035 label.
+// object lends its name to a Service (the pooler) takes the DNS-1035 label. A
+// role that names a Flux Kustomization the base library generates (the layout)
+// takes the subdomain of at most 63 characters it holds that name to.
 func overrideNameProblem(name string, syntax nameSyntax) string {
 	if name == "" {
 		return "it is empty"
@@ -736,6 +759,9 @@ func overrideNameProblem(name string, syntax nameSyntax) string {
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return "not a valid DNS-1123 subdomain: " + strings.Join(errs, "; ")
+	}
+	if syntax == nameSyntaxKustomization && len(name) > stack.KustomizationNameMaxLength {
+		return fmt.Sprintf("it is %d characters long, and a Flux Kustomization name is at most %d", len(name), stack.KustomizationNameMaxLength)
 	}
 	return ""
 }

@@ -318,6 +318,7 @@ func TestNameCollision_TextNamesTheClaimKey(t *testing.T) {
 		},
 		nameClassBundle:          {{"a bundle", objectIdentity{name: "web"}}},
 		nameClassHookGroupPrefix: {{"a hook-group name prefix", objectIdentity{name: "web"}}},
+		nameClassLayout:          {{"a layout Kustomization", objectIdentity{name: "web"}}},
 	}
 	claimed := 0
 	for _, r := range nameRoles {

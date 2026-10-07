@@ -397,6 +397,19 @@ Decided in the ticket:
   - **Breaking:** under per-layout placement a child's Kustomization was named
     `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`), and refused over 63
     characters; it is now `shop-db-01-main`.
+- **A chart's layout Kustomization** (`pkg/oam/README.md` "Pipeline" and "Name roles and the
+  `Naming` hook"). Role `layout` names the Flux Kustomization kure generates under per-layout
+  placement for the layout of a chart (`helmtemplate`, or `helm` under `delivery: template`),
+  by `layoutKustomizationName`, else the hook, else kure's own `<bundle>-<component>`.
+  - Over 63 characters the default is shortened to 63 by the one shortening rule,
+    `-<component>` kept whole, and set on the layout; kure refused it before. Where it fits
+    nothing is set and the output does not change. An authored or hook-given name is never
+    shortened, and is refused in the transform unless it is a DNS-1123 subdomain of at most 63
+    characters.
+  - Charts only, and per-layout placement only. The length is measured with the bundle's
+    name as launcher made it, not as a consumer renames it afterwards. Not covered: the
+    layout of any other component under `ApplicationGrouping: GroupByName`, which keeps
+    kure's default.
 - **Target, author:** an override for each remaining name of §3.1.
 - **Target, consumer:** the hook reaches the remaining sites.
   - A name the `Namer` builds (`NameAllocator.Name` and
@@ -1537,7 +1550,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`). Open: an author override for bundle, ordered-group and synthesized NetworkPolicy names; a hook role for the names outside the roles of §3.2, among them the claim a `pvc` volume generates | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Partly: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`). Open: an author override for bundle, ordered-group and synthesized NetworkPolicy names; a hook role for the names outside the roles of §3.2, among them the claim a `pvc` volume generates | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

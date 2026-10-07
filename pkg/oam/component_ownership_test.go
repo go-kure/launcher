@@ -1040,13 +1040,14 @@ var configContracts = map[string]configContract{
 	"podTemplateLabeler":           {method: "PodTemplateLabels"},
 	"identityPortMapper":           {method: "IdentityTargetPorts"},
 
-	"Enforceable":               {notForwarded: "asserted as each config is created, before the wrap"},
-	"trafficSourceCollector":    {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
-	"backendRefTargetCollector": {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
-	"fluxNamespaceInput":        {notForwarded: "a trait sub-application contract the Flux namespace pass reads before the wrap"},
-	"synthesizedPolicy":         {notForwarded: "the NetworkPolicy synthesis's own configs, which the transform names before the wrap"},
-	"*siblingGroupConfig":       {notForwarded: "the engine's own type, asserted while it builds the group"},
-	"componentOwner":            {notForwarded: "the wrapper itself"},
+	"Enforceable":                   {notForwarded: "asserted as each config is created, before the wrap"},
+	"LayoutKustomizationNameSetter": {notForwarded: "asserted where the bundle is built, before any trait or the wrap"},
+	"trafficSourceCollector":        {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
+	"backendRefTargetCollector":     {notForwarded: "a trait sub-application contract the NetworkPolicy synthesis reads before the wrap"},
+	"fluxNamespaceInput":            {notForwarded: "a trait sub-application contract the Flux namespace pass reads before the wrap"},
+	"synthesizedPolicy":             {notForwarded: "the NetworkPolicy synthesis's own configs, which the transform names before the wrap"},
+	"*siblingGroupConfig":           {notForwarded: "the engine's own type, asserted while it builds the group"},
+	"componentOwner":                {notForwarded: "the wrapper itself"},
 }
 
 // onConfigSelector reports whether assertion is made on a selector named
