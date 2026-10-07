@@ -9917,7 +9917,11 @@ None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway
 `artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation`, `resourcesetinputprovider`, `secretstore`,
 `clustersecretstore`, `externalsecret` and `clusterexternalsecret`. `metallb-bfdprofile` and
-`metallb-community` are not measured: their CRDs require no field. Most members are written
+`metallb-community` are not measured: their CRDs require no field.
+`TestRequiredWrittenKinds_CoverEveryCRDKind` holds the measured kinds to the kind inventory:
+every `kind` row whose API group client-go's scheme does not register, so a CRD serves it, is
+measured or named as not measured with its reason, so a new kind component of such an API
+fails there until it is one or the other. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
 an object of such values.
 
