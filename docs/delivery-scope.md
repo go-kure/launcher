@@ -1579,7 +1579,8 @@ its text:
     `evictionResponders`. `imagePullPolicy`, `terminationMessagePath`,
     `terminationMessagePolicy`, `stdin`, `stdinOnce`, `tty`, `resizePolicy` and
     `securityContext.windowsOptions` are read on the main container, on an init
-    container and on a sidecar, and an init container reads its own `restartPolicy`
+    container and on a sidecar, with its strings held to upstream's rules there and
+    at the pod level, and an init container reads its own `restartPolicy`
     (`Never` or `OnFailure`) and `restartPolicyRules` (README "Container fields");
   - `service`: a literal `clusterIP`, `clusterIPs` and `externalIPs`, which are
     refused. Every other `ServiceSpec` field is read: `type: ExternalName` with
