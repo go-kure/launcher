@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"maps"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -36,8 +37,10 @@ func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 		},
 	}
 	held := map[string]int{}
+	ran := 0
 	for _, name := range slices.Sorted(maps.Keys(cases)) {
 		t.Run(name, func(t *testing.T) {
+			ran++
 			res := lowerPostgresql(t, &oam.Component{Name: "db", Type: "postgresql", Properties: cases[name]}, nil)
 			for _, member := range res.Components {
 				schema, ok := schemas[member.Type]
@@ -48,7 +51,9 @@ func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 					if !schema[key].Required {
 						continue
 					}
-					if _, written := member.Properties[key]; !written {
+					// The engine refuses a null, typed or not, as it refuses an
+					// absent key (pkg/oam/property_validate.go).
+					if v, written := member.Properties[key]; !written || isNull(v) {
 						t.Errorf("%s %q is emitted without %s, which its schema marks Required", member.Type, member.Name, key)
 					}
 					held[member.Type]++
@@ -57,10 +62,28 @@ func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 		})
 	}
 	// Vacuity guard: each of the three kinds was emitted and has a Required
-	// property that was looked for.
+	// property that was looked for. It reads every case, so it holds only
+	// when -run selected them all.
+	if ran < len(cases) {
+		return
+	}
 	for _, typ := range []string{"cnpg-objectstore", "cnpg-pooler", "cnpg-database"} {
 		if held[typ] == 0 {
 			t.Errorf("no Required property of an emitted %s was looked for", typ)
 		}
+	}
+}
+
+// isNull reports a value the engine reads as null: nil, or a nil map, slice or
+// pointer held in an any. It mirrors pkg/oam's unexported isNullValue.
+func isNull(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
 	}
 }
