@@ -40,6 +40,14 @@ const (
 	NameRoleRBAC NameRole = "rbac"
 	// NameRoleNetworkPolicy is the networkpolicy trait's NetworkPolicy.
 	NameRoleNetworkPolicy NameRole = "networkpolicy"
+	// NameRoleIngress is the ingress trait's Ingress. Default:
+	// "<component>-ingress", "<component>-ingress-<scope>" with a scope. Launcher
+	// writes no reference to it by name.
+	NameRoleIngress NameRole = "ingress"
+	// NameRoleHTTPRoute is the httproute trait's HTTPRoute. Default:
+	// "<component>-httproute", "<component>-httproute-<scope>" with a scope.
+	// Launcher writes no reference to it by name.
+	NameRoleHTTPRoute NameRole = "httproute"
 	// NameRolePooler is the CloudNativePG Pooler the postgresql component
 	// generates. Default: "<component>-pooler". CloudNativePG names the pooler's
 	// Service after it, so a name that is not the default must be a DNS-1035
@@ -204,6 +212,8 @@ var nameRoles = []struct {
 	{NameRolePDB, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleRBAC, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleNetworkPolicy, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleIngress, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleHTTPRoute, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},
@@ -613,12 +623,12 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 
 // ClaimObjectName claims the name of an object the trait generates and names
 // itself: one that has no name role, whose name is the handler's own property
-// or its own default, and for which the Naming hook is not asked (the `ingress`
-// trait's Ingress). Nothing is resolved, and the name is used as the handler
-// settled it. The claim holds it against every name the transform resolves or
-// claims: a second owner of the same kind, namespace and name is refused with
-// both named, whichever of the two comes first (a kind component's object, a
-// second trait's).
+// or its own default, and for which the Naming hook is not asked (the
+// `cilium-networkpolicy` trait's CiliumNetworkPolicy). Nothing is resolved,
+// and the name is used as the handler settled it. The claim holds it against
+// every name the transform resolves or claims: a second owner of the same
+// kind, namespace and name is refused with both named, whichever of the two
+// comes first (a kind component's object, a second trait's).
 //
 // property is the property the author wrote the name in, "" when the name is
 // the handler's default. namespace is the one the object is generated in, ""

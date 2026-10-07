@@ -1147,19 +1147,20 @@ launcher refuses it. The name also becomes a file name and a `kustomization.yaml
 the written tree, and a colon has not been shown to be safe there. An author who needs such
 a name cannot write it today.
 
-The names of the `scaler`, `rbac` and `networkpolicy` objects are resolved under a name role
-(`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the author's property, else the
-consumer's `TransformContext.Naming` hook, else the default. `Transform` keeps those names
-apart and refuses two that name one object, naming both: an `hpaName` equal to another
-component's HPA, or two `scaler` traits on one component.
+The names of the `scaler`, `rbac`, `networkpolicy`, `ingress` and `httproute` objects are
+resolved under a name role (`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the
+author's property, else the consumer's `TransformContext.Naming` hook, else the default. The
+`ingress` and `httproute` traits an `expose` trait lowers to are resolved the same way.
+`Transform` keeps those names apart and refuses two that name one object, naming both: an
+`hpaName` equal to another component's HPA, two `scaler` traits on one component, two
+`ingress` traits under one name, on one component or two, or a trait and the kind component
+of the same kind whose object carries the trait's name (an `ingress` trait and an `ingress`
+component).
 
-The Ingress, the HTTPRoute and the CiliumNetworkPolicy have no name role: the trait names its
-object itself (`name`, else the default; the `cilium-networkpolicy` `name` is required), and
-the hook is not asked. The name is claimed all the same (`(*Trait).ClaimObjectName`), so
-`Transform` refuses a second owner of that object with both named: two `ingress` traits under
-one name, on one component or two, or a trait and the kind component of the same kind whose
-object carries the trait's name (an `ingress` trait and an `ingress` component). The name
-itself is what it was before it was claimed.
+The CiliumNetworkPolicy has no name role: it is author-named, and the hook is not asked, by
+design. The `cilium-networkpolicy` `name` is required, and the trait claims it
+(`(*Trait).ClaimObjectName`), so `Transform` refuses a second owner of that object with both
+named, as under a role.
 
 Every other authored name in the
 table below is checked as a name, not against the other objects of the document:

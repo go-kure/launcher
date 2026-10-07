@@ -59,9 +59,10 @@ func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored str
 	return trait.ResolveName(spec)
 }
 
-// The kinds of the objects a trait names itself and claims
-// (claimOwnObjectName). A name is claimed by group, kind, namespace and name,
-// so these are what another owner of the same object must agree on.
+// The kinds of the routing traits' objects, resolved under their roles
+// (resolveObjectName) or, the CiliumNetworkPolicy, claimed (claimOwnObjectName).
+// A name is claimed by group, kind, namespace and name, so these are what
+// another owner of the same object must agree on.
 var (
 	ingressKind             = schema.GroupKind{Group: networkingv1.GroupName, Kind: "Ingress"}
 	httpRouteKind           = schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}
@@ -69,12 +70,12 @@ var (
 )
 
 // claimOwnObjectName claims the name of an object a trait names itself, under
-// no name role (oam.Trait.ClaimObjectName): the `ingress` trait's Ingress, the
-// `httproute` trait's HTTPRoute, the `cilium-networkpolicy` trait's
-// CiliumNetworkPolicy. The name is the one the handler settled and is not
-// changed; the claim refuses a second owner of it, a second trait's object or
-// a kind component's, with both named. authored is the value of the trait's
-// `name` as the handler parsed it, "" when the name is the trait's default.
+// no name role (oam.Trait.ClaimObjectName): the `cilium-networkpolicy` trait's
+// CiliumNetworkPolicy, whose `name` is required, so no hook could be asked for
+// it. The name is the one the handler settled and is not changed; the claim
+// refuses a second owner of it, a second trait's object or a kind component's,
+// with both named. authored is the value of the trait's `name` as the handler
+// parsed it, "" when the name is the trait's default.
 func claimOwnObjectName(trait *oam.Trait, kind schema.GroupKind, namespace, name, authored string) error {
 	property := ""
 	if authored != "" {

@@ -22,7 +22,7 @@ var kindTraitPairs = []struct {
 	{
 		typ: "ingress", identity: `Ingress.networking.k8s.io "default/api-ingress"`,
 		trait: claimIngressTrait, object: "api-ingress",
-		traitOwner: `component "api" traits[0] "ingress" (its own object, its default name)`,
+		traitOwner: `component "api" traits[0] "ingress" (role "ingress", its default)`,
 		kind: `        defaultBackend:
           service:
             name: api
@@ -33,7 +33,7 @@ var kindTraitPairs = []struct {
 	{
 		typ: "httproute", identity: `HTTPRoute.gateway.networking.k8s.io "default/api-httproute"`,
 		trait: claimHTTPRouteTrait, object: "api-httproute",
-		traitOwner: `component "api" traits[0] "httproute" (its own object, its default name)`,
+		traitOwner: `component "api" traits[0] "httproute" (role "httproute", its default)`,
 		kind: `        parentRefs:
           - name: gw
         rules:

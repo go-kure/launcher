@@ -34,14 +34,16 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		return err
 	}
 
-	config.objectName = config.Name
-	if config.objectName == "" {
-		config.objectName = routingObjectName(app.Name, "httproute", config.Scope)
+	def := config.Name
+	if def == "" {
+		def = routingObjectName(app.Name, "httproute", config.Scope)
 	}
-	if err := claimOwnObjectName(trait, httpRouteKind, app.Namespace, config.objectName, config.Name); err != nil {
+	if config.objectName, err = resolveObjectName(trait, oam.NameRoleHTTPRoute, httpRouteKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
 	}
-	subAppName, err := resolveSubApplicationName(trait, config.objectName)
+	// The hook's answer names the HTTPRoute alone: the sub-application keeps the
+	// authored name, else launcher's default (go-kure/launcher#787).
+	subAppName, err := resolveSubApplicationName(trait, def)
 	if err != nil {
 		return err
 	}
@@ -957,8 +959,9 @@ func isAllowedRedirectStatus(code int) bool {
 type HTTPRouteConfig struct {
 	Name  string // optional, overrides sub-app name for multi-httproute components
 	Scope string // optional; sub-app name becomes {component}-httproute-{scope} when set and Name is empty
-	// objectName is the HTTPRoute's name as Apply settled it: Name, else the
-	// default. "" on a config built directly (routingObjectNameOr).
+	// objectName is the HTTPRoute's name as Apply resolved it: Name, else the
+	// naming hook's, else the default. "" on a config built directly
+	// (routingObjectNameOr).
 	objectName    string
 	componentName string
 	ParentRefs    []ParentRef

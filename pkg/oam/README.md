@@ -946,6 +946,8 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
 | `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
+| `ingress` | The `ingress` trait's Ingress. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the Ingress by name. | `<component>-ingress`, `<component>-ingress-<scope>` with a `scope`. | `name` | unless `name` is set |
+| `httproute` | The `httproute` trait's HTTPRoute. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the HTTPRoute by name. | `<component>-httproute`, `<component>-httproute-<scope>` with a `scope`. | `name` | unless `name` is set |
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
 | `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
@@ -968,6 +970,10 @@ The `bundle`, `group` and `netpol-synth` names are the hook's to change, and onl
 The `bundle` and `group` defaults carry no namespace: two applications of one name, or whose
 order gives the same group name, get the same bundle names wherever they are deployed. Keeping
 them apart across applications is the consumer's job, through the `Naming` hook.
+
+The `cilium-networkpolicy` trait's CiliumNetworkPolicy has no role: it is author-named, and
+the hook is not asked, by design. Its `name` is required, and an authored name is never put to
+the hook. The trait claims the name, so a second owner of it is refused as under any role.
 
 The `hook-group` prefix is resolved in the transform, where two components of one document
 that resolve to the same prefix are refused: their groups would share names. The names are
@@ -1304,15 +1310,16 @@ apart. The handler names the namespace its object is generated in (`NameSpec.Nam
 sets `NameSpec.ClusterScoped` for an object that has none.
 
 A trait that names its object itself, under no role, claims the name with
-`(*Trait).ClaimObjectName(kind, namespace, name, property)`: the `ingress` trait's Ingress, the
-`httproute` trait's HTTPRoute and the `cilium-networkpolicy` trait's CiliumNetworkPolicy. The
-name is the handler's own (its `name` property, else its default) and is not changed, and the
-`Naming` hook is not asked about it: there is no role for these objects. The claim only holds
-the name against every other one of the transform, so that a second owner of the same kind,
-namespace and name is refused with both named, whichever comes first:
+`(*Trait).ClaimObjectName(kind, namespace, name, property)`: the `cilium-networkpolicy` trait's
+CiliumNetworkPolicy, whose required `name` leaves the hook nothing to be asked. The `ingress`
+trait's Ingress and the `httproute` trait's HTTPRoute used to be claimed the same way; they are
+resolved under their roles now (`ingress`, `httproute`). The name is the handler's own and is
+not changed, and the `Naming` hook is not asked about it: there is no role for the object. The
+claim only holds the name against every other one of the transform, so that a second owner of
+the same kind, namespace and name is refused with both named, whichever comes first:
 
 ```
-name collision: Ingress.networking.k8s.io "default/api-ingress" is named by component "web" traits[0] "ingress" (its own object, set by name) and by component "api" traits[0] "ingress" (its own object, its default name); give one of them another name
+name collision: CiliumNetworkPolicy.cilium.io "default/allow-dns" is named by component "web" traits[0] "cilium-networkpolicy" (its own object, set by name) and by component "api" traits[0] "cilium-networkpolicy" (its own object, set by name); give one of them another name
 ```
 
 `property` is the property the author wrote the name in, empty for the default. On a trait
