@@ -81,8 +81,7 @@ func TestShortenName_GeneratingSites(t *testing.T) {
 				map[string]any{"sourcePVC": name, "schedule": "0 3 * * *"})
 		}},
 		{"managed TLS Secret default", "-tls", func(t *testing.T, name string) string {
-			tls := synthesizedIngressTLS([]string{"example.com"}, name, "")
-			return tls[0].(map[string]any)["secretName"].(string)
+			return managedTLSSecretName(name)
 		}},
 	}
 	shared := strings.Repeat("a", 240)

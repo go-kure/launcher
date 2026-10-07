@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -67,6 +68,15 @@ var (
 	ingressKind             = schema.GroupKind{Group: networkingv1.GroupName, Kind: "Ingress"}
 	httpRouteKind           = schema.GroupKind{Group: gatewayv1.GroupName, Kind: "HTTPRoute"}
 	ciliumNetworkPolicyKind = schema.GroupKind{Group: ciliumv2.CustomResourceDefinitionGroup, Kind: ciliumv2.CNPKindDefinition}
+)
+
+// The kinds of the Secret family's objects: a Secret a trait's object makes
+// another controller write (the managed TLS Secret, the certificate trait's,
+// the external-secret trait's produced Secret), and the external-secret trait's
+// ExternalSecret.
+var (
+	secretKind         = schema.GroupKind{Kind: "Secret"}
+	externalSecretKind = schema.GroupKind{Group: esv1.SchemeGroupVersion.Group, Kind: esv1.ExtSecretKind}
 )
 
 // claimOwnObjectName claims the name of an object a trait names itself, under

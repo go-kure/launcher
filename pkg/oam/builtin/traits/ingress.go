@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -133,6 +134,14 @@ func (h *IngressHandler) CanHandle(traitType string) bool {
 // (IngressConfig.PlatformAnnotations, go-kure/launcher#790).
 const platformAnnotationsProperty = "platformAnnotations"
 
+// managedTLSProperty is the ingress trait's property for the TLS entry the
+// platform manages: the hosts, and the Secret name the expose trait's author
+// wrote, if any. The expose rule writes it, or a capability rendering of the
+// ingress trait does; it is platform-reserved, so an author cannot write it.
+// Apply resolves the Secret's name (NameRoleTLSSecret) and adds the entry after
+// the authored tls entries, which are used as written.
+const managedTLSProperty = "managedTLS"
+
 // PropertySchema declares the ingress trait's user-facing properties.
 // `allowedHostnameWildcard`, `platformAnnotations` and `networkPolicy` are
 // platform-reserved keys populated by capability rendering, or by the expose
@@ -185,6 +194,14 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, PlatformReserved: true,
 			Description: "Platform-reserved annotations the platform sets on the Ingress resource (annotation key to string value). An authored annotation of the same key must hold the same value.",
 		},
+		managedTLSProperty: {
+			Type: oam.PropertyTypeObject, PlatformReserved: true,
+			Description: "Platform-reserved TLS entry the platform manages, added after the tls entries; its Secret's name is resolved under the Naming hook role tls-secret.",
+			Properties: map[string]oam.PropertySchema{
+				"hosts":      {Type: oam.PropertyTypeArray, Required: true, Description: "Hostnames covered by the managed certificate.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname covered by the certificate."}},
+				"secretName": {Type: oam.PropertyTypeString, Description: "Name of the managed Secret, in place of <component>-tls; used as written, never shortened."},
+			},
+		},
 		"ingressClassName":        {Type: oam.PropertyTypeString, Description: "IngressClass that should handle this Ingress."},
 		"servicePort":             {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one (e.g. a Helm chart)."},
 		"serviceName":             {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
@@ -235,6 +252,14 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	if config.objectName, err = resolveObjectName(trait, oam.NameRoleIngress, ingressKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
 	}
+	if m := config.managedTLS; m != nil {
+		name, err := resolveObjectName(trait, oam.NameRoleTLSSecret, secretKind, app.Namespace,
+			"secretName", m.secretName, managedTLSSecretName(app.Name))
+		if err != nil {
+			return err
+		}
+		config.TLS = append(config.TLS, IngressTLS{Hosts: m.hosts, SecretName: name})
+	}
 	// The hook's answer names the Ingress alone: the sub-application keeps the
 	// authored name, else launcher's default (go-kure/launcher#787).
 	subAppName, err := resolveSubApplicationName(trait, def)
@@ -269,6 +294,52 @@ func platformAnnotationsOf(raw any) (map[string]string, error) {
 		annotations[k] = value.String()
 	}
 	return annotations, nil
+}
+
+// managedTLS is the managed TLS entry of an ingress trait (managedTLSProperty).
+type managedTLS struct {
+	hosts []string
+	// secretName is the Secret name the platform wrote for the entry, "" for
+	// the default (managedTLSSecretName).
+	secretName string
+}
+
+// managedTLSValue is the shape of the managedTLS property, for the strict
+// decode.
+type managedTLSValue struct {
+	Hosts      []string `yaml:"hosts"`
+	SecretName *string  `yaml:"secretName"`
+}
+
+// managedTLSOf reads the managedTLS property: an object with at least one host,
+// and a secretName, when present, that can name the Secret (as written, never
+// shortened).
+func managedTLSOf(raw any) (*managedTLS, error) {
+	object, ok := raw.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: expected object, got %T", managedTLSProperty, raw)
+	}
+	value, err := builtin.DecodeStrict[managedTLSValue](object)
+	if err != nil {
+		return nil, errors.Wrapf(err, "%s", managedTLSProperty)
+	}
+	if len(value.Hosts) == 0 {
+		return nil, errors.Errorf("%s.hosts: at least one host is required", managedTLSProperty)
+	}
+	managed := &managedTLS{hosts: value.Hosts}
+	if value.SecretName != nil {
+		if err := checkAuthoredObjectName(managedTLSProperty+".secretName", "the managed TLS Secret", *value.SecretName); err != nil {
+			return nil, err
+		}
+		managed.secretName = *value.SecretName
+	}
+	return managed, nil
+}
+
+// managedTLSSecretName is the default name of the managed TLS Secret,
+// "<component>-tls", shortened by the one rule when it is over 253 characters.
+func managedTLSSecretName(component string) string {
+	return oam.ShortenNameWithSuffix(component, "-tls", oam.ShortenLimitSubdomain)
 }
 
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
@@ -535,6 +606,13 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			config.TLS = append(config.TLS, tlsEntry)
 		}
 	}
+	if raw, ok := props[managedTLSProperty]; ok && !oam.IsNullValue(raw) {
+		managed, err := managedTLSOf(raw)
+		if err != nil {
+			return nil, err
+		}
+		config.managedTLS = managed
+	}
 
 	// Platform-reserved auto-NetworkPolicy inputs (populated by capability rendering).
 	sources, err := parseTrafficSources(props, app.Name, "ingress")
@@ -572,6 +650,9 @@ type IngressConfig struct {
 	Rules               []IngressRule
 	TLS                 []IngressTLS
 	ServiceName         string
+	// managedTLS is the managed TLS entry as parsed (managedTLSProperty), nil
+	// when there is none. Apply resolves its Secret's name and appends it to TLS.
+	managedTLS *managedTLS
 
 	// sources/ports are populated in parseProperties from the platform-reserved
 	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.

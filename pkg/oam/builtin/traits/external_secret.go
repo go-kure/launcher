@@ -56,6 +56,23 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 	if err != nil {
 		return err
 	}
+	// The ExternalSecret is named by the required secretName, so no hook could be
+	// asked for it: its name is claimed as written.
+	if err := trait.ClaimObjectName(externalSecretKind, app.Namespace, config.SecretName, "secretName"); err != nil {
+		return err
+	}
+	// The produced Secret, before anything reads its name: the ExternalSecret's
+	// target.name and the decorator's envFrom and volume below.
+	if config.createsTarget() {
+		config.TargetSecretName, err = resolveObjectName(trait, oam.NameRoleExternalSecret, secretKind,
+			app.Namespace, "targetSecretName", config.targetSecretAuthored, config.SecretName)
+		if err != nil {
+			return err
+		}
+	}
+	if err := config.checkMountedSecretName(); err != nil {
+		return err
+	}
 
 	subAppName, err := resolveSubApplicationName(trait, app.Name+"-external-secret-"+config.SecretName)
 	if err != nil {
@@ -196,7 +213,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		if err := checkAuthoredObjectName("targetSecretName", "the produced Secret", tsn); err != nil {
 			return nil, err
 		}
-		config.TargetSecretName = tsn
+		config.TargetSecretName, config.targetSecretAuthored = tsn, tsn
 	}
 
 	// A present-but-wrong-typed field must error, not fall through silently —
@@ -425,15 +442,32 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		}
 	}
 
-	if config.mountPath != "" {
-		if msgs := validation.IsDNS1123Label(config.TargetSecretName); len(msgs) > 0 {
-			return nil, errors.Errorf(
-				"external-secret mountPath: the produced Secret name %q cannot be used as a volume name (%s); set targetSecretName to a DNS-1123 label",
-				config.TargetSecretName, strings.Join(msgs, "; "))
-		}
-	}
-
 	return config, nil
+}
+
+// createsTarget reports whether the External Secrets Operator creates the
+// produced Secret: under creationPolicy Owner (the default) and Orphan it does,
+// so its name is the trait's to resolve (NameRoleExternalSecret). Under Merge
+// and None it writes into a Secret that exists apart from the trait, and the
+// name refers to that Secret: it is used as written, neither resolved nor
+// claimed.
+func (c *ExternalSecretConfig) createsTarget() bool {
+	return c.CreationPolicy != creationPolicyMerge && c.CreationPolicy != creationPolicyNone
+}
+
+// checkMountedSecretName refuses a produced Secret name that cannot be the name
+// of the volume mountPath mounts it as. Apply calls it on the name it resolved,
+// the hook's included.
+func (c *ExternalSecretConfig) checkMountedSecretName() error {
+	if c.mountPath == "" {
+		return nil
+	}
+	if msgs := validation.IsDNS1123Label(c.TargetSecretName); len(msgs) > 0 {
+		return errors.Errorf(
+			"external-secret mountPath: the produced Secret name %q cannot be used as a volume name (%s); set targetSecretName to a DNS-1123 label",
+			c.TargetSecretName, strings.Join(msgs, "; "))
+	}
+	return nil
 }
 
 type creationPolicy string
@@ -527,13 +561,16 @@ type ExternalSecretConfig struct {
 	StoreRefKind     string
 	RefreshInterval  string
 	TargetSecretName string
-	CreationPolicy   creationPolicy
-	DeletionPolicy   deletionPolicy
-	Template         *esTemplate
-	Data             []esDataEntry
-	DataFrom         []esDataFromEntry
-	envFrom          bool
-	mountPath        string
+	// targetSecretAuthored is the authored targetSecretName, "" when the author
+	// left it out and the produced Secret takes the default, SecretName.
+	targetSecretAuthored string
+	CreationPolicy       creationPolicy
+	DeletionPolicy       deletionPolicy
+	Template             *esTemplate
+	Data                 []esDataEntry
+	DataFrom             []esDataFromEntry
+	envFrom              bool
+	mountPath            string
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource

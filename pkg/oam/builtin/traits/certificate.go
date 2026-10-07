@@ -86,6 +86,12 @@ func (h *CertificateHandler) Apply(trait *oam.Trait, app *stack.Application, bun
 	if err != nil {
 		return err
 	}
+	// The Secret cert-manager writes is named by the required secretName, so no
+	// hook could be asked for it, and what refers to it (a secret volume, an
+	// ingress trait's tls entry) is authored apart: its name is claimed as written.
+	if err := trait.ClaimObjectName(secretKind, app.Namespace, config.SecretName, "secretName"); err != nil {
+		return err
+	}
 
 	subAppName, err := resolveSubApplicationName(trait, app.Name+"-certificate")
 	if err != nil {

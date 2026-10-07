@@ -1008,6 +1008,8 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `netpol-synth` | A synthesized NetworkPolicy. | `{owner}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`. | none, by design: a synthesized policy has no authored home | always |
 | `hpa` | The `scaler` trait's HorizontalPodAutoscaler. | `<component>-hpa` | `hpaName` | unless `hpaName` is set |
 | `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
+| `tls-secret` | The Secret of the TLS entry the `expose` trait manages on its Ingress (the `ingress` trait's platform-reserved `managedTLS`). cert-manager writes it; the Ingress's `tls[].secretName` is launcher's one reference to it and carries the resolved name. Not an `ingress` trait's own authored `tls[]` entries, used as written. | `<component>-tls`, shortened to 253 with `-tls` kept whole. | `secretName`, on `expose` | unless the expose trait's `secretName` is set |
+| `external-secret` | The Secret the `external-secret` trait's ExternalSecret produces. The ExternalSecret's `target.name`, and the `envFrom` and secret volume the trait adds to the workload, carry the resolved name; a reference the author wrote elsewhere does not follow it. | The trait's `secretName`, the ExternalSecret's own name. | `targetSecretName` | unless `targetSecretName` is set; not under `creationPolicy: Merge` or `None`, where the name refers to a Secret that exists apart and is used as written |
 | `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
 | `networkpolicy` | The `networkpolicy` trait's NetworkPolicy. | `<component>-allow` | `name` | unless `name` is set |
 | `ingress` | The `ingress` trait's Ingress. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the Ingress by name. | `<component>-ingress`, `<component>-ingress-<scope>` with a `scope`. | `name` | unless `name` is set |
@@ -1388,6 +1390,13 @@ name collision: CiliumNetworkPolicy.cilium.io "default/allow-dns" is named by co
 
 `property` is the property the author wrote the name in, empty for the default. On a trait
 built outside a transform nothing is claimed.
+
+Two objects are named by a required property and claimed the same way, with no role: the Secret
+the `certificate` trait has cert-manager write (`secretName`), whose referrers (a secret volume,
+an `ingress` trait's `tls[]` entry) are authored apart, and the `external-secret` trait's
+ExternalSecret (`secretName`). A required name leaves no default for a hook to replace. The
+Secret an ExternalSecret produces is the `external-secret` role's, and is claimed under kind
+`Secret` too, so a `certificate` trait's Secret of the same name is refused.
 
 ### `objectName`: the object of a kind component
 

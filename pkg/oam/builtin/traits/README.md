@@ -53,7 +53,7 @@ preflight reject every valid use of the trait.
 ### Networking
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations`; `platformAnnotations` is platform-reserved (see below) |
+| `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations`; `platformAnnotations` and `managedTLS` are platform-reserved (see below) |
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`), `name` (optional; the policy's name, default `<component>-allow`) |
@@ -150,7 +150,16 @@ not the app — chooses the implementation:
   ingress-only, hosts stay rule-derived, and it requires the cluster-issuer capability;
   a `secretName` on the gateway path or without managed TLS is a `ValidationError`).
   This lets a component carry several expose ingress traits (distinct `name`/`scope`)
-  each naming its own cert secret. Both paths
+  each naming its own cert secret.
+  **The managed TLS entry** (go-kure/launcher#787). The rule does not write the managed entry
+  into the emitted `ingress` trait's `tls[]`: it reaches that trait in the platform-reserved
+  `managedTLS` property (`hosts`, and `secretName` when authored), which the trait adds after
+  its own `tls[]` entries. Its Secret's name is resolved under the `Naming` hook role
+  `tls-secret` (`pkg/oam/README.md`): the expose `secretName` when authored, else the hook's
+  answer, else `<component>-tls` as before. A rendering of the `ingress` capability may supply
+  `managedTLS` as well: it is consumer-supplied, never author-supplied. Authored on an
+  `ingress` trait it is refused (`ErrPlatformReserved`). An `ingress` trait's own
+  `tls[].secretName` is used as written, and no hook is asked for it. Both paths
   validate user hostnames against the `allowedHostnameWildcard` capability field (empty ⇒
   no validation); a violation is a `ValidationError`.
   Both paths accept a bare `hostnames: [...]` shorthand when `rules` is absent, each
@@ -192,6 +201,11 @@ not the app — chooses the implementation:
   Remove the annotation, or set the typed property (`sslRedirect`, `forceSslRedirect`,
   `authSigninURL`) to the value meant.
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
+  The Secret cert-manager writes is named by the required `secretName` and claimed under kind
+  `Secret` with no `Naming` role: a required name leaves no default for a hook to replace, and
+  what refers to the Secret (a secret volume, an `ingress` trait's `tls[]` entry) is authored
+  apart and would not follow a rename. A second owner of that Secret in the document (another
+  `certificate`, or the Secret an `external-secret` produces) is refused with both named.
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 
   `data[]` entries derive by absence: a bare `- secretKey: FOO` defaults
@@ -200,6 +214,15 @@ not the app — chooses the implementation:
   unknown keys in an entry or its `remoteRef` are rejected (naming the supported
   fields) rather than silently ignored. See
   [External Secret Shorthand](/concepts/oam-external-secret-shorthand/).
+
+  The produced Secret's name is resolved under the `Naming` hook role `external-secret`
+  (go-kure/launcher#787, `pkg/oam/README.md`): `targetSecretName` when authored, else the
+  hook's answer, else `secretName`. It is resolved before anything reads it, so the
+  ExternalSecret's `target.name`, the `envFrom` secretRef and the secret volume below all
+  carry it. A reference to the produced Secret the author wrote elsewhere does not follow a
+  rename. Under `target.creationPolicy: Merge` or `None` ESO creates no Secret: the name
+  refers to one that exists apart, and is used as written, neither resolved nor claimed. The
+  ExternalSecret itself is named by the required `secretName` and claimed with no role.
 
   The produced Secret is otherwise emit-only — nothing references it unless the trait is told
   to. Set `envFrom: true` and/or `mountPath: <path>` to inject it into the component's workload
@@ -216,7 +239,7 @@ not the app — chooses the implementation:
   Kubernetes' `IsEnvVarName`, since it becomes an env var name in the container; `dataFrom[]`
   keys are exempt from this check because they are extract/find queries resolved by ESO at
   runtime, so the keys they ultimately produce aren't known at render time. When `mountPath` is
-  set, the produced Secret's name (`secretName`, or `targetSecretName` if overridden) must be a
+  set, the produced Secret's name (as resolved, below) must be a
   valid DNS-1123 label, because it becomes the injected volume's name; a dotted or otherwise
   non-label-safe name is rejected at render time rather than producing an invalid Volume. A
   `mountPath` already used by another decorator's volume (e.g. `configmap`) is also rejected at
