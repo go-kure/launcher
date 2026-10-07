@@ -2511,7 +2511,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     one;
   - of a `fluxcd-provider`, the enumeration of `type`, the lengths of
     `channel`, `username`, `address` and `proxy`, and the pattern of `proxy`
-    (an `http` or `https` URL); an `address` that does not parse as a URL is
+    (an `http` or `https` URL); an `address` that is no URL with a host is
     written as authored unless it holds an `@` (Policy, below);
   - of a `fluxcd-receiver`, the enumerations (`type`, a resource's `kind`),
     the lengths of a resource's `name` and `namespace`, the pattern of an
@@ -2596,8 +2596,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     one in an inline chart source's URL (`fluxcd-provider: address must not
     carry a user or password, which would be written in plain text into the
     Provider; …`): it would sit in the object in plain text. An `address`
-    that does not parse as a URL is refused only when it holds an `@`, since
-    the API allows a project ID or a namespace there. *Assumption, not read
+    that is no URL with a host is refused only when it holds an `@`, since
+    the API allows a project ID or a namespace there; `bot:pw@host` and
+    `bot@host` parse as URLs with no user, so parsing alone does not clear
+    them. *Assumption, not read
     here:* for the webhook types the address itself is the credential and
     belongs in the Secret `secretRef` names, under an `address` key; the
     linked type says only that this Secret holds "the authentication

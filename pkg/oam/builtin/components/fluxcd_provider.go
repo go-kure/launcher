@@ -83,18 +83,19 @@ const (
 
 // refuseProviderUserinfo refuses a user or a password in a Provider's `address`
 // or `proxy` (refuseFieldUserinfo). The API takes values in `address` that are
-// no URL (a project ID, a namespace): one that does not parse as a URL is
-// refused only when it holds an `@`, without which it can carry no user, and
-// the refusal does not name the value. A credential in a path or a query, as a
-// webhook URL has, is not something this can tell: the README says where such
-// an address belongs.
+// no URL (a project ID, a namespace): one that is no URL with a host is refused
+// only when it holds an `@`, without which it can carry no user, and the
+// refusal does not name the value. Parsing alone does not tell: `bot:pw@host`
+// parses as an opaque URL of scheme `bot`, and `bot@host` as a path, neither
+// with a user. A credential in a path or a query, as a webhook URL has, is not
+// something this can tell: the README says where such an address belongs.
 func refuseProviderUserinfo(spec *notificationv1beta3.ProviderSpec) error {
-	if _, err := url.Parse(spec.Address); err != nil {
-		if strings.Contains(spec.Address, "@") {
-			return errors.Errorf("%s: address holds an @ and is not a valid URL, so a user or password in it cannot be ruled out; an address that holds a credential belongs in the Secret secretRef names", fluxcdProviderType)
+	if u, err := url.Parse(spec.Address); err == nil && u.Host != "" {
+		if err := refuseFieldUserinfo(fluxcdProviderType, "address", spec.Address, providerAddressRemedy); err != nil {
+			return err
 		}
-	} else if err := refuseFieldUserinfo(fluxcdProviderType, "address", spec.Address, providerAddressRemedy); err != nil {
-		return err
+	} else if strings.Contains(spec.Address, "@") {
+		return errors.Errorf("%s: address holds an @ and is no URL with a host, so a user or password in it cannot be ruled out; an address that holds a credential belongs in the Secret secretRef names", fluxcdProviderType)
 	}
 	return refuseFieldUserinfo(fluxcdProviderType, "proxy", spec.Proxy, providerProxyRemedy)
 }
