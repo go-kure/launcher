@@ -52,6 +52,7 @@
         "github.com/fluxcd/image-reflector-controller/api",
         "github.com/fluxcd/kustomize-controller/api",
         "github.com/fluxcd/notification-controller/api",
+        "github.com/fluxcd/pkg/apis/kustomize",
         "github.com/fluxcd/pkg/apis/meta",
         "github.com/fluxcd/source-controller/api",
         "github.com/fluxcd/source-watcher/api/v2",
