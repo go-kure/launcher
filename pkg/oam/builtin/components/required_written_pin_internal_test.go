@@ -41,12 +41,13 @@ import (
 )
 
 // The third set of kind_api_sets_internal_test.go: the fields the API requires
-// and the Go type writes when nothing was decoded into them ("", 0, {}, null).
-// A kind refuses the omission of such a field only where its required list
-// names it; any other one reaches the API server written empty, and what the
-// API server or the operator then says of it is not the kind's answer. This
-// test does not hold those fields to be refused (the mechanism that would is
-// tracked by go-kure/launcher#883). It pins which ones are not: the set is
+// and the Go type writes when nothing was decoded into them ("", 0, {}, [],
+// null). A kind refuses the omission of such a field only where its required
+// list or its own validation names it; any other one reaches the API server
+// written empty, and what the API server or the operator then says of it is
+// not the kind's answer. This test does not hold those fields to be refused
+// (the mechanism that would is tracked by go-kure/launcher#883). It pins
+// which ones are not: the set is
 // checked in, one line per field, and a field that joins it (a new gap) or
 // leaves it (a new refusal) fails the test until the file is regenerated
 // with UPDATE_REQUIRED_WRITTEN_PIN=1.

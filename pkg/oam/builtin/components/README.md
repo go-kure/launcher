@@ -8935,7 +8935,8 @@ test's list is not a gap.
 A field the API requires can still reach the object unauthored. Where the Go type writes the
 field whatever was authored (`""`, `0`, `{}`, `null`), the object carries a value the author
 did not write and does not show the omission. A kind refuses the omission of such a field only
-where its required list names it; every other one is written and left to the API server and to
+where its required list or its own validation names it (`helmrelease` checks a `valuesFrom`
+entry's `kind` and `name` by hand); every other one is written and left to the API server and to
 the operator. The section above and each kind's entry list the ones that are refused. This
 section states the ones that are not, as they are at this pin.
 
@@ -8975,8 +8976,8 @@ None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway
 `listenerset`, `referencegrant`, `backendtlspolicy`, `prometheusrule`, `artifactgenerator`,
 `fluxcd-alert`, `imagepolicy`, `imageupdateautomation`, `secretstore`,
 `clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Most members are written
-`""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `null` or an
-object of such values.
+`""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
+an object of such values.
 
 **What the API server makes of them** is a value rule of each field, not read here. One case is
 shown: `imageCatalogRef` of `cnpg-cluster` and `pgbouncer.imageCatalogRef` of `cnpg-pooler`.
