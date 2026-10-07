@@ -37,6 +37,7 @@ var parityKinds = []parityKind{
 	{"service", (&ServiceHandler{}).PropertySchema, reflect.TypeFor[corev1.Service]()},
 	{"persistentvolumeclaim", (&PersistentVolumeClaimHandler{}).PropertySchema, reflect.TypeFor[corev1.PersistentVolumeClaim]()},
 	{"configmap", (&ConfigMapHandler{}).PropertySchema, reflect.TypeFor[corev1.ConfigMap]()},
+	{"secret", (&SecretHandler{}).PropertySchema, reflect.TypeFor[corev1.Secret]()},
 	{"serviceaccount", (&ServiceAccountHandler{}).PropertySchema, reflect.TypeFor[corev1.ServiceAccount]()},
 }
 

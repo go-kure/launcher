@@ -172,7 +172,7 @@ type paritySelectorSite struct {
 	read func(t *testing.T, objects []*client.Object) *metav1.LabelSelector
 }
 
-// paritySelectorSites lists every label selector the nine hand-parsed kinds
+// paritySelectorSites lists every label selector the ten hand-parsed kinds
 // parse: 47.
 //
 //   - deployment, statefulset, daemonset, job and cronjob read the raw
@@ -186,7 +186,8 @@ type paritySelectorSite struct {
 //     claim through the same parser (ParseClaimProperties).
 //
 // service's `selector` is a label map, not a LabelSelector, and the workload
-// kinds' own `selector` is refused; configmap and serviceaccount have none.
+// kinds' own `selector` is refused; configmap, secret and serviceaccount have
+// none.
 func paritySelectorSites() []paritySelectorSite {
 	const required, preferred = "requiredDuringSchedulingIgnoredDuringExecution", "preferredDuringSchedulingIgnoredDuringExecution"
 	var sites []paritySelectorSite
