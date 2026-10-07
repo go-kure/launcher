@@ -29,7 +29,9 @@ func TestWebserviceRule_ComponentType(t *testing.T) {
 // updates the capture with it: go-kure/launcher#790 added the shared container
 // fields (schemaContainerFields) to the main container, to an init container
 // and to a sidecar, securityContext.windowsOptions to every container, and an
-// init container's restartPolicy and restartPolicyRules; go-kure/launcher#787 added deploymentObjectName,
+// init container's restartPolicy and restartPolicyRules, and later the
+// exclusive groups of a volume, an envFrom entry and a resourceClaims entry;
+// go-kure/launcher#787 added deploymentObjectName,
 // serviceObjectName and serviceAccountObjectName (schemaRoleObjectNames).
 func TestWebserviceRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/webservice-property-schema.json")

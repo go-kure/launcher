@@ -1,11 +1,13 @@
 package components
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"maps"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -179,6 +181,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 						"name":   str("Git reference name to check out, e.g. refs/heads/main."),
 						"commit": str("Commit SHA to check out."),
 					},
+					Exclusive: []oam.ExclusiveGroup{{Keys: []string{"branch", "tag", "semver", "name", "commit"}, Required: true}},
 				},
 				"endpoint":   str("Object storage address of an inline Bucket source (its spec.endpoint). Required with an inline kind Bucket, and only valid there."),
 				"bucketName": str("Bucket name of an inline Bucket source. Required with an inline kind Bucket, and only valid there."),
@@ -259,11 +262,70 @@ type helmGitRef struct {
 	SemVer string `json:"semver,omitempty"`
 	Name   string `json:"name,omitempty"`
 	Commit string `json:"commit,omitempty"`
+
+	// authored lists the fields the properties wrote, an empty string
+	// included and a null not, in fields order (UnmarshalJSON). The values
+	// cannot tell an authored "" from an absent field, and an empty field
+	// beside a set one is refused as two fields, as the published schema
+	// refuses it.
+	authored []string
 }
 
 // fields lists r's keys, in Flux's GitRepositoryRef order, with their values.
 func (r *helmGitRef) fields() [][2]string {
 	return [][2]string{{"branch", r.Branch}, {"tag", r.Tag}, {"semver", r.SemVer}, {"name", r.Name}, {"commit", r.Commit}}
+}
+
+// UnmarshalJSON decodes data into r as builtin.DecodeStrictJSON decodes the
+// properties (unknown fields refused, keys matched ignoring case), and adds to
+// r.authored each field a key of data writes and does not null. It reads the
+// bytes the decode reads, so it sees what the decode sees whatever value
+// produced them; and it runs once for each ref object decoded into r (two
+// spellings of the key, or one key given twice), so r is authored by all of
+// them, as its values are.
+func (r *helmGitRef) UnmarshalJSON(data []byte) error {
+	type plain helmGitRef
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	dec.UseNumber()
+	if err := dec.Decode((*plain)(r)); err != nil {
+		// A ref that is no object names helmGitRef, as it did before this
+		// method, not the local type.
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &te) && te.Type == reflect.TypeFor[plain]() {
+			te.Type = reflect.TypeFor[helmGitRef]()
+		}
+		return err
+	}
+	// Every key is read, a repeated one included, so an occurrence that a
+	// later null hides from the values still counts.
+	dec = json.NewDecoder(bytes.NewReader(data))
+	if _, err := dec.Token(); err != nil { // '{': data decoded as an object above
+		return err
+	}
+	var written []string
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return err
+		}
+		if key, _ := tok.(string); !bytes.Equal(v, []byte("null")) {
+			written = append(written, key)
+		}
+	}
+	var authored []string
+	for _, f := range r.fields() {
+		wrote := slices.ContainsFunc(written, func(k string) bool { return strings.EqualFold(k, f[0]) })
+		if wrote || slices.Contains(r.authored, f[0]) {
+			authored = append(authored, f[0])
+		}
+	}
+	r.authored = authored
+	return nil
 }
 
 // inlineBucket reports whether s is read as an inline Bucket: kind Bucket that
@@ -796,6 +858,11 @@ func checkHelmGitSource(src *helmSource) error {
 			if f[1] != "" {
 				set = append(set, f[0])
 			}
+		}
+		// An empty field beside a set one counts as a second field
+		// (helmGitRef.authored); an empty field alone sets none.
+		if len(src.Ref.authored) > 1 {
+			set = src.Ref.authored
 		}
 	}
 	switch len(set) {

@@ -87,9 +87,9 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 // when `type` is absent. An authored document must end as a build error, not as
 // a crash, for that decoder and for the next one a dependency bump brings.
 //
-// Only the decode call is covered. No launcher type decoded through
-// DecodeStrictJSON has an UnmarshalJSON of its own, so the panics this catches
-// are encoding/json's and an external type's.
+// Only the decode call is covered, and with it every UnmarshalJSON the decode
+// reaches: encoding/json's, an external type's, and a launcher type's own (the
+// helm rule's source.ref decodes itself).
 func decodeJSONRecovering[T any](dec *json.Decoder, out *T) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

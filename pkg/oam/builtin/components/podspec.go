@@ -976,7 +976,9 @@ func parsePodResourceClaim(m map[string]any, label string) (corev1.PodResourceCl
 	if err != nil {
 		return corev1.PodResourceClaim{}, err
 	}
-	if hasClaim == hasTemplate {
+	// An empty name beside the other counts as authored, as the entry's
+	// exclusive group in the published schema counts it.
+	if hasClaim == hasTemplate || bothAuthored(m, "resourceClaimName", "resourceClaimTemplateName") {
 		return corev1.PodResourceClaim{}, errors.Errorf("%s: exactly one of resourceClaimName or resourceClaimTemplateName must be set", label)
 	}
 	if hasClaim {
