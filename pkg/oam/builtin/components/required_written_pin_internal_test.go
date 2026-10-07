@@ -37,6 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
@@ -277,6 +278,7 @@ func goTypeProps(typ reflect.Type) apiextensionsv1.JSONSchemaProps {
 // kind whose API is a CRD a linked module ships, and the kinds of the APIs
 // whose markers a reader of this package reads (the Prometheus operator's, the
 // Flux controllers' and the External Secrets Operator's).
+// TestRequiredWrittenKinds_CoverEveryCRDKind holds it to the kind inventory.
 var requiredWrittenKinds = []pinKind{
 	{component: "issuer", handler: &IssuerHandler{}, typ: reflect.TypeFor[certv1.IssuerSpec](),
 		schema: pinCRDSchema(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1"),
@@ -450,6 +452,73 @@ var requiredWrittenKinds = []pinKind{
 			"externalSecretSpec": map[string]any{"secretStoreRef": map[string]any{"name": "vault", "kind": "ClusterSecretStore"}, "data": []any{externalSecretsPinData()}},
 			"namespaces":         []any{"web"},
 		}},
+}
+
+// requiredWrittenUnmeasured are the kind components whose API the API server
+// does not serve itself and that requiredWrittenKinds leaves out, each with the
+// reason. TestRequiredWrittenKinds_CoverEveryCRDKind holds the two lists to
+// the kind inventory.
+var requiredWrittenUnmeasured = map[string]string{
+	"metallb-bfdprofile": "its CRD requires no field",
+	"metallb-community":  "its CRD requires no field",
+}
+
+// TestRequiredWrittenKinds_CoverEveryCRDKind holds requiredWrittenKinds to the
+// kind components it is meant to cover. Every `kind` row of README.md's kind
+// inventory whose API group client-go's scheme does not register, so a CRD
+// serves it, is measured or listed in requiredWrittenUnmeasured with its
+// reason: a new kind component of such an API fails here until it is one or
+// the other. A component on both lists fails, and so does one on either list
+// that is no such row.
+func TestRequiredWrittenKinds_CoverEveryCRDKind(t *testing.T) {
+	crdKinds := map[string]int{}
+	for _, row := range readKindInventory(t) {
+		if row.status != inventoryKind {
+			continue
+		}
+		fields := strings.Fields(row.kind)
+		if len(fields) == 0 {
+			t.Fatalf("README.md:%d: a kind row with an empty Kind cell", row.line)
+		}
+		// "<group>/<version>", or "<version>" for the core group.
+		group, _, found := strings.Cut(fields[0], "/")
+		if !found {
+			group = ""
+		}
+		if clientgoscheme.Scheme.IsGroupRegistered(group) {
+			continue
+		}
+		crdKinds[strings.Trim(row.typ, "`")] = row.line
+	}
+	// Vacuity guard: a scheme that registered every group, or rows read
+	// without their Kind cell, would leave nothing to check.
+	if len(crdKinds) < len(requiredWrittenKinds) {
+		t.Fatalf("found %d kind components of a CRD-backed API, fewer than the %d requiredWrittenKinds measures; the walk is broken", len(crdKinds), len(requiredWrittenKinds))
+	}
+
+	measured := map[string]bool{}
+	for _, k := range requiredWrittenKinds {
+		measured[k.component] = true
+		if _, ok := crdKinds[k.component]; !ok {
+			t.Errorf("requiredWrittenKinds measures %s, which is no kind row of a CRD-backed API in README.md's kind inventory", k.component)
+		}
+	}
+	for _, component := range slices.Sorted(maps.Keys(crdKinds)) {
+		reason, excused := requiredWrittenUnmeasured[component]
+		switch {
+		case measured[component] && excused:
+			t.Errorf("%s is measured and also listed in requiredWrittenUnmeasured: drop it from one", component)
+		case !measured[component] && !excused:
+			t.Errorf("README.md:%d: %s is a kind component of a CRD-backed API that requiredWrittenKinds does not measure: add it there, or to requiredWrittenUnmeasured with the reason", crdKinds[component], component)
+		case excused && strings.TrimSpace(reason) == "":
+			t.Errorf("%s is listed in requiredWrittenUnmeasured without a reason", component)
+		}
+	}
+	for _, component := range slices.Sorted(maps.Keys(requiredWrittenUnmeasured)) {
+		if _, ok := crdKinds[component]; !ok {
+			t.Errorf("requiredWrittenUnmeasured lists %s, which is no kind row of a CRD-backed API in README.md's kind inventory", component)
+		}
+	}
 }
 
 func ciliumPinRule() map[string]any {
