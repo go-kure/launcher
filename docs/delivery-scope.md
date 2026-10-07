@@ -801,15 +801,16 @@ its text:
     one, a Cluster's `spec.inheritedMetadata`, a Pooler's pod template,
     `spec.podMetadata` of the Prometheus operator kinds, the `moverPodLabels` of a VolSync
     mover, the pod template of a cert-manager issuer's HTTP01 solvers, a Gateway's
-    `spec.infrastructure`, `spec.commonMetadata` of a Flux Kustomization, HelmRelease or
-    ArtifactGenerator and a CronJob's job template (all but the first three since
-    go-kure/launcher#790, with the component label's check, which also writes the label on
-    the job template); and metadata an operator copies onto objects it creates that
-    are no pods (a solver's Ingress template and HTTPRoute labels, the Secret templates of a
-    Certificate and the external-secrets kinds, a ClusterExternalSecret's
-    `externalSecretMetadata`, the Service, ServiceAccount and VolumeSnapshot templates of a
-    Cluster and a Pooler, a HelmRelease's `spec.chart.metadata`, a VolSync destination's
-    `serviceAnnotations`), for the reserved keys alone (go-kure/launcher#790: nothing
+    `spec.infrastructure`, `spec.commonMetadata` of a Flux Kustomization or HelmRelease and a
+    CronJob's job template (all but the first three since go-kure/launcher#790, with the
+    component label's check, which also writes the label on the job template); and metadata
+    an operator copies onto objects it creates that are no pods (a solver's Ingress template
+    and HTTPRoute labels, the Secret templates of a Certificate and the external-secrets
+    kinds, a ClusterExternalSecret's `externalSecretMetadata`, the Service, ServiceAccount
+    and VolumeSnapshot templates of a Cluster and a Pooler, a HelmRelease's
+    `spec.chart.metadata`, an ArtifactGenerator's `spec.commonMetadata`, which goes onto the
+    ExternalArtifacts it generates, a VolSync destination's `serviceAnnotations`), for the
+    reserved keys alone (go-kure/launcher#790: nothing
     selects those objects by the component label). Exempt: the `app` label and the component
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.

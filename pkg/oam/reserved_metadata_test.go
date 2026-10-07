@@ -466,6 +466,8 @@ func noPodHolderRows() []noPodHolderRow {
 		{"a ClusterExternalSecret's secret template", "external-secrets.io/v1", "ClusterExternalSecret", ReservedKeyInSecretTemplate,
 			[]string{"spec", "externalSecretSpec", "target", "template", "metadata"}, "metadata"},
 		{"a HelmRelease's chart template", "helm.toolkit.fluxcd.io/v2", "HelmRelease", ReservedKeyInChartTemplate, []string{"spec", "chart", "metadata"}, "metadata"},
+		{"an ArtifactGenerator's common metadata", "source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator", ReservedKeyInCommonMetadata,
+			[]string{"spec", "commonMetadata"}, "metadata"},
 		{"a ReplicationDestination's rsync service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
 			[]string{"spec", "rsync", "serviceAnnotations"}, "annotations"},
 		{"a ReplicationDestination's rsyncTLS service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
