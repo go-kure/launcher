@@ -764,14 +764,36 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})
-	t.Run("unset imageName is not checked", func(t *testing.T) {
-		// The operator then takes a catalog's image or its own default: neither
-		// is an image the document names.
-		c := newCnpgCluster(t, map[string]any{})
+	// Without imageName and imageCatalogRef the operator runs its own default
+	// image, which no allowlist can hold: refused under a list.
+	t.Run("unset imageName without imageCatalogRef is refused under a list", func(t *testing.T) {
+		err := newCnpgCluster(t, map[string]any{}).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+		want := "imageName: unset, so the CloudNativePG operator chooses the image the pods run, which the allowed registries [ghcr.io] cannot hold; name an image from one of them"
+		if err == nil || err.Error() != want {
+			t.Fatalf("err = %v, want %q", err, want)
+		}
+		var refusal *oam.PolicyRefusal
+		if !errors.As(err, &refusal) || refusal.Class != oam.RefusalRegistry {
+			t.Errorf("err = %v, want a refusal of class %q", err, oam.RefusalRegistry)
+		}
+	})
+	// A catalog's images are the catalog's to hold: the build cannot read it.
+	t.Run("unset imageName under imageCatalogRef is not checked", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"imageCatalogRef": cnpgImageCatalogRef()})
 		if err := c.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"registry.invalid"}}); err != nil {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})
+	t.Run("unset imageName with no list is not checked", func(t *testing.T) {
+		if err := newCnpgCluster(t, map[string]any{}).ApplyPolicy(&stubPolicy{}); err != nil {
+			t.Errorf("ApplyPolicy: %v", err)
+		}
+	})
+}
+
+// cnpgImageCatalogRef is a cnpg-cluster imageCatalogRef the CRD admits.
+func cnpgImageCatalogRef() map[string]any {
+	return map[string]any{"apiGroup": "postgresql.cnpg.io", "kind": "ClusterImageCatalog", "name": "postgresql", "major": 16}
 }
 
 // cnpgExtensions is a cnpg-cluster's properties naming one extension per
@@ -807,9 +829,16 @@ func TestCnpgClusterConfig_ApplyPolicy_ExtensionImageRegistry(t *testing.T) {
 		{"a digest is not part of the host", []string{"other.example/team/pgvector@sha256:" + strings.Repeat("a", 64)},
 			`postgresql.extensions[0].image.reference: image "other.example/team/pgvector@sha256:` + strings.Repeat("a", 64) + `" is not from an allowed registry [ghcr.io]`},
 	}
+	// The Cluster's own image comes from a catalog in every case, so that only
+	// the extensions are held to the list.
+	withCatalog := func(references ...string) map[string]any {
+		props := cnpgExtensions(references...)
+		props["imageCatalogRef"] = cnpgImageCatalogRef()
+		return props
+	}
 	for _, tc := range refused {
 		t.Run("refused: "+tc.name, func(t *testing.T) {
-			err := newCnpgCluster(t, cnpgExtensions(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: ghcr})
+			err := newCnpgCluster(t, withCatalog(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: ghcr})
 			if err == nil || err.Error() != tc.want {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
@@ -836,7 +865,7 @@ func TestCnpgClusterConfig_ApplyPolicy_ExtensionImageRegistry(t *testing.T) {
 	}
 	for _, tc := range allowed {
 		t.Run("allowed: "+tc.name, func(t *testing.T) {
-			if err := newCnpgCluster(t, cnpgExtensions(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: tc.registries}); err != nil {
+			if err := newCnpgCluster(t, withCatalog(tc.references...)).ApplyPolicy(&stubPolicy{allowedRegistries: tc.registries}); err != nil {
 				t.Errorf("ApplyPolicy: %v", err)
 			}
 		})

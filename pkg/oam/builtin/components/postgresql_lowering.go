@@ -690,6 +690,7 @@ func (c *PostgresqlConfig) poolerSpec(cluster string) cnpgv1.PoolerSpec {
 	if len(c.PoolerParameters) > 0 {
 		pgBouncer.Parameters = c.PoolerParameters
 	}
+	pgBouncer.Image = c.PoolerImage
 
 	// Anything other than "ro" is written as rw, the value launcher has always
 	// emitted for an unset type.

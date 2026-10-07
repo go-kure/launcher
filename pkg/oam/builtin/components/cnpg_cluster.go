@@ -130,7 +130,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"description":               str("Description of this PostgreSQL cluster."),
 		"inheritedMetadata":         obj("Labels and annotations inherited by every object related to the Cluster."),
-		"imageName":                 str("Container image for the instances, by tag or digest. When omitted, the operator takes the image from imageCatalogRef or, without one, runs its own default. A policy registry allowlist applies to an authored image."),
+		"imageName":                 str("Container image for the instances, by tag or digest. When omitted, the operator takes the image from imageCatalogRef or, without one, chooses its own. A policy registry allowlist applies to an authored image, and refuses a Cluster that sets neither."),
 		"imageCatalogRef":           obj("Reference to an ImageCatalog or ClusterImageCatalog entry selecting the image by PostgreSQL major version."),
 		"imagePullPolicy":           str("Image pull policy: Always, Never or IfNotPresent."),
 		"schedulerName":             str("Kubernetes scheduler that places the instance pods."),
@@ -713,12 +713,19 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if err := c.enforceMaxStorage(p.MaxStorageSize()); err != nil {
 		return err
 	}
-	// Only an authored image is checked: without imageName the operator takes the
-	// image from the catalog imageCatalogRef names, or runs its own default image
-	// when there is none. Neither is an image the document names.
-	if c.Spec.ImageName != "" {
+	// Without imageName the operator takes the image from the catalog
+	// imageCatalogRef names, whose images are the catalog's to hold (the build
+	// cannot read it), or, without one, chooses an image of its own: under a
+	// list that is refused, since no list can hold it. The operator's own image
+	// (the bootstrap init container) is not covered: no field names it.
+	switch {
+	case c.Spec.ImageName != "":
 		if err := enforceAllowedRegistries(c.Spec.ImageName, p.AllowedRegistries()); err != nil {
 			return errors.Wrap(err, "imageName")
+		}
+	case c.Spec.ImageCatalogRef == nil:
+		if err := refuseCnpgOperatorImage("imageName", p.AllowedRegistries()); err != nil {
+			return err
 		}
 	}
 	// An extension's image is mounted into the instance pods as an image volume,

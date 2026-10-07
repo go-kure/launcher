@@ -270,7 +270,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"resources":         schemaResources(false),
 		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
-		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters)."),
+		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses."),
 		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, a DNS-1035 label used as written (default: the component name followed by -pooler). Only with pooler.enabled: true."},
 		"bootstrap":         openObj("Cluster bootstrap source (recovery or pg_basebackup)."),
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
@@ -515,12 +515,24 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, err
 			}
 		}
+		// The image is written to the Pooler's pgbouncer.image, and held to
+		// ValidateImageRef here, where the property that names it is known. An
+		// empty one names no image, as an empty imageName does: the operator
+		// then chooses, which a registry allowlist refuses (cnpg-pooler).
+		if config.PoolerImage, _, err = parseRawStringField(pooler, "image", "pooler.image"); err != nil {
+			return nil, err
+		}
+		if config.PoolerImage != "" {
+			if err := ValidateImageRef(config.PoolerImage); err != nil {
+				return nil, errors.Wrap(err, "pooler.image")
+			}
+		}
 		// The Pooler is emitted only when enabled is true, so a setting
 		// beside an enabled nobody wrote would be dropped. An authored false
 		// is the author's own switch: the settings are kept in the document
 		// for when it is switched on.
 		if enabled == nil {
-			for _, key := range []string{"instances", "type", "poolMode"} {
+			for _, key := range []string{"instances", "type", "poolMode", "image"} {
 				if _, set := authoredValue(pooler, key); set {
 					return nil, postgresqlPoolerNotEnabled(key)
 				}
@@ -1072,6 +1084,9 @@ type PostgresqlConfig struct {
 	PoolerType       string
 	PoolerPoolMode   PoolMode
 	PoolerParameters map[string]string
+	// PoolerImage is the PgBouncer image, written to the Pooler's
+	// pgbouncer.image; empty for the operator's choice.
+	PoolerImage string
 
 	BootstrapRecoverySource     string
 	BootstrapPgBasebackupSource string
