@@ -236,7 +236,8 @@ func TestBundleSettings_OrderedApplicationTakesTheGroupBundle(t *testing.T) {
 
 // fluxSettings are the five settings besides patches that a per-layout
 // Kustomization takes from its bundle since go-kure/kure#1021. Substitute is
-// spec.postBuild.substitute, nil without a postBuild.
+// spec.postBuild.substitute: nil without a postBuild, and not nil with one, so
+// a postBuild without a substitution is told from none.
 type fluxSettings struct {
 	Interval   string
 	Prune      bool
@@ -256,7 +257,10 @@ func treeFluxSettings(root *layout.ManifestLayout) map[string]fluxSettings {
 			}
 			s := fluxSettings{Interval: kz.Spec.Interval.Duration.String(), Prune: kz.Spec.Prune, Force: kz.Spec.Force, Suspend: kz.Spec.Suspend}
 			if kz.Spec.PostBuild != nil {
-				s.Substitute = kz.Spec.PostBuild.Substitute
+				s.Substitute = maps.Clone(kz.Spec.PostBuild.Substitute)
+				if s.Substitute == nil {
+					s.Substitute = map[string]string{}
+				}
 			}
 			out[kz.Name] = s
 		}
