@@ -12,13 +12,13 @@ import (
 )
 
 // omitemptyList says the field is a list, not a []byte (which encodes as a
-// string), that the type omits when empty.
+// string), that the type omits when empty. Only omitempty does: omitzero
+// omits a nil slice, and a decoded [] is an empty non-nil one, which it keeps.
 func (f kindField) omitemptyList() bool {
 	if f.field.Type.Kind() != reflect.Slice || f.field.Type.Elem().Kind() == reflect.Uint8 {
 		return false
 	}
-	opts := f.jsonOptions()
-	return slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+	return slices.Contains(f.jsonOptions(), "omitempty")
 }
 
 // listDefaultLiteral is def, a list default as a marker ({a,b}) or a CRD
