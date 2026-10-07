@@ -34,9 +34,10 @@ import (
 // appLabelKey and the component label key, which a consumer may well configure
 // under a prefix it reserves. The component label's value is held to the
 // component's by the wrapper's other check (checkComponentLabel), which reads
-// the same places (metadataHolders). An annotation launcher wrote from the platform's
-// own input is exempt as a key and value pair, which the config states
-// (platformAnnotated), also from under a wrapper (platformAnnotationsUnder).
+// the same places (metadataHolders) but those that reach no pods. An annotation
+// launcher wrote from the platform's own input is exempt as a key and value
+// pair, which the config states (platformAnnotated), also from under a wrapper
+// (platformAnnotationsUnder).
 
 // appLabelKey is the label launcher's own configs put on what they generate,
 // valued ComponentLabelValue(component).
@@ -137,13 +138,19 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //     spec.inheritedMetadata, a Pooler's pod template, spec.podMetadata of the
 //     Prometheus operator's pod-running kinds, the moverPodLabels of a VolSync
 //     mover, the pod template of a cert-manager issuer's HTTP01 solvers, a
-//     Gateway's spec.infrastructure.
+//     Gateway's spec.infrastructure;
+//   - what an operator copies onto objects it creates that are no pods
+//     (operatorMetadataKinds, noPods): a solver's Ingress template and HTTPRoute
+//     labels, a Certificate's and an ExternalSecret's Secret template, the
+//     Service, ServiceAccount and VolumeSnapshot templates of a CloudNativePG
+//     Cluster and a Pooler, the metadata of a ClusterExternalSecret's
+//     ExternalSecrets, a HelmRelease's chart template, the Service annotations
+//     of a VolSync mover.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
 // read: not the metadata a Flux object hands on to what it applies
-// (spec.commonMetadata), not a volume claim template's or a job template's, not
-// metadata an operator copies onto objects it creates that are no pods, and not
-// what a chart that Flux installs renders in the cluster.
+// (spec.commonMetadata), not a volume claim template's or a job template's, and
+// not what a chart that Flux installs renders in the cluster.
 func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
@@ -238,7 +245,7 @@ func (o *ownedConfig) checkReservedHolder(held heldMetadata, refusal ReservedMet
 			continue
 		}
 		if entry, ok := o.reserved.entryFor(key); ok {
-			refusal.Annotation, refusal.Path, refusal.Key, refusal.Entry = true, held.path+".annotations", key, entry
+			refusal.Annotation, refusal.Path, refusal.Key, refusal.Entry = true, held.annotations, key, entry
 			return &refusal
 		}
 	}
@@ -323,6 +330,50 @@ const (
 	// labels and annotations the controller applies to what it creates for the
 	// Gateway, which may be pods.
 	ReservedKeyInInfrastructure ReservedKeyHolder = "spec.infrastructure"
+
+	// The holders below reach objects an operator creates that are no pods.
+
+	// ReservedKeyInSolverIngressTemplate is ingressTemplate.metadata of an
+	// HTTP01 solver by Ingress of a cert-manager Issuer or ClusterIssuer
+	// (spec.acme.solvers[].http01.ingress.ingressTemplate.metadata), which
+	// cert-manager puts on the Ingress that answers the challenge.
+	ReservedKeyInSolverIngressTemplate ReservedKeyHolder = "solver ingress template"
+	// ReservedKeyInSolverHTTPRoute is the labels of an HTTP01 solver on a
+	// Gateway of a cert-manager Issuer or ClusterIssuer
+	// (spec.acme.solvers[].http01.gatewayHTTPRoute.labels), which cert-manager
+	// puts on the HTTPRoute that answers the challenge. It holds labels only.
+	ReservedKeyInSolverHTTPRoute ReservedKeyHolder = "solver HTTPRoute"
+	// ReservedKeyInSecretTemplate is the template of the Secret an operator
+	// creates: a cert-manager Certificate's spec.secretTemplate, an
+	// ExternalSecret's spec.target.template.metadata, and a
+	// ClusterExternalSecret's spec.externalSecretSpec.target.template.metadata.
+	ReservedKeyInSecretTemplate ReservedKeyHolder = "secret template"
+	// ReservedKeyInServiceTemplate is serviceTemplate.metadata of a
+	// CloudNativePG Cluster's additional Service
+	// (spec.managed.services.additional[].serviceTemplate.metadata) or of a
+	// Pooler (spec.serviceTemplate.metadata), which the operator puts on the
+	// Service it creates.
+	ReservedKeyInServiceTemplate ReservedKeyHolder = "service template"
+	// ReservedKeyInServiceAccountTemplate is
+	// spec.serviceAccountTemplate.metadata of a CloudNativePG Cluster, which
+	// the operator puts on the cluster's ServiceAccount.
+	ReservedKeyInServiceAccountTemplate ReservedKeyHolder = "service account template"
+	// ReservedKeyInVolumeSnapshot is spec.backup.volumeSnapshot of a
+	// CloudNativePG Cluster, whose labels and annotations the operator puts on
+	// the VolumeSnapshots it takes.
+	ReservedKeyInVolumeSnapshot ReservedKeyHolder = "volume snapshot"
+	// ReservedKeyInExternalSecretMetadata is spec.externalSecretMetadata of a
+	// ClusterExternalSecret, which the operator puts on the ExternalSecrets it
+	// creates.
+	ReservedKeyInExternalSecretMetadata ReservedKeyHolder = "spec.externalSecretMetadata"
+	// ReservedKeyInChartTemplate is spec.chart.metadata of a Flux HelmRelease,
+	// which the controller puts on the HelmChart it creates for the release.
+	ReservedKeyInChartTemplate ReservedKeyHolder = "chart template"
+	// ReservedKeyInMoverService is serviceAnnotations of the rsync or rsyncTLS
+	// mover of a VolSync ReplicationDestination (spec.rsync.serviceAnnotations
+	// and spec.rsyncTLS.serviceAnnotations), which the operator puts on the
+	// Service of the mover. It holds annotations only.
+	ReservedKeyInMoverService ReservedKeyHolder = "mover service"
 )
 
 // prefix is the holder as a text puts it before what it holds: "" for the

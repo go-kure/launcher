@@ -802,14 +802,19 @@ its text:
     `spec.podMetadata` of the Prometheus operator kinds, the `moverPodLabels` of a VolSync
     mover, the pod template of a cert-manager issuer's HTTP01 solvers and a Gateway's
     `spec.infrastructure` (all but the first three since go-kure/launcher#790, with the
-    component label's check). Exempt: the `app` label and the component
+    component label's check); and metadata an operator copies onto objects it creates that
+    are no pods (a solver's Ingress template and HTTPRoute labels, the Secret templates of a
+    Certificate and the external-secrets kinds, a ClusterExternalSecret's
+    `externalSecretMetadata`, the Service, ServiceAccount and VolumeSnapshot templates of a
+    Cluster and a Pooler, a HelmRelease's `spec.chart.metadata`, a VolSync destination's
+    `serviceAnnotations`), for the reserved keys alone (go-kure/launcher#790: nothing
+    selects those objects by the component label). Exempt: the `app` label and the component
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
-    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own), metadata an
-    operator copies onto objects it creates that are no pods (a test derives these fields
-    from the kinds' API types and lists each: `TestLabelReach_EveryFieldIsHeldOrListed`),
-    and what a controller adds.
+    of its own (`commonMetadata`, `volumeClaimTemplates`, a job template's own; a test
+    derives the fields that hand metadata on from the kinds' API types and holds or lists
+    each: `TestLabelReach_EveryFieldIsHeldOrListed`), and what a controller adds.
   - Not read either: what a config that a consumer wraps around an application's config
     after the transform adds. On a layout a config augments, the check reads the objects the
     config's `AugmentLayout` added and leaves what was on the layout before, so a consumer may
