@@ -432,6 +432,7 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | `policyFreeKinds` and the two maps of its tests, for a kind built on `policyFreeKind` | the tests of this package | `TestKindLists_InOrder` |
 | `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
 | "Component types" | this file | `TestKindLists_InOrder` |
+| "Component type allowlist" | `pkg/oam/README.md` | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a type of `validComponentTypes` with no row and on a row of no type of it |
 | Table 4.2 | `docs/oam/design-kurel-package.md` | `TestKindLists_InOrder` |
 | The table of kind components under "`kurel build`" | `pkg/cmd/kurel/README.md` | `TestKindLists_InOrder` |
 | "Per-type highlights" | this file | no test, and not yet in order: a new entry goes before the first entry whose head names a type that sorts after its own |
@@ -444,8 +445,11 @@ What belongs to one kind goes in that kind's own files, not at the end of a shar
 handler, its `ContractMetadata` and `ComponentObject` methods (not `contract.go`,
 `object_name.go`), and its tests.
 
-No text names every kind. A sentence that needs the set points at the "Kind inventory", which
-its tests hold complete.
+No sentence names every kind. A sentence that needs the set points at the "Kind inventory",
+which its tests hold complete. One table names every component type, one row each: the
+"Component type allowlist" of `pkg/oam/README.md`. A change that adds a type to
+`validComponentTypes` adds its row there, so it changes the README that CI's documentation
+check requires of a change to `pkg/oam`.
 
 Six places still conflict, and there the change that lands second is rebased on the first
 before it is published:

@@ -50,9 +50,18 @@ var kindTables = []struct {
 	file, heading string
 }{
 	{"README.md", "## `kurel build`"},
+	{allowlistTable.file, allowlistTable.heading},
 	{"../../oam/builtin/components/README.md", "## Component types"},
 	{"../../../docs/oam/design-kurel-package.md", "### 4.2 Supported component types (Phase 1)"},
 }
+
+// allowlistTable is the table of pkg/oam/README.md that names every type of
+// pkg/oam's validComponentTypes, one row each. TestKindLists_Complete holds
+// its rows to that list, which holds more than the registered types: it also
+// names the types a lowering rule lowers away (webservice, helm, postgresql).
+var allowlistTable = struct {
+	file, heading, list string
+}{"../../oam/README.md", "### Component type allowlist", "../../oam/validate.go"}
 
 // The reasons more than one component type gives for having no row.
 const (
@@ -179,6 +188,32 @@ func TestKindLists_Complete(t *testing.T) {
 			t.Errorf("kindListExceptions names %s, which is no list of kindLists", name)
 		}
 	}
+
+	t.Run("allowlist table", func(t *testing.T) {
+		allowed := goListKeys(t, allowlistTable.list, "validComponentTypes")
+		rows := markdownTableKeys(t, allowlistTable.file, allowlistTable.heading)
+		for _, defect := range allowlistTableGaps(allowed, rows) {
+			t.Errorf("%s: in the table under %q, %s", allowlistTable.file, allowlistTable.heading, defect)
+		}
+	})
+}
+
+// allowlistTableGaps names every type of the allowlist with no row and every
+// row that names no type of it. A row written twice is left to
+// kindListMisplaced.
+func allowlistTableGaps(allowed, rows []string) []string {
+	var defects []string
+	for _, typ := range allowed {
+		if !slices.Contains(rows, typ) {
+			defects = append(defects, fmt.Sprintf("%q is in validComponentTypes and has no row: add its row at its position", typ))
+		}
+	}
+	for _, row := range rows {
+		if !slices.Contains(allowed, row) {
+			defects = append(defects, fmt.Sprintf("the row %q names no type of validComponentTypes", row))
+		}
+	}
+	return defects
 }
 
 // TestKindListChecks_NameEachDefect shows the two checks on lists that are
@@ -224,6 +259,22 @@ func TestKindListChecks_NameEachDefect(t *testing.T) {
 	for _, tt := range gaps {
 		t.Run("complete/"+tt.name, func(t *testing.T) {
 			expectDefects(t, kindListGaps(registered, tt.rows, tt.exceptions), tt.want)
+		})
+	}
+
+	allowed := []string{"alpha", "beta"}
+	table := []struct {
+		name string
+		rows []string
+		want []string
+	}{
+		{"complete", []string{"alpha", "beta"}, nil},
+		{"missing row", []string{"alpha"}, []string{`"beta" is in validComponentTypes and has no row`}},
+		{"row of no type", []string{"alpha", "beta", "delta"}, []string{`the row "delta" names no type`}},
+	}
+	for _, tt := range table {
+		t.Run("allowlist/"+tt.name, func(t *testing.T) {
+			expectDefects(t, allowlistTableGaps(allowed, tt.rows), tt.want)
 		})
 	}
 }
