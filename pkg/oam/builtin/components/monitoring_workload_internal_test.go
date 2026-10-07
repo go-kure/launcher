@@ -143,7 +143,12 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 				class:  oam.RefusalPrivileged,
 			},
 			"initContainers": {
-				props:  map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}}},
+				// The spec's own image is authored from the allowed registry, so
+				// that the unset-image refusal does not answer for this field.
+				props: map[string]any{
+					"image":          "registry.example/prometheus/alertmanager:v0.28.1",
+					"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}},
+				},
 				policy: &workloadPolicy{allowed: []string{"registry.example"}},
 				class:  oam.RefusalRegistry,
 			},
@@ -651,6 +656,20 @@ func TestMonitoringWorkloadKinds_PodFieldsHeldOrListed(t *testing.T) {
 				var refusal *oam.PolicyRefusal
 				if !errors.As(err, &refusal) || refusal.Class != held.class {
 					t.Errorf("%s: err = %v, want a refusal of class %q", path, err, held.class)
+					continue
+				}
+				// The refusal is the field's: without it, the same properties
+				// are not refused the same way.
+				refused := err.Error()
+				without := maps.Clone(held.props)
+				delete(without, path)
+				config, err = kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: without}, "data")
+				if err != nil {
+					t.Errorf("%s: the properties without it do not build: %v", path, err)
+					continue
+				}
+				if other := config.(oam.Enforceable).ApplyPolicy(held.policy); other != nil && other.Error() == refused {
+					t.Errorf("%s: the properties are refused the same way without it (%v): the refusal is not the field's", path, other)
 				}
 			}
 		})

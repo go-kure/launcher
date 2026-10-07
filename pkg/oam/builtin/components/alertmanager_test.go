@@ -420,19 +420,27 @@ func TestAlertmanager_HostProcess(t *testing.T) {
 	}
 }
 
-// TestAlertmanager_UnsetImage: a spec that names no image, or an empty one,
-// leaves the image to the operator, which no registry allowlist reaches: it is
-// refused with the registry class under a policy with allowed registries, and
-// builds under one without. A listed container that names no image is a patch
-// of one the operator generates and is not refused.
+// TestAlertmanager_UnsetImage: a spec that names no image, a null one or an
+// empty one leaves the image to the operator, which no registry allowlist
+// reaches: it is refused with the registry class under a policy with allowed
+// registries, and builds under one without and under none, where an unset or
+// null image writes none. A listed container that names no image is not
+// refused; one named for a container the operator generates, as here, is
+// merged into it.
 func TestAlertmanager_UnsetImage(t *testing.T) {
 	patch := []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
 	h := &components.AlertmanagerHandler{}
 	for name, props := range map[string]map[string]any{
 		"unset": {"version": "v0.28.1"},
+		"null":  {"version": "v0.28.1", "image": nil},
 		"empty": {"version": "v0.28.1", "image": ""},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if name != "empty" {
+				if am := alertmanagerOf(t, props); am.Spec.Image != nil {
+					t.Errorf("image = %q under no policy, want none written", *am.Spec.Image)
+				}
+			}
 			_, err := pvTransform("alertmanager", h, props, ptStrictPolicy())
 			rcWantClass(t, err, oam.RefusalRegistry)
 			if err != nil && !strings.Contains(err.Error(), "image: unset") {
