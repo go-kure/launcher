@@ -62,6 +62,11 @@ func (h *PVCHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *sta
 	if err != nil {
 		return err
 	}
+	// The required name is claimed as written. No Flux object reads a claim, so
+	// it stays in the application's namespace.
+	if err := claimOwnObjectName(trait, pvcKind, app.Namespace, config.Name, config.Name); err != nil {
+		return err
+	}
 
 	subAppName, err := resolveSubApplicationName(trait, config.Name)
 	if err != nil {

@@ -65,6 +65,12 @@ func (h *SecretHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return errors.Errorf("secret trait: name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
 	}
+	// The required name is claimed as written, in the namespace the Secret lands
+	// in: the Flux namespace when the component's Flux object reads it
+	// (FluxNamespaceInput), else the application's. The trait generates it.
+	if err := trait.ClaimGeneratedObjectName(secretKind, app.Namespace, name, "name", "Secret", name); err != nil {
+		return err
+	}
 
 	secret, err := components.ParseSecretProperties(props)
 	if err != nil {

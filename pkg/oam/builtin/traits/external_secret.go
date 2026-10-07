@@ -70,7 +70,9 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 	// The ExternalSecret is named by the required secretName, so no hook could be
 	// asked for it: its name is claimed as written, in the namespace it lands in,
 	// which follows its target (FluxNamespaceInput) under every creationPolicy.
-	if err := trait.ClaimFluxInputName(externalSecretKind, app.Namespace, config.SecretName, "secretName",
+	// The trait generates it; the produced Secret, which the operator writes, is
+	// resolved above.
+	if err := trait.ClaimGeneratedObjectName(externalSecretKind, app.Namespace, config.SecretName, "secretName",
 		"Secret", config.TargetSecretName); err != nil {
 		return err
 	}

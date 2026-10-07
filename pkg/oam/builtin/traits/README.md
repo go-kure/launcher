@@ -909,8 +909,8 @@ the `secret` kind component (go-kure/launcher#790) runs the same two, as the `co
 and trait share theirs. The trait's schema is the kind's plus `name`, so the same properties
 give the same Secret and the same refusals on both paths; only the ownership fields differ (the
 name, the labels, the namespace, the bundle). The trait names its Secret under no role and
-claims nothing, so a `secret` component and a `secret` trait that name one Secret are refused
-among the generated objects, with both named (`oam.CheckInDocumentCollisions`).
+claims the name, so a `secret` component and a `secret` trait that name one Secret are refused
+in `Transform`, with both named.
 
 ## Component attribution
 
@@ -1182,11 +1182,21 @@ component).
 
 The CiliumNetworkPolicy has no name role: it is author-named, and the hook is not asked, by
 design. The `cilium-networkpolicy` `name` is required, and the trait claims it
-(`(*Trait).ClaimObjectName`), so `Transform` refuses a second owner of that object with both
-named, as under a role. The `certificate` trait's Secret and the `external-secret` trait's
-ExternalSecret are claimed the same way by their required `secretName`, in the namespace they
-land in (go-kure/launcher#787), so a `certificate` trait and an `external-secret` trait that
-write the same Secret are refused in `Transform`.
+(`(*Trait).ClaimGeneratedObjectName`), so `Transform` refuses a second owner of that object
+with both named, as under a role. The `certificate` trait's Secret and the `external-secret`
+trait's ExternalSecret are claimed by their required `secretName` too, in the
+namespace they land in (go-kure/launcher#787), so a `certificate` trait and an
+`external-secret` trait that write the same Secret are refused in `Transform`. The `configmap`,
+`secret` and `pvc` traits have no role either, by design: each `name` is required. Each trait
+claims its object's name (`(*Trait).ClaimGeneratedObjectName`), the ConfigMap's and the
+Secret's in the namespace they land in, the claim's in the application namespace, so a second
+owner of the object, a second trait or a kind component, is refused in `Transform` with both
+named. A trait a lowering rule emits adds no claim of the name of an object it generates when
+its component's rule already resolved and claimed that name under a role, as the `helm` rule
+does for its values ConfigMap and Secret and a role component's rule for its volume claims: the
+object is that rule's. The Secret a `certificate` trait has cert-manager write is not one the
+trait generates, so a rule-emitted `certificate` trait's `secretName` is always claimed as an
+authored trait's.
 
 Every other authored name in the
 table below is checked as a name, not against the other objects of the document:
