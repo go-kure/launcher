@@ -9399,12 +9399,10 @@ The positions are:
 | Position | On | Keys |
 |----------|----|------|
 | a container's `resources`: the main container's, and an `initContainers` or `sidecars` entry's | every workload kind | `claims` |
+| the pod's `podResources` | every workload kind | `claims` (upstream validation forbids claims at pod level: "claims may not be set for Resources at pod-level") |
 | an `initContainers` entry | every workload kind | `probes`, `lifecycle` (see [Container fields](#container-fields)) |
 | the `affinity` shorthand | `webservice`, `worker` | `nodeAffinity`, `podAffinity`, `podAntiAffinity` |
 | a `volumeClaimTemplates` entry | `statefulset` | `volumeName`, `dataSource`, `volumeMount` |
-
-`podResources` refuses `claims` as an unknown key, with no reason, at both
-paths.
 
 A key that is **no field of the upstream type** is not in a refusal map. The
 check refuses it as it refuses any undeclared key, with nothing appended; a
@@ -9427,6 +9425,7 @@ name, which a `cronjob` document retyped to `job` leaves behind.
 | `dataSource` | `persistentvolumeclaim`, the `pvc` trait | Authored through `dataSourceRef`. |
 | `secrets` | `serviceaccount` | The list limits mountable Secrets only under an annotation upstream deprecates since Kubernetes 1.32; it is no way to find or create a token. |
 | `resources.claims` | a container's `resources`, on every kind that reads them | An entry names one of the pod's `resourceClaims`, and a container's resources are read without them; upstream puts the field behind the `DynamicResourceAllocation` feature gate. See [Below the top level](#below-the-top-level). |
+| `podResources.claims` | every workload kind | Upstream validation forbids claims in a pod's own resources ("claims may not be set for Resources at pod-level"); the pod's claims are its `resourceClaims`. See [Below the top level](#below-the-top-level). |
 
 ### Read in another shape
 
@@ -9495,7 +9494,8 @@ go-kure/launcher#790, left as it was:
   on `selector` and `template`).
 - **Refused, as any value is:** `statefulset`, `daemonset`, `job`, `cronjob`,
   `serviceaccount`, and `webservice` and `worker`; and every kind on
-  `resources.claims` and on the keys refused under the `affinity` shorthand.
+  `resources.claims`, on `podResources.claims` and on the keys refused under
+  the `affinity` shorthand.
 
 In a document the difference does not show: the authored-property check
 refuses an undeclared key whatever its value, null included.
@@ -9508,7 +9508,7 @@ refuses an undeclared key whatever its value, null included.
   refused, nor placed in one of the classes above — so a field a later
   `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
   what a property holds inside is held to the upstream type only for a
-  container's `resources`.
+  container's `resources` and the pod's `podResources`.
 - `TestRefusedKeys_BothPathsGiveTheReason` holds every entry of every refusal
   map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
   refusals inside a declared property.

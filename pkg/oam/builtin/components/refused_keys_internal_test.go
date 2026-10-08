@@ -383,6 +383,18 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 			props["initContainers"] = initEntry("livenessProbe")
 			check(t, componentType, props, "properties.initContainers[0]", "livenessProbe", "")
 		})
+		for _, key := range slices.Sorted(maps.Keys(podResourcesRejectedKeys)) {
+			t.Run(componentType+"/podResources/"+key, func(t *testing.T) {
+				props := maps.Clone(refusedKeyBase[componentType])
+				props["podResources"] = map[string]any{"requests": map[string]any{"cpu": "1"}, key: []any{map[string]any{"name": "gpu"}}}
+				check(t, componentType, props, "properties.podResources", key, podResourcesRejectedKeys[key])
+			})
+		}
+		t.Run(componentType+"/podResources/noSuchKey", func(t *testing.T) {
+			props := maps.Clone(refusedKeyBase[componentType])
+			props["podResources"] = map[string]any{"requests": map[string]any{"cpu": "1"}, "noSuchKey": "x"}
+			check(t, componentType, props, "properties.podResources", "noSuchKey", "")
+		})
 	}
 	for _, key := range slices.Sorted(maps.Keys(volumeClaimTemplateRejectedKeys)) {
 		t.Run("statefulset/volumeClaimTemplates/"+key, func(t *testing.T) {
