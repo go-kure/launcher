@@ -206,7 +206,14 @@ type operatorMetadataKind struct {
 //   - the metadata of each volume claim template of a StatefulSet
 //     (spec.volumeClaimTemplates[].metadata), which the StatefulSet controller
 //     copies onto each PersistentVolumeClaim it creates from the template
-//     (go-kure/launcher#944).
+//     (go-kure/launcher#944);
+//   - the metadata of the claim template of a Prometheus, a PrometheusAgent,
+//     an Alertmanager and a ThanosRuler
+//     (spec.storage.volumeClaimTemplate.metadata), which the operator copies
+//     onto the volume claim template of the StatefulSet it creates
+//     (go-kure/launcher#957). The claim template of its ephemeral storage
+//     (spec.storage.ephemeral.volumeClaimTemplate) goes onto a claim of a pod
+//     and is not read.
 //
 // The wrapper writes the component label into none of these. A volume claim
 // template is a case of its own: the API server refuses a change to a
@@ -253,6 +260,7 @@ var operatorMetadataKinds = slices.Concat(
 		{fluxOperatorGroup, "FluxInstance", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
 		{"apps", "StatefulSet", metadataHolder{path: []string{"spec", "volumeClaimTemplates", listStep, "metadata"}, in: ReservedKeyInVolumeClaimTemplate, noPods: true}},
 	},
+	storageClaimTemplates("Prometheus", "PrometheusAgent", "Alertmanager", "ThanosRuler"),
 	moverPodLabels("ReplicationSource", "rsync", "rsyncTLS", "rclone", "restic", "syncthing"),
 	moverPodLabels("ReplicationDestination", "rsync", "rsyncTLS", "rclone", "restic"),
 	moverServiceAnnotations("ReplicationDestination", "rsync", "rsyncTLS"),
@@ -283,6 +291,19 @@ func solverHolders(kind string) []operatorMetadataKind {
 			path: solver("gatewayHTTPRoute", "labels"), in: ReservedKeyInSolverHTTPRoute, labelMap: true, noPods: true,
 		}},
 	)
+}
+
+// storageClaimTemplates returns the rows of the Prometheus operator kinds:
+// spec.storage.volumeClaimTemplate.metadata of each, which the operator puts on
+// the volume claim template of the StatefulSet it creates.
+func storageClaimTemplates(kinds ...string) []operatorMetadataKind {
+	rows := make([]operatorMetadataKind, 0, len(kinds))
+	for _, kind := range kinds {
+		rows = append(rows, operatorMetadataKind{monitoringGroup, kind, metadataHolder{
+			path: []string{"spec", "storage", "volumeClaimTemplate", "metadata"}, in: ReservedKeyInVolumeClaimTemplate, noPods: true,
+		}})
+	}
+	return rows
 }
 
 // moverServiceAnnotations returns the rows of a VolSync kind:

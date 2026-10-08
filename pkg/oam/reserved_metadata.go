@@ -392,7 +392,9 @@ const (
 	// ReservedKeyInVolumeClaimTemplate is the metadata of a volume claim
 	// template of a StatefulSet (spec.volumeClaimTemplates[].metadata), which
 	// the StatefulSet controller copies onto each PersistentVolumeClaim it
-	// creates from the template.
+	// creates from the template, and of the claim template of a Prometheus
+	// operator kind (spec.storage.volumeClaimTemplate.metadata), which the
+	// operator copies onto the volume claim template of its StatefulSet.
 	ReservedKeyInVolumeClaimTemplate ReservedKeyHolder = "volume claim template"
 )
 
