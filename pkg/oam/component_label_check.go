@@ -356,8 +356,9 @@ func readGeneratedObject(obj client.Object) (generatedObject, error) {
 // application the document as a whole owns has no component label to be held
 // to.
 //
-// The kinds are checked first, on obj and all it stands for, so an object the
-// policy keeps out is refused as such whatever its metadata holds. The reserved
+// The kinds are checked first, on what Flux applies (a list envelope's members,
+// not the envelope), so an object the policy keeps out is refused as such
+// whatever its metadata holds. The reserved
 // keys are checked on all of them before the component label is checked on any,
 // so a reserved key is refused as one (ErrReservedMetadataKey) whatever the
 // labels beside it hold.
@@ -365,14 +366,10 @@ func (o *ownedConfig) check(obj client.Object) error {
 	if o.reserved == nil && o.component == "" && o.kinds == nil {
 		return nil
 	}
-	checked := appliedSelfAndMembers(obj)
-	if o.kinds != nil {
-		for _, c := range checked {
-			if err := o.checkObjectKind(c); err != nil {
-				return err
-			}
-		}
+	if err := o.checkObjectKinds(obj); err != nil {
+		return err
 	}
+	checked := appliedSelfAndMembers(obj)
 	if o.reserved == nil && o.component == "" {
 		return nil
 	}
