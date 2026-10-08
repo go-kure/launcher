@@ -1526,7 +1526,9 @@ its text:
   - `pod` projects `PodSpec`, `replicaset` projects `ReplicaSetSpec`,
     `replicationcontroller` projects `ReplicationControllerSpec`. The pod spec, the one
     under a `template` included, refuses `ephemeralContainers`, `priority` and
-    `overhead`, an untagged or `:latest` image and a probe timing written as `0`; a
+    `overhead`, an untagged or `:latest` image, a probe timing written as `0`, a
+    string the API server defaults written as `""` and a `hostPort` of `0` under
+    `hostNetwork`, held to the API server's defaulting code at the linked release; a
     controller's template also refuses `activeDeadlineSeconds`.
   - All are held to environment policy by the check the rendered paths run on the same
     object (`enforcePodTemplatePolicy`, and the replica maximum on the two controllers),

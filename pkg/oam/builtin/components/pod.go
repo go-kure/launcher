@@ -124,19 +124,94 @@ var probeDefaultedZeroFields = map[string]string{
 	"failureThreshold": "3",
 }
 
+// imagePullPolicyDefault is the default the API server gives an omitted
+// imagePullPolicy of a container or pullPolicy of an image volume: it reads
+// the image's tag, and an image that names neither a tag nor a digest is read
+// as tagged latest. The image rule (ValidateImageRef) refuses both of those
+// images, so an image a pod may hold is given "IfNotPresent".
+const imagePullPolicyDefault = `"Always" for an image tagged latest or naming neither a tag nor a digest, else "IfNotPresent"`
+
+// httpGetDefaultedZeroFields are the corev1.HTTPGetAction fields on which an
+// authored "" cannot be carried, with the defaults the API server applies.
+var httpGetDefaultedZeroFields = map[string]string{
+	"path":   `"/"`,
+	"scheme": `"HTTP"`,
+}
+
+// containerDefaultedZeroFields are the corev1.Container fields, by path under
+// the container, on which an authored "" cannot be carried, with the defaults
+// the API server applies; the httpGet fields of the probes and the lifecycle
+// hooks are added by podSpecDefaultedZeros.
+var containerDefaultedZeroFields = map[string]string{
+	"imagePullPolicy":                     imagePullPolicyDefault,
+	"terminationMessagePath":              `"/dev/termination-log"`,
+	"terminationMessagePolicy":            `"File"`,
+	"ports[].protocol":                    `"TCP"`,
+	"env[].valueFrom.fieldRef.apiVersion": `"v1"`,
+}
+
+// podSpecOwnDefaultedZeroFields are the fields of a corev1.PodSpec outside its
+// containers, by path under the spec, on which an authored "" cannot be
+// carried, with the defaults the API server applies.
+var podSpecOwnDefaultedZeroFields = map[string]string{
+	"dnsPolicy":     `"ClusterFirst"`,
+	"restartPolicy": `"Always"`,
+	"schedulerName": `"default-scheduler"`,
+	"volumes[].downwardAPI.items[].fieldRef.apiVersion":                     `"v1"`,
+	"volumes[].projected.sources[].downwardAPI.items[].fieldRef.apiVersion": `"v1"`,
+	"volumes[].image.pullPolicy":                                            imagePullPolicyDefault,
+	"volumes[].iscsi.iscsiInterface":                                        `"default"`,
+	"volumes[].rbd.pool":                                                    `"rbd"`,
+	"volumes[].rbd.user":                                                    `"admin"`,
+	"volumes[].rbd.keyring":                                                 `"/etc/ceph/keyring"`,
+	"volumes[].scaleIO.storageMode":                                         `"ThinProvisioned"`,
+	"volumes[].scaleIO.fsType":                                              `"xfs"`,
+}
+
+// hostNetworkHostPortDefault is the default the API server gives an omitted
+// hostPort of a container port when the pod's hostNetwork is true.
+const hostNetworkHostPortDefault = "the port's containerPort, as hostNetwork is true"
+
 // podSpecDefaultedZeros is the defaulted-zero list of a corev1.PodSpec whose
-// fields sit under prefix in the authored properties ("" for the pod kind): the
-// probeDefaultedZeroFields of the three probes of every init and regular
-// container. TestPodSpecDefaultedZeros_MatchFieldDocs holds it to the linked
-// type: every other omitempty number or boolean under PodSpec defaults to its
-// zero.
-func podSpecDefaultedZeros(prefix string) defaultedZeroFields {
+// fields sit under prefix in the authored properties ("" for the pod kind):
+// podSpecOwnDefaultedZeroFields, and for every init and regular container its
+// containerDefaultedZeroFields, the probeDefaultedZeroFields and
+// httpGetDefaultedZeroFields of its three probes, and the
+// httpGetDefaultedZeroFields of its two lifecycle hooks. When ps, the decoded
+// spec, sets hostNetwork, each container port's hostPort is in the list too:
+// the API server sets an omitted one to the port's containerPort, so an
+// authored 0 cannot be carried. The default is applied to a Pod object, so for
+// a pod template it is applied to each pod created from it. A nil ps gives the
+// list without it.
+//
+// TestKubernetesDefaulters_MatchVendoredSource holds the list to the API
+// server's defaulting code at the linked k8s.io/api's release, and
+// TestPodSpecDefaultedZeros_MatchFieldDocs its numbers to the field comments.
+func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroFields {
 	fields := map[string]string{}
+	for field, def := range podSpecOwnDefaultedZeroFields {
+		fields[prefix+field] = def
+	}
 	for _, list := range []string{"initContainers", "containers"} {
+		ctr := prefix + list + "[]."
+		for field, def := range containerDefaultedZeroFields {
+			fields[ctr+field] = def
+		}
 		for _, probe := range []string{"livenessProbe", "readinessProbe", "startupProbe"} {
 			for field, def := range probeDefaultedZeroFields {
-				fields[prefix+list+"[]."+probe+"."+field] = def
+				fields[ctr+probe+"."+field] = def
 			}
+			for field, def := range httpGetDefaultedZeroFields {
+				fields[ctr+probe+".httpGet."+field] = def
+			}
+		}
+		for _, hook := range []string{"postStart", "preStop"} {
+			for field, def := range httpGetDefaultedZeroFields {
+				fields[ctr+"lifecycle."+hook+".httpGet."+field] = def
+			}
+		}
+		if ps != nil && ps.HostNetwork {
+			fields[ctr+"ports[].hostPort"] = hostNetworkHostPortDefault
 		}
 	}
 	return defaultedZeroFields{api: "Kubernetes", defaulter: "API server", fields: fields}
@@ -216,7 +291,7 @@ func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(props, spec, podSpecDefaultedZeros("")); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, podSpecDefaultedZeros("", spec)); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(props, labelSelectorRequired(podSpecLabelSelectors("")...)); err != nil {

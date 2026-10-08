@@ -56,7 +56,10 @@ type listDefault struct {
 // "default" by its field comment (SwaggerDoc). The second covers the
 // Kubernetes types, whose defaults are applied in the API server's own code,
 // which is not in the module graph: a default a comment does not mention is
-// not found.
+// not found here. The defaults of the refused ones are held to that code by
+// TestKubernetesDefaulters_ListDefaultsMatchVendoredSource, which reads an
+// excerpt of it (vendoredK8sDir), and TestKubernetesDefaulters_MatchVendoredSource
+// fails on a list the API server defaults under a pod spec.
 var defaultedListAnswers = map[string]listDefault{
 	"v2.HorizontalPodAutoscalerSpec.metrics":          {refused: true},
 	"v2.HPAScalingRules.policies":                     {refused: true},

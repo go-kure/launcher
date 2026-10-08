@@ -24,11 +24,16 @@ func podTemplateSchema(desc string) oam.PropertySchema {
 
 // podTemplateDefaultedZeros is the defaulted-zero list of a spec whose pod
 // template is its `template` property: the pod spec's list
-// (podSpecDefaultedZeros) under template.spec.
-// TestPodTemplateKindsDefaultedZeros_MatchFieldDocs holds it to the linked
-// types of each kind that uses it.
-func podTemplateDefaultedZeros() defaultedZeroFields {
-	return podSpecDefaultedZeros("template.spec.")
+// (podSpecDefaultedZeros) under template.spec, for tmpl, the decoded template
+// (nil when none is authored).
+// TestPodTemplateKindsDefaultedZeros_MatchFieldDocs holds its numbers to the
+// linked types of each kind that uses it.
+func podTemplateDefaultedZeros(tmpl *corev1.PodTemplateSpec) defaultedZeroFields {
+	var ps *corev1.PodSpec
+	if tmpl != nil {
+		ps = &tmpl.Spec
+	}
+	return podSpecDefaultedZeros("template.spec.", ps)
 }
 
 // podTemplateLabelSelectorRequired is the required list of the label selectors

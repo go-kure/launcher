@@ -55,7 +55,7 @@ func (h *ReplicationControllerHandler) ToApplicationConfig(component *oam.Compon
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros()); err != nil {
+	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros(spec.Template)); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {

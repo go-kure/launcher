@@ -1,0 +1,15 @@
+# Excerpt of kubernetes/kubernetes, copied unmodified by scripts/vendor-k8s-defaulters.sh.
+# Licensed under the Apache License, Version 2.0 (each file carries its header);
+# LICENSE is kubernetes/kubernetes's copy of the licence, at the same tag.
+# The components tests check each file against its git blob id below.
+tag v1.37.1
+tag-object d2b770f4c94636a992534a8d3156b6b2d8e82ac3
+licence LICENSE d645695673349e3947e8e5ae42332d0ac3164cd7
+file pkg/apis/core/v1/defaults.go bad6446682c6819cf522fff31dac4e7e958d60c9
+file pkg/apis/core/v1/zz_generated.defaults.go e8e2b7181e2c10f22eabd0dbab02cc21354bf253
+file pkg/apis/apps/v1/defaults.go b52fa0a28f636e09f908ea3ecd6026e92851bdbe
+file pkg/apis/apps/v1/zz_generated.defaults.go c523c1b979ce1302846b068bb75b16d90b824a59
+file pkg/apis/autoscaling/annotations.go 0df01c14386e780fb54c6bff5672b8eac7146455
+file pkg/apis/autoscaling/v2/defaults.go 38ca3dceca379aea7c97e3659b4df80ef1bb5a58
+file pkg/apis/networking/v1/defaults.go 7748b6e09106e7cbe93ba873d99e80c4f5663071
+file pkg/util/parsers/parsers.go 73916fda304a6704dc691465537482c5d9bb55e8
