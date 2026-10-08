@@ -4630,7 +4630,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `grpc` where `thanos` is set, the port the operator adds for the sidecar
     to the governing Service it creates (`MakeContainerPorts`,
     `BuildStatefulSetService`; server/operator.go:1006-1030).
-  - a negative `replicas`, which the operator runs as 1 (`ReplicasNumberPtr`).
+  - a negative `replicas`, which the operator runs as 1 (`ReplicasNumberPtr`),
+    and a `shards` below 1, for which it runs 1 shard (`shardsNumber`).
   - the storage arms as on `alertmanager`: a claim template named otherwise
     than `prometheus-<name>-db` beside `storage.emptyDir` or
     `storage.ephemeral`, a claim without a positive storage request, an
@@ -4656,6 +4657,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/prometheus/rules/prometheus-<name>-rulefiles-<n>`, and
     `/etc/prometheus/secrets/<name>` and `/etc/prometheus/configmaps/<name>`
     for each entry of `secrets` and `configMaps`.
+  - an entry of `thanos.volumeMounts` at a path the operator mounts a
+    volume at in the thanos-sidecar container: `/prometheus` where
+    `objectStorageConfig` or `objectStorageConfigFile` is set, and
+    `/etc/thanos/config`, which it mounts from Thanos 0.24.0, reserved
+    whatever `thanos.version` names, as `web-config` is
+    (`createThanosContainer`, server/statefulset.go:642-671 and :730-738).
+  - a `queryLogFile` named without a directory beside a
+    `scrapeFailureLogFile` named with one: the operator writes the query log
+    under `/var/log/prometheus` but adds the `log-file` volume there only for
+    the scrape failure log file, on a read-only root filesystem
+    (server/statefulset.go:510, :537; common.go:330-345). A volume the
+    author mounts there, in `volumeMounts` or a patch of the `prometheus`
+    container, is accepted.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a name the operator's objects cannot be named after: the data volume
@@ -4663,8 +4677,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `prometheus-<name>-rulefiles-2`, and the hostname of the last pod of the
     last shard, `prometheus-<name>-<replicas-1>` or
     `prometheus-<name>-shard-<shards-1>-<replicas-1>`, must each be a
-    DNS-1123 label, so a name has no dot and at most 40 characters. The
-    refusal names the component, or `objectName` where that set the name.
+    DNS-1123 label, so a name has no dot and at most 40 characters, fewer
+    where the authored `shards` and `replicas` make the last hostname
+    longer (1000 shards of 11 replicas: 39). The operator mounts three rule
+    ConfigMaps whatever the rules (server/rules.go:119), and more only where
+    the PrometheusRules it selects outgrow three of half a MiB each; the
+    name of an eleventh, `rulefiles-10`, depends on the cluster's rules and
+    is not checked. The refusal names the component, or `objectName` where
+    that set the name.
 
   **The API's expression rules are not checked.** Five are listed
   (`prometheusRulesLeft`) and left to the API server: with the sharding
@@ -4715,8 +4735,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **The operator's own counts are held, not written.** The operator runs one
   StatefulSet a shard with the replica count each, and reads an unset or
-  negative `replicas` as 1 and an unset `shards`, or one of 1 or less, as 1
-  (`ReplicasNumberPtr`, `shardsNumber`). The replica maximum holds that
+  negative `replicas` as 1 and an unset `shards` as 1 (`ReplicasNumberPtr`,
+  `shardsNumber`; a `shards` below 1 is refused). The replica maximum holds that
   product whether or not either is authored, and the emitted object still
   leaves both as authored.
 

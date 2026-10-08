@@ -419,6 +419,28 @@ func prometheusRefusals(notA string) []struct {
 			`volumeMounts[0] "/etc/prometheus/rules/prometheus-fast-rulefiles-1": the mount path is the path the Prometheus operator mounts a rule ConfigMap at`},
 		{"a mount at the log file's directory", map[string]any{"scrapeFailureLogFile": "scrape.log", "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/var/log/prometheus"}}},
 			`volumeMounts[0] "/var/log/prometheus": the mount path is the path the Prometheus operator mounts the volume of a log file`},
+		// The API refuses two mounts at one path in the thanos-sidecar container
+		// (server/statefulset.go:642-671, :730-738).
+		{"a sidecar mount at the data volume's path beside object storage", map[string]any{"thanos": map[string]any{
+			"objectStorageConfigFile": "/etc/thanos/objstore.yaml",
+			"volumeMounts":            []any{map[string]any{"name": "extra", "mountPath": "/prometheus"}},
+		}}, `thanos.volumeMounts[0] "/prometheus": the mount path is the path the Prometheus operator mounts the data volume at in the thanos-sidecar container where object storage is configured`},
+		{"a sidecar mount at its configuration's directory", map[string]any{"thanos": map[string]any{
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/thanos/config"}},
+		}}, `thanos.volumeMounts[0] "/etc/thanos/config": the mount path is the path the Prometheus operator mounts the sidecar's HTTP client configuration at in the thanos-sidecar container for Thanos 0.24.0 and later`},
+		// Reserved whatever thanos.version names, as web-config is.
+		{"a sidecar mount at its configuration's directory before Thanos 0.24.0", map[string]any{"thanos": map[string]any{"version": "v0.23.0",
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/thanos/config"}},
+		}}, `thanos.volumeMounts[0] "/etc/thanos/config": the mount path is`},
+		// The operator adds no volume for a query log file named without a
+		// directory beside a scrape failure log file named with one
+		// (server/statefulset.go:510, :537; common.go:330-345).
+		{"a query log file beside a scrape failure log file in a directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log"},
+			`queryLogFile: "query.log" names no directory, so the Prometheus operator configures it under /var/log/prometheus, but beside scrapeFailureLogFile "/var/log/scrape/failures.log", which names one, it mounts no volume there`},
+		// The operator runs 1 shard for a count below 1 (shardsNumber,
+		// common.go:118-129).
+		{"a shard count of 0", map[string]any{"shards": 0}, "shards: 0 is below 1: the Prometheus operator runs 1 shard for it; write 1"},
+		{"a negative shard count", map[string]any{"shards": -2}, "shards: -2 is below 1"},
 		// The CRD's quantity pattern admits a sign; the API refuses the
 		// container the operator builds with it.
 		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
@@ -619,8 +641,8 @@ func TestPrometheus_Unauthored(t *testing.T) {
 // holds are those of all shards, replicas times shards, as the operator counts
 // them (ReplicasNumberPtr and shardsNumber, pkg/prometheus/common.go:118-143
 // at prometheus-operator v0.94.1): an unset or negative replica count as 1,
-// an unset shard count or one of 1 or less as 1. Where neither is authored,
-// one pod is held.
+// an unset shard count as 1. Where neither is authored, one pod is held. A
+// shard count below 1 is refused (prometheusRefusals).
 func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	for name, tc := range map[string]struct {
@@ -637,8 +659,7 @@ func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 		"a replica count of 0":           {map[string]any{"replicas": 0, "shards": 4}, false},
 		"a null shard count":             {map[string]any{"replicas": 3, "shards": nil}, false},
 		"a null count beside over":       {map[string]any{"replicas": nil, "shards": 4}, true},
-		"a shard count of 0 beside over": {map[string]any{"replicas": 4, "shards": 0}, true},
-		"a negative shard count":         {map[string]any{"replicas": 3, "shards": -2}, false},
+		"a shard count of 1 beside over": {map[string]any{"replicas": 4, "shards": 1}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := pvTransform("prometheus", h, pmHeld(tc.props), ptStrictPolicy())
@@ -659,7 +680,8 @@ func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 // TestPrometheus_Name: the operator names the data volume, the rule
 // ConfigMaps' volumes and the pods' hostnames after the Prometheus, each a
 // DNS-1123 label; the third rule ConfigMap's volume, mounted whatever the
-// rules, binds a name to 40 characters.
+// rules, binds a name to 40 characters at most, and the last pod's hostname to
+// fewer where the authored shards and replicas make it longer.
 func TestPrometheus_Name(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	for name, tc := range map[string]struct {
@@ -722,6 +744,13 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/secrets/extra"}}},
 		"the log file's directory without a log file volume": {"volumes": extra("extra"),
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/var/log/prometheus"}}},
+		"a query log file beside a scrape failure log file named alike": {"queryLogFile": "query.log", "scrapeFailureLogFile": "scrape.log"},
+		"a query log file with the author's mount at its directory": {"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log",
+			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus"}}},
+		"a query log file with a mount at its directory in a patch": {"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log",
+			"volumes": extra("logs"), "containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus"}}}}},
+		"a sidecar mount at the data volume's path without object storage": {"thanos": map[string]any{
+			"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/prometheus"}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := coreKindErr(h, "prometheus", "fast", props); err != nil {

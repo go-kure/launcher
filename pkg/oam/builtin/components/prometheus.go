@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
@@ -102,8 +103,8 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"imagePullPolicy":                 text("imagePullPolicy: when the images of the prometheus, config-reloader, init-config-reloader and thanos-sidecar containers are pulled: Always, Never or IfNotPresent."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Prometheus's namespace that hold the credentials the images are pulled with.",
 			"One reference: name."),
-		"replicas":                    number("replicas: the number of Prometheus pods of each shard. replicas times shards is held to the EnvironmentPolicy's replica maximum as the operator counts them: an unset or negative replicas as 1, an unset shards or one of 1 or less as 1. Nothing is written, and no replica default of the policy is applied."),
-		"shards":                      number("shards: the number of shards the scraped targets are spread over, one StatefulSet each. Unset, the API fills 1. Held with replicas: see replicas. Scaling the shards down or up moves no data."),
+		"replicas":                    number("replicas: the number of Prometheus pods of each shard. replicas times shards is held to the EnvironmentPolicy's replica maximum as the operator counts them: an unset or negative replicas as 1, an unset shards as 1. Nothing is written, and no replica default of the policy is applied."),
+		"shards":                      number("shards: the number of shards the scraped targets are spread over, one StatefulSet each. Unset, the API fills 1. Below 1 is refused, since the operator runs 1 shard for it. Held with replicas: see replicas. Scaling the shards down or up moves no data."),
 		"shardingStrategy":            object("shardingStrategy: how targets are spread over the shards: mode, Address (the default, by a hash of the target's address) or Topology (behind the operator's PrometheusTopologySharding feature gate), with topology." + decoded + "ShardingStrategy in its API reference."),
 		"replicaExternalLabelName":    text("replicaExternalLabelName: the name of the external label that holds the replica's name. Unset, prometheus_replica; empty, no such label."),
 		"prometheusExternalLabelName": text("prometheusExternalLabelName: the name of the external label that holds the Prometheus's name. Unset, prometheus; empty, no such label."),
@@ -230,8 +231,8 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalAlertManagerConfigs": object("additionalAlertManagerConfigs: the Secret key that holds further Alertmanager configurations, appended to the ones the operator generates as they are." + secretKey),
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
-		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
-		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
+		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
+		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory: refused there unless a volume is mounted at /var/log/prometheus. A full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
 		"evaluationInterval":     text("evaluationInterval: the interval between two evaluations of the rules. Unset, the API fills 30s; an empty one is refused, since the API server would replace it." + duration),
@@ -411,6 +412,9 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 	if err := refuseNegativeReplicas(spec.Replicas, "the Prometheus operator runs 1 replica for it; write 1"); err != nil {
 		return err
 	}
+	if s := spec.Shards; s != nil && *s < 1 {
+		return errors.Errorf("shards: %d is below 1: the Prometheus operator runs 1 shard for it; write 1", *s)
+	}
 	if err := validatePrometheusPortName(spec); err != nil {
 		return err
 	}
@@ -418,6 +422,12 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 		return err
 	}
 	if err := refusePrometheusExternalURL(spec.ExternalURL); err != nil {
+		return err
+	}
+	if err := validatePrometheusQueryLogFile(spec); err != nil {
+		return err
+	}
+	if err := validateThanosSidecarMounts(spec.Thanos); err != nil {
 		return err
 	}
 	return validateMonitoringWorkload(prometheusWorkload(spec))
@@ -437,6 +447,66 @@ func refusePrometheusExternalURL(value string) error {
 		return errors.New("externalUrl: begins or ends with a quote: the Prometheus operator passes it to Prometheus, which then exits at startup; name the URL without quotes, or leave it unset")
 	}
 	return refuseUnservableExternalURL("Prometheus", value, nil)
+}
+
+// validatePrometheusQueryLogFile refuses a queryLogFile named without a
+// directory where the operator adds no volume for it. The operator writes such
+// a file under /var/log/prometheus (logFilePath, pkg/prometheus/common.go:
+// 230-236, appendQueryLogFile, pkg/prometheus/promcfg.go:3218-3224 at
+// prometheus-operator v0.94.1) and adds the log-file volume there for it only
+// where scrapeFailureLogFile is unset (appendServerVolumes,
+// pkg/prometheus/server/statefulset.go:510 and :537); where
+// scrapeFailureLogFile is set, it adds the volume only for a
+// scrapeFailureLogFile named without a directory (BuildCommonVolumes,
+// common.go:330-345). Without that volume Prometheus writes the file to the
+// prometheus container's root filesystem, which the operator makes read-only
+// (server/statefulset.go:349). A mount of the author's at /var/log/prometheus,
+// in volumeMounts or a listed patch of the prometheus container, gives the
+// file a volume, and is not refused.
+func validatePrometheusQueryLogFile(spec *monitoringv1.PrometheusSpec) error {
+	file := spec.QueryLogFile
+	if file == "" || filepath.Dir(file) != "." || usesLogFileVolume(spec) {
+		return nil
+	}
+	mounts := spec.VolumeMounts
+	for _, c := range spec.Containers {
+		if c.Name == "prometheus" {
+			mounts = append(slices.Clone(mounts), c.VolumeMounts...)
+		}
+	}
+	for _, m := range mounts {
+		if m.MountPath == prometheusLogDirectory {
+			return nil
+		}
+	}
+	return errors.Errorf("queryLogFile: %q names no directory, so the Prometheus operator configures it under %s, but beside scrapeFailureLogFile %q, which names one, it mounts no volume there, and the prometheus container's root filesystem is read-only; name the file with scrapeFailureLogFile's directory, name scrapeFailureLogFile without one too, or mount a volume at %s", file, prometheusLogDirectory, *spec.ScrapeFailureLogFile, prometheusLogDirectory)
+}
+
+// prometheusLogDirectory is where the operator writes a log file named without
+// a directory, and mounts the log-file volume (DefaultLogDirectory,
+// pkg/prometheus/common.go:53 at prometheus-operator v0.94.1).
+const prometheusLogDirectory = "/var/log/prometheus"
+
+// validateThanosSidecarMounts refuses an entry of thanos.volumeMounts at a
+// path the operator mounts a volume at in the thanos-sidecar container, as
+// refuseGeneratedMounts refuses it (createThanosContainer,
+// pkg/prometheus/server/statefulset.go:544 at prometheus-operator v0.94.1):
+// /prometheus, the data volume, where objectStorageConfig or
+// objectStorageConfigFile is set (:649 and :664-671), and /etc/thanos/config,
+// the HTTP client configuration, for Thanos 0.24.0 and later (:730-738,
+// thanosConfigDir in thanos_sidecar_config.go:29). The latter is reserved
+// whatever thanos.version names, as web-config is (validatePrometheusName).
+func validateThanosSidecarMounts(t *monitoringv1.ThanosSpec) error {
+	if t == nil {
+		return nil
+	}
+	generated := map[string]string{
+		"/etc/thanos/config": "the path the Prometheus operator mounts the sidecar's HTTP client configuration at in the thanos-sidecar container for Thanos 0.24.0 and later",
+	}
+	if t.ObjectStorageConfig != nil || t.ObjectStorageConfigFile != nil {
+		generated["/prometheus"] = "the path the Prometheus operator mounts the data volume at in the thanos-sidecar container where object storage is configured"
+	}
+	return refuseGeneratedMounts(operatorContainerMounts{field: "thanos.volumeMounts", generated: generated, mounts: t.VolumeMounts})
 }
 
 // validatePrometheusPortName refuses a portName the API refuses where the
@@ -475,9 +545,15 @@ func usesLogFileVolume(spec *monitoringv1.PrometheusSpec) bool {
 // prometheusRuleFiles is how many rule ConfigMaps the operator mounts at
 // least, whether or not it has rules for them, so that a change in their
 // number does not roll the pods (AppendConfigMapNames, pkg/operator/rules.go:
-// 343-361; createOrUpdateRuleConfigMaps, pkg/prometheus/server/rules.go:99-119
-// at prometheus-operator v0.94.1). It names them
-// prometheus-<name>-rulefiles-<i>, and the volume of each after its ConfigMap.
+// 343-361; createOrUpdateRuleConfigMaps, pkg/prometheus/server/rules.go:99-119,
+// the 3 at :119, at prometheus-operator v0.94.1). It names them
+// prometheus-<name>-rulefiles-<i>, and the volume of each after its ConfigMap
+// (appendServerVolumes, pkg/prometheus/server/statefulset.go:514-526). It
+// creates more only where the PrometheusRules it selects outgrow three
+// ConfigMaps of half a MiB each (makeConfigMapsFromRules and
+// MaxConfigMapDataSize, pkg/operator/rules.go:440-465 and :58-62), which the
+// object does not say; an eleventh's volume, rulefiles-10, is one character
+// longer than rulefiles-2 and is not checked.
 const prometheusRuleFiles = 3
 
 // validatePrometheusName refuses a Prometheus name the operator's objects

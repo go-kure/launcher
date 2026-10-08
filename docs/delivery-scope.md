@@ -1866,8 +1866,7 @@ and by scope, whatever component or trait emits it.
     `externalLabels` keeps its upstream name; it is not checked as Kubernetes labels are.
   - **The pods are held as the Alertmanager's are, those of every shard:** `replicas`
     times `shards` is held to the replica maximum as the operator counts them, an unset
-    or negative replica count and an unset shard count or one of 1 or less read as 1,
-    authored or not, and the Thanos sidecar's `image` and `resources` are held as the
+    or negative replica count and an unset shard count read as 1, authored or not, and the Thanos sidecar's `image` and `resources` are held as the
     prometheus container's are. `baseImage`, `tag` and `sha` are not authorable: the
     spec's when not empty (an empty one writes nothing), the sidecar's whenever set, the
     empty string included. An image the operator chooses (for `prometheus`, the two
@@ -1895,16 +1894,24 @@ and by scope, whatever component or trait emits it.
   - **What the operator builds from the spec is checked as on the Alertmanager,** by the
     same shared checks: a `portName` the API refuses on the container or the governing
     Service (`grpc` where `thanos` is set and `serviceName` is not); a negative
-    `replicas`, which the operator runs as 1; the storage arms; an entry of `volumes`
+    `replicas`, which the operator runs as 1, and a `shards` below 1, for which it runs
+    1 shard; the storage arms; an entry of `volumes`
     named as a volume the operator adds (`config`, `tls-assets`, `config-out`,
     `web-config`, `log-file` where a log file is named without a directory,
     `thanos-prometheus-http-client-file` where `thanos` is set, the rule ConfigMaps'
     `prometheus-<name>-rulefiles-<n>`, the `secrets` and `configMaps` volumes and the data
     volume), and two entries of `secrets` or of `configMaps` the operator gives one
     volume name; an entry of `volumeMounts` at a path the operator mounts at in the
-    prometheus container; a negative request or limit; and a name whose data volume,
-    third rule ConfigMap volume `prometheus-<name>-rulefiles-2` or last pod hostname of
-    the last shard is not a DNS-1123 label (no dot, at most 40 characters).
+    prometheus container, and of `thanos.volumeMounts` at one it mounts at in the sidecar
+    (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
+    mounts from Thanos 0.24.0, whatever version is named); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
+    named with one, where the operator mounts no volume for it and no volume of the
+    author's is mounted at `/var/log/prometheus`; a negative request or limit; and a
+    name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
+    or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
+    characters, fewer where the authored shards and replicas make the hostname longer).
+    The operator mounts three rule ConfigMaps whatever the rules and more only for large
+    rule sets the object does not name; the name of an eleventh is not checked.
   - **An `excludedFromEnforcement` entry that leaves `group` out is written with
     `monitoring.coreos.com`,** and an authored empty group is refused by the entry's
     index: the Go type writes the field even when empty, and the API admits only that
