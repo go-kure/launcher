@@ -328,11 +328,14 @@ type walkFrame struct {
 	w    *defaulterWalk
 	fn   *vendoredFunc
 	vars map[string]pathVal
-	// copies are range values: copies of an element, through which a write
-	// would change nothing the walk can follow.
+	// copies are range values and variables given a field's value: copies,
+	// through which a write would change nothing the walk can follow.
 	copies map[string]bool
 	// locals are the other variables, as the source text of their value.
 	locals map[string]string
+	// ranges are the index variables of ranges over a list of the object,
+	// with the list's path.
+	ranges map[string]string
 	conds  []string
 }
 
@@ -348,14 +351,14 @@ func (w *defaulterWalk) call(fn *vendoredFunc, args []ast.Expr, caller *walkFram
 	if w.depth > 30 {
 		w.fail(fn.decl.Pos(), "the call depth passes 30: a recursion the walk does not follow")
 	}
-	f := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{}, copies: map[string]bool{}, locals: map[string]string{}, conds: caller.conds}
+	f := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, conds: caller.conds}
 	i := 0
 	for _, field := range fn.decl.Type.Params.List {
 		for _, name := range field.Names {
 			if i >= len(args) {
 				w.fail(fn.decl.Pos(), "%s takes more parameters than the call passes", fn.decl.Name.Name)
 			}
-			if pv, ok := caller.resolve(args[i]); ok {
+			if pv, ok := caller.alias(args[i]); ok {
 				f.vars[name.Name] = pv
 			} else {
 				f.locals[name.Name] = caller.render(args[i])
@@ -375,7 +378,7 @@ func (s *vendoredK8s) podSpecWrites(t *testing.T, pkgPath, name string, typ refl
 	fn := s.fn(t, pkgPath, name)
 	w := &defaulterWalk{t: t, src: s, prefix: prefix}
 	param := fn.decl.Type.Params.List[0].Names[0].Name
-	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}}
+	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}}
 	top.stmts(fn.decl.Body.List)
 	out := map[string][]specWrite{}
 	for _, wr := range w.writes {
@@ -492,6 +495,9 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		f.noVendoredCalls(x.X)
 		if k, ok := x.Key.(*ast.Ident); ok && k.Name != "_" {
 			f.bindLocal(k.Name, k.Name)
+			if pv, ok := f.resolve(x.X); ok {
+				f.ranges[k.Name] = pv.path
+			}
 		}
 		if v, ok := x.Value.(*ast.Ident); ok && v.Name != "_" {
 			f.bindLocal(v.Name, v.Name)
@@ -583,22 +589,59 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 	}
 }
 
+// alias is the field of the object e refers to, when a write through e
+// reaches the object: a variable bound to it, its address, a pointer, map or
+// list field, or a conversion of one to a pointer type. A struct or basic
+// field read by value is a copy, not an alias.
+func (f *walkFrame) alias(e ast.Expr) (pathVal, bool) {
+	pv, ok := f.resolve(e)
+	if !ok {
+		return pathVal{}, false
+	}
+	for {
+		p, isParen := e.(*ast.ParenExpr)
+		if !isParen {
+			break
+		}
+		e = p.X
+	}
+	switch x := e.(type) {
+	case *ast.Ident, *ast.CallExpr:
+		return pv, true
+	case *ast.UnaryExpr:
+		return pv, x.Op == token.AND
+	}
+	switch pv.typ.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		return pv, true
+	default:
+		return pathVal{}, false
+	}
+}
+
 // bindValue binds name, declared or assigned with value: to the field of the
-// object value denotes, so writes through it are followed, else to value's
-// text.
+// object value refers to, so writes through it are followed, else to value's
+// text; a copy of a field of the object is marked so, and a write through it
+// fails the walk.
 func (f *walkFrame) bindValue(name string, value ast.Expr) {
-	if pv, ok := f.resolve(value); ok {
+	if pv, ok := f.alias(value); ok {
 		f.vars[name] = pv
 		delete(f.locals, name)
 		delete(f.copies, name)
+		delete(f.ranges, name)
 		return
 	}
+	_, isCopy := f.resolve(value)
 	f.bindLocal(name, f.render(value))
+	if isCopy {
+		f.copies[name] = true
+	}
 }
 
 func (f *walkFrame) bindLocal(name, text string) {
 	delete(f.vars, name)
 	delete(f.copies, name)
+	delete(f.ranges, name)
 	f.locals[name] = text
 }
 
@@ -622,16 +665,20 @@ func rootIdent(e ast.Expr) *ast.Ident {
 	}
 }
 
-// nilCheck matches a condition that only tests that a field is set, and
-// captures the field's path.
-var nilCheck = regexp.MustCompile(`^\{([^{}]*)\} != nil$`)
+// nilCheck matches a condition that only tests that a field is set, in
+// either form, and captures the field's path.
+var nilCheck = regexp.MustCompile(`^(?:\{([^{}]*)\} != nil|!\(\{([^{}]*)\} == nil\))$`)
 
 // isAncestorCheck says c only tests that a field enclosing path is set, the
 // check a write under it needs to reach the field: it says nothing about when
 // the field is defaulted.
 func isAncestorCheck(c, path string) bool {
 	m := nilCheck.FindStringSubmatch(c)
-	return m != nil && (strings.HasPrefix(path, m[1]+".") || strings.HasPrefix(path, m[1]+"[]"))
+	if m == nil {
+		return false
+	}
+	field := m[1] + m[2]
+	return strings.HasPrefix(path, field+".") || strings.HasPrefix(path, field+"[]")
 }
 
 // write records an assignment to a field under the pod spec. A pointer, map
@@ -797,6 +844,13 @@ func (f *walkFrame) resolve(e ast.Expr) (pathVal, bool) {
 		t := derefType(base.typ)
 		switch t.Kind() {
 		case reflect.Slice, reflect.Array:
+			// Every element under the pod spec is reached only through the
+			// index of a range over the list itself: an element reached
+			// otherwise, or by another list's index, may be one the
+			// defaulting never visits.
+			if id, ok := x.Index.(*ast.Ident); strings.HasPrefix(base.path, f.w.prefix) && (!ok || f.ranges[id.Name] != base.path) {
+				f.w.fail(x.Pos(), "%s indexes %s by something other than a range over it, which the walk cannot place", f.w.src.text(x), base.path)
+			}
 			return pathVal{typ: t.Elem(), path: base.path + "[]"}, true
 		case reflect.Map:
 			return pathVal{typ: t.Elem(), path: base.path + "{}", mapElem: true}, true
@@ -1301,29 +1355,55 @@ func assignmentIn(src *vendoredK8s, body *ast.BlockStmt, lhs string) *ast.Assign
 	return nil
 }
 
-// assignedIn is the right-hand side of the assignment to lhs directly in body,
-// or nil.
-func assignedIn(src *vendoredK8s, body *ast.BlockStmt, lhs string) ast.Expr {
-	if as := assignmentIn(src, body, lhs); as != nil {
-		return as.Rhs[0]
+// flatStmts is the source text of each statement of body, its whitespace
+// collapsed to single spaces.
+func flatStmts(src *vendoredK8s, body *ast.BlockStmt) []string {
+	out := stmtTexts(src, body)
+	for i, s := range out {
+		out[i] = strings.Join(strings.Fields(s), " ")
 	}
-	return nil
+	return out
 }
 
-// checkOnlyWrites fails unless the assignments to a field named field, through
-// any variable, in every function of the package at pkgPath are exactly want,
-// by source text: a second write, before or after, would change the default
-// the checks below read from one of them.
+// writesField says the lvalue e writes to a field named field or to anything
+// beneath one: an element, or a field of it.
+func writesField(e ast.Expr, field string) bool {
+	for {
+		switch x := e.(type) {
+		case *ast.SelectorExpr:
+			if x.Sel.Name == field {
+				return true
+			}
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		case *ast.ParenExpr:
+			e = x.X
+		default:
+			return false
+		}
+	}
+}
+
+// checkOnlyWrites fails unless the assignments to a field named field, or to
+// anything beneath one, through any variable, in every function of the package
+// at pkgPath are exactly want, by source text: a second write, before or
+// after, would change the default the checks below read from one of them.
 func checkOnlyWrites(t *testing.T, src *vendoredK8s, pkgPath, field string, want ...string) {
 	t.Helper()
 	var got []string
 	for _, name := range slices.Sorted(maps.Keys(src.pkgs[pkgPath].funcs)) {
 		ast.Inspect(src.pkgs[pkgPath].funcs[name].decl.Body, func(n ast.Node) bool {
-			if as, ok := n.(*ast.AssignStmt); ok {
-				for _, l := range as.Lhs {
-					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == field {
-						got = append(got, name+": "+src.text(as))
-					}
+			switch s := n.(type) {
+			case *ast.AssignStmt:
+				if slices.ContainsFunc(s.Lhs, func(l ast.Expr) bool { return writesField(l, field) }) {
+					got = append(got, name+": "+src.text(s))
+				}
+			case *ast.IncDecStmt:
+				if writesField(s.X, field) {
+					got = append(got, name+": "+src.text(s))
 				}
 			}
 			return true
@@ -1338,9 +1418,11 @@ func checkOnlyWrites(t *testing.T, src *vendoredK8s, pkgPath, field string, want
 // defaults of hpaDefaultedZeros and networkPolicyDefaultedZeros to the API
 // server's defaulting code in the excerpt: each default is the literal the
 // code assigns, evaluated into the linked type and encoded, and each is
-// assigned only when the list is omitted or empty. checkOnlyWrites holds each
-// to being the only write to its field, so a later write cannot change it
-// unseen.
+// assigned only when the list is omitted or empty. The functions that reach
+// the defaults are held to their exact statements, so a return or branch
+// added to them cannot change when a default applies unseen, and
+// checkOnlyWrites holds each default to being the only write to its field or
+// beneath it, so a write elsewhere cannot change it unseen.
 func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 	src := loadVendoredK8s(t)
 
@@ -1368,26 +1450,40 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		if got, want := ev.evalJSON(assign.Rhs[0], reflect.TypeFor[[]autoscalingv2.MetricSpec]()), hpaDefaultedZeros.fields["metrics"]; got != want {
 			t.Errorf("the API server defaults metrics to %s, hpaDefaultedZeros says %s", got, want)
 		}
-		if !slices.Contains(stmtTexts(src, hpa.decl.Body), "SetDefaults_HorizontalPodAutoscalerBehavior(obj)") {
-			t.Error("SetDefaults_HorizontalPodAutoscaler does not call SetDefaults_HorizontalPodAutoscalerBehavior(obj)")
+		// The functions that reach the defaults are held to their exact
+		// statements: a return, a branch or a write added anywhere in them
+		// could change when or whether a default applies.
+		hpaStmts := hpa.decl.Body.List
+		if len(hpaStmts) != 3 || flatStmts(src, hpa.decl.Body)[0] != "if obj.Spec.MinReplicas == nil { obj.Spec.MinReplicas = ptr.To[int32](1) }" ||
+			hpaStmts[1] != ast.Stmt(metrics) || src.text(hpaStmts[2]) != "SetDefaults_HorizontalPodAutoscalerBehavior(obj)" {
+			t.Errorf("SetDefaults_HorizontalPodAutoscaler is not the minReplicas default, the metrics default, then SetDefaults_HorizontalPodAutoscalerBehavior(obj): %q", flatStmts(src, hpa.decl.Body))
 		}
 
 		behavior := src.fn(t, k8sAutoscalingV2, "SetDefaults_HorizontalPodAutoscalerBehavior")
-		set := findIf(src, behavior.decl.Body, "obj.Spec.Behavior != nil")
-		wantSet := []string{
-			"obj.Spec.Behavior.ScaleUp = GenerateHPAScaleUpRules(obj.Spec.Behavior.ScaleUp)",
-			"obj.Spec.Behavior.ScaleDown = GenerateHPAScaleDownRules(obj.Spec.Behavior.ScaleDown)",
+		wantBehavior := []string{"if obj.Spec.Behavior != nil { " +
+			"obj.Spec.Behavior.ScaleUp = GenerateHPAScaleUpRules(obj.Spec.Behavior.ScaleUp) " +
+			"obj.Spec.Behavior.ScaleDown = GenerateHPAScaleDownRules(obj.Spec.Behavior.ScaleDown) }"}
+		if got := flatStmts(src, behavior.decl.Body); !slices.Equal(got, wantBehavior) {
+			t.Errorf("SetDefaults_HorizontalPodAutoscalerBehavior does not only generate both directions' rules from the authored ones: %q", got)
 		}
-		if set == nil || !slices.Equal(stmtTexts(src, set.Body), wantSet) {
-			t.Errorf("SetDefaults_HorizontalPodAutoscalerBehavior does not generate both directions' rules from the authored ones")
-		}
-		checkOnlyWrites(t, src, k8sAutoscalingV2, "Behavior")
-		checkOnlyWrites(t, src, k8sAutoscalingV2, "ScaleUp", "SetDefaults_HorizontalPodAutoscalerBehavior: "+wantSet[0])
-		checkOnlyWrites(t, src, k8sAutoscalingV2, "ScaleDown", "SetDefaults_HorizontalPodAutoscalerBehavior: "+wantSet[1])
+		checkOnlyWrites(t, src, k8sAutoscalingV2, "Behavior",
+			"SetDefaults_HorizontalPodAutoscalerBehavior: obj.Spec.Behavior.ScaleUp = GenerateHPAScaleUpRules(obj.Spec.Behavior.ScaleUp)",
+			"SetDefaults_HorizontalPodAutoscalerBehavior: obj.Spec.Behavior.ScaleDown = GenerateHPAScaleDownRules(obj.Spec.Behavior.ScaleDown)")
+		checkOnlyWrites(t, src, k8sAutoscalingV2, "ScaleUp",
+			"SetDefaults_HorizontalPodAutoscalerBehavior: obj.Spec.Behavior.ScaleUp = GenerateHPAScaleUpRules(obj.Spec.Behavior.ScaleUp)")
+		checkOnlyWrites(t, src, k8sAutoscalingV2, "ScaleDown",
+			"SetDefaults_HorizontalPodAutoscalerBehavior: obj.Spec.Behavior.ScaleDown = GenerateHPAScaleDownRules(obj.Spec.Behavior.ScaleDown)")
 		copyRules := src.fn(t, k8sAutoscalingV2, "copyHPAScalingRules")
-		policies := findIf(src, copyRules.decl.Body, "from.Policies != nil")
-		if policies == nil || !slices.Equal(stmtTexts(src, policies.Body), []string{"to.Policies = from.Policies"}) {
-			t.Error("copyHPAScalingRules does not keep the default policies when the authored ones are nil")
+		wantCopy := []string{
+			"if from == nil { return to }",
+			"if from.SelectPolicy != nil { to.SelectPolicy = from.SelectPolicy }",
+			"if from.StabilizationWindowSeconds != nil { to.StabilizationWindowSeconds = from.StabilizationWindowSeconds }",
+			"if from.Policies != nil { to.Policies = from.Policies }",
+			"if from.Tolerance != nil { to.Tolerance = from.Tolerance }",
+			"return to",
+		}
+		if got := flatStmts(src, copyRules.decl.Body); !slices.Equal(got, wantCopy) {
+			t.Errorf("copyHPAScalingRules does not only copy each authored field over the defaults, keeping the default policies when the authored ones are nil: %q", got)
 		}
 		checkOnlyWrites(t, src, k8sAutoscalingV2, "Policies", "copyHPAScalingRules: to.Policies = from.Policies")
 		for _, dir := range []struct{ fn, rules, path string }{
@@ -1424,6 +1520,9 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		egress := findIf(src, empty.Body, "len(obj.Spec.Egress) != 0")
 		// The default is the base list, then the egress type appended to it:
 		// exactly those two statements, in that order.
+		if len(np.decl.Body.List) != 1 || np.decl.Body.List[0] != ast.Stmt(empty) {
+			t.Fatalf("SetDefaults_NetworkPolicy is not only the policyTypes default: %q", flatStmts(src, np.decl.Body))
+		}
 		if assign == nil || egress == nil || len(empty.Body.List) != 2 || empty.Body.List[0] != ast.Stmt(assign) || empty.Body.List[1] != ast.Stmt(egress) || len(egress.Body.List) != 1 {
 			t.Fatalf("SetDefaults_NetworkPolicy's default when policyTypes is empty is not an assignment then an egress branch: %q", stmtTexts(src, empty.Body))
 		}
