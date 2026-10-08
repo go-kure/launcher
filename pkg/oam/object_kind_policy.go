@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/manifest"
+	"github.com/go-kure/kure/pkg/stack/layout"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,6 +102,72 @@ func appliedSelfAndMembers(obj client.Object) []client.Object {
 		}
 	}
 	return out
+}
+
+// checkObjectKinds holds every object obj stands for when Flux applies it
+// (appliedObjects) to the policy: obj itself, or a list envelope's members and
+// not the envelope, which Flux never applies. Nil rules check nothing.
+func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
+	if o.kinds == nil {
+		return nil
+	}
+	for _, applied := range appliedObjects(obj) {
+		if err := o.checkObjectKind(applied); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordEmitted keeps obj among the objects this wrapper's Generate returned,
+// when the policy has object kind rules: AugmentLayout reads them again
+// (recheckEmitted).
+func (o *ownedConfig) recordEmitted(obj client.Object) {
+	id, ok := resourceIdentity(obj)
+	if o.kinds == nil || !ok {
+		return
+	}
+	o.emittedMu.Lock()
+	defer o.emittedMu.Unlock()
+	if o.emitted == nil {
+		o.emitted = layoutResources{}
+	}
+	o.emitted[id] = struct{}{}
+}
+
+// recheckEmitted holds again to the policy every resource on l and on its child
+// layouts that was there before the wrapped augmenter ran (before) and that this
+// wrapper's Generate returned: an augmenter may edit in place an object its
+// Generate returned, a list envelope's items included. What the augmenter added
+// was checked by stampAdded; an object a consumer put on the layout is not read.
+func (o *ownedConfig) recheckEmitted(l *layout.ManifestLayout, before layoutResources) error {
+	if l == nil || o.kinds == nil {
+		return nil
+	}
+	for _, r := range l.Resources {
+		id, ok := resourceIdentity(r)
+		if !ok {
+			continue
+		}
+		if _, was := before[id]; !was {
+			continue
+		}
+		o.emittedMu.Lock()
+		_, mine := o.emitted[id]
+		o.emittedMu.Unlock()
+		if !mine {
+			continue
+		}
+		if err := o.checkObjectKinds(r); err != nil {
+			return err
+		}
+	}
+	for _, c := range l.Children {
+		if err := o.recheckEmitted(c, before); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkObjectKind refuses obj when the policy keeps its kind out of the build,

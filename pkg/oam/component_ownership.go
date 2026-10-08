@@ -4,6 +4,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"sync"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"github.com/fluxcd/pkg/apis/kustomize"
@@ -76,6 +77,10 @@ type ownedConfig struct {
 	// kinds is the policy's ObjectKindPolicy, nil when it does not implement
 	// it (object_kind_policy.go).
 	kinds *objectKindRules
+	// emitted is the objects Generate returned under kinds, which AugmentLayout
+	// reads again (recheckEmitted); emittedMu guards it.
+	emittedMu sync.Mutex
+	emitted   layoutResources
 }
 
 // wrapOwnedConfig wraps inner for the component that owns its application; an
@@ -164,6 +169,7 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 		if err := o.stamp(*p); err != nil {
 			return nil, err
 		}
+		o.recordEmitted(*p)
 	}
 	return objs, nil
 }
@@ -355,8 +361,11 @@ type augmentingOwnedConfig struct {
 // object of its own, and neither is read (go-kure/launcher#790).
 //
 // Two things follow, and neither is checked here. An object that was on the
-// layout and that the wrapped augmenter edits in place is not read again: no
-// augmenter of launcher's edits one. And a caller that hands over a layout
+// layout and that the wrapped augmenter edits in place is not read again for
+// the reserved keys or the component label: no augmenter of launcher's edits
+// one. It is read again for the object kind policy when this wrapper's Generate
+// returned it (recheckEmitted), so an augmenter that appends a forbidden member
+// to a list it generated is refused. And a caller that hands over a layout
 // holding objects that never passed through Generate gets them back unchecked
 // and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
@@ -368,7 +377,10 @@ func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
 	if err := a.augmenter.AugmentLayout(l); err != nil {
 		return err
 	}
-	return a.stampAdded(l, before)
+	if err := a.stampAdded(l, before); err != nil {
+		return err
+	}
+	return a.recheckEmitted(l, before)
 }
 
 // GenerateCoversAugmentLayout forwards LayoutAugmentationCoverage, false when

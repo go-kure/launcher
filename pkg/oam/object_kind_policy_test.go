@@ -220,6 +220,73 @@ func TestObjectKindPolicy_AugmentedLayout(t *testing.T) {
 	}
 }
 
+// listGrowingAugmenter generates its objects and, as it augments the layout,
+// appends a member to the items of each list envelope on it, editing in place
+// an object its Generate returned.
+type listGrowingAugmenter struct {
+	ownershipObjectsConfig
+	member map[string]any
+}
+
+func (c *listGrowingAugmenter) AugmentLayout(l *layout.ManifestLayout) error {
+	for _, r := range l.Resources {
+		if u, ok := r.(*unstructured.Unstructured); ok && u.IsList() {
+			u.Object["items"] = append(u.Object["items"].([]any), c.member)
+		}
+	}
+	return nil
+}
+
+// TestObjectKindPolicy_AugmenterEditsItsOwnList: a member an augmenter appends
+// to a list its own Generate returned is held to the policy, though the list
+// was on the layout before it ran; an object a caller put on the layout is not.
+func TestObjectKindPolicy_AugmenterEditsItsOwnList(t *testing.T) {
+	policy := &kindPolicy{forbidden: []schema.GroupKind{{Group: "rbac.authorization.k8s.io", Kind: "*"}}, allowCluster: true}
+	list := func() *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List",
+			"items": []any{kindObject("v1", "ConfigMap", "ns").Object},
+		}}
+	}
+	role := kindObject("rbac.authorization.k8s.io/v1", "Role", "ns").Object
+
+	generated := list()
+	cfg := wrapOwnedEntryConfigKinds(&listGrowingAugmenter{ownershipObjectsConfig: ownershipObjectsConfig{objects: []client.Object{generated}}, member: role},
+		"web", "web", ownershipKey, nil, mustKindRules(t, policy))
+	objs, err := cfg.Generate(stack.NewApplication("web", "ns", cfg))
+	if err != nil {
+		t.Fatalf("Generate = %v, want the list of a ConfigMap generated", err)
+	}
+	l := &layout.ManifestLayout{}
+	for _, p := range objs {
+		if p != nil {
+			l.Resources = append(l.Resources, *p)
+		}
+	}
+	wantKindRefusal(t, cfg.(layout.LayoutAugmenter).AugmentLayout(l), "web", `Role "thing" (rbac.authorization.k8s.io/Role)`)
+
+	// A list on the layout that this wrapper did not generate is the caller's,
+	// and is not read (AugmentLayout).
+	cfg = wrapOwnedEntryConfigKinds(&listGrowingAugmenter{member: role}, "web", "web", ownershipKey, nil, mustKindRules(t, policy))
+	if err := cfg.(layout.LayoutAugmenter).AugmentLayout(&layout.ManifestLayout{Resources: []client.Object{list()}}); err != nil {
+		t.Errorf("AugmentLayout = %v, want a caller's object left unread", err)
+	}
+}
+
+// TestObjectKindPolicy_ListEnvelope: a list envelope is held to the policy by
+// its members, which Flux applies, and not as an object of its own: a List with
+// no namespace and of a kind no allowlist names passes when its members do.
+func TestObjectKindPolicy_ListEnvelope(t *testing.T) {
+	envelope := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "List",
+		"items": []any{kindObject("v1", "ConfigMap", "ns").Object},
+	}}
+	policy := &kindPolicy{allowed: []schema.GroupKind{{Kind: "ConfigMap"}}}
+	if err := generateUnderKinds(t, policy, "web", envelope); err != nil {
+		t.Errorf("Generate = %v, want a List of an allowed, namespaced ConfigMap generated", err)
+	}
+}
+
 // TestObjectKindPolicy_DocumentOwnedApplication: an application the document as
 // a whole owns is held to the policy too, and its refusal names its entry.
 func TestObjectKindPolicy_DocumentOwnedApplication(t *testing.T) {

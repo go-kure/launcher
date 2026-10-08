@@ -798,10 +798,12 @@ and by scope, whatever component or trait emits it.
 - **One check, on every producer:** the ownership wrapper the transform's last step puts
   on every application (`pkg/oam/object_kind_policy.go`). It reads each object generation
   emits — a kind component's, a trait's, what `passthrough` and `manifests` carry, every
-  object a chart renders at build time, its hook groups included — and each member of a
-  list envelope, and refuses the first that breaks the policy. A layout augmenter's
-  objects are read as it adds them, so a chart is refused object by object whether it is
-  generated, walked or laid out first.
+  object a chart renders at build time, its hook groups included — as Flux applies it: a
+  list envelope by each of its members, not as an object of its own. It refuses the first
+  that breaks the policy. A layout augmenter's objects are read as it adds them, and an
+  object its own Generate returned is read again after it ran, so a member it appends to
+  a list it generated is refused too; a chart is refused object by object whether it is
+  generated, walked or laid out first. An object a caller puts on the layout is not read.
 - **Scope:** kure's (`manifest.Scope`). A kind whose scope kure does not know (neither
   built in nor registered with kure) counts as cluster-scoped whatever namespace the object
   states, so the check fails closed: the namespace is the author's to write, and the API
@@ -1024,7 +1026,7 @@ and by scope, whatever component or trait emits it.
   and taking `objectName`. A GatewayClass is cluster-scoped, the other four namespaced.
   All five are built on `policyFreeKind`, unchanged: no environment policy applies, no
   default is filled and no `Policy` method is added.
-  - **No capability is required and nothing gates them,** a GatewayClass and a
+  - **No capability is required and none gates them,** a GatewayClass and a
     ReferenceGrant (which lets another namespace refer into the build namespace)
     included: on a cluster without the Gateway API's CRDs the component builds and the
     object is refused at apply. The `gateway` kind is not the Gateway a capability names
@@ -1065,7 +1067,7 @@ and by scope, whatever component or trait emits it.
   its object and taking `objectName`. All three are built on `policyFreeKind`,
   unchanged: no environment policy applies, no default is filled and no `Policy` method
   is added, as for the `httproute` kind.
-  - **No capability is required and nothing gates them,** on the terms of the
+  - **No capability is required and none gates them,** on the terms of the
     infrastructure kinds above. **A reference across namespaces is not gated either:**
     a parent's and a backend's `namespace` are written as authored, and whether the
     Gateway's listener and a ReferenceGrant allow them is the cluster's to answer. The
@@ -1099,7 +1101,7 @@ and by scope, whatever component or trait emits it.
   spec type, declaring its object and taking `objectName`. An Issuer and a Certificate
   are namespaced, a ClusterIssuer cluster-scoped. `certificate` is also a trait type;
   the two are separate lists, and the trait is unchanged.
-  - **No capability is required and nothing gates them,** a ClusterIssuer included: on
+  - **No capability is required and none gates them,** a ClusterIssuer included: on
     a cluster without cert-manager's CRDs the component builds and the object is refused
     at apply.
   - **The environment policy reaches two fields, so these are not built on
@@ -1143,7 +1145,7 @@ and by scope, whatever component or trait emits it.
   `cilium_bgp_common.go`), each the strict projection of its spec type, built on
   `policyFreeKind`, cluster-scoped, declaring its object and taking `objectName`. The
   type names carry a prefix: MetalLB has a BGPAdvertisement too.
-  - **No capability is required and nothing gates them:** on a cluster without Cilium's
+  - **No capability is required and none gates them:** on a cluster without Cilium's
     CRDs the component builds and the object is refused at apply.
   - The required lists follow the rule of the Prometheus operator's kinds, read from the
     CRDs of the linked module: a
@@ -1175,7 +1177,7 @@ and by scope, whatever component or trait emits it.
   `cilium_nodeconfig.go`), each the strict projection of its spec type, built on
   `policyFreeKind`, declaring its object and taking `objectName`. The first three are
   cluster-scoped; the redirect policy and the node configuration are namespaced.
-  - **No capability is required and nothing gates them,** as for the BGP kinds.
+  - **No capability is required and none gates them,** as for the BGP kinds.
   - The required lists are read from the CRDs of the linked module and held to them by
     a test, with the helper the BGP kinds use for a selector's match expressions.
   - A redirect frontend takes exactly one of `addressMatcher` and `serviceMatcher`: the
@@ -1199,7 +1201,7 @@ and by scope, whatever component or trait emits it.
   (`cilium_clusterwidenetworkpolicy.go`), the cluster-scoped counterpart of the
   `cilium-networkpolicy` kind: `spec`, `specs` or both, each a Cilium rule, with that
   kind's decode and its refusal of an unknown key inside a selector. It declares its
-  object and takes `objectName`. **No capability is required and nothing gates it.**
+  object and takes `objectName`. **No capability is required and none gates it.**
   - It refuses what the CRD's schema refuses of the two fields and is one comparison of
     authored fields: an object with no rule, a rule that authors both or neither of
     `endpointSelector` and `nodeSelector`, and a rule with no entry in any of its four
@@ -1247,7 +1249,7 @@ and by scope, whatever component or trait emits it.
   `clusterexternalsecret.go`, with what they share in `externalsecrets_common.go`), each
   the strict projection of its spec type, declaring its object and taking `objectName`.
   The two cluster kinds are cluster-scoped. All four are built on `policyHeldKind`.
-  - **No capability is required and nothing gates them:** on a cluster without the
+  - **No capability is required and none gates them:** on a cluster without the
     operator's CRDs the component builds and the object is refused at apply. The
     cluster's `external-secret` capability is the trait's; the kinds do not read it,
     and an `externalsecret` names its own store.
@@ -1460,7 +1462,7 @@ and by scope, whatever component or trait emits it.
     in one namespace and in no other: the one it is configured to watch (its
     `--namespace` flag or `METALLB_NAMESPACE`), by default the one it runs in;
     launcher does not know that namespace.
-  - **No capability is required and nothing gates them.**
+  - **No capability is required and none gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
     a test: a pool's `addresses`, and the key and the operator of a selector's match
     expression in the three kinds that hold selectors.
@@ -1486,7 +1488,7 @@ and by scope, whatever component or trait emits it.
     empty. A BGP advertisement that names no peer
     announces to every peer, so a new peer receives those announcements.
   - Namespaced and written in the build namespace, which MetalLB reads only where it is
-    the one MetalLB watches. **No capability is required and nothing gates it.**
+    the one MetalLB watches. **No capability is required and none gates it.**
   - Required, held to the CRD by a test: `myASN`, and the key and the operator of a
     match expression in `nodeSelectors`.
   - The CRD's three defaults: `peerPort` defaults to 179 and the Go type omits a 0, so
@@ -1602,7 +1604,7 @@ and by scope, whatever component or trait emits it.
   spec type, built on `policyFreeKind`, namespaced, declaring its object and taking
   `objectName`. The Probe's type name carries a prefix: a probe, in the components
   package, is a container's.
-  - **No capability is required and nothing gates them:** on a cluster without the
+  - **No capability is required and none gates them:** on a cluster without the
     operator's CRDs the component builds and the object is refused at apply.
   - A field the API requires that the Go type writes whether or not it was authored must
     be authored, since the object would not show the omission: a monitor's `selector`
@@ -1632,7 +1634,7 @@ and by scope, whatever component or trait emits it.
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the
   strict projection of its spec type, declaring its namespaced object and taking
   `objectName`. Both are built on `policyHeldKind`; no `Policy` method is added.
-  - **No capability is required and nothing gates them:** on a cluster without VolSync's
+  - **No capability is required and none gates them:** on a cluster without VolSync's
     CRDs the component builds and the object is refused at apply. The kinds read nothing
     of the cluster profile.
   - **Three things an author writes are held to the environment policy:** every
