@@ -42,6 +42,9 @@ packages:
   - path: pkg/oam/builtin/policies
     readme: pkg/oam/builtin/policies/README.md
     mount: {target: api-reference/oam-policies.md, title: Policy Handlers, weight: 26, group: OAM, desc: "Built-in application policies (dependency, placement)"}
+  - path: pkg/oam/builtin/registry
+    readme: pkg/oam/builtin/registry/README.md
+    mount: {target: api-reference/oam-registry.md, title: Built-in Registry, weight: 28, group: OAM, desc: "Every built-in handler and lowering rule, for registering the builtins"}
 
   # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin

@@ -28,7 +28,7 @@ import (
 var kindLists = []struct {
 	file, name string
 }{
-	{"build.go", "builtinComponentHandlers.return"},
+	{"../../oam/builtin/registry/registry.go", "ComponentHandlers.return"},
 	{"build_test.go", "TestBuiltinComponentHandlers_RegisteredTypes.wantHandlers"},
 	{"component_label_invariant_test.go", "componentLabelFixtures"},
 	{"../../oam/builtin/components/core_kinds_test.go", "coreKindSchemas"},

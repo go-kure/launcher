@@ -34,9 +34,9 @@ import (
 type ExposeRule struct{}
 
 // TraitType claims the "expose" trait type at the trait lowering position
-// (oam.TraitLoweringRule, lowering.go). Removing "expose" from build.go's
-// dispatchable trait-handler map (builtinTraitHandlers) and registering this rule
-// via RegisterTraitLowering means "expose" is now reachable only here.
+// (oam.TraitLoweringRule, lowering.go). It is absent from the dispatchable
+// trait-handler map (registry.TraitHandlers) and registered via
+// RegisterBuiltinTraitLowering, so "expose" is reachable only here.
 func (ExposeRule) TraitType() string { return "expose" }
 
 // CapabilityRequired returns true: the expose trait needs controllerType from a

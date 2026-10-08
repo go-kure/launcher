@@ -2016,8 +2016,9 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
-`RegisterPolicy(type, handler)` adds an application policy handler; `pkg/cmd/kurel` registers
-the built-ins. Extend the system by implementing:
+`RegisterPolicy(type, handler)` adds an application policy handler; the built-ins come from
+`pkg/oam/builtin/registry` (see [Registering the builtins](#registering-the-builtins)).
+Extend the system by implementing:
 
 | Interface | Role |
 |-----------|------|
@@ -2073,6 +2074,39 @@ the binding and whether the profile has one, and records a key it finds. The
 `lctx.Capabilities[k]` to `binding, ok := lctx.Capability(k)`. A test driver that calls
 a rule directly, and used to set the field, uses
 `lctx.WithCapabilities(m)` instead; its reads are recorded nowhere.
+
+### Registering the builtins
+
+[`pkg/oam/builtin/registry`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/registry)
+returns every built-in handler and lowering rule launcher implements, one map per
+registration call, keyed by type. Registering all five gives the transformer `kurel build`
+uses:
+
+```go
+t := oam.NewTransformer(registry.ComponentHandlers(), nil)
+for _, r := range registry.ComponentLoweringRules() {
+	t.RegisterComponentLowering(r)
+}
+for name, h := range registry.TraitHandlers() {
+	t.RegisterBuiltinTrait(name, h)
+}
+for name, h := range registry.PolicyHandlers() {
+	t.RegisterPolicy(name, h)
+}
+for _, r := range registry.TraitLoweringRules() {
+	t.RegisterBuiltinTraitLowering(r)
+}
+```
+
+Each call returns a new map, so a consumer drops or replaces entries before it registers
+them, and the change reaches no other caller; a type launcher adds later appears there
+without a change on the consumer's side. Built-in traits and trait lowering rules go
+through `RegisterBuiltinTrait` and `RegisterBuiltinTraitLowering`, which exempt them from a
+`CapabilityDefinition` of the same type. A consumer that replaces a lowered type (such as
+`webservice`) with a handler of its own deletes it from `ComponentLoweringRules()` first:
+`RegisterComponentLowering` panics on a type that is already a handler. The maps hold no
+handler for the delivery policies and traits above; a consumer that delivers registers its
+own.
 
 ## Lowering
 
