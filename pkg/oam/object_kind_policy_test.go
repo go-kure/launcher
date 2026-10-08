@@ -3,6 +3,7 @@ package oam
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -284,6 +286,62 @@ func TestObjectKindPolicy_ListEnvelope(t *testing.T) {
 	policy := &kindPolicy{allowed: []schema.GroupKind{{Kind: "ConfigMap"}}}
 	if err := generateUnderKinds(t, policy, "web", envelope); err != nil {
 		t.Errorf("Generate = %v, want a List of an allowed, namespaced ConfigMap generated", err)
+	}
+}
+
+// typedList is a typed client.Object that is written as a list envelope.
+type typedList struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Items             []runtime.RawExtension `json:"items"`
+}
+
+func (l *typedList) DeepCopyObject() runtime.Object {
+	c := *l
+	c.Items = slices.Clone(l.Items)
+	return &c
+}
+
+// TestObjectKindPolicy_TypedList: a typed list envelope stands for its members
+// as an unstructured one does, since it is written as a list Kustomize expands.
+func TestObjectKindPolicy_TypedList(t *testing.T) {
+	policy := &kindPolicy{forbidden: []schema.GroupKind{{Group: "rbac.authorization.k8s.io", Kind: "*"}}, allowCluster: true}
+	list := func(member string) *typedList {
+		return &typedList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "List"},
+			Items:    []runtime.RawExtension{{Raw: []byte(member)}},
+		}
+	}
+	wantKindRefusal(t, generateUnderKinds(t, policy, "web",
+		list(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"thing"}}`)),
+		"web", `ClusterRole "thing" (rbac.authorization.k8s.io/ClusterRole)`)
+	if err := generateUnderKinds(t, policy, "web",
+		list(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"thing","namespace":"ns"}}`)); err != nil {
+		t.Errorf("Generate = %v, want a typed List of a ConfigMap generated", err)
+	}
+}
+
+// generatorAugmenter adds a configMapGenerator entry to the layout it augments.
+type generatorAugmenter struct{ ownershipObjectsConfig }
+
+func (c *generatorAugmenter) AugmentLayout(l *layout.ManifestLayout) error {
+	l.ConfigMapGenerators = append(l.ConfigMapGenerators, layout.ConfigMapGeneratorSpec{Name: "values", Files: []string{"values.yaml"}})
+	return nil
+}
+
+// TestObjectKindPolicy_AddedGenerator: a configMapGenerator entry an augmenter
+// adds is held to the policy as the ConfigMap Kustomize builds from it; one
+// that was on the layout before it ran is the caller's, and is not read.
+func TestObjectKindPolicy_AddedGenerator(t *testing.T) {
+	policy := &kindPolicy{forbidden: []schema.GroupKind{{Kind: "ConfigMap"}}}
+	augment := func(l *layout.ManifestLayout) error {
+		cfg := wrapOwnedEntryConfigKinds(&generatorAugmenter{}, "web", "web", ownershipKey, nil, mustKindRules(t, policy))
+		return cfg.(layout.LayoutAugmenter).AugmentLayout(l)
+	}
+	wantKindRefusal(t, augment(&layout.ManifestLayout{Namespace: "ns"}), "web", `ConfigMap "values" (core/ConfigMap)`)
+	held := &layout.ManifestLayout{Namespace: "ns", ConfigMapGenerators: []layout.ConfigMapGeneratorSpec{{Name: "values"}}}
+	if err := augment(held); err != nil {
+		t.Errorf("AugmentLayout = %v, want a caller's generator of the same name left unread", err)
 	}
 }
 
