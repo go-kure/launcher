@@ -4233,9 +4233,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     function they call. It fails on a field the code defaults and the list
     does not hold, on a default the list states otherwise, and on a row the
     code does not set. The walk is closed: it accepts only the kinds of
-    statement and expression, the unary operators and the calls the excerpt
-    at the vendored tag uses, each listed in the test, and fails on anything
-    else, naming it and its position, rather than guess. It also fails on
+    statement, expression and type, the unary operators and the calls the
+    excerpt at the vendored tag uses, each listed in the test (a method by
+    its receiver's identity, a builtin only while no name of the excerpt
+    shadows it), and fails on anything else, naming it and its position,
+    rather than guess. It also fails on
     listed shapes it cannot follow: among others, a write through a copy of a
     field (read by name or through a dereference), a list element reached by
     anything but a range over that list, a `break` out of a loop, a method
