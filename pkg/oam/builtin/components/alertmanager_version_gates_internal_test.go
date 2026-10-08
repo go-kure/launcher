@@ -13,8 +13,8 @@ import (
 // alertmanagerGateFiles are the files of the operator's pkg/alertmanager
 // that compare the Alertmanager version: the pods (statefulset.go), the
 // configuration it generates (amcfg.go) and the reconcile (operator.go). No
-// other file of the package does at v0.94.1 (its tests aside); a refresh of
-// the excerpt checks that again.
+// other file of the package does at v0.94.1 (its tests aside);
+// scripts/vendor-prometheus-operator-gates.sh refuses a tag where one does.
 var alertmanagerGateFiles = []string{
 	"pkg/alertmanager/statefulset.go",
 	"pkg/alertmanager/amcfg.go",
@@ -36,6 +36,9 @@ var alertmanagerGateRows = func() []gateRow {
 		// configuration it generates: only a configSecret Secret, which this
 		// kind names and does not author, can.
 		notGlobal = "a field of the generated global configuration that alertmanagerConfiguration.global cannot set; only the configSecret Secret can"
+		// The two strategies that enforce a namespace choose the syntax of
+		// the matcher they add by the version.
+		enforcerSyntax = "chooses the syntax of the matchers the operator adds for alertmanagerConfigMatcherStrategy; every strategy is read at every version"
 	)
 	gate := func(file, fn, cond string, paths ...string) gateRow {
 		return gateRow{file: file, fn: fn, cond: cond, paths: paths}
@@ -61,6 +64,11 @@ var alertmanagerGateRows = func() []gateRow {
 		gate(sts, pods, `version.GTE(semver.MustParse("0.24.0"))`, "clusterTLS"),
 		{file: sts, fn: pods, cond: `version.GTE(semver.MustParse("0.30.0"))`, ordinal: 2,
 			not: "the POD_NAME variable of the alertmanager container, which the default peer name of the clusterPeerName gate reads; no field"},
+
+		// getEnforcer reads alertmanagerConfigMatcherStrategy, so each of its
+		// comparisons is classified on its own: a new one fails the test.
+		not(amcfg, "getEnforcer", `&otherNamespaceEnforcer{ alertmanagerNamespace: amNamespace, namespaceEnforcer: namespaceEnforcer{ matchersV2Allowed: amVersion.GTE(semver.MustParse("0.22.0")), }, }`, enforcerSyntax),
+		not(amcfg, "getEnforcer", `&namespaceEnforcer{ matchersV2Allowed: amVersion.GTE(semver.MustParse("0.22.0")), }`, enforcerSyntax),
 
 		{file: op, fn: "(*Operator).provisionAlertmanagerConfiguration", cond: `version.LT(semver.MustParse("0.15.0")) || version.Major > 0`, floor: true},
 
@@ -120,7 +128,6 @@ var alertmanagerGateFuncs = func() map[string]string {
 	)
 	funcs := map[string]string{
 		amcfg + "(*alertmanagerConfig).sanitize":     "the mute and time intervals of the configuration, which come from the configSecret Secret or an AlertmanagerConfig object, not from this kind",
-		amcfg + "getEnforcer":                        "chooses the syntax of the matchers the operator adds for alertmanagerConfigMatcherStrategy; every strategy is read at every version",
 		amcfg + "(*ConfigBuilder).convertMatchersV2": "chooses the syntax of an AlertmanagerConfig object's matchers",
 		amcfg + "(*ConfigBuilder).convertSnsConfig":  config,
 	}

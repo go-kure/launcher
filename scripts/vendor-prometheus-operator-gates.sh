@@ -54,7 +54,23 @@ if [[ ! "$TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+UPSTREAM="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$UPSTREAM"' EXIT
+
+# The test reads only the pkg/alertmanager files above, so refuse a tag where
+# another file of the package (its tests aside) compares the Alertmanager
+# version: its gates would go unclassified.
+git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
+git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager
+UNREAD=()
+while IFS= read -r f; do
+  f="${f#"$UPSTREAM"/}"
+  [[ " ${FILES[*]} " == *" $f "* ]] || UNREAD+=("$f")
+done < <(find "$UPSTREAM/pkg/alertmanager" -name '*.go' ! -name '*_test.go' -exec grep -l 'semver\.MustParse' -- {} +)
+if (( ${#UNREAD[@]} > 0 )); then
+  echo "ERROR: $TAG compares the Alertmanager version outside the vendored files: ${UNREAD[*]}; vendor them, and classify their gates in the test" >&2
+  exit 1
+fi
 
 for f in "${FILES[@]}" LICENSE NOTICE; do
   mkdir -p "$STAGE/$(dirname "$f")"
