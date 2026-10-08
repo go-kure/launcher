@@ -449,7 +449,9 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 	case *ast.ReturnStmt:
 		return true
 	case *ast.BranchStmt:
-		if x.Tok != token.CONTINUE && x.Tok != token.BREAK {
+		// A break leaves a range before its later elements, which the walk,
+		// visiting the body once, cannot tell from a continue.
+		if x.Tok != token.CONTINUE {
 			w.fail(x.Pos(), "a %s the walk does not follow", x.Tok)
 		}
 		return true
@@ -592,8 +594,8 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 // alias is the field of the object e refers to, when a write through e
 // reaches the object: a variable bound to it, its address, a pointer, map or
 // list field, or a conversion of one to a pointer type. A struct or basic
-// field read by name is a copy, not an alias. A copy taken by dereferencing a
-// pointer (*p) is not told apart: resolve keeps the pointer's type.
+// field read by name, or anything read through a dereference (*p), is a
+// copy, not an alias.
 func (f *walkFrame) alias(e ast.Expr) (pathVal, bool) {
 	pv, ok := f.resolve(e)
 	if !ok {
@@ -611,6 +613,10 @@ func (f *walkFrame) alias(e ast.Expr) (pathVal, bool) {
 		return pv, true
 	case *ast.UnaryExpr:
 		return pv, x.Op == token.AND
+	case *ast.StarExpr:
+		// resolve keeps the pointer's type through a dereference, so the
+		// kind below would take *p for the pointer p.
+		return pathVal{}, false
 	}
 	switch pv.typ.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Slice:
@@ -1195,10 +1201,11 @@ func checkParseImageName(t *testing.T, src *vendoredK8s) {
 	}
 }
 
-// findIf is the if statement directly in body whose condition reads cond.
+// findIf is the if statement directly in body whose condition reads cond,
+// with neither an initialiser nor an else, or nil.
 func findIf(src *vendoredK8s, body *ast.BlockStmt, cond string) *ast.IfStmt {
 	for _, s := range body.List {
-		if is, ok := s.(*ast.IfStmt); ok && src.text(is.Cond) == cond {
+		if is, ok := s.(*ast.IfStmt); ok && is.Init == nil && is.Else == nil && src.text(is.Cond) == cond {
 			return is
 		}
 	}
@@ -1420,9 +1427,8 @@ func checkOnlyWrites(t *testing.T, src *vendoredK8s, pkgPath, field string, want
 // server's defaulting code in the excerpt: each default is the literal the
 // code assigns, evaluated into the linked type and encoded, and each is
 // assigned only when the list is omitted or empty. The functions that reach
-// the defaults are held to their statement lists (an if initialiser on a
-// matched guard is not compared), so a return or branch added to them
-// cannot change when a default applies unseen, and
+// the defaults are held to their exact statements, so a return, branch or
+// initialiser added to them cannot change when a default applies unseen, and
 // checkOnlyWrites holds each default to being the only write to its field or
 // beneath it, so a write elsewhere cannot change it unseen.
 func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
@@ -1432,7 +1438,7 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		hpa := src.fn(t, k8sAutoscalingV2, "SetDefaults_HorizontalPodAutoscaler")
 		metrics := findIf(src, hpa.decl.Body, "len(obj.Spec.Metrics) == 0")
 		if metrics == nil {
-			t.Fatal("SetDefaults_HorizontalPodAutoscaler does not test len(obj.Spec.Metrics) == 0")
+			t.Fatal("SetDefaults_HorizontalPodAutoscaler does not test len(obj.Spec.Metrics) == 0 in an if with no initialiser and no else")
 		}
 		ev := &literalEval{t: t, src: src, pkg: hpa.pkg, file: hpa.file, locals: map[string]ast.Expr{}}
 		assign := assignmentIn(src, metrics.Body, "obj.Spec.Metrics")
@@ -1452,9 +1458,9 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		if got, want := ev.evalJSON(assign.Rhs[0], reflect.TypeFor[[]autoscalingv2.MetricSpec]()), hpaDefaultedZeros.fields["metrics"]; got != want {
 			t.Errorf("the API server defaults metrics to %s, hpaDefaultedZeros says %s", got, want)
 		}
-		// The functions that reach the defaults are held to their statement
-		// lists: a return, a branch or a write added among them could change
-		// when or whether a default applies.
+		// The functions that reach the defaults are held to their exact
+		// statements: a return, a branch, an initialiser or a write added
+		// anywhere in them could change when or whether a default applies.
 		hpaStmts := hpa.decl.Body.List
 		if len(hpaStmts) != 3 || flatStmts(src, hpa.decl.Body)[0] != "if obj.Spec.MinReplicas == nil { obj.Spec.MinReplicas = ptr.To[int32](1) }" ||
 			hpaStmts[1] != ast.Stmt(metrics) || src.text(hpaStmts[2]) != "SetDefaults_HorizontalPodAutoscalerBehavior(obj)" {
@@ -1515,7 +1521,7 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		np := src.fn(t, k8sNetworkingV1, "SetDefaults_NetworkPolicy")
 		empty := findIf(src, np.decl.Body, "len(obj.Spec.PolicyTypes) == 0")
 		if empty == nil {
-			t.Fatal("SetDefaults_NetworkPolicy does not test len(obj.Spec.PolicyTypes) == 0")
+			t.Fatal("SetDefaults_NetworkPolicy does not test len(obj.Spec.PolicyTypes) == 0 in an if with no initialiser and no else")
 		}
 		ev := &literalEval{t: t, src: src, pkg: np.pkg, file: np.file}
 		assign := assignmentIn(src, empty.Body, "obj.Spec.PolicyTypes")
