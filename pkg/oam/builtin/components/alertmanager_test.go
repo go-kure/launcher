@@ -301,6 +301,22 @@ func alertmanagerRefusals(notA string) []struct {
 			"externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to Alertmanager, which then exits at startup; name a valid URL, or leave it unset"},
 		{"an externalUrl that does not parse before v0.19.0", map[string]any{"version": "v0.18.0", "externalUrl": "http://[::1"},
 			"externalUrl: not a URL Go's net/url can parse"},
+		// A cluster advertise address Alertmanager exits on where the cluster
+		// runs (go-kure/launcher#950): one net.SplitHostPort refuses, a port
+		// strconv.Atoi refuses, and a host memberlist's net.ParseIP refuses;
+		// at replicas other than 1, 0 included, and with forceEnableClusterMode.
+		{"a cluster advertise address without a port", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset"},
+		{"a cluster advertise address of a named port", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:mesh"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of a host name", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "alerts.example.com:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of an IPv6 address unbracketed", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "fd00::1:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address at zero replicas", map[string]any{"replicas": 0, "clusterAdvertiseAddress": "10.0.0.1"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address with the cluster forced on", map[string]any{"forceEnableClusterMode": true, "clusterAdvertiseAddress": "10.0.0.1"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		// A web port name the API refuses on the container (statefulset.go:483-500).
 		{"a port name over 15 characters", map[string]any{"portName": "alertmanager-web"},
 			`portName: "alertmanager-web" is not a valid port name`},
@@ -960,6 +976,16 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a claim template with access modes written empty": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 			"accessModes": []any{}, "resources": amClaim["resources"],
 		}}}},
+		// Where the cluster runs, Alertmanager takes an IP address and a
+		// numeric port, an empty host, and a port Atoi takes that no socket has.
+		"a cluster advertise address of IPv4":          {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:9094"},
+		"a cluster advertise address of IPv6":          {"replicas": 3, "clusterAdvertiseAddress": "[fd00::1]:9094"},
+		"a cluster advertise address without its host": {"replicas": 3, "clusterAdvertiseAddress": ":9094"},
+		"a cluster advertise address of a signed port": {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:+80"},
+		"a cluster advertise address of a large port":  {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:99999"},
+		// With the cluster off Alertmanager does not read it.
+		"a cluster advertise address at one replica":    {"replicas": 1, "clusterAdvertiseAddress": "alerts.example.com"},
+		"a cluster advertise address at unset replicas": {"clusterAdvertiseAddress": "alerts.example.com"},
 		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
 			"emptyDir":            map[string]any{},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "alertmanager-fast-db"}},
@@ -1044,6 +1070,31 @@ func TestAlertmanager_ExternalURLRefusalNamesNoValue(t *testing.T) {
 				t.Fatal("err = nil, want the externalUrl refused")
 			}
 			for _, part := range []string{"s3cret", "bot", "smtp", "[::1"} {
+				if strings.Contains(err.Error(), part) {
+					t.Errorf("err = %v, names %q of the value", err, part)
+				}
+			}
+		})
+	}
+}
+
+// TestAlertmanager_AdvertiseAddressRefusalNamesNoValue: a refused
+// clusterAdvertiseAddress is not quoted, nor its host, as the externalUrl
+// refusal names no value, and net.SplitHostPort's error, which repeats it, is
+// not passed on.
+func TestAlertmanager_AdvertiseAddressRefusalNamesNoValue(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	for name, value := range map[string]string{
+		"a host name":    "secret-host.example.com:9094",
+		"a named port":   "10.9.8.7:secret-port",
+		"no port at all": "10.9.8.7",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(h, "alertmanager", "fast", map[string]any{"replicas": 3, "clusterAdvertiseAddress": value})
+			if err == nil {
+				t.Fatal("err = nil, want the clusterAdvertiseAddress refused")
+			}
+			for _, part := range []string{"secret", "10.9.8.7"} {
 				if strings.Contains(err.Error(), part) {
 					t.Errorf("err = %v, names %q of the value", err, part)
 				}
