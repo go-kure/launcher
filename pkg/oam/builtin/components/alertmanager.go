@@ -135,7 +135,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
-		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. The host is judged an IP address, a host name refused, only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port and a numeric port are held. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them."),
+		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. The host is judged an IP address in full only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port, a numeric port and a host of the characters an IP address has (hex digits, '.' and ':') are held: a host name such as alerts.example.com is still refused there. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them."),
 		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
@@ -727,7 +727,9 @@ func alertmanagerClusterRuns(spec *monitoringv1.AlertmanagerSpec) bool {
 // not refused: memberlist truncates it and starts. An empty host, as in :9094,
 // is not refused either: Alertmanager then works the address out itself. The
 // host is held to net.ParseIP only where Alertmanager is built with the Go
-// whose net.ParseIP this is (alertmanagerParsesIPAsGo123). The
+// whose net.ParseIP this is (alertmanagerParsesIPAsGo123); at any version, one
+// with a character no IP address has, as a host name, is refused
+// (ipAddressCharacters). The
 // value is read as the kubelet passes it (kubeletArgument); one that refers to
 // an environment variable, as [$(POD_IP)]:9094, is not refused, as the kind
 // cannot see what the kubelet expands it to (the operator itself gives the
@@ -745,7 +747,7 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 	if err == nil {
 		_, err = strconv.Atoi(port)
 	}
-	if err != nil || (host != "" && alertmanagerParsesIPAsGo123(spec) && net.ParseIP(host) == nil) {
+	if err != nil || (host != "" && (!ipAddressCharacters(host) || (alertmanagerParsesIPAsGo123(spec) && net.ParseIP(host) == nil))) {
 		return errors.New("clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset")
 	}
 	return nil
@@ -755,7 +757,7 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 // to the process, and whether it refers to an environment variable, whose
 // value the kind cannot see: the kubelet expands each $(NAME) in it, reads $$
 // as $, and leaves $( without a closing parenthesis, and $ before any other
-// character, as written (Expand and tryReadVariableName,
+// byte, as written, that byte as a rune (Expand and tryReadVariableName,
 // third_party/forked/golang/expansion/expand.go:35-102 at Kubernetes
 // v1.35.0). A reference to a variable the container does not have is left as
 // written too, but the kind cannot tell which it has: envFrom and the
@@ -777,11 +779,22 @@ func kubeletArgument(value string) (string, bool) {
 			}
 			b.WriteString("$(")
 		default:
+			// string(input[0]) there: a byte above 0x7F is written as the
+			// rune of its value, in UTF-8.
 			b.WriteByte('$')
-			b.WriteByte(value[i])
+			b.WriteRune(rune(value[i]))
 		}
 	}
 	return b.String(), false
+}
+
+// ipAddressCharacters reports whether host has only characters an IP address
+// may have: hex digits, '.' and ':'. The net.ParseIP of no Go version
+// Alertmanager is built with takes any other, a zone's '%' included, so a host
+// with one is not an IP address for any version, whatever older parse rules
+// alertmanagerParsesIPAsGo123 leaves unmodelled.
+func ipAddressCharacters(host string) bool {
+	return strings.Trim(host, "0123456789abcdefABCDEF.:") == ""
 }
 
 // alertmanagerParsesIPAsGo123 reports whether the Alertmanager of the spec's
@@ -792,7 +805,7 @@ func kubeletArgument(value string) (string, bool) {
 // validateAlertmanagerVersion refuses it. An older Go parses IP addresses by
 // older rules, taking some that Go 1.23 refuses (leading zeros, as 010.0.0.1
 // or fd00::00001); those are not modelled, so an older version's host is not
-// held to net.ParseIP at all.
+// held to net.ParseIP, only to ipAddressCharacters.
 func alertmanagerParsesIPAsGo123(spec *monitoringv1.AlertmanagerSpec) bool {
 	version, err := semver.ParseTolerant(spec.Version)
 	return spec.Version == "" || err != nil || version.GTE(semver.MustParse("0.28.0-0"))

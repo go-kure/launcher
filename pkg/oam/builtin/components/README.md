@@ -3985,15 +3985,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   reads the port with `strconv.Atoi` and gives the host to memberlist, which
   takes only an IP address; any failure ends the cluster's creation, and
   Alertmanager exits (`cluster/cluster.go:162-171` and `app/app.go:214-234` of
-  v0.34.0). The host is judged an IP address, a host name refused with the
-  rest, only where Alertmanager is built with Go 1.23 or later, whose
+  v0.34.0). The host is judged an IP address in full only where
+  Alertmanager is built with Go 1.23 or later, whose
   `net.ParseIP` the check uses: from v0.28.0 on, its prerelease
   `v0.28.0-rc.0` included (`.promu.yml`), and where `version` is unset. This
   is a limit: older Alertmanager versions parse IP addresses with older Go
   rules, which this check does not model (they take some leading zeros Go
   1.23 refuses, as `010.0.0.1` or `fd00::00001`), so before v0.28.0 only
-  `host:port` and a numeric port are held, and a host that is not an IP
-  address there is not refused. An empty host, as in `:9094`, is
+  `host:port`, a numeric port and a host of the characters an IP address has
+  (hex digits, `.` and `:`) are held. A host with any other character, as the
+  host name `alerts.example.com`, is no IP address for the `net.ParseIP` of
+  any Go and is refused at every version; one of those characters only, as
+  `cafe.dead`, is not refused before v0.28.0. An empty host, as in `:9094`, is
   not refused: Alertmanager then works the address out itself; nor is a port
   number no socket has, which memberlist truncates. The value is read as the
   kubelet passes it, which reads `$$` as `$` and leaves `$(` without its
