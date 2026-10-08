@@ -453,9 +453,13 @@ func alertmanagerRefusals(notA string) []struct {
 			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
 		}}, `volumes[1] "scratch": the name is listed already at volumes[0], and the API refuses a pod with two volumes of one name`},
 		// The operator gets the governing Service by this name and fails the
-		// reconcile where there is none (pkg/k8s/network.go:135-140).
-		{"a serviceName that is not a DNS-1123 label", map[string]any{"serviceName": "Bad_Name"},
-			`serviceName: "Bad_Name" is not a DNS-1123 label`},
+		// reconcile where there is none (pkg/k8s/network.go:135-140). A
+		// Service's name is a DNS-1035 label, so a leading digit, which a
+		// DNS-1123 label admits, names no Service either.
+		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "Bad_Name"},
+			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1035 label`},
+		{"a serviceName with a leading digit", map[string]any{"serviceName": "1alerts"},
+			`serviceName: "1alerts" is not a valid Service name, which must be a DNS-1035 label`},
 		// The CRD's quantity pattern admits a sign; the API refuses the
 		// container the operator builds with it.
 		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},

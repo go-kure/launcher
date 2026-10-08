@@ -1774,7 +1774,7 @@ and by scope, whatever component or trait emits it.
     pods, generated or listed; a container whose ports name two ports alike, a patch's
     taken as merged into the operator's by number, as its strategic merge does
     (go-kure/launcher#947); two `volumes` of one name; a `serviceName` that is not a
-    DNS-1123 label, which names no Service; a web or cluster TLS
+    DNS-1035 label, which names no Service; a web or cluster TLS
     configuration the operator's own validation refuses; `dnsPolicy: None` without a
     nameserver, and a pod-level HostProcess without `hostNetwork`; a negative request or
     limit; and a name whose data
