@@ -707,18 +707,19 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "alertmanager", typ: "monitoringv1.AlertmanagerSpec", config: kindConfig(&AlertmanagerHandler{}),
 		// The storage arm a selector is written into must claim storage.
-		base:   map[string]any{"storage": amClaimingStorage()},
+		base:   map[string]any{"storage": operatorClaimingStorage()},
 		ground: generatorRuleGround,
 	},
 	{
 		component: "thanosruler", typ: "monitoringv1.ThanosRulerSpec", config: kindConfig(&ThanosRulerHandler{}),
 		// The storage arm a selector is written into must claim storage.
-		base:   map[string]any{"storage": amClaimingStorage()},
+		base:   map[string]any{"storage": operatorClaimingStorage()},
 		ground: generatorRuleGround,
 	},
 	{
 		component: "prometheus", typ: "monitoringv1.PrometheusSpec", config: kindConfig(&PrometheusHandler{}),
-		base:   map[string]any{},
+		// As on alertmanager.
+		base:   map[string]any{"storage": operatorClaimingStorage()},
 		ground: generatorRuleGround,
 	},
 	{

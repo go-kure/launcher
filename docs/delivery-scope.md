@@ -1892,6 +1892,19 @@ and by scope, whatever component or trait emits it.
     `apiserverConfig` is refused under a policy that forbids explicit secrets. A
     credential in a `headers` value or the userinfo of a URL is written as authored and
     not held.
+  - **What the operator builds from the spec is checked as on the Alertmanager,** by the
+    same shared checks: a `portName` the API refuses on the container or the governing
+    Service (`grpc` where `thanos` is set and `serviceName` is not); a negative
+    `replicas`, which the operator runs as 1; the storage arms; an entry of `volumes`
+    named as a volume the operator adds (`config`, `tls-assets`, `config-out`,
+    `web-config`, `log-file` where a log file is named without a directory,
+    `thanos-prometheus-http-client-file` where `thanos` is set, the rule ConfigMaps'
+    `prometheus-<name>-rulefiles-<n>`, the `secrets` and `configMaps` volumes and the data
+    volume), and two entries of `secrets` or of `configMaps` the operator gives one
+    volume name; an entry of `volumeMounts` at a path the operator mounts at in the
+    prometheus container; a negative request or limit; and a name whose data volume,
+    third rule ConfigMap volume `prometheus-<name>-rulefiles-2` or last pod hostname of
+    the last shard is not a DNS-1123 label (no dot, at most 40 characters).
   - **An `excludedFromEnforcement` entry that leaves `group` out is written with
     `monitoring.coreos.com`,** and an authored empty group is refused by the entry's
     index: the Go type writes the field even when empty, and the API admits only that

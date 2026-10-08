@@ -620,10 +620,13 @@ spec:
 		props: map[string]any{"value": 1000},
 	},
 	// A Prometheus is held as an Alertmanager is, its external labels the
-	// spec's own.
+	// spec's own. The operator names the volume of a rule ConfigMap
+	// prometheus-<name>-rulefiles-2, a DNS-1123 label, which leaves the name 40
+	// characters; over 49 the data volume prometheus-<name>-db is refused first.
 	"prometheus": {props: map[string]any{
 		"serviceMonitorSelector": map[string]any{"matchLabels": map[string]any{"team": "payments"}},
-		"externalLabels":         map[string]any{"cluster": "eu-1"}}},
+		"externalLabels":         map[string]any{"cluster": "eu-1"}},
+		nameBound: 40, longRefusal: "the component name is the Prometheus's name, and the Prometheus operator names the data volume"},
 	"prometheus-probe": {props: map[string]any{
 		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
 		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},

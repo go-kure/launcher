@@ -4522,7 +4522,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   check hold with or without a policy; no policy default is filled; an image
   the operator chooses is refused under a registry allowlist, and the
   operator's own replica and shard counts are held, not written (both below);
-  a claim template's metadata is not read. An empty `retention` is not
+  a claim template's metadata is read for its name only. An empty `retention` is not
   refused: its 24h default is the operator's code (where `retentionSize` and
   `retentionPercentage` are empty too), not a CRD default, so the derived list
   cannot hold it, and the object then gets the operator's default. The
@@ -4621,6 +4621,51 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   where the field is absent. `TestMonitoringExcludedGroup_MatchesMarkers`
   holds the written value to the module's default and enum.
 
+  **What the operator builds from the spec is checked where the API or the
+  operator would break it,** as on `alertmanager` and by the same shared
+  checks, under any policy and none, at `pkg/prometheus/common.go` and
+  `pkg/prometheus/server/` of prometheus-operator v0.94.1:
+  - a `portName` the API refuses where the operator writes it: not an IANA
+    service name; and unless `serviceName` names a Service of the author's,
+    `grpc` where `thanos` is set, the port the operator adds for the sidecar
+    to the governing Service it creates (`MakeContainerPorts`,
+    `BuildStatefulSetService`; server/operator.go:1006-1030).
+  - a negative `replicas`, which the operator runs as 1 (`ReplicasNumberPtr`).
+  - the storage arms as on `alertmanager`: a claim template named otherwise
+    than `prometheus-<name>-db` beside `storage.emptyDir` or
+    `storage.ephemeral`, a claim without a positive storage request, an
+    ephemeral claim without access modes, and on the claim template arm a
+    claim template name that is not a DNS-1123 label or names a volume the
+    operator adds (`VolumeClaimName`, server/statefulset.go:105-138).
+  - an entry of `volumes` named as a volume the operator adds: `config`,
+    `tls-assets`, `config-out` and `web-config` (the last whatever `version`
+    names, though the operator adds it only for Prometheus 2.24.0 on);
+    `log-file` where `scrapeFailureLogFile` is a file name without a
+    directory, or `queryLogFile` is one and `scrapeFailureLogFile` is unset;
+    `thanos-prometheus-http-client-file` where `thanos` is set, whatever
+    `thanos.version` names; any `prometheus-<name>-rulefiles-<n>`, the
+    volumes of the rule ConfigMaps, of which the operator mounts at least
+    three whatever the rules; the name the operator derives for each of
+    `secrets` and `configMaps` (`secret-<name>`, `configmap-<name>`); and the
+    data volume's. Two entries of `secrets`, or of `configMaps`, that the
+    operator's naming gives one volume name are refused as well.
+  - an entry of `volumeMounts` at a path the operator mounts a volume at in
+    the prometheus container: `/prometheus`, `/etc/prometheus/config_out`,
+    `/etc/prometheus/certs`, `/etc/prometheus/web_config/web-config.yaml`,
+    `/var/log/prometheus` where `log-file` is added,
+    `/etc/prometheus/rules/prometheus-<name>-rulefiles-<n>`, and
+    `/etc/prometheus/secrets/<name>` and `/etc/prometheus/configmaps/<name>`
+    for each entry of `secrets` and `configMaps`.
+  - a negative request or limit in `resources`, `thanos.resources` or a
+    listed container.
+  - a name the operator's objects cannot be named after: the data volume
+    `prometheus-<name>-db`, the volume of the third rule ConfigMap
+    `prometheus-<name>-rulefiles-2`, and the hostname of the last pod of the
+    last shard, `prometheus-<name>-<replicas-1>` or
+    `prometheus-<name>-shard-<shards-1>-<replicas-1>`, must each be a
+    DNS-1123 label, so a name has no dot and at most 40 characters. The
+    refusal names the component, or `objectName` where that set the name.
+
   **The API's expression rules are not checked.** Five are listed
   (`prometheusRulesLeft`) and left to the API server: with the sharding
   strategy mode `Topology`, `shards` must be at least the number of topology
@@ -4696,8 +4741,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `app.kubernetes.io/managed-by`, `app.kubernetes.io/name`,
   `app.kubernetes.io/version`, `operator.prometheus.io/name`,
   `operator.prometheus.io/shard`) and the annotation
-  `kubectl.kubernetes.io/default-container`; upstream documents that an
-  authored value does not override them. Launcher does not refuse such a key.
+  `kubectl.kubernetes.io/default-container`. The operator copies the
+  authored labels and annotations over `app.kubernetes.io/version` and the
+  annotation, so an authored value replaces those two, and then sets the
+  other six labels over the authored ones, so an authored value of those
+  does not hold (`BuildPodMetadata`, promcfg.go:1367-1384;
+  server/statefulset.go:219-230). Launcher does not refuse such a key.
 
   **Not covered.** Whether what the object refers to exists (a Secret key, a
   mounted Secret or ConfigMap, the ServiceAccount and the RBAC Kubernetes

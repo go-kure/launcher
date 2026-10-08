@@ -356,6 +356,75 @@ func prometheusRefusals(notA string) []struct {
 			"externalUrl: begins or ends with a quote"},
 		{"an externalUrl that does not parse", map[string]any{"externalUrl": "http://[::1"},
 			"externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to Prometheus, which then exits at startup; name a valid URL, or leave it unset"},
+		// The operator rewrites a negative count to 1 (ReplicasNumberPtr,
+		// pkg/prometheus/common.go:131-143).
+		{"negative replicas", map[string]any{"replicas": -1}, "replicas: -1 is below 0: the Prometheus operator runs 1 replica for it; write 1"},
+		// A web port name the API refuses on the container or the governing
+		// Service (common.go:459-469, server/operator.go:1006-1030).
+		{"a port name over 15 characters", map[string]any{"portName": "prometheus-webui"},
+			`portName: "prometheus-webui" is not a valid port name`},
+		{"the sidecar's port name on the governing Service", map[string]any{"portName": "grpc", "thanos": map[string]any{}},
+			`portName: "grpc" is the name of the port the Prometheus operator adds for the Thanos sidecar to the governing Service`},
+		// A claim the API refuses (server/statefulset.go:105-138).
+		{"an empty storage", map[string]any{"storage": map[string]any{}},
+			"storage.volumeClaimTemplate.spec.resources.requests.storage: required"},
+		{"an ephemeral claim without access modes", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": amClaim},
+		}}}, "storage.ephemeral.volumeClaimTemplate.spec.accessModes: required"},
+		{"a claim template requesting 0", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "0"}}}},
+		}}, "storage.volumeClaimTemplate.spec.resources.requests.storage: 0 is not above 0"},
+		// The operator mounts the data volume under the claim template's name
+		// whatever arm is in use (VolumeClaimName, common.go:352-360).
+		{"a named claim template beside emptyDir", map[string]any{"storage": map[string]any{
+			"emptyDir":            map[string]any{},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "data" beside storage.emptyDir or storage.ephemeral`},
+		{"a claim template name that is not a DNS-1123 label", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data.disk"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "data.disk" is not a DNS-1123 label`},
+		{"a claim template named as the configuration's volume", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "config"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "config" is a volume the Prometheus operator adds to every Prometheus's pods`},
+		{"a claim template named as a rule ConfigMap's volume", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "prometheus-fast-rulefiles-0"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "prometheus-fast-rulefiles-0" is the volume of a rule ConfigMap the Prometheus operator mounts`},
+		// A volume named as one the operator adds to the pods (common.go:240-350,
+		// server/statefulset.go:142, :192-204, :510-544, :730-745).
+		{"a volume named as the configuration's", amVolume("config"),
+			`volumes[0] "config": the name is a volume the Prometheus operator adds to every Prometheus's pods`},
+		{"a volume named as the web configuration's", amVolume("web-config"),
+			`volumes[0] "web-config": the name is a volume the Prometheus operator adds`},
+		{"a volume named as the data volume", amVolume("prometheus-fast-db"),
+			`volumes[0] "prometheus-fast-db": the name is the data volume's, which the Prometheus operator adds to the pods`},
+		{"a volume named as a rule ConfigMap's", amVolume("prometheus-fast-rulefiles-7"),
+			`volumes[0] "prometheus-fast-rulefiles-7": the name is the volume of a rule ConfigMap the Prometheus operator mounts`},
+		{"a volume named as the log file's", withAmVolume(map[string]any{"queryLogFile": "query.log"}, "log-file"),
+			`volumes[0] "log-file": the name is the volume the Prometheus operator adds for a log file named without a directory`},
+		{"a volume named as the sidecar's configuration's", withAmVolume(map[string]any{"thanos": map[string]any{}}, "thanos-prometheus-http-client-file"),
+			`volumes[0] "thanos-prometheus-http-client-file": the name is the volume the Prometheus operator adds for the Thanos sidecar's configuration`},
+		{"a volume named as a listed Secret's", withAmVolume(map[string]any{"secrets": []any{"Remote.TLS"}}, "secret-remote-tls"),
+			`volumes[0] "secret-remote-tls": the name is the volume the Prometheus operator adds for secrets[0]`},
+		{"two Secrets the operator gives one volume name", map[string]any{"secrets": []any{"remote.tls", "remote-tls"}},
+			`secrets[1] "remote-tls": the Prometheus operator names its volume "secret-remote-tls", which is the volume the Prometheus operator adds for secrets[0]`},
+		// The API refuses two mounts at one path in the prometheus container
+		// (common.go:264-340, server/statefulset.go:192-204, :527-533).
+		{"a mount at the data volume's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/prometheus"}}},
+			`volumeMounts[0] "/prometheus": the mount path is a path the Prometheus operator mounts a volume at in every prometheus container`},
+		{"a mount at the web configuration file", map[string]any{"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/web_config/web-config.yaml"}}},
+			`volumeMounts[0] "/etc/prometheus/web_config/web-config.yaml": the mount path is a path the Prometheus operator mounts a volume at`},
+		{"a mount at a listed ConfigMap's path", map[string]any{"configMaps": []any{"targets"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/configmaps/targets"}}},
+			`volumeMounts[0] "/etc/prometheus/configmaps/targets": the mount path is the path the Prometheus operator mounts configMaps[0] at`},
+		{"a mount at a rule ConfigMap's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/rules/prometheus-fast-rulefiles-1"}}},
+			`volumeMounts[0] "/etc/prometheus/rules/prometheus-fast-rulefiles-1": the mount path is the path the Prometheus operator mounts a rule ConfigMap at`},
+		{"a mount at the log file's directory", map[string]any{"scrapeFailureLogFile": "scrape.log", "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/var/log/prometheus"}}},
+			`volumeMounts[0] "/var/log/prometheus": the mount path is the path the Prometheus operator mounts the volume of a log file`},
+		// The CRD's quantity pattern admits a sign; the API refuses the
+		// container the operator builds with it.
+		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
+			"resources: cpu: request -1 is below 0"},
+		{"a negative sidecar memory limit", map[string]any{"thanos": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "-1Gi"}}}},
+			"thanos: resources: memory: limit -1Gi is below 0"},
 	}
 }
 
@@ -568,7 +637,6 @@ func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 		"a replica count of 0":           {map[string]any{"replicas": 0, "shards": 4}, false},
 		"a null shard count":             {map[string]any{"replicas": 3, "shards": nil}, false},
 		"a null count beside over":       {map[string]any{"replicas": nil, "shards": 4}, true},
-		"a negative replica count":       {map[string]any{"replicas": -1, "shards": 4}, true},
 		"a shard count of 0 beside over": {map[string]any{"replicas": 4, "shards": 0}, true},
 		"a negative shard count":         {map[string]any{"replicas": 3, "shards": -2}, false},
 	} {
@@ -583,6 +651,81 @@ func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 			rcWantClass(t, err, oam.RefusalReplicaMaximum)
 			if err != nil && !strings.Contains(err.Error(), "replicas times shards 4 exceeds enforced maximum 3") {
 				t.Errorf("err = %v, want one naming replicas times shards", err)
+			}
+		})
+	}
+}
+
+// TestPrometheus_Name: the operator names the data volume, the rule
+// ConfigMaps' volumes and the pods' hostnames after the Prometheus, each a
+// DNS-1123 label; the third rule ConfigMap's volume, mounted whatever the
+// rules, binds a name to 40 characters.
+func TestPrometheus_Name(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	for name, tc := range map[string]struct {
+		component string
+		props     map[string]any
+		want      string
+	}{
+		"a component name over 40 characters": {strings.Repeat("a", 41), nil,
+			`prometheus "` + strings.Repeat("a", 41) + `": the component name is the Prometheus's name, and the Prometheus operator names the volume of a rule ConfigMap it mounts "prometheus-` + strings.Repeat("a", 41) + `-rulefiles-2", which must be a DNS-1123 label`},
+		"a dotted objectName": {"web", map[string]any{oam.ObjectNameProperty: "metrics.example"},
+			`"metrics.example" is not a valid name for this Prometheus`},
+		"the hostname of the last shard's last pod": {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 11},
+			`the pod of the last replica of the last shard takes the hostname "prometheus-` + strings.Repeat("a", 40) + `-shard-999-10", which must be a DNS-1123 label`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := policyFreeTransform("prometheus", h, nil, oam.Component{Name: tc.component, Properties: tc.props})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		component string
+		props     map[string]any
+	}{
+		"40 characters":                    {strings.Repeat("a", 40), nil},
+		"40 characters, 1000 shards of 10": {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 10}},
+		"40 characters, no replica's pod":  {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 0}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := policyFreeTransform("prometheus", h, nil, oam.Component{Name: tc.component, Properties: tc.props}); err != nil {
+				t.Fatalf("err = %v, want it built", err)
+			}
+		})
+	}
+}
+
+// TestPrometheus_OperatorRunsIt: the specs beside each refusal of what the
+// operator or the API would refuse or rewrite, that both run as written, build.
+func TestPrometheus_OperatorRunsIt(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	extra := func(name string) []any { return []any{map[string]any{"name": name, "emptyDir": map[string]any{}}} }
+	for name, props := range map[string]map[string]any{
+		"zero replicas":                                     {"replicas": 0},
+		"a port name of 15 characters":                      {"portName": "prometheuswebui"},
+		"the sidecar's port name without a sidecar":         {"portName": "grpc"},
+		"the sidecar's port name with a Service of its own": {"portName": "grpc", "thanos": map[string]any{}, "serviceName": "metrics"},
+		"an invalid port name written nowhere":              {"portName": "prometheus-webui", "listenLocal": true, "serviceName": "metrics"},
+		"emptyDir alone":                                    {"storage": map[string]any{"emptyDir": map[string]any{}}},
+		"a claim template of its own name":                  {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
+		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
+			"emptyDir":            map[string]any{},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "prometheus-fast-db"}},
+		}},
+		"the log file's volume name for a log file in a directory": {"queryLogFile": "/var/log/query.log", "volumes": extra("log-file")},
+		"the sidecar's volume name without a sidecar":              {"volumes": extra("thanos-prometheus-http-client-file")},
+		"another Prometheus's rule ConfigMap volume name":          {"volumes": extra("prometheus-other-rulefiles-0")},
+		"two Secrets whose volumes differ":                         {"secrets": []any{"remote", "remote-tls"}},
+		"a mount beside the operator's": {"secrets": []any{"remote"}, "volumes": extra("extra"),
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/secrets/extra"}}},
+		"the log file's directory without a log file volume": {"volumes": extra("extra"),
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/var/log/prometheus"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := coreKindErr(h, "prometheus", "fast", props); err != nil {
+				t.Fatalf("err = %v, want it built", err)
 			}
 		})
 	}

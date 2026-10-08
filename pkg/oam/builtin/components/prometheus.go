@@ -3,6 +3,8 @@ package components
 import (
 	"fmt"
 	"maps"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
@@ -259,7 +261,8 @@ var prometheusKind = &policyHeldKind[monitoringv1.PrometheusSpec]{
 		defaultedZerosFor: func(spec *monitoringv1.PrometheusSpec) defaultedZeroFields {
 			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, prometheusDefaultedZeroFields)
 		},
-		validate: validatePrometheus,
+		validate:     validatePrometheus,
+		validateName: validatePrometheusName,
 		build: func(name, namespace string, spec *monitoringv1.PrometheusSpec) client.Object {
 			p := prometheus.CreatePrometheus(name, namespace)
 			spec.DeepCopyInto(&p.Spec)
@@ -403,6 +406,17 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 			}
 		}
 	}
+	// The operator runs 1 replica for a negative count (ReplicasNumberPtr,
+	// pkg/prometheus/common.go:131-143 at prometheus-operator v0.94.1).
+	if err := refuseNegativeReplicas(spec.Replicas, "the Prometheus operator runs 1 replica for it; write 1"); err != nil {
+		return err
+	}
+	if err := validatePrometheusPortName(spec); err != nil {
+		return err
+	}
+	if err := validateOperatorStorage(spec.Storage); err != nil {
+		return err
+	}
 	if err := refusePrometheusExternalURL(spec.ExternalURL); err != nil {
 		return err
 	}
@@ -423,6 +437,145 @@ func refusePrometheusExternalURL(value string) error {
 		return errors.New("externalUrl: begins or ends with a quote: the Prometheus operator passes it to Prometheus, which then exits at startup; name the URL without quotes, or leave it unset")
 	}
 	return refuseUnservableExternalURL("Prometheus", value, nil)
+}
+
+// validatePrometheusPortName refuses a portName the API refuses where the
+// operator writes it: unless listenLocal is set, as the name of the prometheus
+// container's one port (MakeContainerPorts, pkg/prometheus/common.go:459-469
+// at prometheus-operator v0.94.1); unless serviceName names a Service of the
+// author's, as the name and target port of the governing Service's web port,
+// beside the port grpc it adds where thanos is set
+// (pkg/prometheus/server/operator.go:1006-1030, BuildStatefulSetService in
+// common.go:500-520), as validateOperatorPortName refuses them. The Thanos
+// sidecar's ports, http and grpc, are on its own container, where a port name
+// of the prometheus container's does not clash.
+func validatePrometheusPortName(spec *monitoringv1.PrometheusSpec) error {
+	containerPort, servicePort := !spec.ListenLocal, spec.ServiceName == nil
+	reserved := map[string]string{}
+	if servicePort && spec.Thanos != nil {
+		reserved["grpc"] = "the port the Prometheus operator adds for the Thanos sidecar to the governing Service it creates where serviceName is unset"
+	}
+	return validateOperatorPortName(spec.PortName, containerPort || servicePort, reserved)
+}
+
+// usesLogFileVolume says the operator adds the log-file volume, mounted at
+// /var/log/prometheus in the prometheus container: where scrapeFailureLogFile
+// is a bare file name, or queryLogFile is one and scrapeFailureLogFile is
+// unset (UsesDefaultFileVolume, BuildCommonVolumes, pkg/prometheus/common.go:
+// 226-228 and :330-345; appendServerVolumes,
+// pkg/prometheus/server/statefulset.go:508-541 at prometheus-operator v0.94.1).
+func usesLogFileVolume(spec *monitoringv1.PrometheusSpec) bool {
+	bare := func(file string) bool { return file != "" && filepath.Dir(file) == "." }
+	if spec.ScrapeFailureLogFile != nil {
+		return bare(*spec.ScrapeFailureLogFile)
+	}
+	return bare(spec.QueryLogFile)
+}
+
+// prometheusRuleFiles is how many rule ConfigMaps the operator mounts at
+// least, whether or not it has rules for them, so that a change in their
+// number does not roll the pods (AppendConfigMapNames, pkg/operator/rules.go:
+// 343-361; createOrUpdateRuleConfigMaps, pkg/prometheus/server/rules.go:99-119
+// at prometheus-operator v0.94.1). It names them
+// prometheus-<name>-rulefiles-<i>, and the volume of each after its ConfigMap.
+const prometheusRuleFiles = 3
+
+// validatePrometheusName refuses a Prometheus name the operator's objects
+// cannot be named after, a data volume the pods would not get, and an entry of
+// volumes or volumeMounts the operator's own clash with, as
+// validateOperatorObjectName, refuseGeneratedVolumes and refuseGeneratedMounts
+// refuse them; it holds the volumes and mounts here, as the rule ConfigMaps'
+// are named after the Prometheus.
+//
+// The operator names the StatefulSet of shard 0 prometheus-<name> and of shard
+// i prometheus-<name>-shard-<i>, whose pods take the hostname
+// <StatefulSet>-<ordinal>, and the data volume prometheus-<name>-db
+// (prometheusNameByShard, VolumeName and PrefixedName,
+// pkg/prometheus/common.go:145-151 and :197-203 at prometheus-operator
+// v0.94.1); beside emptyDir or ephemeral it creates the data volume under that
+// name (pkg/prometheus/server/statefulset.go:105-128). The longest hostname is
+// the last pod's of the last shard, the replica and shard counts as the
+// operator reads them (prometheusPods). The volume of the third rule
+// ConfigMap, prometheus-<name>-rulefiles-2, which the operator mounts
+// whatever the rules, is longer than the hostname of a Prometheus of one shard,
+// and must be a DNS-1123 label too.
+//
+// The volumes the operator adds under a fixed name are config, tls-assets and
+// config-out (BuildCommonVolumes, common.go:242-261), web-config
+// (BuildWebconfig, server/statefulset.go:192-205), log-file where
+// usesLogFileVolume, thanos-prometheus-http-client-file where thanos is set
+// (createThanosContainer, :729-746), and the rule ConfigMaps' volumes. The
+// operator adds web-config only for Prometheus 2.24.0 and later, and the
+// sidecar's only for Thanos 0.24.0 and later; both are reserved whatever the
+// versions name, as on the alertmanager kind. Its mounts in the prometheus
+// container are /prometheus, /etc/prometheus/config_out and
+// /etc/prometheus/certs (common.go:263-283), /etc/prometheus/secrets/<name>
+// and /etc/prometheus/configmaps/<name> for each entry of secrets and
+// configMaps (:286-326), /var/log/prometheus where usesLogFileVolume,
+// /etc/prometheus/web_config/web-config.yaml, and
+// /etc/prometheus/rules/<ConfigMap> for each rule ConfigMap
+// (server/statefulset.go:528-534); /etc/prometheus/config is the reloaders'
+// only (CreateConfigReloaderVolumeMounts, common.go:471-480).
+func validatePrometheusName(name, componentName string, spec *monitoringv1.PrometheusSpec) error {
+	prefix := "prometheus-" + name
+	n := operatorObjectName{
+		kind: "Prometheus", label: "prometheus",
+		name: name, componentName: componentName,
+		dataVolume: prefix + "-db",
+		storage:    spec.Storage,
+		volumes:    spec.Volumes,
+	}
+	replicas := int32(1)
+	if spec.Replicas != nil && *spec.Replicas >= 0 {
+		replicas = *spec.Replicas
+	}
+	if replicas > 0 {
+		statefulSet := prefix
+		if spec.Shards != nil && *spec.Shards > 1 {
+			statefulSet = fmt.Sprintf("%s-shard-%d", prefix, *spec.Shards-1)
+		}
+		n.derived = append(n.derived, derivedName{"the pod of the last replica of the last shard takes the hostname", fmt.Sprintf("%s-%d", statefulSet, replicas-1)})
+	}
+	ruleFiles := fmt.Sprintf("%s-rulefiles-%d", prefix, prometheusRuleFiles-1)
+	n.derived = append(n.derived, derivedName{"the Prometheus operator names the volume of a rule ConfigMap it mounts", ruleFiles})
+	if err := validateOperatorObjectName(n); err != nil {
+		return err
+	}
+	ruleFile := regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "-rulefiles-[0-9]+$")
+	ruleMount := regexp.MustCompile("^/etc/prometheus/rules/" + regexp.QuoteMeta(prefix) + "-rulefiles-[0-9]+$")
+	volumes := map[string]string{}
+	for _, v := range []string{"config", "tls-assets", "config-out", "web-config"} {
+		volumes[v] = "a volume the Prometheus operator adds to every Prometheus's pods"
+	}
+	mounts := map[string]string{}
+	for _, p := range []string{"/prometheus", "/etc/prometheus/config_out", "/etc/prometheus/certs", "/etc/prometheus/web_config/web-config.yaml"} {
+		mounts[p] = "a path the Prometheus operator mounts a volume at in every prometheus container"
+	}
+	if usesLogFileVolume(spec) {
+		volumes["log-file"] = "the volume the Prometheus operator adds for a log file named without a directory in scrapeFailureLogFile or queryLogFile"
+		mounts["/var/log/prometheus"] = "the path the Prometheus operator mounts the volume of a log file named without a directory in scrapeFailureLogFile or queryLogFile at"
+	}
+	if spec.Thanos != nil {
+		volumes["thanos-prometheus-http-client-file"] = "the volume the Prometheus operator adds for the Thanos sidecar's configuration where thanos is set"
+	}
+	if err := refuseGeneratedVolumes(operatorPodVolumes{
+		generated: volumes,
+		patterns:  []reservedPattern{{ruleFile, "the volume of a rule ConfigMap the Prometheus operator mounts"}},
+		secrets:   spec.Secrets, configMaps: spec.ConfigMaps,
+		storage: spec.Storage,
+		volumes: spec.Volumes,
+	}); err != nil {
+		return err
+	}
+	return refuseGeneratedMounts(operatorContainerMounts{
+		field:      "volumeMounts",
+		generated:  mounts,
+		patterns:   []reservedPattern{{ruleMount, "the path the Prometheus operator mounts a rule ConfigMap at"}},
+		root:       "/etc/prometheus",
+		secrets:    spec.Secrets,
+		configMaps: spec.ConfigMaps,
+		mounts:     spec.VolumeMounts,
+	})
 }
 
 // prometheusPods is the number of pods the operator runs for a Prometheus:
