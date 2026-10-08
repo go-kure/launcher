@@ -3920,9 +3920,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   into one an earlier port added. Two `volumes` of one name are refused,
   as the API refuses the pods (`volumes[1] "scratch": the name is listed
   already at volumes[0], …`), and so is a `serviceName` that is not a
-  DNS-1123 label, which no Service has: the operator fails the reconcile
-  where it finds no governing Service of the name (`serviceName: "Bad_Name"
-  is not a DNS-1123 label: …`). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  DNS-1035 label (a leading digit included), which no Service has: the
+  operator fails the reconcile where it finds no governing Service of the
+  name (`serviceName: "1alerts" is not a valid Service name, which must be
+  a DNS-1035 label: …`). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as

@@ -10,7 +10,6 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -160,7 +159,7 @@ type monitoringWorkload struct {
 // dnsPolicy of None without a nameserver and a pod-level HostProcess without
 // hostNetwork, which the API refuses of a pod (podspec.go holds both on the
 // pod kinds), as are two volumes of one name and a serviceName that is not a
-// DNS-1123 label, which names no Service. A listed container named for one
+// DNS-1035 label, which names no Service. A listed container named for one
 // the operator generates is merged into it, its ports by number (runPorts),
 // and may name no image; any other listed container is added to the pods as
 // written, and one that names no image is refused, since no pod runs it. A
@@ -232,10 +231,10 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	}
 	// The operator fails the reconcile where it cannot get the Service the
 	// spec names (EnsureCustomGoverningService, pkg/k8s/network.go:135-140
-	// at v0.94.1), and no Service has a name that is not a DNS-1123 label.
+	// at v0.94.1), and no Service has a name that is not a DNS-1035 label.
 	if w.serviceName != nil {
-		if errs := validation.IsDNS1123Label(*w.serviceName); len(errs) > 0 {
-			return errors.Errorf("serviceName: %q is not a DNS-1123 label: %s; no Service has such a name, so the Prometheus operator fails to find the governing Service and builds no pods", *w.serviceName, strings.Join(errs, "; "))
+		if err := validateServiceName("serviceName", *w.serviceName); err != nil {
+			return errors.Errorf("%w; no Service has such a name, so the Prometheus operator fails to find the governing Service and builds no pods", err)
 		}
 	}
 	// The API's pod rules across fields the spec carries apart: the operator
