@@ -33,14 +33,17 @@ import (
 // it is refused. The arguments the operator derives are not held.
 
 // monitoringWorkloadDefaultedZeros is a workload kind's defaulted-zero list for
-// refuseUncarriedSpecValues: the probe fields of the containers its spec lists
-// (podSpecDefaultedZeros), on which an authored 0 cannot be carried, and own,
-// the fields of the operator's own types that the encoding omits when empty and
-// to which the CRD gives another default, each mapped to that default as its
-// JSON literal. A string default of the Kubernetes pod types is not listed,
-// as the pod kinds list none.
+// refuseUncarriedSpecValues: the numbers of the pod kinds' list
+// (podSpecDefaultedZeros), the probe fields of the containers its spec lists,
+// on which an authored 0 cannot be carried, and own, the fields of the
+// operator's own types that the encoding omits when empty and to which the CRD
+// gives another default, each mapped to that default as its JSON literal. The
+// pod kinds' string defaults, whose list names pod fields these specs do not
+// carry, and a hostPort of 0 under hostNetwork, which needs the spec, are not
+// held here (go-kure/launcher#938).
 func monitoringWorkloadDefaultedZeros(own map[string]string) defaultedZeroFields {
-	fields := podSpecDefaultedZeros("").fields
+	fields := podSpecDefaultedZeros("", nil).fields
+	maps.DeleteFunc(fields, func(_, def string) bool { return strings.HasPrefix(def, `"`) })
 	maps.Copy(fields, own)
 	return defaultedZeroFields{api: "Prometheus operator", defaulter: "API server", fields: fields}
 }
