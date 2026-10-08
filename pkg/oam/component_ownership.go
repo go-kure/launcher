@@ -365,7 +365,9 @@ type augmentingOwnedConfig struct {
 // the reserved keys or the component label: no augmenter of launcher's edits
 // one. It is read again for the object kind policy when this wrapper's Generate
 // returned it (recheckEmitted), so an augmenter that appends a forbidden member
-// to a list it generated is refused. And a caller that hands over a layout
+// to a list it generated is refused. A configMapGenerator entry the augmenter
+// adds is held to the object kind policy as the ConfigMap Kustomize builds from
+// it (checkAddedGenerators). And a caller that hands over a layout
 // holding objects that never passed through Generate gets them back unchecked
 // and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
@@ -374,10 +376,15 @@ func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
 	}
 	before := layoutResources{}
 	before.collect(l)
+	generators := layoutGenerators{}
+	generators.collect(l)
 	if err := a.augmenter.AugmentLayout(l); err != nil {
 		return err
 	}
 	if err := a.stampAdded(l, before); err != nil {
+		return err
+	}
+	if err := a.checkAddedGenerators(l, generators); err != nil {
 		return err
 	}
 	return a.recheckEmitted(l, before)

@@ -799,11 +799,13 @@ and by scope, whatever component or trait emits it.
   on every application (`pkg/oam/object_kind_policy.go`). It reads each object generation
   emits — a kind component's, a trait's, what `passthrough` and `manifests` carry, every
   object a chart renders at build time, its hook groups included — as Flux applies it: a
-  list envelope by each of its members, not as an object of its own. It refuses the first
-  that breaks the policy. A layout augmenter's objects are read as it adds them, and an
-  object its own Generate returned is read again after it ran, so a member it appends to
-  a list it generated is refused too; a chart is refused object by object whether it is
-  generated, walked or laid out first. An object a caller puts on the layout is not read.
+  list envelope, typed or unstructured, by each of its members, not as an object of its
+  own. It refuses the first that breaks the policy. A layout augmenter's objects are read
+  as it adds them, a configMapGenerator entry as the ConfigMap Kustomize builds from it,
+  and an object its own Generate returned is read again after it ran, so a member it
+  appends to a list it generated is refused too; a chart is refused object by object
+  whether it is generated, walked or laid out first. An object or generator a caller puts
+  on the layout is not read.
 - **Scope:** kure's (`manifest.Scope`). A kind whose scope kure does not know (neither
   built in nor registered with kure) counts as cluster-scoped whatever namespace the object
   states, so the check fails closed: the namespace is the author's to write, and the API

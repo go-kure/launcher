@@ -3041,8 +3041,9 @@ its group, the core group is `""`, and an entry with no `Kind` fails the transfo
 holds every producer to it: the ownership wrapper the transform's last step puts on every
 application reads each object generation emits (a kind component's, a trait's, what
 `passthrough` and `manifests` carry, every object a chart renders at build time) as Flux
-applies it, a list envelope by its members and not as an object of its own, and each object
-a layout augmenter adds or edits among those its Generate returned. The scope is kure's
+applies it, a list envelope (typed or unstructured) by its members and not as an object of
+its own, each object a layout augmenter adds or edits among those its Generate returned, and
+the ConfigMap of each configMapGenerator entry it adds. The scope is kure's
 `manifest.Scope`; a kind of unknown scope (neither built in nor registered with kure, such as a
 custom resource whose CRD is installed apart from the build) counts as cluster-scoped whatever
 namespace the object states. The refusal comes at generation (`GenerateApplications`, or kure's layout walk), a
