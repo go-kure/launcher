@@ -70,16 +70,24 @@ if (( ${#FILES[@]} == 0 )); then
 fi
 FILES+=(pkg/operator/defaults.go)
 
+# Each file is read from the tag's tree, not the checkout, so that no checkout
+# conversion (core.autocrlf, a filter) changes its bytes.
 for f in "${FILES[@]}" LICENSE NOTICE; do
   mkdir -p "$STAGE/$(dirname "$f")"
-  cp -- "$UPSTREAM/$f" "$STAGE/$f"
+  git -C "$UPSTREAM" cat-file blob "HEAD:$f" > "$STAGE/$f"
 done
 
-# Hash every file before writing SOURCE: a hash taken inside an echo would
-# leave a failure unseen by set -e.
+# Record the tag tree's blob id of every file before writing SOURCE (an id
+# taken inside an echo would leave a failure unseen by set -e), and check that
+# the bytes written hash, unconverted, to that id.
 declare -A BLOB
 for f in "${FILES[@]}" LICENSE NOTICE; do
-  BLOB[$f]="$(git hash-object "$STAGE/$f")"
+  BLOB[$f]="$(git -C "$UPSTREAM" rev-parse "HEAD:$f")"
+  written="$(git hash-object --no-filters "$STAGE/$f")"
+  if [[ "$written" != "${BLOB[$f]}" ]]; then
+    echo "ERROR: $f was written as blob $written, not the tag's ${BLOB[$f]}" >&2
+    exit 1
+  fi
 done
 
 {
