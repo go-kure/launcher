@@ -3609,14 +3609,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of those pods is held to the environment policy as a workload kind's own
   fields are.
 
-  **No capability is required, and nothing gates the kind.** As for the four
+  **No capability is required, and none gates the kind.** As for the four
   kinds under **servicemonitor**, below, launcher does not ask
   whether the cluster serves `monitoring.coreos.com/v1`: where the operator's
   CRDs are not installed the
   component builds, and the object is refused at apply. Whoever may author a
   component may author an Alertmanager, and so make the operator run pods in
-  the namespace; the policy below is what holds them. The open point "No
-  capability gate on component types" on go-kure/launcher#790 carries it.
+  the namespace; the policy below is what holds them. A policy can keep the
+  kind out of a build through the object kind policy (`oam.ObjectKindPolicy`,
+  go-kure/launcher#922). The open point "No capability gate on component
+  types" on go-kure/launcher#790 carries the capability.
 
   **Authored.** The properties are the top-level json fields of
   `AlertmanagerSpec`, decoded strictly at every depth (an unknown key is
