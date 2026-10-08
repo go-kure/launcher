@@ -344,8 +344,8 @@ func TestBundleSettings_Refused(t *testing.T) {
 		{
 			name: "a timeout of a microsecond",
 			set:  func(b *stack.Bundle) { b.Timeout = "1us" },
-			// The workflow wraps the generator's refusal and states it twice.
-			want: `validation failed for Bundle 'shop' field 'flux-resources': failed to generate Flux resources: ` + durationRefusal + `: ` + durationRefusal,
+			// The workflow wraps the generator's refusal, which is stated once.
+			want: `validation failed for Bundle 'shop' field 'flux-resources': failed to generate Flux resources: ` + durationRefusal,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

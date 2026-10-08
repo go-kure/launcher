@@ -8296,12 +8296,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   chained via `DependsOn`, listing each child's preceding sibling in the order kure's
   `helm.SplitByHookWeight` synthesizes from Helm's hook phases — a combined install/upgrade
   ordering for GitOps reconciliation, not Helm's own per-operation execution order (kure
-  `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child regardless of placement, but
-  kure's layout integrator only translates it into `spec.dependsOn` on a per-child Flux
-  Kustomization CR under `FluxIntegratedPerLayout` placement, where it writes each entry as the
-  name of the Kustomization of the sibling the entry names (kure `pkg/stack/layout/manifest.go`'s
-  `DependsOn` field doc); under coarser placement modes the children's resources are aggregated
-  instead, and reconciliation ordering between hook groups is not separately enforced. When it
+  `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child, and only kure's
+  `FluxIntegratedPerLayout` placement carries it: there kure's layout integrator gives each child
+  a Flux Kustomization CR of its own and writes each entry into its `spec.dependsOn` as the name
+  of the Kustomization of the sibling the entry names (kure `pkg/stack/layout/manifest.go`'s
+  `DependsOn` field doc). Under `FluxSeparate` and `FluxIntegratedPerBundle` a child gets no
+  Kustomization of its own, and kure's Flux integration refuses the child's `DependsOn` and
+  `KustomizationName`, naming the child (go-kure/kure#1032); before, it dropped them without an
+  error, and the order between hook groups was lost. A chart with more than one hook group
+  therefore needs `FluxIntegratedPerLayout` under kure's Flux integration. When it
   partitions, `AugmentLayout` also sets the component layout's `ApplicationFileMode` to
   `AppFilePerResource` unless the caller already set one, so the component stays a directory
   whose `kustomization.yaml` lists the children. Without that, a writer-wide `AppFileSingle`
@@ -8367,13 +8370,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`KustomizationName`), whatever the number of hook groups; where it fits, the layout is left
   to kure's default and nothing changes. That is launcher's rule with the kure launcher pins;
   go-kure/launcher#941 hands this default to the rule kure applies to its own over-63
-  default from go-kure/kure#1030 on, which gives another name for the same input, at the
-  next re-pin. Kure's rule never reaches a name launcher set (`pkg/oam/README.md`,
-  "Pipeline").
+  default from go-kure/kure#1030 on, which gives another name for the same input. Kure's
+  rule never reaches a name launcher set (`pkg/oam/README.md`, "Pipeline").
   The `layoutKustomizationName` property, or the `Naming` hook's answer for the `layout`
   role, sets another name, a DNS-1123 subdomain of at most 63 characters used as written and
-  never shortened; any other fails the transform,
-  naming the component and the role. It is read under per-layout placement only. A
+  never shortened; any other fails the transform, naming the component and the role. A name
+  set on the layout, the shortened default included, needs per-layout placement: under any
+  other the layout gets no Kustomization of its own, and kure's Flux integration refuses the
+  name, naming the layout (go-kure/kure#1032). A
   `HelmTemplateConfig` built directly sets `LayoutKustomizationName`; `AugmentLayout` never
   overwrites a `KustomizationName` the layout already carries. `GenerateCoversAugmentLayout` is always true —
   `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,

@@ -421,6 +421,10 @@ func (r *chartRender) objects() []*client.Object {
 // ManifestLayout written to a numbered sub-directory in execution order,
 // chained via DependsOn so kure's FluxCD integrator (in FluxIntegratedPerLayout
 // placement) waits for each hook group to reconcile healthy before the next.
+// That placement alone gives a child a Kustomization of its own: under any
+// other, kure refuses the child's DependsOn and KustomizationName and names
+// the child (go-kure/kure#1032), so a chart with more than one hook group
+// builds under FluxIntegratedPerLayout only.
 //
 // Each child's Namespace is the parent's path (ml.FullRepoPath()): kure's
 // FullRepoPath() joins Namespace and Name verbatim, so the child's directory
@@ -437,13 +441,13 @@ func (r *chartRender) objects() []*client.Object {
 // AppFileSingle child is no directory: it writes one "<dirName>.yaml" into
 // its Namespace — the parent's own directory — which the parent's
 // kustomization.yaml then lists directly, and under FluxIntegratedPerLayout
-// kure's integrator gives such a child no Kustomization CR of its own, so
-// its DependsOn — the hook-group ordering — would be silently lost. Left
-// AppFileUnset, a child under FluxIntegratedPerLayout is pinned to a
-// directory by that integrator and gets its own Kustomization CR (spec.path
-// its FullRepoPath(), spec.dependsOn from DependsOn); under any other
-// placement the writer applies its own Config default to the child, exactly
-// as to a walked application layout.
+// kure's integrator gives such a child no Kustomization CR of its own, so it
+// would refuse the child's DependsOn — the hook-group ordering — and its
+// KustomizationName. Left AppFileUnset, a child under FluxIntegratedPerLayout
+// is pinned to a directory by that integrator and gets its own Kustomization
+// CR (spec.path its FullRepoPath(), spec.dependsOn from DependsOn); under any
+// other placement the writer applies its own Config default to the child,
+// exactly as to a walked application layout, once kure accepted the tree.
 //
 // The partitioned layout itself, when its own ApplicationFileMode is
 // AppFileUnset (always, for a layout kure's walker built), is pinned to
