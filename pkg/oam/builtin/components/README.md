@@ -3907,6 +3907,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   empties such a value before it builds the StatefulSet and runs the pods as
   if the field were unset (`discardZeroDurations`, same source). A value
   that does not parse is left to the API's pattern.
+  A nonempty `externalUrl` that Alertmanager exits on at startup is refused
+  too, though the operator and the API accept it: the operator passes it
+  unchanged as `--web.external-url`, and Alertmanager exits where Go's
+  `net/url` cannot parse it, and, from v0.19.0 on, where its scheme is not
+  `http` or `https` (`externalUrl: not a URL of scheme http or https: …`;
+  `cmd/alertmanager/main.go` of v0.28.1, `app/url.go` of v0.34.0). The scheme
+  is held where `version` is unset or names v0.19.0 or later; an earlier
+  version takes any scheme. Neither message names the value.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload

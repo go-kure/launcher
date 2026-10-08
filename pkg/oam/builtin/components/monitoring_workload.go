@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -58,6 +59,30 @@ func monitoringWorkloadDefaultedZeros(ps *corev1.PodSpec, own map[string]string)
 // it.
 type fieldValue struct {
 	path, value string
+}
+
+// refuseUnservableExternalURL refuses an externalUrl the monitored binary exits
+// on at startup: the Prometheus operator passes a nonempty one unchanged as
+// --web.external-url, and the binary parses it with net/url and fails to start
+// where that fails. Where schemes names any, a URL of another scheme is
+// refused too, as Alertmanager refuses one not of http or https
+// (go-kure/launcher#948). url.Parse lower-cases the scheme, so HTTPS is https
+// here as in the binary. binary names the binary in the message. An empty
+// value is not read: the operator then passes no flag, and the binary derives
+// the URL. No message names the value or its scheme: it is authored text, and
+// url.Parse's error repeats it (validateURLScheme, manifestsource.go).
+func refuseUnservableExternalURL(binary, value string, schemes []string) error {
+	if value == "" {
+		return nil
+	}
+	u, err := url.Parse(value)
+	if err != nil {
+		return errors.Errorf("externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to %s, which then exits at startup; name a valid URL, or leave it unset", binary)
+	}
+	if len(schemes) > 0 && !slices.Contains(schemes, u.Scheme) {
+		return errors.Errorf("externalUrl: not a URL of scheme %s: the Prometheus operator passes it to %s, which exits at startup on any other; name such a URL, or leave it unset", strings.Join(schemes, " or "), binary)
+	}
+	return nil
 }
 
 // fieldResources is one authored resource block with the path of the property

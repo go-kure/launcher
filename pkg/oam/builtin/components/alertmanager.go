@@ -107,7 +107,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container. A mount path the operator mounts a volume at is refused: /alertmanager, /etc/alertmanager/config, config_out and certs, the web and cluster TLS configuration files whatever version names, /etc/alertmanager/templates where alertmanagerConfiguration.templates is set, and /etc/alertmanager/secrets/<name> and configmaps/<name> of each entry of secrets and configMaps. The mounts of the TLS credentials are left to the API.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
 		"persistentVolumeClaimRetentionPolicy": object("persistentVolumeClaimRetentionPolicy: whether the claims of the StatefulSet are deleted when it is deleted (whenDeleted) or scaled down (whenScaled): Retain, the default, or Delete." + core + "StatefulSetPersistentVolumeClaimRetentionPolicy in the Kubernetes API reference."),
-		"externalUrl":                          text("externalUrl: the URL under which the Alertmanager web service is reached from outside, which the links in its notifications are built from."),
+		"externalUrl":                          text("externalUrl: the URL under which the Alertmanager web service is reached from outside, which the links in its notifications are built from. The Prometheus operator passes it to Alertmanager unchanged, which exits at startup on one it cannot parse, and from v0.19.0 on one not of scheme http or https: both are refused, the second where version is unset or v0.19.0 or later."),
 		"routePrefix":                          text("routePrefix: the path prefix Alertmanager registers its HTTP handlers under."),
 		"paused":                               flag("paused: true stops the operator from acting on the objects it manages for this Alertmanager, deletion excepted."),
 		"nodeSelector":                         object("nodeSelector: the node labels a node must carry for the pods to be scheduled on it."),
@@ -254,7 +254,8 @@ var alertmanagerRulesLeft = map[string]string{
 
 // validateAlertmanager refuses, with or without an environment policy, the
 // three deprecated fields that name the image in parts, a duration the
-// operator discards, and what validateMonitoringWorkload refuses of the
+// operator discards, an externalUrl Alertmanager exits on at startup
+// (alertmanagerURLSchemes), and what validateMonitoringWorkload refuses of the
 // workload.
 //
 // baseImage, tag and sha are refused when not empty: the operator composes
@@ -289,6 +290,9 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.Replicas != nil && *spec.Replicas < 0 {
 		return errors.Errorf("replicas: %d is below 0: the Prometheus operator runs 0 replicas for it; write 0", *spec.Replicas)
 	}
+	if err := refuseUnservableExternalURL("Alertmanager", spec.ExternalURL, alertmanagerURLSchemes(spec)); err != nil {
+		return err
+	}
 	if err := validateAlertmanagerPortName(spec); err != nil {
 		return err
 	}
@@ -314,6 +318,21 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		return err
 	}
 	return validateAlertmanagerVersion(spec)
+}
+
+// alertmanagerURLSchemes returns the schemes of an externalUrl Alertmanager
+// starts with: http and https from v0.19.0, which refuses any other and exits
+// (cmd/alertmanager/main.go:386-389 and 621-622 at v0.28.1, app/url.go:46-47
+// at v0.34.0), and any before it, which only parses the URL
+// (cmd/alertmanager/main.go:292-296 and 440-443 at v0.15.0). Unset, the
+// version is the operator's default (v0.34.0 at v0.94.1), and where it does
+// not parse validateAlertmanagerVersion refuses it, so both are held to the
+// two schemes, as refuseGeneratedAlertmanagerArgs holds their flags.
+func alertmanagerURLSchemes(spec *monitoringv1.AlertmanagerSpec) []string {
+	if version, err := semver.ParseTolerant(spec.Version); spec.Version != "" && err == nil && version.LT(semver.MustParse("0.19.0")) {
+		return nil
+	}
+	return []string{"http", "https"}
 }
 
 // validateAlertmanagerVersion refuses a version the operator cannot build the

@@ -282,6 +282,20 @@ func alertmanagerRefusals(notA string) []struct {
 			`version: "v0.14.0" is not supported by the Prometheus operator`},
 		{"a version of major version 1", map[string]any{"version": "v1.0.0"},
 			`version: "v1.0.0" is not supported by the Prometheus operator`},
+		// An external URL Alertmanager exits on at startup, though the operator
+		// passes it on unchanged (go-kure/launcher#948): one of a scheme other
+		// than http or https from v0.19.0, and of the operator's default where
+		// version is unset, and one net/url cannot parse at any version.
+		{"an externalUrl of another scheme", map[string]any{"externalUrl": "ftp://alerts.example.com"},
+			"externalUrl: not a URL of scheme http or https: the Prometheus operator passes it to Alertmanager, which exits at startup on any other; name such a URL, or leave it unset"},
+		{"an externalUrl without a scheme", map[string]any{"externalUrl": "alerts.example.com"},
+			"externalUrl: not a URL of scheme http or https"},
+		{"an externalUrl of another scheme at v0.19.0", map[string]any{"version": "v0.19.0", "externalUrl": "ftp://alerts.example.com"},
+			"externalUrl: not a URL of scheme http or https"},
+		{"an externalUrl that does not parse", map[string]any{"externalUrl": "http://[::1"},
+			"externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to Alertmanager, which then exits at startup; name a valid URL, or leave it unset"},
+		{"an externalUrl that does not parse before v0.19.0", map[string]any{"version": "v0.18.0", "externalUrl": "http://[::1"},
+			"externalUrl: not a URL Go's net/url can parse"},
 		// A web port name the API refuses on the container (statefulset.go:483-500).
 		{"a port name over 15 characters", map[string]any{"portName": "alertmanager-web"},
 			`portName: "alertmanager-web" is not a valid port name`},
@@ -874,18 +888,22 @@ func TestAlertmanager_Name(t *testing.T) {
 func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 	h := &components.AlertmanagerHandler{}
 	for name, props := range map[string]map[string]any{
-		"the least version supported":           {"version": "v0.15.0"},
-		"a version without its patch":           {"version": "0.28"},
-		"zero replicas":                         {"replicas": 0},
-		"a port name of 15 characters":          {"portName": "alertmanagerweb"},
-		"emptyDir alone":                        {"storage": map[string]any{"emptyDir": map[string]any{}}},
-		"two Secrets whose volumes differ":      {"secrets": []any{"alerts", "alerts-tls"}},
-		"a Secret whose volume name is cut":     {"secrets": []any{strings.Repeat("a", 60)}},
-		"a mount beside the operator's":         {"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/extra"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
-		"the templates' path without templates": {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
-		"a claim template of its own name":      {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
-		"a request and a limit of 0":            {"resources": map[string]any{"requests": map[string]any{"cpu": "0"}, "limits": map[string]any{"cpu": "0"}}},
-		"a claim template without access modes": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
+		"the least version supported":            {"version": "v0.15.0"},
+		"an externalUrl of http with a path":     {"externalUrl": "http://alerts.example.com/am"},
+		"an externalUrl of an upper-case scheme": {"externalUrl": "HTTPS://alerts.example.com"},
+		// Alertmanager refuses another scheme only from v0.19.0 on.
+		"an externalUrl of another scheme before v0.19.0": {"version": "v0.18.0", "externalUrl": "ftp://alerts.example.com"},
+		"a version without its patch":                     {"version": "0.28"},
+		"zero replicas":                                   {"replicas": 0},
+		"a port name of 15 characters":                    {"portName": "alertmanagerweb"},
+		"emptyDir alone":                                  {"storage": map[string]any{"emptyDir": map[string]any{}}},
+		"two Secrets whose volumes differ":                {"secrets": []any{"alerts", "alerts-tls"}},
+		"a Secret whose volume name is cut":               {"secrets": []any{strings.Repeat("a", 60)}},
+		"a mount beside the operator's":                   {"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/extra"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
+		"the templates' path without templates":           {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
+		"a claim template of its own name":                {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
+		"a request and a limit of 0":                      {"resources": map[string]any{"requests": map[string]any{"cpu": "0"}, "limits": map[string]any{"cpu": "0"}}},
+		"a claim template without access modes":           {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
 		"a claim template with access modes written empty": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 			"accessModes": []any{}, "resources": amClaim["resources"],
 		}}}},
@@ -941,6 +959,29 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if err := coreKindErr(h, "alertmanager", "fast", props); err != nil {
 				t.Fatalf("err = %v, want it built", err)
+			}
+		})
+	}
+}
+
+// TestAlertmanager_ExternalURLRefusalNamesNoValue: a refused externalUrl is
+// not quoted, nor its scheme, as it is authored text that can carry a
+// credential, and url.Parse's error, which repeats it, is not passed on.
+func TestAlertmanager_ExternalURLRefusalNamesNoValue(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	for name, value := range map[string]string{
+		"another scheme":         "smtp://bot:s3cret@alerts.example.com",
+		"a URL that won't parse": "http://bot:s3cret@[::1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(h, "alertmanager", "fast", map[string]any{"externalUrl": value})
+			if err == nil {
+				t.Fatal("err = nil, want the externalUrl refused")
+			}
+			for _, part := range []string{"s3cret", "bot", "smtp", "[::1"} {
+				if strings.Contains(err.Error(), part) {
+					t.Errorf("err = %v, names %q of the value", err, part)
+				}
 			}
 		})
 	}
