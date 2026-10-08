@@ -1901,7 +1901,8 @@ and by scope, whatever component or trait emits it.
     `thanos-prometheus-http-client-file` where `thanos` is set, the rule ConfigMaps'
     `prometheus-<name>-rulefiles-<n>`, the `secrets` and `configMaps` volumes and the data
     volume), and two entries of `secrets` or of `configMaps` the operator gives one
-    volume name; an entry of `volumeMounts` at a path the operator mounts at in the
+    volume name, or one whose volume name the operator cuts to 63 characters after a
+    `-`; an entry of `volumeMounts` at a path the operator mounts at in the
     prometheus container, and of `thanos.volumeMounts` at one it mounts at in the sidecar
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`

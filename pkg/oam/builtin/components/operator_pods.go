@@ -164,10 +164,12 @@ type operatorPodVolumes struct {
 // pods would have two of that name. An entry whose volume name is not a
 // DNS-1123 label once cut to 63 characters (one cut after a -) is refused: the
 // operator checks the name after the cut and fails the reconcile
-// (ResourceNamer.DNS1123Label). On the claim template arm, a claim template
-// named as a volume the operator adds is refused: the StatefulSet controller
-// replaces the pod's volume of that name with the claim, so the pods would not
-// get the operator's volume.
+// (ResourceNamer.DNS1123Label; pkg/alertmanager/statefulset.go:640-643, and
+// pkg/prometheus/common.go:289-292 and :311-314, returned at
+// pkg/prometheus/server/statefulset.go:181-184 at v0.94.1). On the claim
+// template arm, a claim template named as a volume the operator adds is
+// refused: the StatefulSet controller replaces the pod's volume of that name
+// with the claim, so the pods would not get the operator's volume.
 func refuseGeneratedVolumes(v operatorPodVolumes) error {
 	generated := make(map[string]string, len(v.generated))
 	maps.Copy(generated, v.generated)
