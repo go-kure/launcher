@@ -309,6 +309,9 @@ func alertmanagerRefusals(notA string) []struct {
 			"clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset"},
 		{"a cluster advertise address of a named port", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:mesh"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		// Atoi on the 32-bit armv7 image refuses a port above 2147483647.
+		{"a cluster advertise address of a port over 32 bits", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:2147483648"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		{"a cluster advertise address of a host name", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "alerts.example.com:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		{"a cluster advertise address of an IPv6 address unbracketed", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "fd00::1:9094"},
@@ -1003,11 +1006,12 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		}}}},
 		// Where the cluster runs, Alertmanager takes an IP address and a
 		// numeric port, an empty host, and a port Atoi takes that no socket has.
-		"a cluster advertise address of IPv4":          {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:9094"},
-		"a cluster advertise address of IPv6":          {"replicas": 3, "clusterAdvertiseAddress": "[fd00::1]:9094"},
-		"a cluster advertise address without its host": {"replicas": 3, "clusterAdvertiseAddress": ":9094"},
-		"a cluster advertise address of a signed port": {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:+80"},
-		"a cluster advertise address of a large port":  {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:99999"},
+		"a cluster advertise address of IPv4":                    {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:9094"},
+		"a cluster advertise address of IPv6":                    {"replicas": 3, "clusterAdvertiseAddress": "[fd00::1]:9094"},
+		"a cluster advertise address without its host":           {"replicas": 3, "clusterAdvertiseAddress": ":9094"},
+		"a cluster advertise address of a signed port":           {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:+80"},
+		"a cluster advertise address of a large port":            {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:99999"},
+		"a cluster advertise address of the largest 32-bit port": {"replicas": 3, "clusterAdvertiseAddress": "10.0.0.1:2147483647"},
 		// With the cluster off Alertmanager does not read it.
 		"a cluster advertise address at one replica":    {"replicas": 1, "clusterAdvertiseAddress": "alerts.example.com"},
 		"a cluster advertise address at unset replicas": {"clusterAdvertiseAddress": "alerts.example.com"},
