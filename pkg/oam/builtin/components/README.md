@@ -4320,7 +4320,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     on the thanos-ruler container unless `listenLocal` is set, and on the
     governing Service it creates unless `serviceName` names one of the
     author's (:216-232, :545-583; `portName: "grpc" is the name of a port the
-    Prometheus operator adds to the thanos-ruler container, …`). A patch of
+    Prometheus operator adds to the thanos-ruler container, …`). The
+    operator writes `portName` nowhere else, as it gives the ruler no probe,
+    so on the container it is judged as the pods run the web port: a
+    `thanos-ruler` patch that names port 10902 otherwise leaves it out of the
+    container, and one that renames `grpc` frees that name. The Service's
+    half is held whatever a patch says. A patch of
     `thanos-ruler` or `config-reloader` is merged by port number into the
     ports the operator gives them (`grpc` at 10901/TCP, the web port at
     10902/TCP and `reloader-web` at 8080/TCP, the last two unless

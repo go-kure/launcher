@@ -251,6 +251,19 @@ func thanosRulerRefusals(notA string) []struct {
 			`portName: "grpc" is the name of a port the Prometheus operator adds to the thanos-ruler container, and the API refuses a port name twice`},
 		{"a port name of the governing Service's gRPC port", map[string]any{"portName": "grpc", "listenLocal": true},
 			`portName: "grpc" is the name of a port of the governing Service the Prometheus operator creates where serviceName is unset`},
+		// On the container, portName is judged as the pods run the web port,
+		// after a thanos-ruler patch's ports are merged by number (:494): a
+		// patch that renames neither port leaves the clash, and the Service's
+		// half is held whatever the patch says.
+		{"a port name of the gRPC port, the patch renaming no port", map[string]any{"portName": "grpc", "serviceName": "rules",
+			"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "metrics", "containerPort": 9000}}}}},
+			`portName: "grpc" is the name of a port the Prometheus operator adds to the thanos-ruler container`},
+		{"an invalid port name, the patch renaming no port", map[string]any{"portName": "thanos-ruler-web", "serviceName": "rules",
+			"containers": []any{map[string]any{"name": "thanos-ruler", "resources": map[string]any{"limits": map[string]any{"cpu": "1"}}}}},
+			`portName: "thanos-ruler-web" is not a valid port name`},
+		{"a port name of the Service's gRPC port, the patch renaming the web port", map[string]any{"portName": "grpc",
+			"containers": []any{trWebPortRenamed()}},
+			`portName: "grpc" is the name of a port of the governing Service the Prometheus operator creates where serviceName is unset`},
 		// The operator merges a patch's ports into its own by number: the
 		// thanos-ruler container's grpc port, and the reloader's reloader-web.
 		{"a patched port of the gRPC port's name at another number", container(map[string]any{"name": "thanos-ruler", "ports": []any{
@@ -259,6 +272,11 @@ func thanosRulerRefusals(notA string) []struct {
 		{"a patched port of the reloader's name at another number", container(map[string]any{"name": "config-reloader", "ports": []any{
 			map[string]any{"name": "reloader-web", "containerPort": 9000},
 		}}), `containers[0] "config-reloader": ports[0] "reloader-web" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8080/TCP`},
+		// A patched port that takes portName is the two-ports clash, not
+		// portName naming a port the operator adds.
+		{"a patched port of portName's name at another number", map[string]any{"portName": "metrics", "serviceName": "rules",
+			"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "metrics", "containerPort": 9000}}}}},
+			`containers[0] "thanos-ruler": ports[0] "metrics" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 10902/TCP`},
 		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "1rules"}, "serviceName:"},
 		// The operator copies the count into the StatefulSet (statefulset.go:507).
 		{"negative replicas", map[string]any{"replicas": -1},
@@ -778,6 +796,12 @@ func TestThanosRuler_PatchedImage(t *testing.T) {
 	}
 }
 
+// trWebPortRenamed is an entry of containers that names the thanos-ruler
+// container's web port, 10902, web.
+func trWebPortRenamed() map[string]any {
+	return map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "web", "containerPort": 10902}}}
+}
+
 // trResourcesPatch is an entry of containers that patches the thanos-ruler
 // container's resources.
 func trResourcesPatch(resources map[string]any) map[string]any {
@@ -974,10 +998,18 @@ func TestThanosRuler_Name(t *testing.T) {
 func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 	h := &components.ThanosRulerHandler{}
 	for name, props := range map[string]map[string]any{
-		"zero replicas":                                    {"replicas": 0},
-		"a port name of 15 characters":                     {"portName": "thanosrulerwebx"},
-		"the gRPC port name nowhere":                       {"portName": "grpc", "listenLocal": true, "serviceName": "rules"},
-		"an invalid port name nowhere":                     {"portName": "thanos-ruler-web", "listenLocal": true, "serviceName": "rules"},
+		"zero replicas":                {"replicas": 0},
+		"a port name of 15 characters": {"portName": "thanosrulerwebx"},
+		"the gRPC port name nowhere":   {"portName": "grpc", "listenLocal": true, "serviceName": "rules"},
+		"an invalid port name nowhere": {"portName": "thanos-ruler-web", "listenLocal": true, "serviceName": "rules"},
+		// The operator writes portName into no probe, so a patch that names
+		// the web port otherwise leaves it out of the pods, and one that
+		// renames the gRPC port frees that name.
+		"the gRPC port name, the patch renaming the web port":   {"portName": "grpc", "serviceName": "rules", "containers": []any{trWebPortRenamed()}},
+		"an invalid port name, the patch renaming the web port": {"portName": "thanos-ruler-web", "serviceName": "rules", "containers": []any{trWebPortRenamed()}},
+		"the gRPC port name, the patch renaming the gRPC port": {"portName": "grpc", "serviceName": "rules", "containers": []any{
+			map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "grpc-api", "containerPort": 10901}}},
+		}},
 		"a patched port of the web port's name and number": {"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "web", "containerPort": 10902}}}}},
 		// A request a patch of the thanos-ruler container names replaces the
 		// 200Mi the operator fills, and is held with the spec's limit.

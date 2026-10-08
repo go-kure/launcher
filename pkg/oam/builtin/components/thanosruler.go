@@ -94,7 +94,7 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"replicas":         number("replicas: the number of Thanos Ruler pods. A negative one is refused: the operator copies it into the StatefulSet, which the API refuses. Held to the EnvironmentPolicy's replica maximum. Unset, the StatefulSet runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
 		"nodeSelector":     object("nodeSelector: the node labels a node must carry for the pods to be scheduled on it."),
 		"schedulerName":    text("schedulerName: the scheduler that places the pods. Unset, the default scheduler. Not empty."),
-		"resources":        object("resources: the resource requests and limits of the thanos-ruler container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied." + core + "ResourceRequirements in the Kubernetes API reference."),
+		"resources":        object("resources: the resource requests and limits of the thanos-ruler container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied. A containers entry named thanos-ruler is merged over this block key by key, and the checks hold the merged block, so a memory request it names replaces the 200Mi." + core + "ResourceRequirements in the Kubernetes API reference."),
 		"affinity":         object("affinity: the scheduling constraints of the pods." + core + "Affinity in the Kubernetes API reference."),
 		"tolerations": objects("tolerations: the taints the pods tolerate.",
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
@@ -369,16 +369,40 @@ func validateThanosRuler(spec *monitoringv1.ThanosRulerSpec) error {
 // prometheus-operator v0.94.1); unless serviceName names a Service of the
 // author's, as the name and target port of the governing Service's web port,
 // beside the port grpc (makeStatefulSetService, :545-583; operator.go:567-574).
+//
+// The operator writes portName nowhere else: it gives the ruler no probe
+// (:216-232 and :545-583 are its only reads). So the container's web port is
+// judged as the pods run it, after a thanos-ruler patch's ports are merged
+// into the operator's by number (:494, runPorts): a patch that names port
+// 10902 otherwise leaves portName out of the container, and one that renames
+// the grpc port frees that name. Where the patch renames neither, a portName
+// that is not a port name, or is the name another port of the container has,
+// is refused; a clash with a port the patch adds is the shared port check's
+// (refuseDuplicatePortNames). The Service's half is held whatever the patch
+// says, as the Service's ports are the operator's alone.
 func validateThanosRulerPortName(spec *monitoringv1.ThanosRulerSpec) error {
-	containerPort, servicePort := !spec.ListenLocal, spec.ServiceName == nil
-	reserved := map[string]string{}
-	if servicePort {
-		reserved["grpc"] = "a port of the governing Service the Prometheus operator creates where serviceName is unset"
+	if !spec.ListenLocal && spec.PortName != "" {
+		var listed []corev1.ContainerPort
+		if i := patchOf(spec.Containers, "thanos-ruler"); i >= 0 {
+			listed = spec.Containers[i].Ports
+		}
+		ports := runPorts(true, thanosRulerPorts(spec)["thanos-ruler"], listed)
+		web := slices.IndexFunc(ports, func(p runPort) bool { return p.port.ContainerPort == thanosRulerWebPort })
+		if web >= 0 && !strings.HasPrefix(ports[web].from, "ports[") {
+			reserved := map[string]string{}
+			for i, p := range ports {
+				if i != web && !strings.HasPrefix(p.from, "ports[") {
+					reserved[p.port.Name] = "a port the Prometheus operator adds to the thanos-ruler container"
+				}
+			}
+			if err := validateOperatorPortName(spec.PortName, true, reserved); err != nil {
+				return err
+			}
+		}
 	}
-	if containerPort {
-		reserved["grpc"] = "a port the Prometheus operator adds to the thanos-ruler container"
-	}
-	return validateOperatorPortName(spec.PortName, containerPort || servicePort, reserved)
+	return validateOperatorPortName(spec.PortName, spec.ServiceName == nil, map[string]string{
+		"grpc": "a port of the governing Service the Prometheus operator creates where serviceName is unset",
+	})
 }
 
 // thanosRulerPorts are the ports the operator gives the containers it
@@ -397,11 +421,15 @@ func thanosRulerPorts(spec *monitoringv1.ThanosRulerSpec) map[string][]corev1.Co
 		if web == "" {
 			web = "web"
 		}
-		ports["thanos-ruler"] = append(ports["thanos-ruler"], port(web, 10902))
+		ports["thanos-ruler"] = append(ports["thanos-ruler"], port(web, thanosRulerWebPort))
 		ports["config-reloader"] = []corev1.ContainerPort{port("reloader-web", 8080)}
 	}
 	return ports
 }
+
+// thanosRulerWebPort is the number of the thanos-ruler container's web port,
+// the one portName names (:223-232).
+const thanosRulerWebPort = 10902
 
 // thanosRulerSecretKeyVolumes are the volumes the operator adds to the pods
 // for a Secret key of the spec, each mounted in the thanos-ruler container
