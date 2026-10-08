@@ -93,8 +93,14 @@ type monitoringWorkload struct {
 	// with the requests and limits of a listed entry that patches the container
 	// merged over it, key by key (mergedResources).
 	resources []fieldResources
+	// mergedPatches names, by the property that lists it, the generated
+	// container whose patch's resources are held merged in resources: the
+	// patch's block alone is then not checked against the API's rules, as the
+	// operator never runs it alone.
+	mergedPatches map[string]string
 	// memoryRequests is the memory request the operator fills into a block of
-	// resources that names none, by the path of the block.
+	// resources that names none, by the path of the block. The block is checked
+	// with it filled.
 	memoryRequests map[string]string
 	// literals are the paths of the credentials the spec holds in the clear.
 	literals []string
@@ -111,10 +117,13 @@ type monitoringWorkload struct {
 // generates is merged into it, so such a patch may name no image; any other
 // listed container is added to the pods as written, and one that names no
 // image is refused, since no pod runs it. An image volume that names no image
-// is not checked. A block that names a memory limit and no memory request is
-// refused where the request the operator fills (memoryRequests) exceeds that
-// limit: the operator fills it whatever the limit, and the API refuses a pod
-// whose request exceeds its limit.
+// is not checked. The blocks of resources are checked as the operator runs
+// them: a patch merged in one (mergedPatches) is not checked alone, and a
+// block that names no memory request is checked with the request the
+// operator fills (memoryRequests), which satisfies the API's rule that
+// hugepages need cpu or memory. Such a block that names a memory limit is
+// refused where the filled request exceeds it: the operator fills it whatever
+// the limit, and the API refuses a pod whose request exceeds its limit.
 func validateMonitoringWorkload(w monitoringWorkload) error {
 	for _, image := range w.images {
 		if err := ValidateImageRef(image.value); err != nil {
@@ -140,6 +149,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
+			if w.mergedPatches[list.name] == c.Name {
+				continue
+			}
 			if err := validateCnpgResources(where, c.Resources); err != nil {
 				return err
 			}
@@ -149,16 +161,22 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 		return err
 	}
 	for _, r := range w.resources {
-		if err := validateResourcesAt(r.path, r.resources); err != nil {
-			return err
-		}
+		block := r.resources
 		if q, ok := w.memoryRequests[r.path]; ok {
-			if _, named := r.resources.Requests[corev1.ResourceMemory]; !named {
+			if _, named := block.Requests[corev1.ResourceMemory]; !named {
 				filled := resource.MustParse(q)
-				if limit, limited := r.resources.Limits[corev1.ResourceMemory]; limited && filled.Cmp(limit) > 0 {
+				if limit, limited := block.Limits[corev1.ResourceMemory]; limited && filled.Cmp(limit) > 0 {
 					return errors.Errorf("%s: memory: the unset request the Prometheus operator fills as %s must not exceed limit %s; name a request no larger than the limit", r.path, q, limit.String())
 				}
+				block.Requests = maps.Clone(block.Requests)
+				if block.Requests == nil {
+					block.Requests = corev1.ResourceList{}
+				}
+				block.Requests[corev1.ResourceMemory] = filled
 			}
+		}
+		if err := validateResourcesAt(r.path, block); err != nil {
+			return err
 		}
 	}
 	return nil

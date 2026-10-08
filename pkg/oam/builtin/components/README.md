@@ -3733,9 +3733,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `metadata: {}` and `status: {}` beside its `spec`; upstream documents that
   an `emptyDir` or an `ephemeral` takes precedence over it.
 
-  **With or without a policy,** an authored `image`, the authored image of a
-  listed container or init container, and the `reference` of an image volume
-  are held to the tag rule (`ValidateImageRef`: `image: image "…" rejected:
+  **With or without a policy,** an authored `image` (unless a patch of
+  `alertmanager` names an image, which replaces it in the container the
+  operator builds, so only the patch's is run and held), the authored image
+  of a listed container or init container, and the `reference` of an image
+  volume are held to the tag rule (`ValidateImageRef`: `image: image "…" rejected:
   :latest tag not allowed`), and a resource block's request may not exceed
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
@@ -3743,7 +3745,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   operator fills it, an unset memory request as 200Mi whatever the limit,
   and with the requests and limits of a listed `alertmanager` entry merged
   over that block key by key (`makeStatefulSetSpec`, same source); the
-  checks hold that merged block. A memory limit under 200Mi with no memory
+  checks hold that merged block with the 200Mi filled where it names no
+  memory request, and not the patch's block alone. So hugepages need no
+  authored cpu or memory beside them, the filled request naming memory, and
+  an extended resource the patch requests meets a limit named in
+  `resources`. A memory limit under 200Mi with no memory
   request in either is refused, as the API would refuse the pods
   (`resources: memory: the unset request the Prometheus operator fills as
   200Mi must not exceed limit 100Mi; …`; with a patch, the path is
@@ -3768,9 +3774,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload
   kind's refusal has:
-  - `image`, the image of a listed container or init container (a patch of
-    `alertmanager` included), and an image volume's reference, outside the
-    allowed registries (`oam.RefusalRegistry`);
+  - `image` where no patch of `alertmanager` replaces it, the image of a
+    listed container or init container (a patch of `alertmanager` included),
+    and an image volume's reference, outside the allowed registries
+    (`oam.RefusalRegistry`);
   - under a policy that lists allowed registries, an image of a container
     the operator generates that the spec leaves to it (`oam.RefusalRegistry`):
     the `alertmanager` container's where neither `image` nor a patch of it

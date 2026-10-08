@@ -1696,7 +1696,7 @@ and by scope, whatever component or trait emits it.
   operator builds a StatefulSet from it and runs the pods.
   - **No capability is required and nothing gates it,** as for the four kinds above.
   - **What the spec says of the pods is held to the environment policy as a workload
-    kind's own fields are:** `image` and the images of the listed containers and image
+    kind's own fields are:** `image` (where no patch replaces it) and the images of the listed containers and image
     volumes (allowed registries, and the tag rule with or without a policy), `replicas`,
     the cpu and memory of `resources` and of a listed container, the storage of the claim
     the operator makes from the arm of `storage` it uses, `hostNetwork`, hostPath volumes,
@@ -1720,8 +1720,10 @@ and by scope, whatever component or trait emits it.
     `retention` and a cluster duration of 0 or less, which the operator ignores, a
     memory limit under the 200Mi request the operator fills where none is named, and a
     container name listed twice, of which the operator runs only the last entry. The
-    alertmanager container's resources are held as the operator runs them: a listed
-    `alertmanager` entry's requests and limits merged over `resources`. **Not
+    alertmanager container is held as the operator runs it: a listed `alertmanager`
+    entry's requests and limits merged over `resources`, with the 200Mi request filled
+    where neither names one, and an image the entry names in place of `image`, which
+    is then not held. **Not
     held:** what else the operator adds on its own (the arguments it derives, the
     governing Service) is not in the object.
   - **`baseImage`, `tag` and `sha` are not authorable**: not in the schema, so `kurel build`

@@ -80,7 +80,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	return map[string]oam.PropertySchema{
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
-		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
+		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
 		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
@@ -289,11 +289,12 @@ var alertmanagerGenerated = map[string][]string{
 // alertmanagerWorkload maps an Alertmanager spec into the workload the two
 // shared functions read. It only reads spec.
 //
-// Held through it: image; replicas, an unset one as the operator's 1;
+// Held through it: image, where no patch of the alertmanager container names
+// one in its place; replicas, an unset one as the operator's 1;
 // storage; resources, the alertmanager container's as the operator runs it:
 // an unset memory request filled as its 200Mi, then the requests and limits
 // of a listed alertmanager entry merged over it, key by key, so a request the
-// entry names replaces the 200Mi (makeStatefulSet and makeStatefulSetSpec,
+// entry names replaces the 200Mi, and the entry's block is not checked alone (makeStatefulSet and makeStatefulSetSpec,
 // pkg/alertmanager/statefulset.go:144-149, :762 and :817 at
 // prometheus-operator v0.94.1); the images of the three containers the operator
 // generates, where the spec leaves them to it; and, as pod fields, containers,
@@ -308,6 +309,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		replicas = int64(*spec.Replicas)
 	}
 	resources := fieldResources{"resources", spec.Resources}
+	var merged map[string]string
 	if i := patchOf(spec.Containers, "alertmanager"); i >= 0 {
 		patch := spec.Containers[i].Resources
 		if len(patch.Requests) > 0 || len(patch.Limits) > 0 {
@@ -315,6 +317,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 				fmt.Sprintf("resources with containers[%d] %q merged over it", i, "alertmanager"),
 				mergedResources(spec.Resources, patch),
 			}
+			merged = map[string]string{"containers": "alertmanager"}
 		}
 	}
 	w := monitoringWorkload{
@@ -330,12 +333,17 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		replicasPath:   "replicas",
 		storage:        spec.Storage,
 		resources:      []fieldResources{resources},
+		mergedPatches:  merged,
 		memoryRequests: map[string]string{resources.path: alertmanagerOperatorMemoryRequest},
 	}
+	// The image a patch names replaces image in the container the operator
+	// builds from it, so image is then not run, and not held: the patch's own
+	// is, as a listed container's image.
 	switch {
+	case patchedImage(spec.Containers, "alertmanager") != "":
 	case spec.Image != nil && *spec.Image != "":
 		w.images = []fieldValue{{"image", *spec.Image}}
-	case patchedImage(spec.Containers, "alertmanager") == "":
+	default:
 		w.unsetImages = []string{"image"}
 	}
 	for _, reloader := range []struct {
