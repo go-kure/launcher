@@ -208,9 +208,9 @@ const (
 	// unreadFlux: what a Flux object hands on other than its
 	// spec.commonMetadata, which the checks read.
 	unreadFlux = "what a Flux object hands on to the objects it applies: the triage of go-kure/launcher#790"
-	// unreadTemplate: these become the metadata of a PersistentVolumeClaim, not
-	// of a pod.
-	unreadTemplate = "a volume claim template's metadata: its own item of go-kure/launcher#790"
+	// unreadTemplate: the claim template of an ephemeral volume becomes the
+	// metadata of a PersistentVolumeClaim, not of a pod.
+	unreadTemplate = "an ephemeral volume's claim template: not examined by go-kure/launcher#944, which holds a StatefulSet's volume claim templates"
 )
 
 // labelReachReservedOnly names every field the walk finds that hands metadata
@@ -269,6 +269,12 @@ var labelReachReservedOnly = []struct {
 		field: "github.com/backube/volsync/api/v1alpha1.ReplicationDestinationRsyncTLSSpec.ServiceAnnotations",
 		says:  "serviceAnnotations defines annotations that will be added to the service created for incoming SSH connections.",
 	},
+	{
+		// A StatefulSet's spec.volumeClaimTemplates: the controller copies each
+		// template's metadata onto the claims it creates from it.
+		field: "k8s.io/api/core/v1.PersistentVolumeClaim.ObjectMeta",
+		says:  "volumeClaimTemplates is a list of claims that pods are allowed to reference. The StatefulSet controller is responsible for mapping network identities to claims in a way that maintains the identity of a pod.",
+	},
 }
 
 // labelReachNotRead names every field the walk finds that the checks do not
@@ -277,11 +283,11 @@ var labelReachReservedOnly = []struct {
 // operatorMetadataKinds and podTemplateKinds), by both checks or, listed in
 // labelReachReservedOnly, by the reserved keys alone, or stands here.
 var labelReachNotRead = []labelReachUnread{
-	// A volume claim template's: a StatefulSet's spec.volumeClaimTemplates, and
-	// the claim template of an ephemeral volume, in every pod spec and in a
-	// CloudNativePG Cluster's spec.ephemeralVolumeSource. A CronJob's job
-	// template is held (pkg/oam podTemplateKinds).
-	{field: "k8s.io/api/core/v1.PersistentVolumeClaim.ObjectMeta", reason: unreadTemplate},
+	// The claim template of an ephemeral volume, in every pod spec and in a
+	// CloudNativePG Cluster's spec.ephemeralVolumeSource. A StatefulSet's
+	// spec.volumeClaimTemplates is held to the reserved keys
+	// (labelReachReservedOnly), and a CronJob's job template by both checks
+	// (pkg/oam podTemplateKinds).
 	{field: "k8s.io/api/core/v1.PersistentVolumeClaimTemplate.ObjectMeta", reason: unreadTemplate},
 
 	// Maps that are named like metadata and are the metadata of no object.

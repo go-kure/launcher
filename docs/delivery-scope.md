@@ -906,13 +906,16 @@ and by scope, whatever component or trait emits it.
     ExternalArtifacts it generates, a FluxInstance's, which goes onto the objects of the Flux
     installation, a VolSync destination's `serviceAnnotations`), for the
     reserved keys alone (go-kure/launcher#790: nothing
-    selects those objects by the component label). Exempt: the `app` label and the component
+    selects those objects by the component label), and a StatefulSet's
+    `spec.volumeClaimTemplates[].metadata`, which goes onto the claims the controller creates,
+    for the reserved keys alone too (go-kure/launcher#944: the API server refuses a change to
+    the claim templates, so launcher writes no component label there). Exempt: the `app` label and the component
     label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
-    of its own (`volumeClaimTemplates`; a test derives the fields that hand metadata on from
-    the kinds' API types and holds or lists each: `TestLabelReach_EveryFieldIsHeldOrListed`),
-    and what a controller adds.
+    of its own (an ephemeral volume's claim template; a test derives the fields that hand
+    metadata on from the kinds' API types and holds or lists each:
+    `TestLabelReach_EveryFieldIsHeldOrListed`), and what a controller adds.
   - Not read either: what a config that a consumer wraps around an application's config
     after the transform adds. On a layout a config augments, the check reads the objects the
     config's `AugmentLayout` added and leaves what was on the layout before, so a consumer may

@@ -603,9 +603,15 @@ typed Flux `Kustomization` or `HelmRelease` by its Go type as well. A `ResourceS
 component type: the row holds one that a `manifests` or `passthrough` document carries, as
 every row does. A refusal names the labels by their path, with the index of the solver where
 they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not
-read: a volume claim template's labels, and `spec.commonMetadata` of an `ArtifactGenerator` and
-a `FluxInstance`, which go onto the ExternalArtifacts it generates and onto the objects of the
-Flux installation, no pods.
+read: `spec.commonMetadata` of an `ArtifactGenerator` and a `FluxInstance`, which go onto the
+ExternalArtifacts it generates and onto the objects of the Flux installation, no pods, and a
+`StatefulSet`'s volume claim templates (`spec.volumeClaimTemplates[].metadata`), which go onto
+the PersistentVolumeClaims the StatefulSet controller creates (go-kure/launcher#944). The
+reserved metadata keys are read in all three. Launcher writes no label into a volume claim
+template either: the API server refuses a change to a StatefulSet's
+`spec.volumeClaimTemplates`, so a label written there would fail the apply of a StatefulSet the
+cluster holds already, and the controller does not relabel a claim it created before. The
+controller puts the `matchLabels` of the StatefulSet's selector on each claim it creates.
 
 The five Flux holders of `spec.commonMetadata` put it on the top-level metadata of each object
 they apply, never on a pod template. A `Kustomization`, `HelmRelease` or `ResourceSet` may
@@ -911,6 +917,19 @@ text of its own; that refusal is the component label's now, text included.
 `ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` and
 `ReservedKeyInMoverService`.
 
+**Breaking library changes** (go-kure/launcher#944, a StatefulSet's volume claim templates):
+
+- A document that built before is refused at generation when a volume claim template of a
+  `StatefulSet` (`spec.volumeClaimTemplates[].metadata`) holds a reserved metadata key as a
+  label or an annotation. Before, a volume claim template's metadata was not read. The
+  `statefulset` kind writes nothing there but the claim's name, so this reaches a
+  `passthrough` or `manifests` document, a chart rendered at build time and a consumer's own
+  config.
+- The component label is neither read nor written there, as before: another component's
+  value builds, and the output does not change.
+- New exported API: `ReservedKeyInVolumeClaimTemplate`, the `ReservedKeyHolder` of a volume
+  claim template (`volume claim template label "…"`).
+
 ## Reserved metadata keys
 
 A consumer that keeps label and annotation keys to itself names them in
@@ -971,8 +990,8 @@ the key: `ReservedKeyInObjectMetadata`, `ReservedKeyInPodTemplate`, `ReservedKey
 metadata that reaches no pods, `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
 `ReservedKeyInSecretTemplate`, `ReservedKeyInServiceTemplate`,
 `ReservedKeyInServiceAccountTemplate`, `ReservedKeyInVolumeSnapshot`,
-`ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` or
-`ReservedKeyInMoverService`. `Path` is where the labels
+`ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate`,
+`ReservedKeyInMoverService` or `ReservedKeyInVolumeClaimTemplate`. `Path` is where the labels
 or the annotations that hold the key are on the object (`metadata.labels`,
 `spec.template.metadata.annotations`), the map itself where the field is a map of labels or
 of annotations (`spec.rsync.serviceAnnotations`), with the index of the element where they
@@ -1036,7 +1055,11 @@ Flux applies it (a `List`, or an envelope with `items`):
     Services and the like, not their pod templates): `spec.commonMetadata label "…"`;
   - `serviceAnnotations` of the `rsync` and `rsyncTLS` movers of a `volsync.backube`
     `ReplicationDestination`, which go onto the mover's Service: `mover service annotation
-    "…"`.
+    "…"`;
+  - the metadata of each volume claim template of an `apps` `StatefulSet`
+    (`spec.volumeClaimTemplates[].metadata`), in every template of the list, which the
+    StatefulSet controller copies onto each PersistentVolumeClaim it creates: `volume claim
+    template label "…"` (go-kure/launcher#944).
 
 These are the places the component label is held to its value in
 ([Component label and ownership](#component-label-and-ownership)), but the metadata that
@@ -1079,8 +1102,8 @@ object named, and is not read as holding no key.
 
 - A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
-- Metadata an object hands on to others in a field of its own: a StatefulSet's
-  `volumeClaimTemplates`. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the
+- Metadata an object hands on to others in a field of its own: the claim template of an
+  ephemeral volume, in a pod spec. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the
   full list of fields of the kinds' API types that hand metadata on and are not read.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
