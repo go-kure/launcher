@@ -1821,7 +1821,9 @@ and by scope, whatever component or trait emits it.
     is not, as on the pod kinds.
   - **What the operator builds from the spec is checked where the API would break it,**
     on the line drawn for `alertmanager`: a `portName` the API refuses where the operator
-    writes it, `grpc` included, beside which it adds it; a patched port that leaves two
+    writes it, `grpc` included, beside which it adds it (on the container, as the pods
+    run the web port after a `thanos-ruler` patch's ports are merged, since the operator
+    writes it into no probe); a patched port that leaves two
     ports of one name, merged by number; a `serviceName` that is not a DNS-1035 label; a
     negative `replicas`, which the operator copies into the StatefulSet; the storage
     rules of `alertmanager`, under `thanos-ruler-<name>-data`; an entry of `volumes`
