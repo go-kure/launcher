@@ -29,10 +29,11 @@ import (
 //
 // The hint is a type's answer for its top-level keys. A field below the top
 // level, inside a property the type declares, is refused by the parser of that
-// property (resourcesRejectedKeys, affinityShorthandRejectedKeys below,
-// initContainerRejectedKeys, volumeClaimTemplateRejectedKeys); the document
-// check appends the type's NestedUnsupportedFieldHint to its refusal of such a
-// key (refusedNestedKeyHint).
+// property (resourcesRejectedKeys, podResourcesRejectedKeys,
+// affinityShorthandRejectedKeys below, initContainerRejectedKeys,
+// volumeClaimTemplateRejectedKeys); the document check appends the type's
+// NestedUnsupportedFieldHint to its refusal of such a key
+// (refusedNestedKeyHint).
 
 // mainContainerRejectedKeys are the corev1.Container fields a workload type's
 // main container is not authored with. That container is authored as the type's
@@ -75,6 +76,15 @@ var appsPodTemplateRejectedKeys = map[string]string{
 // claim the pod declares, and parseResources is handed the one object.
 var resourcesRejectedKeys = map[string]string{
 	"claims": "resources.claims: not read by this component — an entry names one of the pod's resourceClaims, and a container's resources are read without them; upstream puts the field behind the DynamicResourceAllocation feature gate",
+}
+
+// podResourcesRejectedKeys are the corev1.ResourceRequirements fields the
+// pod-level `podResources` property is not read with (parsePodSpec). Upstream
+// takes no claims there: PodSpec.Resources says "ResourceClaims are not
+// supported", and validatePodResources (k8s.io/kubernetes v1.37.1,
+// pkg/apis/core/validation/validation.go) refuses a pod-level Claims outright.
+var podResourcesRejectedKeys = map[string]string{
+	"claims": "podResources.claims: not authorable — upstream validation forbids claims in a pod's own resources (\"claims may not be set for Resources at pod-level\"); the pod's claims are its resourceClaims",
 }
 
 // affinityShorthandReason ends the refusal of a corev1.Affinity field on the
@@ -133,18 +143,19 @@ type nestedRefusal struct {
 }
 
 // reasonOnly is the text of a parser that refuses with the reason alone, which
-// names the key's path itself (resourcesRejectedKeys,
+// names the key's path itself (resourcesRejectedKeys, podResourcesRejectedKeys,
 // affinityShorthandRejectedKeys).
 func reasonOnly(_, reason string) string { return reason }
 
 // containerNestedRefusals are the objects below the top level that every
 // workload type of refusedKeys declares and whose parser refuses keys by name,
 // keyed by the declared keys down to the object, joined with "." (array items
-// unnamed): the main container's `resources`, an init container entry, and the
-// `resources` of an init container or a sidecar entry. A type with no
-// `sidecars` property never reaches that row.
+// unnamed): the main container's `resources`, an init container entry, the
+// `resources` of an init container or a sidecar entry, and the pod's own
+// `podResources`. A type with no `sidecars` property never reaches that row.
 var containerNestedRefusals = map[string]nestedRefusal{
-	"resources": {resourcesRejectedKeys, reasonOnly},
+	"resources":    {resourcesRejectedKeys, reasonOnly},
+	"podResources": {podResourcesRejectedKeys, reasonOnly},
 	"initContainers": {initContainerRejectedKeys, func(key, reason string) string {
 		return key + ": not supported on an init container — " + reason
 	}},

@@ -59,7 +59,9 @@ const (
 	// properties of `as`, so neither path drops it in silence.
 	parityOtherShape = "other shape"
 	// parityRenamed: read under the property of `as`, because the upstream name
-	// is a property of this kind already, read as another upstream field.
+	// is a property of this kind already, read as another upstream field. With
+	// `nested`, the fields of its type are held to that property one level
+	// down, as for parityReadInPart.
 	parityRenamed = "renamed"
 	// parityNameTaken: not read, and its name is taken on this kind by another
 	// upstream field of the same name, which is read as that property: `as`
@@ -90,8 +92,8 @@ type parityRule struct {
 	// of the component.
 	descend bool
 	// nested is the refusal map of the parser that reads the property
-	// (parityReadInPart): its keys are fields of the upstream
-	// field's type, refused one level down.
+	// (parityReadInPart, or the one property of `as` for parityRenamed): its
+	// keys are fields of the upstream field's type, refused one level down.
 	nested map[string]string
 }
 
@@ -137,7 +139,7 @@ var parityRules = map[string][]parityRule{
 
 	// Pod fields whose name is the container's property, or the job's.
 	"PodSpec.securityContext":       {{class: parityRenamed, as: []string{"podSecurityContext"}}},
-	"PodSpec.resources":             {{class: parityRenamed, as: []string{"podResources"}}},
+	"PodSpec.resources":             {{class: parityRenamed, as: []string{"podResources"}, nested: podResourcesRejectedKeys}},
 	"PodSpec.activeDeadlineSeconds": {{class: parityRenamed, as: []string{"podActiveDeadlineSeconds"}, only: []string{"job", "cronjob"}}},
 
 	// A container's `resources` are read without `claims` (parseResources).
@@ -213,8 +215,8 @@ func parityRuleFor(k parityKind, typ reflect.Type, name string) (string, parityR
 //
 // The walk stops at the component's properties. What a property holds inside is
 // held to the upstream type only for a property whose parser has a refusal map
-// of its own (parityReadInPart); the fields inside every other property are not
-// walked.
+// of its own (parityReadInPart, or a parityRenamed rule with `nested`); the
+// fields inside every other property are not walked.
 //
 // A field with no answer fails the test, so a field a later k8s.io/api adds to
 // one of these types cannot be dropped in silence: it is read, or it gets its
@@ -247,6 +249,34 @@ func TestHandParsedKinds_CoverEveryUpstreamField(t *testing.T) {
 					t.Errorf("%s and %s are both read as the property %q: one of them needs a rule in parityRules", prev, id, prop)
 				}
 				readAs[prop] = id
+			}
+
+			// walkNested holds the fields of the upstream field's type to the
+			// property prop that reads it: each one declared by prop or a key
+			// of nested, the refusal map of prop's parser, whose reason begins
+			// with the field's path under prop.
+			walkNested := func(id, prop string, inner reflect.Type, nested map[string]string) {
+				for inner.Kind() == reflect.Pointer {
+					inner = inner.Elem()
+				}
+				innerFields := parityFields(inner)
+				for _, field := range slices.Sorted(maps.Keys(innerFields)) {
+					_, isDeclared := schema[prop].Properties[field]
+					reason, isRefused := nested[field]
+					switch {
+					case isDeclared && isRefused:
+						t.Errorf("%s.%s: the property both declares and refuses it", id, field)
+					case !isDeclared && !isRefused:
+						t.Errorf("%s.%s (%s) is neither read nor refused by the property %q of %q: declare it, or give it an entry with its reason in the parser's refusal map", id, field, innerFields[field], prop, k.componentType)
+					case isRefused && !strings.HasPrefix(reason, prop+"."+field+": "):
+						t.Errorf("%s.%s: the refusal does not begin with the path %q: %q", id, field, prop+"."+field, reason)
+					}
+				}
+				for field := range nested {
+					if _, ok := innerFields[field]; !ok {
+						t.Errorf("%s: the refusal key %q is no field of %s", id, field, inner)
+					}
+				}
 			}
 
 			var walk func(typ reflect.Type)
@@ -290,6 +320,12 @@ func TestHandParsedKinds_CoverEveryUpstreamField(t *testing.T) {
 							}
 							claim(prop, id)
 						}
+						if rule.nested != nil {
+							if len(rule.as) != 1 {
+								t.Fatalf("%s: a parityRenamed rule with a nested refusal map names exactly one property in `as`, got %v", id, rule.as)
+							}
+							walkNested(id, rule.as[0], fields[name], rule.nested)
+						}
 					case hasRule && class == parityNameTaken:
 						usedRules[id] = true
 						if len(rule.as) != 1 {
@@ -305,28 +341,7 @@ func TestHandParsedKinds_CoverEveryUpstreamField(t *testing.T) {
 							t.Errorf("%s: %q is not a declared, unrefused property of the kind", id, name)
 						}
 						claim(name, id)
-						inner := fields[name]
-						for inner.Kind() == reflect.Pointer {
-							inner = inner.Elem()
-						}
-						innerFields := parityFields(inner)
-						for _, field := range slices.Sorted(maps.Keys(innerFields)) {
-							_, isDeclared := schema[name].Properties[field]
-							reason, isRefused := rule.nested[field]
-							switch {
-							case isDeclared && isRefused:
-								t.Errorf("%s.%s: the property both declares and refuses it", id, field)
-							case !isDeclared && !isRefused:
-								t.Errorf("%s.%s (%s) is neither read nor refused by the property %q of %q: declare it, or give it an entry with its reason in the parser's refusal map", id, field, innerFields[field], name, k.componentType)
-							case isRefused && !strings.HasPrefix(reason, name+"."+field+": "):
-								t.Errorf("%s.%s: the refusal does not begin with the path %q: %q", id, field, name+"."+field, reason)
-							}
-						}
-						for field := range rule.nested {
-							if _, ok := innerFields[field]; !ok {
-								t.Errorf("%s: the refusal key %q is no field of %s", id, field, inner)
-							}
-						}
+						walkNested(id, name, fields[name], rule.nested)
 					case hint != "":
 						class = "refused"
 						refused[name] = true

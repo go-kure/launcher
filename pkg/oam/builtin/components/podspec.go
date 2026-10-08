@@ -413,7 +413,11 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 		// pod-level resources. parseResources refuses a non-object
 		// requests/limits itself, but under its own `resources.<k>` label; the
 		// pre-check below is kept so the error names the key the author wrote
-		// (`podResources.<k>`).
+		// (`podResources.<k>`). An upstream field the property does not read
+		// is refused with its reason first (podResourcesRejectedKeys).
+		if err := refusedProperty(raw, podResourcesRejectedKeys); err != nil {
+			return PodSpecConfig{}, err
+		}
 		if err := rejectUnknownKeys(raw, []string{"requests", "limits"}, "podResources"); err != nil {
 			return PodSpecConfig{}, err
 		}
