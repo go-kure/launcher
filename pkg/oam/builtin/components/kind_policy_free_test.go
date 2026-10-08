@@ -26,6 +26,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -711,6 +712,15 @@ var policyFreeKinds = []policyFreeKind{
 			"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}},
 		},
 	},
+	// The two webhook configurations have no spec type: each is a whole
+	// object, whose one field is its webhooks (go-kure/launcher#943).
+	{
+		component: "mutatingwebhookconfiguration", handler: &components.MutatingWebhookConfigurationHandler{},
+		gvk: admissionregistrationv1.SchemeGroupVersion.WithKind("MutatingWebhookConfiguration"),
+		typ: reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), wholeObject: true,
+		minimal: map[string]any{},
+		full:    admissionWebhookFull(true),
+	},
 	{
 		component: "poddisruptionbudget", handler: &components.PodDisruptionBudgetHandler{},
 		gvk: policyv1.SchemeGroupVersion.WithKind("PodDisruptionBudget"),
@@ -993,6 +1003,13 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](), namespaced: true,
 		minimal: gatewayRouteMinimal(),
 		full:    gatewayRouteFull(),
+	},
+	{
+		component: "validatingwebhookconfiguration", handler: &components.ValidatingWebhookConfigurationHandler{},
+		gvk: admissionregistrationv1.SchemeGroupVersion.WithKind("ValidatingWebhookConfiguration"),
+		typ: reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), wholeObject: true,
+		minimal: map[string]any{},
+		full:    admissionWebhookFull(false),
 	},
 	{
 		component: "volumeattributesclass", handler: &components.VolumeAttributesClassHandler{},
@@ -1419,6 +1436,17 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		".Spec.Rules[0].BackendRefs[0].Weight", ".Spec.Rules[0].BackendRefs[1].BackendObjectReference.Port",
 		".Spec.Rules[0].BackendRefs[2].BackendObjectReference.Group",
 	}
+	// The two webhook configurations hold the same webhooks; the mutating
+	// one's add a reinvocation policy.
+	webhookReaches := []string{
+		".Webhooks", ".Webhooks[0].ClientConfig.Service", ".Webhooks[0].ClientConfig.Service.Path",
+		".Webhooks[0].ClientConfig.Service.Port", ".Webhooks[0].ClientConfig.CABundle", ".Webhooks[0].Rules",
+		".Webhooks[0].Rules[0].Operations", ".Webhooks[0].Rules[0].Rule.APIGroups", ".Webhooks[0].Rules[0].Rule.Scope",
+		".Webhooks[0].FailurePolicy", ".Webhooks[0].MatchPolicy", ".Webhooks[0].NamespaceSelector.MatchLabels",
+		".Webhooks[0].ObjectSelector.MatchExpressions", ".Webhooks[0].ObjectSelector.MatchExpressions[0].Values",
+		".Webhooks[0].SideEffects", ".Webhooks[0].TimeoutSeconds", ".Webhooks[0].AdmissionReviewVersions",
+		".Webhooks[0].MatchConditions", ".Webhooks[1].ClientConfig.URL",
+	}
 	// In the order of the component types, as policyFreeKinds.
 	reaches := map[string][]string{
 		"alertmanager": alertmanagerReaches,
@@ -1597,6 +1625,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Interfaces", ".Spec.ServiceSelectors",
 			".Spec.ServiceSelectors[0].MatchLabels",
 		},
+		"mutatingwebhookconfiguration": append(webhookReaches, ".Webhooks[0].ReinvocationPolicy"),
 		"poddisruptionbudget": {
 			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
 			".Spec.Selector.MatchExpressions", ".Spec.Selector.MatchExpressions[0].Values", ".Spec.UnhealthyPodEvictionPolicy",
@@ -1655,11 +1684,12 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.SampleLimit", ".Spec.ScrapeProtocols", ".Spec.NativeHistogramConfig.NativeHistogramMinBucketFactor",
 			".Spec.AttachMetadata",
 		},
-		"storageclass":          {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
-		"tcproute":              routeReaches,
-		"tlsroute":              append([]string{".Spec.Hostnames"}, routeReaches...),
-		"udproute":              routeReaches,
-		"volumeattributesclass": {".Parameters"},
+		"storageclass":                   {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
+		"tcproute":                       routeReaches,
+		"tlsroute":                       append([]string{".Spec.Hostnames"}, routeReaches...),
+		"udproute":                       routeReaches,
+		"validatingwebhookconfiguration": webhookReaches,
+		"volumeattributesclass":          {".Parameters"},
 	}
 	type copyCase struct {
 		name      string
@@ -1888,6 +1918,64 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		{"solver sub-key", acmeIssuer(map[string]any{"http01": map[string]any{"ingress": map[string]any{"image": "registry.example/solver:1"}}}), notA},
 		{"null solver", map[string]any{"acme": acmeWith("solvers", []any{nil})}, "acme.solvers[0]"},
 		{"two spellings", map[string]any{"selfSigned": map[string]any{}, "SelfSigned": map[string]any{}}, "sets the same field as"},
+	}
+	// The two webhook configurations refuse the same of their webhooks.
+	// upstream is the type their decode names.
+	webhookCases := func(upstream string) []refusal {
+		hook := func(fields map[string]any) map[string]any {
+			return admissionWebhooks(admissionWebhook(fields))
+		}
+		without := func(field string) map[string]any {
+			h := admissionWebhook(nil)
+			delete(h, field)
+			return admissionWebhooks(h)
+		}
+		rule := func(fields map[string]any) map[string]any {
+			r := map[string]any{"operations": []any{"CREATE"}, "apiGroups": []any{""}, "apiVersions": []any{"v1"}, "resources": []any{"pods"}}
+			for k, v := range fields {
+				if v == nil {
+					delete(r, k)
+					continue
+				}
+				r[k] = v
+			}
+			return hook(map[string]any{"rules": []any{r}})
+		}
+		return []refusal{
+			{"webhook without a name", without("name"), "webhooks[0].name: required"},
+			{"webhook without a client config", without("clientConfig"), "webhooks[0].clientConfig: required"},
+			{"webhook without side effects", without("sideEffects"), "webhooks[0].sideEffects: required"},
+			{"webhook without review versions", without("admissionReviewVersions"), "webhooks[0].admissionReviewVersions: required"},
+			{"webhook with no review version", hook(map[string]any{"admissionReviewVersions": []any{}}), "webhooks[0].admissionReviewVersions: required"},
+			{"client config with neither", hook(map[string]any{"clientConfig": map[string]any{"caBundle": "Y2E="}}), "webhooks[0].clientConfig: exactly one of url and service is required"},
+			{"client config with both", hook(map[string]any{"clientConfig": map[string]any{
+				"url": "https://policy.example.com", "service": map[string]any{"namespace": "policy", "name": "webhook"},
+			}}), "webhooks[0].clientConfig: exactly one of url and service is required"},
+			{"service without a name", hook(map[string]any{"clientConfig": map[string]any{"service": map[string]any{"namespace": "policy"}}}), "webhooks[0].clientConfig.service.name: required"},
+			{"service without a namespace", hook(map[string]any{"clientConfig": map[string]any{"service": map[string]any{"name": "webhook"}}}), "webhooks[0].clientConfig.service.namespace: required"},
+			{"rule without operations", rule(map[string]any{"operations": nil}), "webhooks[0].rules[0].operations: required"},
+			{"rule with no operation", rule(map[string]any{"operations": []any{}}), "webhooks[0].rules[0].operations: required"},
+			{"rule without API groups", rule(map[string]any{"apiGroups": nil}), "webhooks[0].rules[0].apiGroups: required"},
+			{"rule without API versions", rule(map[string]any{"apiVersions": nil}), "webhooks[0].rules[0].apiVersions: required"},
+			{"rule without resources", rule(map[string]any{"resources": nil}), "webhooks[0].rules[0].resources: required"},
+			{"match condition without a name", hook(map[string]any{"matchConditions": []any{map[string]any{"expression": "true"}}}), "webhooks[0].matchConditions[0].name: required"},
+			{"match condition without an expression", hook(map[string]any{"matchConditions": []any{map[string]any{"name": "always"}}}), "webhooks[0].matchConditions[0].expression: required"},
+			{"namespace selector expression without a key", hook(map[string]any{"namespaceSelector": map[string]any{"matchExpressions": []any{map[string]any{"operator": "Exists"}}}}), "webhooks[0].namespaceSelector.matchExpressions[0].key: required"},
+			{"object selector In without values", hook(map[string]any{"objectSelector": map[string]any{"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In"}}}}), "webhooks[0].objectSelector.matchExpressions[0].values: required with the operator In"},
+			{"a later webhook without a client config", func() map[string]any {
+				second := admissionWebhook(map[string]any{"name": "audit.example.com"})
+				delete(second, "clientConfig")
+				return admissionWebhooks(admissionWebhook(nil), second)
+			}(), "webhooks[1].clientConfig: required"},
+			{"a later webhook with both", admissionWebhooks(admissionWebhook(nil), admissionWebhook(map[string]any{"clientConfig": map[string]any{
+				"url": "https://audit.example.com", "service": map[string]any{"namespace": "audit", "name": "webhook"},
+			}})), "webhooks[1].clientConfig: exactly one of url and service is required"},
+			{"unknown key", map[string]any{"hooks": []any{}}, notA + upstream},
+			{"webhook sub-key", hook(map[string]any{"url": "https://policy.example.com"}), notA},
+			{"timeout a string", hook(map[string]any{"timeoutSeconds": "5"}), notA},
+			{"null webhook", admissionWebhooks(admissionWebhook(nil), nil), "webhooks[1]"},
+			{"two spellings", map[string]any{"webhooks": []any{}, "Webhooks": []any{}}, "sets the same field as"},
+		}
 	}
 	// The routes that carry no HTTP refuse the same of their rules. base is what
 	// a kind requires beside them, and upstream the type its decode names.
@@ -2608,6 +2696,7 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", map[string]any{"nodeSelectors": []any{map[string]any{}, nil}}, "nodeSelectors[1]"},
 			{"two spellings", map[string]any{"interfaces": []any{"eth1"}, "Interfaces": []any{"eth2"}}, "sets the same field as"},
 		},
+		"mutatingwebhookconfiguration": webhookCases("admissionregistration.k8s.io/v1 MutatingWebhookConfiguration"),
 		"poddisruptionbudget": {
 			{"unknown key", map[string]any{"minAvailable": 1, "minReady": 1}, notA + "policy/v1 PodDisruptionBudgetSpec"},
 			{"the object's spec", map[string]any{"spec": map[string]any{"minAvailable": 1}}, notA},
@@ -2839,6 +2928,7 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"no properties", nil, "rules: required"},
 			{"another route's key", withProperty(gatewayRouteMinimal(), "hostnames", []any{"dns.example.com"}), notA + "gateway.networking.k8s.io/v1 UDPRouteSpec"},
 		}, routeCases("gateway.networking.k8s.io/v1 UDPRouteSpec", nil)...),
+		"validatingwebhookconfiguration": webhookCases("admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration"),
 		"volumeattributesclass": {
 			{"no properties", nil, "driverName: required"},
 			{"empty driverName", map[string]any{"driverName": "", "parameters": map[string]any{"iops": "1"}}, "driverName: required"},

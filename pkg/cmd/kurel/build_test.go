@@ -466,6 +466,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	// its position (TestKindLists_InOrder).
 	wantHandlers := []string{
 		"alertmanager",
+		"apiservice",
 		"artifactgenerator",
 		"backendtlspolicy",
 		"bucket",
@@ -535,6 +536,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"metallb-community",
 		"metallb-ipaddresspool",
 		"metallb-l2advertisement",
+		"mutatingwebhookconfiguration",
 		"namespace",
 		"networkpolicy",
 		"ocirepository",
@@ -569,6 +571,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"tcproute",
 		"tlsroute",
 		"udproute",
+		"validatingwebhookconfiguration",
 		"volumeattributesclass",
 	}
 	sort.Strings(wantHandlers)

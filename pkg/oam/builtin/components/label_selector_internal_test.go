@@ -33,6 +33,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -47,6 +48,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1validation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
@@ -141,6 +143,9 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 // rows are aligned by gofmt, so one longer key would rewrite every other row.
 // TestSharedKindTables_RowLocal holds that form.
 var strictlyDecodedTypes = typesByName([]namedType{
+	{"admissionregistrationv1.MutatingWebhookConfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration]()},
+	{"admissionregistrationv1.ValidatingWebhookConfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration]()},
+	{"apiregistrationv1.APIServiceSpec", reflect.TypeFor[apiregistrationv1.APIServiceSpec]()},
 	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
 	{"autoscalingv2.HorizontalPodAutoscalerSpec", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec]()},
 	{"autov1.ImageUpdateAutomationSpec", reflect.TypeFor[autov1.ImageUpdateAutomationSpec]()},
@@ -600,6 +605,15 @@ func gatewayAPICRDs(name string) func(t *testing.T) []crdSchema {
 
 var labelSelectorTestContainers = []any{map[string]any{"name": "app", "image": "registry.example.com/app:1.0"}}
 
+// labelSelectorTestWebhooks is a webhook configuration with one whole webhook,
+// whose two selectors the test writes.
+var labelSelectorTestWebhooks = map[string]any{"webhooks": []any{map[string]any{
+	"name":                    "policy.example.com",
+	"clientConfig":            map[string]any{"url": "https://policy.example.com/check"},
+	"sideEffects":             "None",
+	"admissionReviewVersions": []any{"v1"},
+}}}
+
 // labelSelectorKinds lists every kind component whose type reaches a
 // metav1.LabelSelector.
 //
@@ -650,6 +664,14 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "clusterrole", typ: "rbacv1.ClusterRole", config: kindConfig(&ClusterRoleHandler{}),
 		base: map[string]any{}, expressions: true,
+	},
+	{
+		component: "validatingwebhookconfiguration", typ: "admissionregistrationv1.ValidatingWebhookConfiguration", config: kindConfig(&ValidatingWebhookConfigurationHandler{}),
+		base: labelSelectorTestWebhooks, expressions: true,
+	},
+	{
+		component: "mutatingwebhookconfiguration", typ: "admissionregistrationv1.MutatingWebhookConfiguration", config: kindConfig(&MutatingWebhookConfigurationHandler{}),
+		base: labelSelectorTestWebhooks, expressions: true,
 	},
 	{
 		component: "horizontalpodautoscaler", typ: "autoscalingv2.HorizontalPodAutoscalerSpec",

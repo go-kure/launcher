@@ -25,6 +25,7 @@ const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 // new type goes at its position (TestKindLists_InOrder, pkg/cmd/kurel).
 var validComponentTypes = map[string]bool{
 	"alertmanager":                    true,
+	"apiservice":                      true,
 	"artifactgenerator":               true,
 	"backendtlspolicy":                true,
 	"bucket":                          true,
@@ -95,6 +96,7 @@ var validComponentTypes = map[string]bool{
 	"metallb-community":               true,
 	"metallb-ipaddresspool":           true,
 	"metallb-l2advertisement":         true,
+	"mutatingwebhookconfiguration":    true,
 	"namespace":                       true,
 	"networkpolicy":                   true,
 	"oci":                             true,
@@ -131,6 +133,7 @@ var validComponentTypes = map[string]bool{
 	"tcproute":                        true,
 	"tlsroute":                        true,
 	"udproute":                        true,
+	"validatingwebhookconfiguration":  true,
 	"volumeattributesclass":           true,
 	"webservice":                      true,
 	"worker":                          true,

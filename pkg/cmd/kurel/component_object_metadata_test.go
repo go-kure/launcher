@@ -62,7 +62,8 @@ func takeMetadataKey(doc map[string]any, field, key, want string) bool {
 // TestObjectName_EveryComponentTypeChooses holds it to `objectName`: a kind
 // cannot ship without them. Each is rendered with and without `labels` and
 // `annotations`. With them the object of the declared kind, named after the
-// component, carries the authored label and annotation on its own metadata,
+// component (or the fixture's apiName), carries the authored label and
+// annotation on its own metadata,
 // and the output is otherwise the render without them, object for object: the
 // pod template, the selectors and every other object are unchanged, and nothing
 // is added or dropped. The handler's own schema declares neither property,
@@ -96,6 +97,12 @@ func TestObjectMetadata_EveryKindComponentTakesIt(t *testing.T) {
 				props = fx.propsFor(t)
 			}
 			kind, _ := provider.ComponentObject()
+			// A type whose object the API names authors that name as
+			// objectName.
+			named := component
+			if fx.apiName != "" {
+				named = fx.apiName
+			}
 
 			plain := map[string]map[string]any{}
 			for _, doc := range renderLabelInvariant(t, labelInvariantApp(component, typ, props, "", nil)) {
@@ -111,7 +118,7 @@ func TestObjectMetadata_EveryKindComponentTakesIt(t *testing.T) {
 			found := false
 			for _, doc := range docs {
 				key := docKey(doc)
-				if names := docsOfKind([]map[string]any{doc}, kind.Kind, kind.Group); slices.Contains(names, component) {
+				if names := docsOfKind([]map[string]any{doc}, kind.Kind, kind.Group); slices.Contains(names, named) {
 					found = true
 					if !takeMetadataKey(doc, "labels", authoredLabelKey, authoredLabelValue) {
 						t.Errorf("%s carries no label %s=%s on its own metadata", key, authoredLabelKey, authoredLabelValue)
@@ -130,7 +137,7 @@ func TestObjectMetadata_EveryKindComponentTakesIt(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Fatalf("no %s named %q among the emitted objects", kind, component)
+				t.Fatalf("no %s named %q among the emitted objects", kind, named)
 			}
 		})
 	}

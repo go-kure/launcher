@@ -55,6 +55,11 @@ type policyFreeKind[T any] struct {
 	// only under another field's value, as it does a container port's
 	// hostPort under hostNetwork (podSpecDefaultedZeros).
 	defaultedZerosFor func(decoded *T) defaultedZeroFields
+	// checkName, when set, refuses an object name the API requires to follow
+	// from what was decoded (an APIService is named <version>.<group>). It is
+	// called by Generate, with the name build is given, since an object named
+	// after the application has no name before then.
+	checkName func(name string, decoded *T) error
 	// build returns the object: the base library's identity-only constructor
 	// for the name (and the namespace, unless the kind is cluster-scoped) and
 	// a deep copy of decoded. name is the one the object takes: the
@@ -152,8 +157,15 @@ func (c *policyFreeKindConfig[T]) ApplyPolicy(oam.Policy) error {
 }
 
 // Generate emits the kind's one object, under the object name the config
-// carries, else named after the application. Its labels and annotations are the
-// authored ones: the handler adds none of its own.
+// carries, else named after the application, once the kind's checkName, if
+// any, accepts that name. Its labels and annotations are the authored ones:
+// the handler adds none of its own.
 func (c *policyFreeKindConfig[T]) Generate(app *stack.Application) ([]*client.Object, error) {
-	return kindObject(c.kind.build(kindObjectName(c.objectName, app.Name), app.Namespace, c.decoded), c.metadata)
+	name := kindObjectName(c.objectName, app.Name)
+	if c.kind.checkName != nil {
+		if err := c.kind.checkName(name, c.decoded); err != nil {
+			return nil, err
+		}
+	}
+	return kindObject(c.kind.build(name, app.Namespace, c.decoded), c.metadata)
 }

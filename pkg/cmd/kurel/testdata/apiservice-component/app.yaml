@@ -1,0 +1,31 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: v1beta1.metrics.example.com
+      type: apiservice
+      properties:
+        group: metrics.example.com
+        version: v1beta1
+        groupPriorityMinimum: 100
+        versionPriority: 10
+        service:
+          namespace: metrics
+          name: metrics-server
+          port: 443
+        caBundle: Y2EtYnVuZGxl
+    - name: custom-metrics
+      type: apiservice
+      properties:
+        objectName: v1beta2.custom.metrics.example.com
+        group: custom.metrics.example.com
+        version: v1beta2
+        groupPriorityMinimum: 100
+        versionPriority: 200
+        insecureSkipTLSVerify: true
+        service:
+          namespace: metrics
+          name: custom-metrics

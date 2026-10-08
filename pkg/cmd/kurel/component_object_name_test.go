@@ -103,15 +103,23 @@ func TestObjectName_RenamesTheObjectAlone(t *testing.T) {
 			}
 			kind, _ := provider.ComponentObject()
 
-			plain := renderLabelInvariant(t, objectNameApp(component, typ, props, ""))
-			if got := docsOfKind(plain, kind.Kind, kind.Group); !slices.Contains(got, component) {
-				t.Fatalf("without objectName the %s objects are %v, want one named after the component %q", kind, got, component)
+			// A type whose object the API names takes that name alone: the
+			// render without objectName names the component with it, and
+			// objectName renames the object to it.
+			plainName, plainProps, to := component, props, renamed
+			if fx.apiName != "" {
+				plainName, plainProps, to = fx.apiName, maps.Clone(props), fx.apiName
+				delete(plainProps, oam.ObjectNameProperty)
+			}
+			plain := renderLabelInvariant(t, objectNameApp(plainName, typ, plainProps, ""))
+			if got := docsOfKind(plain, kind.Kind, kind.Group); !slices.Contains(got, plainName) {
+				t.Fatalf("without objectName the %s objects are %v, want one named after the component %q", kind, got, plainName)
 			}
 
-			docs := renderLabelInvariant(t, objectNameApp(component, typ, props, renamed))
+			docs := renderLabelInvariant(t, objectNameApp(component, typ, props, to))
 			got := docsOfKind(docs, kind.Kind, kind.Group)
-			if !slices.Contains(got, renamed) {
-				t.Errorf("with objectName the %s objects are %v, want one named %q", kind, got, renamed)
+			if !slices.Contains(got, to) {
+				t.Errorf("with objectName the %s objects are %v, want one named %q", kind, got, to)
 			}
 			if slices.Contains(got, component) {
 				t.Errorf("with objectName a %s is still named after the component: %v", kind, got)
@@ -150,16 +158,13 @@ func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 			t.Errorf("component type %q has no fixture in componentLabelFixtures", typ)
 			continue
 		}
-		props := fx.props
-		if fx.propsFor != nil {
-			props = fx.propsFor(t)
-		}
+		name, props := fx.directly(t, component)
 		direct := func(props map[string]any) ([]string, error) {
-			cfg, err := handlers[typ].ToApplicationConfig(&oam.Component{Name: component, Type: typ, Properties: props}, "default")
+			cfg, err := handlers[typ].ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, "default")
 			if err != nil {
 				return nil, err
 			}
-			objs, err := cfg.Generate(stack.NewApplication(component, "default", cfg))
+			objs, err := cfg.Generate(stack.NewApplication(name, "default", cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -170,8 +175,8 @@ func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 			return names, nil
 		}
 
-		if names, err := direct(maps.Clone(props)); err != nil || !slices.Contains(names, component) {
-			t.Errorf("%s driven directly without objectName: objects %v, err %v; want one named %q", typ, names, err, component)
+		if names, err := direct(maps.Clone(props)); err != nil || !slices.Contains(names, name) {
+			t.Errorf("%s driven directly without objectName: objects %v, err %v; want one named %q", typ, names, err, name)
 			continue
 		}
 		withName := maps.Clone(props)
@@ -185,8 +190,8 @@ func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 			refuses = append(refuses, typ)
 		case err != nil:
 			t.Errorf("%s driven directly with objectName: %v; want the property passed over or refused by name", typ, err)
-		case slices.Contains(names, "other") || !slices.Contains(names, component):
-			t.Errorf("%s driven directly with objectName names its objects %v; want the component name %q kept", typ, names, component)
+		case slices.Contains(names, "other") || !slices.Contains(names, name):
+			t.Errorf("%s driven directly with objectName names its objects %v; want the component name %q kept", typ, names, name)
 		default:
 			passesOver = append(passesOver, typ)
 		}

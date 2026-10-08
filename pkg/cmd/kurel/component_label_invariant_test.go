@@ -149,6 +149,29 @@ type componentLabelFixture struct {
 	// each render must have read for the component label; 0 for every type that
 	// emits no PodTemplate.
 	storedTemplates int
+	// apiName, when set, is the one name the API allows the type's object (an
+	// APIService's <version>.<group>), and the type refuses any other. props
+	// author it as `objectName`, so the component name stays free; a test
+	// that names the object after its component expects apiName instead.
+	apiName string
+}
+
+// directly returns the component name and properties a test hands the type's
+// handler past the engine, which reads `objectName` off a component before
+// its handler sees it: name and the fixture's properties, or, for a type with
+// an apiName, apiName and the properties without `objectName`.
+func (fx componentLabelFixture) directly(t *testing.T, name string) (string, map[string]any) {
+	t.Helper()
+	props := fx.props
+	if fx.propsFor != nil {
+		props = fx.propsFor(t)
+	}
+	if fx.apiName == "" {
+		return name, props
+	}
+	props = maps.Clone(props)
+	delete(props, oam.ObjectNameProperty)
+	return fx.apiName, props
 }
 
 const (
@@ -212,6 +235,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// label, which leaves the name 47 characters.
 	"alertmanager": {props: map[string]any{"version": "v0.28.1", "replicas": 1},
 		nameBound: 47, longRefusal: "the component name is the Alertmanager's name, and the Prometheus operator names the data volume"},
+	// An APIService must be named <version>.<group>: objectName names it, so
+	// the component name, long or not, is free.
+	"apiservice": {apiName: "v1beta1.metrics.example.com", props: map[string]any{
+		"objectName": "v1beta1.metrics.example.com", "group": "metrics.example.com", "version": "v1beta1",
+		"groupPriorityMinimum": 100, "versionPriority": 10,
+	}},
 	"artifactgenerator": {props: map[string]any{
 		"sources": []any{map[string]any{"alias": "app", "kind": "GitRepository", "name": "app"}},
 		"artifacts": []any{map[string]any{
@@ -525,6 +554,12 @@ spec:
 	"metallb-l2advertisement": {props: map[string]any{
 		"ipAddressPools": []any{"edge"},
 		"nodeSelectors":  []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
+	// The two webhook configurations are identity and their webhooks, with no
+	// pods, and leave the name rules of their object to the API server.
+	"mutatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
+		"name": "policy.example.com", "clientConfig": map[string]any{"url": "https://policy.example.com/check"},
+		"sideEffects": "None", "admissionReviewVersions": []any{"v1"},
+	}}}},
 	// The namespace, limitrange, resourcequota and persistentvolume kinds of
 	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
 	// label and no pods. The component name is the Namespace's name, which the
@@ -666,6 +701,10 @@ spec:
 		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
 	"udproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}},
+	"validatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
+		"name": "policy.example.com", "clientConfig": map[string]any{"url": "https://policy.example.com/check"},
+		"sideEffects": "None", "admissionReviewVersions": []any{"v1"},
+	}}}},
 	"volumeattributesclass": {
 		props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}},
 	},

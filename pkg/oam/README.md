@@ -1930,6 +1930,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | Type |
 |---|
 | `alertmanager` |
+| `apiservice` |
 | `artifactgenerator` |
 | `backendtlspolicy` |
 | `bucket` |
@@ -2000,6 +2001,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `metallb-community` |
 | `metallb-ipaddresspool` |
 | `metallb-l2advertisement` |
+| `mutatingwebhookconfiguration` |
 | `namespace` |
 | `networkpolicy` |
 | `oci` |
@@ -2036,6 +2038,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `tcproute` |
 | `tlsroute` |
 | `udproute` |
+| `validatingwebhookconfiguration` |
 | `volumeattributesclass` |
 | `webservice` |
 | `worker` |

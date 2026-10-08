@@ -524,6 +524,7 @@ var requiredWrittenKinds = []pinKind{
 // reason. TestRequiredWrittenKinds_CoverEveryCRDKind holds the two lists to
 // the kind inventory.
 var requiredWrittenUnmeasured = map[string]string{
+	"apiservice":         "no CRD serves it: the API server's aggregation layer does, and client-go's scheme does not register its group",
 	"metallb-bfdprofile": "its CRD requires no field",
 	"metallb-community":  "its CRD requires no field",
 }
