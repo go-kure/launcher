@@ -3073,7 +3073,8 @@ holds every producer to it: the ownership wrapper the transform's last step puts
 application reads each object generation emits (a kind component's, a trait's, what
 `passthrough` and `manifests` carry, every object a chart renders at build time) as Flux
 applies it, a list envelope (in any Go representation, read as it is written) by its members
-and not as an object of its own, each object a layout augmenter adds or edits among those its
+and not as an object of its own (a kind ending in `List` through every List it holds, less one
+whose items is null, as Kustomize drops it; any other envelope one level, as Flux expands it), each object a layout augmenter adds or edits among those its
 Generate returned, and the ConfigMap of each configMapGenerator entry it adds under a new name.
 The scope is kure's
 `manifest.Scope`; a kind of unknown scope (neither built in nor registered with kure, such as a

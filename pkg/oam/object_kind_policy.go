@@ -107,19 +107,60 @@ func appliedSelfAndMembers(obj client.Object) []client.Object {
 
 // checkObjectKinds holds every object obj stands for when Flux applies it
 // (appliedObjects) to the policy: obj itself, or a list envelope's members and
-// not the envelope, which Flux never applies. A list is read as it is written
-// (asWritten), so one of any Go representation stands for its members at every
-// depth, and one whose items is null for none. Nil rules check nothing.
+// not the envelope, which Flux never applies (kindAppliedObjects). Nil rules
+// check nothing.
 func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
 	if o.kinds == nil {
 		return nil
 	}
-	for _, applied := range appliedObjects(asWritten(obj)) {
+	for _, applied := range kindAppliedObjects(obj) {
 		if err := o.checkObjectKind(applied); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// kindAppliedObjects is appliedObjects of obj as it is written (asWritten), so a
+// list of any Go representation stands for its members, with the List envelopes
+// Kustomize drops for a null items removed first (pruneNullLists): a List whose
+// kind ends in "List" is inlined at every depth of Lists, and any other envelope
+// is expanded one level, as Flux does. The pruning works on the written copy
+// only; the objects the other checks read are left as they are.
+func kindAppliedObjects(obj client.Object) []client.Object {
+	written := asWritten(obj)
+	if u, ok := written.(*unstructured.Unstructured); ok && written != obj && pruneNullLists(u.Object) {
+		return nil
+	}
+	return appliedObjects(written)
+}
+
+// pruneNullLists reports whether m is a List envelope Kustomize drops, one whose
+// kind ends in "List" and whose items is null. Otherwise it removes every such
+// envelope from the items of m, when Kustomize inlines m, and so on down the
+// Lists it inlines.
+func pruneNullLists(m map[string]any) bool {
+	kind, _ := m["kind"].(string)
+	if !strings.HasSuffix(kind, "List") {
+		return false
+	}
+	items, present := m["items"]
+	if present && items == nil {
+		return true
+	}
+	members, isArray := items.([]any)
+	if !isArray {
+		return false
+	}
+	kept := make([]any, 0, len(members))
+	for _, member := range members {
+		if mm, ok := member.(map[string]any); ok && pruneNullLists(mm) {
+			continue
+		}
+		kept = append(kept, member)
+	}
+	m["items"] = kept
+	return false
 }
 
 // asWritten returns obj as the manifest kure writes for it when it has items:
