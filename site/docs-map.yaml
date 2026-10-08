@@ -73,6 +73,34 @@ packages:
     mounted: false
     reason: "Binary entrypoint (package main); no API surface."
 
+  # ─── Unmounted: vendored upstream source the tests read; not built ───
+  # The Kubernetes defaulting excerpt the components tests parse (testdata, so
+  # Go never builds it). The components README describes it.
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/apps/v1
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/autoscaling
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/autoscaling/v2
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/core/v1
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/networking/v1
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/util/parsers
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+
 # Non-package docs mounted into the site. Not gated by code changes.
 # (README.md, examples/README.md, and design-capability-schema.md are deferred to
 # the content PR, where their repo-relative links are reworked for the site.)
