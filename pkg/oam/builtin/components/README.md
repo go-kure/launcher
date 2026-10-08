@@ -3721,35 +3721,45 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   operator would break it.** Each is refused, under any policy and none, at
   `pkg/alertmanager/statefulset.go` of prometheus-operator v0.94.1:
   - `version` unset where `image`, or a listed `alertmanager` entry, names the
-    image: the operator chooses the container's flags by `version`, and by its
-    own default where none is, whatever the image runs (`version: required
+    image: the operator chooses the container's flags by `version`, and by the
+    deployed operator's default where none is, which a build cannot know and
+    need not be the version the image runs (`version: required
     where image, or an entry of containers named alertmanager, names the
     image`); and a `version` the operator fails the reconcile on: one
     `semver.ParseTolerant` cannot parse, one under 0.15.0, or one of a major
     version above 0 (operator.go:902-909).
-  - a `portName` the API refuses as the name of the alertmanager container's
-    web port: not an IANA service name (at most 15 characters, lower-case
-    letters, digits and `-`), or `mesh-tcp`/`mesh-udp`, the ports the
-    operator adds beside it.
+  - a `portName` the API refuses where the operator writes it: not an IANA
+    service name (at most 15 characters, lower-case letters, digits and `-`);
+    unless `listenLocal` is set, `mesh-tcp`/`mesh-udp`, the container ports the
+    operator adds beside the web port; and unless `serviceName` names a Service
+    of the author's, `tcp-mesh`/`udp-mesh`, the ports of the governing Service
+    the operator creates (statefulset.go:223-250, :483-502).
   - a negative `replicas`, which the operator runs as 0.
   - `storage.volumeClaimTemplate.metadata.name` beside `storage.emptyDir` or
-    `storage.ephemeral`: the operator mounts the data volume under that name and
-    creates it under its own, so the pods mount a volume that does not exist.
+    `storage.ephemeral`, other than `alertmanager-<name>-db`: the operator
+    mounts the data volume under that name and creates it as
+    `alertmanager-<name>-db`, so the pods mount a volume that does not exist.
   - a storage arm in use whose claim the API refuses: the claim template arm
     (which an unset arm selects, an empty `storage` included) without
-    `spec.resources.requests.storage`, or with `spec.accessModes` written
-    empty (unset, the operator writes `ReadWriteOnce`); the ephemeral arm
+    `spec.resources.requests.storage` (unset or empty access modes, which are
+    not serialized, the operator writes as `ReadWriteOnce`); the ephemeral arm
     without a claim template, its access modes or its storage request, which
     the operator uses as written.
   - an entry of `volumes` named as a volume the operator adds: `config-volume`,
     `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`, a name
-    starting `web-config-tls-`, `cluster-tls-server-config-` or
-    `cluster-tls-client-config-`, `notification-templates` where
+    starting `web-config-tls-` where `web.tlsConfig` is set, or
+    `cluster-tls-server-config-` or `cluster-tls-client-config-` where
+    `clusterTLS` is set, `notification-templates` where
     `alertmanagerConfiguration.templates` is set, the name the operator derives
     for each of `secrets` and `configMaps` (`secret-<name>`,
-    `configmap-<name>`), and the data volume's
+    `configmap-<name>`), and the data volume's: beside `storage.emptyDir` or
+    `storage.ephemeral` a second volume of one name, and on the claim template
+    arm one the StatefulSet controller replaces with the claim
     (`volumes[0] "config-volume": the name is a volume the Prometheus operator
     adds to every Alertmanager's pods; name the volume otherwise`).
+    `web-config` and `cluster-tls-config` are refused whatever `version`
+    names, though the operator adds them only for Alertmanager 0.22.0 and
+    0.24.0 on: no field is held to `version` (go-kure/launcher#935).
   - a name the operator's objects cannot be named after: the data volume
     `alertmanager-<name>-db`, unless a claim template's name names it, and the
     hostname `alertmanager-<name>-<replicas-1>` of the last pod must each be a

@@ -244,19 +244,23 @@ func alertmanagerRefusals(notA string) []struct {
 		{"a named claim template beside emptyDir", map[string]any{"storage": map[string]any{
 			"emptyDir":            map[string]any{},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
-		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
+		}}, `storage.volumeClaimTemplate.metadata.name: "data" beside storage.emptyDir or storage.ephemeral`},
 		{"a named claim template beside ephemeral", map[string]any{"storage": map[string]any{
-			"ephemeral":           map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}}},
+			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],
+			}}},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
-		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
+		}}, `storage.volumeClaimTemplate.metadata.name: "data" beside storage.emptyDir or storage.ephemeral`},
 		// A volume named as one the operator adds to the pods
 		// (statefulset.go:215, :510-529, :617-690, :698-738).
 		{"a volume named as the configuration's", amVolume("config-volume"),
 			`volumes[0] "config-volume": the name is a volume the Prometheus operator adds to every Alertmanager's pods`},
 		{"a volume named as the web configuration's", amVolume("web-config"),
 			`volumes[0] "web-config": the name is a volume the Prometheus operator adds`},
-		{"a volume named as a TLS credential's", amVolume("web-config-tls-secret-key-web"),
-			`volumes[0] "web-config-tls-secret-key-web": names starting "web-config-tls-" are the Prometheus operator's`},
+		{"a volume named as a web TLS credential's", withAmVolume(map[string]any{"web": map[string]any{"tlsConfig": amTLS}}, "web-config-tls-secret-key-web"),
+			`volumes[0] "web-config-tls-secret-key-web": where web.tlsConfig is set, names starting "web-config-tls-" are the Prometheus operator's`},
+		{"a volume named as a cluster TLS credential's", withAmVolume(map[string]any{"clusterTLS": map[string]any{"server": amTLS, "client": map[string]any{}}}, "cluster-tls-server-config-x"),
+			`volumes[0] "cluster-tls-server-config-x": where clusterTLS is set, names starting "cluster-tls-server-config-" are the Prometheus operator's`},
 		{"a volume named as a listed Secret's", withAmVolume(map[string]any{"secrets": []any{"Alert.TLS"}}, "secret-alert-tls"),
 			`volumes[0] "secret-alert-tls": the name is the volume the Prometheus operator adds for secrets[0]`},
 		{"a volume named as a listed ConfigMap's", withAmVolume(map[string]any{"configMaps": []any{"templates"}}, "configmap-templates"),
@@ -266,10 +270,10 @@ func alertmanagerRefusals(notA string) []struct {
 		}}, "notification-templates"),
 			`volumes[0] "notification-templates": the name is the volume the Prometheus operator adds for alertmanagerConfiguration.templates`},
 		{"a volume named as the data volume", amVolume("alertmanager-fast-db"),
-			`volumes[0] "alertmanager-fast-db": the name is the data volume's`},
+			`volumes[0] "alertmanager-fast-db": the name is the data volume's, which the Prometheus operator adds to the pods, and the API refuses a pod with two volumes of one name`},
 		{"a volume named as the claim template's", withAmVolume(map[string]any{"storage": map[string]any{
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
-		}}, "data"), `volumes[0] "data": the name is the data volume's`},
+		}}, "data"), `volumes[0] "data": the name is the data volume's claim template's, and the StatefulSet controller replaces a volume of that name with the claim`},
 		// A version the operator fails the reconcile on (operator.go:902-909,
 		// statefulset.go:284).
 		{"a version that does not parse", map[string]any{"version": "banana"},
@@ -283,6 +287,8 @@ func alertmanagerRefusals(notA string) []struct {
 			`portName: "alertmanager-web" is not a valid port name`},
 		{"a port name of the mesh", map[string]any{"portName": "mesh-tcp"},
 			`portName: "mesh-tcp" is the name of a port the Prometheus operator adds`},
+		{"a port name of the governing Service", map[string]any{"portName": "tcp-mesh"},
+			`portName: "tcp-mesh" is the name of a port of the governing Service the Prometheus operator creates`},
 		// The operator rewrites a negative count to 0 (statefulset.go:137-139).
 		{"negative replicas", map[string]any{"replicas": -1}, "replicas: -1 is below 0"},
 		// A claim the API refuses (statefulset.go:191-212).
@@ -291,9 +297,6 @@ func alertmanagerRefusals(notA string) []struct {
 		}}, "storage.volumeClaimTemplate.spec.resources.requests.storage: required where neither storage.emptyDir nor storage.ephemeral is set"},
 		{"an empty storage", map[string]any{"storage": map[string]any{}},
 			"storage.volumeClaimTemplate.spec.resources.requests.storage: required"},
-		{"a claim template with access modes written empty", map[string]any{"storage": map[string]any{
-			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{}, "resources": amClaim["resources"]}},
-		}}, "storage.volumeClaimTemplate.spec.accessModes: written empty"},
 		{"an ephemeral arm without a claim template", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{}}},
 			"storage.ephemeral.volumeClaimTemplate: required"},
 		{"an ephemeral claim without access modes", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
@@ -378,6 +381,12 @@ const amVersion = "v0.28.1"
 // amClaim is the spec of a claim template that claims storage, as the claim
 // template arm in use must.
 var amClaim = map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
+
+// amTLS is a server TLS configuration, of the web or of the cluster.
+var amTLS = map[string]any{
+	"keySecret": map[string]any{"name": "alerts-tls", "key": "tls.key"},
+	"cert":      map[string]any{"secret": map[string]any{"name": "alerts-tls", "key": "tls.crt"}},
+}
 
 // amReloader is an image from that registry for the two config-reloader
 // containers the operator generates: under ptStrictPolicy each is refused
@@ -766,6 +775,17 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a port name of 15 characters":          {"portName": "alertmanagerweb"},
 		"emptyDir alone":                        {"storage": map[string]any{"emptyDir": map[string]any{}}},
 		"a claim template without access modes": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
+		"a claim template with access modes written empty": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+			"accessModes": []any{}, "resources": amClaim["resources"],
+		}}}},
+		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
+			"emptyDir":            map[string]any{},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "alertmanager-fast-db"}},
+		}},
+		"a TLS credential's prefix without TLS":             {"volumes": []any{map[string]any{"name": "web-config-tls-x", "emptyDir": map[string]any{}}}},
+		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
+		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
+		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],
