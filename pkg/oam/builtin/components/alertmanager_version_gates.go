@@ -26,6 +26,11 @@ const (
 	// the pods for; it refuses a version of a major above 0 too
 	// (provisionAlertmanagerConfiguration, pkg/alertmanager/operator.go).
 	alertmanagerMinimumVersion = "0.15.0"
+	// alertmanagerURLSchemeVersion is the least version whose Alertmanager
+	// exits on an externalUrl not of scheme http or https: the least
+	// prerelease of v0.19.0, as v0.19.0-rc.0 already does
+	// (alertmanagerURLSchemes).
+	alertmanagerURLSchemeVersion = "0.19.0-0"
 	// alertmanagerGo123Version is the least version whose Alertmanager is
 	// built with Go 1.23 or later: the least prerelease of v0.28.0, as
 	// v0.28.0-rc.0 already is (alertmanagerParsesIPAsGo123).
