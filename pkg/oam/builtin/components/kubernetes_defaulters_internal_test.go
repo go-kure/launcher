@@ -485,6 +485,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			if clause.List != nil {
 				var parts []string
 				for _, e := range clause.List {
+					f.noVendoredCalls(e)
 					parts = append(parts, f.render(e))
 				}
 				cond = "(" + strings.Join(parts, " || ") + ")"
@@ -543,6 +544,12 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		for _, a := range call.Args {
 			if _, ok := f.resolve(a); ok {
 				w.fail(call.Pos(), "%s is passed the object to a function the excerpt does not hold", f.render(call))
+			}
+		}
+		// A method called on the object can change it as an argument can.
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+			if _, ok := f.resolve(sel.X); ok {
+				w.fail(call.Pos(), "%s calls a method on the object, which the walk does not follow", f.render(call))
 			}
 		}
 	case *ast.AssignStmt:

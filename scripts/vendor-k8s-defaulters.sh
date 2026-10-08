@@ -42,8 +42,8 @@ FILES=(
 )
 
 TAG_OBJECT="$(git ls-remote https://github.com/kubernetes/kubernetes.git "refs/tags/$TAG" | cut -f1)"
-if [[ -z "$TAG_OBJECT" ]]; then
-  echo "ERROR: kubernetes/kubernetes has no tag $TAG" >&2
+if [[ ! "$TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: kubernetes/kubernetes has no single tag $TAG (ls-remote gave: ${TAG_OBJECT:-nothing})" >&2
   exit 1
 fi
 
