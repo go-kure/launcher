@@ -581,7 +581,9 @@ the PersistentVolumeClaims the StatefulSet controller creates (go-kure/launcher#
 claim template of the storage of a `Prometheus`, `PrometheusAgent`, `Alertmanager` or
 `ThanosRuler` (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto
 the volume claim template of the StatefulSet it creates (go-kure/launcher#957). The reserved
-metadata keys are read in all four. Launcher writes no label into a volume claim template
+metadata keys are read in all four; the storage claim template only where neither
+`spec.storage.emptyDir` nor `spec.storage.ephemeral` is set, since the operator uses the first
+storage arm set and makes no claim from the template beside either. Launcher writes no label into a volume claim template
 either: the API server refuses a change to a StatefulSet's
 `spec.volumeClaimTemplates`, so a label written there would fail the apply of a StatefulSet the
 cluster holds already, and the controller does not relabel a claim it created before. The
@@ -910,7 +912,9 @@ template):
 - A document that built before is refused at generation when the storage claim template of a
   `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`, `Alertmanager` or `ThanosRuler`
   (`spec.storage.volumeClaimTemplate.metadata`) holds a reserved metadata key as a label or an
-  annotation. Before, it was not read. This reaches the `alertmanager` kind's `storage`
+  annotation, and neither `spec.storage.emptyDir` nor `spec.storage.ephemeral` is set (beside
+  either, the operator makes no claim from the template). Before, it was not read. This
+  reaches the `alertmanager` kind's `storage`
   property, a `passthrough` or `manifests` document, a chart rendered at build time and a
   consumer's own config. The refusal names the holder `ReservedKeyInVolumeClaimTemplate`
   (`volume claim template label "…"`); no new API.
@@ -1051,7 +1055,8 @@ Flux applies it (a `List`, or an envelope with `items`):
     `PrometheusAgent`, `Alertmanager` or `ThanosRuler`
     (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto the volume
     claim template of its StatefulSet: `volume claim template label "…"`
-    (go-kure/launcher#957). The claim template of its ephemeral storage
+    (go-kure/launcher#957), where neither `spec.storage.emptyDir` nor `spec.storage.ephemeral`
+    is set, the operator using the first storage arm set. The claim template of its ephemeral storage
     (`spec.storage.ephemeral.volumeClaimTemplate`) goes onto a claim of a pod and is not read.
 
 These are the places the component label is held to its value in

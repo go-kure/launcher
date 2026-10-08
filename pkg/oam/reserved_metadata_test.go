@@ -612,6 +612,12 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		// not onto the StatefulSet's volume claim templates.
 		"an Alertmanager's ephemeral storage claim template": holding(t, unstructuredObject("monitoring.coreos.com/v1", "Alertmanager"),
 			map[string]string{"example.org/tenant": "a"}, "spec", "storage", "ephemeral", "volumeClaimTemplate", "metadata"),
+		// The operator uses the first storage arm set, the claim template last:
+		// beside an emptyDir or ephemeral storage it makes no claim.
+		"an Alertmanager's storage claim template beside an emptyDir": besideStorageArm(t, holding(t, unstructuredObject("monitoring.coreos.com/v1", "Alertmanager"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "storage", "volumeClaimTemplate", "metadata"), "emptyDir"),
+		"a Prometheus's storage claim template beside ephemeral storage": besideStorageArm(t, holding(t, unstructuredObject("monitoring.coreos.com/v1", "Prometheus"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "storage", "volumeClaimTemplate", "metadata"), "ephemeral"),
 		"the two labels in a mover's pod labels": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"),
 			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "restic", "moverPodLabels"),
 		"moverPodLabels of a ReplicationSource of another group": holdingLabelMap(t, unstructuredObject("example.com/v1", "ReplicationSource"),
@@ -664,6 +670,36 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 				t.Error("the object carries no component label")
 			}
 		})
+	}
+}
+
+// besideStorageArm returns obj with spec.storage.<arm> set to an empty object,
+// a storage arm the operator uses before the claim template.
+func besideStorageArm(t *testing.T, obj *unstructured.Unstructured, arm string) *unstructured.Unstructured {
+	t.Helper()
+	if err := unstructured.SetNestedField(obj.Object, map[string]any{}, "spec", "storage", arm); err != nil {
+		t.Fatal(err)
+	}
+	return obj
+}
+
+// TestOwnedConfig_StorageClaimTemplateBesideNullArms: a null emptyDir or
+// ephemeral is no arm set, so the operator still claims the data volume from
+// the claim template, and a reserved key there is refused.
+func TestOwnedConfig_StorageClaimTemplateBesideNullArms(t *testing.T) {
+	obj := holding(t, unstructuredObject("monitoring.coreos.com/v1", "ThanosRuler"),
+		map[string]string{"platform.example/zone": "a"}, "spec", "storage", "volumeClaimTemplate", "metadata")
+	storage := obj.Object["spec"].(map[string]any)["storage"].(map[string]any)
+	storage["emptyDir"] = nil
+	storage["ephemeral"] = nil
+	inner := &ownershipObjectsConfig{objects: []client.Object{obj}}
+	_, err := stack.NewApplication("web", "ns", wrapOwnedConfigReserving(inner, "web", ownershipKey, mustReserve(t, reservedForTest...))).Generate()
+	var got *ReservedMetadataKeyError
+	if !errors.As(err, &got) {
+		t.Fatalf("Generate = %v, want a *ReservedMetadataKeyError", err)
+	}
+	if got.Holder != ReservedKeyInVolumeClaimTemplate || got.Path != "spec.storage.volumeClaimTemplate.metadata.labels" {
+		t.Errorf("refusal = %+v, want holder %q at spec.storage.volumeClaimTemplate.metadata.labels", *got, ReservedKeyInVolumeClaimTemplate)
 	}
 }
 

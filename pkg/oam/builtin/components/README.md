@@ -4029,7 +4029,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and annotations of `storage.volumeClaimTemplate` are held to the reserved
   metadata keys: the operator copies them onto the volume claim template of
   its StatefulSet, and so onto every claim the StatefulSet controller creates
-  (`volume claim template label "…"`, go-kure/launcher#957). Those of
+  (`volume claim template label "…"`, go-kure/launcher#957). Beside
+  `storage.emptyDir` or `storage.ephemeral` the operator makes no claim from
+  it, and they are not read. Those of
   `storage.ephemeral.volumeClaimTemplate` and of a generic ephemeral volume
   under `volumes` go onto a claim of a pod and are not read. All three are
   written as authored.
