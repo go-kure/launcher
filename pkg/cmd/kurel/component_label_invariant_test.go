@@ -696,6 +696,17 @@ spec:
 	},
 	"tcproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
+	// A ThanosRuler is held as an Alertmanager is: identity and the authored
+	// fields, namespaced, no `app` label, and the pods are the operator's. Its
+	// external labels are no object labels and take no component label.
+	// The operator names the data volume thanos-ruler-<name>-data, which a
+	// 63-character name breaks first, and the first rule ConfigMap's volume
+	// thanos-ruler-<name>-rulefiles-0, each a DNS-1123 label, which leaves
+	// the name 38 characters.
+	"thanosruler": {props: map[string]any{
+		"queryEndpoints": []any{"dnssrv+_http._tcp.thanos-query.monitoring.svc"},
+		"externalLabels": map[string]any{"cluster": "eu-1"}},
+		nameBound: 38, longRefusal: "the component name is the ThanosRuler's name, and the Prometheus operator names the data volume"},
 	"tlsroute": {props: map[string]any{
 		"hostnames": []any{"db.example.com"},
 		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},

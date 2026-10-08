@@ -102,6 +102,7 @@ component servicemonitor *components.ServiceMonitorHandler
 component statefulset *components.StatefulsetHandler
 component storageclass *components.StorageClassHandler
 component tcproute *components.TCPRouteHandler
+component thanosruler *components.ThanosRulerHandler
 component tlsroute *components.TLSRouteHandler
 component udproute *components.UDPRouteHandler
 component validatingwebhookconfiguration *components.ValidatingWebhookConfigurationHandler

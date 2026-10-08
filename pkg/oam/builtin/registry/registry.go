@@ -151,6 +151,7 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 		"statefulset":                     &components.StatefulsetHandler{},
 		"storageclass":                    &components.StorageClassHandler{},
 		"tcproute":                        &components.TCPRouteHandler{},
+		"thanosruler":                     &components.ThanosRulerHandler{},
 		"tlsroute":                        &components.TLSRouteHandler{},
 		"udproute":                        &components.UDPRouteHandler{},
 		"validatingwebhookconfiguration":  &components.ValidatingWebhookConfigurationHandler{},

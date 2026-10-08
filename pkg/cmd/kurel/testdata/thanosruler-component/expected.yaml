@@ -1,0 +1,53 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ThanosRuler
+metadata:
+  labels:
+    launcher.gokure.dev/component: rules
+    team: payments
+  name: rules
+  namespace: default
+spec:
+  alertmanagersUrl:
+  - dnssrv+_http._tcp.alertmanager-operated.monitoring.svc
+  excludedFromEnforcement:
+  - group: monitoring.coreos.com
+    namespace: monitoring
+    resource: prometheusrules
+  image: quay.io/thanos/thanos:v0.39.2
+  labels:
+    cluster: eu-1
+  podMetadata:
+    labels:
+      team: payments
+  queryEndpoints:
+  - dnssrv+_http._tcp.thanos-query.monitoring.svc
+  replicas: 2
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  ruleSelector:
+    matchLabels:
+      role: alert-rules
+  storage:
+    volumeClaimTemplate:
+      metadata: {}
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+      status: {}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ThanosRuler
+metadata:
+  labels:
+    launcher.gokure.dev/component: defaults
+  name: defaults
+  namespace: default
+spec:
+  resources: {}

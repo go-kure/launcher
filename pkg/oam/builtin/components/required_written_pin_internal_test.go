@@ -504,6 +504,16 @@ var requiredWrittenKinds = []pinKind{
 			"parentRefs": []any{map[string]any{"name": "public"}},
 			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}},
 		}},
+	// As for alertmanager, the listed container and init container each name
+	// an image, under names that differ, and the storage arm in use claims
+	// storage (validateOperatorStorage).
+	{component: "thanosruler", handler: &ThanosRulerHandler{}, typ: reflect.TypeFor[monitoringv1.ThanosRulerSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.ThanosRulerSpec](), false),
+		base: map[string]any{
+			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
+			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
+			"storage":        amClaimingStorage(),
+		}},
 	{component: "tlsroute", handler: &TLSRouteHandler{}, typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes"), "v1"),
 		base: map[string]any{
@@ -867,9 +877,9 @@ func pinControl(k pinKind, base map[string]any, path string, schema pinSchema) (
 	return nil, last
 }
 
-// amClaimingStorage is an alertmanager storage whose claim template arm and
-// ephemeral arm each build: whichever is in use claims storage, and the
-// ephemeral one names its access modes.
+// amClaimingStorage is an alertmanager or thanosruler storage whose claim
+// template arm and ephemeral arm each build: whichever is in use claims
+// storage, and the ephemeral one names its access modes.
 func amClaimingStorage() map[string]any {
 	claim := func() map[string]any {
 		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}

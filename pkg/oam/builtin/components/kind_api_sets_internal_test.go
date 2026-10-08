@@ -622,6 +622,13 @@ var apiSetKinds = []apiSetKind{
 		refused: []string{"rules", "rules[].backendRefs"},
 	},
 	{
+		component: "thanosruler", typ: reflect.TypeFor[monitoringv1.ThanosRulerSpec](), source: markerAPISource, listed: monitoringWorkloadPodOmitted(),
+		// The kind writes the group into an entry that names none
+		// (withExcludedGroups): the type writes an empty one, which the API's
+		// enum refuses.
+		filled: map[string]string{"excludedFromEnforcement[].group": thanosRulerExcludedGroup},
+	},
+	{
 		component: "tlsroute", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
 		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes"), "v1"),
 		build:  handlerBuild(&TLSRouteHandler{}, "tlsroute"),

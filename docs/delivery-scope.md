@@ -1790,6 +1790,63 @@ and by scope, whatever component or trait emits it.
     and each is held to the list. An unset `version` is judged against the operator
     release launcher vendors (v0.94.1, default v0.34.0), as the deployed operator's
     default is unknown at build time; at v0.34.0 no field is refused.
+- **Shipped: `thanosruler`, the ThanosRuler of the same API** (`thanosruler.go`, on
+  what `monitoring_workload.go` shares): the strict projection of `ThanosRulerSpec`, built
+  on `policyHeldKind`, namespaced, declaring its object and taking `objectName`. Launcher
+  emits the ThanosRuler and nothing else; the operator runs the pods.
+  - **One field is renamed: the spec's `labels` is the `externalLabels` property.** These
+    are the ThanosRuler's Prometheus external labels (the operator always adds a
+    `thanos_ruler_replica` one), not Kubernetes labels. `labels` is the object's own labels on every kind component, so the
+    spec's field cannot keep its name. The reserved-key and component-label checks do not
+    apply to `externalLabels`; `Labels` in another spelling is refused rather than folded
+    into either field. A test shows both authored together landing in the two places.
+  - **The pods are held as the Alertmanager's are,** less `hostNetwork`, which this spec
+    does not have; no capability is required and no default is filled. Where the
+    operator fills a value the policy has a dimension for (a 200Mi memory request, and
+    an unset replica count the StatefulSet runs as 1, read from the operator's source at
+    v0.94.1), that value is held, and nothing is written.
+  - **An image the operator chooses is refused under a registry allowlist.** It
+    generates the `thanos-ruler` and `config-reloader` containers and no init
+    container; where the spec names no image for one (for the first, in `image` or a
+    patch; for the reloader, in a patch), a policy with allowed registries refuses it
+    (`oam.RefusalRegistry`) and one without builds it. A listed container that names no
+    image and patches neither is refused with or without a policy, and so are an init
+    container that names none and a memory limit under the 200Mi request the operator
+    fills where none is named. The thanos-ruler container is held as the operator runs
+    it: a listed `thanos-ruler` entry's requests and limits merged over `resources`,
+    with the 200Mi request filled where neither names one, and an image the entry
+    names in place of `image`, which is then not held. Beside the probe timings, an empty `portName`,
+    `evaluationInterval`, `retention` or `action` of a remote write entry's relabeling
+    rule is refused, which the CRD defaults; a string default of the Kubernetes pod types
+    is not, as on the pod kinds.
+  - **What the operator builds from the spec is checked where the API would break it,**
+    on the line drawn for `alertmanager`: a `portName` the API refuses where the operator
+    writes it, `grpc` included, beside which it adds it; a patched port that leaves two
+    ports of one name, merged by number; a `serviceName` that is not a DNS-1035 label; a
+    negative `replicas`, which the operator copies into the StatefulSet; the storage
+    rules of `alertmanager`, under `thanos-ruler-<name>-data`; an entry of `volumes`
+    named as a volume the operator adds (`tls-assets`, `web-config`,
+    `remote-write-config`, each Secret key's, the rule ConfigMaps'
+    `thanos-ruler-<name>-rulefiles-<n>`, the data volume); an entry of `volumeMounts` at
+    a path it mounts at in the thanos-ruler container; `dnsPolicy: None` without a
+    nameserver, which the operator copies into the pods; and a name whose data volume or
+    first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
+    are each refused. Left to the operator, which fails the reconcile on each: neither
+    `queryConfig` nor `queryEndpoints`, a `version` it cannot parse, an argument naming a
+    flag it generates, and a web TLS configuration its validation refuses.
+  - **Credentials: one is held, the rest are stated.** A literal `remoteWrite[].bearerToken`
+    (deprecated upstream) is refused under a policy that forbids explicit secrets. A
+    credential under a name that does not say so (a `remoteWrite[].headers` value, the
+    userinfo of a URL) is written as authored and not held.
+  - **An `excludedFromEnforcement` entry that leaves `group` out is written with
+    `monitoring.coreos.com`.** The Go type writes the field even when empty, and the API
+    admits only that one group, which it defaults where the field is absent; an empty
+    group would be refused. An authored empty group is refused by the entry's index, not
+    repaired, and a test holds the written value to the module's default and enum.
+  - **The module ships no CRD.** The required fields are held to the markers of its
+    source, and the two expression rules the spec reaches (a `remoteWrite[].sigv4`
+    `externalId` needs a `roleArn`; an `updateStrategy` with a `rollingUpdate` must be of
+    type `RollingUpdate`) are listed and left to the API server.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

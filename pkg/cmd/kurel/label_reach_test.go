@@ -313,6 +313,10 @@ var labelReachNotRead = []labelReachUnread{
 		reason: "no metadata of any object: labels of the series scraped from the targets",
 	},
 	{
+		field:  "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.ThanosRulerSpec.Labels",
+		reason: "no metadata of any object: the external labels Thanos Ruler adds to the alerts and series it produces (the externalLabels property)",
+	},
+	{
 		field:  "github.com/cilium/cilium/pkg/policy/api.AWSGroup.Labels",
 		reason: "no metadata of any object: the tags a rule selects cloud instances by",
 	},

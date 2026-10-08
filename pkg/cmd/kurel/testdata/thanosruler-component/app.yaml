@@ -1,0 +1,45 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: rules
+      type: thanosruler
+      properties:
+        labels:
+          team: payments
+        externalLabels:
+          cluster: eu-1
+        image: quay.io/thanos/thanos:v0.39.2
+        replicas: 2
+        queryEndpoints:
+          - dnssrv+_http._tcp.thanos-query.monitoring.svc
+        alertmanagersUrl:
+          - dnssrv+_http._tcp.alertmanager-operated.monitoring.svc
+        ruleSelector:
+          matchLabels:
+            role: alert-rules
+        excludedFromEnforcement:
+          - resource: prometheusrules
+            namespace: monitoring
+        podMetadata:
+          labels:
+            team: payments
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+        storage:
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 1Gi
+    - name: defaults
+      type: thanosruler

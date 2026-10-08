@@ -57,8 +57,8 @@ import (
 // advertisement on the local network, one over BGP, a BFD profile and a set
 // of community aliases). The three kinds of cert-manager's API, the four of the
 // External Secrets Operator's, MetalLB's BGP peer and the Prometheus
-// operator's Alertmanager are held here too: the policy reaches part of each
-// (held), and everything else of them is the helper's.
+// operator's Alertmanager and ThanosRuler are held here too: the policy
+// reaches part of each (held), and everything else of them is the helper's.
 // So are the kinds of the Flux APIs beside the sources, the HelmRelease and the
 // Kustomization (flux): what they add to the helper, the Flux namespace, has its
 // own tests (kind_flux_test.go).
@@ -991,6 +991,19 @@ var policyFreeKinds = []policyFreeKind{
 		full:    gatewayRouteFull(),
 	},
 	{
+		component: "thanosruler", handler: &components.ThanosRulerHandler{},
+		gvk: monitoringv1.SchemeGroupVersion.WithKind("ThanosRuler"),
+		typ: reflect.TypeFor[monitoringv1.ThanosRulerSpec](), namespaced: true, held: true,
+		// Under ptStrictPolicy's allowed registries an unset image is refused
+		// (TestThanosRuler_UnsetImage), and so is the reloader left unpatched
+		// (TestThanosRuler_ReloaderImage): the least is the image and the patch.
+		minimal: trReloaders(map[string]any{"image": trImage}),
+		full:    thanosRulerFull(),
+		// The operator names the data volume and the rule ConfigMaps' volumes
+		// after it (validateThanosRulerName).
+		labelName: true,
+	},
+	{
 		component: "tlsroute", handler: &components.TLSRouteHandler{},
 		gvk: gatewayGVK("TLSRoute"),
 		typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](), namespaced: true,
@@ -1235,6 +1248,7 @@ func TestPolicyFreeKinds_FullCoversEveryField(t *testing.T) {
 	for _, kind := range policyFreeKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			fields := specJSONFields(t, kind.typ)
+			full := asSpecFields(kind.component, kind.full)
 			if kind.wholeObject {
 				for _, identity := range []string{"kind", "apiVersion", "metadata"} {
 					if _, ok := fields[identity]; !ok {
@@ -1255,17 +1269,17 @@ func TestPolicyFreeKinds_FullCoversEveryField(t *testing.T) {
 				if strings.TrimSpace(reason) == "" {
 					t.Errorf("unfixtured %q has no reason", name)
 				}
-				if _, ok := kind.full[name]; ok {
+				if _, ok := full[name]; ok {
 					t.Errorf("the full fixture sets %q, which unfixtured says it cannot", name)
 				}
 				delete(fields, name)
 			}
 			for name := range fields {
-				if _, ok := kind.full[name]; !ok {
+				if _, ok := full[name]; !ok {
 					t.Errorf("the full fixture sets no %q, a field of %s", name, kind.typ)
 				}
 			}
-			for name := range kind.full {
+			for name := range full {
 				if _, ok := fields[name]; !ok {
 					t.Errorf("the full fixture sets %q, which is no field of %s", name, kind.typ)
 				}
@@ -1296,8 +1310,9 @@ func TestPolicyFreeKinds_EmitIdentityAndTheAuthoredFields(t *testing.T) {
 			t.Run(kind.component+"/"+name, func(t *testing.T) {
 				// What was authored is read before the handler sees the
 				// properties, so a handler that changed its input could not
-				// change what its object is compared with.
-				authored, data := authoredProperties(t, props)
+				// change what its object is compared with. A renamed property
+				// is read under the name of the field it sets.
+				authored, data := authoredProperties(t, asSpecFields(kind.component, props))
 				before, err := json.Marshal(props)
 				if err != nil {
 					t.Fatalf("marshal the properties: %v", err)
@@ -1686,6 +1701,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		},
 		"storageclass":                   {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
 		"tcproute":                       routeReaches,
+		"thanosruler":                    thanosRulerReaches,
 		"tlsroute":                       append([]string{".Spec.Hostnames"}, routeReaches...),
 		"udproute":                       routeReaches,
 		"validatingwebhookconfiguration": webhookReaches,
@@ -2940,10 +2956,13 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"two spellings", map[string]any{"driverName": "d", "drivername": "e"}, "sets the same field as"},
 		},
 	}
-	// The alertmanager kind and the External Secrets Operator's kinds keep
-	// their cases beside their fixtures.
+	// The alertmanager and thanosruler kinds and the External Secrets
+	// Operator's kinds keep their cases beside their fixtures.
 	for _, tc := range alertmanagerRefusals(notA) {
 		cases["alertmanager"] = append(cases["alertmanager"], refusal(tc))
+	}
+	for _, tc := range thanosRulerRefusals(notA) {
+		cases["thanosruler"] = append(cases["thanosruler"], refusal(tc))
 	}
 	for _, kind := range secretStores {
 		for _, tc := range secretStoreRefusals(notA) {

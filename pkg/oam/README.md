@@ -2036,6 +2036,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `statefulset` |
 | `storageclass` |
 | `tcproute` |
+| `thanosruler` |
 | `tlsroute` |
 | `udproute` |
 | `validatingwebhookconfiguration` |
