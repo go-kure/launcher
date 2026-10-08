@@ -328,13 +328,18 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 // (cmd/alertmanager/main.go:386-389 and 621-622 at v0.28.1, app/url.go:46-47
 // at v0.34.0), and its prerelease v0.19.0-rc.0 already does
 // (cmd/alertmanager/main.go:542-543 there), so the bound is the least
-// prerelease of v0.19.0; any before it, which only parses the URL
-// (cmd/alertmanager/main.go:292-296 and 440-443 at v0.15.0). Unset, the
-// version is the operator's default (v0.34.0 at v0.94.1), and where it does
-// not parse validateAlertmanagerVersion refuses it, so both are held to the
-// two schemes, as refuseGeneratedAlertmanagerArgs holds their flags.
+// prerelease of v0.19.0, alertmanagerURLSchemeVersion; any before it, which
+// only parses the URL (cmd/alertmanager/main.go:292-296 and 440-443 at
+// v0.15.0). Where version is unset it is judged at the operator's default,
+// alertmanagerDefaultVersion, as the version gates are. Where it does not
+// parse validateAlertmanagerVersion refuses it, and it is held to the two
+// schemes, as refuseGeneratedAlertmanagerArgs holds its flags.
 func alertmanagerURLSchemes(spec *monitoringv1.AlertmanagerSpec) []string {
-	if version, err := semver.ParseTolerant(spec.Version); spec.Version != "" && err == nil && version.LT(semver.MustParse("0.19.0-0")) {
+	judged := spec.Version
+	if judged == "" {
+		judged = alertmanagerDefaultVersion
+	}
+	if version, err := semver.ParseTolerant(judged); err == nil && version.LT(semver.MustParse(alertmanagerURLSchemeVersion)) {
 		return nil
 	}
 	return []string{"http", "https"}
