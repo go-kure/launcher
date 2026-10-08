@@ -610,8 +610,9 @@ func podShapingFields(typ reflect.Type) []string {
 }
 
 // TestMonitoringWorkloadKinds_PodFieldsHeldOrListed derives, from each kind's
-// spec type, every field that shapes the pods the operator runs
-// (podShapingFields), and fails on one that is neither held to the
+// spec type, the fields podShapingFields recognises as shaping the pods the
+// operator runs (not one under a name of the operator's own, such as secrets
+// or configMaps), and fails on one that is neither held to the
 // environment policy, nor read by the ownership rules, nor stated with the
 // reason it is neither. A dependency bump that adds such a field fails here,
 // naming it. A held field is proven held: properties with it build, pass under

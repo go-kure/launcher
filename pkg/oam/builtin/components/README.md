@@ -3808,12 +3808,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   authored, and the emitted object still leaves both unset.
 
   `TestMonitoringWorkloadKinds_PodFieldsHeldOrListed` derives, from the type,
-  every field of the spec that shapes the pods and holds each to one of three
-  answers: held to the policy, with a refusal shown on a document (the nine
-  above: `image`, `replicas`, `resources`, `storage`, `volumes`,
-  `containers`, `initContainers`, `securityContext`, `hostNetwork`); read by
-  the wrapper (`podMetadata`, below); or stated with the reason it is neither.
-  A dependency bump that adds such a field fails there, naming it. **Not
+  the fields of the spec that carry the name of a field of a pod spec, a
+  container or a StatefulSet's spec, the storage block, and any field that
+  holds object metadata, and holds each to one of three answers: held to the
+  policy, with a refusal shown on a document (the nine above: `image`,
+  `replicas`, `resources`, `storage`, `volumes`, `containers`,
+  `initContainers`, `securityContext`, `hostNetwork`); read by the wrapper
+  (`podMetadata`, below); or stated with the reason it is neither. A
+  dependency bump that adds such a field fails there, naming it. A field that
+  shapes the pods under a name of the operator's own is not derived: `secrets`
+  and `configMaps` mount the named Secrets and ConfigMaps of the namespace,
+  read-only, into the alertmanager and config-reloader containers
+  (`makeStatefulSetSpec`, same source), and fields such as `retention` and
+  `logLevel` become arguments. The policy has no dimension for a Secret or
+  ConfigMap volume or for an argument, so none of them is held. **Not
   held:**
   - **An image the operator chooses, under a policy without allowed
     registries,** as stated above. `version` does not name an image.

@@ -1702,9 +1702,13 @@ and by scope, whatever component or trait emits it.
     privilege and capabilities. It refuses or passes; no policy default is filled, since
     the operator decides what an omitted field means. Where it fills a value the policy
     has a dimension for (1 replica, a 200Mi memory request, read from the operator's
-    source at v0.94.1), that value is held, and nothing is written. A test derives every
-    field of the spec that shapes the pods and holds each to a shown refusal or a stated
-    reason.
+    source at v0.94.1), that value is held, and nothing is written. A test derives the
+    fields of the spec named as a field of a pod spec, a container or a StatefulSet's
+    spec, the storage block and any field holding object metadata, and holds each to a
+    shown refusal or a stated reason. A field that shapes the pods under a name of the
+    operator's own is not derived and not held: `secrets` and `configMaps` mount Secrets
+    and ConfigMaps of the namespace read-only, and fields such as `retention` become
+    arguments; the policy has no dimension for either.
   - **An image the operator chooses is refused under a registry allowlist.** It
     generates the `alertmanager`, `config-reloader` and `init-config-reloader`
     containers; where the spec names no image for one (for the first, in `image` or a
