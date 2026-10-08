@@ -307,12 +307,8 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 	}
 	var moving []string
 	for _, typ := range slices.Sorted(maps.Keys(builtinComponentHandlers())) {
-		fx := componentLabelFixtures[typ]
-		props := fx.props
-		if fx.propsFor != nil {
-			props = fx.propsFor(t)
-		}
-		cfg, err := builtinComponentHandlers()[typ].ToApplicationConfig(&oam.Component{Name: "c", Type: typ, Properties: props}, "default")
+		name, props := componentLabelFixtures[typ].directly(t, "c")
+		cfg, err := builtinComponentHandlers()[typ].ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, "default")
 		if err != nil {
 			t.Errorf("%s: ToApplicationConfig: %v", typ, err)
 			continue

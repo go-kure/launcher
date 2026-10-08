@@ -1,0 +1,45 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: policy-check
+      type: validatingwebhookconfiguration
+      properties:
+        webhooks:
+          - name: policy.example.com
+            clientConfig:
+              service:
+                namespace: policy
+                name: webhook
+                path: /validate
+              caBundle: Y2EtYnVuZGxl
+            rules:
+              - operations: [CREATE, UPDATE]
+                apiGroups: [apps]
+                apiVersions: [v1]
+                resources: [deployments]
+                scope: Namespaced
+            failurePolicy: Fail
+            namespaceSelector:
+              matchExpressions:
+                - key: policy.example.com/enforce
+                  operator: Exists
+            sideEffects: None
+            timeoutSeconds: 5
+            admissionReviewVersions: [v1]
+            matchConditions:
+              - name: not-system
+                expression: "!request.userInfo.username.startsWith('system:')"
+    - name: audit
+      type: validatingwebhookconfiguration
+      properties:
+        objectName: audit.example.com
+        webhooks:
+          - name: audit.example.com
+            clientConfig:
+              url: https://audit.example.com/check
+            sideEffects: NoneOnDryRun
+            admissionReviewVersions: [v1, v1beta1]

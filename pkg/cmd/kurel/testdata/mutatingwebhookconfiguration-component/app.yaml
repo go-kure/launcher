@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: sidecar-injector
+      type: mutatingwebhookconfiguration
+      properties:
+        webhooks:
+          - name: inject.sidecar.example.com
+            clientConfig:
+              service:
+                namespace: sidecar
+                name: injector
+                path: /mutate
+                port: 8443
+            rules:
+              - operations: [CREATE]
+                apiGroups: [""]
+                apiVersions: [v1]
+                resources: [pods]
+            objectSelector:
+              matchLabels:
+                sidecar.example.com/inject: "true"
+            sideEffects: None
+            reinvocationPolicy: IfNeeded
+            admissionReviewVersions: [v1]
+    - name: defaults
+      type: mutatingwebhookconfiguration
+      properties:
+        objectName: defaults.example.com
+        webhooks: []

@@ -27,6 +27,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
@@ -136,7 +138,7 @@ func crdAPISource(modulePath, file, version string) func(*testing.T) apiSource {
 }
 
 // markerModules are the modules whose Go source markerAPISource reads.
-var markerModules = append([]string{monitoringModulePath, "k8s.io/apimachinery", "k8s.io/api"}, fluxMarkerModules...)
+var markerModules = append([]string{monitoringModulePath, "k8s.io/apimachinery", "k8s.io/api", "k8s.io/kube-aggregator"}, fluxMarkerModules...)
 
 // linkedFieldMarkers returns the lookup of a field's markers in the Go source
 // of the linked modules named, and whether that source declares the field. A
@@ -351,6 +353,7 @@ var objectIdentity = []string{"kind", "apiVersion", "metadata"}
 // the refusal.
 var apiSetKinds = []apiSetKind{
 	{component: "alertmanager", typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](), source: markerAPISource, listed: monitoringWorkloadPodOmitted()},
+	{component: "apiservice", typ: reflect.TypeFor[apiregistrationv1.APIServiceSpec](), source: markerAPISource},
 	{component: "artifactgenerator", typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), source: markerAPISource},
 	// The Gateway API's infrastructure objects (backendtlspolicy, gateway,
 	// gatewayclass, listenerset, referencegrant) are read from the experimental
@@ -555,6 +558,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "metallb-community", typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_communities.yaml", metallbVersion)},
 	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "metallb-l2advertisement", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion)},
+	{component: "mutatingwebhookconfiguration", typ: reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), source: markerAPISource, skip: objectIdentity},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
 	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
 	{
@@ -638,6 +642,7 @@ var apiSetKinds = []apiSetKind{
 		}},
 		refused: []string{"rules", "rules[].backendRefs"},
 	},
+	{component: "validatingwebhookconfiguration", typ: reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), source: markerAPISource, skip: objectIdentity},
 	{component: "volumeattributesclass", typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), source: markerAPISource, skip: objectIdentity},
 }
 

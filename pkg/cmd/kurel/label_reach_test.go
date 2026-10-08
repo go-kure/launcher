@@ -166,16 +166,12 @@ func walkLabelReach(t reflect.Type, path, field string, on map[reflect.Type]bool
 // registry fixture: the one typed object of the kind the handler declares.
 func kindObject(t *testing.T, typ string, handler oam.ComponentHandler) client.Object {
 	t.Helper()
-	fx := componentLabelFixtures[typ]
-	props := fx.props
-	if fx.propsFor != nil {
-		props = fx.propsFor(t)
-	}
-	cfg, err := handler.ToApplicationConfig(&oam.Component{Name: "c", Type: typ, Properties: props}, "default")
+	name, props := componentLabelFixtures[typ].directly(t, "c")
+	cfg, err := handler.ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, "default")
 	if err != nil {
 		t.Fatalf("%s: ToApplicationConfig: %v", typ, err)
 	}
-	objs, err := cfg.Generate(stack.NewApplication("c", "default", cfg))
+	objs, err := cfg.Generate(stack.NewApplication(name, "default", cfg))
 	if err != nil {
 		t.Fatalf("%s: Generate: %v", typ, err)
 	}

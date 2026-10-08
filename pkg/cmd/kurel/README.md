@@ -116,6 +116,7 @@ at its position.
 | `type` | What the fixture builds |
 |---|---|
 | `alertmanager` | An Alertmanager in the build namespace, and nothing else, since the operator runs the pods. What its spec says of those pods is held to the environment policy; no capability is required to build it. |
+| `apiservice` | Two APIServices with no namespace, one named by the component, `<version>.<group>`, and one by `objectName`, each handing its group and version to a Service of the `metrics` namespace. Only the environment policy's object kind rules apply to it. |
 | `artifactgenerator` | Two ArtifactGenerators in the build namespace, no Flux namespace being set for the build, one named by `objectName`, with a `pathPattern` and a source of another namespace. No capability is required to build it. |
 | `backendtlspolicy` | A BackendTLSPolicy in the build namespace. No capability is required of the cluster profile to build it. |
 | `certificate` | A Certificate in the build namespace. No capability is required of the cluster profile to build it; the `certificate` trait, which shares the kind's name, still requires its own. |
@@ -167,6 +168,7 @@ at its position.
 | `metallb-community` | Two Community objects in the build namespace, one with three aliases, one of them a value the writer quotes (`64512:10`, which YAML 1.1 reads as a base-60 number where it is not quoted), and one that authors nothing but its `objectName`. No capability is required to build it. |
 | `metallb-ipaddresspool` | Two IPAddressPool objects in the build namespace, one with every field, one named by `objectName` with its addresses alone. No capability is required to build it. |
 | `metallb-l2advertisement` | Two L2Advertisement objects in the build namespace, one with every field, one named by `objectName` that authors nothing else and is written with an empty spec. No capability is required to build it. |
+| `mutatingwebhookconfiguration` | Two MutatingWebhookConfigurations with no namespace: a pod-injecting webhook with every field the fixture authors, `reinvocationPolicy` among them, and one named by `objectName` that holds no webhook. Only the environment policy's object kind rules apply to it. |
 | `namespace` | |
 | `networkpolicy` | The authored spec. Unlike the trait of the same name, the kind selects every pod of the namespace when no `podSelector` is written. |
 | `persistentvolume` | |
@@ -195,6 +197,7 @@ at its position.
 | `tcproute` | Two TCPRoutes in the build namespace, one with a single backend, one named by `objectName` that attaches to a Gateway of another namespace and splits its traffic over two backends, one of them in another namespace. No capability is required of the cluster profile to build them. |
 | `tlsroute` | Two TLSRoutes as the `tcproute` fixture's, each naming its host names, one of them a wildcard. No capability is required of the cluster profile to build them. |
 | `udproute` | Two UDPRoutes as the `tcproute` fixture's. No capability is required of the cluster profile to build them. |
+| `validatingwebhookconfiguration` | Two ValidatingWebhookConfigurations with no namespace: one whose webhook a Service serves, with a rule, a selector and a match condition, and one named by `objectName` whose webhook a URL serves. Only the environment policy's object kind rules apply to it. |
 | `volumeattributesclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 
 The

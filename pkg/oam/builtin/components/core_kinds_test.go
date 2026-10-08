@@ -22,6 +22,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -76,6 +78,7 @@ var coreKindSchemas = []struct {
 		"tag":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 	}},
+	{"apiservice", reflect.TypeFor[apiregistrationv1.APIServiceSpec](), &components.APIServiceHandler{}, nil},
 	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, nil},
 	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
@@ -147,6 +150,7 @@ var coreKindSchemas = []struct {
 	{"metallb-community", reflect.TypeFor[metallbv1beta1.CommunitySpec](), &components.MetalLBCommunityHandler{}, nil},
 	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
 	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, nil},
+	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), &components.MutatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 MutatingWebhookConfiguration")},
 	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
 	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
 	{"persistentvolume", reflect.TypeFor[corev1.PersistentVolumeSpec](), &components.PersistentVolumeHandler{}, nil},
@@ -184,6 +188,7 @@ var coreKindSchemas = []struct {
 	{"tcproute", reflect.TypeFor[gatewayv1.TCPRouteSpec](), &components.TCPRouteHandler{}, nil},
 	{"tlsroute", reflect.TypeFor[gatewayv1.TLSRouteSpec](), &components.TLSRouteHandler{}, nil},
 	{"udproute", reflect.TypeFor[gatewayv1.UDPRouteSpec](), &components.UDPRouteHandler{}, nil},
+	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), &components.ValidatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration")},
 	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
 }
 
@@ -248,6 +253,17 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 	}
 	if len(prop.Types) != 0 {
 		t.Errorf("schema key %q declares the union %v, but the field is %s, which decodes from one type", key, prop.Types, typ)
+		return
+	}
+	// Bytes decode from a base64 string (encoding/json), not from an array,
+	// and so do an APIService's caBundle.
+	if typ == reflect.TypeFor[[]byte]() {
+		if prop.Type != oam.PropertyTypeString {
+			t.Errorf("schema key %q declares type %q, but the field is bytes, which decode from a base64 string", key, prop.Type)
+		}
+		if prop.Description == "" {
+			t.Errorf("schema key %q has no description", key)
+		}
 		return
 	}
 	// A duration is a struct that decodes from a string ("2160h") and from

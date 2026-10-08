@@ -48,6 +48,7 @@ import (
 func ComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
 		"alertmanager":                    &components.AlertmanagerHandler{},
+		"apiservice":                      &components.APIServiceHandler{},
 		"artifactgenerator":               &components.ArtifactGeneratorHandler{},
 		"backendtlspolicy":                &components.BackendTLSPolicyHandler{},
 		"bucket":                          &components.BucketHandler{},
@@ -117,6 +118,7 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 		"metallb-community":               &components.MetalLBCommunityHandler{},
 		"metallb-ipaddresspool":           &components.MetalLBIPAddressPoolHandler{},
 		"metallb-l2advertisement":         &components.MetalLBL2AdvertisementHandler{},
+		"mutatingwebhookconfiguration":    &components.MutatingWebhookConfigurationHandler{},
 		"namespace":                       &components.NamespaceHandler{},
 		"networkpolicy":                   &components.NetworkPolicyHandler{},
 		"ocirepository":                   &components.OCIRepositoryHandler{},
@@ -151,6 +153,7 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 		"tcproute":                        &components.TCPRouteHandler{},
 		"tlsroute":                        &components.TLSRouteHandler{},
 		"udproute":                        &components.UDPRouteHandler{},
+		"validatingwebhookconfiguration":  &components.ValidatingWebhookConfigurationHandler{},
 		"volumeattributesclass":           &components.VolumeAttributesClassHandler{},
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
@@ -31,6 +32,8 @@ var builtinMarkerKinds = []struct {
 	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), roleBindingKind.required, []string{"roleRef.apiGroup"}},
 	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), clusterRoleKind.required, []string{"rules"}},
 	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), clusterRoleBindingKind.required, []string{"roleRef.apiGroup"}},
+	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), validatingWebhookConfigurationKind.required, nil},
+	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), mutatingWebhookConfigurationKind.required, nil},
 }
 
 // fieldClasses is how the fields a kind's type reaches divide, by what the API

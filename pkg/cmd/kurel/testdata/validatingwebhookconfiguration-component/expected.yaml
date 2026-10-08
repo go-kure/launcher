@@ -1,0 +1,52 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    launcher.gokure.dev/component: policy-check
+  name: policy-check
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    caBundle: Y2EtYnVuZGxl
+    service:
+      name: webhook
+      namespace: policy
+      path: /validate
+  failurePolicy: Fail
+  matchConditions:
+  - expression: '!request.userInfo.username.startsWith(''system:'')'
+    name: not-system
+  name: policy.example.com
+  namespaceSelector:
+    matchExpressions:
+    - key: policy.example.com/enforce
+      operator: Exists
+  rules:
+  - apiGroups:
+    - apps
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - deployments
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: 5
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    launcher.gokure.dev/component: audit
+  name: audit.example.com
+webhooks:
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    url: https://audit.example.com/check
+  name: audit.example.com
+  sideEffects: NoneOnDryRun

@@ -1853,6 +1853,29 @@ and by scope, whatever component or trait emits it.
     named, as a `configmap` component and trait are. The Secret a `helm` component generates for
     `secretValues` is claimed under role `values-secret`, so a `secret` component under
     that name is refused as a name collision.
+- **Shipped: the two webhook configurations and APIService,**
+  `validatingwebhookconfiguration`, `mutatingwebhookconfiguration` (with what they share
+  in `admission_webhook_common.go`) and `apiservice` (`apiservice.go`), cluster-scoped
+  kinds on `policyFreeKind` (go-kure/launcher#943).
+  - No dimension of the environment policy reads what they match or where they send a
+    request. They are gated as every emitted object is, by `oam.ObjectKindPolicy` (§5.4):
+    a policy that forbids their group, their kind or cluster-scoped objects refuses them
+    on every path.
+  - The webhook configurations have no spec: the property is the object's `webhooks`,
+    strictly decoded, and `kind`, `apiVersion` and `metadata` are refused. Their required
+    lists are derived from the markers of the linked `k8s.io/api` module; beyond them the
+    kinds check presence rules read by hand from the API server's validation at
+    Kubernetes v1.37.1: `clientConfig` holds exactly one of `url` and `service`, at least
+    one admission review version, and a rule names an operation, an API group, an API
+    version and a resource. A selector's match expression is held to the shared
+    label-selector check.
+  - `apiservice` projects `APIServiceSpec`, `k8s.io/kube-aggregator` now a direct
+    dependency. It refuses an object not named `<version>.<group>`, which the API
+    requires.
+  - Stated limits, in each kind's README entry: they act on every other document's
+    objects or on the API itself; a mutating webhook changes objects after the build;
+    a webhook's `clientConfig` and an APIService's `service` are not resolved at build;
+    a match condition's CEL expression is compiled by the API server.
 - **Held: `ResourceSet` and `FluxInstance`** (fluxcd.controlplane.io/v1), each with its
   reason in its inventory row. A ResourceSet's `resourcesTemplate` is a Go template the
   operator renders on the cluster into the objects it reconciles: no build sees them,
@@ -1908,16 +1931,10 @@ and by scope, whatever component or trait emits it.
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Held: the seven kinds of cluster-wide admission and API registration,**
-  ValidatingWebhookConfiguration, MutatingWebhookConfiguration,
-  ValidatingAdmissionPolicy and MutatingAdmissionPolicy with their bindings, and
-  APIService. Their inventory rows are `held`: by the Kubernetes documentation they act
-  on every other document's objects or on the API itself, the mutating ones undo what
-  the environment policy checked at build, and the policy has no dimension for
-  cluster-wide admission. A ValidatingAdmissionPolicy and its binding change nothing but
-  can deny writes for the whole cluster; they are taken up when a consumer asks. An RBAC
-  grant, which is emitted, names its subjects in the document that makes it (README
-  "Held: cluster-wide admission and API registration").
+- **Held, for now: the four admission policy kinds,** ValidatingAdmissionPolicy and
+  MutatingAdmissionPolicy with their bindings. Their kind components follow under
+  go-kure/launcher#943, on the terms of the webhook configurations above (README
+  "Cluster-wide admission and API registration").
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.
@@ -2080,7 +2097,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. A chart's layout names and hook-group order need per-layout placement (go-kure/kure#1032). Default Kustomization names, a chart's layout's and a hook-group child's alike, are left to the base library and its shortening (go-kure/launcher#941). The override length check is the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
-| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
+| [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Closed: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component. The held cluster-wide kinds continue in go-kure/launcher#943 | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787, go-kure/launcher#943 |
 | [go-kure/launcher#791](https://github.com/go-kure/launcher/issues/791) | Security on template delivery | §5.2 | Shipped | — |
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |

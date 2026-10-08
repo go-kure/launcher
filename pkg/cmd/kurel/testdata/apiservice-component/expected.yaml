@@ -1,0 +1,32 @@
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  labels:
+    launcher.gokure.dev/component: v1beta1.metrics.example.com
+  name: v1beta1.metrics.example.com
+spec:
+  caBundle: Y2EtYnVuZGxl
+  group: metrics.example.com
+  groupPriorityMinimum: 100
+  service:
+    name: metrics-server
+    namespace: metrics
+    port: 443
+  version: v1beta1
+  versionPriority: 10
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  labels:
+    launcher.gokure.dev/component: custom-metrics
+  name: v1beta2.custom.metrics.example.com
+spec:
+  group: custom.metrics.example.com
+  groupPriorityMinimum: 100
+  insecureSkipTLSVerify: true
+  service:
+    name: custom-metrics
+    namespace: metrics
+  version: v1beta2
+  versionPriority: 200
