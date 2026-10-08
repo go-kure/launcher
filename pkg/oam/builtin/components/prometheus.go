@@ -121,7 +121,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"externalUrl": text("externalUrl: the URL under which Prometheus is reached from outside, which the URLs it generates are built from."),
 		"routePrefix": text("routePrefix: the path prefix Prometheus registers its HTTP handlers under."),
 		"storage":     object("storage: where the Prometheus pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage a claim template requests is held to the EnvironmentPolicy's storage maximum; the size limit of an emptyDir is not. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Prometheus pods, beside the ones the operator generates. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"volumes": objects("volumes: further volumes of the Prometheus pods, beside the ones the operator generates. Two entries of one name are refused. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
 		"volumeMounts": objects("volumeMounts: further volume mounts of the prometheus container.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
@@ -151,9 +151,9 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSets create and delete pods when they scale: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSets."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSets replace their pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
 		"enableServiceLinks":  flag("enableServiceLinks: whether the Services of the namespace are injected into the pods' environment variables."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (prometheus, config-reloader, and thanos-sidecar where thanos is set) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (prometheus, config-reloader, and thanos-sidecar where thanos is set) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. The operator merges a patch's ports into those it gives that container (prometheus: the web port under portName at 9090/TCP; config-reloader: reloader-web at 8080/TCP; thanos-sidecar: http at 10902 and grpc at 10901) by number: in the patch's order, a port is merged into the first port of its number, the operator's or one the patch added before it, and takes the name and protocol it names; a port of another number is added. Where the operator gives the container no port (prometheus under listenLocal, and config-reloader under listenLocal with the HTTP reloadStrategy), the patch's ports are taken as listed. A container whose ports, merged so or as an added entry lists them, name two ports alike is refused, since the API refuses it. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates: an entry named init-config-reloader is merged into it. Held to the EnvironmentPolicy as containers are. A patch may name no image; any other entry must name one. Under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader is.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates: an entry named init-config-reloader is merged into it. Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (prometheus, config-reloader, thanos-sidecar where thanos is set, or a listed one), and its ports as there (a patch's merged into reloader-init at 8081/TCP). A patch may name no image; any other entry must name one. Under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader is.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"additionalScrapeConfigs":     object("additionalScrapeConfigs: the Secret key that holds further scrape configurations, appended to the ones the operator generates as they are." + secretKey),
 		"apiserverConfig":             object("apiserverConfig: the Kubernetes API server Prometheus discovers targets from, and how it authenticates. Unset, the cluster Prometheus runs in, with the pod's service account. The deprecated bearerToken is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential is the key of a Secret or the path of a file in the container." + decoded + "APIServerConfig in its API reference."),
@@ -205,7 +205,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"serviceDiscoveryRole":          text("serviceDiscoveryRole: the role ServiceMonitor targets and Alertmanager endpoints are discovered with: Endpoints, the operator's default, or EndpointSlice."),
 		"tsdb":                          object("tsdb: the settings of the time series database that are reloaded at runtime: outOfOrderTimeWindow, staleSeriesCompactionThreshold and chunkEncoding. Requires Prometheus v2.39.0 or later." + decoded + "TSDBSpec in its API reference."),
 		"scrapeFailureLogFile":          text("scrapeFailureLogFile: the file scrape failures are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a full path needs a writable volume mounted there. Requires Prometheus v2.55.0 or later. Not empty."),
-		"serviceName":                   text("serviceName: the name of the governing Service of the StatefulSets, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named prometheus-operated. Not empty."),
+		"serviceName":                   text("serviceName: the name of the governing Service of the StatefulSets, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named prometheus-operated. Not empty, and a DNS-1035 label (starting with a letter), the rule of every Service name here: the API refuses a Service of another name before Kubernetes 1.36 (by default), and the operator fails to reconcile where it finds no Service of the name."),
 		"runtime":                       object("runtime: the settings of the Prometheus process: goGC." + decoded + "RuntimeConfig in its API reference."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop; 0 kills them at once, which may corrupt data. Unset, 600. At least 0."),
 		"hostUsers":                     flag("hostUsers: false runs the pods in a user namespace of their own, not the host's."),
@@ -465,6 +465,43 @@ func prometheusGenerated(spec *monitoringv1.PrometheusSpec) map[string][]string 
 	}
 }
 
+// prometheusGeneratedPorts are the ports the operator gives the containers it
+// generates, in its order: the prometheus container's web port under portName
+// (web where it is unset) at 9090/TCP unless listenLocal is set
+// (MakeContainerPorts, pkg/prometheus/common.go:457-469 at
+// prometheus-operator v0.94.1); the config-reloader container's reloader-web
+// at 8080/TCP unless listenLocal is set under the HTTP reloadStrategy, the
+// default (BuildConfigReloader, common.go:391-414: only that strategy hands
+// listenLocal on); the init-config-reloader container's reloader-init at
+// 8081/TCP, whatever either says (common.go:384-389, CreateConfigReloader,
+// pkg/operator/config_reloader.go:226-282); and, where thanos is set, the
+// thanos-sidecar container's http at 10902 and grpc at 10901, which name no
+// protocol, so the API's TCP, whatever thanos.listenLocal says
+// (pkg/prometheus/server/statefulset.go:629-638).
+func prometheusGeneratedPorts(spec *monitoringv1.PrometheusSpec) map[string][]corev1.ContainerPort {
+	port := func(name string, number int32, protocol corev1.Protocol) corev1.ContainerPort {
+		return corev1.ContainerPort{Name: name, ContainerPort: number, Protocol: protocol}
+	}
+	ports := map[string][]corev1.ContainerPort{
+		"init-config-reloader": {port("reloader-init", 8081, corev1.ProtocolTCP)},
+	}
+	if !spec.ListenLocal {
+		web := spec.PortName
+		if web == "" {
+			web = "web"
+		}
+		ports["prometheus"] = []corev1.ContainerPort{port(web, 9090, corev1.ProtocolTCP)}
+	}
+	signal := spec.ReloadStrategy != nil && *spec.ReloadStrategy == monitoringv1.ProcessSignalReloadStrategyType
+	if !spec.ListenLocal || signal {
+		ports["config-reloader"] = []corev1.ContainerPort{port("reloader-web", 8080, corev1.ProtocolTCP)}
+	}
+	if spec.Thanos != nil {
+		ports["thanos-sidecar"] = []corev1.ContainerPort{port("http", 10902, ""), port("grpc", 10901, "")}
+	}
+	return ports
+}
+
 // prometheusWorkload maps a Prometheus spec into the workload the two shared
 // functions read. It only reads spec.
 //
@@ -496,10 +533,12 @@ func prometheusWorkload(spec *monitoringv1.PrometheusSpec) monitoringWorkload {
 			SecurityContext: spec.SecurityContext,
 			HostNetwork:     spec.HostNetwork,
 		},
-		generated:    prometheusGenerated(spec),
-		replicas:     &pods,
-		replicasPath: "replicas times shards",
-		storage:      spec.Storage,
+		generated:      prometheusGenerated(spec),
+		generatedPorts: prometheusGeneratedPorts(spec),
+		serviceName:    spec.ServiceName,
+		replicas:       &pods,
+		replicasPath:   "replicas times shards",
+		storage:        spec.Storage,
 	}
 	if spec.DNSPolicy != nil {
 		w.pod.DNSPolicy = corev1.DNSPolicy(*spec.DNSPolicy)

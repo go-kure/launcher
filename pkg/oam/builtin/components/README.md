@@ -4574,7 +4574,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `dnsConfig.nameservers`, and a pod-level
   `securityContext.windowsOptions.hostProcess: true` without
   `hostNetwork: true`, are refused: the API refuses the pods the operator
-  copies them into. A nonempty `externalUrl` that Prometheus exits on at
+  copies them into. A patch's ports are merged into those the operator gives
+  the container by number, as on `alertmanager`: the `prometheus` container's
+  web port under `portName` at 9090/TCP and `config-reloader`'s `reloader-web`
+  at 8080/TCP, none of either under `listenLocal` (`config-reloader` keeps its
+  port under the `ProcessSignal` `reloadStrategy`, to which the operator does
+  not hand `listenLocal` on), `init-config-reloader`'s `reloader-init` at
+  8081/TCP, and `thanos-sidecar`'s `http` at 10902 and `grpc` at 10901, which
+  `thanos.listenLocal` does not take away. A container whose ports, as the
+  pods run them, name two ports alike is refused (`containers[0]
+  "prometheus": ports[0] "web" at 8080/TCP: the Prometheus operator merges
+  the patch's ports into the container's by number, which leaves another port
+  of that name, the Prometheus operator's port at 9090/TCP, …`), and so are
+  two `volumes` of one name and a `serviceName` that is not a DNS-1035 label.
+  A nonempty `externalUrl` that Prometheus exits on at
   startup is refused too, though the operator and the API accept it: the
   operator passes it unchanged as `--web.external-url`
   (`pkg/prometheus/promcfg.go`), and Prometheus exits where it begins or ends

@@ -1876,7 +1876,9 @@ and by scope, whatever component or trait emits it.
     operator generates is refused, as are a name listed twice in one list, a name shared
     by an init container and a container of the pods, `dnsPolicy: None` without a
     nameserver and a pod-level HostProcess without `hostNetwork`, which the API refuses
-    of the pods, and an `externalUrl` Prometheus exits on at startup (one that begins or
+    of the pods, a container whose ports, as the operator merges a patch's into its
+    own by number, name two ports alike, two volumes of one name and a `serviceName`
+    that is not a DNS-1035 label, and an `externalUrl` Prometheus exits on at startup (one that begins or
     ends with a quote, or that Go's `net/url` cannot parse; no scheme is held). No capability is required and no default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
     `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
     so is an empty `action` of a relabeling rule in the five lists of rules the spec
