@@ -348,8 +348,11 @@ func alertmanagerURLSchemes(spec *monitoringv1.AlertmanagerSpec) []string {
 // a version may be run with the flags of another.
 //
 // It then refuses a field the operator reads only from a later version than
-// the one it compares, which is version, or its default where version is unset
-// (alertmanagerVersionGates).
+// the one it compares (alertmanagerVersionGates). That is version where set.
+// Unset, which version may be where no image is named, it is judged against
+// the default of the operator release launcher vendors, as the deployed
+// operator's is unknown at build time; at that default (v0.34.0) no gate
+// refuses.
 func validateAlertmanagerVersion(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.Version == "" {
 		if (spec.Image != nil && *spec.Image != "") || patchedImage(spec.Containers, "alertmanager") != "" {
