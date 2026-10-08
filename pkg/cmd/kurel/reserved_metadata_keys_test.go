@@ -18,11 +18,13 @@ import (
 // reservedKeyCarriers is one document per way a label or annotation key reaches
 // the output today, through the built-in handlers and rules. %[1]s is the key
 // under test, and %[2]s the chart repository's URL where the document has one.
-// Each names the component, the object and the place the key lands in.
+// Each names the component, the object and the place the key lands in, and
+// path, where it is set, the path of the labels or annotations on the object.
 var reservedKeyCarriers = map[string]struct {
 	component string // the document's one component, named "carrier"
 	object    string
 	what      string
+	path      string
 }{
 	"a kind component's label": {
 		component: `    - name: carrier
@@ -119,6 +121,109 @@ var reservedKeyCarriers = map[string]struct {
           key: %[1]s
 `,
 		object: `Deployment "web"`, what: "pod template label",
+	},
+	// A StatefulSet's volume claim templates, on the three raw paths: the
+	// statefulset kind writes no metadata there but the claim's name. The key is
+	// in the second template, so the refusal names its index.
+	"a passthrough StatefulSet's volume claim template label": {
+		component: `    - name: carrier
+      type: passthrough
+      properties:
+        object:
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: store
+          spec:
+            serviceName: store
+            selector:
+              matchLabels:
+                role: store
+            template:
+              metadata:
+                labels:
+                  role: store
+              spec:
+                containers:
+                  - name: app
+                    image: ghcr.io/example/store:v1.0.0
+            volumeClaimTemplates:
+              - metadata:
+                  name: cache
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 1Gi
+              - metadata:
+                  name: data
+                  labels:
+                    %[1]s: a
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 1Gi
+`,
+		object: `StatefulSet "store"`, what: "volume claim template label", path: "spec.volumeClaimTemplates[1].metadata.labels",
+	},
+	"a manifests StatefulSet's volume claim template annotation": {
+		component: `    - name: carrier
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: store
+            namespace: default
+          spec:
+            serviceName: store
+            selector:
+              matchLabels:
+                role: store
+            template:
+              metadata:
+                labels:
+                  role: store
+              spec:
+                containers:
+                  - name: app
+                    image: ghcr.io/example/store:v1.0.0
+            volumeClaimTemplates:
+              - metadata:
+                  name: cache
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 1Gi
+              - metadata:
+                  name: data
+                  annotations:
+                    %[1]s: a
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 1Gi
+`,
+		object: `StatefulSet "store"`, what: "volume claim template annotation", path: "spec.volumeClaimTemplates[1].metadata.annotations",
+	},
+	"a rendered chart's volume claim template label": {
+		component: `    - name: carrier
+      type: helm
+      properties:
+        delivery: template
+        chart: testchart
+        version: "0.1.0"
+        source:
+          url: %[2]s
+        values:
+          key: example.com/owner
+          claimKey: %[1]s
+`,
+		object: `StatefulSet "store"`, what: "volume claim template label", path: "spec.volumeClaimTemplates[1].metadata.labels",
 	},
 	"an ingress trait's annotation": {
 		component: `    - name: carrier
@@ -242,13 +347,21 @@ func TestBuiltinTraits_SubApplicationDecoratorsLeaveTheConfig(t *testing.T) {
 // not reserved builds, so the refusal is the key's and not the fixture's.
 func TestReservedMetadataKeys_EveryCarrier(t *testing.T) {
 	// The chart puts the key its values name on the pod template of its
-	// Deployment: a key no launcher code wrote and no property of the document
-	// states as metadata.
+	// Deployment, and, where the values name a claimKey, the claimKey on the
+	// second volume claim template of a StatefulSet: keys no launcher code wrote
+	// and no property of the document states as metadata.
 	const pod = "      containers:\n        - name: app\n          image: ghcr.io/example/web:v1.0.0\n"
+	const claim = "    - metadata:\n        name: %s\n%s      spec:\n        accessModes: [ReadWriteOnce]\n" +
+		"        resources:\n          requests:\n            storage: 1Gi\n"
 	chart := buildMinimalChartTar(t, "testchart", "0.1.0", map[string]string{
 		"testchart/templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n" +
 			"  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n" +
 			"        {{ .Values.key }}: a\n    spec:\n" + pod,
+		"testchart/templates/statefulset.yaml": "{{- if .Values.claimKey }}\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: store\nspec:\n" +
+			"  serviceName: store\n  selector:\n    matchLabels:\n      app: store\n  template:\n    metadata:\n      labels:\n        app: store\n" +
+			"    spec:\n" + pod + "  volumeClaimTemplates:\n" +
+			fmt.Sprintf(claim, "cache", "") +
+			fmt.Sprintf(claim, "data", "        labels:\n          {{ .Values.claimKey }}: a\n") + "{{- end }}\n",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -318,7 +431,8 @@ func TestReservedMetadataKeys_EveryCarrier(t *testing.T) {
 				field, annotation := strings.CutSuffix(tc.what, "annotation")
 				holder := oam.ReservedKeyHolder(strings.TrimSpace(strings.TrimSuffix(field, "label")))
 				if got.Component != "carrier" || !strings.HasPrefix(got.Object, tc.object) ||
-					got.Holder != holder || got.Annotation != annotation || got.Key != key || got.Entry != reserved.entry {
+					got.Holder != holder || got.Annotation != annotation || got.Key != key || got.Entry != reserved.entry ||
+					(tc.path != "" && got.Path != tc.path) {
 					t.Errorf("with %s: the refusal is %+v, want component carrier, %s, holder %q, annotation %v and entry %s",
 						key, *got, tc.object, holder, annotation, reserved.entry)
 				}

@@ -146,6 +146,11 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 	podTemplate.Template.ObjectMeta = typedPods(nil, map[string]string{"platform.example/zone": "a"})
 	replicationController := &corev1.ReplicationController{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
 	replicationController.Spec.Template = &corev1.PodTemplateSpec{ObjectMeta: typedPods(map[string]string{"platform.example/zone": "a"}, nil)}
+	claimTemplates := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
+	claimTemplates.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+		{ObjectMeta: metav1.ObjectMeta{Name: "data"}},
+		{ObjectMeta: typedPods(map[string]string{"example.org/tenant": "a"}, nil)},
+	}
 
 	const prefix = `the prefix "platform.example/" is reserved for the platform`
 	const exact = "the key is reserved for the platform"
@@ -185,6 +190,11 @@ func TestOwnedConfig_ReservedKeyRefused(t *testing.T) {
 		},
 		"a typed StatefulSet's pod template annotation": {
 			statefulSet, []string{`StatefulSet "w"`, `pod template annotation "example.org/tenant"`, exact},
+		},
+		// Every claim template of the list is read, on a typed StatefulSet that
+		// states no kind as well.
+		"a typed StatefulSet's volume claim template label, in a later template": {
+			claimTemplates, []string{`StatefulSet "w"`, `volume claim template label "example.org/tenant" (spec.volumeClaimTemplates[1].metadata.labels)`, exact},
 		},
 		"a typed CronJob's pod template label": {
 			cronJob, []string{`CronJob "w"`, `pod template label "platform.example/zone"`, prefix},
@@ -483,6 +493,8 @@ func noPodHolderRows() []noPodHolderRow {
 			[]string{"spec", "rsync", "serviceAnnotations"}, "annotations"},
 		{"a ReplicationDestination's rsyncTLS service annotations", "volsync.backube/v1alpha1", "ReplicationDestination", ReservedKeyInMoverService,
 			[]string{"spec", "rsyncTLS", "serviceAnnotations"}, "annotations"},
+		{"a StatefulSet's volume claim template", "apps/v1", "StatefulSet", ReservedKeyInVolumeClaimTemplate,
+			[]string{"spec", "volumeClaimTemplates", listStep, "metadata"}, "metadata"},
 	}
 }
 
@@ -556,7 +568,7 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "w", Labels: map[string]string{"app": "web", ownershipKey: "web"}}}
 	deployment.Spec.Template.Labels = map[string]string{"app": "web", ownershipKey: "web"}
 	statefulSet := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "w"}}
-	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: map[string]string{"example.org/tenant": "a"}}}}
+	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "data", Labels: map[string]string{"app": "web", ownershipKey: "web"}}}}
 
 	// "app" and the component label key are reserved here, as a consumer that
 	// keeps the component key under a prefix of its own has them.
@@ -570,7 +582,9 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 		}},
 		"the two labels a Cluster's objects inherit": cnpgCluster("postgresql.cnpg.io/v1", "Cluster",
 			map[string]any{"labels": map[string]any{"app": "db", ownershipKey: "web"}}),
-		"a volume claim template's label": statefulSet,
+		"the two labels in a volume claim template": statefulSet,
+		"a volume claim template of a StatefulSet of another group": holdingThrough(unstructuredObject("example.com/v1", "StatefulSet"),
+			map[string]any{"labels": map[string]any{"example.org/tenant": "a"}}, "spec", "volumeClaimTemplates", listStep, "metadata"),
 		"a job template of a kind of another group": holding(t, unstructuredWorkload("example.com/v1", "CronJob"),
 			map[string]string{"example.org/tenant": "a"}, "spec", "jobTemplate", "metadata"),
 		"the two labels in a job template": holding(t, unstructuredWorkload("batch/v1", "CronJob"),

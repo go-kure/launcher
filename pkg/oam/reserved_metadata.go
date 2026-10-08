@@ -151,11 +151,10 @@ func (r *reservedMetadataKeys) entryFor(key string) (string, bool) {
 //     Cluster and a Pooler, the metadata of a ClusterExternalSecret's
 //     ExternalSecrets, a HelmRelease's chart template, spec.commonMetadata of an
 //     ArtifactGenerator and a FluxInstance, the Service annotations of a VolSync
-//     mover.
+//     mover, a StatefulSet's volume claim templates.
 //
 // A key that is a string map's key is read whatever its value. Nothing else is
-// read: not a volume claim template's, and not what a chart that Flux installs
-// renders in the cluster.
+// read: not what a chart that Flux installs renders in the cluster.
 func (o *ownedConfig) checkReserved(g generatedObject) error {
 	platform := platformAnnotationsUnder(o.inner)
 	// What a refusal says of the object, whichever of its metadata holds the key.
@@ -390,6 +389,11 @@ const (
 	// and spec.rsyncTLS.serviceAnnotations), which the operator puts on the
 	// Service of the mover. It holds annotations only.
 	ReservedKeyInMoverService ReservedKeyHolder = "mover service"
+	// ReservedKeyInVolumeClaimTemplate is the metadata of a volume claim
+	// template of a StatefulSet (spec.volumeClaimTemplates[].metadata), which
+	// the StatefulSet controller copies onto each PersistentVolumeClaim it
+	// creates from the template.
+	ReservedKeyInVolumeClaimTemplate ReservedKeyHolder = "volume claim template"
 )
 
 // prefix is the holder as a text puts it before what it holds: "" for the

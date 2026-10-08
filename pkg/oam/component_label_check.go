@@ -202,7 +202,19 @@ type operatorMetadataKind struct {
 //     templates it does not reach;
 //   - serviceAnnotations of the rsync and rsyncTLS movers of a VolSync
 //     ReplicationDestination, which go onto the Service of the mover: a map of
-//     annotations, with no labels beside it.
+//     annotations, with no labels beside it;
+//   - the metadata of each volume claim template of a StatefulSet
+//     (spec.volumeClaimTemplates[].metadata), which the StatefulSet controller
+//     copies onto each PersistentVolumeClaim it creates from the template
+//     (go-kure/launcher#944).
+//
+// The wrapper writes the component label into none of these. A volume claim
+// template is a case of its own: the API server refuses a change to a
+// StatefulSet's spec.volumeClaimTemplates, so writing the label there would
+// make the apply of a StatefulSet the cluster holds already fail the first time
+// the label appears, and the controller does not relabel a claim it created
+// before. A claim takes the StatefulSet's selector labels from the controller
+// instead.
 //
 // A kind is told by the group and kind the object states. Of the typed objects
 // that state none, only the ones statedOrTypedKind names are recognized.
@@ -239,6 +251,7 @@ var operatorMetadataKinds = slices.Concat(
 		{helmGroup, "HelmRelease", metadataHolder{path: []string{"spec", "chart", "metadata"}, in: ReservedKeyInChartTemplate, noPods: true}},
 		{fluxSourceExtensionsGroup, "ArtifactGenerator", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
 		{fluxOperatorGroup, "FluxInstance", metadataHolder{path: []string{"spec", "commonMetadata"}, in: ReservedKeyInCommonMetadata, noPods: true}},
+		{"apps", "StatefulSet", metadataHolder{path: []string{"spec", "volumeClaimTemplates", listStep, "metadata"}, in: ReservedKeyInVolumeClaimTemplate, noPods: true}},
 	},
 	moverPodLabels("ReplicationSource", "rsync", "rsyncTLS", "rclone", "restic", "syncthing"),
 	moverPodLabels("ReplicationDestination", "rsync", "rsyncTLS", "rclone", "restic"),
@@ -301,8 +314,8 @@ func moverPodLabels(kind string, movers ...string) []operatorMetadataKind {
 // metadata in: its own first, then a CronJob's job template's and its pod
 // template's on a kind that has one (podTemplateKinds), then what an operator
 // hands on (operatorMetadataKinds). The reserved keys are read in every one of
-// them, the component label in all but those that reach no pods (noPods).
-// Neither check reads a volume claim template's metadata.
+// them, the component label in all but those that reach no pods (noPods), a
+// StatefulSet's volume claim templates among these.
 func metadataHolders(group, kind string) []metadataHolder {
 	holders := []metadataHolder{{path: []string{"metadata"}, in: ReservedKeyInObjectMetadata}}
 	for _, k := range podTemplateKinds {
