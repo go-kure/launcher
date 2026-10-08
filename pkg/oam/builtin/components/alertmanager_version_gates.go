@@ -10,8 +10,8 @@ import (
 // Alertmanager version on, at prometheus-operator v0.94.1.
 //
 // TestAlertmanagerVersionGates_MatchVendoredSource holds the table to the
-// operator's source: every comparison of the Alertmanager version in
-// pkg/alertmanager/statefulset.go, amcfg.go and operator.go is either a row
+// operator's source: every comparison of the Alertmanager version in the
+// operator's package pkg/alertmanager, vendored whole, is either a row
 // here, at its minimum, or listed in the test with the reason it is not this
 // kind's (a field of an AlertmanagerConfig object or of the configSecret
 // Secret, or no field at all). It holds alertmanagerDefaultVersion and the

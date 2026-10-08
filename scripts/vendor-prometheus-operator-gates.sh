@@ -39,14 +39,6 @@ if [[ "$LINKED" != "$TAG" ]]; then
   exit 1
 fi
 
-# The files the test reads, by their path in prometheus-operator/prometheus-operator.
-FILES=(
-  pkg/alertmanager/statefulset.go
-  pkg/alertmanager/amcfg.go
-  pkg/alertmanager/operator.go
-  pkg/operator/defaults.go
-)
-
 TAG_OBJECT="$(git ls-remote "https://github.com/$REPO.git" "refs/tags/$TAG" | cut -f1)"
 if [[ ! "$TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
   echo "ERROR: $REPO has no single tag $TAG (ls-remote gave: ${TAG_OBJECT:-nothing})" >&2
@@ -58,35 +50,29 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE" ${UPSTREAM:+"$UPSTREAM"}' EXIT
 UPSTREAM="$(mktemp -d)"
 
-# The test reads only the pkg/alertmanager files above, so refuse a tag where
-# another file of the package (its tests aside) may compare the Alertmanager
-# version: its gates would go unclassified. A file counts where it imports
-# semver, reads a version's Major, Minor or Patch, or calls a comparison
-# method; the test's own detection, read as text, and broader.
+# The tag's tree, sparse: pkg/alertmanager, pkg/operator, and the root files
+# (LICENSE, NOTICE), which a cone-mode sparse checkout always holds.
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
-git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager
-COMPARES='blang/semver|\.(Major|Minor|Patch)\b|\.(GTE|GT|LTE|LT|EQ|NE|Compare|Equals)\('
-# grep exits 1 for no match and 2 for an error; only 0 is a usable scan, as
-# the vendored files themselves match.
-SCAN_RC=0
-SCANNED="$(grep -rlE --include='*.go' --exclude='*_test.go' -- "$COMPARES" "$UPSTREAM/pkg/alertmanager")" || SCAN_RC=$?
-if (( SCAN_RC != 0 )); then
-  echo "ERROR: scanning pkg/alertmanager at $TAG for version comparisons failed (grep exit $SCAN_RC)" >&2
+git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/operator
+
+# The files the test reads, by their path in prometheus-operator/prometheus-operator:
+# every Go file of the package pkg/alertmanager, its tests aside, so that the
+# test walks each one for a version comparison, and the operator's defaults.
+shopt -s nullglob
+FILES=()
+for f in "$UPSTREAM"/pkg/alertmanager/*.go; do
+  [[ "$f" == *_test.go ]] || FILES+=("${f#"$UPSTREAM"/}")
+done
+shopt -u nullglob
+if (( ${#FILES[@]} == 0 )); then
+  echo "ERROR: $REPO $TAG has no Go file in pkg/alertmanager" >&2
   exit 1
 fi
-UNREAD=()
-while IFS= read -r f; do
-  f="${f#"$UPSTREAM"/}"
-  [[ " ${FILES[*]} " == *" $f "* ]] || UNREAD+=("$f")
-done <<< "$SCANNED"
-if (( ${#UNREAD[@]} > 0 )); then
-  echo "ERROR: $TAG compares the Alertmanager version outside the vendored files: ${UNREAD[*]}; vendor them, and classify their gates in the test" >&2
-  exit 1
-fi
+FILES+=(pkg/operator/defaults.go)
 
 for f in "${FILES[@]}" LICENSE NOTICE; do
   mkdir -p "$STAGE/$(dirname "$f")"
-  curl -fsSL "https://raw.githubusercontent.com/$REPO/$TAG/$f" -o "$STAGE/$f"
+  cp -- "$UPSTREAM/$f" "$STAGE/$f"
 done
 
 # Hash every file before writing SOURCE: a hash taken inside an echo would

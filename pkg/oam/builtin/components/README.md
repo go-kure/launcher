@@ -3768,10 +3768,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `rocketChat` and `smtp.tlsConfig` (0.28.0); `smtp.forceImplicitTLS`
     (0.31.0); `mattermost` (0.32.0).
     `TestAlertmanagerVersionGates_MatchVendoredSource` parses every version
-    comparison of the operator's `statefulset.go`, `amcfg.go` and `operator.go`
-    and holds each to this list, or to the reason it gates no field of this
-    kind (the configuration of a receiver, a route or a configSecret Secret);
-    the files are vendored unmodified under
+    comparison of the operator's package `pkg/alertmanager` (every Go file of
+    it, its tests aside; at v0.94.1 the comparisons are in `statefulset.go`,
+    `amcfg.go` and `operator.go`) and holds each to this list, or to the
+    reason it gates no field of this kind (the configuration of a receiver, a
+    route or a configSecret Secret); the files, with the operator's
+    `pkg/operator/defaults.go`, are vendored unmodified under
     `testdata/upstream/prometheus-operator`, with the project's LICENSE and
     NOTICE and a SOURCE file naming each file's git blob id, and
     `mise run vendor-prometheus-operator-gates <tag>` re-fetches them for the
