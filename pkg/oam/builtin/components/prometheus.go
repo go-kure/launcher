@@ -471,6 +471,12 @@ func prometheusWorkload(spec *monitoringv1.PrometheusSpec) monitoringWorkload {
 		replicasPath: "replicas times shards",
 		storage:      spec.Storage,
 	}
+	if spec.DNSPolicy != nil {
+		w.pod.DNSPolicy = corev1.DNSPolicy(*spec.DNSPolicy)
+	}
+	if spec.DNSConfig != nil {
+		w.pod.DNSConfig = &corev1.PodDNSConfig{Nameservers: spec.DNSConfig.Nameservers}
+	}
 	// The image a patch names replaces the spec's in the container the
 	// operator builds from it, so the spec's is then not run, and not held: the
 	// patch's own is, as a listed container's image.

@@ -4563,7 +4563,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   generates no container of that name to merge it into; name an image, or
   the container it patches (prometheus, config-reloader)`), and so is a
   `thanos-sidecar` entry without an image where `thanos` is unset, since no
-  sidecar is generated then.
+  sidecar is generated then. As on `alertmanager`, a name listed twice in one
+  list is refused, and so is a name shared by an init container and a
+  container of the pods, generated or listed (`containers[0]
+  "init-config-reloader": the name is also that of the init container the
+  Prometheus operator generates, …`); and `dnsPolicy: None` without
+  `dnsConfig.nameservers`, and a pod-level
+  `securityContext.windowsOptions.hostProcess: true` without
+  `hostNetwork: true`, are refused: the API refuses the pods the operator
+  copies them into.
 
   **Required.** No top-level field is one. Of what is authored below them:
   the `name` of an additional argument (the spec's and the sidecar's), a DNS

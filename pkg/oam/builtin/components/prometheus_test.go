@@ -290,6 +290,22 @@ func prometheusRefusals(notA string) []struct {
 			`scrapeInterval: "" cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default "30s")`},
 		{"empty thanos blockSize", map[string]any{"thanos": map[string]any{"blockSize": ""}},
 			`thanos.blockSize: "" cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default "2h")`},
+		// The API requires the names of a pod's init containers and containers
+		// to be unique together.
+		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
+			`containers[0] "init-config-reloader": the name is also that of the init container the Prometheus operator generates, and the API refuses a pod whose init containers and containers share a name`},
+		{"an init container named as a generated container", map[string]any{"initContainers": []any{map[string]any{"name": "config-reloader", "image": "registry.example/team/proxy:1.2.3"}}},
+			`initContainers[0] "config-reloader": the name is that of a container the Prometheus operator generates, and the API refuses a pod whose init containers and containers share a name`},
+		{"a name listed in both lists", map[string]any{
+			"initContainers": []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
+			"containers":     []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
+		}, `containers[0] "setup": the name is also that of initContainers[0]`},
+		// The API's pod rules across fields; the operator copies both fields
+		// into the pod template.
+		{"dnsPolicy None without a nameserver", map[string]any{"dnsPolicy": "None"},
+			"dnsPolicy: None requires dnsConfig.nameservers with at least one entry; the API refuses the pods the Prometheus operator builds without one"},
+		{"a pod-level HostProcess without the host network", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+			"securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true"},
 	}
 }
 
@@ -510,7 +526,6 @@ func TestPrometheus_PolicyRefusals(t *testing.T) {
 			"containers": []any{map[string]any{"name": "thanos-sidecar", "securityContext": map[string]any{"privileged": true}}},
 		}, oam.RefusalPrivileged, "thanos-sidecar"},
 		{"privileged init container", container("initContainers", map[string]any{"name": "init-config-reloader", "securityContext": map[string]any{"privileged": true}}), oam.RefusalPrivileged, "init-config-reloader"},
-		{"host process", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}}, oam.RefusalPrivileged, "securityContext.windowsOptions.hostProcess is not allowed"},
 		{"forbidden capability", container("containers", map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "securityContext": map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}}}), oam.RefusalContainerCapability, "NET_ADMIN"},
 		// The deprecated bearer tokens, the credentials in the clear, by the
 		// index of their entry.
@@ -553,6 +568,25 @@ func TestPrometheus_HostNetwork(t *testing.T) {
 	off := prometheusOf(t, pmHeld(map[string]any{"hostNetwork": false}), ptStrictPolicy())
 	if spec, _ := policyFreeJSON(t, off)["spec"].(map[string]any); spec["hostNetwork"] != nil {
 		t.Errorf("hostNetwork = %v, want it omitted: the API reads an absent one as false", spec["hostNetwork"])
+	}
+}
+
+// TestPrometheus_HostProcess: a pod-level securityContext that asks for a
+// Windows HostProcess pod is refused under a policy that does not allow
+// privileged containers, as on a workload kind. The API requires the host
+// network of such a pod, so the props set it.
+func TestPrometheus_HostProcess(t *testing.T) {
+	props := pmHeld(map[string]any{
+		"hostNetwork":     true,
+		"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}},
+	})
+	h := &components.PrometheusHandler{}
+	_, err := pvTransform("prometheus", h, props, hostNetworkOK{ptStrictPolicy()})
+	rcWantClass(t, err, oam.RefusalPrivileged)
+	allowing := ptStrictPolicy()
+	allowing.allowPrivileged = true
+	if _, err := pvTransform("prometheus", h, props, hostNetworkOK{allowing}); err != nil {
+		t.Errorf("under a policy that allows privileged containers: %v, want it built", err)
 	}
 }
 
@@ -790,13 +824,6 @@ func TestPrometheus_ReloaderImages(t *testing.T) {
 				"containers":     []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
 				"initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
 			"the image of the config-reloader container (containers): unset",
-		},
-		"init-config-reloader patched in containers": {
-			map[string]any{"image": pmImage, "containers": []any{
-				map[string]any{"name": "config-reloader", "image": amReloader},
-				map[string]any{"name": "init-config-reloader", "image": amReloader},
-			}},
-			"the image of the init-config-reloader container (initContainers): unset",
 		},
 		"config-reloader patched outside the allowed registries": {
 			amReloaders(map[string]any{"image": pmImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),
