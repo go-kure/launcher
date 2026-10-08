@@ -105,7 +105,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"paused":                               flag("paused: true stops the operator from acting on the objects it manages for this Alertmanager, deletion excepted."),
 		"nodeSelector":                         object("nodeSelector: the node labels a node must carry for the pods to be scheduled on it."),
 		"schedulerName":                        text("schedulerName: the scheduler that places the pods. Unset, the default scheduler. Not empty."),
-		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied." + core + "ResourceRequirements in the Kubernetes API reference."),
+		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied. A containers entry named alertmanager is merged over this block key by key, and the checks hold the merged block, so a memory request it names replaces the 200Mi." + core + "ResourceRequirements in the Kubernetes API reference."),
 		"affinity":                             object("affinity: the scheduling constraints of the pods." + core + "Affinity in the Kubernetes API reference."),
 		"tolerations": objects("tolerations: the taints the pods tolerate.",
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
@@ -120,9 +120,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there, and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
@@ -290,8 +290,12 @@ var alertmanagerGenerated = map[string][]string{
 // shared functions read. It only reads spec.
 //
 // Held through it: image; replicas, an unset one as the operator's 1;
-// storage; resources, the alertmanager container's, an unset memory request as
-// the operator's 200Mi; the images of the three containers the operator
+// storage; resources, the alertmanager container's as the operator runs it:
+// an unset memory request filled as its 200Mi, then the requests and limits
+// of a listed alertmanager entry merged over it, key by key, so a request the
+// entry names replaces the 200Mi (makeStatefulSet and makeStatefulSetSpec,
+// pkg/alertmanager/statefulset.go:144-149, :762 and :817 at
+// prometheus-operator v0.94.1); the images of the three containers the operator
 // generates, where the spec leaves them to it; and, as pod fields, containers,
 // initContainers, volumes, securityContext and hostNetwork. The spec has no
 // hostPID or hostIPC field, and no credential in the clear: every one is the
@@ -302,6 +306,16 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 	replicas := int64(alertmanagerOperatorReplicas)
 	if spec.Replicas != nil {
 		replicas = int64(*spec.Replicas)
+	}
+	resources := fieldResources{"resources", spec.Resources}
+	if i := patchOf(spec.Containers, "alertmanager"); i >= 0 {
+		patch := spec.Containers[i].Resources
+		if len(patch.Requests) > 0 || len(patch.Limits) > 0 {
+			resources = fieldResources{
+				fmt.Sprintf("resources with containers[%d] %q merged over it", i, "alertmanager"),
+				mergedResources(spec.Resources, patch),
+			}
+		}
 	}
 	w := monitoringWorkload{
 		pod: corev1.PodSpec{
@@ -315,8 +329,8 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		replicas:       &replicas,
 		replicasPath:   "replicas",
 		storage:        spec.Storage,
-		resources:      []fieldResources{{"resources", spec.Resources}},
-		memoryRequests: map[string]string{"resources": alertmanagerOperatorMemoryRequest},
+		resources:      []fieldResources{resources},
+		memoryRequests: map[string]string{resources.path: alertmanagerOperatorMemoryRequest},
 	}
 	switch {
 	case spec.Image != nil && *spec.Image != "":

@@ -229,6 +229,35 @@ func alertmanagerRefusals(notA string) []struct {
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
 			"limits": map[string]any{"memory": "100Mi"},
 		}}, "resources: memory: the unset request the Prometheus operator fills as 200Mi must not exceed limit 100Mi; name a request no larger than the limit"},
+		// The operator merges a patch of the alertmanager container over the
+		// block it builds it with (statefulset.go:762 and :817), so the two are
+		// held as one.
+		{"memory limit of a patch under the operator's request", container(map[string]any{"name": "alertmanager", "resources": map[string]any{
+			"limits": map[string]any{"memory": "64Mi"},
+		}}), `resources with containers[0] "alertmanager" merged over it: memory: the unset request the Prometheus operator fills as 200Mi must not exceed limit 64Mi`},
+		{"request of a patch over the spec's limit", map[string]any{
+			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
+			"containers": []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
+		}, `resources with containers[0] "alertmanager" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		// The operator keeps the last entry of a name (MergePatchContainers,
+		// pkg/k8s/merge.go at v0.94.1), so an earlier one would be held and not
+		// run.
+		{"a reloader listed twice", map[string]any{"containers": []any{
+			map[string]any{"name": "config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"},
+			map[string]any{"name": "config-reloader"},
+		}}, `containers[1] "config-reloader": the name is listed already at containers[0], and the Prometheus operator keeps only the last entry of a name; list each container once`},
+		{"the init reloader listed twice", map[string]any{"initContainers": []any{
+			map[string]any{"name": "init-config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"},
+			map[string]any{"name": "init-config-reloader"},
+		}}, `initContainers[1] "init-config-reloader": the name is listed already at initContainers[0]`},
+		{"alertmanager listed twice", map[string]any{"containers": []any{
+			map[string]any{"name": "alertmanager", "image": "registry.example/prometheus/alertmanager:v0.28.1"},
+			map[string]any{"name": "alertmanager"},
+		}}, `containers[1] "alertmanager": the name is listed already at containers[0]`},
+		{"a sidecar listed twice", map[string]any{"containers": []any{
+			map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3"},
+			map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3"},
+		}}, `containers[1] "proxy": the name is listed already at containers[0]`},
 		{"container request over its limit", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "resources": map[string]any{
 			"requests": map[string]any{"memory": "2Gi"}, "limits": map[string]any{"memory": "1Gi"},
 		}}), `containers[0] "proxy": resources: memory: request 2Gi must not exceed limit 1Gi`},
@@ -294,6 +323,12 @@ func amReloaders(props map[string]any) map[string]any {
 		out[list] = entries
 	}
 	return out
+}
+
+// amPatch is a listed entry that patches the alertmanager container with the
+// resource block resources, and names no image.
+func amPatch(resources map[string]any) map[string]any {
+	return map[string]any{"name": "alertmanager", "resources": resources}
 }
 
 // alertmanagerOf builds the Alertmanager of props under the given policies, in
@@ -502,7 +537,7 @@ func TestAlertmanager_HostProcess(t *testing.T) {
 // null image writes none. A listed container named for one the operator
 // generates, as here, is merged into it and may name no image.
 func TestAlertmanager_UnsetImage(t *testing.T) {
-	patch := []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
+	patch := []any{amPatch(map[string]any{"requests": map[string]any{"memory": "64Mi"}, "limits": map[string]any{"memory": "64Mi"}})}
 	h := &components.AlertmanagerHandler{}
 	for name, props := range map[string]map[string]any{
 		"unset": amReloaders(map[string]any{"version": "v0.28.1"}),
@@ -678,15 +713,26 @@ func TestAlertmanager_OperatorDefaultsHeld(t *testing.T) {
 		"memory request unset under 200Mi":       {map[string]any{}, exact, "", ""},
 		"memory request authored under 128Mi":    {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "64Mi"}}}, small, "", ""},
 		"memory request authored over 128Mi":     {map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}, small, oam.RefusalResourceMaximum, `resources: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+		// A request a patch of the alertmanager container names replaces the
+		// one the operator fills, and is held with the spec's limit.
+		"memory request of a patch under 128Mi": {map[string]any{"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "64Mi"}})}}, small, "", ""},
+		"memory request of a patch under the spec's limit": {map[string]any{
+			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
+			"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "64Mi"}})},
+		}, small, "", ""},
+		"memory request of a patch over 128Mi":              {map[string]any{"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "256Mi"}})}}, small, oam.RefusalResourceMaximum, `resources with containers[0] "alertmanager" merged over it: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+		"a patch that names no memory request, under 128Mi": {map[string]any{"containers": []any{amPatch(map[string]any{"limits": map[string]any{"cpu": "1"}})}}, small, oam.RefusalResourceMaximum, `resources with containers[0] "alertmanager" merged over it, whose unset memory request the Prometheus operator fills as 200Mi`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			props := amReloaders(map[string]any{"image": amImage})
+			props := map[string]any{"image": amImage}
 			maps.Copy(props, tc.props)
+			props = amReloaders(props)
 			_, err := pvTransform("alertmanager", h, props, tc.policy)
 			if tc.want == "" {
 				if err != nil {
 					t.Errorf("err = %v, want it built", err)
 				}
+				alertmanagerOf(t, props)
 				return
 			}
 			rcWantClass(t, err, tc.class)

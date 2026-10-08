@@ -1716,8 +1716,11 @@ and by scope, whatever component or trait emits it.
     allowlist reaches that choice, so a policy with allowed registries refuses it
     (`oam.RefusalRegistry`) and one without builds it. A listed entry that names no
     image and patches none of these is refused with or without a policy, and so are a
-    `retention` and a cluster duration of 0 or less, which the operator ignores, and a
-    memory limit under the 200Mi request the operator fills where none is named. **Not
+    `retention` and a cluster duration of 0 or less, which the operator ignores, a
+    memory limit under the 200Mi request the operator fills where none is named, and a
+    container name listed twice, of which the operator runs only the last entry. The
+    alertmanager container's resources are held as the operator runs them: a listed
+    `alertmanager` entry's requests and limits merged over `resources`. **Not
     held:** what else the operator adds on its own (the arguments it derives, the
     governing Service) is not in the object.
   - **`baseImage`, `tag` and `sha` are not authorable**: not in the schema, so `kurel build`
