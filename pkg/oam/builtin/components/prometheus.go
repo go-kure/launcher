@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -88,7 +89,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	const secretKey = " A Secret key selector: name and key, in the Prometheus's namespace. Launcher emits no Secret for it." //nolint:gosec // G101: a description, not a credential
 	return map[string]oam.PropertySchema{
-		"podMetadata":                     object("podMetadata: the labels and annotations the operator copies onto the Prometheus pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets seven labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
+		"podMetadata":                     object("podMetadata: the labels and annotations the operator copies onto the Prometheus pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets seven labels and one annotation of its own: a value authored here replaces app.kubernetes.io/version and the annotation, but not the other six labels." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"serviceMonitorSelector":          object("serviceMonitorSelector: the ServiceMonitor objects scraped, by their labels. Unset, none; an empty selector, all." + unmanaged + selector),
 		"serviceMonitorNamespaceSelector": object("serviceMonitorNamespaceSelector: the namespaces ServiceMonitor objects are read from, by their labels. Unset, the Prometheus's own namespace only; an empty selector, all." + selector),
 		"podMonitorSelector":              object("podMonitorSelector: the PodMonitor objects scraped, by their labels. Unset, none; an empty selector, all." + unmanaged + selector),
@@ -124,9 +125,9 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"externalUrl": text("externalUrl: the URL under which Prometheus is reached from outside, which the URLs it generates are built from."),
 		"routePrefix": text("routePrefix: the path prefix Prometheus registers its HTTP handlers under."),
 		"storage":     object("storage: where the Prometheus pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage a claim template requests is held to the EnvironmentPolicy's storage maximum; the size limit of an emptyDir is not. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Prometheus pods, beside the ones the operator generates. Two entries of one name are refused. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"volumes": objects("volumes: further volumes of the Prometheus pods, beside the ones the operator generates. Two entries of one name are refused. The web TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
-		"volumeMounts": objects("volumeMounts: further volume mounts of the prometheus container.",
+		"volumeMounts": objects("volumeMounts: further volume mounts of the prometheus container. The mounts of the web TLS credentials are left to the API.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
 		"persistentVolumeClaimRetentionPolicy": object("persistentVolumeClaimRetentionPolicy: whether the claims of the StatefulSets are deleted when they are deleted (whenDeleted) or scaled down (whenScaled): Retain, the default, or Delete." + core + "StatefulSetPersistentVolumeClaimRetentionPolicy in the Kubernetes API reference."),
 		"web":                                  object("web: the web server's settings: tlsConfig, httpConfig, pageTitle and maxConnections." + decoded + "PrometheusWebSpec in its API reference."),
@@ -232,7 +233,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
 		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names; the operator copies only an entry's name and mountPath, so any other field of one is refused. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
-		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory: refused there unless a volume is mounted at /var/log/prometheus. A full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
+		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory: refused there unless a volume is mounted at /var/log/prometheus without readOnly. A full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
 		"evaluationInterval":     text("evaluationInterval: the interval between two evaluations of the rules. Unset, the API fills 30s; an empty one is refused, since the API server would replace it." + duration),
@@ -460,9 +461,16 @@ func refusePrometheusExternalURL(value string) error {
 // scrapeFailureLogFile named without a directory (BuildCommonVolumes,
 // common.go:330-345). Without that volume Prometheus writes the file to the
 // prometheus container's root filesystem, which the operator makes read-only
-// (server/statefulset.go:349). A mount of the author's at /var/log/prometheus,
-// in volumeMounts or a listed patch of the prometheus container, gives the
-// file a volume, and is not refused.
+// (server/statefulset.go:349). A writable mount of the author's at
+// /var/log/prometheus, in volumeMounts or a listed patch of the prometheus
+// container, gives the file a volume, and is not refused. A read-only one
+// leaves Prometheus unable to open the file. The path is compared cleaned, so
+// /var/log/prometheus/ is the same directory, and any read-only mount there
+// refuses: where the patch names the path as volumeMounts does, the
+// operator's strategic merge (MergePatchContainers, pkg/k8s/merge.go:55)
+// keeps readOnly where either sets it, since a false is not serialized; where
+// the two spell it differently, both mounts stay, and which the container
+// runtime mounts last, over the other, is not derived here.
 func validatePrometheusQueryLogFile(spec *monitoringv1.PrometheusSpec) error {
 	file := spec.QueryLogFile
 	if file == "" || filepath.Dir(file) != "." || usesLogFileVolume(spec) {
@@ -474,12 +482,16 @@ func validatePrometheusQueryLogFile(spec *monitoringv1.PrometheusSpec) error {
 			mounts = append(slices.Clone(mounts), c.VolumeMounts...)
 		}
 	}
+	mounted, readOnly := false, false
 	for _, m := range mounts {
-		if m.MountPath == prometheusLogDirectory {
-			return nil
+		if path.Clean(m.MountPath) == prometheusLogDirectory {
+			mounted, readOnly = true, readOnly || m.ReadOnly
 		}
 	}
-	return errors.Errorf("queryLogFile: %q names no directory, so the Prometheus operator configures it under %s, but beside scrapeFailureLogFile %q, which names one, it mounts no volume there, and the prometheus container's root filesystem is read-only; name the file with scrapeFailureLogFile's directory, name scrapeFailureLogFile without one too, or mount a volume at %s", file, prometheusLogDirectory, *spec.ScrapeFailureLogFile, prometheusLogDirectory)
+	if mounted && !readOnly {
+		return nil
+	}
+	return errors.Errorf("queryLogFile: %q names no directory, so the Prometheus operator configures it under %s, but beside scrapeFailureLogFile %q, which names one, it mounts no volume there, and the prometheus container's root filesystem is read-only; name the file with scrapeFailureLogFile's directory, name scrapeFailureLogFile without one too, or mount a writable volume at %s", file, prometheusLogDirectory, *spec.ScrapeFailureLogFile, prometheusLogDirectory)
 }
 
 // thanosDroppedMountFields are the fields of a thanos.volumeMounts entry the
@@ -623,7 +635,13 @@ const prometheusRuleFiles = 3
 // /etc/prometheus/web_config/web-config.yaml, and
 // /etc/prometheus/rules/<ConfigMap> for each rule ConfigMap
 // (server/statefulset.go:528-534); /etc/prometheus/config is the reloaders'
-// only (CreateConfigReloaderVolumeMounts, common.go:471-480).
+// only (CreateConfigReloaderVolumeMounts, common.go:471-480). A rule
+// ConfigMap's ordinal is written in decimal without a leading zero
+// (configMapNameAt, pkg/operator/rules.go:363-365), so only such a name is
+// reserved. The volumes and mounts of the web TLS credentials are left to the
+// API, as on the alertmanager kind: the operator names each volume after the
+// credential's source with a hash appended (pkg/webconfig/tls_credentials.go,
+// pkg/k8s/resource_namer.go), which is not derived here.
 func validatePrometheusName(name, componentName string, spec *monitoringv1.PrometheusSpec) error {
 	prefix := "prometheus-" + name
 	n := operatorObjectName{
@@ -649,8 +667,8 @@ func validatePrometheusName(name, componentName string, spec *monitoringv1.Prome
 	if err := validateOperatorObjectName(n); err != nil {
 		return err
 	}
-	ruleFile := regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "-rulefiles-[0-9]+$")
-	ruleMount := regexp.MustCompile("^/etc/prometheus/rules/" + regexp.QuoteMeta(prefix) + "-rulefiles-[0-9]+$")
+	ruleFile := regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "-rulefiles-(0|[1-9][0-9]*)$")
+	ruleMount := regexp.MustCompile("^/etc/prometheus/rules/" + regexp.QuoteMeta(prefix) + "-rulefiles-(0|[1-9][0-9]*)$")
 	volumes := map[string]string{}
 	for _, v := range []string{"config", "tls-assets", "config-out", "web-config"} {
 		volumes[v] = "a volume the Prometheus operator adds to every Prometheus's pods"
