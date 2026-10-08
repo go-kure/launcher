@@ -73,7 +73,7 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // hookGroupNamePrefixDescription describes hookGroupNamePrefix for the
 // helmtemplate component, and for a helm component under delivery: template.
-const hookGroupNamePrefixDescription = "Prefix of the names of the component's hook-group layouts, in place of <application>-<component>: each layout, its directory and the Flux Kustomization generated for it under per-layout placement, is named <prefix>-<NN>-<phase>. Without it only the layout and its directory take the default prefix, and the Kustomization takes kure's default name, <unit>-<layout name>, shortened past 63 characters. A DNS-1123 subdomain, used as written and never shortened: a layout name over 63 characters built from it is refused. It must differ from the prefix of every other component of the document."
+const hookGroupNamePrefixDescription = "Prefix of the names of the component's hook-group layouts, in place of <application>-<component>: each layout, its directory and the Flux Kustomization generated for it under per-layout placement, is named <prefix>-<NN>-<phase>. Where neither it nor the consumer's Naming hook sets a prefix, only the layout and its directory take the default prefix, and the Kustomization takes kure's default name, <unit>-<layout name>, shortened past 63 characters. A DNS-1123 subdomain, used as written and never shortened: a layout name over 63 characters built from it is refused. It must differ from the prefix of every other component of the document."
 
 // layoutKustomizationNameDescription describes layoutKustomizationName for the
 // helmtemplate component, and for a helm component under delivery: template.
