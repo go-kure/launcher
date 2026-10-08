@@ -436,6 +436,13 @@ func alertmanagerRefusals(notA string) []struct {
 			map[string]any{"name": "metrics", "containerPort": 9000},
 			map[string]any{"name": "metrics", "containerPort": 9001},
 		}}), `containers[0] "config-reloader": ports[1] "metrics" at 9001/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, ports[0] at 9000/TCP`},
+		// Under listenLocal the operator gives config-reloader no port, and
+		// the merge takes the patch's ports whole, two of one number
+		// included.
+		{"a patch of a portless container with two ports of one name", map[string]any{"listenLocal": true, "containers": []any{map[string]any{"name": "config-reloader", "ports": []any{
+			map[string]any{"name": "metrics", "containerPort": 9000, "protocol": "TCP"},
+			map[string]any{"name": "metrics", "containerPort": 9000, "protocol": "UDP"},
+		}}}}, `containers[0] "config-reloader": ports[1] "metrics": the name is that of ports[0] already, and the API refuses a container with two ports of one name`},
 		// The operator adds a container it does not generate as listed.
 		{"a sidecar with two ports of one name", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{
 			map[string]any{"name": "http", "containerPort": 8080},

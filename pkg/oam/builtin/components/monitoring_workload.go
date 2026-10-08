@@ -198,8 +198,12 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
-			patch := slices.Contains(w.generated[list.name], c.Name)
-			if err := refuseDuplicatePortNames(where, patch, runPorts(patch, w.generatedPorts[c.Name], c.Ports)); err != nil {
+			// A patch of a container the operator gives no ports keeps its
+			// ports as listed: the merge takes the patch's list whole where
+			// the generated container has none (mergeMap, apimachinery
+			// strategicpatch/patch.go:1374-1386 at v0.37.0).
+			merging := slices.Contains(w.generated[list.name], c.Name) && len(w.generatedPorts[c.Name]) > 0
+			if err := refuseDuplicatePortNames(where, merging, runPorts(merging, w.generatedPorts[c.Name], c.Ports)); err != nil {
 				return err
 			}
 			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
@@ -277,7 +281,8 @@ type runPort struct {
 	from string
 }
 
-// runPorts are the ports of a listed container as the pods run them. The
+// runPorts are the ports of a listed container as the pods run them, with
+// merge set for a patch of a generated container that has ports. The
 // operator adds a container it does not generate as listed
 // (MergePatchContainers, pkg/k8s/merge.go:65-70 at prometheus-operator
 // v0.94.1). It merges a patch of one it generates into the generated one with
@@ -289,9 +294,9 @@ type runPort struct {
 // findMapInSliceBasedOnKeyValue, apimachinery strategicpatch/patch.go:
 // 1606-1667 at v0.37.0, the version the operator builds with). The merge
 // keeps every port, in an order of its own.
-func runPorts(patch bool, generated, listed []corev1.ContainerPort) []runPort {
+func runPorts(merge bool, generated, listed []corev1.ContainerPort) []runPort {
 	var ports []runPort
-	if patch {
+	if merge {
 		for _, p := range generated {
 			ports = append(ports, runPort{p, "the Prometheus operator's port"})
 		}
@@ -299,7 +304,7 @@ func runPorts(patch bool, generated, listed []corev1.ContainerPort) []runPort {
 	for j, p := range listed {
 		from := fmt.Sprintf("ports[%d]", j)
 		i := -1
-		if patch {
+		if merge {
 			i = slices.IndexFunc(ports, func(q runPort) bool { return q.port.ContainerPort == p.ContainerPort })
 		}
 		if i < 0 {
@@ -318,8 +323,9 @@ func runPorts(patch bool, generated, listed []corev1.ContainerPort) []runPort {
 
 // refuseDuplicatePortNames refuses a container whose ports, as the pods run
 // them (runPorts), name two ports alike: the API requires the names of a
-// container's ports to be unique. An unnamed port names none.
-func refuseDuplicatePortNames(where string, patch bool, ports []runPort) error {
+// container's ports to be unique. An unnamed port names none. merge is as
+// runPorts was given it.
+func refuseDuplicatePortNames(where string, merge bool, ports []runPort) error {
 	first := map[string]int{}
 	for i, p := range ports {
 		if p.port.Name == "" {
@@ -331,8 +337,8 @@ func refuseDuplicatePortNames(where string, patch bool, ports []runPort) error {
 			continue
 		}
 		later, earlier := p, ports[j]
-		if !patch {
-			return errors.Errorf("%s: %s %q: the name is that of %s already, and the API refuses a container with two ports of one name, which the Prometheus operator adds to the pods as listed; name the port otherwise", where, later.from, later.port.Name, earlier.from)
+		if !merge {
+			return errors.Errorf("%s: %s %q: the name is that of %s already, and the API refuses a container with two ports of one name, which the Prometheus operator gives the pods as listed; name the port otherwise", where, later.from, later.port.Name, earlier.from)
 		}
 		// The operator's ports are named apart, as each kind refuses a spec
 		// that names two of them alike before this runs
