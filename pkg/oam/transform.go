@@ -1528,6 +1528,16 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				where := traitLocation(&entry.component, trait.origin)
 				return nil, &TransformError{Message: noHandlerMessage("trait", trait.Type, where, deliveryTraitTypes)}
 			}
+			// The handler's exclusive groups are held to the schema as declared before
+			// anything below reads the trait's values or merges a rendering into them.
+			if p, ok := handler.(PropertySchemaProvider); ok {
+				if err := checkObjectGroups(p.PropertySchema(), exclusiveProperties(p), "properties"); err != nil {
+					return nil, &TransformError{
+						Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
+						Cause:   err,
+					}
+				}
+			}
 			// A sealed trait was emitted by a lowering rule, which already merged
 			// capability rendering into it (D5) before the fixpoint settled — the
 			// information-closure rule does not allow a second, different-key merge
@@ -1822,7 +1832,8 @@ func mergeRenderedProperties(rendered, authored map[string]any) map[string]any {
 // shares a value with the profile and an integer stays an integer. A filled value
 // that is not a property value (checkRenderedValue) is an error, never shared
 // instead; TransformWithPolicy refuses one before this runs (checkCapabilityRenderings).
-// Each filled value is then validated against the component's schema
+// The schema's exclusive groups are checked for shape first (checkObjectGroups),
+// each filled value is then validated against the component's schema
 // (validateCapabilityFill), and the merged properties against its top-level
 // exclusive groups.
 func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
@@ -1846,6 +1857,14 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	if len(fill) == 0 {
 		return props, nil
 	}
+	// A malformed group is the schema's error, reported before any the filled
+	// values have.
+	p, declares := d.(PropertySchemaProvider)
+	if declares {
+		if err := checkObjectGroups(p.PropertySchema(), exclusiveProperties(d), "properties"); err != nil {
+			return nil, errors.Wrapf(err, "capability %q defaults", key)
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(fill)) {
 		if err := checkRenderedValue(fill[k], map[propertyCopyKey]bool{}); err != nil {
 			return nil, errors.Wrapf(err, "capability %q defaults: rendering key %q", key, k)
@@ -1863,7 +1882,7 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	// A filled key may join an authored key of the same exclusive group. The
 	// merged properties are held to the bound the authored ones were held to:
 	// at most one.
-	if p, ok := d.(PropertySchemaProvider); ok {
+	if declares {
 		if err := checkExclusive(exclusiveProperties(d), p.PropertySchema(), out, false, "properties", ""); err != nil {
 			return nil, errors.Wrapf(err, "capability %q defaults", key)
 		}

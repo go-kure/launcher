@@ -1499,6 +1499,14 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// (transform.go). Every capability-processing step below is skipped
 			// entirely for a sealed trait; its Properties are final.
 			p, declaresSchema := rule.(PropertySchemaProvider)
+			// The rule's exclusive groups are held to the schema as declared before
+			// anything below reads the trait's values or merges a rendering into them,
+			// as applyTraits holds a handler's (transform.go).
+			if declaresSchema {
+				if err := checkObjectGroups(p.PropertySchema(), exclusiveProperties(p), "properties"); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
+			}
 			resolvedTrait := trait
 			matched := false
 			matchedKey := ""

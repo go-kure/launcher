@@ -2538,7 +2538,14 @@ naming the capability. A component's capability defaults (`ComponentCapabilityDe
 the authored bound once merged: a default that fills one key of a top-level group beside an authored
 key of it is refused, naming the capability. Emitted properties are held to both bounds at every level. A group of fewer
 than two keys, a key the object does not declare, a key in two groups, a `Required` key, or groups
-on a non-object node is a schema error reported as soon as a value reaches the object. A consumer
+on a non-object node is a schema error. Property validation always refuses it, whatever the
+document supplies: `ValidateAuthoredProperties*` and the check of emitted properties hold the whole
+schema, objects and array items the document leaves out included. So does `Transform` wherever a
+capability rendering may supply values the author did not write (a trait it applies or lowers, a
+component's capability defaults); a caller that skips `ValidateAuthoredProperties*` gets no other
+schema check, as for every other property rule. It is reported before the document's errors about that object's keys
+(`Required` and group membership); a reserved-property or value-type error of the document may be
+reported first. A consumer
 that does not read `Exclusive` sees each key as the optional key it is declared as.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —

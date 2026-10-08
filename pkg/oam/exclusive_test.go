@@ -2,6 +2,7 @@ package oam
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 
@@ -151,11 +152,31 @@ func TestExclusive_SchemaErrors(t *testing.T) {
 		})
 	}
 
+	// A malformed group is the schema's error, so it is reported before anything the
+	// document gets wrong: here a missing Required key.
+	for _, tc := range tests {
+		if tc.schema["o"].Type == PropertyTypeString {
+			continue
+		}
+		t.Run(tc.name+", before a missing Required key", func(t *testing.T) {
+			p := map[string]any{"o": map[string]any{}}
+			wantError(t, validateProperties(tc.schema, p, "properties"), tc.want)
+			wantError(t, checkNestedRequired(tc.schema, nil, p, "properties", ""), tc.want)
+		})
+	}
+
 	t.Run("a malformed top-level group", func(t *testing.T) {
 		top := []ExclusiveGroup{{Keys: []string{"inline", "nope"}}}
 		want := `properties: schema declares exclusive key "nope", which is not a declared property`
 		wantError(t, validateTopLevelProperties(oneOfSchema(), top, map[string]any{"inline": "x"}, "properties"), want)
 		wantError(t, validateAuthoredTopLevel(oneOfSchema(), top, map[string]any{"inline": "x"}, "properties"), want)
+	})
+	t.Run("a malformed top-level group, before the document's errors", func(t *testing.T) {
+		schema := oneOfSchema()
+		schema["inline"] = PropertySchema{Type: PropertyTypeString, Required: true}
+		want := `properties: schema declares exclusive key "inline" Required; a group's keys are optional, and the group's Required says one is set`
+		wantError(t, validateTopLevelProperties(schema, oneOfTop(), map[string]any{}, "properties"), want)
+		wantError(t, validateAuthoredTopLevel(schema, oneOfTop(), map[string]any{"zz": "x"}, "properties"), want)
 	})
 }
 
@@ -518,4 +539,201 @@ func TestExclusive_ComponentCapabilityDefaults(t *testing.T) {
 			}
 		})
 	}
+}
+
+// requiredInGroupComponent is oneOfDefaultsComponent with "inline" declared Required
+// inside its inline/url group: a malformed schema.
+type requiredInGroupComponent struct{ oneOfDefaultsComponent }
+
+func (h *requiredInGroupComponent) PropertySchema() map[string]PropertySchema {
+	s := oneOfSchema()
+	s["inline"] = PropertySchema{Type: PropertyTypeString, Required: true}
+	return s
+}
+
+// requiredInNestedGroupTrait is oneOfTrait with "source.git" declared Required
+// inside the source's git/oci group.
+type requiredInNestedGroupTrait struct{ oneOfTrait }
+
+func (h *requiredInNestedGroupTrait) PropertySchema() map[string]PropertySchema {
+	s := oneOfSchema()
+	s["source"].Properties["git"] = PropertySchema{Type: PropertyTypeString, Required: true}
+	return s
+}
+
+// emptyObjectGroupTrait is oneOfTrait whose "source" declares no properties but a
+// git/oci group: both of its keys are undeclared.
+type emptyObjectGroupTrait struct{ oneOfTrait }
+
+func (h *emptyObjectGroupTrait) PropertySchema() map[string]PropertySchema {
+	s := oneOfSchema()
+	s["source"] = PropertySchema{Type: PropertyTypeObject, Exclusive: []ExclusiveGroup{{Keys: []string{"git", "oci"}}}}
+	return s
+}
+
+// requiredInNestedGroupRule is oneOfRule with requiredInNestedGroupTrait's schema.
+type requiredInNestedGroupRule struct{ oneOfRule }
+
+func (requiredInNestedGroupRule) PropertySchema() map[string]PropertySchema {
+	return (&requiredInNestedGroupTrait{}).PropertySchema()
+}
+
+// scalarItemsGroupTrait is oneOfTrait with a "list" whose string Items declare a
+// group: groups on a non-object node.
+type scalarItemsGroupTrait struct{ oneOfTrait }
+
+func (h *scalarItemsGroupTrait) PropertySchema() map[string]PropertySchema {
+	s := oneOfSchema()
+	s["list"] = PropertySchema{Type: PropertyTypeArray, Items: &PropertySchema{
+		Type: PropertyTypeString, Exclusive: []ExclusiveGroup{{Keys: []string{"a", "b"}}},
+	}}
+	return s
+}
+
+// unusedGroupSchema is oneOfSchema with a malformed group no value reaches unless the
+// document supplies it: on an object "o" when node is "o", else on the objects of
+// "list". The group names an undeclared key.
+func unusedGroupSchema(node string) map[string]PropertySchema {
+	s := oneOfSchema()
+	malformed := PropertySchema{
+		Type:       PropertyTypeObject,
+		Properties: map[string]PropertySchema{"a": {Type: PropertyTypeString}, "b": {Type: PropertyTypeString}},
+		Exclusive:  []ExclusiveGroup{{Keys: []string{"a", "missing"}}},
+	}
+	if node == "o" {
+		s["o"] = malformed
+	} else {
+		s["list"] = PropertySchema{Type: PropertyTypeArray, Items: &malformed}
+	}
+	return s
+}
+
+// TestExclusive_SchemaErrorsOnUnusedNodes: property validation refuses a malformed
+// group whatever the document supplies, an object or array it leaves out included,
+// on the authored and the emitted path.
+func TestExclusive_SchemaErrorsOnUnusedNodes(t *testing.T) {
+	for _, tc := range []struct {
+		name, node, want string
+		props            map[string]any
+	}{
+		{name: "an omitted object", node: "o", props: map[string]any{"inline": "x"}, want: `properties.o: schema declares exclusive key "missing", which is not a declared property`},
+		{name: "a null object", node: "o", props: map[string]any{"inline": "x", "o": nil}, want: `properties.o: schema declares exclusive key "missing", which is not a declared property`},
+		{name: "an empty array", node: "list", props: map[string]any{"inline": "x", "list": []any{}}, want: `properties.list[]: schema declares exclusive key "missing", which is not a declared property`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := unusedGroupSchema(tc.node)
+			h := &schemaOverrideComponent{oneOfComponent: oneOfComponent{typ: "store"}, schema: schema}
+			tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+			props := map[string]any{}
+			maps.Copy(props, tc.props)
+			wantError(t, tr.ValidateAuthoredProperties(authoredApp("store", props)), tc.want)
+			emitted := map[string]any{}
+			maps.Copy(emitted, tc.props)
+			wantError(t, validateTopLevelProperties(schema, oneOfTop(), emitted, "properties"), tc.want)
+		})
+	}
+}
+
+// schemaOverrideComponent is oneOfComponent declaring schema instead of oneOfSchema.
+type schemaOverrideComponent struct {
+	oneOfComponent
+	schema map[string]PropertySchema
+}
+
+func (h *schemaOverrideComponent) PropertySchema() map[string]PropertySchema { return h.schema }
+
+// TestExclusive_SchemaErrorsBeforeCapabilities: a malformed group is reported as the
+// schema's error where capabilities fill, relax or merge, before any value is
+// checked: a component's capability defaults, a capability-bound trait's relaxed
+// nested Required, an object only the rendering supplies, both Transform trait merge
+// sites, and array items only the rendering supplies.
+func TestExclusive_SchemaErrorsBeforeCapabilities(t *testing.T) {
+	t.Run("a component's capability default", func(t *testing.T) {
+		h := &requiredInGroupComponent{oneOfDefaultsComponent{oneOfComponent: oneOfComponent{typ: "store"}}}
+		tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+		caps := map[string]CapabilityBinding{"store": {Rendering: map[string]any{"url": 123}}}
+		_, _, err := tr.TransformWithPolicy(storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}}), TransformContext{Capabilities: caps})
+		want := `capability "store" defaults: properties: schema declares exclusive key "inline" Required; a group's keys are optional, and the group's Required says one is set`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("TransformWithPolicy error = %v, want it to contain %q", err, want)
+		}
+	})
+
+	caps := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"source": map[string]any{"tag": "v1"}}}}
+	for _, tc := range []struct {
+		name   string
+		source map[string]any
+	}{
+		{name: "a relaxed Required key, beside a value of the wrong type", source: map[string]any{"git": 123}},
+		{name: "a relaxed Required key, beside two keys of the group", source: map[string]any{"git": "a", "oci": "b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(
+				map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+				map[string]TraitHandler{"oneof": &requiredInNestedGroupTrait{}},
+			)
+			app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: map[string]any{"inline": "x", "source": tc.source}})
+			want := `properties.source: schema declares exclusive key "git" Required; a group's keys are optional, and the group's Required says one is set`
+			wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, caps), want)
+		})
+	}
+
+	t.Run("an object only the rendering supplies", func(t *testing.T) {
+		want := `properties.source: schema declares exclusive key "git", which is not a declared property`
+		tr := NewTransformer(
+			map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+			map[string]TraitHandler{"oneof": &emptyObjectGroupTrait{}},
+		)
+		app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: map[string]any{"inline": "x"}})
+		rendered := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"source": map[string]any{}}}}
+		wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered), want)
+		// The merged properties' own check, which applyTraits and the lowering
+		// fixpoint run, reports it too.
+		schema := (&emptyObjectGroupTrait{}).PropertySchema()
+		wantError(t, checkNestedRequired(schema, nil, map[string]any{"source": map[string]any{}}, "properties", ""), want)
+	})
+
+	// Transform with no prior authored check: the top-level pair the merge sets
+	// together is the document's error, and the nested group's shape comes first.
+	for _, traitType := range []string{"oneof", "oneof-rule"} {
+		t.Run("Transform, "+traitType+", before the merge's top-level pair", func(t *testing.T) {
+			tr := NewTransformer(
+				map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+				map[string]TraitHandler{
+					"oneof":      &requiredInNestedGroupTrait{},
+					"oneof-done": &recordingTraitHandler{typ: "oneof-done"},
+				},
+			)
+			tr.RegisterTraitLowering(requiredInNestedGroupRule{})
+			app := storeApp(Component{Name: "web", Type: "webservice", Traits: []Trait{{
+				Type: traitType, Properties: map[string]any{"inline": "x", "source": map[string]any{"git": "a"}},
+			}}})
+			caps := map[string]CapabilityBinding{traitType: {Rendering: map[string]any{"url": "y"}}}
+			_, err := tr.Transform(app, TransformContext{Capabilities: caps})
+			want := `properties.source: schema declares exclusive key "git" Required; a group's keys are optional, and the group's Required says one is set`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Transform error = %v, want it to contain %q", err, want)
+			}
+		})
+	}
+
+	t.Run("array items only the rendering supplies", func(t *testing.T) {
+		want := `properties.list[]: schema declares exclusive groups on a non-object node; they name keys of an object`
+		h := &scalarItemsGroupTrait{}
+		tr := NewTransformer(
+			map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+			map[string]TraitHandler{"oneof": h},
+		)
+		props := map[string]any{"inline": "x"}
+		rendered := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"list": []any{"x"}}}}
+		app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: props})
+		wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered), want)
+		built := storeApp(Component{Name: "web", Type: "webservice", Traits: []Trait{{Type: "oneof", Properties: props}}})
+		if _, err := tr.Transform(built, TransformContext{Capabilities: rendered}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Transform error = %v, want it to contain %q", err, want)
+		}
+		if h.got != nil {
+			t.Errorf("the handler was applied with %v", h.got)
+		}
+	})
 }
