@@ -909,11 +909,12 @@ and by scope, whatever component or trait emits it.
     selects those objects by the component label), and a StatefulSet's
     `spec.volumeClaimTemplates[].metadata`, which goes onto the claims the controller creates,
     for the reserved keys alone too (go-kure/launcher#944: the API server refuses a change to
-    the claim templates, so launcher writes no component label there). Exempt: the `app` label and the component
-    label key, and the annotations the platform sets on an Ingress, which the `expose` rule
+    the claim templates, so launcher writes no component label there). Exempt: the `app`
+    label and the component label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
   - Not covered: a chart Flux renders in the cluster, metadata an object hands on in a field
-    of its own (an ephemeral volume's claim template; a test derives the fields that hand
+    of its own (an ephemeral volume's claim template, in a pod spec or a CloudNativePG
+    Cluster's `spec.ephemeralVolumeSource`; a test derives the fields that hand
     metadata on from the kinds' API types and holds or lists each:
     `TestLabelReach_EveryFieldIsHeldOrListed`), and what a controller adds.
   - Not read either: what a config that a consumer wraps around an application's config
