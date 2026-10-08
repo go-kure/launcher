@@ -332,6 +332,10 @@ func alertmanagerRefusals(notA string) []struct {
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		{"a cluster advertise address without a port before v0.28.0", map[string]any{"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "10.0.0.1"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		// No Go's net.ParseIP takes a character outside hex digits, '.' and
+		// ':', so a host name is refused at every version.
+		{"a cluster advertise address of a host name before v0.28.0", map[string]any{"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "alerts.example.com:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		// The kubelet passes $$ as $ and $( without its closing parenthesis as
 		// written, so neither is a reference it expands.
 		{"a cluster advertise address of an escaped reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$$(POD_IP)]:9094"},
@@ -1013,7 +1017,9 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a cluster advertise address of a reference after an escaped one": {"replicas": 3, "clusterAdvertiseAddress": "$$[$(AM_ADVERTISE)"},
 		// Before v0.28.0 Alertmanager is built with an older Go, whose rules
 		// for an IP address the check does not model: the host is not judged.
-		"a cluster advertise address of a long IPv6 group before v0.28.0": {"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
+		"a cluster advertise address of a long IPv6 group before v0.28.0":   {"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
+		"a cluster advertise address with leading zeros before v0.28.0":     {"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "010.0.0.1:9094"},
+		"a cluster advertise address of hex digits and dots before v0.28.0": {"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "cafe.dead:9094"},
 		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
 			"emptyDir":            map[string]any{},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "alertmanager-fast-db"}},
