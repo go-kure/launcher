@@ -1904,7 +1904,9 @@ and by scope, whatever component or trait emits it.
     volume name; an entry of `volumeMounts` at a path the operator mounts at in the
     prometheus container, and of `thanos.volumeMounts` at one it mounts at in the sidecar
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
-    mounts from Thanos 0.24.0, whatever version is named); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
+    mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
+    and `mountPath`, which the operator drops; a `queryLogFile` named without a directory
+    beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it and no volume of the
     author's is mounted at `/var/log/prometheus`; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
