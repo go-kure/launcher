@@ -221,6 +221,15 @@ func alertmanagerRefusals(notA string) []struct {
 		{"request over its limit", map[string]any{"resources": map[string]any{
 			"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"},
 		}}, "resources: cpu: request 2 must not exceed limit 1"},
+		// An unnamed entry merges into no generated container, so its block is
+		// checked alone, as is any added container's.
+		{"request over its limit in an unnamed container", container(map[string]any{"name": "", "image": "registry.example/team/proxy:v1", "resources": map[string]any{
+			"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"},
+		}}), `containers[0] "": resources: cpu: request 2 must not exceed limit 1`},
+		{"request over its limit in an unnamed init container beside a merged patch", map[string]any{
+			"containers":     []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"cpu": "1"}}}},
+			"initContainers": []any{map[string]any{"name": "", "image": "registry.example/team/prepare:v1", "resources": map[string]any{"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}}}},
+		}, `initContainers[0] "": resources: cpu: request 2 must not exceed limit 1`},
 		// The operator fills an unset memory request as 200Mi whatever the
 		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{

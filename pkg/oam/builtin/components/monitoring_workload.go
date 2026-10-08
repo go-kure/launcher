@@ -149,7 +149,7 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
-			if w.mergedPatches[list.name] == c.Name {
+			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
 				continue
 			}
 			if err := validateCnpgResources(where, c.Resources); err != nil {
