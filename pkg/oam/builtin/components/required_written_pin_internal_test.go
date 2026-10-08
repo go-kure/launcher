@@ -287,7 +287,7 @@ var requiredWrittenKinds = []pinKind{
 	// needs a certificate and a key, and the cluster's client a certificate
 	// (validateAlertmanagerTLS), so the base carries both blocks whole.
 	// The storage arm in use must claim storage, and an ephemeral one name its
-	// access modes (validateAlertmanagerStorage), so both arms carry them.
+	// access modes (validateOperatorStorage), so both arms carry them.
 	{component: "alertmanager", handler: &AlertmanagerHandler{}, typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.AlertmanagerSpec](), false),
 		base: map[string]any{
