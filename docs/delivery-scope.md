@@ -1903,13 +1903,14 @@ and by scope, whatever component or trait emits it.
     volume), and two entries of `secrets` or of `configMaps` the operator gives one
     volume name, or one whose volume name the operator cuts to 63 characters after a
     `-`; an entry of `volumeMounts` at a path the operator mounts at in the
-    prometheus container, and of `thanos.volumeMounts` at one it mounts at in the sidecar
+    prometheus container (the web TLS credentials' volumes and mounts excepted, which
+    are left to the API, as on the Alertmanager), and of `thanos.volumeMounts` at one it mounts at in the sidecar
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
     and `mountPath`, which the operator drops; a `queryLogFile` named without a directory
     beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it and no volume of the
-    author's is mounted at `/var/log/prometheus`; a negative request or limit; and a
+    author's is mounted writable at `/var/log/prometheus`; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
     characters, fewer where the authored shards and replicas make the hostname longer).

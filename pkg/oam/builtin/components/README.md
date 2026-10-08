@@ -4646,21 +4646,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `thanos-prometheus-http-client-file` where `thanos` is set, whatever
     `thanos.version` names; any `prometheus-<name>-rulefiles-<n>`, the
     volumes of the rule ConfigMaps, of which the operator mounts at least
-    three whatever the rules; the name the operator derives for each of
+    three whatever the rules (`<n>` a decimal without a leading zero, as the
+    operator writes it: `rulefiles-01` is not reserved); the name the operator derives for each of
     `secrets` and `configMaps` (`secret-<name>`, `configmap-<name>`); and the
     data volume's. Two entries of `secrets`, or of `configMaps`, that the
     operator's naming gives one volume name are refused as well. So is an
     entry whose volume name, cut to 63 characters, ends in `-`: the operator
     checks the name after the cut and fails to build the pods
     (`ResourceNamer.DNS1123Label`, common.go:289-292 and :311-314, returned
-    at server/statefulset.go:181-184).
+    at server/statefulset.go:181-184). The volumes of the web TLS
+    credentials are not checked, as on `alertmanager`: the operator names
+    each after the credential's source with a hash appended, which the kind
+    does not derive, so an entry under one of those names is left to the API
+    to refuse.
   - an entry of `volumeMounts` at a path the operator mounts a volume at in
     the prometheus container: `/prometheus`, `/etc/prometheus/config_out`,
     `/etc/prometheus/certs`, `/etc/prometheus/web_config/web-config.yaml`,
     `/var/log/prometheus` where `log-file` is added,
     `/etc/prometheus/rules/prometheus-<name>-rulefiles-<n>`, and
     `/etc/prometheus/secrets/<name>` and `/etc/prometheus/configmaps/<name>`
-    for each entry of `secrets` and `configMaps`.
+    for each entry of `secrets` and `configMaps`. The mounts of the web TLS
+    credentials, under `/etc/prometheus/web_config/`, are left to the API,
+    as their volumes are.
   - an entry of `thanos.volumeMounts` at a path the operator mounts a
     volume at in the thanos-sidecar container: `/prometheus` where
     `objectStorageConfig` or `objectStorageConfigFile` is set, and
@@ -4676,9 +4683,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
     the scrape failure log file, on a read-only root filesystem
-    (server/statefulset.go:510, :537; common.go:330-345). A volume the
-    author mounts there, in `volumeMounts` or a patch of the `prometheus`
-    container, is accepted.
+    (server/statefulset.go:510, :537; common.go:330-345). A writable volume
+    the author mounts there, in `volumeMounts` or a patch of the
+    `prometheus` container, is accepted; a mount there with `readOnly` set,
+    in either, is not. The path is compared cleaned (`/var/log/prometheus/`
+    is the same directory). Where both name the path alike, the operator's
+    strategic merge keeps `readOnly` if either sets it; where they spell it
+    differently, both mounts stay, and which one the container runtime mounts
+    over the other is not derived, so the read-only one still refuses.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a name the operator's objects cannot be named after: the data volume
