@@ -53,20 +53,32 @@ if [[ ! "$TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+UPSTREAM=""
 STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" ${UPSTREAM:+"$UPSTREAM"}' EXIT
 UPSTREAM="$(mktemp -d)"
-trap 'rm -rf "$STAGE" "$UPSTREAM"' EXIT
 
 # The test reads only the pkg/alertmanager files above, so refuse a tag where
-# another file of the package (its tests aside) compares the Alertmanager
-# version: its gates would go unclassified.
+# another file of the package (its tests aside) may compare the Alertmanager
+# version: its gates would go unclassified. A file counts where it imports
+# semver, reads a version's Major, Minor or Patch, or calls a comparison
+# method; the test's own detection, read as text, and broader.
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
 git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager
+COMPARES='blang/semver|\.(Major|Minor|Patch)\b|\.(GTE|GT|LTE|LT|EQ|NE|Compare|Equals)\('
+# grep exits 1 for no match and 2 for an error; only 0 is a usable scan, as
+# the vendored files themselves match.
+SCAN_RC=0
+SCANNED="$(grep -rlE --include='*.go' --exclude='*_test.go' -- "$COMPARES" "$UPSTREAM/pkg/alertmanager")" || SCAN_RC=$?
+if (( SCAN_RC != 0 )); then
+  echo "ERROR: scanning pkg/alertmanager at $TAG for version comparisons failed (grep exit $SCAN_RC)" >&2
+  exit 1
+fi
 UNREAD=()
 while IFS= read -r f; do
   f="${f#"$UPSTREAM"/}"
   [[ " ${FILES[*]} " == *" $f "* ]] || UNREAD+=("$f")
-done < <(find "$UPSTREAM/pkg/alertmanager" -name '*.go' ! -name '*_test.go' -exec grep -l 'semver\.MustParse' -- {} +)
+done <<< "$SCANNED"
 if (( ${#UNREAD[@]} > 0 )); then
   echo "ERROR: $TAG compares the Alertmanager version outside the vendored files: ${UNREAD[*]}; vendor them, and classify their gates in the test" >&2
   exit 1
