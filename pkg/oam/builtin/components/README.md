@@ -3903,7 +3903,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   in the patch's order, each port is merged into the first port of its
   number, the operator's or one an earlier port of the patch added, and
   replaces the name and protocol it names; a port of a number no port has is
-  added. The operator's ports, in its order, are the web port under
+  added. Where the operator gives the container no port (config-reloader
+  under `listenLocal`), the merge takes the patch's ports as listed. The
+  operator's ports, in its order, are the web port under
   `portName` at 9093/TCP and the config-reloader's `reloader-web` at
   8080/TCP unless `listenLocal` is set, `mesh-tcp` at 9094/TCP then
   `mesh-udp` at 9094/UDP, and the init-config-reloader's `reloader-init` at
