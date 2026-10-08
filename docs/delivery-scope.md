@@ -799,8 +799,10 @@ and by scope, whatever component or trait emits it.
   on every application (`pkg/oam/object_kind_policy.go`). It reads each object generation
   emits — a kind component's, a trait's, what `passthrough` and `manifests` carry, every
   object a chart renders at build time, its hook groups included — as Flux applies it: a
-  list envelope, in any Go representation, read as it is written, by each of its members
-  (none when its items is null), not as an object of its own. It refuses the first that
+  list envelope, in any Go representation, read as it is written, by each of its members,
+  not as an object of its own: a kind ending in `List` inlined through every List it
+  holds, a List among them whose items is null dropped as Kustomize drops it, and any
+  other envelope expanded one level, as Flux does. It refuses the first that
   breaks the policy. A layout augmenter's objects are read as it adds them, a
   configMapGenerator entry under a name new to its layout as the ConfigMap Kustomize
   builds from it,

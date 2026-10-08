@@ -362,6 +362,29 @@ func TestObjectKindPolicy_TypedList(t *testing.T) {
 	}
 }
 
+// TestObjectKindPolicy_NullListsOnlyForTheKindCheck: the List Kustomize drops
+// for a null items is dropped for the object kind check alone. The traversal the
+// component label, the reserved keys and the forced-volume warnings read keeps
+// it, and the object the check reads is not changed.
+func TestObjectKindPolicy_NullListsOnlyForTheKindCheck(t *testing.T) {
+	nested := func() *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List",
+			"items": []any{map[string]any{"apiVersion": "v1", "kind": "List", "items": nil}},
+		}}
+	}
+	if got := appliedObjects(nested()); len(got) != 1 || got[0].GetObjectKind().GroupVersionKind().Kind != "List" {
+		t.Errorf("appliedObjects = %v, want the inner List kept", got)
+	}
+	checked := nested()
+	if got := kindAppliedObjects(checked); len(got) != 0 {
+		t.Errorf("kindAppliedObjects = %v, want nothing", got)
+	}
+	if !reflect.DeepEqual(checked, nested()) {
+		t.Errorf("kindAppliedObjects changed its object: %v", checked.Object)
+	}
+}
+
 // generatorAugmenter adds a configMapGenerator entry to the layout it augments.
 type generatorAugmenter struct{ ownershipObjectsConfig }
 
