@@ -136,97 +136,174 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 // policyHeldKind is declared over. TestLabelSelectorKinds_CoverEverySelector
 // holds the keys to the package's source and counts the kinds of each type by
 // the files that decode it, so a kind added without a row fails there.
-var strictlyDecodedTypes = map[string]reflect.Type{
-	"appsv1.ReplicaSetSpec":                       reflect.TypeFor[appsv1.ReplicaSetSpec](),
-	"autoscalingv2.HorizontalPodAutoscalerSpec":   reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec](),
-	"autov1.ImageUpdateAutomationSpec":            reflect.TypeFor[autov1.ImageUpdateAutomationSpec](),
-	"barmanv1.ObjectStoreSpec":                    reflect.TypeFor[barmanv1.ObjectStoreSpec](),
-	"certv1.CertificateSpec":                      reflect.TypeFor[certv1.CertificateSpec](),
-	"certv1.IssuerSpec":                           reflect.TypeFor[certv1.IssuerSpec](),
-	"ciliumNetworkPolicyProperties":               reflect.TypeFor[ciliumNetworkPolicyProperties](),
-	"ciliumv2.CiliumBGPAdvertisementSpec":         reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](),
-	"ciliumv2.CiliumBGPClusterConfigSpec":         reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec](),
-	"ciliumv2.CiliumBGPNodeConfigOverrideSpec":    reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec](),
-	"ciliumv2.CiliumBGPPeerConfigSpec":            reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec](),
-	"ciliumv2.CiliumCIDRGroupSpec":                reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec](),
-	"ciliumv2.CiliumEgressGatewayPolicySpec":      reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec](),
-	"ciliumv2.CiliumLoadBalancerIPPoolSpec":       reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec](),
-	"ciliumv2.CiliumLocalRedirectPolicySpec":      reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec](),
-	"ciliumv2.CiliumNodeConfigSpec":               reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec](),
-	"cnpgv1.BackupSpec":                           reflect.TypeFor[cnpgv1.BackupSpec](),
-	"cnpgv1.ClusterSpec":                          reflect.TypeFor[cnpgv1.ClusterSpec](),
-	"cnpgv1.DatabaseRoleSpec":                     reflect.TypeFor[cnpgv1.DatabaseRoleSpec](),
-	"cnpgv1.DatabaseSpec":                         reflect.TypeFor[cnpgv1.DatabaseSpec](),
-	"cnpgv1.ImageCatalogSpec":                     reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
-	"cnpgv1.PoolerSpec":                           reflect.TypeFor[cnpgv1.PoolerSpec](),
-	"cnpgv1.PublicationSpec":                      reflect.TypeFor[cnpgv1.PublicationSpec](),
-	"cnpgv1.ScheduledBackupSpec":                  reflect.TypeFor[cnpgv1.ScheduledBackupSpec](),
-	"cnpgv1.SubscriptionSpec":                     reflect.TypeFor[cnpgv1.SubscriptionSpec](),
-	"corev1.LimitRangeSpec":                       reflect.TypeFor[corev1.LimitRangeSpec](),
-	"corev1.NamespaceSpec":                        reflect.TypeFor[corev1.NamespaceSpec](),
-	"corev1.PersistentVolumeSpec":                 reflect.TypeFor[corev1.PersistentVolumeSpec](),
-	"corev1.PodSpec":                              reflect.TypeFor[corev1.PodSpec](),
-	"corev1.ReplicationControllerSpec":            reflect.TypeFor[corev1.ReplicationControllerSpec](),
-	"corev1.ResourceQuotaSpec":                    reflect.TypeFor[corev1.ResourceQuotaSpec](),
-	"discoveryv1.EndpointSlice":                   reflect.TypeFor[discoveryv1.EndpointSlice](),
-	"esv1.ClusterExternalSecretSpec":              reflect.TypeFor[esv1.ClusterExternalSecretSpec](),
-	"esv1.ExternalSecretSpec":                     reflect.TypeFor[esv1.ExternalSecretSpec](),
-	"esv1.SecretStoreSpec":                        reflect.TypeFor[esv1.SecretStoreSpec](),
-	"fluxoperatorv1.ResourceSetInputProviderSpec": reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](),
-	"gatewayv1.BackendTLSPolicySpec":              reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
-	"gatewayv1.GatewayClassSpec":                  reflect.TypeFor[gatewayv1.GatewayClassSpec](),
-	"gatewayv1.GatewaySpec":                       reflect.TypeFor[gatewayv1.GatewaySpec](),
-	"gatewayv1.GRPCRouteSpec":                     reflect.TypeFor[gatewayv1.GRPCRouteSpec](),
-	"gatewayv1.HTTPRouteSpec":                     reflect.TypeFor[gatewayv1.HTTPRouteSpec](),
-	"gatewayv1.ListenerSetSpec":                   reflect.TypeFor[gatewayv1.ListenerSetSpec](),
-	"gatewayv1.ReferenceGrantSpec":                reflect.TypeFor[gatewayv1.ReferenceGrantSpec](),
-	"gatewayv1.TCPRouteSpec":                      reflect.TypeFor[gatewayv1.TCPRouteSpec](),
-	"gatewayv1.TLSRouteSpec":                      reflect.TypeFor[gatewayv1.TLSRouteSpec](),
-	"gatewayv1.UDPRouteSpec":                      reflect.TypeFor[gatewayv1.UDPRouteSpec](),
-	"helmProperties":                              reflect.TypeFor[helmProperties](),
-	"helmTemplateProperties":                      reflect.TypeFor[helmTemplateProperties](),
-	"helmValuesFromSpec":                          reflect.TypeFor[helmValuesFromSpec](),
-	"helmv2.HelmReleaseSpec":                      reflect.TypeFor[helmv2.HelmReleaseSpec](),
-	"imagev1.ImagePolicySpec":                     reflect.TypeFor[imagev1.ImagePolicySpec](),
-	"imagev1.ImageRepositorySpec":                 reflect.TypeFor[imagev1.ImageRepositorySpec](),
-	"kustv1.KustomizationSpec":                    reflect.TypeFor[kustv1.KustomizationSpec](),
-	"metallbv1beta1.BFDProfileSpec":               reflect.TypeFor[metallbv1beta1.BFDProfileSpec](),
-	"metallbv1beta1.BGPAdvertisementSpec":         reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](),
-	"metallbv1beta1.CommunitySpec":                reflect.TypeFor[metallbv1beta1.CommunitySpec](),
-	"metallbv1beta1.IPAddressPoolSpec":            reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](),
-	"metallbv1beta1.L2AdvertisementSpec":          reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](),
-	"metallbv1beta2.BGPPeerSpec":                  reflect.TypeFor[metallbv1beta2.BGPPeerSpec](),
-	"monitoringv1.AlertmanagerSpec":               reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
-	"monitoringv1.PodMonitorSpec":                 reflect.TypeFor[monitoringv1.PodMonitorSpec](),
-	"monitoringv1.ProbeSpec":                      reflect.TypeFor[monitoringv1.ProbeSpec](),
-	"monitoringv1.PrometheusRuleSpec":             reflect.TypeFor[monitoringv1.PrometheusRuleSpec](),
-	"monitoringv1.ServiceMonitorSpec":             reflect.TypeFor[monitoringv1.ServiceMonitorSpec](),
-	"networkingv1.IngressClassSpec":               reflect.TypeFor[networkingv1.IngressClassSpec](),
-	"networkingv1.IngressSpec":                    reflect.TypeFor[networkingv1.IngressSpec](),
-	"networkingv1.NetworkPolicySpec":              reflect.TypeFor[networkingv1.NetworkPolicySpec](),
-	"networkingv1.ServiceCIDRSpec":                reflect.TypeFor[networkingv1.ServiceCIDRSpec](),
-	"nodev1.RuntimeClass":                         reflect.TypeFor[nodev1.RuntimeClass](),
-	"notificationv1.ReceiverSpec":                 reflect.TypeFor[notificationv1.ReceiverSpec](),
-	"notificationv1beta3.AlertSpec":               reflect.TypeFor[notificationv1beta3.AlertSpec](),
-	"notificationv1beta3.ProviderSpec":            reflect.TypeFor[notificationv1beta3.ProviderSpec](),
-	"podTemplateProperties":                       reflect.TypeFor[podTemplateProperties](),
-	"policyv1.PodDisruptionBudgetSpec":            reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](),
-	"rbacv1.ClusterRole":                          reflect.TypeFor[rbacv1.ClusterRole](),
-	"rbacv1.ClusterRoleBinding":                   reflect.TypeFor[rbacv1.ClusterRoleBinding](),
-	"rbacv1.Role":                                 reflect.TypeFor[rbacv1.Role](),
-	"rbacv1.RoleBinding":                          reflect.TypeFor[rbacv1.RoleBinding](),
-	"schedulingv1.PriorityClass":                  reflect.TypeFor[schedulingv1.PriorityClass](),
-	"sourcev1.BucketSpec":                         reflect.TypeFor[sourcev1.BucketSpec](),
-	"sourcev1.GitRepositorySpec":                  reflect.TypeFor[sourcev1.GitRepositorySpec](),
-	"sourcev1.HelmChartSpec":                      reflect.TypeFor[sourcev1.HelmChartSpec](),
-	"sourcev1.HelmRepositorySpec":                 reflect.TypeFor[sourcev1.HelmRepositorySpec](),
-	"sourcev1.OCIRepositorySpec":                  reflect.TypeFor[sourcev1.OCIRepositorySpec](),
-	"storagev1.CSIDriverSpec":                     reflect.TypeFor[storagev1.CSIDriverSpec](),
-	"storagev1.StorageClass":                      reflect.TypeFor[storagev1.StorageClass](),
-	"storagev1.VolumeAttributesClass":             reflect.TypeFor[storagev1.VolumeAttributesClass](),
-	"swv1beta1.ArtifactGeneratorSpec":             reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
-	"volsyncv1alpha1.ReplicationDestinationSpec":  reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
-	"volsyncv1alpha1.ReplicationSourceSpec":       reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
+//
+// A row is one line, {name, type}: kind PRs add rows here, and a map literal's
+// rows are aligned by gofmt, so one longer key would rewrite every other row.
+// TestSharedKindTables_RowLocal holds that form.
+var strictlyDecodedTypes = typesByName([]namedType{
+	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
+	{"autoscalingv2.HorizontalPodAutoscalerSpec", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec]()},
+	{"autov1.ImageUpdateAutomationSpec", reflect.TypeFor[autov1.ImageUpdateAutomationSpec]()},
+	{"barmanv1.ObjectStoreSpec", reflect.TypeFor[barmanv1.ObjectStoreSpec]()},
+	{"certv1.CertificateSpec", reflect.TypeFor[certv1.CertificateSpec]()},
+	{"certv1.IssuerSpec", reflect.TypeFor[certv1.IssuerSpec]()},
+	{"ciliumNetworkPolicyProperties", reflect.TypeFor[ciliumNetworkPolicyProperties]()},
+	{"ciliumv2.CiliumBGPAdvertisementSpec", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec]()},
+	{"ciliumv2.CiliumBGPClusterConfigSpec", reflect.TypeFor[ciliumv2.CiliumBGPClusterConfigSpec]()},
+	{"ciliumv2.CiliumBGPNodeConfigOverrideSpec", reflect.TypeFor[ciliumv2.CiliumBGPNodeConfigOverrideSpec]()},
+	{"ciliumv2.CiliumBGPPeerConfigSpec", reflect.TypeFor[ciliumv2.CiliumBGPPeerConfigSpec]()},
+	{"ciliumv2.CiliumCIDRGroupSpec", reflect.TypeFor[ciliumv2.CiliumCIDRGroupSpec]()},
+	{"ciliumv2.CiliumEgressGatewayPolicySpec", reflect.TypeFor[ciliumv2.CiliumEgressGatewayPolicySpec]()},
+	{"ciliumv2.CiliumLoadBalancerIPPoolSpec", reflect.TypeFor[ciliumv2.CiliumLoadBalancerIPPoolSpec]()},
+	{"ciliumv2.CiliumLocalRedirectPolicySpec", reflect.TypeFor[ciliumv2.CiliumLocalRedirectPolicySpec]()},
+	{"ciliumv2.CiliumNodeConfigSpec", reflect.TypeFor[ciliumv2.CiliumNodeConfigSpec]()},
+	{"cnpgv1.BackupSpec", reflect.TypeFor[cnpgv1.BackupSpec]()},
+	{"cnpgv1.ClusterSpec", reflect.TypeFor[cnpgv1.ClusterSpec]()},
+	{"cnpgv1.DatabaseRoleSpec", reflect.TypeFor[cnpgv1.DatabaseRoleSpec]()},
+	{"cnpgv1.DatabaseSpec", reflect.TypeFor[cnpgv1.DatabaseSpec]()},
+	{"cnpgv1.ImageCatalogSpec", reflect.TypeFor[cnpgv1.ImageCatalogSpec]()},
+	{"cnpgv1.PoolerSpec", reflect.TypeFor[cnpgv1.PoolerSpec]()},
+	{"cnpgv1.PublicationSpec", reflect.TypeFor[cnpgv1.PublicationSpec]()},
+	{"cnpgv1.ScheduledBackupSpec", reflect.TypeFor[cnpgv1.ScheduledBackupSpec]()},
+	{"cnpgv1.SubscriptionSpec", reflect.TypeFor[cnpgv1.SubscriptionSpec]()},
+	{"corev1.LimitRangeSpec", reflect.TypeFor[corev1.LimitRangeSpec]()},
+	{"corev1.NamespaceSpec", reflect.TypeFor[corev1.NamespaceSpec]()},
+	{"corev1.PersistentVolumeSpec", reflect.TypeFor[corev1.PersistentVolumeSpec]()},
+	{"corev1.PodSpec", reflect.TypeFor[corev1.PodSpec]()},
+	{"corev1.ReplicationControllerSpec", reflect.TypeFor[corev1.ReplicationControllerSpec]()},
+	{"corev1.ResourceQuotaSpec", reflect.TypeFor[corev1.ResourceQuotaSpec]()},
+	{"discoveryv1.EndpointSlice", reflect.TypeFor[discoveryv1.EndpointSlice]()},
+	{"esv1.ClusterExternalSecretSpec", reflect.TypeFor[esv1.ClusterExternalSecretSpec]()},
+	{"esv1.ExternalSecretSpec", reflect.TypeFor[esv1.ExternalSecretSpec]()},
+	{"esv1.SecretStoreSpec", reflect.TypeFor[esv1.SecretStoreSpec]()},
+	{"fluxoperatorv1.ResourceSetInputProviderSpec", reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec]()},
+	{"gatewayv1.BackendTLSPolicySpec", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec]()},
+	{"gatewayv1.GatewayClassSpec", reflect.TypeFor[gatewayv1.GatewayClassSpec]()},
+	{"gatewayv1.GatewaySpec", reflect.TypeFor[gatewayv1.GatewaySpec]()},
+	{"gatewayv1.GRPCRouteSpec", reflect.TypeFor[gatewayv1.GRPCRouteSpec]()},
+	{"gatewayv1.HTTPRouteSpec", reflect.TypeFor[gatewayv1.HTTPRouteSpec]()},
+	{"gatewayv1.ListenerSetSpec", reflect.TypeFor[gatewayv1.ListenerSetSpec]()},
+	{"gatewayv1.ReferenceGrantSpec", reflect.TypeFor[gatewayv1.ReferenceGrantSpec]()},
+	{"gatewayv1.TCPRouteSpec", reflect.TypeFor[gatewayv1.TCPRouteSpec]()},
+	{"gatewayv1.TLSRouteSpec", reflect.TypeFor[gatewayv1.TLSRouteSpec]()},
+	{"gatewayv1.UDPRouteSpec", reflect.TypeFor[gatewayv1.UDPRouteSpec]()},
+	{"helmProperties", reflect.TypeFor[helmProperties]()},
+	{"helmTemplateProperties", reflect.TypeFor[helmTemplateProperties]()},
+	{"helmValuesFromSpec", reflect.TypeFor[helmValuesFromSpec]()},
+	{"helmv2.HelmReleaseSpec", reflect.TypeFor[helmv2.HelmReleaseSpec]()},
+	{"imagev1.ImagePolicySpec", reflect.TypeFor[imagev1.ImagePolicySpec]()},
+	{"imagev1.ImageRepositorySpec", reflect.TypeFor[imagev1.ImageRepositorySpec]()},
+	{"kustv1.KustomizationSpec", reflect.TypeFor[kustv1.KustomizationSpec]()},
+	{"metallbv1beta1.BFDProfileSpec", reflect.TypeFor[metallbv1beta1.BFDProfileSpec]()},
+	{"metallbv1beta1.BGPAdvertisementSpec", reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec]()},
+	{"metallbv1beta1.CommunitySpec", reflect.TypeFor[metallbv1beta1.CommunitySpec]()},
+	{"metallbv1beta1.IPAddressPoolSpec", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec]()},
+	{"metallbv1beta1.L2AdvertisementSpec", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec]()},
+	{"metallbv1beta2.BGPPeerSpec", reflect.TypeFor[metallbv1beta2.BGPPeerSpec]()},
+	{"monitoringv1.AlertmanagerSpec", reflect.TypeFor[monitoringv1.AlertmanagerSpec]()},
+	{"monitoringv1.PodMonitorSpec", reflect.TypeFor[monitoringv1.PodMonitorSpec]()},
+	{"monitoringv1.ProbeSpec", reflect.TypeFor[monitoringv1.ProbeSpec]()},
+	{"monitoringv1.PrometheusRuleSpec", reflect.TypeFor[monitoringv1.PrometheusRuleSpec]()},
+	{"monitoringv1.ServiceMonitorSpec", reflect.TypeFor[monitoringv1.ServiceMonitorSpec]()},
+	{"networkingv1.IngressClassSpec", reflect.TypeFor[networkingv1.IngressClassSpec]()},
+	{"networkingv1.IngressSpec", reflect.TypeFor[networkingv1.IngressSpec]()},
+	{"networkingv1.NetworkPolicySpec", reflect.TypeFor[networkingv1.NetworkPolicySpec]()},
+	{"networkingv1.ServiceCIDRSpec", reflect.TypeFor[networkingv1.ServiceCIDRSpec]()},
+	{"nodev1.RuntimeClass", reflect.TypeFor[nodev1.RuntimeClass]()},
+	{"notificationv1.ReceiverSpec", reflect.TypeFor[notificationv1.ReceiverSpec]()},
+	{"notificationv1beta3.AlertSpec", reflect.TypeFor[notificationv1beta3.AlertSpec]()},
+	{"notificationv1beta3.ProviderSpec", reflect.TypeFor[notificationv1beta3.ProviderSpec]()},
+	{"podTemplateProperties", reflect.TypeFor[podTemplateProperties]()},
+	{"policyv1.PodDisruptionBudgetSpec", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec]()},
+	{"rbacv1.ClusterRole", reflect.TypeFor[rbacv1.ClusterRole]()},
+	{"rbacv1.ClusterRoleBinding", reflect.TypeFor[rbacv1.ClusterRoleBinding]()},
+	{"rbacv1.Role", reflect.TypeFor[rbacv1.Role]()},
+	{"rbacv1.RoleBinding", reflect.TypeFor[rbacv1.RoleBinding]()},
+	{"schedulingv1.PriorityClass", reflect.TypeFor[schedulingv1.PriorityClass]()},
+	{"sourcev1.BucketSpec", reflect.TypeFor[sourcev1.BucketSpec]()},
+	{"sourcev1.GitRepositorySpec", reflect.TypeFor[sourcev1.GitRepositorySpec]()},
+	{"sourcev1.HelmChartSpec", reflect.TypeFor[sourcev1.HelmChartSpec]()},
+	{"sourcev1.HelmRepositorySpec", reflect.TypeFor[sourcev1.HelmRepositorySpec]()},
+	{"sourcev1.OCIRepositorySpec", reflect.TypeFor[sourcev1.OCIRepositorySpec]()},
+	{"storagev1.CSIDriverSpec", reflect.TypeFor[storagev1.CSIDriverSpec]()},
+	{"storagev1.StorageClass", reflect.TypeFor[storagev1.StorageClass]()},
+	{"storagev1.VolumeAttributesClass", reflect.TypeFor[storagev1.VolumeAttributesClass]()},
+	{"swv1beta1.ArtifactGeneratorSpec", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec]()},
+	{"volsyncv1alpha1.ReplicationDestinationSpec", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec]()},
+	{"volsyncv1alpha1.ReplicationSourceSpec", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec]()},
+})
+
+// namedType is a row of strictlyDecodedTypes: a type argument as the source
+// spells it, and the type.
+type namedType struct {
+	name string
+	typ  reflect.Type
+}
+
+// typesByName returns the rows by name. A name listed twice panics, where a
+// map literal's duplicate key would not compile.
+func typesByName(rows []namedType) map[string]reflect.Type {
+	byName := make(map[string]reflect.Type, len(rows))
+	for _, row := range rows {
+		if _, ok := byName[row.name]; ok {
+			panic("strictlyDecodedTypes lists " + row.name + " twice")
+		}
+		byName[row.name] = row.typ
+	}
+	return byName
+}
+
+// TestSharedKindTables_RowLocal holds the two shared kind tables gofmt would
+// otherwise align across rows, strictlyDecodedTypes in this file and
+// componentLabelFixtures in pkg/cmd/kurel, to a form in which adding or
+// removing a row changes that row's lines alone: here every row is a
+// positional {name, type} pair, which gofmt does not align. The kurel table's
+// half of the guard is TestComponentLabelFixtures_RowLocal there.
+func TestSharedKindTables_RowLocal(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "label_selector_internal_test.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse label_selector_internal_test.go: %v", err)
+	}
+	rows := sharedTableRows(t, file, "strictlyDecodedTypes")
+	for _, row := range rows {
+		lit, ok := row.(*ast.CompositeLit)
+		if !ok || len(lit.Elts) != 2 || slices.ContainsFunc(lit.Elts, func(e ast.Expr) bool { _, keyed := e.(*ast.KeyValueExpr); return keyed }) {
+			t.Errorf("strictlyDecodedTypes: the row at %s is not a positional {name, type} pair; gofmt aligns keyed rows, so a row added beside it rewrites its neighbours", fset.Position(row.Pos()))
+		}
+	}
+	if len(rows) != len(strictlyDecodedTypes) {
+		t.Errorf("strictlyDecodedTypes: the guard read %d rows, the table holds %d", len(rows), len(strictlyDecodedTypes))
+	}
+}
+
+// sharedTableRows returns the elements of the composite literal the package
+// variable name is declared with: the literal itself, or the one literal
+// argument of the call that builds it.
+func sharedTableRows(t *testing.T, file *ast.File, name string) []ast.Expr {
+	t.Helper()
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok || len(value.Names) != 1 || value.Names[0].Name != name || len(value.Values) != 1 {
+				continue
+			}
+			expr := value.Values[0]
+			if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 1 {
+				expr = call.Args[0]
+			}
+			if lit, ok := expr.(*ast.CompositeLit); ok {
+				return lit.Elts
+			}
+			t.Fatalf("%s is declared with %s, not a composite literal", name, types.ExprString(expr))
+		}
+	}
+	t.Fatalf("no package variable %s", name)
+	return nil
 }
 
 // strictDecodeSites reads the package's source, test files apart, and returns
