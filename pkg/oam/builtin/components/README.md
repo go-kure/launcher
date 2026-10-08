@@ -3871,17 +3871,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Alertmanager splits it on `,` and exits on an element that is not a feature
     flag of its version (`featurecontrol/featurecontrol.go:135-180`,
     `cmd/alertmanager/main.go:104-108` at v0.34.0). So an element with a `,`
-    in it is two, an empty element is refused (`["classic-mode", ""]`), while
-    a list of one empty element is no feature, and `classic-mode` with
-    `utf8-strict-mode` is refused. The names, by minor: `classic-mode`,
-    `receiver-name-in-metrics` and `utf8-strict-mode` from 0.27;
+    in it is two, an empty element is refused (`["classic-mode", ""]`), and
+    `classic-mode` with `utf8-strict-mode` is refused. A list of one empty
+    element is refused at any version: the operator writes its empty value as
+    `--enable-feature` alone (`pkg/operator/argument.go:69-75` at v0.94.1),
+    which Alertmanager's flag parser refuses (kingpin v2.4.0
+    `flags.go:126-130`) before it exits; leave `enableFeatures` unset for no
+    feature. The names, by minor: `classic-mode`, `receiver-name-in-metrics`
+    and `utf8-strict-mode` from 0.27;
     `auto-gomaxprocs` and `auto-gomemlimit` from 0.28; `alert-names-in-metrics`
     from 0.31; `event-recorder` and `group-key-in-metrics` from 0.33, which
     drops `auto-gomaxprocs` (`enableFeatures: not a feature flag of
     Alertmanager 0.33, at version v0.33.0: …; it takes alert-names-in-metrics,
     …`). A prerelease is judged at its minor. Above 0.34 the names are not
     known, and none is refused. `TestAlertmanagerFeatureFlags_MatchVendoredSource`
-    holds the names to `featurecontrol.go` of each minor's latest release,
+    holds the names, and `NewFlags` statement by statement, to
+    `featurecontrol.go` of each minor's latest release,
     vendored unmodified under `testdata/upstream/alertmanager` with the
     project's LICENSE, each release's NOTICE and a SOURCE file naming each
     file's git blob id; `mise run vendor-alertmanager-features 0.27 0.34`
