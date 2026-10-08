@@ -255,12 +255,14 @@ func TestAlertmanagerVersionGates_Refused(t *testing.T) {
 	}
 	fixtures := alertmanagerGateFixtures()
 	for _, g := range alertmanagerVersionGates {
+		// Taken here, not in the subtest, so the leftover check below holds
+		// whichever subtests -run selects.
+		props, ok := fixtures[g.path]
+		delete(fixtures, g.path)
 		t.Run(g.path, func(t *testing.T) {
-			props, ok := fixtures[g.path]
 			if !ok {
 				t.Fatalf("no fixture authors %s", g.path)
 			}
-			delete(fixtures, g.path)
 			minimum := semver.MustParse(g.minimum)
 			if minimum.Major != 0 || minimum.Patch != 0 || minimum.Minor <= 15 {
 				t.Fatalf("minimum %s: the case takes the minor version under it, which must be a supported one", g.minimum)
