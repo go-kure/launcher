@@ -1,0 +1,12 @@
+# Excerpt of prometheus-operator/prometheus-operator, copied unmodified by scripts/vendor-prometheus-operator-gates.sh.
+# Licensed under the Apache License, Version 2.0 (each file carries its header);
+# LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag.
+# The components tests check each file against its git blob id below.
+tag v0.94.1
+tag-object eb84171b4e460327bef8ab3c88996408e084dac1
+licence LICENSE 74e6ec6963979ae506d5a6b1d59adb7f3bdaf045
+notice NOTICE e520005cdda30b725b5534ce120ee905fd40b55a
+file pkg/alertmanager/statefulset.go 2fb9bed3fc1f1ca90ab424bf67d2ed601a3aff4f
+file pkg/alertmanager/amcfg.go 4414ca0c9f6824ae0b6c4bfcf743a27eaeeca079
+file pkg/alertmanager/operator.go c1948d6106bba7ddae97e5084ecde59b15710b87
+file pkg/operator/defaults.go e0a4d715bd29b7467658f3a9cff464c507501a87
