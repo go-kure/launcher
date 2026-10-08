@@ -8350,9 +8350,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   by the same rule, `-<component>` kept whole (for a component name over 52 characters the
   whole name is shortened instead), and `AugmentLayout` sets it on the layout
   (`KustomizationName`), whatever the number of hook groups; where it fits, the layout is left
-  to kure's default and nothing changes. The `layoutKustomizationName` property, or the
-  `Naming` hook's answer for the `layout` role, sets another name, a DNS-1123 subdomain of at
-  most 63 characters used as written and never shortened; any other fails the transform,
+  to kure's default and nothing changes. That rule is launcher's, never kure's: the rule kure
+  applies to its own over-63 default from go-kure/kure#1030 on gives another name for the
+  same input, and never reaches a name launcher set (`pkg/oam/README.md`, "Pipeline").
+  The `layoutKustomizationName` property, or the `Naming` hook's answer for the `layout`
+  role, sets another name, a DNS-1123 subdomain of at most 63 characters used as written and
+  never shortened; any other fails the transform,
   naming the component and the role. It is read under per-layout placement only. A
   `HelmTemplateConfig` built directly sets `LayoutKustomizationName`; `AugmentLayout` never
   overwrites a `KustomizationName` the layout already carries. `GenerateCoversAugmentLayout` is always true —
