@@ -135,7 +135,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
-		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. The host is judged an IP address in full only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port, a numeric port and a host of the characters an IP address has (hex digits, '.' and ':') are held: a host name such as alerts.example.com is still refused there. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them."),
+		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. The host is judged an IP address in full only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port, a numeric port and a host of the characters an IP address has (hex digits, '.' and ':') are held: a host name such as alerts.example.com is still refused there. The port is read as on a 32-bit image, so one above 2147483647 is refused. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them."),
 		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
@@ -723,9 +723,11 @@ func alertmanagerClusterRuns(spec *monitoringv1.AlertmanagerSpec) bool {
 // (net_transport.go:140-147 at memberlist v0.6.0, cluster/tls_transport.go:142-149
 // at v0.34.0); any failure fails the cluster's creation, and Alertmanager
 // exits (app/app.go:214-234 at v0.34.0). Every minor version from v0.15.0 to
-// v0.34.0 reads it so. A port Atoi takes but no socket has, such as 99999, is
-// not refused: memberlist truncates it and starts. An empty host, as in :9094,
-// is not refused either: Alertmanager then works the address out itself. The
+// v0.34.0 reads it so. The port is read as Atoi reads it on a 32-bit image,
+// so one above 2147483647 is refused at any int size here. A port Atoi takes
+// but no socket has, such as 99999, is not refused: memberlist truncates it
+// and starts. An empty host, as in :9094, is not refused either: Alertmanager
+// then works the address out itself. The
 // host is held to net.ParseIP only where Alertmanager is built with the Go
 // whose net.ParseIP this is (alertmanagerParsesIPAsGo123); at any version, one
 // with a character no IP address has, as a host name, is refused
@@ -745,7 +747,9 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 	}
 	host, port, err := net.SplitHostPort(value)
 	if err == nil {
-		_, err = strconv.Atoi(port)
+		// Atoi at 32 bits, as on the armv7 image (Makefile:15 DOCKER_ARCHS at
+		// v0.34.0), whatever the int size here.
+		_, err = strconv.ParseInt(port, 10, 32)
 	}
 	if err != nil || (host != "" && (!ipAddressCharacters(host) || (alertmanagerParsesIPAsGo123(spec) && net.ParseIP(host) == nil))) {
 		return errors.New("clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset")
@@ -764,6 +768,7 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 // Services' variables add names it does not see, so any reference counts.
 func kubeletArgument(value string) (string, bool) {
 	var b strings.Builder
+	lastClose := strings.LastIndexByte(value, ')')
 	for i := 0; i < len(value); i++ {
 		if value[i] != '$' || i+1 == len(value) {
 			b.WriteByte(value[i])
@@ -774,7 +779,7 @@ func kubeletArgument(value string) (string, bool) {
 		case '$':
 			b.WriteByte('$')
 		case '(':
-			if strings.IndexByte(value[i+1:], ')') >= 0 {
+			if lastClose > i {
 				return "", true
 			}
 			b.WriteString("$(")

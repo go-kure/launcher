@@ -3998,7 +3998,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   any Go and is refused at every version; one of those characters only, as
   `cafe.dead`, is not refused before v0.28.0. An empty host, as in `:9094`, is
   not refused: Alertmanager then works the address out itself; nor is a port
-  number no socket has, which memberlist truncates. The value is read as the
+  number no socket has, which memberlist truncates. The port is read as
+  `strconv.Atoi` reads it on a 32-bit image (the armv7 one), so one above
+  2147483647 is refused whatever the architecture. The value is read as the
   kubelet passes it, which reads `$$` as `$` and leaves `$(` without its
   closing parenthesis as written; one that refers to an environment variable,
   as `[$(POD_IP)]:9094`, is not refused, since the kubelet expands it to a
