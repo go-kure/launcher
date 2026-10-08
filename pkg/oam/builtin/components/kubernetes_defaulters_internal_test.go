@@ -538,7 +538,8 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			w.call(fn, call.Args, f)
 			return false
 		}
-		if id, ok := call.Fun.(*ast.Ident); ok {
+		fun := ast.Unparen(call.Fun)
+		if id, ok := fun.(*ast.Ident); ok {
 			w.fail(call.Pos(), "a call to %s, which the excerpt does not hold", id.Name)
 		}
 		for _, a := range call.Args {
@@ -547,7 +548,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			}
 		}
 		// A method called on the object can change it as an argument can.
-		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if sel, ok := fun.(*ast.SelectorExpr); ok {
 			if _, ok := f.resolve(sel.X); ok {
 				w.fail(call.Pos(), "%s calls a method on the object, which the walk does not follow", f.render(call))
 			}
@@ -749,7 +750,7 @@ func (f *walkFrame) write(lhs, rhs ast.Expr) {
 // callee is the function of the excerpt call calls, or nil for a method, a
 // builtin, a conversion or a function of a package the excerpt does not hold.
 func (f *walkFrame) callee(call *ast.CallExpr) *vendoredFunc {
-	switch fun := call.Fun.(type) {
+	switch fun := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
 		return f.fn.pkg.funcs[fun.Name]
 	case *ast.SelectorExpr:
