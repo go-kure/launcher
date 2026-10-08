@@ -446,14 +446,16 @@ var requiredWrittenKinds = []pinKind{
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), false),
 		base:   map[string]any{"groups": []any{map[string]any{"name": "g", "rules": []any{map[string]any{"alert": "Down", "expr": "up == 0"}}}}}},
 	// A listed container named for none the operator generates must name an
-	// image, so the controls of the fields under one fill it into this entry.
+	// image, so the controls of the fields under one fill it into this entry;
+	// the two entries' names differ, as the API requires of a pod's init
+	// containers and containers (refuseSharedContainerNames).
 	// The storage arm in use must claim storage, and an ephemeral one name its
 	// access modes (validateAlertmanagerStorage), so both arms carry them.
 	{component: "alertmanager", handler: &AlertmanagerHandler{}, typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.AlertmanagerSpec](), false),
 		base: map[string]any{
 			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
-			"initContainers": []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
+			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
 			"storage":        amClaimingStorage(),
 		}},
 	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),

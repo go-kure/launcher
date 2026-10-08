@@ -77,6 +77,9 @@ type monitoringWorkload struct {
 	// kind must set it: where it is nil, every listed entry without an image
 	// is refused, a patch of the operator's own containers included.
 	generated map[string][]string
+	// generatedPorts are the ports the operator gives the containers it
+	// generates, by container name, each port's number by its name.
+	generatedPorts map[string]map[string]int32
 	// images are the full image references the spec names outside pod. An
 	// empty value names no image and is not listed.
 	images []fieldValue
@@ -116,8 +119,12 @@ type monitoringWorkload struct {
 // (validateCnpgResources). A name listed twice in one list is refused: the
 // operator keeps the last entry of a name only, so an earlier one would be
 // held and not run (MergePatchContainers, pkg/k8s/merge.go at
-// prometheus-operator v0.94.1). A listed container named for one the operator
-// generates is merged into it, so such a patch may name no image; any other
+// prometheus-operator v0.94.1). A name shared by an init container and a
+// container of the pods is refused (refuseSharedContainerNames). A listed
+// container named for one the operator generates is merged into it, its ports
+// by number, so a port of the patch named as one of that container's
+// (generatedPorts) at another number is added beside it, and is refused, since
+// the API refuses two ports of one name; such a patch may name no image; any other
 // listed container is added to the pods as written, and one that names no
 // image is refused, since no pod runs it. An image volume that names no image
 // is not checked. The blocks of resources are checked as the operator runs
@@ -152,6 +159,11 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
+			for j, p := range c.Ports {
+				if number, ok := w.generatedPorts[c.Name][p.Name]; ok && slices.Contains(w.generated[list.name], c.Name) && p.ContainerPort != number {
+					return errors.Errorf("%s: ports[%d] %q: the Prometheus operator gives the container a port of that name at %d, and adds this one at %d beside it, and the API refuses a container with two ports of one name; name the port otherwise, or give it number %d", where, j, p.Name, number, p.ContainerPort, number)
+				}
+			}
 			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
 				continue
 			}
@@ -162,6 +174,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 				return err
 			}
 		}
+	}
+	if err := refuseSharedContainerNames(w); err != nil {
+		return err
 	}
 	if err := validateImageVolumeRefs("", &w.pod); err != nil {
 		return err
@@ -186,6 +201,35 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 		}
 		if err := validateResourcesAt(r.path, block); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// refuseSharedContainerNames refuses a name shared by an init container and a
+// container of the pods: the API requires the names of both lists to be unique
+// together. The pods' init containers are the ones the operator generates and
+// the listed initContainers, and their containers likewise; a listed entry of
+// a generated container's name in its own list is a patch of it, and adds no
+// name.
+func refuseSharedContainerNames(w monitoringWorkload) error {
+	for i, c := range w.pod.InitContainers {
+		if slices.Contains(w.generated["containers"], c.Name) {
+			return errors.Errorf("initContainers[%d] %q: the name is that of a container the Prometheus operator generates, and the API refuses a pod whose init containers and containers share a name; name the init container otherwise", i, c.Name)
+		}
+	}
+	initNames := map[string]string{}
+	for _, name := range w.generated["initContainers"] {
+		initNames[name] = "the init container the Prometheus operator generates"
+	}
+	for i, c := range w.pod.InitContainers {
+		if _, ok := initNames[c.Name]; !ok {
+			initNames[c.Name] = fmt.Sprintf("initContainers[%d]", i)
+		}
+	}
+	for i, c := range w.pod.Containers {
+		if what, ok := initNames[c.Name]; ok {
+			return errors.Errorf("containers[%d] %q: the name is also that of %s, and the API refuses a pod whose init containers and containers share a name; name the container otherwise", i, c.Name, what)
 		}
 	}
 	return nil

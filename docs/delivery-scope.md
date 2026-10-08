@@ -1761,7 +1761,13 @@ and by scope, whatever component or trait emits it.
     `secrets` or of `configMaps` the operator gives one volume name, or one whose volume
     name the operator cuts to 63 characters after a `-`; an entry of
     `volumeMounts` at a path the operator mounts at in the alertmanager container (not
-    the TLS credentials' mounts); a negative request or limit; and a name whose data
+    the TLS credentials' mounts); an entry of `additionalArgs` naming, or negating with
+    `no-`, a flag the operator generates for the spec, on which it fails to build the
+    pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
+    loads only the first; a name shared by an init container and a container of the
+    pods, generated or listed; a port of a patch named as one the operator gives that
+    container, at another number, which the merge adds beside it; a negative request or
+    limit; and a name whose data
     volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot,
     at most 47 characters with the defaults) are each refused. The line: what the CRD's
     own schema refuses when the Alertmanager is applied is left to the API, as it shows

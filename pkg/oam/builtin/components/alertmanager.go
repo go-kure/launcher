@@ -127,9 +127,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. A patch's port named as one the operator gives that container (the web port under portName, mesh-tcp, mesh-udp, reloader-web) at another number is refused: it is added beside it. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there, and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (alertmanager, config-reloader or a listed one), a patch's port as there (reloader-init), and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
@@ -152,11 +152,11 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"web":                          object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout." + decoded + "AlertmanagerWebSpec in its API reference."),
 		"limits":                       object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Requires Alertmanager v0.28.0 or later." + decoded + "AlertmanagerLimitsSpec in its API reference."),
 		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Requires Alertmanager v0.24.0 or later." + decoded + "ClusterTLSConfig in its API reference."),
-		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
+		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
 		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Requires Alertmanager v0.27.0 or later.",
 			"The name of one feature flag."),
-		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. Launcher does not read them: an argument can change what the fields above configure.",
+		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec, or its negation with no-, is refused: the operator then fails to build the pods. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop. Unset, the operator's default of 120. At least 0."),
 		"hostUsers":                     flag("hostUsers: false runs the pods in a user namespace of their own, not the host's."),
@@ -284,6 +284,12 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		return err
 	}
 	if err := refuseGeneratedAlertmanagerMounts(spec); err != nil {
+		return err
+	}
+	if err := refuseGeneratedAlertmanagerArgs(spec); err != nil {
+		return err
+	}
+	if err := refuseDuplicateAlertmanagerTemplateKeys(spec); err != nil {
 		return err
 	}
 	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
@@ -614,6 +620,134 @@ var alertmanagerGenerated = map[string][]string{
 	"initContainers": {"init-config-reloader"},
 }
 
+// alertmanagerGeneratedPorts are the ports the operator gives the containers
+// it generates: unless listenLocal is set, the alertmanager container's web
+// port under portName (web where it is unset) at 9093 and the config-reloader
+// container's reloader-web at 8080; whatever listenLocal says, the
+// alertmanager container's mesh-tcp and mesh-udp at 9094, and the
+// init-config-reloader container's reloader-init at 8081
+// (pkg/alertmanager/statefulset.go:483-502 and :793-830, and CreateConfigReloader,
+// pkg/operator/config_reloader.go:228-282 at prometheus-operator v0.94.1).
+func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string]map[string]int32 {
+	ports := map[string]map[string]int32{
+		"alertmanager":         {"mesh-tcp": 9094, "mesh-udp": 9094},
+		"config-reloader":      {},
+		"init-config-reloader": {"reloader-init": 8081},
+	}
+	if !spec.ListenLocal {
+		web := spec.PortName
+		if web == "" {
+			web = "web"
+		}
+		ports["alertmanager"][web] = 9093
+		ports["config-reloader"]["reloader-web"] = 8080
+	}
+	return ports
+}
+
+// refuseGeneratedAlertmanagerArgs refuses an entry of additionalArgs that
+// names a flag the operator generates for the spec: it fails to build the pods
+// where an additional argument's name, or that name with no- added or taken
+// away, is the name of one (BuildArgs and ArgumentsIntersection,
+// pkg/operator/argument.go:26-79 at prometheus-operator v0.94.1). The flags
+// are those of makeStatefulSetSpec (pkg/alertmanager/statefulset.go:289-508,
+// :700-748). A flag the operator generates only from some Alertmanager
+// version on is reserved whatever version names, as the mounts of
+// refuseGeneratedAlertmanagerMounts are. dispatch.start-delay is not: the
+// operator leaves it out where an additional argument names it.
+func refuseGeneratedAlertmanagerArgs(spec *monitoringv1.AlertmanagerSpec) error {
+	generated := map[string]bool{}
+	for _, name := range []string{"config.file", "storage.path", "data.retention", "web.listen-address", "web.route-prefix", "cluster.reconnect-timeout", "cluster.peer-name", "cluster.label", "web.config.file"} {
+		generated[name] = true
+	}
+	replicas := int32(alertmanagerOperatorReplicas)
+	if spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	if replicas == 1 && !spec.ForceEnableClusterMode {
+		generated["cluster.listen-address="] = true
+	} else {
+		generated["cluster.listen-address"] = true
+	}
+	web, limits := spec.Web, spec.Limits
+	for name, set := range map[string]bool{
+		"cluster.peer":                   replicas > 0 || len(spec.AdditionalPeers) > 0,
+		"web.external-url":               spec.ExternalURL != "",
+		"enable-feature":                 len(spec.EnableFeatures) > 0,
+		"web.get-concurrency":            web != nil && web.GetConcurrency != nil,
+		"web.timeout":                    web != nil && web.Timeout != nil,
+		"silences.max-silences":          limits != nil && limits.MaxSilences != nil,
+		"silences.max-per-silence-bytes": limits != nil && !limits.MaxPerSilenceBytes.IsEmpty(),
+		"log.level":                      spec.LogLevel != "" && spec.LogLevel != "info",
+		"log.format":                     spec.LogFormat != "" && spec.LogFormat != "logfmt",
+		"cluster.advertise-address":      spec.ClusterAdvertiseAddress != "",
+		"cluster.gossip-interval":        spec.ClusterGossipInterval != "",
+		"cluster.pushpull-interval":      spec.ClusterPushpullInterval != "",
+		"cluster.peer-timeout":           spec.ClusterPeerTimeout != "",
+		"cluster.tls-config":             spec.ClusterTLS != nil,
+	} {
+		if set {
+			generated[name] = true
+		}
+	}
+	for i, arg := range spec.AdditionalArgs {
+		negated, found := strings.CutPrefix(arg.Name, "no-")
+		if !found {
+			negated = "no-" + arg.Name
+		}
+		for _, name := range []string{arg.Name, negated} {
+			if generated[name] {
+				return errors.Errorf("additionalArgs[%d] %q: the Prometheus operator generates the flag %q for this spec, and fails to build the pods where an additional argument names it; set the field that configures it, or leave the argument out", i, arg.Name, name)
+			}
+		}
+	}
+	return nil
+}
+
+// refuseDuplicateAlertmanagerTemplateKeys refuses an entry of
+// alertmanagerConfiguration.templates whose key an earlier entry names: the
+// operator projects each key into one volume at the path of its name and
+// skips a later entry of a key it has projected, configMap or secret
+// (pkg/alertmanager/statefulset.go:575-620 at prometheus-operator v0.94.1), so
+// that template would not be loaded.
+func refuseDuplicateAlertmanagerTemplateKeys(spec *monitoringv1.AlertmanagerSpec) error {
+	c := spec.AlertmanagerConfiguration
+	if c == nil {
+		return nil
+	}
+	first := map[string]string{}
+	for i, t := range c.Templates {
+		for _, source := range []struct {
+			field string
+			key   *string
+		}{{"configMap", configMapKey(t.ConfigMap)}, {"secret", secretKey(t.Secret)}} {
+			if source.key == nil {
+				continue
+			}
+			where := fmt.Sprintf("alertmanagerConfiguration.templates[%d].%s.key", i, source.field)
+			if earlier, seen := first[*source.key]; seen {
+				return errors.Errorf("%s: %q is the key %s names already, and the Prometheus operator skips a template whose key it has already loaded; give each template a key of its own", where, *source.key, earlier)
+			}
+			first[*source.key] = where
+		}
+	}
+	return nil
+}
+
+func configMapKey(s *corev1.ConfigMapKeySelector) *string {
+	if s == nil {
+		return nil
+	}
+	return &s.Key
+}
+
+func secretKey(s *corev1.SecretKeySelector) *string {
+	if s == nil {
+		return nil
+	}
+	return &s.Key
+}
+
 // alertmanagerWorkload maps an Alertmanager spec into the workload the two
 // shared functions read. It only reads spec.
 //
@@ -657,6 +791,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 			HostNetwork:     spec.HostNetwork,
 		},
 		generated:      alertmanagerGenerated,
+		generatedPorts: alertmanagerGeneratedPorts(spec),
 		replicas:       &replicas,
 		replicasPath:   "replicas",
 		storage:        spec.Storage,
