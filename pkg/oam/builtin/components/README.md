@@ -3898,16 +3898,29 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   requires the two lists' names to be unique together
   (`containers[0] "init-config-reloader": the name is also that of the init
   container the Prometheus operator generates, …`). A patch's ports are
-  merged into the generated container's by number, so a port of the patch
-  named as one the operator gives that container, at another number, is
-  added beside it and refused, as the API refuses two ports of one name,
-  unless the same patch has a port at the generated port's number, which
-  renames that one
-  (`containers[0] "alertmanager": ports[0] "web": the Prometheus operator
-  gives the container a port of that name at 9093, …`): the web port under
-  `portName` at 9093 and the config-reloader's `reloader-web` at 8080 unless
-  `listenLocal` is set, `mesh-tcp` and `mesh-udp` at 9094, and the
-  init-config-reloader's `reloader-init` at 8081. `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  merged into the ports the operator gives the generated container by
+  number, as a strategic merge does (`MergePatchContainers`, same source):
+  in the patch's order, each port is merged into the first port of its
+  number, the operator's or one an earlier port of the patch added, and
+  replaces the name and protocol it names; a port of a number no port has is
+  added. The operator's ports, in its order, are the web port under
+  `portName` at 9093/TCP and the config-reloader's `reloader-web` at
+  8080/TCP unless `listenLocal` is set, `mesh-tcp` at 9094/TCP then
+  `mesh-udp` at 9094/UDP, and the init-config-reloader's `reloader-init` at
+  8081/TCP. A container whose ports, merged so, or as a listed container
+  that is not a patch lists them, name two ports alike is refused, as the
+  API refuses two ports of one name (`containers[0] "alertmanager":
+  ports[1] "mesh-udp" at 9000/UDP: the Prometheus operator merges the
+  patch's ports into the container's by number, which leaves another port
+  of that name, the Prometheus operator's port at 9094/UDP, …`; a port at
+  9094 renames `mesh-tcp`, never `mesh-udp`). A patch may rename a
+  generated port and reuse its name, and a later port of the patch merges
+  into one an earlier port added. Two `volumes` of one name are refused,
+  as the API refuses the pods (`volumes[1] "scratch": the name is listed
+  already at volumes[0], …`), and so is a `serviceName` that is not a
+  DNS-1123 label, which no Service has: the operator fails the reconcile
+  where it finds no governing Service of the name (`serviceName: "Bad_Name"
+  is not a DNS-1123 label: …`). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as

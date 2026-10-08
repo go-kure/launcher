@@ -414,11 +414,41 @@ func alertmanagerRefusals(notA string) []struct {
 		// strategic merge), so a port of a generated name at another number
 		// is added beside the generated one.
 		{"a patched port of the web port's name at another number", container(map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}),
-			`containers[0] "alertmanager": ports[0] "web": the Prometheus operator gives the container a port of that name at 9093, and adds this one at 8080 beside it, and the API refuses a container with two ports of one name`},
+			`containers[0] "alertmanager": ports[0] "web" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9093/TCP, and the API refuses a container with two ports of one name`},
 		{"a patched port of the authored web port name", map[string]any{"portName": "http", "containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "http", "containerPort": 8080}}}}},
-			`containers[0] "alertmanager": ports[0] "http": the Prometheus operator gives the container a port of that name at 9093`},
+			`containers[0] "alertmanager": ports[0] "http" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9093/TCP`},
 		{"a patched port of the reloader's name", container(map[string]any{"name": "config-reloader", "ports": []any{map[string]any{"name": "reloader-web", "containerPort": 9000}}}),
-			`containers[0] "config-reloader": ports[0] "reloader-web": the Prometheus operator gives the container a port of that name at 8080`},
+			`containers[0] "config-reloader": ports[0] "reloader-web" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8080/TCP`},
+		{"a patched port of the init reloader's name", map[string]any{"initContainers": []any{map[string]any{"name": "init-config-reloader", "ports": []any{map[string]any{"name": "reloader-init", "containerPort": 9000}}}}},
+			`initContainers[0] "init-config-reloader": ports[0] "reloader-init" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8081/TCP`},
+		// A port at 9094 is merged into mesh-tcp, the first of that number,
+		// and renames it, so mesh-udp at 9094/UDP stays beside the patch's
+		// mesh-udp at 9000 (go-kure/launcher#947).
+		{"a patch that renames mesh-tcp and adds a port of the mesh's UDP name", container(map[string]any{"name": "alertmanager", "ports": []any{
+			map[string]any{"name": "gossip", "containerPort": 9094, "protocol": "TCP"},
+			map[string]any{"name": "mesh-udp", "containerPort": 9000, "protocol": "UDP"},
+		}}), `containers[0] "alertmanager": ports[1] "mesh-udp" at 9000/UDP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9094/UDP`},
+		// The patch renames the web port to a name the operator gives a port
+		// listed after it; the patch's port is named.
+		{"a patch that renames the web port to the mesh's UDP name", container(map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "mesh-udp", "containerPort": 9093}}}),
+			`containers[0] "alertmanager": ports[0] "mesh-udp" at 9093/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9094/UDP`},
+		{"two patched ports of one name", container(map[string]any{"name": "config-reloader", "ports": []any{
+			map[string]any{"name": "metrics", "containerPort": 9000},
+			map[string]any{"name": "metrics", "containerPort": 9001},
+		}}), `containers[0] "config-reloader": ports[1] "metrics" at 9001/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, ports[0] at 9000/TCP`},
+		// The operator adds a container it does not generate as listed.
+		{"a sidecar with two ports of one name", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{
+			map[string]any{"name": "http", "containerPort": 8080},
+			map[string]any{"name": "http", "containerPort": 8081},
+		}}), `containers[0] "proxy": ports[1] "http": the name is that of ports[0] already, and the API refuses a container with two ports of one name`},
+		{"two volumes of one name", map[string]any{"volumes": []any{
+			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
+			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
+		}}, `volumes[1] "scratch": the name is listed already at volumes[0], and the API refuses a pod with two volumes of one name`},
+		// The operator gets the governing Service by this name and fails the
+		// reconcile where there is none (pkg/k8s/network.go:135-140).
+		{"a serviceName that is not a DNS-1123 label", map[string]any{"serviceName": "Bad_Name"},
+			`serviceName: "Bad_Name" is not a DNS-1123 label`},
 		// The CRD's quantity pattern admits a sign; the API refuses the
 		// container the operator builds with it.
 		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
@@ -940,6 +970,16 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 			map[string]any{"name": "metrics", "containerPort": 8080},
 			map[string]any{"name": "reloader-web", "containerPort": 9000},
 		}}}},
+		// reloader-web at 9000 is added, and metrics at 9000 is merged into
+		// it, the first port of that number, and renames it
+		// (go-kure/launcher#947).
+		"a patch whose later port renames one it added": {"containers": []any{map[string]any{"name": "config-reloader", "ports": []any{
+			map[string]any{"name": "reloader-web", "containerPort": 9000, "protocol": "TCP"},
+			map[string]any{"name": "metrics", "containerPort": 9000, "protocol": "UDP"},
+		}}}},
+		// A port that names nothing keeps the name of the port it is merged
+		// into.
+		"a patched port without a name at the mesh's number": {"containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"containerPort": 9094}}}}},
 		// The operator generates cluster.peer-name from 0.30.0 and
 		// cluster.label from 0.26.0 on, and enable-feature only from 0.27.0;
 		// unversioned, the operator's default v0.34.0 generates each.

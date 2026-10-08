@@ -1771,9 +1771,10 @@ and by scope, whatever component or trait emits it.
     `no-`, a flag the operator generates for the spec, on which it fails to build the
     pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
     loads only the first; a name shared by an init container and a container of the
-    pods, generated or listed; a port of a patch named as one the operator gives that
-    container, at another number, which the merge adds beside it (unless the patch
-    renames the generated one by its number); a web or cluster TLS
+    pods, generated or listed; a container whose ports name two ports alike, a patch's
+    taken as merged into the operator's by number, as its strategic merge does
+    (go-kure/launcher#947); two `volumes` of one name; a `serviceName` that is not a
+    DNS-1123 label, which names no Service; a web or cluster TLS
     configuration the operator's own validation refuses; `dnsPolicy: None` without a
     nameserver, and a pod-level HostProcess without `hostNetwork`; a negative request or
     limit; and a name whose data
