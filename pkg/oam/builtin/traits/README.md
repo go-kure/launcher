@@ -5,10 +5,11 @@
 Package `traits` implements `oam.TraitHandler` for most built-in trait types, plus one
 `oam.TraitLoweringRule` (`expose`, see below). A trait decorates or augments a
 component — adding networking, security, storage, scaling, or operational behavior.
-Handlers are registered with the transformer in `pkg/cmd/kurel` via
+Handlers are listed by `TraitHandlers()` in `pkg/oam/builtin/registry` and registered
+with the transformer (in `pkg/cmd/kurel`, as by any consumer) via
 `RegisterBuiltinTrait(type, handler)`; each implements `CanHandle` + `Apply`. `expose`
-is registered separately, via `RegisterBuiltinTraitLowering` (`builtinTraitLoweringRules()`
-in `pkg/cmd/kurel`) — it lowers into a terminal `ingress` or `httproute` trait rather
+is registered separately, via `RegisterBuiltinTraitLowering` (`TraitLoweringRules()`
+in `pkg/oam/builtin/registry`) — it lowers into a terminal `ingress` or `httproute` trait rather
 than building a resource itself, so it is never also present in the dispatchable
 trait-handler map (a lowerable type and a dispatchable handler type are mutually
 exclusive by construction; see the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s

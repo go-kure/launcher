@@ -472,7 +472,7 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 
 | List | Where | Held in order by |
 |---|---|---|
-| `builtinComponentHandlers` | `pkg/cmd/kurel/build.go` | `TestKindLists_InOrder` (`pkg/cmd/kurel`) |
+| `ComponentHandlers` | `pkg/oam/builtin/registry/registry.go` | `TestKindLists_InOrder` (`pkg/cmd/kurel`) |
 | `validComponentTypes` | `pkg/oam/validate.go` | `TestKindLists_InOrder` |
 | `wantHandlers`, `componentLabelFixtures` | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder` |
 | `coreKindSchemas`, `apiSetKinds` | the tests of this package | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a registered type with no row and no reason in `kindListExceptions` |
@@ -505,7 +505,7 @@ before it is published:
 - `policyFreeTypes`, where two changes each add a row at the end;
 - two changes that add kinds at the same position of a list, with no existing entry between
   them (two more `cilium-*` kinds, say);
-- a map whose values `gofmt` aligns (`builtinComponentHandlers`, `validComponentTypes`,
+- a map whose values `gofmt` aligns (`ComponentHandlers`, `validComponentTypes`,
   `kindListExceptions`), when a new type is longer than every type the map holds: every
   entry is realigned, which conflicts with any other change to that map;
 - the "Kind inventory", where a new kind edits its row in place (`missing` to `kind`): two

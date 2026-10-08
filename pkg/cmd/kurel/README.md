@@ -30,8 +30,9 @@ containing `app.yaml` and optionally `kurel.yaml`) plus a platform `ClusterProfi
 Output goes to stdout by default, or to a directory with `--output`.
 
 All built-in component and trait handlers are registered automatically (via
-`builtinComponentHandlers()` / `builtinTraitHandlers()`, the shared registration
-source), alongside the built-in lowering rules: the trait-position ones
+`builtinComponentHandlers()` / `builtinTraitHandlers()`, which return the library's
+exported sets from `pkg/oam/builtin/registry`, unfiltered; `testdata/builtin-registries.txt`
+pins the set, `TestBuiltinRegistries_TypesUnchanged`), alongside the built-in lowering rules: the trait-position ones
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
 component-position ones (`builtinComponentLoweringRules()` — `worker`,

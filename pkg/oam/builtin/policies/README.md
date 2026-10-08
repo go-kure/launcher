@@ -10,8 +10,9 @@ tiers and dependency edges are two of the three declarations that order an appli
 components (the third is a lowering rule's own order, see `pkg/oam`), and the order decides
 how components are grouped into bundles and which bundle depends on which.
 
-Handlers are registered with the transformer in `pkg/cmd/kurel` via
-`RegisterPolicy(type, handler)`, from `builtinPolicyHandlers()`. A policy type with no
+Handlers are registered with the transformer (in `pkg/cmd/kurel`, as by any consumer) via
+`RegisterPolicy(type, handler)`, from `PolicyHandlers()` in `pkg/oam/builtin/registry`. A
+policy type with no
 registered handler fails the transform with `no handler for policy type "<type>" (policy
 "<name>")`. Every
 handler also implements `oam.PropertySchemaProvider` (`PropertySchema()`), with a

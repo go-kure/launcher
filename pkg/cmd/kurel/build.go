@@ -16,9 +16,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
-	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
-	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
+	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
 )
 
 // kurelDomain is the label/annotation domain the kurel CLI stamps into every transform.
@@ -266,188 +264,42 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 	return supplied, nil
 }
 
+// The five functions below are kurel's registration: newBuiltinTransformer and
+// the handler-schema tests read them. Each returns the library's exported set
+// (pkg/oam/builtin/registry), which holds every built-in launcher implements,
+// unfiltered: launcher has no handler for a type kurel leaves out. So
+// app-dependency, which orders one application after others while a
+// single-application build has nothing to order it against, keeps failing with
+// "no handler for policy type"; so do reconciliation and health-checks, and the
+// fluxcd-patches and fluxcd-postbuild traits: they configure delivery, which
+// kurel does not do (go-kure/launcher#781), and the error says so.
+
 // builtinComponentHandlers returns the built-in component handlers keyed by type.
-// It is the single source of truth for component registration, shared by
-// newBuiltinTransformer and the handler-schema parity test.
-//
-// The entries stand in the order of their type, as sort.Strings gives it; a
-// new type goes at its position (TestKindLists_InOrder).
 func builtinComponentHandlers() map[string]oam.ComponentHandler {
-	return map[string]oam.ComponentHandler{
-		"alertmanager":                    &components.AlertmanagerHandler{},
-		"artifactgenerator":               &components.ArtifactGeneratorHandler{},
-		"backendtlspolicy":                &components.BackendTLSPolicyHandler{},
-		"bucket":                          &components.BucketHandler{},
-		"certificate":                     &components.CertificateHandler{},
-		"cilium-bgpadvertisement":         &components.CiliumBGPAdvertisementHandler{},
-		"cilium-bgpclusterconfig":         &components.CiliumBGPClusterConfigHandler{},
-		"cilium-bgpnodeconfigoverride":    &components.CiliumBGPNodeConfigOverrideHandler{},
-		"cilium-bgppeerconfig":            &components.CiliumBGPPeerConfigHandler{},
-		"cilium-cidrgroup":                &components.CiliumCIDRGroupHandler{},
-		"cilium-clusterwidenetworkpolicy": &components.CiliumClusterwideNetworkPolicyHandler{},
-		"cilium-egressgatewaypolicy":      &components.CiliumEgressGatewayPolicyHandler{},
-		"cilium-loadbalancerippool":       &components.CiliumLoadBalancerIPPoolHandler{},
-		"cilium-localredirectpolicy":      &components.CiliumLocalRedirectPolicyHandler{},
-		"cilium-networkpolicy":            &components.CiliumNetworkPolicyHandler{},
-		"cilium-nodeconfig":               &components.CiliumNodeConfigHandler{},
-		"clusterexternalsecret":           &components.ClusterExternalSecretHandler{},
-		"clusterissuer":                   &components.ClusterIssuerHandler{},
-		"clusterrole":                     &components.ClusterRoleHandler{},
-		"clusterrolebinding":              &components.ClusterRoleBindingHandler{},
-		"clustersecretstore":              &components.ClusterSecretStoreHandler{},
-		"cnpg-backup":                     &components.CnpgBackupHandler{},
-		"cnpg-cluster":                    &components.CnpgClusterHandler{},
-		"cnpg-clusterimagecatalog":        &components.CnpgClusterImageCatalogHandler{},
-		"cnpg-database":                   &components.CnpgDatabaseHandler{},
-		"cnpg-databaserole":               &components.CnpgDatabaseRoleHandler{},
-		"cnpg-imagecatalog":               &components.CnpgImageCatalogHandler{},
-		"cnpg-objectstore":                &components.CnpgObjectStoreHandler{},
-		"cnpg-pooler":                     &components.CnpgPoolerHandler{},
-		"cnpg-publication":                &components.CnpgPublicationHandler{},
-		"cnpg-scheduledbackup":            &components.CnpgScheduledBackupHandler{},
-		"cnpg-subscription":               &components.CnpgSubscriptionHandler{},
-		"configmap":                       &components.ConfigMapHandler{},
-		"crd":                             &components.CRDHandler{},
-		"cronjob":                         &components.CronjobHandler{},
-		"csidriver":                       &components.CSIDriverHandler{},
-		"daemonset":                       &components.DaemonsetHandler{},
-		"deployment":                      &components.DeploymentHandler{},
-		"endpointslice":                   &components.EndpointSliceHandler{},
-		"externalsecret":                  &components.ExternalSecretHandler{},
-		"fluxcd-alert":                    &components.FluxcdAlertHandler{},
-		"fluxcd-kustomization":            &components.FluxcdKustomizationHandler{},
-		"fluxcd-provider":                 &components.FluxcdProviderHandler{},
-		"fluxcd-receiver":                 &components.FluxcdReceiverHandler{},
-		"gateway":                         &components.GatewayHandler{},
-		"gatewayclass":                    &components.GatewayClassHandler{},
-		"gitrepository":                   &components.GitRepositoryHandler{},
-		"grpcroute":                       &components.GRPCRouteHandler{},
-		"helmchart":                       &components.HelmChartHandler{},
-		"helmrelease":                     &components.HelmReleaseHandler{},
-		"helmrepository":                  &components.HelmRepositoryHandler{},
-		"helmtemplate":                    &components.HelmTemplateHandler{},
-		"horizontalpodautoscaler":         &components.HorizontalPodAutoscalerHandler{},
-		"httproute":                       &components.HTTPRouteHandler{},
-		"imagepolicy":                     &components.ImagePolicyHandler{},
-		"imagerepository":                 &components.ImageRepositoryHandler{},
-		"imageupdateautomation":           &components.ImageUpdateAutomationHandler{},
-		"ingress":                         &components.IngressHandler{},
-		"ingressclass":                    &components.IngressClassHandler{},
-		"issuer":                          &components.IssuerHandler{},
-		"job":                             &components.JobHandler{},
-		"limitrange":                      &components.LimitRangeHandler{},
-		"listenerset":                     &components.ListenerSetHandler{},
-		"manifests":                       &components.ManifestsHandler{},
-		"metallb-bfdprofile":              &components.MetalLBBFDProfileHandler{},
-		"metallb-bgpadvertisement":        &components.MetalLBBGPAdvertisementHandler{},
-		"metallb-bgppeer":                 &components.MetalLBBGPPeerHandler{},
-		"metallb-community":               &components.MetalLBCommunityHandler{},
-		"metallb-ipaddresspool":           &components.MetalLBIPAddressPoolHandler{},
-		"metallb-l2advertisement":         &components.MetalLBL2AdvertisementHandler{},
-		"namespace":                       &components.NamespaceHandler{},
-		"networkpolicy":                   &components.NetworkPolicyHandler{},
-		"ocirepository":                   &components.OCIRepositoryHandler{},
-		"passthrough":                     &components.PassthroughHandler{},
-		"persistentvolume":                &components.PersistentVolumeHandler{},
-		"persistentvolumeclaim":           &components.PersistentVolumeClaimHandler{},
-		"pod":                             &components.PodHandler{},
-		"poddisruptionbudget":             &components.PodDisruptionBudgetHandler{},
-		"podmonitor":                      &components.PodMonitorHandler{},
-		"podtemplate":                     &components.PodTemplateHandler{},
-		"priorityclass":                   &components.PriorityClassHandler{},
-		"prometheus-probe":                &components.PrometheusProbeHandler{},
-		"prometheusrule":                  &components.PrometheusRuleHandler{},
-		"referencegrant":                  &components.ReferenceGrantHandler{},
-		"replicaset":                      &components.ReplicaSetHandler{},
-		"replicationcontroller":           &components.ReplicationControllerHandler{},
-		"replicationdestination":          &components.ReplicationDestinationHandler{},
-		"replicationsource":               &components.ReplicationSourceHandler{},
-		"resourcequota":                   &components.ResourceQuotaHandler{},
-		"resourcesetinputprovider":        &components.ResourceSetInputProviderHandler{},
-		"role":                            &components.RoleHandler{},
-		"rolebinding":                     &components.RoleBindingHandler{},
-		"runtimeclass":                    &components.RuntimeClassHandler{},
-		"secret":                          &components.SecretHandler{},
-		"secretstore":                     &components.SecretStoreHandler{},
-		"service":                         &components.ServiceHandler{},
-		"serviceaccount":                  &components.ServiceAccountHandler{},
-		"servicecidr":                     &components.ServiceCIDRHandler{},
-		"servicemonitor":                  &components.ServiceMonitorHandler{},
-		"statefulset":                     &components.StatefulsetHandler{},
-		"storageclass":                    &components.StorageClassHandler{},
-		"tcproute":                        &components.TCPRouteHandler{},
-		"tlsroute":                        &components.TLSRouteHandler{},
-		"udproute":                        &components.UDPRouteHandler{},
-		"volumeattributesclass":           &components.VolumeAttributesClassHandler{},
-	}
+	return registry.ComponentHandlers()
 }
 
-// builtinTraitHandlers returns the built-in trait handlers keyed by type. It is
-// the single source of truth for trait registration, shared by
-// newBuiltinTransformer and the handler-schema parity test.
+// builtinTraitHandlers returns the built-in trait handlers keyed by type.
 func builtinTraitHandlers() map[string]oam.TraitHandler {
-	return map[string]oam.TraitHandler{
-		"ingress":              &traits.IngressHandler{},
-		"httproute":            &traits.HTTPRouteHandler{},
-		"certificate":          &traits.CertificateHandler{},
-		"scaler":               &traits.ScalerHandler{},
-		"pvc":                  &traits.PVCHandler{},
-		"external-secret":      &traits.ExternalSecretHandler{},
-		"configmap":            &traits.ConfigMapHandler{},
-		"secret":               &traits.SecretHandler{},
-		"networkpolicy":        &traits.NetworkPolicyHandler{},
-		"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
-		"volsync":              &traits.VolSyncHandler{},
-		"rbac":                 &traits.RBACHandler{},
-		"prune-protection":     &traits.PruneProtectionHandler{},
-		"force-replace":        &traits.ForceReplaceHandler{},
-		"security-context":     &traits.SecurityContextHandler{},
-		"topology-spread":      &traits.TopologySpreadHandler{},
-	}
+	return registry.TraitHandlers()
 }
 
 // builtinTraitLoweringRules returns the built-in trait-position lowering rules
-// (oam.TraitLoweringRule, D5) keyed by the trait type they claim. It is the single
-// source of truth for trait-lowering registration, shared by newBuiltinTransformer
-// and the handler-schema parity/description tests — mirroring
-// builtinComponentHandlers/builtinTraitHandlers above so a rule added here is
-// covered by those tests exactly like a dispatchable handler is.
+// (oam.TraitLoweringRule, D5) keyed by the trait type they claim.
 func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
-	return map[string]oam.TraitLoweringRule{
-		"expose": traits.ExposeRule{},
-	}
+	return registry.TraitLoweringRules()
 }
 
 // builtinComponentLoweringRules returns the built-in component-position lowering
-// rules (oam.ComponentLoweringRule, D1) keyed by the component type they claim. It
-// is the single source of truth for component-lowering registration, shared by
-// newBuiltinTransformer and the handler-schema parity/description tests —
-// mirroring builtinTraitLoweringRules above so a rule added here is covered by
-// those tests exactly like a dispatchable handler is.
+// rules (oam.ComponentLoweringRule, D1) keyed by the component type they claim.
 func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
-	return map[string]oam.ComponentLoweringRule{
-		"webservice": components.WebserviceRule{},
-		"worker":     components.WorkerRule{},
-		"helm":       components.HelmRule{},
-		"postgresql": components.PostgresqlRule{},
-		"oci":        components.OCIRule{},
-	}
+	return registry.ComponentLoweringRules()
 }
 
 // builtinPolicyHandlers returns the built-in application policy handlers keyed
-// by policy type. It is the single source of truth for policy registration,
-// shared by newBuiltinTransformer and the handler-schema tests. app-dependency
-// is deliberately absent: it orders one application after others, and a
-// single-application build has nothing to order it against, so registering it
-// would accept the policy and silently drop it. It keeps failing with "no
-// handler for policy type" instead. So do reconciliation and health-checks, and
-// the fluxcd-patches and fluxcd-postbuild traits: they configure delivery, which
-// kurel does not do (go-kure/launcher#781), and the error says so.
+// by policy type.
 func builtinPolicyHandlers() map[string]oam.PolicyHandler {
-	return map[string]oam.PolicyHandler{
-		"dependency": &policies.DependencyHandler{},
-		"placement":  &policies.PlacementHandler{},
-	}
+	return registry.PolicyHandlers()
 }
 
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
