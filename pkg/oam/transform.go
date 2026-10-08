@@ -55,21 +55,23 @@ type TransformContext struct {
 	// template, spec.podMetadata of the Prometheus operator's kinds, the
 	// moverPodLabels of a VolSync mover, the pod template of a cert-manager
 	// issuer's HTTP01 solvers, a Gateway's spec.infrastructure). A workload
-	// whose selector requires another value for the key is refused too. Where the
+	// whose selector requires another value for the key is refused too, and so is
+	// one whose selector rules the label out of a pod template that carries no
+	// value for it (DoesNotExist on the key, NotIn with the component's value):
+	// its pods could carry no component label, so no synthesized policy would
+	// select them. A workload selector the check cannot read fails generation, as
+	// an error that is no *ComponentLabelError. Where the
 	// key is absent launcher writes it, on the object and its pod template. One
 	// value besides the component's passes, under the key "app" only: the one the
 	// kinds write for an entry a lowering rule emitted under a name of its own,
-	// whose pods then carry that entry's value and are not selected by the
-	// component's policies. Under that key the transform refuses a document in
+	// whose pods then carry that entry's value; that entry's synthesized policies
+	// select it beside the component's. Under that key the transform refuses a document in
 	// which such an entry's value is another component's. Each of these refusals,
 	// and the one of a kind component's `labels` property that holds another
 	// value under the key, is a *ComponentLabelError and answers to
 	// ErrComponentLabelValue.
 	//
-	// A workload whose own selector rules the
-	// label out (DoesNotExist on the key, NotIn with the component's value) keeps its pod
-	// template as written: its pods carry no component label, and a synthesized policy
-	// does not select them. A HelmRelease's post-renderer overwrites instead: with a
+	// A HelmRelease's post-renderer is not checked; it overwrites: with a
 	// ComponentLabelKey that a Flux-installed chart's own selectors use ("app",
 	// "app.kubernetes.io/name"), the post-renderer replaces the value the chart set under
 	// it. Where a chart's selector does not accept the component's value, that parts the
