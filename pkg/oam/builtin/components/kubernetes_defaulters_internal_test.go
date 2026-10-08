@@ -45,12 +45,13 @@ type vendoredK8s struct {
 	pkgs map[string]*vendoredPkg
 }
 
-// vendoredPkg is one package of the excerpt: its functions and its
-// package-level vars and consts.
+// vendoredPkg is one package of the excerpt: its functions, its
+// package-level vars and consts, and every name it declares at package level.
 type vendoredPkg struct {
 	path   string
 	funcs  map[string]*vendoredFunc
 	values map[string]*vendoredValue
+	names  map[string]bool
 }
 
 // vendoredFunc is a function of the excerpt with the file that declares it,
@@ -135,7 +136,7 @@ func loadVendoredK8s(t *testing.T) *vendoredK8s {
 			pkgPath := "k8s.io/kubernetes/" + path.Dir(rel)
 			pkg := src.pkgs[pkgPath]
 			if pkg == nil {
-				pkg = &vendoredPkg{path: pkgPath, funcs: map[string]*vendoredFunc{}, values: map[string]*vendoredValue{}}
+				pkg = &vendoredPkg{path: pkgPath, funcs: map[string]*vendoredFunc{}, values: map[string]*vendoredValue{}, names: map[string]bool{}}
 				src.pkgs[pkgPath] = pkg
 			}
 			for _, decl := range file.Decls {
@@ -143,14 +144,19 @@ func loadVendoredK8s(t *testing.T) *vendoredK8s {
 				case *ast.FuncDecl:
 					if d.Recv == nil {
 						pkg.funcs[d.Name.Name] = &vendoredFunc{decl: d, file: file, pkg: pkg}
+						pkg.names[d.Name.Name] = true
 					}
 				case *ast.GenDecl:
 					for _, spec := range d.Specs {
+						if ts, ok := spec.(*ast.TypeSpec); ok {
+							pkg.names[ts.Name.Name] = true
+						}
 						vs, ok := spec.(*ast.ValueSpec)
 						if !ok {
 							continue
 						}
 						for i, name := range vs.Names {
+							pkg.names[name.Name] = true
 							v := &vendoredValue{file: file, pkg: pkg}
 							if i < len(vs.Values) {
 								v.expr = vs.Values[i]
@@ -336,7 +342,11 @@ type walkFrame struct {
 	// ranges are the index variables of ranges over a list of the object,
 	// with the list's path.
 	ranges map[string]string
-	conds  []string
+	// elems are the value variables of ranges, as what they range over: the
+	// element type of a list of the object, else the list's text. A method
+	// is listed by its receiver's identity, which these give.
+	elems map[string]string
+	conds []string
 }
 
 func (w *defaulterWalk) fail(pos token.Pos, format string, args ...any) {
@@ -351,7 +361,7 @@ func (w *defaulterWalk) call(fn *vendoredFunc, args []ast.Expr, caller *walkFram
 	if w.depth > 30 {
 		w.fail(fn.decl.Pos(), "the call depth passes 30: a recursion the walk does not follow")
 	}
-	f := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, conds: caller.conds}
+	f := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, elems: map[string]string{}, conds: caller.conds}
 	i := 0
 	for _, field := range fn.decl.Type.Params.List {
 		for _, name := range field.Names {
@@ -378,7 +388,7 @@ func (s *vendoredK8s) podSpecWrites(t *testing.T, pkgPath, name string, typ refl
 	fn := s.fn(t, pkgPath, name)
 	w := &defaulterWalk{t: t, src: s, prefix: prefix}
 	param := fn.decl.Type.Params.List[0].Names[0].Name
-	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}}
+	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, elems: map[string]string{}}
 	top.stmts(fn.decl.Body.List)
 	out := map[string][]specWrite{}
 	for _, wr := range w.writes {
@@ -513,6 +523,12 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		if v, ok := x.Value.(*ast.Ident); ok && v.Name != "_" {
 			f.bindLocal(v.Name, v.Name)
 			f.copies[v.Name] = true
+			f.elems[v.Name] = "an element of " + f.render(x.X)
+			if pv, ok := f.resolve(x.X); ok {
+				if t := derefType(pv.typ); t.Kind() == reflect.Map || t.Kind() == reflect.Slice {
+					f.elems[v.Name] = "a " + t.Elem().PkgPath() + "." + t.Elem().Name()
+				}
+			}
 		}
 		f.stmts(x.Body.List)
 	case *ast.DeclStmt:
@@ -525,6 +541,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			if !ok {
 				w.fail(spec.Pos(), "a %T the walk does not follow", spec)
 			}
+			f.checkType(vs.Type)
 			for i, name := range vs.Names {
 				if i < len(vs.Values) {
 					f.check(vs.Values[i])
@@ -659,6 +676,7 @@ func (f *walkFrame) bindValue(name string, value ast.Expr) {
 		delete(f.locals, name)
 		delete(f.copies, name)
 		delete(f.ranges, name)
+		delete(f.elems, name)
 		return
 	}
 	_, isCopy := f.resolve(value)
@@ -672,6 +690,7 @@ func (f *walkFrame) bindLocal(name, text string) {
 	delete(f.vars, name)
 	delete(f.copies, name)
 	delete(f.ranges, name)
+	delete(f.elems, name)
 	f.locals[name] = text
 }
 
@@ -799,9 +818,12 @@ func (f *walkFrame) callee(call *ast.CallExpr) *vendoredFunc {
 
 // walkCalls are the calls the walk accepts, other than to a function of the
 // excerpt, keyed by callKey, and walkUnary the unary operators: those the
-// excerpt at the vendored tag uses, none of which changes the object. The walk
-// is closed: any other call, operator or kind of expression fails it, so a
-// re-vendoring that brings one fails until it is understood and listed here.
+// excerpt at the vendored tag uses, none of which changes the object (RoundUp
+// rounds a range copy, written back by an assignment the walk records). A
+// method is keyed by its receiver's identity, a builtin only while no name of
+// the excerpt shadows it. The walk is closed: any other call, operator, type
+// or kind of expression fails it, so a re-vendoring that brings one fails
+// until it is understood and listed here.
 var (
 	walkCalls = setOf(
 		"int32", "int64", "len", "make", "new",
@@ -816,7 +838,12 @@ var (
 		"k8s.io/kubernetes/pkg/apis/core/v1/helper.IsOvercommitAllowed",
 		"k8s.io/utils/ptr.AllPtrFieldsNil",
 		"k8s.io/utils/ptr.To[int64]",
-		"method DeepCopy", "method Enabled", "method RoundUp", "method Seconds",
+		"method k8s.io/apiserver/pkg/util/feature.DefaultFeatureGate.Enabled",
+		"method a k8s.io/apimachinery/pkg/api/resource.Quantity.DeepCopy",
+		"method a k8s.io/apimachinery/pkg/api/resource.Quantity.RoundUp",
+		"method an element of resourcehelper.AggregateContainerLimits({}, resourcehelper.PodResourcesOptions{}).DeepCopy",
+		"method an element of resourcehelper.AggregateContainerRequests({}, resourcehelper.PodResourcesOptions{}).DeepCopy",
+		"method time.Hour.Seconds",
 	)
 	walkUnary = map[token.Token]bool{token.NOT: true, token.AND: true, token.SUB: true}
 )
@@ -862,6 +889,7 @@ func (f *walkFrame) check(e ast.Expr) {
 		f.check(x.X)
 		f.check(x.Index)
 	case *ast.CompositeLit:
+		f.checkType(x.Type)
 		for _, el := range x.Elts {
 			if kv, ok := el.(*ast.KeyValueExpr); ok {
 				f.check(kv.Key)
@@ -895,18 +923,20 @@ func (f *walkFrame) check(e ast.Expr) {
 func (f *walkFrame) callKey(call *ast.CallExpr) string {
 	switch fun := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
+		// A builtin or predeclared type only while nothing shadows it.
+		if f.bound(fun.Name) || f.fn.pkg.names[fun.Name] {
+			f.w.fail(call.Pos(), "a call to %s, a name the excerpt binds, which the walk does not follow", fun.Name)
+		}
 		return fun.Name
 	case *ast.SelectorExpr:
-		if id, ok := fun.X.(*ast.Ident); ok && !f.bound(id.Name) {
-			if p, ok := importPath(f.fn.file, id.Name); ok {
-				return p + "." + fun.Sel.Name
-			}
+		if p, ok := f.pkgName(fun.X); ok {
+			return p + "." + fun.Sel.Name
 		}
 		f.check(fun.X)
 		if _, ok := f.resolve(fun.X); ok {
 			return "method of the object " + fun.Sel.Name
 		}
-		return "method " + fun.Sel.Name
+		return "method " + f.receiver(call, fun.X) + "." + fun.Sel.Name
 	case *ast.IndexExpr:
 		// An instantiated generic function, ptr.To[int64].
 		return f.callKey(&ast.CallExpr{Fun: fun.X}) + "[" + f.w.src.text(fun.Index) + "]"
@@ -915,6 +945,58 @@ func (f *walkFrame) callKey(call *ast.CallExpr) string {
 	default:
 		f.w.fail(call.Pos(), "a call through %T, which the walk does not follow", fun)
 		return ""
+	}
+}
+
+// pkgName gives the import path of e when it names an imported package.
+func (f *walkFrame) pkgName(e ast.Expr) (string, bool) {
+	id, ok := e.(*ast.Ident)
+	if !ok || f.bound(id.Name) {
+		return "", false
+	}
+	return importPath(f.fn.file, id.Name)
+}
+
+// receiver names the receiver of a method call by its identity: a variable
+// of an imported package by import path and name, a range value by what it
+// ranges over. The walk does not follow a method on any other receiver,
+// whose type it cannot tell.
+func (f *walkFrame) receiver(call *ast.CallExpr, e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.SelectorExpr:
+		if p, ok := f.pkgName(x.X); ok {
+			return p + "." + x.Sel.Name
+		}
+	case *ast.Ident:
+		if s, ok := f.elems[x.Name]; ok {
+			return s
+		}
+	}
+	f.w.fail(call.Pos(), "%s calls a method on a receiver the walk cannot name", f.render(call))
+	return ""
+}
+
+// checkType fails on a type the walk does not follow: one that is not a
+// name, a pointer, an array of constant length, a slice or a map of those.
+func (f *walkFrame) checkType(e ast.Expr) {
+	switch x := e.(type) {
+	case nil, *ast.Ident:
+	case *ast.SelectorExpr:
+		if _, ok := f.pkgName(x.X); !ok {
+			f.w.fail(x.Pos(), "the type %s, which the walk does not follow", f.w.src.text(x))
+		}
+	case *ast.StarExpr:
+		f.checkType(x.X)
+	case *ast.ArrayType:
+		if _, ok := x.Len.(*ast.BasicLit); x.Len != nil && !ok {
+			f.w.fail(x.Pos(), "the type %s, which the walk does not follow", f.w.src.text(x))
+		}
+		f.checkType(x.Elt)
+	case *ast.MapType:
+		f.checkType(x.Key)
+		f.checkType(x.Value)
+	default:
+		f.w.fail(e.Pos(), "the type %s, which the walk does not follow", f.w.src.text(e))
 	}
 }
 
