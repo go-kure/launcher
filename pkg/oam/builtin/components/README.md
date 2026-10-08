@@ -8339,9 +8339,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   states the scope of a kind the chart renders (see **Scope overrides** below).
   `hookGroupNamePrefix` (go-kure/launcher#787) is the prefix of the names of the hook-group
   layouts, in place of `<application>-<component>`, and so of their Flux Kustomizations under
-  `FluxIntegratedPerLayout`. Without it the default prefix names only the layouts: kure names
-  each Kustomization `<unit>-<layout name>` (go-kure/launcher#941). See the hook-group
-  paragraph below.
+  `FluxIntegratedPerLayout`; so does a prefix the `Naming` hook returns for the `hook-group`
+  role. With neither, the default prefix names only the layouts: kure names each Kustomization
+  `<unit>-<layout name>` (go-kure/launcher#941). See the hook-group paragraph below.
   `layoutKustomizationName` (go-kure/launcher#787) is the name of the Flux Kustomization of
   the component's own layout, in place of `<bundle>-<component>`; see the same paragraph.
 
