@@ -151,7 +151,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
 		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
-		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to.",
+		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.0; above 0.34 no name is refused.",
 			"The name of one feature flag."),
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
@@ -360,13 +360,18 @@ func alertmanagerURLSchemes(spec *monitoringv1.AlertmanagerSpec) []string {
 // Unset, which version may be where no image is named, it is judged against
 // the default of the operator release launcher vendors, as the deployed
 // operator's is unknown at build time; at that default (v0.34.0) no gate
-// refuses.
+// refuses. At the same version it refuses an enableFeatures Alertmanager exits
+// on (refuseUnusableAlertmanagerFeatures).
 func validateAlertmanagerVersion(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.Version == "" {
 		if (spec.Image != nil && *spec.Image != "") || patchedImage(spec.Containers, "alertmanager") != "" {
 			return errors.New("version: required where image, or an entry of containers named alertmanager, names the image: the Prometheus operator chooses the flags of the alertmanager container by the version named here, and by the deployed operator's default where none is, which need not be the version the image runs; name the version of the image")
 		}
-		return refuseVersionGates(spec, semver.MustParse(strings.TrimPrefix(alertmanagerDefaultVersion, "v")), "the operator's default version "+alertmanagerDefaultVersion, "Alertmanager", alertmanagerVersionGates)
+		version, at := semver.MustParse(strings.TrimPrefix(alertmanagerDefaultVersion, "v")), "the operator's default version "+alertmanagerDefaultVersion
+		if err := refuseVersionGates(spec, version, at, "Alertmanager", alertmanagerVersionGates); err != nil {
+			return err
+		}
+		return refuseUnusableAlertmanagerFeatures(spec, version, at)
 	}
 	version, err := semver.ParseTolerant(spec.Version)
 	if err != nil {
@@ -375,7 +380,10 @@ func validateAlertmanagerVersion(spec *monitoringv1.AlertmanagerSpec) error {
 	if version.LT(semver.MustParse(alertmanagerMinimumVersion)) || version.Major > 0 {
 		return errors.Errorf("version: %q is not supported by the Prometheus operator, which runs Alertmanager %s and later of major version 0; name one such as v0.28.1", spec.Version, alertmanagerMinimumVersion)
 	}
-	return refuseVersionGates(spec, version, "version "+spec.Version, "Alertmanager", alertmanagerVersionGates)
+	if err := refuseVersionGates(spec, version, "version "+spec.Version, "Alertmanager", alertmanagerVersionGates); err != nil {
+		return err
+	}
+	return refuseUnusableAlertmanagerFeatures(spec, version, "version "+spec.Version)
 }
 
 // validateAlertmanagerPortName refuses a portName the API refuses where the

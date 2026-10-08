@@ -435,6 +435,27 @@ func alertmanagerRefusals(notA string) []struct {
 		// that version (alertmanagerVersionGates).
 		{"an argument of the features with features before 0.27", map[string]any{"version": "v0.26.0", "enableFeatures": []any{"x"}, "additionalArgs": []any{map[string]any{"name": "enable-feature", "value": "y"}}},
 			`enableFeatures: read by the Prometheus operator only for Alertmanager 0.27.0 and later`},
+		// A feature flag Alertmanager exits on (go-kure/launcher#950): a name
+		// its version does not take, an empty element of the list the operator
+		// joins with ",", and classic-mode with utf8-strict-mode.
+		{"a feature flag no version takes", map[string]any{"enableFeatures": []any{"no-such-feature"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0: the Prometheus operator passes the list joined with "," as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes alert-names-in-metrics, auto-gomemlimit, classic-mode, event-recorder, group-key-in-metrics, receiver-name-in-metrics, utf8-strict-mode`},
+		{"a feature flag dropped at 0.33", map[string]any{"version": "v0.33.0", "enableFeatures": []any{"auto-gomaxprocs"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.33, at version v0.33.0`},
+		{"a feature flag added after the version", map[string]any{"version": "v0.32.3", "enableFeatures": []any{"event-recorder"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.32, at version v0.32.3`},
+		{"a feature flag added after a prerelease's minor", map[string]any{"version": "v0.28.0-rc.0", "enableFeatures": []any{"alert-names-in-metrics"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.28, at version v0.28.0-rc.0`},
+		{"an empty feature flag beside one", map[string]any{"enableFeatures": []any{"classic-mode", ""}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"two empty feature flags", map[string]any{"enableFeatures": []any{"", ""}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an unknown feature flag after a comma", map[string]any{"enableFeatures": []any{"classic-mode,no-such-feature"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"both matcher modes", map[string]any{"enableFeatures": []any{"classic-mode", "utf8-strict-mode"}},
+			`enableFeatures: classic-mode with utf8-strict-mode: Alertmanager exits at startup on both; name one of them`},
+		{"both matcher modes in one element at 0.27", map[string]any{"version": "v0.27.0", "enableFeatures": []any{"utf8-strict-mode,classic-mode"}},
+			`enableFeatures: classic-mode with utf8-strict-mode`},
 		// The API requires the names of a pod's init containers and containers
 		// to be unique together.
 		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
@@ -1087,6 +1108,16 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
 		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
 		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
+		// Feature flags of the version Alertmanager runs (go-kure/launcher#950),
+		// unversioned the operator's default v0.34.0; the operator joins the
+		// list with "," and Alertmanager splits it, taking one empty value as
+		// no feature. Above the table's last minor no name is refused.
+		"feature flags of the operator's default":   {"enableFeatures": []any{"event-recorder", "group-key-in-metrics"}},
+		"a feature flag dropped later, before it":   {"version": "v0.32.3", "enableFeatures": []any{"auto-gomaxprocs"}},
+		"the feature flags of 0.27":                 {"version": "v0.27.0", "enableFeatures": []any{"classic-mode", "receiver-name-in-metrics"}},
+		"two feature flags in one element":          {"enableFeatures": []any{"classic-mode,receiver-name-in-metrics"}},
+		"one empty feature flag":                    {"enableFeatures": []any{""}},
+		"a feature flag after the table's versions": {"version": "v0.35.0", "enableFeatures": []any{"a-later-feature"}},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],
