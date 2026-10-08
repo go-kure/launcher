@@ -41,6 +41,11 @@ type policyFreeKind[T any] struct {
 	// name is the one the object takes (oam.Component.ObjectName), and
 	// componentName the component's, to say where the name came from.
 	validateName func(name, componentName string, decoded *T) error
+	// checkName, when set, refuses an object name the API requires to follow
+	// from what was decoded (an APIService is named <version>.<group>). It is
+	// called by Generate, with the name build is given, since an object named
+	// after the application has no name before then.
+	checkName func(name string, decoded *T) error
 	// required lists the fields the API requires that T encodes whether or not
 	// they were authored, so that the decoded value does not show the omission
 	// (refuseUnauthoredRequired). Nil for a kind with none.
@@ -55,11 +60,6 @@ type policyFreeKind[T any] struct {
 	// only under another field's value, as it does a container port's
 	// hostPort under hostNetwork (podSpecDefaultedZeros).
 	defaultedZerosFor func(decoded *T) defaultedZeroFields
-	// checkName, when set, refuses an object name the API requires to follow
-	// from what was decoded (an APIService is named <version>.<group>). It is
-	// called by Generate, with the name build is given, since an object named
-	// after the application has no name before then.
-	checkName func(name string, decoded *T) error
 	// build returns the object: the base library's identity-only constructor
 	// for the name (and the namespace, unless the kind is cluster-scoped) and
 	// a deep copy of decoded. name is the one the object takes: the
