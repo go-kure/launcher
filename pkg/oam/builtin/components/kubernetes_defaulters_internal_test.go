@@ -447,6 +447,9 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 	case *ast.BlockStmt:
 		f.stmts(x.List)
 	case *ast.ReturnStmt:
+		for _, r := range x.Results {
+			f.check(r)
+		}
 		return true
 	case *ast.BranchStmt:
 		// A break leaves a range before its later elements, which the walk,
@@ -461,7 +464,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		}
 		saved := f.conds
 		for _, c := range conjuncts(x.Cond) {
-			f.noVendoredCalls(c)
+			f.check(c)
 			f.conds = append(slices.Clip(f.conds), f.render(c))
 		}
 		f.stmts(x.Body.List)
@@ -485,7 +488,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			if clause.List != nil {
 				var parts []string
 				for _, e := range clause.List {
-					f.noVendoredCalls(e)
+					f.check(e)
 					parts = append(parts, f.render(e))
 				}
 				cond = "(" + strings.Join(parts, " || ") + ")"
@@ -495,7 +498,12 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		}
 		f.conds = saved
 	case *ast.RangeStmt:
-		f.noVendoredCalls(x.X)
+		f.check(x.X)
+		for _, kv := range []ast.Expr{x.Key, x.Value} {
+			if _, ok := kv.(*ast.Ident); kv != nil && !ok {
+				w.fail(x.Pos(), "a range assigning to %s, which the walk does not follow", f.render(kv))
+			}
+		}
 		if k, ok := x.Key.(*ast.Ident); ok && k.Name != "_" {
 			f.bindLocal(k.Name, k.Name)
 			if pv, ok := f.resolve(x.X); ok {
@@ -515,11 +523,11 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		for _, spec := range gen.Specs {
 			vs, ok := spec.(*ast.ValueSpec)
 			if !ok {
-				continue
+				w.fail(spec.Pos(), "a %T the walk does not follow", spec)
 			}
 			for i, name := range vs.Names {
 				if i < len(vs.Values) {
-					f.noVendoredCalls(vs.Values[i])
+					f.check(vs.Values[i])
 					f.bindValue(name.Name, vs.Values[i])
 				} else {
 					f.bindLocal(name.Name, name.Name)
@@ -532,7 +540,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			w.fail(x.Pos(), "an expression statement the walk does not follow")
 		}
 		for _, a := range call.Args {
-			f.noVendoredCalls(a)
+			f.check(a)
 		}
 		if fn := f.callee(call); fn != nil {
 			w.call(fn, call.Args, f)
@@ -553,6 +561,9 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 				w.fail(call.Pos(), "%s calls a method on the object, which the walk does not follow", f.render(call))
 			}
 		}
+		if key := f.callKey(call); !walkCalls[key] {
+			w.fail(call.Pos(), "a call to %s, which the walk does not follow", key)
+		}
 	case *ast.AssignStmt:
 		f.assign(x)
 	default:
@@ -569,7 +580,7 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 		if len(x.Rhs) != 1 {
 			w.fail(x.Pos(), "an assignment the walk does not follow")
 		}
-		f.noVendoredCalls(x.Rhs[0])
+		f.check(x.Rhs[0])
 		rhs := f.render(x.Rhs[0])
 		for i, l := range x.Lhs {
 			id, ok := l.(*ast.Ident)
@@ -584,7 +595,11 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 	}
 	for i, l := range x.Lhs {
 		r := x.Rhs[i]
-		f.noVendoredCalls(r)
+		f.check(r)
+		f.check(l)
+		if x.Tok != token.ASSIGN && x.Tok != token.DEFINE {
+			w.fail(x.Pos(), "the assignment %s, which the walk does not follow", x.Tok)
+		}
 		if id, ok := l.(*ast.Ident); ok {
 			if id.Name == "_" {
 				continue
@@ -782,19 +797,132 @@ func (f *walkFrame) callee(call *ast.CallExpr) *vendoredFunc {
 	}
 }
 
-// noVendoredCalls fails on a call to a function of the excerpt inside an
-// expression: the walk follows calls made as statements only. ParseImageName
-// is the exception: it reads its argument and writes nothing, and
+// walkCalls are the calls the walk accepts, other than to a function of the
+// excerpt, keyed by callKey, and walkUnary the unary operators: those the
+// excerpt at the vendored tag uses, none of which changes the object. The walk
+// is closed: any other call, operator or kind of expression fails it, so a
+// re-vendoring that brings one fails until it is understood and listed here.
+var (
+	walkCalls = setOf(
+		"int32", "int64", "len", "make", "new",
+		"conversion *v1.Container",
+		"k8s.io/api/core/v1.AzureDataDiskCachingMode",
+		"k8s.io/api/core/v1.AzureDataDiskKind",
+		"k8s.io/api/core/v1.ResourceName",
+		"k8s.io/component-helpers/resource.AggregateContainerLimits",
+		"k8s.io/component-helpers/resource.AggregateContainerRequests",
+		"k8s.io/component-helpers/resource.IsSupportedPodLevelResource",
+		"k8s.io/kubernetes/pkg/apis/core/v1/helper.IsHugePageResourceName",
+		"k8s.io/kubernetes/pkg/apis/core/v1/helper.IsOvercommitAllowed",
+		"k8s.io/utils/ptr.AllPtrFieldsNil",
+		"k8s.io/utils/ptr.To[int64]",
+		"method DeepCopy", "method Enabled", "method RoundUp", "method Seconds",
+	)
+	walkUnary = map[token.Token]bool{token.NOT: true, token.AND: true, token.SUB: true}
+)
+
+func setOf(keys ...string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
+}
+
+// check fails on an expression the walk does not understand: a kind of node,
+// a unary operator or a call it does not list, or a call to a function of the
+// excerpt, which the walk follows only as a statement. ParseImageName is the
+// exception: it reads its argument and writes nothing, and
 // checkParseImageName holds what the defaults read from it.
-func (f *walkFrame) noVendoredCalls(e ast.Expr) {
-	ast.Inspect(e, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if fn := f.callee(call); fn != nil && (fn.pkg.path != k8sParsers || fn.decl.Name.Name != "ParseImageName") {
-				f.w.fail(call.Pos(), "a call to %s inside an expression, which the walk does not follow", fn.decl.Name.Name)
+func (f *walkFrame) check(e ast.Expr) {
+	switch x := e.(type) {
+	case *ast.Ident, *ast.BasicLit:
+	case *ast.ParenExpr:
+		f.check(x.X)
+	case *ast.StarExpr:
+		f.check(x.X)
+	case *ast.UnaryExpr:
+		if !walkUnary[x.Op] {
+			f.w.fail(x.Pos(), "the unary %s, which the walk does not follow", x.Op)
+		}
+		f.check(x.X)
+	case *ast.BinaryExpr:
+		f.check(x.X)
+		f.check(x.Y)
+	case *ast.SelectorExpr:
+		f.check(x.X)
+		// On the object, a name that is not a field is a method value, which
+		// can change the object wherever it is called.
+		if _, ok := f.resolve(x.X); ok {
+			if _, ok := f.resolve(x); !ok {
+				f.w.fail(x.Pos(), "%s is a method value of the object, which the walk does not follow", f.render(x))
 			}
 		}
-		return true
-	})
+	case *ast.IndexExpr:
+		f.check(x.X)
+		f.check(x.Index)
+	case *ast.CompositeLit:
+		for _, el := range x.Elts {
+			if kv, ok := el.(*ast.KeyValueExpr); ok {
+				f.check(kv.Key)
+				f.check(kv.Value)
+				continue
+			}
+			f.check(el)
+		}
+	case *ast.CallExpr:
+		for _, a := range x.Args {
+			f.check(a)
+		}
+		if fn := f.callee(x); fn != nil {
+			if fn.pkg.path != k8sParsers || fn.decl.Name.Name != "ParseImageName" {
+				f.w.fail(x.Pos(), "a call to %s inside an expression, which the walk does not follow", fn.decl.Name.Name)
+			}
+			return
+		}
+		if key := f.callKey(x); !walkCalls[key] {
+			f.w.fail(x.Pos(), "a call to %s, which the walk does not follow", key)
+		}
+	default:
+		f.w.fail(e.Pos(), "a %T the walk does not follow", e)
+	}
+}
+
+// callKey names a call to anything but a function of the excerpt: a builtin or
+// predeclared type by name, a function or type of a package by import path
+// and name, a conversion by its type, and a method by its name and whether it
+// is called on the object.
+func (f *walkFrame) callKey(call *ast.CallExpr) string {
+	switch fun := ast.Unparen(call.Fun).(type) {
+	case *ast.Ident:
+		return fun.Name
+	case *ast.SelectorExpr:
+		if id, ok := fun.X.(*ast.Ident); ok && !f.bound(id.Name) {
+			if p, ok := importPath(f.fn.file, id.Name); ok {
+				return p + "." + fun.Sel.Name
+			}
+		}
+		f.check(fun.X)
+		if _, ok := f.resolve(fun.X); ok {
+			return "method of the object " + fun.Sel.Name
+		}
+		return "method " + fun.Sel.Name
+	case *ast.IndexExpr:
+		// An instantiated generic function, ptr.To[int64].
+		return f.callKey(&ast.CallExpr{Fun: fun.X}) + "[" + f.w.src.text(fun.Index) + "]"
+	case *ast.StarExpr, *ast.ArrayType, *ast.MapType:
+		return "conversion " + f.w.src.text(fun)
+	default:
+		f.w.fail(call.Pos(), "a call through %T, which the walk does not follow", fun)
+		return ""
+	}
+}
+
+// bound says name is a variable of the function being walked.
+func (f *walkFrame) bound(name string) bool {
+	_, isVar := f.vars[name]
+	_, isLocal := f.locals[name]
+	return isVar || isLocal
 }
 
 func derefType(t reflect.Type) reflect.Type {

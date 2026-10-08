@@ -4232,11 +4232,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     ReplicationController and ReplicaSet objects and every defaulting
     function they call. It fails on a field the code defaults and the list
     does not hold, on a default the list states otherwise, and on a row the
-    code does not set. It also fails on code it cannot follow, rather than
-    guess: among others, a write through a copy of a field (read by name or
-    through a dereference), a list element reached by anything but a range
-    over that list, a `break` out of a loop, or a write it cannot place in
-    the object. Most defaults are set by a `SetDefaults_` function.
+    code does not set. The walk is closed: it accepts only the kinds of
+    statement and expression, the unary operators and the calls the excerpt
+    at the vendored tag uses, each listed in the test, and fails on anything
+    else, naming it and its position, rather than guess. It also fails on
+    listed shapes it cannot follow: among others, a write through a copy of a
+    field (read by name or through a dereference), a list element reached by
+    anything but a range over that list, a `break` out of a loop, a method
+    called on the object, or a write it cannot place in the object. The
+    trade-off is that a re-vendoring whose code uses a new shape or call
+    fails the test until that shape is understood and listed, even when it
+    changes no default. Most defaults are set by a `SetDefaults_` function.
     The exceptions are a port's `protocol` and the `iscsi`, `rbd` and
     `scaleIO` strings, which `k8s.io/api` declares with a `+default` marker
     and the generated functions apply, and `hostPort`, which
