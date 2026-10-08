@@ -295,7 +295,7 @@ var requiredWrittenKinds = []pinKind{
 			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
 			"web":            map[string]any{"tlsConfig": pinTLS()},
 			"clusterTLS":     map[string]any{"server": pinTLS(), "client": pinTLS()},
-			"storage":        amClaimingStorage(),
+			"storage":        operatorClaimingStorage(),
 		}},
 	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), false)},
@@ -470,12 +470,14 @@ var requiredWrittenKinds = []pinKind{
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PodMonitorSpec](), false),
 		base:   map[string]any{"selector": map[string]any{}, "podMetricsEndpoints": []any{map[string]any{"port": "http"}}}},
 	// As on alertmanager, a listed container named for none the operator
-	// generates must name an image, and the two entries' names differ.
+	// generates must name an image, the two entries' names differ, and the
+	// storage arm in use must claim storage (validateOperatorStorage).
 	{component: "prometheus", handler: &PrometheusHandler{}, typ: reflect.TypeFor[monitoringv1.PrometheusSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PrometheusSpec](), false),
 		base: map[string]any{
 			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
 			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
+			"storage":        operatorClaimingStorage(),
 		}},
 	{component: "prometheus-probe", handler: &PrometheusProbeHandler{}, typ: reflect.TypeFor[monitoringv1.ProbeSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.ProbeSpec](), false),
@@ -520,7 +522,7 @@ var requiredWrittenKinds = []pinKind{
 		base: map[string]any{
 			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
 			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
-			"storage":        amClaimingStorage(),
+			"storage":        operatorClaimingStorage(),
 		}},
 	{component: "tlsroute", handler: &TLSRouteHandler{}, typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes"), "v1"),
@@ -885,10 +887,10 @@ func pinControl(k pinKind, base map[string]any, path string, schema pinSchema) (
 	return nil, last
 }
 
-// amClaimingStorage is an alertmanager or thanosruler storage whose claim
-// template arm and ephemeral arm each build: whichever is in use claims
-// storage, and the ephemeral one names its access modes.
-func amClaimingStorage() map[string]any {
+// operatorClaimingStorage is a storage of the Prometheus operator's kinds
+// whose claim template arm and ephemeral arm each build: whichever is in use
+// claims storage, and the ephemeral one names its access modes.
+func operatorClaimingStorage() map[string]any {
 	claim := func() map[string]any {
 		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
 	}

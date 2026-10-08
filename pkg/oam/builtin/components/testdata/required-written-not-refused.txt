@@ -859,7 +859,6 @@ prometheus	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].apiV
 prometheus	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].kind	KIND	""
 prometheus	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].name	KIND	""
 prometheus	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].uid	KIND	""
-prometheus	storage.ephemeral.volumeClaimTemplate.spec	POD	{"resources":{}}
 prometheus	storage.ephemeral.volumeClaimTemplate.spec.dataSource.kind	POD	""
 prometheus	storage.ephemeral.volumeClaimTemplate.spec.dataSource.name	POD	""
 prometheus	storage.ephemeral.volumeClaimTemplate.spec.dataSourceRef.kind	POD	""

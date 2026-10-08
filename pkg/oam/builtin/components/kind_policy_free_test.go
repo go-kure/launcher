@@ -786,6 +786,9 @@ var policyFreeKinds = []policyFreeKind{
 		minimal:    pmHeld(map[string]any{}),
 		full:       prometheusFull(),
 		unfixtured: prometheusUnfixtured,
+		// The operator names the data volume, the pods' hostnames and the rule
+		// ConfigMaps' volumes after it (validatePrometheusName).
+		labelName: true,
 	},
 	{
 		component: "prometheus-probe", handler: &components.PrometheusProbeHandler{},
