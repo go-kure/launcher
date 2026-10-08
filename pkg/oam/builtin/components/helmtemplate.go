@@ -77,7 +77,7 @@ const hookGroupNamePrefixDescription = "Prefix of the names of the component's h
 
 // layoutKustomizationNameDescription describes layoutKustomizationName for the
 // helmtemplate component, and for a helm component under delivery: template.
-const layoutKustomizationNameDescription = "Name of the Flux Kustomization generated under per-layout placement for the component's own layout, in place of <bundle>-<component> (over 63 characters, shortened by launcher's own rule, -<component> kept whole up to 52 characters, and never by the rule the base library applies to its own default from go-kure/kure#1030 on, which would give another name). It names neither the layout nor its directory, and is not read under per-bundle placement. A DNS-1123 subdomain of at most 63 characters, used as written and never shortened. It must differ from that of every other component of the document."
+const layoutKustomizationNameDescription = "Name of the Flux Kustomization generated under per-layout placement for the component's own layout, in place of <bundle>-<component> (over 63 characters, shortened by launcher's own rule with the base library launcher pins, -<component> kept whole up to 52 characters; go-kure/launcher#941 hands it to the rule the base library applies to its own default from go-kure/kure#1030 on, which gives another name, at the next re-pin). It names neither the layout nor its directory, and is not read under per-bundle placement. A DNS-1123 subdomain of at most 63 characters, used as written and never shortened. It must differ from that of every other component of the document."
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values, secretValues and scopeOverrides excepted, which are split off before

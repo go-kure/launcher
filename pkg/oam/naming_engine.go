@@ -95,12 +95,14 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 // whole unless the application's name is over 52 characters, when the whole
 // name is shortened. component names the owner, in the hook's request and in a refusal.
 //
-// That is launcher's one rule (go-kure/launcher#793), not the base library's.
-// From go-kure/kure#1030 on, the base library shortens its own over-63
-// "<unit>-<layout name>" default by another rule (8 hex characters of the
-// SHA-256 of the whole default, after a prefix of the unit where room is left
-// for one, then "-<layout name>"; one whose layout name is over 54 refused),
-// which gives another name for the same input. It never applies to a name set
+// With the base library launcher pins, that is launcher's one rule
+// (go-kure/launcher#793); go-kure/launcher#941 hands this default to the base
+// library's rule at the next re-pin. From go-kure/kure#1030 on, the base
+// library shortens its own over-63 "<unit>-<layout name>" default by another
+// rule (8 hex characters of the SHA-256 of the whole default, after a prefix
+// of the unit where room is left for one, then "-<layout name>"; one whose
+// layout name is over 54 refused), which gives another name for the same
+// input. It never applies to a name set
 // here: every default measured over 63 is set, and the base library uses a set
 // name as written. A shortened default is made from the bundle name launcher
 // measured and kept after a consumer renames the bundle; a default left to the

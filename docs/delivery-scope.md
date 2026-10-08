@@ -437,9 +437,12 @@ Decided in the ticket:
     name as launcher made it, not as a consumer renames it afterwards. The layout of any
     other component under `ApplicationGrouping: GroupByName` keeps kure's default; its
     length is the base library's to keep, and is fixed there, not here (go-kure/kure#1030, in
-    a kure newer than the one launcher pins): it is no longer launcher's open point. A
-    chart's own layout keeps launcher's rule and never follows kure's, which gives another
-    name for the same input (`pkg/oam/README.md`, "Pipeline").
+    a kure newer than the one launcher pins): it is no longer launcher's open point.
+  - With the kure launcher pins, launcher shortens a chart's own layout default by its one
+    rule (go-kure/launcher#793); go-kure/launcher#941 hands that default to kure's rule
+    (go-kure/kure#1030) at the next re-pin. The two rules give different names for one
+    input, and kure's never reaches a name launcher sets on the layout, which kure uses as
+    written (`pkg/oam/README.md`, "Pipeline").
 - **Shipped: the routing traits' objects** (`traits/ingress.go`, `traits/httproute.go`;
   the traits README, "Conventions"). The Ingress and the HTTPRoute are named by `name`,
   else the hook, else the default, under roles `ingress` and `httproute`, and so are those
@@ -467,8 +470,10 @@ Decided in the ticket:
     component's rule resolved the name under a role and claimed it (the `helm` component's
     values ConfigMap and Secret, a role component's volume claims); any other name it
     carries is claimed, the Secret a `certificate` trait has cert-manager write included.
-- **Target, author:** an override for each remaining name of §3.1.
-- **Target, consumer:** the hook reaches the remaining sites.
+- **No author override, by design:** the bundle, ordered-group and synthesized
+  NetworkPolicy names are hook-only. The author names the bundle by `metadata.name`, a
+  group is derived from the order, and a synthesized policy has no authored home.
+- **The hook's reach for the rest:**
   - A name the `Namer` builds (`NameAllocator.Name` and
     `NameOrAdopt`, `pkg/oam/lowering.go`) reaches the hook only where its rule calls
     `LoweringContext.ResolveName` or `ResolveSharedName`; a rule outside launcher's own
@@ -1926,7 +1931,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. The chart-only shortening keeps launcher's one rule and never follows kure's, and the override length check stays at the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. With the kure launcher pins, launcher shortens a chart's own layout default by its one rule (go-kure/launcher#793); go-kure/launcher#941 hands that default to kure's rule (go-kure/kure#1030) at the next re-pin. The override length check is the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |
