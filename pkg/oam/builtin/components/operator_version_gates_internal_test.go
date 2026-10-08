@@ -240,13 +240,28 @@ func (v *vendoredPromOp) versionGates(t *testing.T, files ...string) []operatorG
 func isVersionRead(n ast.Node) bool {
 	switch n := n.(type) {
 	case *ast.CallExpr:
-		sel, ok := n.Fun.(*ast.SelectorExpr)
+		sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr)
 		return ok && versionComparisons[sel.Sel.Name] && len(n.Args) == 1
 	case *ast.SelectorExpr:
 		switch n.Sel.Name {
 		case "Major", "Minor", "Patch":
 			return true
 		}
+	}
+	return false
+}
+
+// calledAt reports whether sel, whose ancestors are path, is the function of
+// a call, parentheses around it aside.
+func calledAt(path []ast.Node, sel *ast.SelectorExpr) bool {
+	for i := len(path) - 1; i >= 0; i-- {
+		switch p := path[i].(type) {
+		case *ast.ParenExpr:
+			continue
+		case *ast.CallExpr:
+			return ast.Unparen(p.Fun) == sel
+		}
+		return false
 	}
 	return false
 }
@@ -274,6 +289,10 @@ func (v *vendoredPromOp) funcGates(t *testing.T, rel string, fd *ast.FuncDecl) [
 			return true
 		}
 		defer func() { stack = append(stack, n) }()
+		if sel, ok := n.(*ast.SelectorExpr); ok && versionComparisons[sel.Sel.Name] && !calledAt(stack, sel) {
+			t.Errorf("%s: %s takes the comparison method %s as a value; the test cannot read its minimum", v.fset.Position(n.Pos()), fn, sel.Sel.Name)
+			return true
+		}
 		if !isVersionRead(n) {
 			return true
 		}
