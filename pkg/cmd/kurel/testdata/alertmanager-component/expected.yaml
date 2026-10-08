@@ -42,6 +42,7 @@ spec:
           requests:
             storage: 1Gi
       status: {}
+  version: v0.28.1
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager

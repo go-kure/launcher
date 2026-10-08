@@ -3717,6 +3717,33 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   only in free text. An authored `hostNetwork: false` is left out, and the API
   reads an absent one as `false`.
 
+  **What the operator builds from the spec is checked where the API or the
+  operator would break it.** Each is refused, under any policy and none, at
+  `pkg/alertmanager/statefulset.go` of prometheus-operator v0.94.1:
+  - `version` unset where `image`, or a listed `alertmanager` entry, names the
+    image: the operator chooses the container's flags by `version`, and by its
+    own default where none is, whatever the image runs (`version: required
+    where image, or an entry of containers named alertmanager, names the
+    image`).
+  - `storage.volumeClaimTemplate.metadata.name` beside `storage.emptyDir` or
+    `storage.ephemeral`: the operator mounts the data volume under that name and
+    creates it under its own, so the pods mount a volume that does not exist.
+  - an entry of `volumes` named as a volume the operator adds: `config-volume`,
+    `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`, a name
+    starting `web-config-tls-`, `cluster-tls-server-config-` or
+    `cluster-tls-client-config-`, `notification-templates` where
+    `alertmanagerConfiguration.templates` is set, the name the operator derives
+    for each of `secrets` and `configMaps` (`secret-<name>`,
+    `configmap-<name>`), and the data volume's
+    (`volumes[0] "config-volume": the name is a volume the Prometheus operator
+    adds to every Alertmanager's pods; name the volume otherwise`).
+  - a name the operator's objects cannot be named after: the data volume
+    `alertmanager-<name>-db`, unless a claim template's name names it, and the
+    hostname `alertmanager-<name>-<replicas-1>` of the last pod must each be a
+    DNS-1123 label, so a name has no dot and at most 47 characters with the
+    defaults. The refusal names the component, or `objectName` where that set
+    the name.
+
   **The API's expression rules are not checked.** The types the spec reaches
   state one: an `updateStrategy` with a `rollingUpdate` must have the type
   `RollingUpdate`. The linked module ships no CRD, so there is no rule text

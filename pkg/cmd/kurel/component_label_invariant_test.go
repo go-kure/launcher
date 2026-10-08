@@ -202,7 +202,10 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// An Alertmanager emits identity and the authored fields too, namespaced,
 	// with no `app` label. Its operator runs the pods: the object holds no pod
 	// template and no selector, and its podMetadata takes no label.
-	"alertmanager": {props: map[string]any{"version": "v0.28.1", "replicas": 1}},
+	// The operator names the data volume alertmanager-<name>-db, a DNS-1123
+	// label, which leaves the name 47 characters.
+	"alertmanager": {props: map[string]any{"version": "v0.28.1", "replicas": 1},
+		nameBound: 47, longRefusal: "the component name is the Alertmanager's name, and the Prometheus operator names the data volume"},
 	"artifactgenerator": {props: map[string]any{
 		"sources": []any{map[string]any{"alias": "app", "kind": "GitRepository", "name": "app"}},
 		"artifacts": []any{map[string]any{

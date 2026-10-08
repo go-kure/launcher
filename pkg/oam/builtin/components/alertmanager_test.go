@@ -230,6 +230,46 @@ func alertmanagerRefusals(notA string) []struct {
 			"containers":     []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"cpu": "1"}}}},
 			"initContainers": []any{map[string]any{"name": "", "image": "registry.example/team/prepare:v1", "resources": map[string]any{"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}}}},
 		}, `initContainers[0] "": resources: cpu: request 2 must not exceed limit 1`},
+		// An image without its version: the operator chooses the flags for
+		// its own default version (pkg/alertmanager/statefulset.go:272 and
+		// :383-392 at v0.94.1), so a v0.28.1 image would be passed a flag of
+		// v0.30.0.
+		{"image without a version", map[string]any{"image": "quay.io/prometheus/alertmanager:v0.28.1"},
+			"version: required where image, or an entry of containers named alertmanager, names the image"},
+		{"image of a patch without a version", container(map[string]any{"name": "alertmanager", "image": "quay.io/prometheus/alertmanager:v0.28.1"}),
+			"version: required where image, or an entry of containers named alertmanager, names the image"},
+		// The operator mounts the data volume under the claim template's name
+		// whatever arm is in use, and creates it under its own for emptyDir
+		// and ephemeral (statefulset.go:174-198 and :531-535).
+		{"a named claim template beside emptyDir", map[string]any{"storage": map[string]any{
+			"emptyDir":            map[string]any{},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
+		{"a named claim template beside ephemeral", map[string]any{"storage": map[string]any{
+			"ephemeral":           map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}}},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
+		// A volume named as one the operator adds to the pods
+		// (statefulset.go:215, :510-529, :617-690, :698-738).
+		{"a volume named as the configuration's", amVolume("config-volume"),
+			`volumes[0] "config-volume": the name is a volume the Prometheus operator adds to every Alertmanager's pods`},
+		{"a volume named as the web configuration's", amVolume("web-config"),
+			`volumes[0] "web-config": the name is a volume the Prometheus operator adds`},
+		{"a volume named as a TLS credential's", amVolume("web-config-tls-secret-key-web"),
+			`volumes[0] "web-config-tls-secret-key-web": names starting "web-config-tls-" are the Prometheus operator's`},
+		{"a volume named as a listed Secret's", withAmVolume(map[string]any{"secrets": []any{"Alert.TLS"}}, "secret-alert-tls"),
+			`volumes[0] "secret-alert-tls": the name is the volume the Prometheus operator adds for secrets[0]`},
+		{"a volume named as a listed ConfigMap's", withAmVolume(map[string]any{"configMaps": []any{"templates"}}, "configmap-templates"),
+			`volumes[0] "configmap-templates": the name is the volume the Prometheus operator adds for configMaps[0]`},
+		{"a volume named as the templates'", withAmVolume(map[string]any{"alertmanagerConfiguration": map[string]any{
+			"name": "global", "templates": []any{map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}}},
+		}}, "notification-templates"),
+			`volumes[0] "notification-templates": the name is the volume the Prometheus operator adds for alertmanagerConfiguration.templates`},
+		{"a volume named as the data volume", amVolume("alertmanager-fast-db"),
+			`volumes[0] "alertmanager-fast-db": the name is the data volume's`},
+		{"a volume named as the claim template's", withAmVolume(map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+		}}, "data"), `volumes[0] "data": the name is the data volume's`},
 		// The operator fills an unset memory request as 200Mi whatever the
 		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
@@ -300,6 +340,9 @@ func alertmanagerRefusals(notA string) []struct {
 // unset image is refused (TestAlertmanager_UnsetImage).
 const amImage = "registry.example/prometheus/alertmanager:v0.28.1"
 
+// amVersion is the version amImage runs.
+const amVersion = "v0.28.1"
+
 // amReloader is an image from that registry for the two config-reloader
 // containers the operator generates: under ptStrictPolicy each is refused
 // unless a listed entry patches it with an allowed image
@@ -309,9 +352,13 @@ const amReloader = "registry.example/prometheus-operator/prometheus-config-reloa
 // amReloaders returns props with both reloaders patched with amReloader, so
 // that a document built under ptStrictPolicy is not refused for them: an
 // entry of a reloader's name that names no image takes it, and one is
-// appended where the list has none. props is not changed.
+// appended where the list has none. It names the version of amImage where
+// props names none, as an authored image needs one. props is not changed.
 func amReloaders(props map[string]any) map[string]any {
 	out := maps.Clone(props)
+	if _, named := out["version"]; !named {
+		out["version"] = amVersion
+	}
 	for list, name := range map[string]string{"containers": "config-reloader", "initContainers": "init-config-reloader"} {
 		entries, _ := out[list].([]any)
 		entries = slices.Clone(entries)
@@ -331,6 +378,19 @@ func amReloaders(props map[string]any) map[string]any {
 		}
 		out[list] = entries
 	}
+	return out
+}
+
+// amVolume is an Alertmanager that lists one emptyDir volume, named name.
+func amVolume(name string) map[string]any {
+	return withAmVolume(map[string]any{}, name)
+}
+
+// withAmVolume returns props with one emptyDir volume, named name, listed.
+// props is not changed.
+func withAmVolume(props map[string]any, name string) map[string]any {
+	out := maps.Clone(props)
+	out["volumes"] = []any{map[string]any{"name": name, "emptyDir": map[string]any{}}}
 	return out
 }
 
@@ -612,6 +672,60 @@ func TestAlertmanager_PatchedImage(t *testing.T) {
 	}
 }
 
+// TestAlertmanager_Name: the operator names the data volume
+// alertmanager-<name>-db, unless a claim template's name names it, and each
+// pod alertmanager-<name>-<ordinal>; the API refuses a pod whose volume name or
+// hostname is not a DNS-1123 label. A name either breaks is refused, naming the
+// component or the objectName it came from; the longest the defaults allow, 47
+// characters, builds, and 48 where a claim template names the data volume.
+func TestAlertmanager_Name(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	long := strings.Repeat("a", 48)
+	named := map[string]any{"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}}}}
+	for name, tc := range map[string]struct {
+		component string
+		props     map[string]any
+		want      string
+	}{
+		"a component name over 47 characters": {long, nil,
+			`alertmanager "` + long + `": the component name is the Alertmanager's name, and the Prometheus operator names the data volume "alertmanager-` + long + `-db", which must be a DNS-1123 label`},
+		"a dotted objectName": {"web", map[string]any{oam.ObjectNameProperty: "alerts.example"},
+			`"alerts.example" is not a valid name for this Alertmanager: the Prometheus operator names the data volume "alertmanager-alerts.example-db"`},
+		"a named claim template and a long name": {strings.Repeat("a", 50), named,
+			`the pod of the last replica takes the hostname "alertmanager-` + strings.Repeat("a", 50) + `-0", which must be a DNS-1123 label`},
+		"eleven replicas and 48 characters": {strings.Repeat("a", 48), map[string]any{"replicas": 11, "storage": named["storage"]},
+			`the pod of the last replica takes the hostname "alertmanager-` + strings.Repeat("a", 48) + `-10"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := alertmanagerNamed(h, tc.component, tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		component string
+		props     map[string]any
+	}{
+		"47 characters":                      {strings.Repeat("a", 47), nil},
+		"48 characters and a named template": {strings.Repeat("a", 48), named},
+		"a dotted name of no replica's pod":  {"web", map[string]any{oam.ObjectNameProperty: "alerts.example", "replicas": 0, "storage": named["storage"]}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := alertmanagerNamed(h, tc.component, tc.props); err != nil {
+				t.Fatalf("err = %v, want it built", err)
+			}
+		})
+	}
+}
+
+// alertmanagerNamed builds an alertmanager component of the given name through
+// the transform, which resolves objectName, and returns its error.
+func alertmanagerNamed(h oam.ComponentHandler, component string, props map[string]any) error {
+	_, err := policyFreeTransform("alertmanager", h, nil, oam.Component{Name: component, Properties: props})
+	return err
+}
+
 // TestAlertmanager_ReloaderImages: the operator generates config-reloader and
 // init-config-reloader from the image of its own configuration, which no
 // allowlist reaches. Under a policy with allowed registries each is refused
@@ -652,6 +766,9 @@ func TestAlertmanager_ReloaderImages(t *testing.T) {
 			`containers[0] "config-reloader"`,
 		},
 	} {
+		// image needs the version it runs.
+		tc.props = maps.Clone(tc.props)
+		tc.props["version"] = amVersion
 		t.Run(name, func(t *testing.T) {
 			_, err := pvTransform("alertmanager", h, tc.props, ptStrictPolicy())
 			rcWantClass(t, err, oam.RefusalRegistry)

@@ -77,7 +77,9 @@ import (
 // that full cannot set, each with the reason: one the kind refuses whenever
 // the object would carry it, or one whose only value the object carries is
 // refused under the policy a held kind's fixtures are built under. Each has a
-// test of its own.
+// test of its own. labelName says the object's name must be a DNS-1123 label,
+// as the names another controller derives from it must: an `objectName` is
+// then authored without a dot (TestPolicyFreeKinds_ObjectName).
 type policyFreeKind struct {
 	component   string
 	handler     oam.ComponentHandler
@@ -91,6 +93,7 @@ type policyFreeKind struct {
 	minimal     map[string]any
 	full        map[string]any
 	unfixtured  map[string]string
+	labelName   bool
 }
 
 // generate builds the kind's object from props, named name. A kind the policy
@@ -145,6 +148,9 @@ var policyFreeKinds = []policyFreeKind{
 		minimal:    amReloaders(map[string]any{"image": amImage}),
 		full:       alertmanagerFull(),
 		unfixtured: alertmanagerUnfixtured,
+		// The operator names the data volume and the pods' hostnames after it
+		// (validateAlertmanagerName).
+		labelName: true,
 	},
 	{
 		component: "artifactgenerator", handler: &components.ArtifactGeneratorHandler{},
@@ -3566,8 +3572,12 @@ func policyFreeTransform(typ string, h oam.ComponentHandler, naming func(oam.Nam
 // for its name it is the object the same properties build under the component
 // name. The hook is asked for the declared kind.
 func TestPolicyFreeKinds_ObjectName(t *testing.T) {
-	const component, authored = "web", "renamed.example.com"
+	const component = "web"
 	for _, kind := range policyFreeKinds {
+		authored := "renamed.example.com"
+		if kind.labelName {
+			authored = "renamed-example"
+		}
 		wantKind := kind.gvk.GroupKind().String()
 		var asked []oam.NameRequest
 		hook := func(req oam.NameRequest) (string, bool) {

@@ -1742,6 +1742,13 @@ and by scope, whatever component or trait emits it.
     empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`, which the
     CRD defaults, as on the other kinds of the operator's API. A string default of the
     Kubernetes pod types is not refused, as on the pod kinds.
+  - **What the operator builds from the spec is checked where it would break.** An
+    `image` (or a listed `alertmanager` entry's) without `version`, whose flags the
+    operator would choose for its own default version; a named claim template beside
+    `storage.emptyDir` or `storage.ephemeral`, which leaves the data mount dangling; an
+    entry of `volumes` named as a volume the operator adds; and a name whose data volume
+    `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot, at most
+    47 characters with the defaults) are each refused.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

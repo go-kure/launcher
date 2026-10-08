@@ -2,6 +2,9 @@ package components
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
@@ -9,6 +12,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -80,9 +84,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	return map[string]oam.PropertySchema{
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
-		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Alertmanager it configures."),
+		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. Where this or an entry of containers named alertmanager names the image, version is required: the operator chooses the container's flags by it."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
-		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1."),
+		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1: it chooses the alertmanager container's flags by it, and by its own default where it is unset. Required where image, or an entry of containers named alertmanager, names the image; name the version that image runs."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
 			"One reference: name."),
 		"secrets": texts("secrets: the Secrets of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/secrets/<name>.",
@@ -94,8 +98,8 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"logFormat":    text("logFormat: the log format of Alertmanager: logfmt or json."),
 		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. Held to the EnvironmentPolicy's replica maximum. Unset, the operator runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
 		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores."),
-		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name is refused beside emptyDir or ephemeral: the operator mounts the data volume under it and creates it under its own. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
+		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the TLS, secrets, configMaps and templates volumes, the data volume) is refused. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
 		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
@@ -180,7 +184,8 @@ var alertmanagerKind = &policyHeldKind[monitoringv1.AlertmanagerSpec]{
 			"retention":                              `"120h"`,
 			"alertmanagerConfigMatcherStrategy.type": `"OnNamespace"`,
 		}),
-		validate: validateAlertmanager,
+		validate:     validateAlertmanager,
+		validateName: validateAlertmanagerName,
 		build: func(name, namespace string, spec *monitoringv1.AlertmanagerSpec) client.Object {
 			alertmanager := prometheus.CreateAlertmanager(name, namespace)
 			spec.DeepCopyInto(&alertmanager.Spec)
@@ -263,7 +268,124 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 			return errors.Errorf("%s: %q is not a positive duration: the Prometheus operator ignores it and runs the pods as if the field were unset; name a positive one, or leave it unset", field.path, field.value)
 		}
 	}
-	return validateMonitoringWorkload(alertmanagerWorkload(spec))
+	if s := spec.Storage; s != nil && (s.EmptyDir != nil || s.Ephemeral != nil) && s.VolumeClaimTemplate.Name != "" {
+		return errors.New("storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral: the Prometheus operator mounts the data volume under this name, but creates it from the arm in use under a name of its own, so the pods would mount a volume they do not have; leave it unset")
+	}
+	if err := refuseGeneratedAlertmanagerVolumes(spec); err != nil {
+		return err
+	}
+	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
+		return err
+	}
+	if spec.Version == "" && ((spec.Image != nil && *spec.Image != "") || patchedImage(spec.Containers, "alertmanager") != "") {
+		return errors.New("version: required where image, or an entry of containers named alertmanager, names the image: the Prometheus operator chooses the flags of the alertmanager container by the version named here, and by its own default where none is, whatever the image runs; name the version of the image")
+	}
+	return nil
+}
+
+// alertmanagerGeneratedVolumes are the volumes the Prometheus operator adds to
+// every Alertmanager's pods under a fixed name: its configuration, its TLS
+// assets, the configuration its reloader writes, the web configuration and the
+// cluster TLS configuration (makeStatefulSetSpec,
+// pkg/alertmanager/statefulset.go:510-529, :698-738; volumeName in
+// pkg/webconfig/config.go and pkg/alertmanager/clustertlsconfig/config.go at
+// prometheus-operator v0.94.1).
+var alertmanagerGeneratedVolumes = []string{"config-volume", "tls-assets", "config-out", "web-config", "cluster-tls-config"}
+
+// alertmanagerGeneratedVolumePrefixes start the names of the volumes the
+// operator adds for each TLS credential of the web and cluster TLS
+// configurations, which it derives from the credential (volumePrefix in
+// pkg/webconfig/tls_credentials.go, serverVolumePrefix and clientVolumePrefix
+// in pkg/alertmanager/clustertlsconfig/config.go at v0.94.1).
+var alertmanagerGeneratedVolumePrefixes = []string{"web-config-tls-", "cluster-tls-server-config-", "cluster-tls-client-config-"}
+
+// invalidDNS1123Characters is what the operator replaces in a name it derives
+// a volume's from (pkg/k8s/resource_namer.go at v0.94.1).
+var invalidDNS1123Characters = regexp.MustCompile("[^-a-z0-9]+")
+
+// alertmanagerSourceVolume is the name the operator gives the volume of an
+// entry of secrets or configMaps: the prefix and the entry, lower-cased, each
+// run of other characters than a-z, 0-9 and - replaced by -, trimmed of - and
+// cut to 63 characters (ResourceNamer.DNS1123Label, pkg/k8s/resource_namer.go
+// at v0.94.1).
+func alertmanagerSourceVolume(prefix, entry string) string {
+	name := strings.Trim(invalidDNS1123Characters.ReplaceAllString(strings.ToLower(prefix+"-"+entry), "-"), "-")
+	if len(name) > validation.DNS1123LabelMaxLength {
+		name = name[:validation.DNS1123LabelMaxLength]
+	}
+	return name
+}
+
+// refuseGeneratedAlertmanagerVolumes refuses an entry of volumes named as a
+// volume the operator adds to the pods: it appends volumes after its own
+// (statefulset.go:215 at v0.94.1), and the API refuses a pod with two volumes
+// of one name. The data volume, named after the Alertmanager, is held by
+// validateAlertmanagerName.
+func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) error {
+	generated := map[string]string{}
+	for _, name := range alertmanagerGeneratedVolumes {
+		generated[name] = "a volume the Prometheus operator adds to every Alertmanager's pods"
+	}
+	if c := spec.AlertmanagerConfiguration; c != nil && len(c.Templates) > 0 {
+		generated["notification-templates"] = "the volume the Prometheus operator adds for alertmanagerConfiguration.templates"
+	}
+	for i, s := range spec.Secrets {
+		generated[alertmanagerSourceVolume("secret", s)] = fmt.Sprintf("the volume the Prometheus operator adds for secrets[%d]", i)
+	}
+	for i, c := range spec.ConfigMaps {
+		generated[alertmanagerSourceVolume("configmap", c)] = fmt.Sprintf("the volume the Prometheus operator adds for configMaps[%d]", i)
+	}
+	for i, v := range spec.Volumes {
+		if what, ok := generated[v.Name]; ok {
+			return errors.Errorf("volumes[%d] %q: the name is %s; name the volume otherwise", i, v.Name, what)
+		}
+		for _, prefix := range alertmanagerGeneratedVolumePrefixes {
+			if strings.HasPrefix(v.Name, prefix) {
+				return errors.Errorf("volumes[%d] %q: names starting %q are the Prometheus operator's, for the volumes of TLS credentials; name the volume otherwise", i, v.Name, prefix)
+			}
+		}
+	}
+	return nil
+}
+
+// validateAlertmanagerName refuses an Alertmanager name the operator's objects
+// cannot be named after. The operator names the data volume
+// alertmanager-<name>-db unless storage.volumeClaimTemplate.metadata.name
+// names it, and the StatefulSet alertmanager-<name>, whose pods take the
+// hostname alertmanager-<name>-<ordinal> (volumeName and prefixedName,
+// pkg/alertmanager/statefulset.go:909-915 at v0.94.1). The API refuses a pod
+// whose volume name or hostname is not a DNS-1123 label: at most 63
+// characters, and no dot. An entry of volumes under the data volume's name is
+// refused too, as refuseGeneratedAlertmanagerVolumes refuses the others.
+func validateAlertmanagerName(name, componentName string, spec *monitoringv1.AlertmanagerSpec) error {
+	refuse := func(rule string, args ...any) error {
+		if name == componentName {
+			return errors.Errorf("alertmanager %q: the component name is the Alertmanager's name, and "+rule, append([]any{name}, args...)...)
+		}
+		return errors.Errorf("%s: %q is not a valid name for this Alertmanager: "+rule, append([]any{objectNameField, name}, args...)...)
+	}
+	volume := "alertmanager-" + name + "-db"
+	if spec.Storage != nil && spec.Storage.VolumeClaimTemplate.Name != "" {
+		volume = spec.Storage.VolumeClaimTemplate.Name
+	} else if errs := validation.IsDNS1123Label(volume); len(errs) > 0 {
+		return refuse("the Prometheus operator names the data volume %q, which must be a DNS-1123 label: %s", volume, strings.Join(errs, "; "))
+	}
+	replicas := int32(alertmanagerOperatorReplicas)
+	if spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	if replicas > 0 {
+		hostname := "alertmanager-" + name + "-" + strconv.Itoa(int(replicas)-1)
+		if errs := validation.IsDNS1123Label(hostname); len(errs) > 0 {
+			return refuse("the pod of the last replica takes the hostname %q, which must be a DNS-1123 label: %s", hostname, strings.Join(errs, "; "))
+		}
+	}
+	for i, v := range spec.Volumes {
+		if v.Name == volume {
+			return errors.Errorf("volumes[%d] %q: the name is the data volume's, which the Prometheus operator adds to the pods; name the volume otherwise", i, v.Name)
+		}
+	}
+	return nil
 }
 
 // What the Prometheus operator fills into an Alertmanager whose spec leaves
