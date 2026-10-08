@@ -33,17 +33,23 @@ import (
 // it is refused. The arguments the operator derives are not held.
 
 // monitoringWorkloadDefaultedZeros is a workload kind's defaulted-zero list for
-// refuseUncarriedSpecValues: the numbers of the pod kinds' list
-// (podSpecDefaultedZeros), the probe fields of the containers its spec lists,
-// on which an authored 0 cannot be carried, and own, the fields of the
-// operator's own types that the encoding omits when empty and to which the CRD
-// gives another default, each mapped to that default as its JSON literal. The
-// pod kinds' string defaults are not held here, those of the containers and
-// volumes these specs list included, nor a hostPort of 0 under hostNetwork,
-// which needs the spec (go-kure/launcher#938).
-func monitoringWorkloadDefaultedZeros(own map[string]string) defaultedZeroFields {
-	fields := podSpecDefaultedZeros("", nil).fields
-	maps.DeleteFunc(fields, func(_, def string) bool { return strings.HasPrefix(def, `"`) })
+// refuseUncarriedSpecValues, for ps, the decoded spec's pod fields the list
+// depends on (its hostNetwork, which the operator copies to the pods). It
+// holds the rows of the pod kinds' list (podSpecDefaultedZeros) under the
+// containers, init containers and volumes the spec lists, which are of the
+// Kubernetes types and reach the pods as written, a container port's hostPort
+// under hostNetwork included, and own: the fields of the operator's own types
+// that the encoding omits when empty and to which the CRD gives another
+// default, or that the operator copies to a pod field the API server defaults,
+// each mapped to that default. The pod kinds' rows for the pod spec's own
+// fields are not held as such: these specs carry no restartPolicy, and their
+// dnsPolicy and schedulerName are fields of the operator's types, in own
+// where an authored "" cannot be carried.
+func monitoringWorkloadDefaultedZeros(ps *corev1.PodSpec, own map[string]string) defaultedZeroFields {
+	fields := podSpecDefaultedZeros("", ps).fields
+	maps.DeleteFunc(fields, func(path, _ string) bool {
+		return !strings.HasPrefix(path, "containers[].") && !strings.HasPrefix(path, "initContainers[].") && !strings.HasPrefix(path, "volumes[].")
+	})
 	maps.Copy(fields, own)
 	return defaultedZeroFields{api: "Prometheus operator", defaulter: "API server", fields: fields}
 }

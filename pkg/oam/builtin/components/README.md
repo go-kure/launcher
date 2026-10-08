@@ -3700,25 +3700,31 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   source), as on the **pod** kind.
 
   **An authored `0` or `""` the type cannot carry is refused.** As on the pod
-  kinds: a `timeoutSeconds`, `periodSeconds`, `successThreshold` or
-  `failureThreshold` written as `0` on a liveness, readiness or startup probe
-  of a listed container or init container
+  kinds, on a listed container, init container or volume: a
+  `timeoutSeconds`, `periodSeconds`, `successThreshold` or `failureThreshold`
+  written as `0` on a liveness, readiness or startup probe
   (`containers[0].readinessProbe.periodSeconds: 0 cannot be carried by the
-  Prometheus operator API types (…)`). The refusal holds for an entry that
-  patches one of the operator's own containers too: the zero is left out
-  there as anywhere, and what then applies is the operator's value for that
-  container, not the authored one. As on the other kinds of the operator's
-  API: an empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`,
-  which the CRD defaults to `web`, `120h` and `OnNamespace` (`portName: ""
-  cannot be carried by the Prometheus operator API types (…)`).
-  `TestMonitoringWorkloadKinds_DefaultedZeros` derives the list from the type,
-  the default markers of the operator's source and the field comments of the
-  Kubernetes types, and shows each field refused on a document. A string
-  default of the Kubernetes pod types (a container port's `protocol`, a
-  volume source's) is not refused, though the pod kinds refuse it, and
-  neither is a `hostPort` of `0` under `hostNetwork`
-  (go-kure/launcher#938). An authored `hostNetwork: false` is left out, and
-  the API reads an absent one as `false`.
+  Prometheus operator API types (…)`); an empty string the API server
+  defaults, such as a container's `imagePullPolicy`, a port's `protocol`, an
+  `httpGet` `path` or `scheme`, or a volume source's default; and, under
+  `hostNetwork: true`, a port's `hostPort` written as `0`, which the API
+  server would set to the port's `containerPort`. The refusal holds for an
+  entry that patches one of the operator's own containers too: the zero is
+  left out there as anywhere, and what then applies is the operator's value
+  for that container, not the authored one. As on the other kinds of the
+  operator's API: an empty `portName`, `retention` or
+  `alertmanagerConfigMatcherStrategy.type`, which the CRD defaults to `web`,
+  `120h` and `OnNamespace` (`portName: "" cannot be carried by the
+  Prometheus operator API types (…)`). An empty `schedulerName` or
+  `imagePullPolicy` is refused too: the operator copies each one unchanged
+  to the pods, the second to its own containers, where the API server
+  defaults an empty one. `TestMonitoringWorkloadKinds_DefaultedZeros` derives
+  the list. It reads the type, the default markers of the operator's source,
+  the field comments of the Kubernetes types, and the API server's defaulting
+  code for their strings. It then shows each field refused on a document.
+  `TestMonitoringWorkloadKinds_HostNetworkHostPort` shows the `hostPort`
+  refusal. An authored `hostNetwork: false` is left out, and the API reads an
+  absent one as `false`.
 
   **What the operator builds from the spec is checked where the API or the
   operator would break it.** The kind leaves to the API what the CRD's own

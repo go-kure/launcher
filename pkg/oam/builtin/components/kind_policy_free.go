@@ -50,6 +50,11 @@ type policyFreeKind[T any] struct {
 	// none: it is the value of every kind whose type has no such field, which
 	// the tests named at config hold.
 	defaultedZeros defaultedZeroFields
+	// defaultedZerosFor, when set, is the list for decoded, in place of
+	// defaultedZeros: for a type on which the API server defaults a field
+	// only under another field's value, as it does a container port's
+	// hostPort under hostNetwork (podSpecDefaultedZeros).
+	defaultedZerosFor func(decoded *T) defaultedZeroFields
 	// build returns the object: the base library's identity-only constructor
 	// for the name (and the namespace, unless the kind is cluster-scoped) and
 	// a deep copy of decoded. name is the one the object takes: the
@@ -64,8 +69,9 @@ type policyFreeKind[T any] struct {
 // (decodeKindSpec), and refuses two spellings of one field
 // (refuseUncarriedSpecValues) and a required field the type would write
 // unauthored (refuseUnauthoredRequired). A field on which an authored 0, false
-// or "" cannot be carried must be in the kind's defaultedZeros, which refuses
-// that value: TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's
+// or "" cannot be carried must be in the kind's defaultedZeros, or in the list
+// defaultedZerosFor gives for the decoded value, which refuses that value:
+// TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's
 // field comments to having no number or boolean of the kind, as far as they
 // state a default in a form it recognises, and
 // TestMonitoringKinds_DefaultedZeros and TestExternalSecretsKinds_DefaultedZeros
@@ -81,7 +87,11 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(authored, decoded, k.defaultedZeros); err != nil {
+	zeros := k.defaultedZeros
+	if k.defaultedZerosFor != nil {
+		zeros = k.defaultedZerosFor(decoded)
+	}
+	if err := refuseUncarriedSpecValues(authored, decoded, zeros); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(authored, k.required); err != nil {
