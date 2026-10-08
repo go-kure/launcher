@@ -809,11 +809,14 @@ and by scope, whatever component or trait emits it.
   list envelope, and refuses the first that breaks the policy. A layout augmenter's
   objects are read as it adds them, so a chart is refused object by object whether it is
   generated, walked or laid out first.
-- **Scope:** kure's (`manifest.Scope`). A kind whose scope kure does not know counts as
-  cluster-scoped when the object carries no namespace, so the check fails closed. The scope
-  a CustomResourceDefinition in the same build gives its kind is not read: it cannot
-  change the outcome, since the CRD is itself cluster-scoped and refused under a policy
-  that does not allow cluster-scoped objects.
+- **Scope:** kure's (`manifest.Scope`). A kind whose scope kure does not know (neither
+  built in nor registered with kure) counts as cluster-scoped whatever namespace the object
+  states, so the check fails closed: the namespace is the author's to write, and the API
+  server ignores it on a cluster-scoped kind. A custom resource whose CRD is installed
+  apart from the build is therefore refused under a policy that does not allow
+  cluster-scoped objects. The scope a CustomResourceDefinition in the same build gives its
+  kind is not read: it cannot change the outcome, since the CRD is itself cluster-scoped
+  and refused under that policy.
 - **Refusal:** a `ViolationError` of the owning component (for a document-owned
   application, its entry) with class `object-kind`, naming the object and its group and
   kind. The refusal comes at generation, not at the transform.

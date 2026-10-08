@@ -118,8 +118,12 @@ func TestObjectKindPolicy_Rules(t *testing.T) {
 		{name: "a namespaced kind with no namespace", policy: &kindPolicy{},
 			object: kindObject("apps/v1", "Deployment", "")},
 		{name: "a kind of unknown scope with no namespace", policy: &kindPolicy{},
-			object: kindObject("example.io/v1", "Widget", ""), refused: "the build does not know the kind's scope and the object carries no namespace, so it is taken as cluster-scoped"},
+			object: kindObject("example.io/v1", "Widget", ""), refused: "the build does not know the kind's scope (it is neither a built-in kind nor one kure registers), so it is taken as cluster-scoped"},
+		// The namespace is the author's to write, and the API server ignores it
+		// on a cluster-scoped kind: it does not make an unknown kind namespaced.
 		{name: "a kind of unknown scope in a namespace", policy: &kindPolicy{},
+			object: kindObject("example.io/v1", "Widget", "ns"), refused: "a namespace the object states does not make it namespaced"},
+		{name: "a kind of unknown scope where cluster-scoped objects are allowed", policy: &kindPolicy{allowCluster: true},
 			object: kindObject("example.io/v1", "Widget", "ns")},
 		{name: "cluster-scoped objects allowed", policy: &kindPolicy{allowCluster: true},
 			object: kindObject("rbac.authorization.k8s.io/v1", "ClusterRole", "")},
@@ -223,6 +227,25 @@ func TestObjectKindPolicy_DocumentOwnedApplication(t *testing.T) {
 	cfg := wrapOwnedEntryConfigKinds(&ownershipObjectsConfig{objects: []client.Object{kindObject("v1", "ConfigMap", "ns")}}, "", "shop-source-1", ownershipKey, nil, mustKindRules(t, policy))
 	_, err := stack.NewApplication("shop-source-1", "ns", cfg).Generate()
 	wantKindRefusal(t, err, "shop-source-1", `ConfigMap "thing"`)
+}
+
+// TestObjectKindPolicy_NamespacedCRDInTheBuild: a CustomResourceDefinition in
+// the build that declares its kind Namespaced cannot make a custom resource of
+// that kind pass a policy that does not allow cluster-scoped objects, in either
+// order: the CRD is itself cluster-scoped and refused. This is why the check
+// reads no CRD scope.
+func TestObjectKindPolicy_NamespacedCRDInTheBuild(t *testing.T) {
+	crd := kindObject("apiextensions.k8s.io/v1", "CustomResourceDefinition", "")
+	crd.SetName("widgets.example.io")
+	crd.Object["spec"] = map[string]any{
+		"group": "example.io", "scope": "Namespaced",
+		"names": map[string]any{"kind": "Widget", "plural": "widgets"},
+	}
+	widget := kindObject("example.io/v1", "Widget", "ns")
+	err := generateUnderKinds(t, &kindPolicy{}, "web", crd, widget)
+	wantKindRefusal(t, err, "web", `CustomResourceDefinition "widgets.example.io"`, "the kind is cluster-scoped")
+	err = generateUnderKinds(t, &kindPolicy{}, "web", widget, crd)
+	wantKindRefusal(t, err, "web", `Widget "thing" (example.io/Widget)`, "does not know the kind's scope")
 }
 
 // TestObjectKindPolicy_WithoutTheInterface: a Policy that does not implement

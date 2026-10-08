@@ -103,8 +103,11 @@ type ObjectKindPolicy interface {
 	// ForbiddenObjectKinds lists the kinds the build may not emit. A kind on
 	// both lists is forbidden.
 	ForbiddenObjectKinds() []schema.GroupKind
-	// AllowClusterScopedObjects says whether the build may emit an object that
-	// is not in a namespace.
+	// AllowClusterScopedObjects says whether the build may emit an object of a
+	// cluster-scoped kind. A kind whose scope the build does not know (neither
+	// built in nor registered with kure, such as a custom resource whose CRD is
+	// installed apart from the build) counts as cluster-scoped, whatever
+	// namespace the object states.
 	AllowClusterScopedObjects() bool
 }
 
