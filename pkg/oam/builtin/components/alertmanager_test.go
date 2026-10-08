@@ -327,6 +327,12 @@ func alertmanagerRefusals(notA string) []struct {
 			`secrets[1] "alerts-config": the Prometheus operator names its volume "secret-alerts-config", which is the volume the Prometheus operator adds for secrets[0], and the API refuses a pod with two volumes of one name`},
 		{"a ConfigMap listed twice", map[string]any{"configMaps": []any{"templates", "templates"}},
 			`configMaps[1] "templates": the Prometheus operator names its volume "configmap-templates", which is the volume the Prometheus operator adds for configMaps[0]`},
+		// The operator cuts the volume name to 63 characters, then checks it
+		// (ResourceNamer.DNS1123Label): a cut after a - fails the reconcile.
+		{"a Secret whose volume name is cut after a -", map[string]any{"secrets": []any{strings.Repeat("a", 55) + "-b"}},
+			`secrets[0] "` + strings.Repeat("a", 55) + `-b": the Prometheus operator names its volume "secret-` + strings.Repeat("a", 55) + `-", which is not a DNS-1123 label`},
+		{"a ConfigMap whose volume name is cut after a -", map[string]any{"configMaps": []any{strings.Repeat("c", 52) + "-d"}},
+			`configMaps[0] "` + strings.Repeat("c", 52) + `-d": the Prometheus operator names its volume "configmap-` + strings.Repeat("c", 52) + `-", which is not a DNS-1123 label`},
 		// The operator appends volumeMounts to its own (statefulset.go:692),
 		// and the API refuses two mounts at one path.
 		{"a mount at the data volume's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "alertmanager-fast-db", "mountPath": "/alertmanager"}}},
@@ -817,6 +823,7 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a port name of 15 characters":          {"portName": "alertmanagerweb"},
 		"emptyDir alone":                        {"storage": map[string]any{"emptyDir": map[string]any{}}},
 		"two Secrets whose volumes differ":      {"secrets": []any{"alerts", "alerts-tls"}},
+		"a Secret whose volume name is cut":     {"secrets": []any{strings.Repeat("a", 60)}},
 		"a mount beside the operator's":         {"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/extra"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
 		"the templates' path without templates": {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
 		"a claim template of its own name":      {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},

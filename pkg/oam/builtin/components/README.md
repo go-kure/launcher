@@ -3617,8 +3617,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component may author an Alertmanager, and so make the operator run pods in
   the namespace; the policy below is what holds them. A policy can keep the
   kind out of a build through the object kind policy (`oam.ObjectKindPolicy`,
-  go-kure/launcher#922). The open point "No capability gate on component
-  types" on go-kure/launcher#790 carries the capability.
+  go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of
   `AlertmanagerSpec`, decoded strictly at every depth (an unknown key is
@@ -3777,7 +3776,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     left to the API to refuse. Two entries of `secrets`, or of `configMaps`,
     that the operator's naming gives one volume name (`alerts.config` and
     `alerts-config` both name `secret-alerts-config`) are refused as well:
-    the operator adds a volume for each (statefulset.go:638-690).
+    the operator adds a volume for each (statefulset.go:638-690). So is an
+    entry whose volume name, cut to 63 characters, ends in `-`: the operator
+    checks the name after the cut and fails to build the pods
+    (`ResourceNamer.DNS1123Label`, statefulset.go:640-643).
   - an entry of `volumeMounts` at a path the operator mounts a volume at in
     the alertmanager container, as the API refuses two mounts at one path:
     `/alertmanager`, `/etc/alertmanager/config`, `config_out` and `certs`, the

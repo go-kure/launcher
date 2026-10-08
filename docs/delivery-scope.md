@@ -1758,7 +1758,8 @@ and by scope, whatever component or trait emits it.
     volume the operator adds; an entry of `volumes` named as a volume the operator adds
     (`web-config` and `cluster-tls-config` whatever `version` names; not the TLS
     credentials' volumes, whose hashed names are left to the API), and two entries of
-    `secrets` or of `configMaps` the operator gives one volume name; an entry of
+    `secrets` or of `configMaps` the operator gives one volume name, or one whose volume
+    name the operator cuts to 63 characters after a `-`; an entry of
     `volumeMounts` at a path the operator mounts at in the alertmanager container (not
     the TLS credentials' mounts); a negative request or limit; and a name whose data
     volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot,
