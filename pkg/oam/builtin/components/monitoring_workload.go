@@ -10,6 +10,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -109,8 +110,12 @@ type monitoringWorkload struct {
 	// is refused, a patch of the operator's own containers included.
 	generated map[string][]string
 	// generatedPorts are the ports the operator gives the containers it
-	// generates, by container name, each port's number by its name.
-	generatedPorts map[string]map[string]int32
+	// generates, by container name, in the order it lists them, each with
+	// its name, number and protocol.
+	generatedPorts map[string][]corev1.ContainerPort
+	// serviceName names the Service the spec makes the StatefulSet's
+	// governing one, nil where the operator creates its own.
+	serviceName *string
 	// images are the full image references the spec names outside pod. An
 	// empty value names no image and is not listed.
 	images []fieldValue
@@ -154,15 +159,15 @@ type monitoringWorkload struct {
 // container of the pods is refused (refuseSharedContainerNames), and so are a
 // dnsPolicy of None without a nameserver and a pod-level HostProcess without
 // hostNetwork, which the API refuses of a pod (podspec.go holds both on the
-// pod kinds). A listed
-// container named for one the operator generates is merged into it, its ports
-// by number, so a port of the patch named as one of that container's
-// (generatedPorts) at another number is added beside it, and is refused, since
-// the API refuses two ports of one name; such a patch may name no image; any other
-// listed container is added to the pods as written, and one that names no
-// image is refused, since no pod runs it. An image volume that names no image
-// is not checked. The blocks of resources are checked as the operator runs
-// them: a patch merged in one (mergedPatches) is not checked alone, and a
+// pod kinds), as are two volumes of one name and a serviceName that is not a
+// DNS-1123 label, which names no Service. A listed container named for one
+// the operator generates is merged into it, its ports by number (runPorts),
+// and may name no image; any other listed container is added to the pods as
+// written, and one that names no image is refused, since no pod runs it. A
+// container whose ports, as the pods run them, name two ports alike is
+// refused (refuseDuplicatePortNames), since the API refuses two ports of one
+// name. An image volume that names no image is not checked. The blocks of
+// resources are checked as the operator runs them: a patch merged in one (mergedPatches) is not checked alone, and a
 // block that names no memory request is checked with the request the
 // operator fills (memoryRequests), which satisfies the API's rule that
 // hugepages need cpu or memory. Such a block that names a memory limit is
@@ -193,18 +198,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
-			// The patch's ports are merged by number: one at the generated
-			// port's number replaces it, name and all, and one at another
-			// number is added beside it.
-			for j, p := range c.Ports {
-				number, ok := w.generatedPorts[c.Name][p.Name]
-				if !ok || !slices.Contains(w.generated[list.name], c.Name) || p.ContainerPort == number {
-					continue
-				}
-				if slices.ContainsFunc(c.Ports, func(q corev1.ContainerPort) bool { return q.ContainerPort == number }) {
-					continue
-				}
-				return errors.Errorf("%s: ports[%d] %q: the Prometheus operator gives the container a port of that name at %d, and adds this one at %d beside it, and the API refuses a container with two ports of one name; name the port otherwise, give it number %d, or rename the port at %d in the same patch", where, j, p.Name, number, p.ContainerPort, number, number)
+			patch := slices.Contains(w.generated[list.name], c.Name)
+			if err := refuseDuplicatePortNames(where, patch, runPorts(patch, w.generatedPorts[c.Name], c.Ports)); err != nil {
+				return err
 			}
 			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
 				continue
@@ -219,6 +215,24 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	}
 	if err := refuseSharedContainerNames(w); err != nil {
 		return err
+	}
+	// The operator adds the listed volumes to the pods as written
+	// (makeStatefulSetSpec, pkg/alertmanager/statefulset.go:198 at v0.94.1),
+	// and the API refuses a pod with two volumes of one name.
+	first := map[string]int{}
+	for i, v := range w.pod.Volumes {
+		if j, seen := first[v.Name]; seen {
+			return errors.Errorf("volumes[%d] %q: the name is listed already at volumes[%d], and the API refuses a pod with two volumes of one name, which the Prometheus operator adds to the pods as listed; list each volume once", i, v.Name, j)
+		}
+		first[v.Name] = i
+	}
+	// The operator fails the reconcile where it cannot get the Service the
+	// spec names (EnsureCustomGoverningService, pkg/k8s/network.go:135-140
+	// at v0.94.1), and no Service has a name that is not a DNS-1123 label.
+	if w.serviceName != nil {
+		if errs := validation.IsDNS1123Label(*w.serviceName); len(errs) > 0 {
+			return errors.Errorf("serviceName: %q is not a DNS-1123 label: %s; no Service has such a name, so the Prometheus operator fails to find the governing Service and builds no pods", *w.serviceName, strings.Join(errs, "; "))
+		}
 	}
 	// The API's pod rules across fields the spec carries apart: the operator
 	// copies both into the pod template, and the API then refuses the pods.
@@ -254,6 +268,92 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 		}
 	}
 	return nil
+}
+
+// runPort is a port of a container as the pods run it, with what gives the
+// port its name: ports[j] of the listed entry, or the operator.
+type runPort struct {
+	port corev1.ContainerPort
+	from string
+}
+
+// runPorts are the ports of a listed container as the pods run them. The
+// operator adds a container it does not generate as listed
+// (MergePatchContainers, pkg/k8s/merge.go:65-70 at prometheus-operator
+// v0.94.1). It merges a patch of one it generates into the generated one with
+// a strategic merge (merge.go:44-62), which merges ports by number
+// (patchMergeKey containerPort): each port of the patch, in its order, is
+// merged into the first port of its number, the operator's or one an earlier
+// port of the patch added, and replaces the name and protocol it names; a
+// port of a number no port has is added (mergeSliceWithoutSpecialElements and
+// findMapInSliceBasedOnKeyValue, apimachinery strategicpatch/patch.go:
+// 1606-1667 at v0.37.0, the version the operator builds with). The merge
+// keeps every port, in an order of its own.
+func runPorts(patch bool, generated, listed []corev1.ContainerPort) []runPort {
+	var ports []runPort
+	if patch {
+		for _, p := range generated {
+			ports = append(ports, runPort{p, "the Prometheus operator's port"})
+		}
+	}
+	for j, p := range listed {
+		from := fmt.Sprintf("ports[%d]", j)
+		i := -1
+		if patch {
+			i = slices.IndexFunc(ports, func(q runPort) bool { return q.port.ContainerPort == p.ContainerPort })
+		}
+		if i < 0 {
+			ports = append(ports, runPort{p, from})
+			continue
+		}
+		if p.Name != "" {
+			ports[i].port.Name, ports[i].from = p.Name, from
+		}
+		if p.Protocol != "" {
+			ports[i].port.Protocol = p.Protocol
+		}
+	}
+	return ports
+}
+
+// refuseDuplicatePortNames refuses a container whose ports, as the pods run
+// them (runPorts), name two ports alike: the API requires the names of a
+// container's ports to be unique. An unnamed port names none.
+func refuseDuplicatePortNames(where string, patch bool, ports []runPort) error {
+	first := map[string]int{}
+	for i, p := range ports {
+		if p.port.Name == "" {
+			continue
+		}
+		j, seen := first[p.port.Name]
+		if !seen {
+			first[p.port.Name] = i
+			continue
+		}
+		later, earlier := p, ports[j]
+		if !patch {
+			return errors.Errorf("%s: %s %q: the name is that of %s already, and the API refuses a container with two ports of one name, which the Prometheus operator adds to the pods as listed; name the port otherwise", where, later.from, later.port.Name, earlier.from)
+		}
+		// The operator's ports are named apart, as each kind refuses a spec
+		// that names two of them alike before this runs
+		// (validateAlertmanagerPortName), so one of the two is the patch's;
+		// name that one.
+		if !strings.HasPrefix(later.from, "ports[") {
+			later, earlier = earlier, later
+		}
+		return errors.Errorf("%s: %s %q at %s: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, %s at %s, and the API refuses a container with two ports of one name; name the port otherwise, or give it the number of the port it is to replace", where, later.from, later.port.Name, portAt(later.port), earlier.from, portAt(earlier.port))
+	}
+	return nil
+}
+
+// portAt is a port's number and protocol; the API defaults an unset protocol
+// to TCP.
+func portAt(p corev1.ContainerPort) string {
+	protocol := p.Protocol
+	if protocol == "" {
+		protocol = corev1.ProtocolTCP
+	}
+	return fmt.Sprintf("%d/%s", p.ContainerPort, protocol)
 }
 
 // refuseSharedContainerNames refuses a name shared by an init container and a

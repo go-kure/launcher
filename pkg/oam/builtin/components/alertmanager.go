@@ -102,7 +102,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. A negative one is refused: the operator runs 0 for it. Held to the EnvironmentPolicy's replica maximum. Unset, the operator runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
 		"retention":    text("retention: how long Alertmanager keeps its data, as whole hours, minutes, seconds and milliseconds in that order, such as 120h or 1h30m. Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores. The kind leaves to the API what the CRD's own schema refuses when the Alertmanager is applied, such as a retention of 1.5h or 1d, which shows at once; it refuses what the CRD admits but the operator or the API then refuses on the StatefulSet or the pods, which would fail late and out of sight."),
 		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name beside emptyDir or ephemeral is refused unless it is alertmanager-<name>-db: the operator mounts the data volume under it and creates it under that name. On the volumeClaimTemplate arm, a claim template's name must be a DNS-1123 label, which the operator names the data volume with, and not the name of a volume the operator adds. A claim of the arm in use, ephemeral or volumeClaimTemplate, must request storage above 0 (spec.resources.requests.storage), and an ephemeral one name its access modes; unset or empty access modes of volumeClaimTemplate are ReadWriteOnce. An emptyDir claims nothing. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A key the consumer reserves is refused in the labels and annotations of volumeClaimTemplate where it is the arm in use, which the operator copies onto its StatefulSet's volume claim template; beside emptyDir or ephemeral they are not read, nor those of the ephemeral arm's claim template. No claim template takes a component label." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. Two entries of secrets, or of configMaps, whose volumes the operator gives one name are refused as well. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. Two entries of secrets, or of configMaps, whose volumes the operator gives one name are refused as well, and so are two entries of one name. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
 		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container. A mount path the operator mounts a volume at is refused: /alertmanager, /etc/alertmanager/config, config_out and certs, the web and cluster TLS configuration files whatever version names, /etc/alertmanager/templates where alertmanagerConfiguration.templates is set, and /etc/alertmanager/secrets/<name> and configmaps/<name> of each entry of secrets and configMaps. The mounts of the TLS credentials are left to the API.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
@@ -122,14 +122,14 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"dnsPolicy":           text("dnsPolicy: the DNS policy of the pods: ClusterFirstWithHostNet, ClusterFirst, Default or None. None is refused without dnsConfig.nameservers, which the API then requires."),
 		"dnsConfig":           object("dnsConfig: the DNS configuration of the pods: nameservers, searches and options." + decoded + "PodDNSConfig in its API reference."),
 		"enableServiceLinks":  flag("enableServiceLinks: whether the Services of the namespace are injected into the pods' environment variables."),
-		"serviceName":         text("serviceName: the name of the governing Service of the StatefulSet, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named alertmanager-operated. Not empty."),
+		"serviceName":         text("serviceName: the name of the governing Service of the StatefulSet, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named alertmanager-operated. Not empty, and a DNS-1123 label, as every Service's name is: the operator fails to reconcile where it finds no Service of the name."),
 		"serviceAccountName":  text("serviceAccountName: the ServiceAccount the pods run as. Launcher creates none for it and does not check that it exists."),
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. A patch's port named as one the operator gives that container (the web port under portName, mesh-tcp, mesh-udp, reloader-web) at another number is refused: it is added beside it, unless the patch renames that port with one at its number. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. The operator merges a patch's ports into those it gives that container (the web port under portName at 9093, mesh-tcp at 9094/TCP, mesh-udp at 9094/UDP, reloader-web at 8080) by number: in the patch's order, a port is merged into the first port of its number, the operator's or one the patch added before it, and takes the name and protocol it names; a port of another number is added. A container whose ports, merged so or as an added entry lists them, name two ports alike is refused, since the API refuses it. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (alertmanager, config-reloader or a listed one), a patch's port as there (reloader-init), and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (alertmanager, config-reloader or a listed one), its ports as there (a patch's merged into reloader-init at 8081), and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
@@ -660,26 +660,32 @@ var alertmanagerGenerated = map[string][]string{
 }
 
 // alertmanagerGeneratedPorts are the ports the operator gives the containers
-// it generates: unless listenLocal is set, the alertmanager container's web
-// port under portName (web where it is unset) at 9093 and the config-reloader
-// container's reloader-web at 8080; whatever listenLocal says, the
-// alertmanager container's mesh-tcp and mesh-udp at 9094, and the
-// init-config-reloader container's reloader-init at 8081
-// (pkg/alertmanager/statefulset.go:483-502 and :793-830, and CreateConfigReloader,
-// pkg/operator/config_reloader.go:228-282 at prometheus-operator v0.94.1).
-func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string]map[string]int32 {
-	ports := map[string]map[string]int32{
-		"alertmanager":         {"mesh-tcp": 9094, "mesh-udp": 9094},
-		"config-reloader":      {},
-		"init-config-reloader": {"reloader-init": 8081},
+// it generates, in its order: the alertmanager container's web port under
+// portName (web where it is unset) at 9093/TCP unless listenLocal is set, then
+// its mesh-tcp at 9094/TCP and mesh-udp at 9094/UDP; the config-reloader
+// container's reloader-web at 8080/TCP unless listenLocal is set; and the
+// init-config-reloader container's reloader-init at 8081/TCP, whatever
+// listenLocal says (pkg/alertmanager/statefulset.go:483-502 and :793-833, and
+// CreateConfigReloader, pkg/operator/config_reloader.go:226-282 at
+// prometheus-operator v0.94.1).
+func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string][]corev1.ContainerPort {
+	port := func(name string, number int32, protocol corev1.Protocol) corev1.ContainerPort {
+		return corev1.ContainerPort{Name: name, ContainerPort: number, Protocol: protocol}
+	}
+	ports := map[string][]corev1.ContainerPort{
+		"alertmanager": {
+			port("mesh-tcp", 9094, corev1.ProtocolTCP),
+			port("mesh-udp", 9094, corev1.ProtocolUDP),
+		},
+		"init-config-reloader": {port("reloader-init", 8081, corev1.ProtocolTCP)},
 	}
 	if !spec.ListenLocal {
 		web := spec.PortName
 		if web == "" {
 			web = "web"
 		}
-		ports["alertmanager"][web] = 9093
-		ports["config-reloader"]["reloader-web"] = 8080
+		ports["alertmanager"] = append([]corev1.ContainerPort{port(web, 9093, corev1.ProtocolTCP)}, ports["alertmanager"]...)
+		ports["config-reloader"] = []corev1.ContainerPort{port("reloader-web", 8080, corev1.ProtocolTCP)}
 	}
 	return ports
 }
@@ -868,6 +874,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		},
 		generated:      alertmanagerGenerated,
 		generatedPorts: alertmanagerGeneratedPorts(spec),
+		serviceName:    spec.ServiceName,
 		replicas:       &replicas,
 		replicasPath:   "replicas",
 		storage:        spec.Storage,
