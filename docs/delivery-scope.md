@@ -1873,7 +1873,10 @@ and by scope, whatever component or trait emits it.
     empty string included. An image the operator chooses (for `prometheus`, the two
     reloaders, and `thanos-sidecar` where `thanos` is set) is refused under a policy with
     allowed registries, and a listed container that names no image and patches none the
-    operator generates is refused. No capability is required and no default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
+    operator generates is refused, as are a name listed twice in one list, a name shared
+    by an init container and a container of the pods, `dnsPolicy: None` without a
+    nameserver and a pod-level HostProcess without `hostNetwork`, which the API refuses
+    of the pods. No capability is required and no default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
     `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
     so is an empty `action` of a relabeling rule in the five lists of rules the spec
     holds (a remote write entry's, an Alertmanager endpoint's two, a scrape class's
