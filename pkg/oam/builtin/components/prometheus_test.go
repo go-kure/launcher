@@ -306,6 +306,42 @@ func prometheusRefusals(notA string) []struct {
 			"dnsPolicy: None requires dnsConfig.nameservers with at least one entry; the API refuses the pods the Prometheus operator builds without one"},
 		{"a pod-level HostProcess without the host network", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
 			"securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true"},
+		// Prometheus exits at startup on an externalUrl that begins or ends
+		// with a quote, or that net/url cannot parse (computeExternalURL,
+		// cmd/prometheus/main.go:1762-1792 at v3.14.0).
+		{"an externalUrl that begins with a quote", map[string]any{"externalUrl": `"https://prometheus.example.com`},
+			"externalUrl: begins or ends with a quote: the Prometheus operator passes it to Prometheus, which then exits at startup; name the URL without quotes, or leave it unset"},
+		{"an externalUrl that ends with a quote", map[string]any{"externalUrl": "https://prometheus.example.com'"},
+			"externalUrl: begins or ends with a quote"},
+		{"an externalUrl that does not parse", map[string]any{"externalUrl": "http://[::1"},
+			"externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to Prometheus, which then exits at startup; name a valid URL, or leave it unset"},
+	}
+}
+
+// TestPrometheus_ExternalURL: Prometheus checks no scheme of externalUrl, so
+// one of any scheme, or none, builds; a refused one is not quoted, as it is
+// authored text that can carry a credential, and url.Parse's error, which
+// repeats it, is not passed on.
+func TestPrometheus_ExternalURL(t *testing.T) {
+	for _, value := range []string{"ftp://prometheus.example.com", "prometheus.example.com/prom", "HTTPS://prometheus.example.com"} {
+		prometheusOf(t, map[string]any{"externalUrl": value})
+	}
+	h := &components.PrometheusHandler{}
+	for name, value := range map[string]string{
+		"a quoted URL":           `'http://bot:s3cret@prometheus.example.com'`,
+		"a URL that won't parse": "http://bot:s3cret@[::1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(h, "prometheus", "main", map[string]any{"externalUrl": value})
+			if err == nil {
+				t.Fatal("err = nil, want the externalUrl refused")
+			}
+			for _, part := range []string{"s3cret", "bot", "[::1"} {
+				if strings.Contains(err.Error(), part) {
+					t.Errorf("err = %v, names %q of the value", err, part)
+				}
+			}
+		})
 	}
 }
 
