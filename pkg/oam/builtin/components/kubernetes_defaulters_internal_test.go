@@ -592,7 +592,8 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 // alias is the field of the object e refers to, when a write through e
 // reaches the object: a variable bound to it, its address, a pointer, map or
 // list field, or a conversion of one to a pointer type. A struct or basic
-// field read by value is a copy, not an alias.
+// field read by name is a copy, not an alias. A copy taken by dereferencing a
+// pointer (*p) is not told apart: resolve keeps the pointer's type.
 func (f *walkFrame) alias(e ast.Expr) (pathVal, bool) {
 	pv, ok := f.resolve(e)
 	if !ok {
@@ -1419,8 +1420,9 @@ func checkOnlyWrites(t *testing.T, src *vendoredK8s, pkgPath, field string, want
 // server's defaulting code in the excerpt: each default is the literal the
 // code assigns, evaluated into the linked type and encoded, and each is
 // assigned only when the list is omitted or empty. The functions that reach
-// the defaults are held to their exact statements, so a return or branch
-// added to them cannot change when a default applies unseen, and
+// the defaults are held to their statement lists (an if initialiser on a
+// matched guard is not compared), so a return or branch added to them
+// cannot change when a default applies unseen, and
 // checkOnlyWrites holds each default to being the only write to its field or
 // beneath it, so a write elsewhere cannot change it unseen.
 func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
@@ -1450,9 +1452,9 @@ func TestKubernetesDefaulters_ListDefaultsMatchVendoredSource(t *testing.T) {
 		if got, want := ev.evalJSON(assign.Rhs[0], reflect.TypeFor[[]autoscalingv2.MetricSpec]()), hpaDefaultedZeros.fields["metrics"]; got != want {
 			t.Errorf("the API server defaults metrics to %s, hpaDefaultedZeros says %s", got, want)
 		}
-		// The functions that reach the defaults are held to their exact
-		// statements: a return, a branch or a write added anywhere in them
-		// could change when or whether a default applies.
+		// The functions that reach the defaults are held to their statement
+		// lists: a return, a branch or a write added among them could change
+		// when or whether a default applies.
 		hpaStmts := hpa.decl.Body.List
 		if len(hpaStmts) != 3 || flatStmts(src, hpa.decl.Body)[0] != "if obj.Spec.MinReplicas == nil { obj.Spec.MinReplicas = ptr.To[int32](1) }" ||
 			hpaStmts[1] != ast.Stmt(metrics) || src.text(hpaStmts[2]) != "SetDefaults_HorizontalPodAutoscalerBehavior(obj)" {
