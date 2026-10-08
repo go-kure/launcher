@@ -677,16 +677,20 @@ func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string]
 // pkg/operator/argument.go:26-79 at prometheus-operator v0.94.1). The flags
 // are those of makeStatefulSetSpec (pkg/alertmanager/statefulset.go:289-508,
 // :700-748). A flag the operator generates only from some Alertmanager
-// version on is reserved from that version on. Where version is unset the
-// operator runs its default, DefaultAlertmanagerVersion (v0.34.0,
-// pkg/operator/defaults.go:25), at or above every such version, as no flag is
-// generated only up to a version; so every such flag is reserved, as it is
-// where version does not parse, which validateAlertmanagerVersion refuses.
-// dispatch.start-delay is not: the operator leaves it out where an
-// additional argument names it.
+// version on is reserved from that version on. Where version is unset it is
+// judged at the operator's default, alertmanagerDefaultVersion, as the
+// version gates are; that default is at or above every such version, as no
+// flag is generated only up to a version, so every such flag is reserved. So
+// is every one where version does not parse, which
+// validateAlertmanagerVersion refuses. dispatch.start-delay is not: the
+// operator leaves it out where an additional argument names it.
 func refuseGeneratedAlertmanagerArgs(spec *monitoringv1.AlertmanagerSpec) error {
-	version, err := semver.ParseTolerant(spec.Version)
-	from := func(v string) bool { return spec.Version == "" || err != nil || version.GTE(semver.MustParse(v)) }
+	judged := spec.Version
+	if judged == "" {
+		judged = alertmanagerDefaultVersion
+	}
+	version, err := semver.ParseTolerant(judged)
+	from := func(v string) bool { return err != nil || version.GTE(semver.MustParse(v)) }
 	generated := map[string]bool{}
 	for _, name := range []string{"config.file", "storage.path", "data.retention", "web.listen-address", "web.route-prefix", "cluster.reconnect-timeout"} {
 		generated[name] = true
