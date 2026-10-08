@@ -1,9 +1,11 @@
 package oam
 
+import "k8s.io/apimachinery/pkg/runtime/schema"
+
 // Policy provides environment-level constraints and defaults for OAM component
 // and trait handlers. Handlers call its methods; they must not type-assert. A
 // constraint added after the interface was fixed is an optional interface
-// beside it (ExplicitSecretPolicy), asked through its own pkg/oam function, so
+// beside it (ExplicitSecretPolicy, ObjectKindPolicy), asked through pkg/oam, so
 // an existing Policy implementation keeps compiling.
 //
 // The 23 typed accessor methods correspond to every piece of data that handlers
@@ -75,6 +77,35 @@ type ExplicitSecretPolicy interface {
 func ExplicitSecretsAllowed(policy Policy) bool {
 	p, ok := policy.(ExplicitSecretPolicy)
 	return !ok || p.AllowExplicitSecrets()
+}
+
+// ObjectKindPolicy is an optional interface of a Policy: which kinds of object a
+// build may emit, and whether it may emit cluster-scoped objects
+// (go-kure/launcher#922). It gates what the build emits, whatever emitted it: a
+// kind component, a trait, the passthrough and manifests components, a chart
+// rendered at build time. The capability lists above keep their meaning, trait
+// types only.
+//
+// A kind is matched by its API group and kind, in any version. An entry whose
+// Kind is "*" matches every kind of its group; the core group is "". An entry
+// with no Kind is refused when the transform starts.
+//
+// A Policy that does not implement it allows every kind and cluster-scoped
+// objects, and so does NoopPolicy: the build is exactly what it was before the
+// interface existed. Not covered: what a chart Flux installs renders on the
+// cluster (only its HelmRelease is emitted), objects a controller creates, and
+// what an RBAC object grants, which the API server holds to the identity that
+// applies it (its escalate and bind checks).
+type ObjectKindPolicy interface {
+	// AllowedObjectKinds lists the kinds the build may emit. Nil or empty means
+	// every kind.
+	AllowedObjectKinds() []schema.GroupKind
+	// ForbiddenObjectKinds lists the kinds the build may not emit. A kind on
+	// both lists is forbidden.
+	ForbiddenObjectKinds() []schema.GroupKind
+	// AllowClusterScopedObjects says whether the build may emit an object that
+	// is not in a namespace.
+	AllowClusterScopedObjects() bool
 }
 
 // Enforceable is implemented by component and trait ApplicationConfig types that

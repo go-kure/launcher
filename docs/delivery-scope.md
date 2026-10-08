@@ -767,12 +767,13 @@ its text:
 
 - `oam.ViolationError` has a `Class` (`pkg/oam/pipeline.go`), filled from the first
   `oam.PolicyRefusal` in the cause chain (`NewViolationError`, `pkg/oam/policy_refusal.go`).
-- The classes are a closed set of eleven: host namespace, privileged, host path, container
+- The classes are a closed set of twelve: host namespace, privileged, host path, container
   capability, registry, resource maximum, storage maximum, replica maximum, explicit
-  secret, trait capability and unreadable object (`RefusalClasses`). Every built-in refusal
-  by the policy carries one, on every path: a component's `ApplyPolicy`, a trait
-  sub-application's, the rendered-object check of template delivery (§5.2), and
-  `passthrough` and `manifests` at the transform and at generation (§7).
+  secret, trait capability, unreadable object and object kind (`RefusalClasses`; object
+  kind since go-kure/launcher#934, §5.4). Every built-in refusal by the policy carries
+  one, on every path: a component's `ApplyPolicy`, a trait sub-application's, the
+  rendered-object check of template delivery (§5.2), `passthrough` and `manifests` at the
+  transform and at generation (§7), and the object kind check at generation (§5.4).
 - No message changed.
 - What is not a refusal by the policy is unclassified, an explicit value and never a guess:
   a chart that does not render, a policy default or maximum that does not parse, and the
@@ -783,6 +784,38 @@ its text:
   registry class.
 - **Breaking** for an unkeyed `oam.ViolationError` literal only.
 - The table of classes is in `pkg/oam/README.md`, "Refusal classes".
+
+### 5.4 Shipped (go-kure/launcher#934): object kind policy
+
+The decision of go-kure/launcher#922: a consumer restricts what a build may emit by kind
+and by scope, whatever component or trait emits it.
+
+- **Interface:** `oam.ObjectKindPolicy`, optional on a `Policy` (`pkg/oam/policy.go`):
+  `AllowedObjectKinds()` (empty allows every kind), `ForbiddenObjectKinds()` (a kind on
+  both lists is forbidden) and `AllowClusterScopedObjects()`. A kind is an API group and
+  kind, matched in any version; a `Kind` of `*` matches every kind of its group, and an
+  entry with no `Kind` fails the transform.
+- **One check, on every producer:** the ownership wrapper the transform's last step puts
+  on every application (`pkg/oam/object_kind_policy.go`). It reads each object generation
+  emits — a kind component's, a trait's, what `passthrough` and `manifests` carry, every
+  object a chart renders at build time, its hook groups included — and each member of a
+  list envelope, and refuses the first that breaks the policy. A layout augmenter's
+  objects are read as it adds them, so a chart is refused object by object whether it is
+  generated, walked or laid out first.
+- **Scope:** kure's (`manifest.Scope`). A kind whose scope kure does not know counts as
+  cluster-scoped when the object carries no namespace, so the check fails closed. The scope
+  a CustomResourceDefinition in the same build gives its kind is not read: it cannot
+  change the outcome, since the CRD is itself cluster-scoped and refused under a policy
+  that does not allow cluster-scoped objects.
+- **Refusal:** a `ViolationError` of the owning component (for a document-owned
+  application, its entry) with class `object-kind`, naming the object and its group and
+  kind. The refusal comes at generation, not at the transform.
+- **Unchanged output:** a `Policy` that does not implement the interface, `NoopPolicy`
+  included, holds the build to nothing; the check never runs and no golden moved. A policy
+  that implements it and lets every object through builds the same objects.
+- **Not covered:** what a chart Flux installs renders on the cluster (only its HelmRelease
+  is emitted), objects a controller creates, and what an RBAC object grants, which the API
+  server holds to the identity that applies it (its escalate and bind checks).
 
 ---
 
@@ -1266,7 +1299,8 @@ its text:
   `rbac.authorization.k8s.io/v1` API on the shared helper `policyFreeKind`. The first
   two are in the build namespace, the last two cluster-scoped.
   - **They are ungated: no capability and no environment-policy check restricts what a
-    role grants,** nor to whom a binding grants it.
+    role grants,** nor to whom a binding grants it. A policy can keep the kinds out of a
+    build, or the two cluster-scoped ones, through `oam.ObjectKindPolicy` (§5.4).
   - None has a spec: the properties are the object's own fields (`rules`; `rules` and
     `aggregationRule`; `subjects` and `roleRef`), strictly decoded, and its `kind`,
     `apiVersion` and `metadata` are refused.
@@ -1368,8 +1402,10 @@ its text:
     an Ingress, the capability's Gateway as an HTTPRoute's parent.
   - No environment policy applies. The policy's capability lists gate trait types, so a
     policy that forbids the trait does not refuse the component; the rendered
-    paths emit the same object under the same terms. A capability gate on component
-    types is an open point of go-kure/launcher#790.
+    paths emit the same object under the same terms. The open point of
+    go-kure/launcher#790 on a capability gate on component types was decided in
+    go-kure/launcher#922: a policy restricts the kinds of object emitted, by any
+    component or trait, through `oam.ObjectKindPolicy` (§5.4).
 - **Shipped: four core kinds,** `namespace`, `limitrange`, `resourcequota` and
   `persistentvolume` (`namespace.go`, `limitrange.go`, `resourcequota.go`,
   `persistentvolume.go` in `pkg/oam/builtin/components`).
@@ -1891,3 +1927,4 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
+| [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |

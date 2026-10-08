@@ -1,0 +1,193 @@
+package oam
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/go-kure/kure/pkg/kubernetes"
+	"github.com/go-kure/kure/pkg/manifest"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/go-kure/launcher/pkg/errors"
+)
+
+// Object kind policy (go-kure/launcher#922). A consumer that keeps some kinds of
+// object out of a build, or every cluster-scoped one, says so through
+// ObjectKindPolicy. One check holds every application to it, and it sits in the
+// ownership wrapper (ownedConfig) beside the reserved metadata keys: the
+// transform's last step wraps every application's config in one, so the check
+// reads each object the build emits, whatever emitted it, and each object a list
+// envelope stands for when Flux applies it (appliedObjects). It reads what
+// Generate returns, and what a layout augmenter adds (a chart rendered at build
+// time); not what a chart Flux installs renders on the cluster.
+
+// objectKindWildcard is the Kind of an entry that matches every kind of its
+// group.
+const objectKindWildcard = "*"
+
+// objectKindRules is ObjectKindPolicy as the check reads it. A nil one holds the
+// build to nothing: the policy does not implement the interface.
+type objectKindRules struct {
+	allowed   objectKindSet
+	forbidden objectKindSet
+	// allowCluster is AllowClusterScopedObjects.
+	allowCluster bool
+}
+
+// objectKindSet is a list of kinds as the check matches it.
+type objectKindSet struct {
+	kinds map[schema.GroupKind]struct{}
+	// groups holds the groups of the wildcard entries.
+	groups map[string]struct{}
+}
+
+// objectKindRulesOf returns policy's ObjectKindPolicy as the check reads it, nil
+// when policy does not implement it. An entry with no Kind is refused: it would
+// match nothing, and a forbidden one that matches nothing lets through what it
+// was written to keep out.
+func objectKindRulesOf(policy Policy) (*objectKindRules, error) {
+	p, ok := policy.(ObjectKindPolicy)
+	if !ok || isNullValue(p) {
+		return nil, nil
+	}
+	allowed, err := parseObjectKinds("AllowedObjectKinds", p.AllowedObjectKinds())
+	if err != nil {
+		return nil, err
+	}
+	forbidden, err := parseObjectKinds("ForbiddenObjectKinds", p.ForbiddenObjectKinds())
+	if err != nil {
+		return nil, err
+	}
+	return &objectKindRules{allowed: allowed, forbidden: forbidden, allowCluster: p.AllowClusterScopedObjects()}, nil
+}
+
+func parseObjectKinds(method string, entries []schema.GroupKind) (objectKindSet, error) {
+	set := objectKindSet{kinds: map[schema.GroupKind]struct{}{}, groups: map[string]struct{}{}}
+	for i, gk := range entries {
+		switch gk.Kind {
+		case "":
+			return set, errors.Errorf("invalid ObjectKindPolicy.%s()[%d] %q: no kind; %q matches every kind of the group", method, i, gk.String(), objectKindWildcard)
+		case objectKindWildcard:
+			set.groups[gk.Group] = struct{}{}
+		default:
+			set.kinds[gk] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+func (s objectKindSet) empty() bool { return len(s.kinds) == 0 && len(s.groups) == 0 }
+
+func (s objectKindSet) matches(gk schema.GroupKind) bool {
+	if _, ok := s.kinds[gk]; ok {
+		return true
+	}
+	_, ok := s.groups[gk.Group]
+	return ok
+}
+
+// appliedSelfAndMembers returns obj, and every object it stands for when Flux
+// applies it (appliedObjects) that is not obj itself.
+func appliedSelfAndMembers(obj client.Object) []client.Object {
+	out := []client.Object{obj}
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		for _, applied := range appliedObjects(u) {
+			if applied != obj {
+				out = append(out, applied)
+			}
+		}
+	}
+	return out
+}
+
+// checkObjectKind refuses obj when the policy keeps its kind out of the build,
+// or its scope: a ViolationError of the application's owner, whose cause is a
+// PolicyRefusal of class RefusalObjectKind naming the object.
+//
+// The kind is the one the object states, else its Go type's
+// (objectGroupVersionKind). An object whose kind cannot be told is refused: the
+// check cannot hold it to the policy. The scope is kure's (manifest.Scope); a
+// kind whose scope kure does not know is taken as cluster-scoped when the
+// object carries no namespace, so the check fails closed.
+//
+// The scope a CustomResourceDefinition in the build gives its kind is not read:
+// it could not change the outcome. A CRD is itself cluster-scoped, so a policy
+// that does not allow cluster-scoped objects refuses the build that emits it,
+// and a policy that does allow them reads no scope.
+func (o *ownedConfig) checkObjectKind(obj client.Object) error {
+	gvk, ok := objectGroupVersionKind(obj)
+	if !ok {
+		return o.objectKindViolation(fmt.Sprintf("%T %q: its kind cannot be told, so it cannot be held to the object kind policy", obj, obj.GetName()))
+	}
+	gk := gvk.GroupKind()
+	where := fmt.Sprintf("%s %q (%s)", gvk.Kind, obj.GetName(), groupKindLabel(gk))
+	if o.kinds.forbidden.matches(gk) {
+		return o.objectKindViolation(where + ": the object kind policy forbids the kind")
+	}
+	if !o.kinds.allowed.empty() && !o.kinds.allowed.matches(gk) {
+		return o.objectKindViolation(where + ": the kind is not among those the object kind policy allows")
+	}
+	if o.kinds.allowCluster {
+		return nil
+	}
+	probe := &unstructured.Unstructured{}
+	probe.SetGroupVersionKind(gvk)
+	switch manifest.Scope(probe, nil) {
+	case manifest.ScopeCluster:
+		return o.objectKindViolation(where + ": the kind is cluster-scoped, and the object kind policy does not allow cluster-scoped objects")
+	case manifest.ScopeUnknown:
+		if obj.GetNamespace() == "" {
+			return o.objectKindViolation(where + ": the build does not know the kind's scope and the object carries no namespace, so it is taken as cluster-scoped, which the object kind policy does not allow")
+		}
+	case manifest.ScopeNamespaced:
+	}
+	return nil
+}
+
+// objectKindViolation is the refusal of an object of the wrapper's application:
+// its owning component's, or, for an application the document as a whole owns,
+// the one the application came from (entry).
+func (o *ownedConfig) objectKindViolation(message string) error {
+	owner := o.component
+	if owner == "" {
+		owner = o.entry
+	}
+	return NewViolationError(owner, NewPolicyRefusal(RefusalObjectKind, message))
+}
+
+// objectGroupVersionKind returns the kind obj states, else the one its Go type
+// is registered under (kure's scheme), when that is one group and kind.
+func objectGroupVersionKind(obj client.Object) (schema.GroupVersionKind, bool) {
+	if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
+		return gvk, true
+	}
+	if group, kind := statedOrTypedKind(obj); kind != "" {
+		return schema.GroupVersionKind{Group: group, Kind: kind}, true
+	}
+	// A scheme that fails to register leaves the kind untold: the object is
+	// refused, not passed.
+	if err := kubernetes.RegisterSchemes(); err != nil {
+		return schema.GroupVersionKind{}, false
+	}
+	gvks, _, err := kubernetes.Scheme.ObjectKinds(obj)
+	if err != nil || len(gvks) == 0 {
+		return schema.GroupVersionKind{}, false
+	}
+	gk := gvks[0].GroupKind()
+	if slices.ContainsFunc(gvks[1:], func(g schema.GroupVersionKind) bool { return g.GroupKind() != gk }) {
+		return schema.GroupVersionKind{}, false
+	}
+	return gvks[0], true
+}
+
+// groupKindLabel writes gk as "group/Kind", the core group as "core".
+func groupKindLabel(gk schema.GroupKind) string {
+	group := gk.Group
+	if group == "" {
+		group = "core"
+	}
+	return strings.Join([]string{group, gk.Kind}, "/")
+}

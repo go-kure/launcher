@@ -2778,12 +2778,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   an object MetalLB does not read. Launcher does not know that namespace and
   checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author a profile, and may so change the timers of the peers
-  that already name one of that name. The open point "No capability gate on
-  component types" on go-kure/launcher#790 carries it.
+  that already name one of that name. A policy can keep the kind out of a
+  build through the object kind policy (`oam.ObjectKindPolicy`,
+  go-kure/launcher#922).
 
   **Authored.** The properties are the seven top-level json fields of
   `BFDProfileSpec`, decoded strictly: an unknown key is refused. None is
@@ -2862,13 +2863,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   MetalLB watches is an object MetalLB does not read. Launcher does not know
   that namespace and checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author an advertisement, and with it which addresses the
-  cluster announces to its BGP peers and with which attributes. The open
-  point "No capability gate on component types" on go-kure/launcher#790
-  carries it.
+  cluster announces to its BGP peers and with which attributes. A policy can
+  keep the kind out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of
   `BGPAdvertisementSpec`, decoded strictly at every depth: an unknown key is
@@ -2974,13 +2975,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   object MetalLB does not read. Launcher does not know that namespace and
   checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author a peer, and with it a router that the cluster's nodes
-  connect to and that is told the addresses of the cluster's Services. The
-  open point "No capability gate on component types" on go-kure/launcher#790
-  carries it.
+  connect to and that is told the addresses of the cluster's Services. A
+  policy can keep the kind out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the twenty-one top-level json fields of
   `BGPPeerSpec`, decoded strictly at every depth: an unknown key is refused
@@ -3097,13 +3098,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   is an object MetalLB does not read. Launcher does not know that namespace
   and checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author a Community, and may so define a name an
   advertisement there already uses. What MetalLB does with a name that two
-  aliases define, in one object or in two, was not read. The open point "No
-  capability gate on component types" on go-kure/launcher#790 carries it.
+  aliases define, in one object or in two, was not read. A policy can keep
+  the kind out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The one property is the top-level json field of
   `CommunitySpec`, `communities`, decoded strictly: an unknown key is
@@ -3168,12 +3170,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   object MetalLB does not read. Launcher does not know that namespace and
   checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author a pool, and with it which Services of the cluster get
-  an address of which range. The open point "No capability gate on component
-  types" on go-kure/launcher#790 carries it.
+  an address of which range. A policy can keep the kind out of a build
+  through the object kind policy (`oam.ObjectKindPolicy`,
+  go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of
   `IPAddressPoolSpec`, decoded strictly at every depth: an unknown key is
@@ -3270,13 +3273,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   MetalLB watches is an object MetalLB does not read. Launcher does not know
   that namespace and checks nothing of it.
 
-  **No capability is required, and nothing gates the kind**: where MetalLB's
+  **No capability is required, and none gates the kind**: where MetalLB's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component of an application built for MetalLB's
   namespace may author an advertisement, and with it which addresses the
   cluster announces on its local network, from which nodes and interfaces.
-  The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it.
+  A policy can keep the kind out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of
   `L2AdvertisementSpec`, decoded strictly at every depth: an unknown key is
@@ -3632,8 +3635,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     an in-cluster name to any DNS name outside the cluster**, and workloads
     that resolve the Service name are sent there. `nodePort`,
     `loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
-    are accepted the same way. The open point "No capability gate on
-    component types" on go-kure/launcher#790 carries it.
+    are accepted the same way. The object kind policy
+    (`oam.ObjectKindPolicy`, go-kure/launcher#922) holds kinds, not these
+    fields: it can keep Services out of a build, not one `type`.
 - **serviceaccount**, **persistentvolumeclaim**, **configmap**
   (go-kure/launcher#702) are kind-named projections of one object each. Each
   emits that object, named after the component, and nothing else, so another
@@ -3691,8 +3695,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
 
     **No policy check on `volumeName`.** It is accepted with no capability
-    gate and no EnvironmentPolicy method (go-kure/launcher#790, open point "No
-    capability gate on component types"). A claim that names a volume binds to
+    gate and no EnvironmentPolicy method; the object kind policy
+    (`oam.ObjectKindPolicy`, go-kure/launcher#922) holds kinds, not this
+    field. A claim that names a volume binds to
     that PersistentVolume and to no other, with no dynamic provisioning, so
     **whoever may author a claim may ask for any PersistentVolume of the
     cluster by name**. The cluster still decides: the volume must be unbound
@@ -4787,6 +4792,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     a changed one builds here and is refused at apply. Launcher does not
     compare what a role grants with what its author, or whoever applies the
     object, may grant.
+  - **The object kind policy** (`oam.ObjectKindPolicy`, go-kure/launcher#922)
+    is what restricts these kinds: it keeps any of the four, or the whole
+    `rbac.authorization.k8s.io` group, out of a build, and a policy that
+    does not allow cluster-scoped objects refuses the ClusterRole and the
+    ClusterRoleBinding. It holds the `rbac` trait's objects too. What an
+    allowed role grants stays unchecked here; the API server's escalate and
+    bind checks hold it to the identity that applies it.
 - **role** emits its Role in the build namespace; the handler declares its
   object as namespaced, so the object name is claimed in the object's
   namespace. **It is ungated: no capability and no environment-policy check
@@ -4907,9 +4919,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **No capability is required, and nothing gates these kinds.** Launcher does
   not ask whether the cluster serves `monitoring.coreos.com/v1`: where the
   operator's CRDs are not installed the component builds, and the object is
-  refused at apply. Whoever may author a component may author these. The open
-  point "No capability gate on component types" on go-kure/launcher#790
-  carries it.
+  refused at apply. Whoever may author a component may author these. A policy
+  can keep the kinds out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of the spec type,
   decoded strictly at every depth: an unknown key is refused wherever it sits
@@ -5078,8 +5090,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   not ask whether the cluster serves `cert-manager.io/v1`: where cert-manager's
   CRDs are not installed the component builds, and the object is refused at
   apply. Whoever may author a component may author these, a ClusterIssuer
-  included. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it. The `certificate` trait still requires its
+  included. A policy can keep the kinds out of a build through the object
+  kind policy (`oam.ObjectKindPolicy`, go-kure/launcher#922). The
+  `certificate` trait still requires its
   capability; the kind of the same name does not read it.
 
   **Authored.** The properties are the top-level json fields of the spec type,
@@ -5301,9 +5314,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   not ask whether the cluster runs Cilium or has its BGP control plane
   enabled: where the CRDs are not installed the component builds, and the
   object is refused at apply. Whoever may author a component may author
-  these, and with them what the cluster's nodes announce to its routers. The
-  open point "No capability gate on component types" on go-kure/launcher#790
-  carries it.
+  these, and with them what the cluster's nodes announce to its routers. A
+  policy can keep the kinds out of a build through the object kind policy
+  (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of the spec type,
   decoded strictly at every depth: an unknown key is refused wherever it sits
@@ -5467,8 +5480,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Whoever may author a component may author these, and with them the address
   a workload's traffic leaves the cluster with, where a node sends traffic
   meant for an address or a Service, and the configuration of the Cilium
-  agent on a node. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it.
+  agent on a node. A policy can keep the kinds out of a build through the
+  object kind policy (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of the spec type,
   decoded strictly at every depth: an unknown key is refused wherever it sits
@@ -5708,8 +5721,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   refused at apply. Whoever may author a component may author these: a
   GatewayClass, which is cluster-scoped, and a ReferenceGrant, which lets
   objects of another namespace refer to objects of the build namespace,
-  included. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it. The `httproute` trait may take the Gateway
+  included. A policy can keep the kinds out of a build through the object
+  kind policy (`oam.ObjectKindPolicy`, go-kure/launcher#922). The
+  `httproute` trait may take the Gateway
   it attaches to from a capability (`gatewayName`, `gatewayNamespace`); the
   `gateway` kind does not read it, and a `gateway` component is not what that
   capability names unless the platform says so.
@@ -6023,8 +6037,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   cluster's `external-secret` capability is the trait's, and these kinds do
   not read it. Whoever may author a component may author these, a store that
   every namespace reads from and an external secret created in every selected
-  namespace included. The open point "No capability gate on component types"
-  on go-kure/launcher#790 carries it.
+  namespace included. A policy can keep the kinds out of a build through the
+  object kind policy (`oam.ObjectKindPolicy`, go-kure/launcher#922).
 
   **Authored.** The properties are the top-level json fields of the spec type,
   decoded strictly at every depth: an unknown key is refused wherever it sits
@@ -6325,8 +6339,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **No capability is required, and nothing gates these kinds.** Launcher does
   not ask whether the cluster serves `volsync.backube/v1alpha1`: where
   VolSync's CRDs are not installed the component builds, and the object is
-  refused at apply. The open point "No capability gate on component types" on
-  go-kure/launcher#790 carries it. The kinds read nothing of the cluster
+  refused at apply. A policy can keep the kinds out of a build through the
+  object kind policy (`oam.ObjectKindPolicy`, go-kure/launcher#922). The
+  kinds read nothing of the cluster
   profile; the `volsync` trait still takes its class defaults from it.
 
   **Authored.** The properties are the top-level json fields of the spec type,

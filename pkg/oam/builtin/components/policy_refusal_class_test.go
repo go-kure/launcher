@@ -188,9 +188,10 @@ func TestPolicyRefusalClass_ObjectPaths(t *testing.T) {
 		}
 	}
 	// The trait-capability class is the transform's own (pkg/oam): no object
-	// raises it.
+	// raises it. The object-kind class is the ownership wrapper's (pkg/oam),
+	// held on every path in object_kind_policy_test.go.
 	for _, class := range oam.RefusalClasses() {
-		if !covered[class] && class != oam.RefusalTraitCapability {
+		if !covered[class] && class != oam.RefusalTraitCapability && class != oam.RefusalObjectKind {
 			t.Errorf("no object case holds the class %q", class)
 		}
 	}

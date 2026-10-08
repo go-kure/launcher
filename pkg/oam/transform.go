@@ -805,6 +805,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err != nil {
 		return nil, nil, err
 	}
+	objectKinds, err := objectKindRulesOf(ctx.Policy)
+	if err != nil {
+		return nil, nil, err
+	}
 	// The namespace override (kurel build --namespace) and the Flux namespace are stamped
 	// onto metadata.namespace as given, so both must be DNS-1123 labels. The messages name
 	// the value as a CLI reader knows it, not the field.
@@ -972,8 +976,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// After every step that reads a config: from here on each application's
 	// config is its ownership wrapper, which labels what the application
 	// generates with its component (go-kure/launcher#788) and holds it to the
-	// consumer's reserved metadata keys (go-kure/launcher#790).
-	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys); err != nil {
+	// consumer's reserved metadata keys (go-kure/launcher#790) and to the
+	// policy's object kinds (go-kure/launcher#922).
+	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys, objectKinds); err != nil {
 		return nil, nil, err
 	}
 
