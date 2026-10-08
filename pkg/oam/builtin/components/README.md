@@ -5913,7 +5913,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **`useDefaultGateways` is an experimental-channel field:** the Go types
     hold it and the standard channel's CRDs do not, so a cluster on that
     channel does not keep it. It is the only such field of these specs at
-    v1.6.2, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+    v1.6.3, and `TestGatewayKinds_RequiredMatchCRD` holds that.
   - **No default is filled.** The defaults are the CRDs', and the API server
     applies them to what the object leaves out: the `group` and `kind` of a
     parent (a Gateway), and the `group`, `kind` and `weight` of a backend (a
