@@ -407,6 +407,14 @@ func prometheusRefusals(notA string) []struct {
 			`volumes[0] "secret-remote-tls": the name is the volume the Prometheus operator adds for secrets[0]`},
 		{"two Secrets the operator gives one volume name", map[string]any{"secrets": []any{"remote.tls", "remote-tls"}},
 			`secrets[1] "remote-tls": the Prometheus operator names its volume "secret-remote-tls", which is the volume the Prometheus operator adds for secrets[0]`},
+		// The operator cuts the volume name to 63 characters, then checks it
+		// (ResourceNamer.DNS1123Label, common.go:289-292, :311-314, returned
+		// at server/statefulset.go:181-184): a cut after a - fails the
+		// reconcile.
+		{"a Secret whose volume name is cut after a -", map[string]any{"secrets": []any{strings.Repeat("a", 55) + "-b"}},
+			`secrets[0] "` + strings.Repeat("a", 55) + `-b": the Prometheus operator names its volume "secret-` + strings.Repeat("a", 55) + `-", which is not a DNS-1123 label`},
+		{"a ConfigMap whose volume name is cut after a -", map[string]any{"configMaps": []any{strings.Repeat("c", 52) + "-d"}},
+			`configMaps[0] "` + strings.Repeat("c", 52) + `-d": the Prometheus operator names its volume "configmap-` + strings.Repeat("c", 52) + `-", which is not a DNS-1123 label`},
 		// The API refuses two mounts at one path in the prometheus container
 		// (common.go:264-340, server/statefulset.go:192-204, :527-533).
 		{"a mount at the data volume's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/prometheus"}}},
@@ -748,6 +756,7 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"the sidecar's volume name without a sidecar":              {"volumes": extra("thanos-prometheus-http-client-file")},
 		"another Prometheus's rule ConfigMap volume name":          {"volumes": extra("prometheus-other-rulefiles-0")},
 		"two Secrets whose volumes differ":                         {"secrets": []any{"remote", "remote-tls"}},
+		"a Secret whose volume name is cut":                        {"secrets": []any{strings.Repeat("a", 60)}},
 		"a mount beside the operator's": {"secrets": []any{"remote"}, "volumes": extra("extra"),
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/secrets/extra"}}},
 		"the log file's directory without a log file volume": {"volumes": extra("extra"),

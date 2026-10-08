@@ -4649,7 +4649,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     three whatever the rules; the name the operator derives for each of
     `secrets` and `configMaps` (`secret-<name>`, `configmap-<name>`); and the
     data volume's. Two entries of `secrets`, or of `configMaps`, that the
-    operator's naming gives one volume name are refused as well.
+    operator's naming gives one volume name are refused as well. So is an
+    entry whose volume name, cut to 63 characters, ends in `-`: the operator
+    checks the name after the cut and fails to build the pods
+    (`ResourceNamer.DNS1123Label`, common.go:289-292 and :311-314, returned
+    at server/statefulset.go:181-184).
   - an entry of `volumeMounts` at a path the operator mounts a volume at in
     the prometheus container: `/prometheus`, `/etc/prometheus/config_out`,
     `/etc/prometheus/certs`, `/etc/prometheus/web_config/web-config.yaml`,
