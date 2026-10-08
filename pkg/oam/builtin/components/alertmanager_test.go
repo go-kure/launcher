@@ -1003,8 +1003,11 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// The operator generates cluster.peer-name from 0.30.0 and
 		// cluster.label from 0.26.0 on; unversioned, the operator's default
 		// v0.34.0 generates each.
-		"an argument of the peer name before 0.30.0":        {"version": amVersion, "additionalArgs": []any{map[string]any{"name": "cluster.peer-name", "value": "custom"}}},
-		"an argument of the cluster label before 0.26.0":    {"version": "v0.25.0", "additionalArgs": []any{map[string]any{"name": "cluster.label", "value": "custom"}}},
+		"an argument of the peer name before 0.30.0":     {"version": amVersion, "additionalArgs": []any{map[string]any{"name": "cluster.peer-name", "value": "custom"}}},
+		"an argument of the cluster label before 0.26.0": {"version": "v0.25.0", "additionalArgs": []any{map[string]any{"name": "cluster.label", "value": "custom"}}},
+		// The StatefulSet takes minReadySeconds at every version; only the
+		// dispatch.start-delay flag waits for 0.30.0.
+		"minReadySeconds before 0.30.0":                     {"version": "v0.29.0", "minReadySeconds": 10},
 		"dnsPolicy None with a nameserver":                  {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
 		"a pod-level HostProcess on the host network":       {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
 		"a sidecar port of a generated port's name":         {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},

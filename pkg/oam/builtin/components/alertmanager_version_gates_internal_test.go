@@ -51,7 +51,8 @@ var alertmanagerGateRows = func() []gateRow {
 		gate(sts, pods, `version.GTE(semver.MustParse("0.17.0")) && web != nil && web.GetConcurrency != nil`, "web.getConcurrency"),
 		gate(sts, pods, `version.GTE(semver.MustParse("0.17.0")) && web != nil && web.Timeout != nil`, "web.timeout"),
 		gate(sts, pods, `version.GTE(semver.MustParse("0.28.0")) && limits != nil`, "limits.maxSilences", "limits.maxPerSilenceBytes"),
-		gate(sts, pods, `version.GTE(semver.MustParse("0.30.0")) && a.Spec.MinReadySeconds != nil`, "minReadySeconds"),
+		not(sts, pods, `version.GTE(semver.MustParse("0.30.0")) && a.Spec.MinReadySeconds != nil`,
+			"the StatefulSet takes minReadySeconds at every version; only dispatch.start-delay is added from 0.30.0"),
 		gate(sts, pods, `version.GTE(semver.MustParse("0.16.0"))`, "logFormat"),
 		gate(sts, pods, `version.GTE(semver.MustParse("0.30.0"))`, "clusterPeerName"),
 		gate(sts, pods, `version.GTE(semver.MustParse("0.26.0"))`, "clusterLabel"),
@@ -189,7 +190,6 @@ func alertmanagerGateFixtures() map[string]map[string]any {
 		"enableFeatures":            {"enableFeatures": []any{"classic-mode"}},
 		"limits.maxSilences":        {"limits": map[string]any{"maxSilences": 100}},
 		"limits.maxPerSilenceBytes": {"limits": map[string]any{"maxPerSilenceBytes": "1MB"}},
-		"minReadySeconds":           {"minReadySeconds": 10},
 		"clusterPeerName":           {"clusterPeerName": "$(POD_NAME)"},
 
 		"alertmanagerConfiguration.global.httpConfig.authorization":        http(map[string]any{"authorization": map[string]any{"credentials": ref("token", "token")}}),

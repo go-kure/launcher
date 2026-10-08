@@ -3764,8 +3764,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `web.getConcurrency` and `web.timeout` (0.17.0), `web.tlsConfig` and
     `web.httpConfig` (0.22.0), `clusterTLS` (0.24.0), `clusterLabel` (0.26.0),
     `enableFeatures` (0.27.0), `limits.maxSilences` and
-    `limits.maxPerSilenceBytes` (0.28.0), `minReadySeconds` and
-    `clusterPeerName` (0.30.0). Under `alertmanagerConfiguration.global`:
+    `limits.maxPerSilenceBytes` (0.28.0), `clusterPeerName` (0.30.0). Under `alertmanagerConfiguration.global`:
     `httpConfig.authorization`, `httpConfig.oauth2` and
     `httpConfig.followRedirects` (0.22.0); `telegram` (0.24.0); `webex`,
     `httpConfig.enableHttp2`, `httpConfig.tlsConfig.minVersion` and `maxVersion`,

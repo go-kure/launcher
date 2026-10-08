@@ -114,9 +114,6 @@ var alertmanagerVersionGates = []versionGate[monitoringv1.AlertmanagerSpec]{
 	{"limits.maxPerSilenceBytes", "0.28.0", amFlagDropped, func(s *monitoringv1.AlertmanagerSpec) bool {
 		return s.Limits != nil && !s.Limits.MaxPerSilenceBytes.IsEmpty()
 	}},
-	{"minReadySeconds", "0.30.0", "does not pass it to Alertmanager as dispatch.start-delay, so notifications are not held back after a start; the StatefulSet still takes it", func(s *monitoringv1.AlertmanagerSpec) bool {
-		return s.MinReadySeconds != nil
-	}},
 	{"clusterPeerName", "0.30.0", amFlagDropped, func(s *monitoringv1.AlertmanagerSpec) bool {
 		return set(s.ClusterPeerName)
 	}},
