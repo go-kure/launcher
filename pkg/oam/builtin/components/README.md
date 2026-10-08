@@ -3720,8 +3720,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **What the operator builds from the spec is checked where the API or the
   operator would break it.** The kind leaves to the API what the CRD's own
-  schema refuses when the Alertmanager is applied (a `retention` of another
-  form than a number and a unit, for one), which shows at once; it refuses
+  schema refuses when the Alertmanager is applied (a `retention` of `1.5h` or
+  `1d`, for one), which shows at once; it refuses
   what the CRD admits but the operator or the API then refuses on the
   StatefulSet or the pods built from it, which would fail late and out of
   sight. Each is refused, under any policy and none, at
