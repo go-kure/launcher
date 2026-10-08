@@ -469,6 +469,14 @@ var requiredWrittenKinds = []pinKind{
 	{component: "podmonitor", handler: &PodMonitorHandler{}, typ: reflect.TypeFor[monitoringv1.PodMonitorSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PodMonitorSpec](), false),
 		base:   map[string]any{"selector": map[string]any{}, "podMetricsEndpoints": []any{map[string]any{"port": "http"}}}},
+	// As on alertmanager, a listed container named for none the operator
+	// generates must name an image, and the two entries' names differ.
+	{component: "prometheus", handler: &PrometheusHandler{}, typ: reflect.TypeFor[monitoringv1.PrometheusSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.PrometheusSpec](), false),
+		base: map[string]any{
+			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
+			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
+		}},
 	{component: "prometheus-probe", handler: &PrometheusProbeHandler{}, typ: reflect.TypeFor[monitoringv1.ProbeSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.ProbeSpec](), false),
 		base: map[string]any{
