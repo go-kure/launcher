@@ -380,6 +380,9 @@ var prometheusRulesLeft = map[string]string{
 // an authored one is refused even empty; a null one sets none and builds.
 // thanos.version is not one of them: it names the version the operator
 // configures for, as the spec's version does.
+//
+// An externalUrl Prometheus exits on at startup is refused too
+// (refusePrometheusExternalURL).
 func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 	type part struct {
 		path, use string
@@ -400,7 +403,26 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 			}
 		}
 	}
+	if err := refusePrometheusExternalURL(spec.ExternalURL); err != nil {
+		return err
+	}
 	return validateMonitoringWorkload(prometheusWorkload(spec))
+}
+
+// refusePrometheusExternalURL refuses a nonempty externalUrl Prometheus exits
+// on at startup, though the operator and the API accept it: the operator
+// passes it unchanged as --web.external-url (pkg/prometheus/promcfg.go:1346-1348
+// at prometheus-operator v0.94.1), and Prometheus exits with status 2 where
+// computeExternalURL fails (cmd/prometheus/main.go:720-723 at v3.14.0): on a
+// value that begins or ends with a quote (startsOrEndsWithQuote, :1746-1749),
+// and on one Go's net/url cannot parse (refuseUnservableExternalURL).
+// Prometheus checks no scheme (computeExternalURL, :1762-1792), so none is
+// held. No message names the value.
+func refusePrometheusExternalURL(value string) error {
+	if strings.HasPrefix(value, `"`) || strings.HasPrefix(value, "'") || strings.HasSuffix(value, `"`) || strings.HasSuffix(value, "'") {
+		return errors.New("externalUrl: begins or ends with a quote: the Prometheus operator passes it to Prometheus, which then exits at startup; name the URL without quotes, or leave it unset")
+	}
+	return refuseUnservableExternalURL("Prometheus", value, nil)
 }
 
 // prometheusPods is the number of pods the operator runs for a Prometheus:

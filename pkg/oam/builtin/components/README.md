@@ -4574,7 +4574,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `dnsConfig.nameservers`, and a pod-level
   `securityContext.windowsOptions.hostProcess: true` without
   `hostNetwork: true`, are refused: the API refuses the pods the operator
-  copies them into.
+  copies them into. A nonempty `externalUrl` that Prometheus exits on at
+  startup is refused too, though the operator and the API accept it: the
+  operator passes it unchanged as `--web.external-url`
+  (`pkg/prometheus/promcfg.go`), and Prometheus exits where it begins or ends
+  with a quote (`externalUrl: begins or ends with a quote: …`) or where Go's
+  `net/url` cannot parse it (`externalUrl: not a URL Go's net/url can parse:
+  …`; `computeExternalURL`, `cmd/prometheus/main.go` of v3.14.0). Prometheus
+  checks no scheme, so any scheme builds. Neither message names the value.
 
   **Required.** No top-level field is one. Of what is authored below them:
   the `name` of an additional argument (the spec's and the sidecar's), a DNS
