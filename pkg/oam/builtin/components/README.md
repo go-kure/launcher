@@ -3966,8 +3966,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   annotations of `storage.volumeClaimTemplate`, of
   `storage.ephemeral.volumeClaimTemplate` and of a generic ephemeral volume
   under `volumes` are written as authored, are not checked for reserved keys
-  and take no component label, as the `volumeClaimTemplates` of a
-  `statefulset` are not.
+  and take no component label.
 
   **No field holds a credential in the clear, and none is checked.** Every
   credential of the spec is the key of a Secret (a `web` or `clusterTLS` key,

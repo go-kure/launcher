@@ -92,7 +92,7 @@ const (
 	rolloutField    = "says how the StatefulSet creates, replaces and removes its pods and claims: the environment policy has no dimension for it, on a statefulset either"
 	podSettingField = "a setting of the pods the environment policy has no dimension for, on a pod kind either"
 	pullPolicyField = "says when the image is pulled, not which image"
-	claimMetadata   = "the labels and annotations of a claim template: not read for reserved keys and given no component label, as the volumeClaimTemplates of a StatefulSet are not"
+	claimMetadata   = "the labels and annotations of a claim template: not read for reserved keys and given no component label"
 )
 
 // The reasons a field named for a credential holds none.
