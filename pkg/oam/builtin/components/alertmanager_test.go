@@ -317,17 +317,26 @@ func alertmanagerRefusals(notA string) []struct {
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		{"a cluster advertise address with the cluster forced on", map[string]any{"forceEnableClusterMode": true, "clusterAdvertiseAddress": "10.0.0.1"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
-		// Releases from v0.24.0 on, its rc.0 included, are built with Go 1.17
-		// or later, whose net.ParseIP refuses an IPv4 number with leading
-		// zeros; so is the operator's default, where version is unset. Before
-		// v0.24.0 a host name is refused still.
+		// Releases from v0.28.0 on, its rc.0 included, are built with Go 1.23
+		// or later, whose net.ParseIP refuses leading zeros in an IPv4 number
+		// and in an IPv6 group of more than four digits; so is the operator's
+		// default, where version is unset. Before v0.28.0 only host:port and a
+		// numeric port are held.
 		{"a cluster advertise address with leading zeros", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "010.0.0.1:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
-		{"a cluster advertise address with leading zeros at v0.24.0-rc.0", map[string]any{"version": "v0.24.0-rc.0", "replicas": 3, "clusterAdvertiseAddress": "010.0.0.1:9094"},
+		{"a cluster advertise address of a long IPv6 group", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
-		{"a cluster advertise address of a host name before v0.24.0", map[string]any{"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "alerts.example.com:9094"},
+		{"a cluster advertise address of a long IPv6 group at v0.28.0-rc.0", map[string]any{"version": "v0.28.0-rc.0", "replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
-		{"a cluster advertise address of an IPv4 number over 255 before v0.24.0", map[string]any{"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "0256.0.0.1:9094"},
+		{"a cluster advertise address of a host name at v0.34.0", map[string]any{"version": "v0.34.0", "replicas": 3, "clusterAdvertiseAddress": "alerts.example.com:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address without a port before v0.28.0", map[string]any{"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "10.0.0.1"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		// The kubelet passes $$ as $ and $( without its closing parenthesis as
+		// written, so neither is a reference it expands.
+		{"a cluster advertise address of an escaped reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$$(POD_IP)]:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of an unclosed reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$(POD_IP]:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		// A web port name the API refuses on the container (statefulset.go:483-500).
 		{"a port name over 15 characters", map[string]any{"portName": "alertmanager-web"},
@@ -1000,11 +1009,11 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a cluster advertise address at unset replicas": {"clusterAdvertiseAddress": "alerts.example.com"},
 		// The kubelet expands an environment variable's reference first: the
 		// operator gives the container POD_IP.
-		"a cluster advertise address of the pod's IP": {"replicas": 3, "clusterAdvertiseAddress": "[$(POD_IP)]:9094"},
-		// Go before 1.17, which builds Alertmanager before v0.24.0, takes an
-		// IPv4 number with leading zeros, alone or at the end of IPv6.
-		"a cluster advertise address with leading zeros before v0.24.0":         {"version": "v0.23.0", "replicas": 3, "clusterAdvertiseAddress": "010.000.0.01:9094"},
-		"a cluster advertise address of IPv6 with leading zeros before v0.24.0": {"version": "v0.15.0", "replicas": 3, "clusterAdvertiseAddress": "[::ffff:010.0.0.1]:9094"},
+		"a cluster advertise address of the pod's IP":                     {"replicas": 3, "clusterAdvertiseAddress": "[$(POD_IP)]:9094"},
+		"a cluster advertise address of a reference after an escaped one": {"replicas": 3, "clusterAdvertiseAddress": "$$[$(AM_ADVERTISE)"},
+		// Before v0.28.0 Alertmanager is built with an older Go, whose rules
+		// for an IP address the check does not model: the host is not judged.
+		"a cluster advertise address of a long IPv6 group before v0.28.0": {"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
 		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
 			"emptyDir":            map[string]any{},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "alertmanager-fast-db"}},
