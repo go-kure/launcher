@@ -936,10 +936,10 @@ wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapC
 A trait's objects are held to the object kind policy (`oam.ObjectKindPolicy`,
 go-kure/launcher#922) like every other producer's: the ownership wrapper checks each
 object its sub-application generates and each object its layout augmenter adds. A policy
-whose allowed kinds are listed and match neither `Role` nor `RoleBinding` (an empty list
-allows every kind; a `Kind` of `*` matches its whole group), or whose forbidden kinds match
-either, refuses `rbac`, and one that
-disallows cluster-scoped objects refuses `rbac` with `clusterWide` (its ClusterRole and
+whose allowed kinds are listed and leave out `Role` or `RoleBinding` (an empty list allows
+every kind; a `Kind` of `*` matches its whole group), or whose forbidden kinds match either,
+refuses `rbac`, and one that disallows cluster-scoped objects refuses `rbac` with
+`clusterWide` (its ClusterRole and
 ClusterRoleBinding); `ingress`, `httproute`, `certificate`, `scaler`, the network policy
 traits and the rest are held to the kinds they write the same way. A refusal names the
 owning component, class `object-kind`. A policy without the interface changes nothing.
