@@ -306,6 +306,47 @@ func prometheusRefusals(notA string) []struct {
 			"dnsPolicy: None requires dnsConfig.nameservers with at least one entry; the API refuses the pods the Prometheus operator builds without one"},
 		{"a pod-level HostProcess without the host network", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
 			"securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true"},
+		// A patch's ports are merged by number (MergePatchContainers, a
+		// strategic merge), so a port of a generated name at another number
+		// is added beside the generated one.
+		{"a patched port of the web port's name at another number", container(map[string]any{"name": "prometheus", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}),
+			`containers[0] "prometheus": ports[0] "web" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9090/TCP, and the API refuses a container with two ports of one name`},
+		{"a patched port of the authored web port name", map[string]any{"portName": "http-web", "containers": []any{map[string]any{"name": "prometheus", "ports": []any{map[string]any{"name": "http-web", "containerPort": 8080}}}}},
+			`containers[0] "prometheus": ports[0] "http-web" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9090/TCP`},
+		{"a patched port of the reloader's name", container(map[string]any{"name": "config-reloader", "ports": []any{map[string]any{"name": "reloader-web", "containerPort": 9000}}}),
+			`containers[0] "config-reloader": ports[0] "reloader-web" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8080/TCP`},
+		// Under the ProcessSignal reloadStrategy the operator does not hand
+		// listenLocal to config-reloader, which keeps its port.
+		{"a patched port of the reloader's name under the signal strategy", map[string]any{"listenLocal": true, "reloadStrategy": "ProcessSignal", "containers": []any{map[string]any{"name": "config-reloader", "ports": []any{map[string]any{"name": "reloader-web", "containerPort": 9000}}}}},
+			`containers[0] "config-reloader": ports[0] "reloader-web" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8080/TCP`},
+		{"a patched port of the init reloader's name", map[string]any{"initContainers": []any{map[string]any{"name": "init-config-reloader", "ports": []any{map[string]any{"name": "reloader-init", "containerPort": 9000}}}}},
+			`initContainers[0] "init-config-reloader": ports[0] "reloader-init" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8081/TCP`},
+		// The sidecar's ports name no protocol; the API defaults it to TCP.
+		{"a patched port of the sidecar's grpc name", map[string]any{"thanos": map[string]any{}, "containers": []any{map[string]any{"name": "thanos-sidecar", "ports": []any{map[string]any{"name": "grpc", "containerPort": 9000}}}}},
+			`containers[0] "thanos-sidecar": ports[0] "grpc" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 10901/TCP`},
+		{"a patch that renames the sidecar's http port to grpc", map[string]any{"thanos": map[string]any{}, "containers": []any{map[string]any{"name": "thanos-sidecar", "ports": []any{map[string]any{"name": "grpc", "containerPort": 10902}}}}},
+			`containers[0] "thanos-sidecar": ports[0] "grpc" at 10902/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 10901/TCP`},
+		// Under listenLocal the operator gives prometheus no port, and the
+		// merge takes the patch's ports whole.
+		{"a patch of a portless container with two ports of one name", map[string]any{"listenLocal": true, "containers": []any{map[string]any{"name": "prometheus", "ports": []any{
+			map[string]any{"name": "metrics", "containerPort": 9000, "protocol": "TCP"},
+			map[string]any{"name": "metrics", "containerPort": 9000, "protocol": "UDP"},
+		}}}}, `containers[0] "prometheus": ports[1] "metrics": the name is that of ports[0] already, and the API refuses a container with two ports of one name`},
+		{"a sidecar with two ports of one name", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{
+			map[string]any{"name": "http", "containerPort": 8080},
+			map[string]any{"name": "http", "containerPort": 8081},
+		}}), `containers[0] "proxy": ports[1] "http": the name is that of ports[0] already, and the API refuses a container with two ports of one name`},
+		{"two volumes of one name", map[string]any{"volumes": []any{
+			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
+			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
+		}}, `volumes[1] "scratch": the name is listed already at volumes[0], and the API refuses a pod with two volumes of one name`},
+		// The operator gets the governing Service by this name and fails the
+		// reconcile where there is none (pkg/prometheus/server/operator.go:1010
+		// at v0.94.1); the name is held to the package's Service-name rule.
+		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "Bad_Name"},
+			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1035 label`},
+		{"a serviceName with a leading digit", map[string]any{"serviceName": "1prom"},
+			`serviceName: "1prom" is not a valid Service name, which must be a DNS-1035 label`},
 		// Prometheus exits at startup on an externalUrl that begins or ends
 		// with a quote, or that net/url cannot parse (computeExternalURL,
 		// cmd/prometheus/main.go:1762-1792 at v3.14.0).
@@ -341,6 +382,38 @@ func TestPrometheus_ExternalURL(t *testing.T) {
 					t.Errorf("err = %v, names %q of the value", err, part)
 				}
 			}
+		})
+	}
+}
+
+// TestPrometheus_PatchedPorts: the patch ports the operator's merge leaves
+// named apart build. The operator gives no port to prometheus under
+// listenLocal, nor to config-reloader under listenLocal with the HTTP
+// reloadStrategy, so a patch's port of the generated name builds there; and
+// thanos.listenLocal moves the sidecar's bind address only, not its ports.
+func TestPrometheus_PatchedPorts(t *testing.T) {
+	patch := func(name string, ports ...map[string]any) []any {
+		list := make([]any, len(ports))
+		for i, p := range ports {
+			list[i] = p
+		}
+		return []any{map[string]any{"name": name, "ports": list}}
+	}
+	for name, props := range map[string]map[string]any{
+		"the web port's name and number":        {"containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 9090})},
+		"the web port's name listening locally": {"listenLocal": true, "containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 8080})},
+		"the reloader's name listening locally": {"listenLocal": true, "containers": patch("config-reloader", map[string]any{"name": "reloader-web", "containerPort": 9000})},
+		// The merge by number renames the generated port at 10902 to
+		// metrics, so http at 9000 is the only port of that name.
+		"a patch that renames a sidecar port and reuses its name": {"thanos": map[string]any{}, "containers": patch("thanos-sidecar",
+			map[string]any{"name": "metrics", "containerPort": 10902},
+			map[string]any{"name": "http", "containerPort": 9000},
+		)},
+		"a port without a name at the sidecar's grpc number": {"thanos": map[string]any{"listenLocal": true}, "containers": patch("thanos-sidecar", map[string]any{"containerPort": 10901})},
+		"a sidecar port of a generated port's name":          {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			prometheusOf(t, props)
 		})
 	}
 }
