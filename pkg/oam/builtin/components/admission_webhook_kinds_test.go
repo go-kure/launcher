@@ -128,10 +128,23 @@ func TestAdmissionWebhookKinds_ValuesLeftToTheAPIServer(t *testing.T) {
 			"a CEL expression that does not compile": admissionWebhooks(admissionWebhook(map[string]any{
 				"matchConditions": []any{map[string]any{"name": "broken", "expression": "request.("}},
 			})),
+			"an unknown match policy": admissionWebhooks(admissionWebhook(map[string]any{"matchPolicy": "Loose"})),
+			"an unknown rule scope": admissionWebhooks(admissionWebhook(map[string]any{"rules": []any{map[string]any{
+				"operations": []any{"CREATE"}, "apiGroups": []any{""}, "apiVersions": []any{"v1"}, "resources": []any{"pods"}, "scope": "Everywhere",
+			}}})),
+			"a wildcard beside a resource": admissionWebhooks(admissionWebhook(map[string]any{"rules": []any{map[string]any{
+				"operations": []any{"CREATE"}, "apiGroups": []any{""}, "apiVersions": []any{"v1"}, "resources": []any{"*", "pods"},
+			}}})),
 			"no webhook": {},
 		} {
 			if err := coreKindErr(kind.handler, kind.component, "fast", props); err != nil {
 				t.Errorf("%s: %s: %v, want it built", kind.component, what, err)
+			}
+		}
+		if kind.component == "mutatingwebhookconfiguration" {
+			props := admissionWebhooks(admissionWebhook(map[string]any{"reinvocationPolicy": "Sometimes"}))
+			if err := coreKindErr(kind.handler, kind.component, "fast", props); err != nil {
+				t.Errorf("%s: an unknown reinvocation policy: %v, want it built", kind.component, err)
 			}
 		}
 	}
