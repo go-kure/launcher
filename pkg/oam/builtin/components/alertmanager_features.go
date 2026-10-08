@@ -42,18 +42,28 @@ var alertmanagerFeatureFlags = []alertmanagerFeatureFlagsOfMinor{
 // or its default where unset), written in messages as at. The operator passes
 // the list from 0.27.0 on, joined with ",", as --enable-feature
 // (pkg/alertmanager/statefulset.go:311-315 at prometheus-operator v0.94.1).
-// Alertmanager takes an empty value as no feature; it splits any other on ","
-// and fails on an element that is not a feature flag of its version, an empty
-// one included, and on classic-mode with utf8-strict-mode (NewFlags,
-// featurecontrol/featurecontrol.go:135-180 at v0.34.0), and then exits
-// (cmd/alertmanager/main.go:104-108 at v0.34.0). So an element with a "," in
-// it is read as two, and a list of one empty element is no feature. Below
-// 0.27.0 the version gate has refused a nonempty list already; above the
-// table's last minor the names are not known, and are not refused. No message
-// names the value, as refuseUnservableExternalURL names none.
+// A list of one empty element joins to an empty value, which the operator
+// writes as --enable-feature alone (BuildArgs, pkg/operator/argument.go:69-75
+// there), and Alertmanager's flag parser (kingpin v2.4.0, flags.go:126-130,
+// at every minor of the table) fails on a string flag without a value and
+// exits (cmd/alertmanager/main.go:98 at v0.34.0), at any version. Alertmanager
+// splits any other value on "," and fails on an element that is not a feature
+// flag of its version, an empty one included, and on classic-mode with
+// utf8-strict-mode (NewFlags, featurecontrol/featurecontrol.go:135-180 at
+// v0.34.0), and then exits (cmd/alertmanager/main.go:104-108 at v0.34.0). So
+// an element with a "," in it is read as two. Below 0.27.0 the version gate
+// has refused a nonempty list already; above the table's last minor the names
+// are not known, and are not refused. No message names the value, as
+// refuseUnservableExternalURL names none.
 func refuseUnusableAlertmanagerFeatures(spec *monitoringv1.AlertmanagerSpec, version semver.Version, at string) error {
+	if len(spec.EnableFeatures) == 0 {
+		return nil
+	}
 	joined := strings.Join(spec.EnableFeatures, ",")
-	if joined == "" || version.Major != 0 {
+	if joined == "" {
+		return errors.New("enableFeatures: one empty element: the Prometheus operator passes it as --enable-feature without a value, and Alertmanager exits at startup on a flag without its value; leave enableFeatures unset to enable no feature")
+	}
+	if version.Major != 0 {
 		return nil
 	}
 	i := slices.IndexFunc(alertmanagerFeatureFlags, func(r alertmanagerFeatureFlagsOfMinor) bool { return r.minor == version.Minor })

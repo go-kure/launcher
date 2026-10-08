@@ -437,7 +437,12 @@ func alertmanagerRefusals(notA string) []struct {
 			`enableFeatures: read by the Prometheus operator only for Alertmanager 0.27.0 and later`},
 		// A feature flag Alertmanager exits on (go-kure/launcher#950): a name
 		// its version does not take, an empty element of the list the operator
-		// joins with ",", and classic-mode with utf8-strict-mode.
+		// joins with ",", one empty element, which it passes as a flag without
+		// a value, and classic-mode with utf8-strict-mode.
+		{"one empty feature flag", map[string]any{"enableFeatures": []any{""}},
+			`enableFeatures: one empty element: the Prometheus operator passes it as --enable-feature without a value, and Alertmanager exits at startup on a flag without its value; leave enableFeatures unset to enable no feature`},
+		{"one empty feature flag after the table's versions", map[string]any{"version": "v0.35.0", "enableFeatures": []any{""}},
+			`enableFeatures: one empty element`},
 		{"a feature flag no version takes", map[string]any{"enableFeatures": []any{"no-such-feature"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0: the Prometheus operator passes the list joined with "," as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes alert-names-in-metrics, auto-gomemlimit, classic-mode, event-recorder, group-key-in-metrics, receiver-name-in-metrics, utf8-strict-mode`},
 		{"a feature flag dropped at 0.33", map[string]any{"version": "v0.33.0", "enableFeatures": []any{"auto-gomaxprocs"}},
@@ -1110,13 +1115,13 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
 		// Feature flags of the version Alertmanager runs (go-kure/launcher#950),
 		// unversioned the operator's default v0.34.0; the operator joins the
-		// list with "," and Alertmanager splits it, taking one empty value as
-		// no feature. Above the table's last minor no name is refused.
+		// list with "," and Alertmanager splits it. Above the table's last
+		// minor no name is refused.
 		"feature flags of the operator's default":   {"enableFeatures": []any{"event-recorder", "group-key-in-metrics"}},
 		"a feature flag dropped later, before it":   {"version": "v0.32.3", "enableFeatures": []any{"auto-gomaxprocs"}},
 		"the feature flags of 0.27":                 {"version": "v0.27.0", "enableFeatures": []any{"classic-mode", "receiver-name-in-metrics"}},
 		"two feature flags in one element":          {"enableFeatures": []any{"classic-mode,receiver-name-in-metrics"}},
-		"one empty feature flag":                    {"enableFeatures": []any{""}},
+		"no feature flag":                           {"enableFeatures": []any{}},
 		"a feature flag after the table's versions": {"version": "v0.35.0", "enableFeatures": []any{"a-later-feature"}},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{

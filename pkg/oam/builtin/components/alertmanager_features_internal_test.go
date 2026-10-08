@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -146,14 +147,51 @@ func (r vendoredAlertmanagerRelease) text(t *testing.T, n ast.Node) string {
 	return b.String()
 }
 
-// featureFlags is the names NewFlags takes, failing unless NewFlags reads
-// --enable-feature as refuseUnusableAlertmanagerFeatures models it: an empty
-// value is no feature; any other is split on ","; an element no case names is
-// an error; classic-mode with utf8-strict-mode is an error.
+// newFlagsOutline is NewFlags's body, statement by statement with its
+// whitespace collapsed, as refuseUnusableAlertmanagerFeatures models it: an
+// empty value is no feature; any other is split on ","; each element is
+// matched by a switch (newFlagsLoop, checked case by case); every option the
+// switch collects is applied; classic-mode with utf8-strict-mode is an error.
+// A statement added, dropped or changed fails the test, to be read anew.
+var newFlagsOutline = []string{
+	"fc := &Flags{logger: logger}",
+	"opts := []flagOption{}",
+	"if len(features) == 0 { return NoopFlags{}, nil }",
+	newFlagsLoop,
+	"for _, opt := range opts { opt(fc) }",
+	`if fc.classicMode && fc.utf8StrictMode { return nil, errors.New("cannot have both classic and UTF-8 modes enabled") }`,
+	"return fc, nil",
+}
+
+// newFlagsLoop stands in newFlagsOutline for the loop over the split value.
+const newFlagsLoop = "<the loop over the split value>"
+
+// newFlagsModeSetters are the bodies of the setters that the cases of
+// classic-mode and utf8-strict-mode call, setting the fields the combination
+// is refused on.
+var newFlagsModeSetters = map[string]string{
+	"classic-mode":     "{ return func(configs *Flags) { configs.classicMode = true } }",
+	"utf8-strict-mode": "{ return func(configs *Flags) { configs.utf8StrictMode = true } }",
+}
+
+// appendOption is a case's first statement, appending the option of a setter.
+var appendOption = regexp.MustCompile(`^opts = append\(opts, (\w+)\(\)\)$`)
+
+// collapsed is n as written in r's file, its whitespace collapsed to one space.
+func (r vendoredAlertmanagerRelease) collapsed(t *testing.T, n ast.Node) string {
+	t.Helper()
+	return strings.Join(strings.Fields(r.text(t, n)), " ")
+}
+
+// featureFlags is the names NewFlags takes, failing unless its body is
+// newFlagsOutline, its loop ranges over features split on "," with only a
+// switch on each element, the switch's default returns an error, every other
+// case appends an option of a named setter and only logs besides, and the
+// cases of the two modes call setters of newFlagsModeSetters.
 func (r vendoredAlertmanagerRelease) featureFlags(t *testing.T) []string {
 	t.Helper()
 	consts := map[string]string{}
-	var newFlags *ast.FuncDecl
+	funcs := map[string]*ast.FuncDecl{}
 	for _, decl := range r.file.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
@@ -175,73 +213,99 @@ func (r vendoredAlertmanagerRelease) featureFlags(t *testing.T) []string {
 				}
 			}
 		case *ast.FuncDecl:
-			if d.Recv == nil && d.Name.Name == "NewFlags" {
-				newFlags = d
+			if d.Recv == nil {
+				funcs[d.Name.Name] = d
 			}
 		}
 	}
+	newFlags := funcs["NewFlags"]
 	if newFlags == nil {
 		t.Fatalf("%s: no func NewFlags", r.tag)
 	}
-	var (
-		emptyIsNoop, comboRefused bool
-		names                     []string
-		split                     string
-	)
-	for _, stmt := range newFlags.Body.List {
-		switch s := stmt.(type) {
-		case *ast.IfStmt:
-			cond, body := r.text(t, s.Cond), r.text(t, s.Body)
-			switch {
-			case cond == "len(features) == 0" && strings.Contains(body, "return NoopFlags{}, nil"):
-				emptyIsNoop = true
-			case cond == "fc.classicMode && fc.utf8StrictMode" && strings.Contains(body, `"cannot have both classic and UTF-8 modes enabled"`):
-				comboRefused = true
+	params := newFlags.Type.Params.List
+	if last := params[len(params)-1]; len(last.Names) != 1 || last.Names[0].Name != "features" || r.text(t, last.Type) != "string" {
+		t.Fatalf("%s: NewFlags's last parameter is not features string", r.tag)
+	}
+	body := newFlags.Body.List
+	if len(body) != len(newFlagsOutline) {
+		t.Fatalf("%s: NewFlags has %d statements, newFlagsOutline %d", r.tag, len(body), len(newFlagsOutline))
+	}
+	var names []string
+	for i, stmt := range body {
+		if newFlagsOutline[i] != newFlagsLoop {
+			if got := r.collapsed(t, stmt); got != newFlagsOutline[i] {
+				t.Fatalf("%s: NewFlags statement %d is %q, newFlagsOutline has %q", r.tag, i+1, got, newFlagsOutline[i])
 			}
-		case *ast.RangeStmt:
-			x := r.text(t, s.X)
-			if x != `strings.Split(features, ",")` && x != `strings.SplitSeq(features, ",")` {
+			continue
+		}
+		loop, ok := stmt.(*ast.RangeStmt)
+		if !ok || loop.Tok != token.DEFINE {
+			t.Fatalf("%s: NewFlags statement %d is not a loop defining its variable", r.tag, i+1)
+		}
+		element := loop.Key
+		if loop.Value != nil {
+			if r.text(t, loop.Key) != "_" {
+				t.Fatalf("%s: NewFlags's loop keeps the index", r.tag)
+			}
+			element = loop.Value
+		}
+		if r.text(t, element) != "feature" {
+			t.Fatalf("%s: NewFlags's loop variable is not feature", r.tag)
+		}
+		if x := r.text(t, loop.X); x != `strings.Split(features, ",")` && x != `strings.SplitSeq(features, ",")` {
+			t.Fatalf("%s: NewFlags loops over %s, not features split on \",\"", r.tag, x)
+		}
+		if len(loop.Body.List) != 1 {
+			t.Fatalf("%s: NewFlags's loop is not one switch", r.tag)
+		}
+		sw, ok := loop.Body.List[0].(*ast.SwitchStmt)
+		if !ok || sw.Init != nil || sw.Tag == nil || r.text(t, sw.Tag) != "feature" {
+			t.Fatalf("%s: NewFlags's loop is not a switch on feature", r.tag)
+		}
+		refusesOthers := false
+		for _, c := range sw.Body.List {
+			cc := c.(*ast.CaseClause)
+			if cc.List == nil {
+				if len(cc.Body) == 1 {
+					ret, ok := cc.Body[0].(*ast.ReturnStmt)
+					refusesOthers = ok && len(ret.Results) == 2 && r.text(t, ret.Results[0]) == "nil" &&
+						strings.HasPrefix(r.text(t, ret.Results[1]), "fmt.Errorf(") && strings.Contains(r.text(t, ret.Results[1]), "for --enable-feature")
+				}
 				continue
 			}
-			split = x
-			if len(s.Body.List) != 1 {
-				t.Fatalf("%s: NewFlags's loop over %s is not one switch", r.tag, x)
+			var appendCall []string
+			if len(cc.Body) > 0 {
+				appendCall = appendOption.FindStringSubmatch(r.collapsed(t, cc.Body[0]))
 			}
-			sw, ok := s.Body.List[0].(*ast.SwitchStmt)
-			if !ok || sw.Init != nil || sw.Tag == nil || r.text(t, sw.Tag) != "feature" {
-				t.Fatalf("%s: NewFlags's loop over %s is not a switch on feature", r.tag, x)
+			if appendCall == nil {
+				t.Fatalf("%s: NewFlags case %s does not first append an option", r.tag, r.text(t, cc.List[0]))
 			}
-			refusesOthers := false
-			for _, c := range sw.Body.List {
-				cc := c.(*ast.CaseClause)
-				body := r.text(t, &ast.BlockStmt{List: cc.Body})
-				if cc.List == nil {
-					refusesOthers = strings.Contains(body, "return nil, fmt.Errorf(") && strings.Contains(body, "for --enable-feature")
-					continue
-				}
-				for _, e := range cc.List {
-					id, ok := e.(*ast.Ident)
-					value, known := consts[r.text(t, e)]
-					if !ok || !known {
-						t.Fatalf("%s: NewFlags case %s is not a string constant of the file", r.tag, r.text(t, e))
-					}
-					names = append(names, value)
-					// The combination is refused on the fields these cases
-					// set: hold each mode's case to its own setter.
-					for value, setter := range map[string]string{"classic-mode": "enableClassicMode()", "utf8-strict-mode": "enableUTF8StrictMode()"} {
-						if consts[id.Name] == value && !strings.Contains(body, setter) {
-							t.Fatalf("%s: NewFlags case %s does not call %s", r.tag, id.Name, setter)
-						}
-					}
+			for _, rest := range cc.Body[1:] {
+				if _, ok := rest.(*ast.ExprStmt); !ok {
+					t.Fatalf("%s: NewFlags case %s does more than append an option and log: %s", r.tag, r.text(t, cc.List[0]), r.collapsed(t, rest))
 				}
 			}
-			if !refusesOthers {
-				t.Fatalf("%s: NewFlags's switch on feature does not return an error on an unknown option", r.tag)
+			for _, e := range cc.List {
+				id, ok := e.(*ast.Ident)
+				if !ok {
+					t.Fatalf("%s: NewFlags case %s is not a constant", r.tag, r.text(t, e))
+				}
+				value, known := consts[id.Name]
+				if !known {
+					t.Fatalf("%s: NewFlags case %s is not a string constant of the file", r.tag, id.Name)
+				}
+				names = append(names, value)
+				if want, mode := newFlagsModeSetters[value]; mode {
+					setter := funcs[appendCall[1]]
+					if setter == nil || r.collapsed(t, setter.Body) != want {
+						t.Fatalf("%s: NewFlags case %s calls %s, whose body is not %q", r.tag, id.Name, appendCall[1], want)
+					}
+				}
 			}
 		}
-	}
-	if !emptyIsNoop || split == "" || !comboRefused {
-		t.Fatalf("%s: NewFlags takes an empty value as no feature %v, splits on \",\" %v, refuses classic-mode with utf8-strict-mode %v: refuseUnusableAlertmanagerFeatures models all three", r.tag, emptyIsNoop, split != "", comboRefused)
+		if !refusesOthers {
+			t.Fatalf("%s: NewFlags's switch on feature does not only return an error by default", r.tag)
+		}
 	}
 	slices.Sort(names)
 	return names
