@@ -177,15 +177,19 @@ func appliedObjects(obj client.Object) []client.Object {
 }
 
 // kustomizeInlined is Kustomize's list inlining: an unstructured object whose kind
-// ends in "List" and whose items is an array stands for its items, recursively; any
-// other object is itself. (Kustomize also drops a List whose items is null; no
-// volume is lost with it.)
+// ends in "List" and whose items is an array stands for its items, recursively,
+// and one whose items is null stands for nothing, as Kustomize drops it; any other
+// object is itself.
 func kustomizeInlined(obj client.Object) []client.Object {
 	u, ok := obj.(*unstructured.Unstructured)
 	if !ok || !strings.HasSuffix(u.GetKind(), "List") {
 		return []client.Object{obj}
 	}
-	if _, isArray := u.Object["items"].([]any); !isArray {
+	items, present := u.Object["items"]
+	if present && items == nil {
+		return nil
+	}
+	if _, isArray := items.([]any); !isArray {
 		return []client.Object{obj}
 	}
 	var out []client.Object
