@@ -136,7 +136,8 @@ for the `bundle` and `group` roles
 Under `FluxIntegratedPerLayout` placement kure also makes a Kustomization for each
 application layout and each hook-group layout. Its default name is
 `<unit name>-<layout name>`, the unit name being the bundle's Kustomization name, and kure
-refuses a name over 63 characters and shortens nothing. A component has a layout of its
+shortens a default over 63 characters by its own rule (go-kure/kure#1030); a name set on the
+layout it uses as written. A component has a layout of its
 own when it is a chart, a `helmtemplate` component or a `helm` component under
 `delivery: template`, and kure names that layout's Kustomization `<bundle>-<component>`. Launcher
 leaves that default where it fits. Where it is over 63 characters, a flat application's
@@ -144,7 +145,8 @@ leaves that default where it fits. Where it is over 63 characters, a flat applic
 `<application>-infra`, launcher sets `ManifestLayout.KustomizationName` on the layout to the
 same name shortened to 63 by the one shortening rule, `-<component>` kept whole (for a
 component name over 52 characters the whole name is shortened instead, as
-`ShortenNameWithSuffix` does), and the application builds where kure refused it. That name is the `layout` name role
+`ShortenNameWithSuffix` does), a rule other than kure's, so the name differs from the one kure
+would make. That name is the `layout` name role
 ([Name roles and the `Naming` hook](#name-roles-and-the-naming-hook)): an author
 (`layoutKustomizationName`) or the hook sets another, used as written, never shortened, and
 refused in the transform, naming the component and the role, unless it is a DNS-1123
@@ -153,12 +155,13 @@ set on the layout. What this does not cover:
 
 - Charts only. Under `ApplicationGrouping: GroupByName` every component has a layout of its
   own, and the layout of a component that is no chart keeps kure's default name, which kure
-  refuses past 63 characters.
-- Per-layout placement only: under per-bundle placement the layout has no Kustomization, and
-  the name is set but not read.
+  shortens past 63 characters by its own rule.
+- Per-layout placement only: under any other the layout has no Kustomization of its own, and
+  kure's Flux integration refuses a name set on it, the shortened default included, naming
+  the layout (go-kure/kure#1032).
 - The length is measured with the bundle's name as launcher made it. A consumer that renames
   the bundle afterwards (`Bundle.KustomizationName`) changes the unit kure prefixes a default
-  with: a default launcher left may then be over 63 and refused, and a name launcher set
+  with: a default launcher left may then be over 63, which kure shortens; a name launcher set
   is kept as it was, made from the bundle's earlier name.
 - Charts of one document are held apart, but the name a chart's layout gets is not held
   against a bundle's or a hook-group child's; kure refuses a Kustomization name used twice
@@ -200,7 +203,9 @@ sibling's layout name, and kure writes that sibling's Kustomization name. The pr
 `<application>-<component>` is the `hook-group` name role
 ([Name roles and the `Naming` hook](#name-roles-and-the-naming-hook)): an author or the hook
 sets another, which is never shortened. A consumer that walks the tree itself can still set
-the field on a walked child before the integration.
+the field on a walked child before the integration. Like the child's `DependsOn`, the field
+needs `FluxIntegratedPerLayout`: under any other placement a child gets no Kustomization of its
+own, and kure's Flux integration refuses both, naming the child (go-kure/kure#1032).
 
 **Breaking output change** (go-kure/launcher#787): under `FluxIntegratedPerLayout` placement
 the Kustomization of a hook-group child loses the leading `<unit name>-`
@@ -1211,7 +1216,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
 | `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `objectStore`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `objectStoreObjectName` | unless `objectStoreObjectName` is set; not without `objectStore`, since the component then generates none |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and its Flux Kustomization. It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
-| `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under per-bundle placement it is not read. | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer), shortened to 63 with `-<component>` kept whole (for a component name over 52 characters, the whole name is shortened). | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
+| `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under any other placement the layout has no Kustomization of its own, and kure's Flux integration refuses a name set on it (go-kure/kure#1032). | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer), shortened to 63 with `-<component>` kept whole (for a component name over 52 characters, the whole name is shortened). | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
 | `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
 
 The `bundle`, `group` and `netpol-synth` names are the hook's to change, and only the hook's.

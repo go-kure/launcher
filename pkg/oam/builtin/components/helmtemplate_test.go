@@ -420,6 +420,21 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 // db is a helmtemplate on the chart served at srvURL, carrying componentTraits.
 func htChartCluster(t *testing.T, srvURL, application string, componentTraits ...oam.Trait) *stack.Cluster {
 	t.Helper()
+	return htChartClusterWith(t, srvURL, application, map[string]any{"values": map[string]any{"replicas": 3}}, componentTraits...)
+}
+
+// htChartClusterWith is htChartCluster with the component's properties besides
+// chart, version and source given as props.
+func htChartClusterWith(t *testing.T, srvURL, application string, props map[string]any, componentTraits ...oam.Trait) *stack.Cluster {
+	t.Helper()
+	properties := map[string]any{
+		"chart":   "testchart",
+		"version": "0.1.0",
+		"source":  map[string]any{"url": srvURL},
+	}
+	for key, value := range props {
+		properties[key] = value
+	}
 	tr := oam.NewTransformer(
 		map[string]oam.ComponentHandler{"helmtemplate": &components.HelmTemplateHandler{}},
 		map[string]oam.TraitHandler{
@@ -430,15 +445,10 @@ func htChartCluster(t *testing.T, srvURL, application string, componentTraits ..
 	cluster, err := tr.Transform(&oam.Application{
 		Metadata: oam.Metadata{Name: application},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{{
-			Name: "db",
-			Type: "helmtemplate",
-			Properties: map[string]any{
-				"chart":   "testchart",
-				"version": "0.1.0",
-				"source":  map[string]any{"url": srvURL},
-				"values":  map[string]any{"replicas": 3},
-			},
-			Traits: componentTraits,
+			Name:       "db",
+			Type:       "helmtemplate",
+			Properties: properties,
+			Traits:     componentTraits,
 		}}},
 	}, oam.TransformContext{Namespace: "demo"})
 	if err != nil {
@@ -589,9 +599,13 @@ func TestHelmTemplate_HookGroupChildNamesIncludeApplication(t *testing.T) {
 // (go-kure/launcher#782); the base library's Flux workflow annotates what the
 // application's layout and the hook-group layouts below it hold. Without the
 // traits no object is annotated. The annotation keys and values are written
-// out literally: they are what kustomize-controller reads.
+// out literally: they are what kustomize-controller reads. The placement is
+// per-layout, the one that takes a chart with hook groups
+// (TestHelmTemplate_HookGroupsNeedPerLayoutPlacement).
 func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
+	rules := layout.DefaultLayoutRules()
+	rules.FluxPlacement = layout.FluxIntegratedPerLayout
 	const pruneKey, forceKey = "kustomize.toolkit.fluxcd.io/prune", "kustomize.toolkit.fluxcd.io/force"
 	for _, tc := range []struct {
 		name   string
@@ -608,7 +622,7 @@ func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 			cluster := htChartCluster(t, srvURL, "shop", tc.traits...)
 			htSourceBundles(cluster)
 
-			root, err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().CreateLayoutWithResources(cluster, layout.DefaultLayoutRules())
+			root, err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().CreateLayoutWithResources(cluster, rules)
 			if err != nil {
 				t.Fatalf("CreateLayoutWithResources: %v", err)
 			}
@@ -638,6 +652,52 @@ func TestHelmTemplate_DeliveryIntentCoversHookGroups(t *testing.T) {
 				t.Errorf("the layout holds the chart's objects %v, want %v: the annotation check did not see every hook group", rendered, want)
 			}
 		})
+	}
+}
+
+// TestHelmTemplate_HookGroupsNeedPerLayoutPlacement: what a chart sets for a
+// Flux Kustomization of its own layouts is carried by the base library's
+// per-layout placement alone, and refused under the other two by the base
+// library, naming the layout: the hook-group children's names and order, and
+// a layout name the author wrote for the chart's own layout. A chart with one
+// hook group and no authored name sets nothing and builds under every
+// placement.
+func TestHelmTemplate_HookGroupsNeedPerLayoutPlacement(t *testing.T) {
+	hooks := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
+	oneGroup := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
+	for _, tc := range []struct {
+		name   string
+		srvURL string
+		props  map[string]any
+		layout string // the layout the refusal names; "" when nothing is refused
+	}{
+		{name: "hook groups", srvURL: hooks, props: map[string]any{"values": map[string]any{"replicas": 3}},
+			layout: `layout "cluster/shop/db/shop-db-`},
+		{name: "an authored layout name", srvURL: oneGroup, props: map[string]any{"layoutKustomizationName": "shop-db-ks"},
+			layout: `layout "cluster/shop/db" `},
+		{name: "one hook group, nothing authored", srvURL: oneGroup},
+	} {
+		for _, placement := range []layout.FluxPlacement{layout.FluxSeparate, layout.FluxIntegratedPerBundle, layout.FluxIntegratedPerLayout} {
+			t.Run(tc.name+"/"+string(placement), func(t *testing.T) {
+				cluster := htChartClusterWith(t, tc.srvURL, "shop", tc.props)
+				htSourceBundles(cluster)
+				rules := layout.DefaultLayoutRules()
+				rules.FluxPlacement = placement
+				_, err := fluxcd.NewWorkflowEngine().GetLayoutIntegrator().CreateLayoutWithResources(cluster, rules)
+				if tc.layout == "" || placement == layout.FluxIntegratedPerLayout {
+					if err != nil {
+						t.Fatalf("CreateLayoutWithResources: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatalf("CreateLayoutWithResources accepted the tree, want the base library's refusal naming %s", tc.layout)
+				}
+				if msg := err.Error(); !strings.Contains(msg, tc.layout) || !strings.Contains(msg, "has no Flux Kustomization of its own") {
+					t.Errorf("CreateLayoutWithResources: %v, want the refusal naming %s", err, tc.layout)
+				}
+			})
+		}
 	}
 }
 

@@ -157,8 +157,8 @@ github.com/go-errors/errors v1.5.1 h1:ZwEMSLRCapFLflTpT7NKaAc7ukJ8ZPEjzlxt8rPN8b
 github.com/go-errors/errors v1.5.1/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
-github.com/go-kure/kure v0.2.0-beta.15.0.20261007183923-3978ab14c665 h1:ya3PI5ExNuY101KiJIhk0+n6wTL0j0JHwCv8y4lxU30=
-github.com/go-kure/kure v0.2.0-beta.15.0.20261007183923-3978ab14c665/go.mod h1:bA4763zeDgxihbqiusKcMoSyKgrYavoCgSfjTqr9hHQ=
+github.com/go-kure/kure v0.2.0-beta.15.0.20261008113235-5af12ede2a72 h1:UJZPTbwk1nnxitkmyyDnCds0dMkdKLwflxzxM7VNhsw=
+github.com/go-kure/kure v0.2.0-beta.15.0.20261008113235-5af12ede2a72/go.mod h1:bA4763zeDgxihbqiusKcMoSyKgrYavoCgSfjTqr9hHQ=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
