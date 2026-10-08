@@ -386,6 +386,11 @@ func alertmanagerRefusals(notA string) []struct {
 			`additionalArgs[0] "log.level": the Prometheus operator generates the flag "log.level" for this spec`},
 		{"an argument naming the peers of a replica", map[string]any{"additionalArgs": []any{map[string]any{"name": "cluster.peer", "value": "other:9094"}}},
 			`additionalArgs[0] "cluster.peer": the Prometheus operator generates the flag "cluster.peer" for this spec`},
+		// Below 0.27.0 the operator generates no enable-feature, so the
+		// argument passes; the field it would come from is refused below
+		// that version (alertmanagerVersionGates).
+		{"an argument of the features with features before 0.27", map[string]any{"version": "v0.26.0", "enableFeatures": []any{"x"}, "additionalArgs": []any{map[string]any{"name": "enable-feature", "value": "y"}}},
+			`enableFeatures: read by the Prometheus operator only for Alertmanager 0.27.0 and later`},
 		// The API requires the names of a pod's init containers and containers
 		// to be unique together.
 		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
@@ -996,17 +1001,16 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// into.
 		"a patched port without a name at the mesh's number": {"containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"containerPort": 9094}}}}},
 		// The operator generates cluster.peer-name from 0.30.0 and
-		// cluster.label from 0.26.0 on, and enable-feature only from 0.27.0;
-		// unversioned, the operator's default v0.34.0 generates each.
-		"an argument of the peer name before 0.30.0":            {"version": amVersion, "additionalArgs": []any{map[string]any{"name": "cluster.peer-name", "value": "custom"}}},
-		"an argument of the cluster label before 0.26.0":        {"version": "v0.25.0", "additionalArgs": []any{map[string]any{"name": "cluster.label", "value": "custom"}}},
-		"an argument of the features with features before 0.27": {"version": "v0.26.0", "enableFeatures": []any{"x"}, "additionalArgs": []any{map[string]any{"name": "enable-feature", "value": "y"}}},
-		"dnsPolicy None with a nameserver":                      {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
-		"a pod-level HostProcess on the host network":           {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
-		"a sidecar port of a generated port's name":             {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
-		"the mesh's port name on a pod listening locally":       {"portName": "mesh-tcp", "listenLocal": true},
-		"the Service's port name with a Service of its own":     {"portName": "tcp-mesh", "serviceName": "alerts"},
-		"an invalid port name written nowhere":                  {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
+		// cluster.label from 0.26.0 on; unversioned, the operator's default
+		// v0.34.0 generates each.
+		"an argument of the peer name before 0.30.0":        {"version": amVersion, "additionalArgs": []any{map[string]any{"name": "cluster.peer-name", "value": "custom"}}},
+		"an argument of the cluster label before 0.26.0":    {"version": "v0.25.0", "additionalArgs": []any{map[string]any{"name": "cluster.label", "value": "custom"}}},
+		"dnsPolicy None with a nameserver":                  {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
+		"a pod-level HostProcess on the host network":       {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+		"a sidecar port of a generated port's name":         {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
+		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
+		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
+		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],

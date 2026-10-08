@@ -184,7 +184,7 @@ func alertmanagerGateFixtures() map[string]map[string]any {
 		"web.timeout":               {"web": map[string]any{"timeout": 30}},
 		"web.tlsConfig":             {"web": map[string]any{"tlsConfig": tls}},
 		"web.httpConfig":            {"web": map[string]any{"httpConfig": map[string]any{"http2": true}}},
-		"clusterTLS":                {"clusterTLS": map[string]any{"server": tls, "client": map[string]any{"ca": map[string]any{"configMap": ref("alertmanager-ca", "ca.crt")}}}},
+		"clusterTLS":                {"clusterTLS": map[string]any{"server": tls, "client": tls}},
 		"clusterLabel":              {"clusterLabel": "main"},
 		"enableFeatures":            {"enableFeatures": []any{"classic-mode"}},
 		"limits.maxSilences":        {"limits": map[string]any{"maxSilences": 100}},
