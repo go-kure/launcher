@@ -79,6 +79,10 @@ run = "make check-issue-refs"
 description = "Re-fetch the Kubernetes defaulter excerpt the components defaulted-zero tests read (mise run vendor-k8s-defaulters vX.Y.Z; never run by CI)"
 run = "bash scripts/vendor-k8s-defaulters.sh"
 
+[tasks.vendor-prometheus-operator-gates]
+description = "Re-fetch the Prometheus operator excerpt the components version-gate tests read (mise run vendor-prometheus-operator-gates vX.Y.Z; never run by CI)"
+run = "bash scripts/vendor-prometheus-operator-gates.sh"
+
 [tasks.verify]
 description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences, verify-merge self-test, pin-impact cases, issue refs)"
 depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences", "test-verify-merge", "test-pin-impact", "check-issue-refs"]

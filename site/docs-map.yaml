@@ -103,6 +103,16 @@ packages:
     readme: pkg/oam/builtin/components/README.md
     mounted: false
     reason: "Vendored Kubernetes defaulting source read by the components tests; not a launcher package."
+  # The Prometheus operator excerpt the components version-gate tests parse
+  # (testdata, so Go never builds it). The components README describes it.
+  - path: pkg/oam/builtin/components/testdata/upstream/prometheus-operator/pkg/alertmanager
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Prometheus operator source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/prometheus-operator/pkg/operator
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Prometheus operator source read by the components tests; not a launcher package."
 
 # Non-package docs mounted into the site. Not gated by code changes.
 # (README.md, examples/README.md, and design-capability-schema.md are deferred to
