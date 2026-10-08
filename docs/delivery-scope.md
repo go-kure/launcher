@@ -1738,12 +1738,14 @@ and by scope, whatever component or trait emits it.
   - **The module ships no CRD.** The required fields are held to the markers of its
     source, and the one expression rule the spec reaches (an `updateStrategy` with a
     `rollingUpdate` must be of type `RollingUpdate`) is listed and left to the API
-    server. An authored `0` on a probe timing of a listed container is refused as on the
-    pod kinds, on a patch of one of the operator's own containers too, and so is an
-    empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`, which the
-    CRD defaults, as on the other kinds of the operator's API. A string default of the
-    Kubernetes pod types, and a `hostPort` of `0` under `hostNetwork`, are not refused,
-    though the pod kinds refuse them (go-kure/launcher#938).
+    server. On a listed container, init container or volume, and on a patch of one of
+    the operator's own containers too, the kind refuses what the pod kinds refuse: an
+    authored `0` on a probe timing, an empty string the API server defaults, and a
+    `hostPort` of `0` under `hostNetwork`. It also refuses an empty `portName`,
+    `retention` or `alertmanagerConfigMatcherStrategy.type`, which the CRD defaults, as
+    on the other kinds of the operator's API. An empty `schedulerName` or
+    `imagePullPolicy` is refused as well: the operator copies them unchanged to the
+    pods, where the API server defaults an empty one.
   - **What the operator builds from the spec is checked where it would break.** An
     `image` (or a listed `alertmanager` entry's) without `version`, whose flags the
     operator would choose for its own default version; a `version` the operator cannot

@@ -67,6 +67,12 @@ type monitoringWorkloadKind struct {
 	// on ("" for the spec itself).
 	rulesLeft map[string]string
 
+	// podCopies maps each string of the operator's own types that the operator
+	// copies, as written, to a pod field the API server defaults, to that
+	// field's path in the pod kinds' list (podSpecDefaultedZeros), as the kind
+	// cites where it lists it.
+	podCopies map[string]string
+
 	// The fields of the spec that shape the pods, each in exactly one: held to
 	// the policy, with the proof; owned, read by the ownership rules of pkg/oam,
 	// with what they do; stated, not held, with the reason.
@@ -106,9 +112,10 @@ const (
 // the tests below name every field of its spec type that has no answer.
 var monitoringWorkloadKinds = []monitoringWorkloadKind{
 	{
-		monitoringKindRow: monitoringKindRow{"alertmanager", reflect.TypeFor[monitoringv1.AlertmanagerSpec](), alertmanagerKind.required, nil, alertmanagerKind.defaultedZeros.fields},
+		monitoringKindRow: monitoringKindRow{"alertmanager", reflect.TypeFor[monitoringv1.AlertmanagerSpec](), alertmanagerKind.required, nil, alertmanagerKind.defaultedZerosFor(&monitoringv1.AlertmanagerSpec{}).fields},
 		handler:           &AlertmanagerHandler{},
 		rulesLeft:         alertmanagerRulesLeft,
+		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
 		held: map[string]heldField{
 			"image": {
 				props:  map[string]any{"image": "other.example/prometheus/alertmanager:v0.28.1", "version": "v0.28.1"},
@@ -467,26 +474,63 @@ func swaggerDocs(typ reflect.Type) (map[string]string, bool) {
 // holds the kind's list to them (monitoringWorkloadDefaultedZeros). Such a
 // field is a number, a boolean or a string that is no pointer and is omitted
 // when zero, and that the API defaults to something else: by a default marker
-// in the source of its type, or, for a Kubernetes type, by the default its
-// published field description states (TestPodSpecDefaultedZeros_MatchFieldDocs,
-// whose limits apply). A string of a Kubernetes type is not read: those types
-// state a string default only in free text, and the kinds hold none of them
-// (go-kure/launcher#938).
-// A field of that shape whose source is not read, or a Kubernetes one that
-// publishes no description, fails here. Each listed field is shown refused on
-// the kind's handler: properties that author a 0 or a "" there do not build,
-// and the same properties with a 2 or the default do.
+// in the source of its type; for a number or a boolean of a Kubernetes type,
+// by the default its published field description states
+// (TestPodSpecDefaultedZeros_MatchFieldDocs, whose limits apply); for a string
+// of a Kubernetes type, by the API server's defaulting code in the vendored
+// excerpt, which those types state only in free text: a field at a path of the
+// pod spec that SetObjectDefaults_Pod writes, with the default the pod kinds'
+// list gives it (TestKubernetesDefaulters_MatchVendoredSource holds that list
+// to the same code); and for a string of the operator's own types that the
+// operator copies to a pod field (podCopies), by that pod field's. A
+// Kubernetes string outside the pod spec's paths (a claim template's, say) is
+// not read. A field of that shape whose source is not read, or a Kubernetes
+// number or boolean that publishes no description, fails here. Each listed
+// field is shown refused on the kind's handler: properties that author a 0 or
+// a "" there do not build, and the same properties with a 2 or the default
+// do. A container port's hostPort, which the API server defaults only under
+// hostNetwork, is shown by TestMonitoringWorkloadKinds_HostNetworkHostPort.
 func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 	src := markerAPISource(t)
+	podWrites := loadVendoredK8s(t).podSpecWrites(t, k8sCoreV1, "SetObjectDefaults_Pod", reflect.TypeFor[corev1.Pod](), "spec.")
+	podRows := podSpecDefaultedZeros("", nil).fields
+	// podDefault is the pod kinds' default for the pod spec's field at path,
+	// where the API server's defaulting code writes it.
+	podDefault := func(t *testing.T, path string) (string, bool) {
+		t.Helper()
+		if podWrites[path] == nil {
+			return "", false
+		}
+		def, ok := podRows[path]
+		if !ok {
+			t.Errorf("the API server defaults the pod spec's %s, which the pod kinds' list does not hold", path)
+		}
+		return def, ok
+	}
 	for _, kind := range monitoringWorkloadKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			derived := map[string]string{}
-			scalars, stated := 0, 0
+			scalars, stated, kubeStrings := 0, 0, 0
+			copied := map[string]bool{}
 			walkKindFields(kind.typ, src.required, func(f kindField) {
 				if !f.omitemptyScalar() {
 					return
 				}
+				if pod, ok := kind.podCopies[f.path]; ok {
+					copied[f.path] = true
+					def, ok := podDefault(t, pod)
+					if !ok {
+						t.Errorf("%s is listed in podCopies as %s, which the API server does not default", f.path, pod)
+						return
+					}
+					derived[f.path] = def
+					return
+				}
 				if f.field.Type.Kind() == reflect.String && strings.HasPrefix(f.owner.PkgPath(), "k8s.io/") {
+					kubeStrings++
+					if def, ok := podDefault(t, f.path); ok {
+						derived[f.path] = def
+					}
 					return
 				}
 				scalars++
@@ -513,11 +557,22 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 					derived[f.path] = literal
 				}
 			})
-			t.Logf("walked %d omitempty numbers, booleans and strings of the operator's types, %d with a default, %d of them not zero", scalars, stated, len(derived))
-			// Vacuity guards: the walk reaches the pod types and reads their
-			// field descriptions.
-			if scalars < 40 || stated < 15 {
-				t.Fatalf("found %d omitempty scalars under %s, %d of them with a default; want >= 40 and >= 15", scalars, kind.typ, stated)
+			t.Logf("walked %d omitempty numbers, booleans and strings of the operator's types, %d with a default, and %d strings of the Kubernetes types; %d fields not zero", scalars, stated, kubeStrings, len(derived))
+			// Vacuity guards: the walk reaches the pod types, reads their
+			// field descriptions and finds the API server's string defaults
+			// on the containers and the volumes.
+			if scalars < 40 || stated < 15 || kubeStrings < 20 {
+				t.Fatalf("found %d omitempty scalars under %s, %d of them with a default, and %d Kubernetes strings; want >= 40, >= 15 and >= 20", scalars, kind.typ, stated, kubeStrings)
+			}
+			for _, path := range []string{"containers[].ports[].protocol", "volumes[].rbd.pool"} {
+				if _, ok := derived[path]; !ok {
+					t.Fatalf("derived no default for %s: the excerpt's writes are not being read", path)
+				}
+			}
+			for path := range kind.podCopies {
+				if !copied[path] {
+					t.Errorf("stale podCopies %s: not an omitempty string of %s", path, kind.typ)
+				}
 			}
 			if !maps.Equal(derived, kind.defaulted) {
 				t.Errorf("fields on which an authored zero is replaced:\n  derived %v\n  listed  %v", derived, kind.defaulted)
@@ -537,7 +592,10 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 				}
 				var zero, other any = 0, 2
 				zeroText := "0"
-				if unquoted, err := strconv.Unquote(def); err == nil {
+				switch unquoted, err := strconv.Unquote(def); {
+				case def == imagePullPolicyDefault:
+					zero, other, zeroText = "", string(corev1.PullIfNotPresent), `""`
+				case err == nil:
 					zero, other, zeroText = "", unquoted, `""`
 				}
 				want := strings.ReplaceAll(path, "[]", "[0]") + ": " + zeroText + " cannot be carried by the Prometheus operator API types"
@@ -549,6 +607,39 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMonitoringWorkloadKinds_HostNetworkHostPort: the operator copies
+// hostNetwork to the pods, and with it true the API server sets an omitted
+// hostPort of a container port to the port's containerPort. So under an
+// authored hostNetwork: true, a hostPort of 0 on a port of a listed container
+// or init container is refused, and without hostNetwork the same port builds.
+func TestMonitoringWorkloadKinds_HostNetworkHostPort(t *testing.T) {
+	for _, kind := range monitoringWorkloadKinds {
+		for _, list := range []string{"containers", "initContainers"} {
+			t.Run(kind.component+"/"+list, func(t *testing.T) {
+				build := func(hostNetwork bool) error {
+					props := map[string]any{list: []any{map[string]any{
+						"name":  "sidecar",
+						"image": "registry.example/team/sidecar:1.0.0",
+						"ports": []any{map[string]any{"containerPort": 9000, "hostPort": 0}},
+					}}}
+					if hostNetwork {
+						props["hostNetwork"] = true
+					}
+					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
+					return err
+				}
+				want := list + "[0].ports[0].hostPort: 0 cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default " + hostNetworkHostPortDefault + ")"
+				if err := build(true); err == nil || err.Error() != want {
+					t.Errorf("under hostNetwork: err = %v\nwant %s", err, want)
+				}
+				if err := build(false); err != nil {
+					t.Errorf("without hostNetwork: %v", err)
+				}
+			})
+		}
 	}
 }
 

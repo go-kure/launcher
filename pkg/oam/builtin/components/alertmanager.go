@@ -170,23 +170,23 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 // included (alertmanagerRulesLeft): the linked module ships no CRD to hold
 // either to.
 //
-// The fields on which an authored 0 cannot be carried are the ones of a pod
-// spec's containers (podSpecDefaultedZeros): the spec lists containers and
-// init containers of the Kubernetes type. Three strings of the operator's own
-// types cannot be carried empty either: portName, retention and the type of
-// alertmanagerConfigMatcherStrategy. TestMonitoringWorkloadKinds_DefaultedZeros
-// derives the list (monitoringWorkloadDefaultedZeros). The refusal holds for an
-// entry that patches a container the operator generates too: the zero is
-// omitted there as anywhere, and the operator's value stays.
+// The fields on which an authored 0 or "" cannot be carried are the ones of a
+// pod spec's containers and volumes (podSpecDefaultedZeros): the spec lists
+// containers, init containers and volumes of the Kubernetes types, and copies
+// hostNetwork to the pods, so a listed container port's hostPort is among them
+// when it is true. Five strings of the operator's own types cannot be carried
+// empty either (alertmanagerDefaultedZeroFields).
+// TestMonitoringWorkloadKinds_DefaultedZeros derives the list
+// (monitoringWorkloadDefaultedZeros). The refusal holds for an entry that
+// patches a container the operator generates too: the zero is omitted there as
+// anywhere, and the operator's value stays.
 var alertmanagerKind = &policyHeldKind[monitoringv1.AlertmanagerSpec]{
 	policyFreeKind: policyFreeKind[monitoringv1.AlertmanagerSpec]{
 		upstream: "monitoring.coreos.com/v1 AlertmanagerSpec",
 		required: alertmanagerRequired,
-		defaultedZeros: monitoringWorkloadDefaultedZeros(map[string]string{
-			"portName":                               `"web"`,
-			"retention":                              `"120h"`,
-			"alertmanagerConfigMatcherStrategy.type": `"OnNamespace"`,
-		}),
+		defaultedZerosFor: func(spec *monitoringv1.AlertmanagerSpec) defaultedZeroFields {
+			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, alertmanagerDefaultedZeroFields)
+		},
 		validate:     validateAlertmanager,
 		validateName: validateAlertmanagerName,
 		build: func(name, namespace string, spec *monitoringv1.AlertmanagerSpec) client.Object {
@@ -198,6 +198,21 @@ var alertmanagerKind = &policyHeldKind[monitoringv1.AlertmanagerSpec]{
 	enforce: func(spec *monitoringv1.AlertmanagerSpec, p oam.Policy) error {
 		return enforceMonitoringWorkloadPolicy(alertmanagerWorkload(spec), p)
 	},
+}
+
+// alertmanagerDefaultedZeroFields are the fields of the operator's own types
+// in the alertmanager kind's defaulted-zero list
+// (monitoringWorkloadDefaultedZeros): three to which the CRD gives another
+// default, and two the operator copies to a pod field the API server defaults
+// (alertmanager/statefulset.go at prometheus-operator v0.94.1): schedulerName
+// to the pod's (:866), and imagePullPolicy to its alertmanager container's
+// (:757) and to both config reloaders' (:813, :834).
+var alertmanagerDefaultedZeroFields = map[string]string{
+	"portName":                               `"web"`,
+	"retention":                              `"120h"`,
+	"alertmanagerConfigMatcherStrategy.type": `"OnNamespace"`,
+	"schedulerName":                          `"default-scheduler"`,
+	"imagePullPolicy":                        imagePullPolicyDefault,
 }
 
 // alertmanagerRequired lists the fields the API requires below an authored
