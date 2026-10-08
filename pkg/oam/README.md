@@ -1103,8 +1103,9 @@ object named, and is not read as holding no key.
 - A chart Flux installs (`helmrelease`, `helm` under `flux` delivery) is rendered in the
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
 - Metadata an object hands on to others in a field of its own: the claim template of an
-  ephemeral volume, in a pod spec. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is the
-  full list of fields of the kinds' API types that hand metadata on and are not read.
+  ephemeral volume, in a pod spec or a CloudNativePG `Cluster`'s
+  `spec.ephemeralVolumeSource`. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is
+  the full list of fields of the kinds' API types that hand metadata on and are not read.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.
