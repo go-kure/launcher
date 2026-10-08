@@ -100,7 +100,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. A negative one is refused: the operator runs 0 for it. Held to the EnvironmentPolicy's replica maximum. Unset, the operator runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
 		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores."),
 		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name beside emptyDir or ephemeral is refused unless it is alertmanager-<name>-db: the operator mounts the data volume under it and creates it under that name. A claim of the arm in use, ephemeral or volumeClaimTemplate, must request storage (spec.resources.requests.storage), and an ephemeral one name its access modes; unset or empty access modes of volumeClaimTemplate are ReadWriteOnce. An emptyDir claims nothing. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the TLS credentials' volumes where web.tlsConfig or clusterTLS is set, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
 		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
@@ -390,24 +390,6 @@ func validateAlertmanagerStorage(s *monitoringv1.StorageSpec) error {
 // version.
 var alertmanagerGeneratedVolumes = []string{"config-volume", "tls-assets", "config-out", "web-config", "cluster-tls-config"}
 
-// alertmanagerTLSVolumePrefixes start the names of the volumes the operator
-// adds for each TLS credential of the web and cluster TLS configurations,
-// which it derives from the credential, by the field that configures them
-// (volumePrefix in pkg/webconfig/tls_credentials.go, serverVolumePrefix and
-// clientVolumePrefix in pkg/alertmanager/clustertlsconfig/config.go at
-// v0.94.1). Without the field the operator adds none of them.
-func alertmanagerTLSVolumePrefixes(spec *monitoringv1.AlertmanagerSpec) map[string]string {
-	prefixes := map[string]string{}
-	if spec.Web != nil && spec.Web.TLSConfig != nil {
-		prefixes["web-config-tls-"] = "web.tlsConfig"
-	}
-	if spec.ClusterTLS != nil {
-		prefixes["cluster-tls-server-config-"] = "clusterTLS"
-		prefixes["cluster-tls-client-config-"] = "clusterTLS"
-	}
-	return prefixes
-}
-
 // invalidDNS1123Characters is what the operator replaces in a name it derives
 // a volume's from (pkg/k8s/resource_namer.go at v0.94.1).
 var invalidDNS1123Characters = regexp.MustCompile("[^-a-z0-9]+")
@@ -429,7 +411,11 @@ func alertmanagerSourceVolume(prefix, entry string) string {
 // volume the operator adds to the pods: it appends volumes after its own
 // (statefulset.go:215 at v0.94.1), and the API refuses a pod with two volumes
 // of one name. The data volume, named after the Alertmanager, is held by
-// validateAlertmanagerName.
+// validateAlertmanagerName. The volumes of the web and cluster TLS
+// credentials are not: the operator names each after the credential's source
+// with a hash appended (pkg/webconfig/tls_credentials.go,
+// pkg/k8s/resource_namer.go at v0.94.1), which is not derived here, so an
+// entry under one of those names is left to the API to refuse.
 func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) error {
 	generated := map[string]string{}
 	for _, name := range alertmanagerGeneratedVolumes {
@@ -444,15 +430,9 @@ func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) err
 	for i, c := range spec.ConfigMaps {
 		generated[alertmanagerSourceVolume("configmap", c)] = fmt.Sprintf("the volume the Prometheus operator adds for configMaps[%d]", i)
 	}
-	prefixes := alertmanagerTLSVolumePrefixes(spec)
 	for i, v := range spec.Volumes {
 		if what, ok := generated[v.Name]; ok {
 			return errors.Errorf("volumes[%d] %q: the name is %s; name the volume otherwise", i, v.Name, what)
-		}
-		for prefix, field := range prefixes {
-			if strings.HasPrefix(v.Name, prefix) {
-				return errors.Errorf("volumes[%d] %q: where %s is set, names starting %q are the Prometheus operator's, for the volumes of its TLS credentials; name the volume otherwise", i, v.Name, field, prefix)
-			}
 		}
 	}
 	return nil
