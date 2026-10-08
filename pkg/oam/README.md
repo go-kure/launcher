@@ -3064,6 +3064,23 @@ the permissive side, so a consumer that must keep secrets out of documents has t
 interface and answer `false`. A refusal is a `ViolationError` naming the component, of class
 `RefusalExplicitSecret` (below).
 
+`ObjectKindPolicy` (go-kure/launcher#922) says which kinds of object a build may emit and
+whether it may emit cluster-scoped ones: `AllowedObjectKinds()` (empty allows every kind),
+`ForbiddenObjectKinds()` (a kind on both lists is forbidden) and `AllowClusterScopedObjects()`.
+A kind is a `schema.GroupKind`, matched in any version; a `Kind` of `*` matches every kind of
+its group, the core group is `""`, and an entry with no `Kind` fails the transform. One check
+holds every producer to it: the ownership wrapper the transform's last step puts on every
+application reads each object generation emits (a kind component's, a trait's, what
+`passthrough` and `manifests` carry, every object a chart renders at build time, and each
+member of a list envelope) and each object a layout augmenter adds. The scope is kure's
+`manifest.Scope`; a kind of unknown scope counts as cluster-scoped when the object carries no
+namespace. The refusal comes at generation (`GenerateApplications`, or kure's layout walk), a
+`ViolationError` naming the owning component, of class `RefusalObjectKind`. **A policy that
+does not implement it allows every kind and cluster-scoped objects**, as does `NoopPolicy`, and
+the check does not run. Not covered: what a chart Flux installs renders on the cluster, objects
+a controller creates, and what an RBAC object grants (the API server's escalate and bind
+checks hold that to the identity that applies it).
+
 Handlers apply values with the precedence **authored > policy default > handler default**,
 then enforce the limits on the resulting effective value — for cpu/memory this explicitly
 includes the `pkg/oam/builtin/components` intrinsic handler-default tier (100m CPU / 128Mi
@@ -3113,12 +3130,14 @@ A `RefusalClass` is a string, and the value is what a consumer may log or store.
 | `RefusalExplicitSecret` | `explicit-secret` | Secret material the document carries itself, under a policy that forbids explicit secrets (`ExplicitSecretPolicy`): a `secret` component or trait, a Secret that `passthrough` or a `manifests` source carries, `secretValues`, a `certificate`'s keystore password, and a credential or the `fake` provider's data written into a `secretstore` or `clustersecretstore`. |
 | `RefusalTraitCapability` | `trait-capability` | A trait type the policy forbids or does not list as allowed, and one it requires that the application does not use. |
 | `RefusalUnreadableObject` | `unreadable-object` | An object written elsewhere (rendered by a chart, carried by `passthrough` or by a `manifests` source) that the build cannot read, so that it cannot be held to the policy and is refused instead of passed. |
+| `RefusalObjectKind` | `object-kind` | An object of a kind the policy forbids or does not list as allowed, or a cluster-scoped one (or one of unknown scope with no namespace) under a policy that does not allow cluster-scoped objects (`ObjectKindPolicy`), whatever component or trait emits it; and an object whose kind cannot be told. Refused at generation. |
 
 The class is the same on every path a refusal comes from: a component's `ApplyPolicy`, a
 post-policy step a lowering rule attached (the `1Gi` storage fallback of `postgresql` over
 `MaxStorageSize`), a trait sub-application's, the check on the objects a chart renders under
 template delivery,
-and the `passthrough` and `manifests` checks, at the transform and again at generation. Of a
+the `passthrough` and `manifests` checks, at the transform and again at generation, and the
+object kind check, at generation only. Of a
 `manifests` `url` source the transform checks the host of the url; the objects it yields are
 first known at generation, so a violation about one of them comes from `Generate`, not from
 the transform. The text of no refusal changed with the class: it is the

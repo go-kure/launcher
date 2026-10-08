@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -350,26 +349,32 @@ func readGeneratedObject(obj client.Object) (generatedObject, error) {
 	return g, nil
 }
 
-// check holds obj to the consumer's reserved metadata keys (checkReserved) and
-// to the component label (checkComponentLabel), and with it every object obj
-// stands for when Flux applies it (appliedObjects, a list envelope's members).
-// An object of an application the document as a whole owns has no component
-// label to be held to.
+// check holds obj to the policy's object kind rules (checkObjectKind), to the
+// consumer's reserved metadata keys (checkReserved) and to the component label
+// (checkComponentLabel), and with it every object obj stands for when Flux
+// applies it (appliedObjects, a list envelope's members). An object of an
+// application the document as a whole owns has no component label to be held
+// to.
 //
-// The reserved keys are checked on obj and all it stands for before the
-// component label is checked on any of them, so a reserved key is refused as
-// one (ErrReservedMetadataKey) whatever the labels beside it hold.
+// The kinds are checked first, on obj and all it stands for, so an object the
+// policy keeps out is refused as such whatever its metadata holds. The reserved
+// keys are checked on all of them before the component label is checked on any,
+// so a reserved key is refused as one (ErrReservedMetadataKey) whatever the
+// labels beside it hold.
 func (o *ownedConfig) check(obj client.Object) error {
-	if o.reserved == nil && o.component == "" {
+	if o.reserved == nil && o.component == "" && o.kinds == nil {
 		return nil
 	}
-	checked := []client.Object{obj}
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		for _, applied := range appliedObjects(u) {
-			if applied != obj {
-				checked = append(checked, applied)
+	checked := appliedSelfAndMembers(obj)
+	if o.kinds != nil {
+		for _, c := range checked {
+			if err := o.checkObjectKind(c); err != nil {
+				return err
 			}
 		}
+	}
+	if o.reserved == nil && o.component == "" {
+		return nil
 	}
 	// An object that cannot be read is refused by the first check that reads it.
 	unreadable := "component label"

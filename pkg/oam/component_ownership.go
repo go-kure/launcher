@@ -73,6 +73,9 @@ type ownedConfig struct {
 	// reserved is the consumer's reserved metadata keys, nil when it reserves
 	// none (reserved_metadata.go).
 	reserved *reservedMetadataKeys
+	// kinds is the policy's ObjectKindPolicy, nil when it does not implement
+	// it (object_kind_policy.go).
+	kinds *objectKindRules
 }
 
 // wrapOwnedConfig wraps inner for the component that owns its application; an
@@ -93,7 +96,13 @@ func wrapOwnedConfigReserving(inner stack.ApplicationConfig, component, labelKey
 // from the component named entry after lowering, which a rule may have emitted
 // under another name than component, its owner's.
 func wrapOwnedEntryConfig(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys) stack.ApplicationConfig {
-	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved}
+	return wrapOwnedEntryConfigKinds(inner, component, entry, labelKey, reserved, nil)
+}
+
+// wrapOwnedEntryConfigKinds is wrapOwnedEntryConfig with the policy's object
+// kind rules, which the wrapper holds the application's objects to.
+func wrapOwnedEntryConfigKinds(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules) stack.ApplicationConfig {
+	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved, kinds: kinds}
 	augmenter, ok := inner.(layout.LayoutAugmenter)
 	if !ok {
 		return owned
@@ -141,11 +150,11 @@ func UnwrapConfig(cfg stack.ApplicationConfig) stack.ApplicationConfig {
 	}
 }
 
-// Generate returns the wrapped config's objects, held to the reserved metadata
-// keys and labelled with the owning component.
+// Generate returns the wrapped config's objects, held to the object kind policy
+// and the reserved metadata keys, and labelled with the owning component.
 func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	objs, err := o.inner.Generate(app)
-	if err != nil || (o.component == "" && o.reserved == nil) {
+	if err != nil || (o.component == "" && o.reserved == nil && o.kinds == nil) {
 		return objs, err
 	}
 	for _, p := range objs {
@@ -159,9 +168,10 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 	return objs, nil
 }
 
-// stamp holds obj to the reserved metadata keys and to the component label as
-// the wrapped config left it, then labels it with the owning component. The
-// checks come first, so they never read the label the wrapper itself writes.
+// stamp holds obj to the object kind policy, the reserved metadata keys and the
+// component label as the wrapped config left it, then labels it with the owning
+// component. The checks come first, so they never read the label the wrapper
+// itself writes.
 func (o *ownedConfig) stamp(obj client.Object) error {
 	if isNullValue(obj) {
 		return nil
@@ -350,7 +360,7 @@ type augmentingOwnedConfig struct {
 // holding objects that never passed through Generate gets them back unchecked
 // and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
-	if a.component == "" && a.reserved == nil {
+	if a.component == "" && a.reserved == nil && a.kinds == nil {
 		return a.augmenter.AugmentLayout(l)
 	}
 	before := layoutResources{}
@@ -402,8 +412,9 @@ var (
 // and the NetworkPolicy synthesized for an external backend Service.
 //
 // It refuses the one document the wrapper's `app` exemption would let another
-// component's label value through for (checkEntryLabelValues).
-func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys) error {
+// component's label value through for (checkEntryLabelValues). kinds is the
+// policy's object kind rules, nil when it has none.
+func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules) error {
 	if cluster == nil {
 		return nil
 	}
@@ -450,7 +461,7 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 				entry := synthesizedPolicyComponent(app.Config)
 				own = owner{component: byEntryName[entry], entry: entry}
 			}
-			app.Config = wrapOwnedEntryConfig(app.Config, own.component, own.entry, labelKey, reserved)
+			app.Config = wrapOwnedEntryConfigKinds(app.Config, own.component, own.entry, labelKey, reserved, kinds)
 		}
 	})
 	return nil

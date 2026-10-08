@@ -60,6 +60,10 @@ const (
 	// cannot read, so that it cannot be held to the policy and is refused
 	// rather than passed.
 	RefusalUnreadableObject RefusalClass = "unreadable-object"
+	// RefusalObjectKind: an object of a kind the policy forbids or does not list
+	// as allowed, or a cluster-scoped one under a policy that does not allow
+	// them (ObjectKindPolicy).
+	RefusalObjectKind RefusalClass = "object-kind"
 )
 
 // RefusalClasses returns the classes the library gives its own refusals: the
@@ -77,6 +81,7 @@ func RefusalClasses() []RefusalClass {
 		RefusalExplicitSecret,
 		RefusalTraitCapability,
 		RefusalUnreadableObject,
+		RefusalObjectKind,
 	}
 }
 
