@@ -292,6 +292,9 @@ func alertmanagerRefusals(notA string) []struct {
 			"externalUrl: not a URL of scheme http or https"},
 		{"an externalUrl of another scheme at v0.19.0", map[string]any{"version": "v0.19.0", "externalUrl": "ftp://alerts.example.com"},
 			"externalUrl: not a URL of scheme http or https"},
+		// Its prerelease refuses the scheme already (main.go:542-543 at v0.19.0-rc.0).
+		{"an externalUrl of another scheme at v0.19.0-rc.0", map[string]any{"version": "v0.19.0-rc.0", "externalUrl": "ftp://alerts.example.com"},
+			"externalUrl: not a URL of scheme http or https"},
 		{"an externalUrl that does not parse", map[string]any{"externalUrl": "http://[::1"},
 			"externalUrl: not a URL Go's net/url can parse: the Prometheus operator passes it to Alertmanager, which then exits at startup; name a valid URL, or leave it unset"},
 		{"an externalUrl that does not parse before v0.19.0", map[string]any{"version": "v0.18.0", "externalUrl": "http://[::1"},
