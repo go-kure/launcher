@@ -42,9 +42,11 @@ func alertmanagerFull() map[string]any {
 			"labels":      map[string]any{"team": "payments"},
 			"annotations": map[string]any{"example.com/owner": "sre"},
 		},
-		"image":            "registry.example/prometheus/alertmanager:v0.28.1",
+		// The version the operator reads every field below at, the latest
+		// minimum being 0.30.0 (alertmanagerVersionGates).
+		"image":            "registry.example/prometheus/alertmanager:v0.30.0",
 		"imagePullPolicy":  "IfNotPresent",
-		"version":          "v0.28.1",
+		"version":          "v0.30.0",
 		"imagePullSecrets": []any{map[string]any{"name": "registry-credentials"}},
 		"secrets":          []any{"alertmanager-tls"},
 		"configMaps":       []any{"alertmanager-templates"},
