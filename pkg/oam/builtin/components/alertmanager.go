@@ -135,7 +135,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
-		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one, a host name included, is refused there."),
+		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one, a host name included, is refused there. An IPv4 number with leading zeros is refused from v0.24.0 on and where version is unset, as the Go Alertmanager is built with refuses it. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone: the kubelet expands it first."),
 		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
@@ -725,20 +725,68 @@ func alertmanagerClusterRuns(spec *monitoringv1.AlertmanagerSpec) bool {
 // exits (app/app.go:214-234 at v0.34.0). Every minor version from v0.15.0 to
 // v0.34.0 reads it so. A port Atoi takes but no socket has, such as 99999, is
 // not refused: memberlist truncates it and starts. An empty host, as in :9094,
-// is not refused either: Alertmanager then works the address out itself. No
-// message names the value, as refuseUnservableExternalURL names none.
+// is not refused either: Alertmanager then works the address out itself. Nor
+// is a value that refers to an environment variable, as [$(POD_IP)]:9094: the
+// kubelet expands such a reference in the container's arguments before
+// Alertmanager reads them, to a value the kind cannot see (the operator itself
+// gives the container POD_IP, statefulset.go:770-780). No message names the
+// value, as refuseUnservableExternalURL names none.
 func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
-	if spec.ClusterAdvertiseAddress == "" || !alertmanagerClusterRuns(spec) {
+	value := spec.ClusterAdvertiseAddress
+	if value == "" || strings.Contains(value, "$(") || !alertmanagerClusterRuns(spec) {
 		return nil
 	}
-	host, port, err := net.SplitHostPort(spec.ClusterAdvertiseAddress)
+	host, port, err := net.SplitHostPort(value)
 	if err == nil {
 		_, err = strconv.Atoi(port)
 	}
-	if err != nil || (host != "" && net.ParseIP(host) == nil) {
+	if err != nil || (host != "" && !alertmanagerParsesIP(spec, host)) {
 		return errors.New("clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset")
 	}
 	return nil
+}
+
+// alertmanagerParsesIP reports whether the Alertmanager of the spec's version
+// takes host as an IP address, as net.ParseIP of the Go it is built with does.
+// Its releases from v0.24.0 on, its prerelease v0.24.0-rc.0 included, are built
+// with Go 1.17 or later (.promu.yml), whose net.ParseIP this is. The earlier
+// ones are built with Go 1.10 to 1.16, whose net.ParseIP also takes an IPv4
+// part whose decimal numbers have leading zeros, as 010.0.0.1; Go 1.17 stopped
+// taking it. Unset, the version is the operator's default (v0.34.0 at
+// v0.94.1), and where it does not parse validateAlertmanagerVersion refuses
+// it, so both are held to Go 1.17's rule.
+func alertmanagerParsesIP(spec *monitoringv1.AlertmanagerSpec, host string) bool {
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	version, err := semver.ParseTolerant(spec.Version)
+	if spec.Version == "" || err != nil || version.GTE(semver.MustParse("0.24.0-0")) {
+		return false
+	}
+	return net.ParseIP(withoutLeadingZeros(host)) != nil
+}
+
+// withoutLeadingZeros drops the leading zeros of each decimal number of host's
+// IPv4 part: all of host, or what follows its last colon in an IPv6 address
+// that ends in one. A number of zeros only becomes 0. Go before 1.17 parsed
+// such a number as decimal, as it parses the result.
+func withoutLeadingZeros(host string) string {
+	head, tail := "", host
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		head, tail = host[:i+1], host[i+1:]
+	}
+	parts := strings.Split(tail, ".")
+	if len(parts) == 1 {
+		return host
+	}
+	for i, part := range parts {
+		if part != "" && strings.Trim(part, "0123456789") == "" {
+			if parts[i] = strings.TrimLeft(part, "0"); parts[i] == "" {
+				parts[i] = "0"
+			}
+		}
+	}
+	return head + strings.Join(parts, ".")
 }
 
 // refuseGeneratedAlertmanagerArgs refuses an entry of additionalArgs that

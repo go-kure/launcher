@@ -3985,10 +3985,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   reads the port with `strconv.Atoi` and gives the host to memberlist, which
   takes only an IP address; any failure ends the cluster's creation, and
   Alertmanager exits (`cluster/cluster.go:162-171` and `app/app.go:214-234` of
-  v0.34.0). A host name is refused with the rest. An empty host, as in
-  `:9094`, is not: Alertmanager then works the address out itself; nor is a
-  port number no socket has, which memberlist truncates. With the cluster off
-  the value is not read. The message does not name the value.
+  v0.34.0). A host name is refused with the rest. The IP address is read as
+  the Go Alertmanager is built with reads it: from v0.24.0 on, its prerelease
+  `v0.24.0-rc.0` included, and where `version` is unset, Go 1.17 or later,
+  which refuses an IPv4 number with leading zeros, as `010.0.0.1`; before it,
+  Go 1.10 to 1.16, which takes one. An empty host, as in `:9094`, is not
+  refused: Alertmanager then works the address out itself; nor is a port
+  number no socket has, which memberlist truncates; nor a value that refers to
+  an environment variable, as `[$(POD_IP)]:9094`, which the kubelet expands
+  before Alertmanager reads it. With the cluster off the value is not read.
+  The message does not name the value.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload
