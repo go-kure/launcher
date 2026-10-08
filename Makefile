@@ -200,14 +200,22 @@ lint-fast: ## Run fast linters only (no type analysis)
 	@PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run --fast-only $(LINT_FLAGS) ./...
 	@echo "$(COLOR_GREEN)Fast linting passed$(COLOR_RESET)"
 
+# Finds the Go files goimports formats: every regular .go file outside
+# testdata and outside directories whose names begin with "." or "_", the
+# directories go fmt ./... skips too (".?*" keeps "." itself). testdata holds
+# vendored upstream source that the tests hold byte for byte to its upstream
+# blob ids, and .claude/worktrees other checkouts. Unlike go fmt ./..., it
+# also takes the separate module under site/scripts/kuredepsync, as before.
+GOIMPORTS_FIND = find . \( -name testdata -o -name '.?*' -o -name '_*' \) -prune -o -type f -name '*.go'
+
 .PHONY: fmt
 fmt: ## Format Go code
 	@echo "$(COLOR_YELLOW)Formatting Go code...$(COLOR_RESET)"
 	$(GO) fmt ./...
 	@if command -v goimports >/dev/null 2>&1; then \
-		goimports -w .; \
+		$(GOIMPORTS_FIND) -exec goimports -w {} +; \
 	else \
-		PATH="$$(go env GOPATH)/bin:$$PATH" goimports -w . || echo "$(COLOR_RED)goimports not found, run 'make tools' to install$(COLOR_RESET)"; \
+		PATH="$$(go env GOPATH)/bin:$$PATH" $(GOIMPORTS_FIND) -exec goimports -w {} + || echo "$(COLOR_RED)goimports not found, run 'make tools' to install$(COLOR_RESET)"; \
 	fi
 	@echo "$(COLOR_GREEN)Code formatted$(COLOR_RESET)"
 

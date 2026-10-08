@@ -218,7 +218,7 @@ make precommit
 ```
 
 This will:
-- Format code with `go fmt` and `goimports`
+- Format code with `go fmt` and `goimports` (both leave testdata and hidden or underscore directories alone)
 - Tidy modules
 - Run linters
 - Run all tests
