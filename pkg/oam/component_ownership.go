@@ -77,8 +77,9 @@ type ownedConfig struct {
 	// kinds is the policy's ObjectKindPolicy, nil when it does not implement
 	// it (object_kind_policy.go).
 	kinds *objectKindRules
-	// emitted is the objects Generate returned under kinds, which AugmentLayout
-	// reads again (recheckEmitted); emittedMu guards it.
+	// emitted is the objects the latest Generate returned under kinds, which
+	// AugmentLayout reads again (recheckEmitted); each Generate replaces it, so
+	// no earlier generation's objects are kept. emittedMu guards it.
 	emittedMu sync.Mutex
 	emitted   layoutResources
 }
@@ -162,6 +163,7 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 	if err != nil || (o.component == "" && o.reserved == nil && o.kinds == nil) {
 		return objs, err
 	}
+	emitted := layoutResources{}
 	for _, p := range objs {
 		if p == nil {
 			continue
@@ -169,8 +171,9 @@ func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error)
 		if err := o.stamp(*p); err != nil {
 			return nil, err
 		}
-		o.recordEmitted(*p)
+		o.recordEmitted(emitted, *p)
 	}
+	o.setEmitted(emitted)
 	return objs, nil
 }
 

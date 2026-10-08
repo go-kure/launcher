@@ -931,6 +931,18 @@ every object a trait's sub-application generates, with its component's value
 (go-kure/launcher#788); after `Transform` the sub-application's config is the ownership
 wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapConfig`.
 
+## The object kind policy
+
+A trait's objects are held to the object kind policy (`oam.ObjectKindPolicy`,
+go-kure/launcher#922) like every other producer's: the ownership wrapper checks each
+object its sub-application generates and each object its layout augmenter adds. A policy
+that leaves `Role` or `RoleBinding` out of its allowed kinds refuses `rbac`, and one that
+disallows cluster-scoped objects refuses `rbac` with `clusterWide` (its ClusterRole and
+ClusterRoleBinding); `ingress`, `httproute`, `certificate`, `scaler`, the network policy
+traits and the rest are held to the kinds they write the same way. A refusal names the
+owning component, class `object-kind`. A policy without the interface changes nothing.
+The rules: `pkg/oam/README.md` and `docs/delivery-scope.md` §5.4.
+
 ## Raw Cilium rules are decoded strictly
 
 `cilium-networkpolicy` passes `endpointSelector`, `ingress` and `egress` through to

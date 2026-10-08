@@ -275,6 +275,40 @@ func TestObjectKindPolicy_AugmenterEditsItsOwnList(t *testing.T) {
 	}
 }
 
+// TestObjectKindPolicy_EmittedHoldsOneGeneration: a config generated again
+// holds only its latest generation's objects for AugmentLayout to read again,
+// so a generator that returns fresh objects on every call does not keep every
+// earlier one.
+func TestObjectKindPolicy_EmittedHoldsOneGeneration(t *testing.T) {
+	policy := &kindPolicy{forbidden: []schema.GroupKind{{Group: "rbac.authorization.k8s.io", Kind: "*"}}, allowCluster: true}
+	list := func() *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List",
+			"items": []any{kindObject("v1", "ConfigMap", "ns").Object},
+		}}
+	}
+	inner := &listGrowingAugmenter{member: kindObject("rbac.authorization.k8s.io/v1", "Role", "ns").Object}
+	cfg := wrapOwnedEntryConfigKinds(inner, "web", "web", ownershipKey, nil, mustKindRules(t, policy))
+	owned := cfg.(*augmentingOwnedConfig).ownedConfig
+
+	first, second := list(), list()
+	for _, generated := range []client.Object{first, second} {
+		inner.objects = []client.Object{generated}
+		if _, err := cfg.Generate(stack.NewApplication("web", "ns", cfg)); err != nil {
+			t.Fatalf("Generate = %v, want the list of a ConfigMap generated", err)
+		}
+	}
+	if _, kept := owned.emitted[first]; kept || len(owned.emitted) != 1 {
+		t.Errorf("emitted = %v, want only the latest generation's list", owned.emitted)
+	}
+	augmenter := cfg.(layout.LayoutAugmenter)
+	if err := augmenter.AugmentLayout(&layout.ManifestLayout{Resources: []client.Object{first}}); err != nil {
+		t.Errorf("AugmentLayout = %v, want an earlier generation's list left unread", err)
+	}
+	wantKindRefusal(t, augmenter.AugmentLayout(&layout.ManifestLayout{Resources: []client.Object{second}}),
+		"web", `Role "thing" (rbac.authorization.k8s.io/Role)`)
+}
+
 // TestObjectKindPolicy_ListEnvelope: a list envelope is held to the policy by
 // its members, which Flux applies, and not as an object of its own: a List with
 // no namespace and of a kind no allowlist names passes when its members do.

@@ -246,20 +246,26 @@ func (o *ownedConfig) checkAddedGenerators(l *layout.ManifestLayout, before layo
 	return nil
 }
 
-// recordEmitted keeps obj among the objects this wrapper's Generate returned,
-// when the policy has object kind rules: AugmentLayout reads them again
-// (recheckEmitted).
-func (o *ownedConfig) recordEmitted(obj client.Object) {
-	id, ok := resourceIdentity(obj)
-	if o.kinds == nil || !ok {
+// recordEmitted adds obj to emitted, the objects one Generate returned, when the
+// policy has object kind rules: AugmentLayout reads them again (recheckEmitted).
+func (o *ownedConfig) recordEmitted(emitted layoutResources, obj client.Object) {
+	if id, ok := resourceIdentity(obj); o.kinds != nil && ok {
+		emitted[id] = struct{}{}
+	}
+}
+
+// setEmitted makes emitted the objects the latest Generate returned, in place of
+// the earlier ones, so a config generated again and again holds one generation's
+// objects, not every one's. A Generate that runs between another and the
+// AugmentLayout that follows it therefore leaves only its own objects to be read
+// again: kure's walker generates an application and then augments its layout.
+func (o *ownedConfig) setEmitted(emitted layoutResources) {
+	if o.kinds == nil {
 		return
 	}
 	o.emittedMu.Lock()
 	defer o.emittedMu.Unlock()
-	if o.emitted == nil {
-		o.emitted = layoutResources{}
-	}
-	o.emitted[id] = struct{}{}
+	o.emitted = emitted
 }
 
 // recheckEmitted holds again to the policy every resource on l and on its child
