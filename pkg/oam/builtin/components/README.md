@@ -3975,6 +3975,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `cmd/alertmanager/main.go` of v0.28.1, `app/url.go` of v0.34.0). The scheme
   is held where `version` is unset or names v0.19.0 or later, its
   prerelease `v0.19.0-rc.0` included; an earlier version takes any scheme. Neither message names the value.
+  A nonempty `clusterAdvertiseAddress` that is not an IP address and a
+  numeric port written as `host:port` is refused where the cluster runs, at
+  `replicas` other than 1 (0 included: the object configures the cluster for
+  the pods a scale-up starts) or with `forceEnableClusterMode`
+  (`clusterAdvertiseAddress: not an IP address and a numeric port, …`): the
+  operator passes it unchanged as `--cluster.advertise-address`, and
+  Alertmanager, from v0.15.0 to v0.34.0, splits it with `net.SplitHostPort`,
+  reads the port with `strconv.Atoi` and gives the host to memberlist, which
+  takes only an IP address; any failure ends the cluster's creation, and
+  Alertmanager exits (`cluster/cluster.go:162-171` and `app/app.go:214-234` of
+  v0.34.0). A host name is refused with the rest. An empty host, as in
+  `:9094`, is not: Alertmanager then works the address out itself; nor is a
+  port number no socket has, which memberlist truncates. With the cluster off
+  the value is not read. The message does not name the value.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without
   a policy the same component builds. Refused, each with the class a workload

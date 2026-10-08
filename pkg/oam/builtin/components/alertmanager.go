@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"net"
 	"path"
 	"regexp"
 	"strconv"
@@ -134,7 +135,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
-		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one."),
+		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one, a host name included, is refused there."),
 		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
@@ -255,8 +256,9 @@ var alertmanagerRulesLeft = map[string]string{
 // validateAlertmanager refuses, with or without an environment policy, the
 // three deprecated fields that name the image in parts, a duration the
 // operator discards, an externalUrl Alertmanager exits on at startup
-// (alertmanagerURLSchemes), and what validateMonitoringWorkload refuses of the
-// workload.
+// (alertmanagerURLSchemes), a clusterAdvertiseAddress it exits on
+// (refuseUnusableAdvertiseAddress), and what validateMonitoringWorkload
+// refuses of the workload.
 //
 // baseImage, tag and sha are refused when not empty: the operator composes
 // the image from them, and from version, in code that is not in the linked
@@ -291,6 +293,9 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		return errors.Errorf("replicas: %d is below 0: the Prometheus operator runs 0 replicas for it; write 0", *spec.Replicas)
 	}
 	if err := refuseUnservableExternalURL("Alertmanager", spec.ExternalURL, alertmanagerURLSchemes(spec)); err != nil {
+		return err
+	}
+	if err := refuseUnusableAdvertiseAddress(spec); err != nil {
 		return err
 	}
 	if err := validateAlertmanagerPortName(spec); err != nil {
@@ -697,6 +702,45 @@ func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string]
 	return ports
 }
 
+// alertmanagerClusterRuns reports whether the operator starts Alertmanager
+// with its cluster on: it passes an empty --cluster.listen-address, which turns
+// the cluster off, only for one replica without forceEnableClusterMode, an
+// unset count being one (pkg/alertmanager/statefulset.go:133-139 and :295-299
+// at prometheus-operator v0.94.1). At 0 replicas no pod runs, but the object
+// configures the cluster for the pods a scale-up starts.
+func alertmanagerClusterRuns(spec *monitoringv1.AlertmanagerSpec) bool {
+	return spec.ForceEnableClusterMode || (spec.Replicas != nil && *spec.Replicas != alertmanagerOperatorReplicas)
+}
+
+// refuseUnusableAdvertiseAddress refuses a clusterAdvertiseAddress Alertmanager
+// exits on at startup where its cluster runs (alertmanagerClusterRuns). The
+// operator passes a nonempty one unchanged as --cluster.advertise-address
+// (pkg/alertmanager/statefulset.go:367-369 at prometheus-operator v0.94.1).
+// Alertmanager splits it with net.SplitHostPort and reads the port with
+// strconv.Atoi (cluster/cluster.go:162-171 at v0.34.0, :127-136 at v0.15.0),
+// and hands a nonempty host unchanged to memberlist, whose transport and
+// Alertmanager's TLS one take only what net.ParseIP parses
+// (net_transport.go:140-147 at memberlist v0.6.0, cluster/tls_transport.go:142-149
+// at v0.34.0); any failure fails the cluster's creation, and Alertmanager
+// exits (app/app.go:214-234 at v0.34.0). Every minor version from v0.15.0 to
+// v0.34.0 reads it so. A port Atoi takes but no socket has, such as 99999, is
+// not refused: memberlist truncates it and starts. An empty host, as in :9094,
+// is not refused either: Alertmanager then works the address out itself. No
+// message names the value, as refuseUnservableExternalURL names none.
+func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
+	if spec.ClusterAdvertiseAddress == "" || !alertmanagerClusterRuns(spec) {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(spec.ClusterAdvertiseAddress)
+	if err == nil {
+		_, err = strconv.Atoi(port)
+	}
+	if err != nil || (host != "" && net.ParseIP(host) == nil) {
+		return errors.New("clusterAdvertiseAddress: not an IP address and a numeric port, written as host:port: the Prometheus operator passes it to Alertmanager, which exits at startup on any other where its cluster runs, as it does at replicas other than 1 or with forceEnableClusterMode; name such an address, or leave it unset")
+	}
+	return nil
+}
+
 // refuseGeneratedAlertmanagerArgs refuses an entry of additionalArgs that
 // names a flag the operator generates for the spec: it fails to build the pods
 // where an additional argument's name, or that name with no- added or taken
@@ -726,10 +770,10 @@ func refuseGeneratedAlertmanagerArgs(spec *monitoringv1.AlertmanagerSpec) error 
 	if spec.Replicas != nil {
 		replicas = *spec.Replicas
 	}
-	if replicas == 1 && !spec.ForceEnableClusterMode {
-		generated["cluster.listen-address="] = true
-	} else {
+	if alertmanagerClusterRuns(spec) {
 		generated["cluster.listen-address"] = true
+	} else {
+		generated["cluster.listen-address="] = true
 	}
 	web, limits := spec.Web, spec.Limits
 	for name, set := range map[string]bool{
