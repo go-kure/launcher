@@ -129,7 +129,11 @@ func alertmanagerFull() map[string]any {
 		"limits": map[string]any{"maxSilences": 100, "maxPerSilenceBytes": "1MB"},
 		"clusterTLS": map[string]any{
 			"server": webTLS,
-			"client": map[string]any{"ca": map[string]any{"configMap": secretKey("alertmanager-ca", "ca.crt")}, "serverName": "alertmanager"},
+			"client": map[string]any{
+				"ca":   map[string]any{"configMap": secretKey("alertmanager-ca", "ca.crt")},
+				"cert": map[string]any{"secret": secretKey("alertmanager-client", "tls.crt")}, "keySecret": secretKey("alertmanager-client", "tls.key"),
+				"serverName": "alertmanager",
+			},
 		},
 		"alertmanagerConfiguration": map[string]any{
 			"name": "main",
@@ -373,6 +377,22 @@ func alertmanagerRefusals(notA string) []struct {
 			"initContainers": []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
 			"containers":     []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
 		}, `containers[0] "setup": the name is also that of initContainers[0]`},
+		// The API's pod rules across fields; the operator copies both fields
+		// into the pod template.
+		{"dnsPolicy None without a nameserver", map[string]any{"dnsPolicy": "None"},
+			"dnsPolicy: None requires dnsConfig.nameservers with at least one entry; the API refuses the pods the Prometheus operator builds without one"},
+		{"a pod-level HostProcess without the host network", map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+			"securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true"},
+		// The operator validates the TLS blocks before it builds the pods
+		// (webconfig.New, clustertlsconfig.New).
+		{"web TLS without a key", map[string]any{"web": map[string]any{"tlsConfig": map[string]any{"cert": amTLS["cert"]}}},
+			"web.tlsConfig: TLS private key must be defined; the Prometheus operator refuses it and builds no pods"},
+		{"cluster TLS whose server names no certificate", map[string]any{"clusterTLS": map[string]any{
+			"server": map[string]any{"keySecret": amTLS["keySecret"]}, "client": amTLS,
+		}}, "clusterTLS.server: TLS certificate must be defined"},
+		{"cluster TLS whose client names no certificate", map[string]any{"clusterTLS": map[string]any{
+			"server": amTLS, "client": map[string]any{"ca": amTLS["cert"]},
+		}}, "clusterTLS.client.cert: required: the Prometheus operator refuses a client without a certificate"},
 		// A patch's ports are merged by number (MergePatchContainers, a
 		// strategic merge), so a port of a generated name at another number
 		// is added beside the generated one.
@@ -893,6 +913,8 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a patched port of the web port's name on a pod listening locally": {"listenLocal": true, "containers": []any{map[string]any{
 			"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}},
 		}}},
+		"dnsPolicy None with a nameserver":                  {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
+		"a pod-level HostProcess on the host network":       {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
 		"a sidecar port of a generated port's name":         {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
 		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
 		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},

@@ -118,8 +118,8 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
 		"topologySpreadConstraints": objects("topologySpreadConstraints: how the pods are spread over topology domains.",
 			"One constraint."+core+"TopologySpreadConstraint in the Kubernetes API reference."),
-		"securityContext":     object("securityContext: the pod-level security attributes of the pods. Its windowsOptions.hostProcess is refused under an EnvironmentPolicy that does not allow privileged containers." + core + "PodSecurityContext in the Kubernetes API reference."),
-		"dnsPolicy":           text("dnsPolicy: the DNS policy of the pods: ClusterFirstWithHostNet, ClusterFirst, Default or None."),
+		"securityContext":     object("securityContext: the pod-level security attributes of the pods. Its windowsOptions.hostProcess is refused under an EnvironmentPolicy that does not allow privileged containers, and without hostNetwork: true, which the API requires of a HostProcess pod." + core + "PodSecurityContext in the Kubernetes API reference."),
+		"dnsPolicy":           text("dnsPolicy: the DNS policy of the pods: ClusterFirstWithHostNet, ClusterFirst, Default or None. None is refused without dnsConfig.nameservers, which the API then requires."),
 		"dnsConfig":           object("dnsConfig: the DNS configuration of the pods: nameservers, searches and options." + decoded + "PodDNSConfig in its API reference."),
 		"enableServiceLinks":  flag("enableServiceLinks: whether the Services of the namespace are injected into the pods' environment variables."),
 		"serviceName":         text("serviceName: the name of the governing Service of the StatefulSet, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named alertmanager-operated. Not empty."),
@@ -149,9 +149,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"hostAliases": objects("hostAliases: further entries of the pods' hosts file.",
 			"One entry: ip and hostnames, both required."),
 		"hostNetwork":                  flag("hostNetwork: true runs the pods in the node's network namespace. Refused under an EnvironmentPolicy that does not allow the host network."),
-		"web":                          object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout." + decoded + "AlertmanagerWebSpec in its API reference."),
+		"web":                          object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout. A tlsConfig the operator refuses is refused: one without a certificate or a key, or naming one twice." + decoded + "AlertmanagerWebSpec in its API reference."),
 		"limits":                       object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Requires Alertmanager v0.28.0 or later." + decoded + "AlertmanagerLimitsSpec in its API reference."),
-		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Requires Alertmanager v0.24.0 or later." + decoded + "ClusterTLSConfig in its API reference."),
+		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Requires Alertmanager v0.24.0 or later. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
 		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
 		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Requires Alertmanager v0.27.0 or later.",
@@ -290,6 +290,9 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		return err
 	}
 	if err := refuseDuplicateAlertmanagerTemplateKeys(spec); err != nil {
+		return err
+	}
+	if err := validateAlertmanagerTLS(spec); err != nil {
 		return err
 	}
 	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
@@ -734,6 +737,33 @@ func refuseDuplicateAlertmanagerTemplateKeys(spec *monitoringv1.AlertmanagerSpec
 	return nil
 }
 
+// validateAlertmanagerTLS refuses a web or cluster TLS configuration the
+// operator refuses when it builds the pods, by the API module's own Validate:
+// web.tlsConfig (webconfig.New, pkg/webconfig/config.go:50-55), and
+// clusterTLS's server and client, the client with a certificate
+// (clustertlsconfig.New, pkg/alertmanager/clustertlsconfig/config.go:78-90 at
+// prometheus-operator v0.94.1). The operator reads them only for
+// Alertmanager 0.22.0 and 0.24.0 on; both are held whatever version names.
+func validateAlertmanagerTLS(spec *monitoringv1.AlertmanagerSpec) error {
+	if spec.Web != nil {
+		if err := spec.Web.TLSConfig.Validate(); err != nil {
+			return errors.Errorf("web.tlsConfig: %v; the Prometheus operator refuses it and builds no pods", err)
+		}
+	}
+	if c := spec.ClusterTLS; c != nil {
+		if err := c.ServerTLS.Validate(); err != nil {
+			return errors.Errorf("clusterTLS.server: %v; the Prometheus operator refuses it and builds no pods", err)
+		}
+		if err := c.ClientTLS.Validate(); err != nil {
+			return errors.Errorf("clusterTLS.client: %v; the Prometheus operator refuses it and builds no pods", err)
+		}
+		if c.ClientTLS.Cert == (monitoringv1.SecretOrConfigMap{}) {
+			return errors.New("clusterTLS.client.cert: required: the Prometheus operator refuses a client without a certificate and builds no pods")
+		}
+	}
+	return nil
+}
+
 func configMapKey(s *corev1.ConfigMapKeySelector) *string {
 	if s == nil {
 		return nil
@@ -798,6 +828,12 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		resources:      []fieldResources{resources},
 		mergedPatches:  merged,
 		memoryRequests: map[string]string{resources.path: alertmanagerOperatorMemoryRequest},
+	}
+	if spec.DNSPolicy != nil {
+		w.pod.DNSPolicy = corev1.DNSPolicy(*spec.DNSPolicy)
+	}
+	if spec.DNSConfig != nil {
+		w.pod.DNSConfig = &corev1.PodDNSConfig{Nameservers: spec.DNSConfig.Nameservers}
 	}
 	// The image a patch names replaces image in the container the operator
 	// builds from it, so image is then not run, and not held: the patch's own

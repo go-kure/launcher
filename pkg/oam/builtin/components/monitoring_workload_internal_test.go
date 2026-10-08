@@ -161,7 +161,8 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 				class:  oam.RefusalRegistry,
 			},
 			"securityContext": {
-				props:  map[string]any{"securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+				// The API requires the host network of a HostProcess pod.
+				props:  map[string]any{"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
 				policy: &workloadPolicy{noPrivileged: true},
 				class:  oam.RefusalPrivileged,
 			},

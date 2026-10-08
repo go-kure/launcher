@@ -38,9 +38,9 @@ import (
 // on which an authored 0 cannot be carried, and own, the fields of the
 // operator's own types that the encoding omits when empty and to which the CRD
 // gives another default, each mapped to that default as its JSON literal. The
-// pod kinds' string defaults, whose list names pod fields these specs do not
-// carry, and a hostPort of 0 under hostNetwork, which needs the spec, are not
-// held here (go-kure/launcher#938).
+// pod kinds' string defaults are not held here, those of the containers and
+// volumes these specs list included, nor a hostPort of 0 under hostNetwork,
+// which needs the spec (go-kure/launcher#938).
 func monitoringWorkloadDefaultedZeros(own map[string]string) defaultedZeroFields {
 	fields := podSpecDefaultedZeros("", nil).fields
 	maps.DeleteFunc(fields, func(_, def string) bool { return strings.HasPrefix(def, `"`) })
@@ -120,7 +120,10 @@ type monitoringWorkload struct {
 // operator keeps the last entry of a name only, so an earlier one would be
 // held and not run (MergePatchContainers, pkg/k8s/merge.go at
 // prometheus-operator v0.94.1). A name shared by an init container and a
-// container of the pods is refused (refuseSharedContainerNames). A listed
+// container of the pods is refused (refuseSharedContainerNames), and so are a
+// dnsPolicy of None without a nameserver and a pod-level HostProcess without
+// hostNetwork, which the API refuses of a pod (podspec.go holds both on the
+// pod kinds). A listed
 // container named for one the operator generates is merged into it, its ports
 // by number, so a port of the patch named as one of that container's
 // (generatedPorts) at another number is added beside it, and is refused, since
@@ -177,6 +180,14 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	}
 	if err := refuseSharedContainerNames(w); err != nil {
 		return err
+	}
+	// The API's pod rules across fields the spec carries apart: the operator
+	// copies both into the pod template, and the API then refuses the pods.
+	if w.pod.DNSPolicy == corev1.DNSNone && (w.pod.DNSConfig == nil || len(w.pod.DNSConfig.Nameservers) == 0) {
+		return errors.New("dnsPolicy: None requires dnsConfig.nameservers with at least one entry; the API refuses the pods the Prometheus operator builds without one")
+	}
+	if sc := w.pod.SecurityContext; sc != nil && sc.WindowsOptions != nil && sc.WindowsOptions.HostProcess != nil && *sc.WindowsOptions.HostProcess && !w.pod.HostNetwork {
+		return errors.New("securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true; the API refuses the pods the Prometheus operator builds otherwise")
 	}
 	if err := validateImageVolumeRefs("", &w.pod); err != nil {
 		return err
