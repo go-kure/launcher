@@ -36,6 +36,11 @@ type policyFreeKind[T any] struct {
 	// validate, when set, refuses what the strict decode cannot: a field the
 	// API requires and the author left out or empty.
 	validate func(decoded *T) error
+	// validateName, when set, refuses what the object's name and decoded
+	// together make invalid in the objects another controller names after it.
+	// name is the one the object takes (oam.Component.ObjectName), and
+	// componentName the component's, to say where the name came from.
+	validateName func(name, componentName string, decoded *T) error
 	// required lists the fields the API requires that T encodes whether or not
 	// they were authored, so that the decoded value does not show the omission
 	// (refuseUnauthoredRequired). Nil for a kind with none.
@@ -84,6 +89,11 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 	}
 	if k.validate != nil {
 		if err := k.validate(decoded); err != nil {
+			return nil, err
+		}
+	}
+	if k.validateName != nil {
+		if err := k.validateName(component.ObjectName(), component.Name, decoded); err != nil {
 			return nil, err
 		}
 	}

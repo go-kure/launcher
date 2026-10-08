@@ -111,7 +111,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 		rulesLeft:         alertmanagerRulesLeft,
 		held: map[string]heldField{
 			"image": {
-				props:  map[string]any{"image": "other.example/prometheus/alertmanager:v0.28.1"},
+				props:  map[string]any{"image": "other.example/prometheus/alertmanager:v0.28.1", "version": "v0.28.1"},
 				policy: &workloadPolicy{allowed: []string{"registry.example"}},
 				class:  oam.RefusalRegistry,
 			},
@@ -150,6 +150,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 				// answer for this field.
 				props: map[string]any{
 					"image":      "registry.example/prometheus/alertmanager:v0.28.1",
+					"version":    "v0.28.1",
 					"containers": []any{map[string]any{"name": "config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"}},
 					"initContainers": []any{
 						map[string]any{"name": "init-config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"},

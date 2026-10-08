@@ -185,7 +185,7 @@ var imageFieldTypes = []imageFieldType{
 		},
 		tagged: map[string]imageTagCheck{
 			"image": {check: func(reference string) error {
-				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Image: &reference})
+				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Image: &reference, Version: "v0.28.1"})
 			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
 			"containers[].image": {check: func(reference string) error {
 				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
