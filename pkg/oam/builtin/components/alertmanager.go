@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -84,7 +86,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		}
 	}
 	return map[string]oam.PropertySchema{
-		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
+		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own; a value authored here replaces its app.kubernetes.io/version label, and not the other four labels or the annotation." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. Where this or an entry of containers named alertmanager names the image, version is required: the operator chooses the container's flags by it."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
 		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1: it chooses the alertmanager container's flags by it, and by its own default where it is unset. Required where image, or an entry of containers named alertmanager, names the image; name the version that image runs. A version the operator cannot parse, one under 0.15.0 and one of a major version above 0 are refused: the operator fails to build the pods for them."),
@@ -98,11 +100,11 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"logLevel":     text("logLevel: the log level of Alertmanager: debug, info, warn or error."),
 		"logFormat":    text("logFormat: the log format of Alertmanager: logfmt or json."),
 		"replicas":     number("replicas: the number of Alertmanager pods; two or more run in high-availability mode. A negative one is refused: the operator runs 0 for it. Held to the EnvironmentPolicy's replica maximum. Unset, the operator runs 1, which is held to that maximum; nothing is written, and no replica default of the policy is applied."),
-		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores."),
-		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name beside emptyDir or ephemeral is refused unless it is alertmanager-<name>-db: the operator mounts the data volume under it and creates it under that name. A claim of the arm in use, ephemeral or volumeClaimTemplate, must request storage (spec.resources.requests.storage), and an ephemeral one name its access modes; unset or empty access modes of volumeClaimTemplate are ReadWriteOnce. An emptyDir claims nothing. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
-		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
+		"retention":    text("retention: how long Alertmanager keeps its data, as a number and a unit (ms, s, m or h). Unset, the API fills 120h; an empty one is refused, since the API server would replace it, and so is one of 0 or less, which the operator ignores. The kind leaves to the API what the CRD's own schema refuses when the Alertmanager is applied, such as another form here, which shows at once; it refuses what the CRD admits but the operator or the API then refuses on the StatefulSet or the pods, which would fail late and out of sight."),
+		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name beside emptyDir or ephemeral is refused unless it is alertmanager-<name>-db: the operator mounts the data volume under it and creates it under that name. On the volumeClaimTemplate arm, a claim template's name must be a DNS-1123 label, which the operator names the data volume with, and not the name of a volume the operator adds. A claim of the arm in use, ephemeral or volumeClaimTemplate, must request storage above 0 (spec.resources.requests.storage), and an ephemeral one name its access modes; unset or empty access modes of volumeClaimTemplate are ReadWriteOnce. An emptyDir claims nothing. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A claim template's labels and annotations are not read for reserved keys and take no component label, as a statefulset's are not." + decoded + "StorageSpec in its API reference."),
+		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. Two entries of secrets, or of configMaps, whose volumes the operator gives one name are refused as well. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
-		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container.",
+		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container. A mount path the operator mounts a volume at is refused: /alertmanager, /etc/alertmanager/config, config_out and certs, the web and cluster TLS configuration files whatever version names, /etc/alertmanager/templates where alertmanagerConfiguration.templates is set, and /etc/alertmanager/secrets/<name> and configmaps/<name> of each entry of secrets and configMaps. The mounts of the TLS credentials are left to the API.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
 		"persistentVolumeClaimRetentionPolicy": object("persistentVolumeClaimRetentionPolicy: whether the claims of the StatefulSet are deleted when it is deleted (whenDeleted) or scaled down (whenScaled): Retain, the default, or Delete." + core + "StatefulSetPersistentVolumeClaimRetentionPolicy in the Kubernetes API reference."),
 		"externalUrl":                          text("externalUrl: the URL under which the Alertmanager web service is reached from outside, which the links in its notifications are built from."),
@@ -110,7 +112,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"paused":                               flag("paused: true stops the operator from acting on the objects it manages for this Alertmanager, deletion excepted."),
 		"nodeSelector":                         object("nodeSelector: the node labels a node must carry for the pods to be scheduled on it."),
 		"schedulerName":                        text("schedulerName: the scheduler that places the pods. Unset, the default scheduler. Not empty."),
-		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied. A containers entry named alertmanager is merged over this block key by key, and the checks hold the merged block, so a memory request it names replaces the 200Mi." + core + "ResourceRequirements in the Kubernetes API reference."),
+		"resources":                            object("resources: the resource requests and limits of the alertmanager container. Its cpu and memory are held to the EnvironmentPolicy's maxima, and a request may not exceed its limit. Without a memory request the operator requests 200Mi, whatever the limit, which is held to the memory maximum, and a memory limit under it is refused; nothing is written, and no resource default of the policy is applied. A containers entry named alertmanager is merged over this block key by key, and the checks hold the merged block, so a memory request it names replaces the 200Mi. A negative request or limit is refused, here and in a listed container." + core + "ResourceRequirements in the Kubernetes API reference."),
 		"affinity":                             object("affinity: the scheduling constraints of the pods." + core + "Affinity in the Kubernetes API reference."),
 		"tolerations": objects("tolerations: the taints the pods tolerate.",
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
@@ -281,6 +283,9 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 	if err := refuseGeneratedAlertmanagerVolumes(spec); err != nil {
 		return err
 	}
+	if err := refuseGeneratedAlertmanagerMounts(spec); err != nil {
+		return err
+	}
 	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
 		return err
 	}
@@ -367,13 +372,27 @@ func validateAlertmanagerStorage(s *monitoringv1.StorageSpec) error {
 		if len(t.Spec.AccessModes) == 0 {
 			return errors.New("storage.ephemeral.volumeClaimTemplate.spec.accessModes: required: the API refuses an ephemeral volume's claim without access modes")
 		}
-		if _, ok := t.Spec.Resources.Requests[corev1.ResourceStorage]; !ok {
+		q, ok := t.Spec.Resources.Requests[corev1.ResourceStorage]
+		if !ok {
 			return errors.New("storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage: required: the API refuses an ephemeral volume's claim without a storage request")
 		}
-		return nil
+		return positiveAlertmanagerStorage("storage.ephemeral.volumeClaimTemplate", q)
 	}
-	if _, ok := s.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; !ok {
+	q, ok := s.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]
+	if !ok {
 		return errors.New("storage.volumeClaimTemplate.spec.resources.requests.storage: required where neither storage.emptyDir nor storage.ephemeral is set: the Prometheus operator then claims the data volume from this template as written, and the API refuses a claim without a storage request")
+	}
+	return positiveAlertmanagerStorage("storage.volumeClaimTemplate", q)
+}
+
+// positiveAlertmanagerStorage refuses the storage request of a claim template
+// in use that is not above 0: the operator passes it on as written, and the API
+// refuses a claim whose storage request is not positive
+// (ValidatePersistentVolumeClaimSpec, k8s.io/kubernetes
+// pkg/apis/core/validation/validation.go).
+func positiveAlertmanagerStorage(template string, q resource.Quantity) error {
+	if q.Sign() <= 0 {
+		return errors.Errorf("%s.spec.resources.requests.storage: %s is not above 0: the Prometheus operator claims the data volume with it as written, and the API refuses a claim whose storage request is not positive; request more", template, q.String())
 	}
 	return nil
 }
@@ -416,6 +435,13 @@ func alertmanagerSourceVolume(prefix, entry string) string {
 // with a hash appended (pkg/webconfig/tls_credentials.go,
 // pkg/k8s/resource_namer.go at v0.94.1), which is not derived here, so an
 // entry under one of those names is left to the API to refuse.
+//
+// Two entries of secrets, or of configMaps, whose volumes the operator gives
+// one name are refused for the same reason: it adds a volume for each
+// (:638-690), so the pods would have two of that name. On the claim template
+// arm, a claim template named as a volume the operator adds is refused: the
+// StatefulSet controller replaces the pod's volume of that name with the
+// claim, so the pods would not get the operator's volume.
 func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) error {
 	generated := map[string]string{}
 	for _, name := range alertmanagerGeneratedVolumes {
@@ -424,15 +450,75 @@ func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) err
 	if c := spec.AlertmanagerConfiguration; c != nil && len(c.Templates) > 0 {
 		generated["notification-templates"] = "the volume the Prometheus operator adds for alertmanagerConfiguration.templates"
 	}
-	for i, s := range spec.Secrets {
-		generated[alertmanagerSourceVolume("secret", s)] = fmt.Sprintf("the volume the Prometheus operator adds for secrets[%d]", i)
+	for _, source := range []struct {
+		field, prefix string
+		names         []string
+	}{{"secrets", "secret", spec.Secrets}, {"configMaps", "configmap", spec.ConfigMaps}} {
+		for i, entry := range source.names {
+			volume := alertmanagerSourceVolume(source.prefix, entry)
+			if what, ok := generated[volume]; ok {
+				return errors.Errorf("%s[%d] %q: the Prometheus operator names its volume %q, which is %s, and the API refuses a pod with two volumes of one name; list each %s once, under names that differ in lower case and in their runs of a-z, 0-9 and -", source.field, i, entry, volume, what, source.prefix)
+			}
+			generated[volume] = fmt.Sprintf("the volume the Prometheus operator adds for %s[%d]", source.field, i)
+		}
 	}
-	for i, c := range spec.ConfigMaps {
-		generated[alertmanagerSourceVolume("configmap", c)] = fmt.Sprintf("the volume the Prometheus operator adds for configMaps[%d]", i)
+	if s := spec.Storage; s != nil && s.EmptyDir == nil && s.Ephemeral == nil {
+		if what, ok := generated[s.VolumeClaimTemplate.Name]; ok {
+			return errors.Errorf("storage.volumeClaimTemplate.metadata.name: %q is %s, and the StatefulSet controller replaces the pod's volume of the claim template's name with the claim, so the pods would not get it; name the claim template otherwise", s.VolumeClaimTemplate.Name, what)
+		}
 	}
 	for i, v := range spec.Volumes {
 		if what, ok := generated[v.Name]; ok {
 			return errors.Errorf("volumes[%d] %q: the name is %s; name the volume otherwise", i, v.Name, what)
+		}
+	}
+	return nil
+}
+
+// alertmanagerGeneratedMounts are the paths the Prometheus operator mounts a
+// volume at in the alertmanager container whatever the spec says: its
+// configuration, the configuration its reloader writes, its TLS assets, the
+// data volume, the web configuration file and the cluster TLS configuration
+// file (makeStatefulSetSpec, pkg/alertmanager/statefulset.go:49-71, :531-556;
+// GetMountParameters in pkg/webconfig/config.go and
+// pkg/alertmanager/clustertlsconfig/config.go at prometheus-operator v0.94.1).
+// The operator mounts the last two only for Alertmanager 0.22.0 and 0.24.0 on;
+// both are reserved whatever version names, as the volumes are.
+var alertmanagerGeneratedMounts = []string{
+	"/etc/alertmanager/config",
+	"/etc/alertmanager/config_out",
+	"/etc/alertmanager/certs",
+	"/alertmanager",
+	"/etc/alertmanager/web_config/web-config.yaml",
+	"/etc/alertmanager/cluster_tls_config/cluster-tls-config.yaml",
+}
+
+// refuseGeneratedAlertmanagerMounts refuses an entry of volumeMounts at a path
+// the operator mounts a volume at in the alertmanager container: it appends
+// volumeMounts to its own mounts (statefulset.go:692), and the API refuses a
+// container with two mounts at one path. Beside the fixed paths, those are
+// /etc/alertmanager/templates where alertmanagerConfiguration.templates is set,
+// and /etc/alertmanager/secrets/<name> and /etc/alertmanager/configmaps/<name>
+// for each entry of secrets and configMaps (:575-690). The mounts of the web
+// and cluster TLS credentials, whose paths the operator derives from each
+// credential's source, are left to the API, as their volumes are.
+func refuseGeneratedAlertmanagerMounts(spec *monitoringv1.AlertmanagerSpec) error {
+	generated := map[string]string{}
+	for _, p := range alertmanagerGeneratedMounts {
+		generated[p] = "a path the Prometheus operator mounts a volume at in every alertmanager container"
+	}
+	if c := spec.AlertmanagerConfiguration; c != nil && len(c.Templates) > 0 {
+		generated["/etc/alertmanager/templates"] = "the path the Prometheus operator mounts alertmanagerConfiguration.templates at"
+	}
+	for i, s := range spec.Secrets {
+		generated[path.Join("/etc/alertmanager/secrets", s)] = fmt.Sprintf("the path the Prometheus operator mounts secrets[%d] at", i)
+	}
+	for i, c := range spec.ConfigMaps {
+		generated[path.Join("/etc/alertmanager/configmaps", c)] = fmt.Sprintf("the path the Prometheus operator mounts configMaps[%d] at", i)
+	}
+	for i, m := range spec.VolumeMounts {
+		if what, ok := generated[m.MountPath]; ok {
+			return errors.Errorf("volumeMounts[%d] %q: the mount path is %s, and the API refuses a container with two mounts at one path; mount the volume elsewhere", i, m.MountPath, what)
 		}
 	}
 	return nil
@@ -474,6 +560,8 @@ func validateAlertmanagerName(name, componentName string, spec *monitoringv1.Ale
 		if errs := validation.IsDNS1123Label(generated); len(errs) > 0 {
 			return refuse("the Prometheus operator names the data volume %q, which must be a DNS-1123 label: %s", generated, strings.Join(errs, "; "))
 		}
+	} else if errs := validation.IsDNS1123Label(volume); len(errs) > 0 {
+		return errors.Errorf("storage.volumeClaimTemplate.metadata.name: %q is not a DNS-1123 label: %s; the Prometheus operator names the data volume with it, which the API then refuses", volume, strings.Join(errs, "; "))
 	}
 	if s != nil && !claimArm && s.VolumeClaimTemplate.Name != "" && s.VolumeClaimTemplate.Name != generated {
 		return errors.Errorf("storage.volumeClaimTemplate.metadata.name: %q beside storage.emptyDir or storage.ephemeral: the Prometheus operator mounts the data volume under this name, but creates it from the arm in use as %q, so the pods would mount a volume they do not have; leave it unset", s.VolumeClaimTemplate.Name, generated)

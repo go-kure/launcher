@@ -301,6 +301,52 @@ func alertmanagerRefusals(notA string) []struct {
 		{"an ephemeral claim without a storage request", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
 			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}},
 		}}}, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage: required"},
+		// The API requires a positive storage request
+		// (ValidatePersistentVolumeClaimSpec), which the operator passes on.
+		{"a claim template requesting 0", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "0"}}}},
+		}}, "storage.volumeClaimTemplate.spec.resources.requests.storage: 0 is not above 0"},
+		{"an ephemeral claim requesting 0", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}, "resources": map[string]any{"requests": map[string]any{"storage": "0"}}}},
+		}}}, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage: 0 is not above 0"},
+		// The operator names the data volume with the claim template's name on
+		// that arm (statefulset.go:531-535); the StatefulSet controller
+		// replaces the pod's volume of that name with the claim.
+		{"a claim template name that is not a DNS-1123 label", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data.disk"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "data.disk" is not a DNS-1123 label`},
+		{"a claim template named as the configuration's volume", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "config-volume"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "config-volume" is a volume the Prometheus operator adds to every Alertmanager's pods, and the StatefulSet controller replaces`},
+		{"a claim template named as a listed Secret's volume", map[string]any{"secrets": []any{"alerts"}, "storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "secret-alerts"}, "spec": amClaim},
+		}}, `storage.volumeClaimTemplate.metadata.name: "secret-alerts" is the volume the Prometheus operator adds for secrets[0]`},
+		// The operator adds a volume for each entry, named by its own
+		// ResourceNamer (statefulset.go:638-690).
+		{"two Secrets the operator gives one volume name", map[string]any{"secrets": []any{"alerts.config", "alerts-config"}},
+			`secrets[1] "alerts-config": the Prometheus operator names its volume "secret-alerts-config", which is the volume the Prometheus operator adds for secrets[0], and the API refuses a pod with two volumes of one name`},
+		{"a ConfigMap listed twice", map[string]any{"configMaps": []any{"templates", "templates"}},
+			`configMaps[1] "templates": the Prometheus operator names its volume "configmap-templates", which is the volume the Prometheus operator adds for configMaps[0]`},
+		// The operator appends volumeMounts to its own (statefulset.go:692),
+		// and the API refuses two mounts at one path.
+		{"a mount at the data volume's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "alertmanager-fast-db", "mountPath": "/alertmanager"}}},
+			`volumeMounts[0] "/alertmanager": the mount path is a path the Prometheus operator mounts a volume at in every alertmanager container, and the API refuses a container with two mounts at one path`},
+		{"a mount at the web configuration file", map[string]any{"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/web_config/web-config.yaml"}}},
+			`volumeMounts[0] "/etc/alertmanager/web_config/web-config.yaml": the mount path is a path the Prometheus operator mounts a volume at`},
+		{"a mount at a listed Secret's path", map[string]any{"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/alerts"}}},
+			`volumeMounts[0] "/etc/alertmanager/secrets/alerts": the mount path is the path the Prometheus operator mounts secrets[0] at`},
+		{"a mount at the templates' path", map[string]any{
+			"alertmanagerConfiguration": map[string]any{"name": "global", "templates": []any{map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}}}},
+			"volumeMounts":              []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}},
+		}, `volumeMounts[0] "/etc/alertmanager/templates": the mount path is the path the Prometheus operator mounts alertmanagerConfiguration.templates at`},
+		// The CRD's quantity pattern admits a sign; the API refuses the
+		// container the operator builds with it.
+		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
+			"resources: cpu: request -1 is below 0"},
+		{"a negative memory limit of a patch", container(map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"memory": "-1Gi"}}}),
+			`resources with containers[0] "alertmanager" merged over it: resources: memory: limit -1Gi is below 0`},
+		{"a negative limit of a sidecar", container(map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "resources": map[string]any{"limits": map[string]any{"cpu": "-500m"}}}),
+			`containers[0] "proxy": resources: cpu: limit -500m is below 0`},
 		// The operator fills an unset memory request as 200Mi whatever the
 		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
@@ -770,6 +816,11 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"zero replicas":                         {"replicas": 0},
 		"a port name of 15 characters":          {"portName": "alertmanagerweb"},
 		"emptyDir alone":                        {"storage": map[string]any{"emptyDir": map[string]any{}}},
+		"two Secrets whose volumes differ":      {"secrets": []any{"alerts", "alerts-tls"}},
+		"a mount beside the operator's":         {"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/extra"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
+		"the templates' path without templates": {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
+		"a claim template of its own name":      {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
+		"a request and a limit of 0":            {"resources": map[string]any{"requests": map[string]any{"cpu": "0"}, "limits": map[string]any{"cpu": "0"}}},
 		"a claim template without access modes": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
 		"a claim template with access modes written empty": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 			"accessModes": []any{}, "resources": amClaim["resources"],
@@ -784,7 +835,7 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 			"volumes": []any{map[string]any{"name": "web-config-tls-secret-key-web", "emptyDir": map[string]any{}}},
 		},
 		"a TLS credential's prefix beside cluster TLS": {
-			"clusterTLS": map[string]any{"server": amTLS, "client": map[string]any{}},
+			"clusterTLS": map[string]any{"server": amTLS, "client": amTLS},
 			"volumes":    []any{map[string]any{"name": "cluster-tls-server-config-x", "emptyDir": map[string]any{}}},
 		},
 		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},

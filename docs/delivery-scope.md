@@ -1751,12 +1751,20 @@ and by scope, whatever component or trait emits it.
     governing Service, where the operator writes it there; a negative `replicas`, which
     the operator runs as 0; a claim template beside `storage.emptyDir` or
     `storage.ephemeral` named otherwise than the operator's data volume, which leaves the
-    data mount dangling; a storage arm in use whose claim has no storage request, or no
-    access modes where the operator does not default them; an entry of `volumes` named as
-    a volume the operator adds (`web-config` and `cluster-tls-config` whatever `version`
-    names; not the TLS credentials' volumes, whose hashed names are left to the API); and
-    a name whose data volume `alertmanager-<name>-db` or last pod hostname is not
-    a DNS-1123 label (no dot, at most 47 characters with the defaults) are each refused.
+    data mount dangling; a storage arm in use whose claim has no storage request or one
+    of `0` or less, or no access modes where the operator does not default them; on the
+    claim template arm, a claim template name that is not a DNS-1123 label or names a
+    volume the operator adds; an entry of `volumes` named as a volume the operator adds
+    (`web-config` and `cluster-tls-config` whatever `version` names; not the TLS
+    credentials' volumes, whose hashed names are left to the API), and two entries of
+    `secrets` or of `configMaps` the operator gives one volume name; an entry of
+    `volumeMounts` at a path the operator mounts at in the alertmanager container (not
+    the TLS credentials' mounts); a negative request or limit; and a name whose data
+    volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot,
+    at most 47 characters with the defaults) are each refused. The line: what the CRD's
+    own schema refuses when the Alertmanager is applied is left to the API, as it shows
+    at once; what the CRD admits but the operator or the API then refuses on the
+    StatefulSet or the pods is refused here, as it would fail late and out of sight.
     Fields the operator reads only from some version on are not held to `version`.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
