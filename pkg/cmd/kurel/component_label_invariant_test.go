@@ -556,6 +556,14 @@ spec:
 	"metallb-l2advertisement": {props: map[string]any{
 		"ipAddressPools": []any{"edge"},
 		"nodeSelectors":  []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
+	"mutatingadmissionpolicy": {props: map[string]any{
+		"matchConstraints":   map[string]any{"resourceRules": []any{map[string]any{"operations": []any{"CREATE"}, "apiGroups": []any{"apps"}, "apiVersions": []any{"v1"}, "resources": []any{"deployments"}}}},
+		"mutations":          []any{map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": "[]"}}},
+		"reinvocationPolicy": "Never",
+	}},
+	"mutatingadmissionpolicybinding": {
+		props: map[string]any{"policyName": "labels"},
+	},
 	// The two webhook configurations are identity and their webhooks, with no
 	// pods, and leave the name rules of their object to the API server.
 	"mutatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
@@ -722,6 +730,13 @@ spec:
 		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
 	"udproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}},
+	"validatingadmissionpolicy": {props: map[string]any{
+		"matchConstraints": map[string]any{"resourceRules": []any{map[string]any{"operations": []any{"CREATE"}, "apiGroups": []any{"apps"}, "apiVersions": []any{"v1"}, "resources": []any{"deployments"}}}},
+		"validations":      []any{map[string]any{"expression": "object.spec.replicas <= 5"}},
+	}},
+	"validatingadmissionpolicybinding": {
+		props: map[string]any{"policyName": "replica-limit", "validationActions": []any{"Deny"}},
+	},
 	"validatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
 		"name": "policy.example.com", "clientConfig": map[string]any{"url": "https://policy.example.com/check"},
 		"sideEffects": "None", "admissionReviewVersions": []any{"v1"},

@@ -91,6 +91,9 @@ var schemaRequiredWitnesses = map[string]map[string]schemaRequiredWitness{
 		},
 		parseOnly: "helmtemplate renders its chart at build time, and a chart of an OCI source is pulled from a registry over TLS, which a test has no local one to serve",
 	}},
+	// One of `validations` and `auditAnnotations` is what the policy does.
+	"validatingadmissionpolicy": {"validations": {props: without("validations", map[string]any{
+		"auditAnnotations": []any{map[string]any{"key": "seen", "valueExpression": "'yes'"}}})}},
 	// A headless Service may list no port.
 	"service": {"ports": {props: without("ports", map[string]any{"clusterIP": "None"})}},
 	// An environment policy's storage default supplies the size.

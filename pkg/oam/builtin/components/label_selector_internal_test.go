@@ -143,7 +143,11 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 // rows are aligned by gofmt, so one longer key would rewrite every other row.
 // TestSharedKindTables_RowLocal holds that form.
 var strictlyDecodedTypes = typesByName([]namedType{
+	{"admissionregistrationv1.MutatingAdmissionPolicyBindingSpec", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec]()},
+	{"admissionregistrationv1.MutatingAdmissionPolicySpec", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec]()},
 	{"admissionregistrationv1.MutatingWebhookConfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration]()},
+	{"admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec]()},
+	{"admissionregistrationv1.ValidatingAdmissionPolicySpec", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec]()},
 	{"admissionregistrationv1.ValidatingWebhookConfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration]()},
 	{"apiregistrationv1.APIServiceSpec", reflect.TypeFor[apiregistrationv1.APIServiceSpec]()},
 	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
@@ -453,8 +457,10 @@ type labelSelectorKind struct {
 	typ    string
 	config func(*oam.Component) (stack.ApplicationConfig, error)
 	// base is a set of properties the component builds from; a selector is
-	// written into a copy of it.
-	base map[string]any
+	// written into a copy of it. pathBase, where it names the selector's
+	// path, adds the fields that selector needs beside it to base.
+	base     map[string]any
+	pathBase map[string]map[string]any
 	// expressions says the kind holds its selectors to validateLabelSelector
 	// beside the presence of key and operator. Without it the operator and its
 	// values are left to the API the kind's object belongs to.
@@ -617,6 +623,23 @@ var labelSelectorTestWebhooks = map[string]any{"webhooks": []any{map[string]any{
 	"admissionReviewVersions": []any{"v1"},
 }}}
 
+// labelSelectorTestPolicy is an admission policy whose match constraints hold
+// one whole rule, with the given fields set over it.
+func labelSelectorTestPolicy(fields map[string]any) map[string]any {
+	props := map[string]any{"matchConstraints": map[string]any{"resourceRules": []any{map[string]any{
+		"operations": []any{"CREATE"}, "apiGroups": []any{"apps"}, "apiVersions": []any{"v1"}, "resources": []any{"deployments"},
+	}}}}
+	maps.Copy(props, fields)
+	return props
+}
+
+// labelSelectorTestParamRef is the base of an admission policy binding's
+// parameter selector: a paramRef needs its parameterNotFoundAction beside it,
+// and with no selector one of a name.
+var labelSelectorTestParamRef = map[string]map[string]any{
+	"paramRef.selector": {"paramRef": map[string]any{"parameterNotFoundAction": "Deny"}},
+}
+
 // labelSelectorKinds lists every kind component whose type reaches a
 // metav1.LabelSelector.
 //
@@ -675,6 +698,27 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "mutatingwebhookconfiguration", typ: "admissionregistrationv1.MutatingWebhookConfiguration", config: kindConfig(&MutatingWebhookConfigurationHandler{}),
 		base: labelSelectorTestWebhooks, expressions: true,
+	},
+	{
+		component: "validatingadmissionpolicy", typ: "admissionregistrationv1.ValidatingAdmissionPolicySpec", config: kindConfig(&ValidatingAdmissionPolicyHandler{}),
+		base: labelSelectorTestPolicy(map[string]any{"validations": []any{map[string]any{"expression": "true"}}}), expressions: true,
+	},
+	{
+		component: "validatingadmissionpolicybinding", typ: "admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec", config: kindConfig(&ValidatingAdmissionPolicyBindingHandler{}),
+		base: map[string]any{"policyName": "replica-limit", "validationActions": []any{"Deny"}}, expressions: true,
+		pathBase: labelSelectorTestParamRef,
+	},
+	{
+		component: "mutatingadmissionpolicy", typ: "admissionregistrationv1.MutatingAdmissionPolicySpec", config: kindConfig(&MutatingAdmissionPolicyHandler{}),
+		base: labelSelectorTestPolicy(map[string]any{
+			"mutations":          []any{map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": "[]"}}},
+			"reinvocationPolicy": "Never",
+		}), expressions: true,
+	},
+	{
+		component: "mutatingadmissionpolicybinding", typ: "admissionregistrationv1.MutatingAdmissionPolicyBindingSpec", config: kindConfig(&MutatingAdmissionPolicyBindingHandler{}),
+		base: map[string]any{"policyName": "labels"}, expressions: true,
+		pathBase: labelSelectorTestParamRef,
 	},
 	{
 		component: "horizontalpodautoscaler", typ: "autoscalingv2.HorizontalPodAutoscalerSpec",
@@ -1001,7 +1045,9 @@ func TestLabelSelectorKinds_CoverEverySelector(t *testing.T) {
 					}
 				}
 				for name, tc := range cases {
-					_, err := kind.config(&oam.Component{Name: "web", Type: kind.component, Properties: withValueAt(kind.base, path, expression(tc.expr))})
+					base := maps.Clone(kind.base)
+					maps.Copy(base, kind.pathBase[path])
+					_, err := kind.config(&oam.Component{Name: "web", Type: kind.component, Properties: withValueAt(base, path, expression(tc.expr))})
 					switch {
 					case tc.want == "" && err != nil:
 						t.Errorf("%s, %s: err = %v, want none", path, name, err)

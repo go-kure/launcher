@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: team-label-apps
+  name: team-label-apps
+spec:
+  matchResources:
+    excludeResourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      resourceNames:
+      - system-agent
+      resources:
+      - deployments
+    namespaceSelector:
+      matchLabels:
+        team.example.com/managed: "true"
+  paramRef:
+    name: team-defaults
+    namespace: policy
+    parameterNotFoundAction: Allow
+  policyName: team-label
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: seen
+  name: seen.example.com
+spec:
+  policyName: seen.example.com

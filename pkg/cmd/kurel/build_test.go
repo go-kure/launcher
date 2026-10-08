@@ -536,6 +536,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"metallb-community",
 		"metallb-ipaddresspool",
 		"metallb-l2advertisement",
+		"mutatingadmissionpolicy",
+		"mutatingadmissionpolicybinding",
 		"mutatingwebhookconfiguration",
 		"namespace",
 		"networkpolicy",
@@ -573,6 +575,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"thanosruler",
 		"tlsroute",
 		"udproute",
+		"validatingadmissionpolicy",
+		"validatingadmissionpolicybinding",
 		"validatingwebhookconfiguration",
 		"volumeattributesclass",
 	}

@@ -712,6 +712,21 @@ var policyFreeKinds = []policyFreeKind{
 			"serviceSelectors": []any{map[string]any{"matchLabels": map[string]any{"exposure": "public"}}},
 		},
 	},
+	// The four admission policy kinds (go-kure/launcher#943).
+	{
+		component: "mutatingadmissionpolicy", handler: &components.MutatingAdmissionPolicyHandler{},
+		gvk:     admissionregistrationv1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicy"),
+		typ:     reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec](),
+		minimal: mutatingAdmissionPolicy(nil),
+		full:    mutatingAdmissionPolicyFull(),
+	},
+	{
+		component: "mutatingadmissionpolicybinding", handler: &components.MutatingAdmissionPolicyBindingHandler{},
+		gvk:     admissionregistrationv1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicyBinding"),
+		typ:     reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec](),
+		minimal: admissionPolicyBinding(false, nil),
+		full:    admissionPolicyBindingFull(false),
+	},
 	// The two webhook configurations have no spec type: each is a whole
 	// object, whose one field is its webhooks (go-kure/launcher#943).
 	{
@@ -1027,6 +1042,20 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](), namespaced: true,
 		minimal: gatewayRouteMinimal(),
 		full:    gatewayRouteFull(),
+	},
+	{
+		component: "validatingadmissionpolicy", handler: &components.ValidatingAdmissionPolicyHandler{},
+		gvk:     admissionregistrationv1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicy"),
+		typ:     reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec](),
+		minimal: validatingAdmissionPolicy(nil),
+		full:    validatingAdmissionPolicyFull(),
+	},
+	{
+		component: "validatingadmissionpolicybinding", handler: &components.ValidatingAdmissionPolicyBindingHandler{},
+		gvk:     admissionregistrationv1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyBinding"),
+		typ:     reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec](),
+		minimal: admissionPolicyBinding(true, nil),
+		full:    admissionPolicyBindingFull(true),
 	},
 	{
 		component: "validatingwebhookconfiguration", handler: &components.ValidatingWebhookConfigurationHandler{},
@@ -1462,6 +1491,20 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 		".Spec.Rules[0].BackendRefs[0].Weight", ".Spec.Rules[0].BackendRefs[1].BackendObjectReference.Port",
 		".Spec.Rules[0].BackendRefs[2].BackendObjectReference.Group",
 	}
+	// The four admission policy kinds hold one match type: the policies as
+	// their matchConstraints, the bindings as their matchResources.
+	matchReaches := func(at string) []string {
+		var out []string
+		for _, path := range []string{
+			"", ".NamespaceSelector.MatchLabels", ".ObjectSelector.MatchExpressions[0].Values", ".ResourceRules",
+			".ResourceRules[0].ResourceNames", ".ResourceRules[0].RuleWithOperations.Operations",
+			".ResourceRules[0].RuleWithOperations.Rule.APIGroups", ".ResourceRules[0].RuleWithOperations.Rule.Scope",
+			".ExcludeResourceRules", ".MatchPolicy",
+		} {
+			out = append(out, at+path)
+		}
+		return out
+	}
 	// The two webhook configurations hold the same webhooks; the mutating
 	// one's add a reinvocation policy.
 	webhookReaches := []string{
@@ -1651,6 +1694,11 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.NodeSelectors[0].MatchExpressions[0].Values", ".Spec.Interfaces", ".Spec.ServiceSelectors",
 			".Spec.ServiceSelectors[0].MatchLabels",
 		},
+		"mutatingadmissionpolicy": append(matchReaches(".Spec.MatchConstraints"),
+			".Spec.ParamKind", ".Spec.Variables", ".Spec.Mutations", ".Spec.Mutations[0].ApplyConfiguration",
+			".Spec.Mutations[1].JSONPatch", ".Spec.FailurePolicy", ".Spec.MatchConditions"),
+		"mutatingadmissionpolicybinding": append(matchReaches(".Spec.MatchResources"),
+			".Spec.ParamRef", ".Spec.ParamRef.Selector.MatchExpressions", ".Spec.ParamRef.ParameterNotFoundAction"),
 		"mutatingwebhookconfiguration": append(webhookReaches, ".Webhooks[0].ReinvocationPolicy"),
 		"poddisruptionbudget": {
 			".Spec.MinAvailable", ".Spec.MaxUnavailable", ".Spec.Selector", ".Spec.Selector.MatchLabels",
@@ -1711,11 +1759,16 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.SampleLimit", ".Spec.ScrapeProtocols", ".Spec.NativeHistogramConfig.NativeHistogramMinBucketFactor",
 			".Spec.AttachMetadata",
 		},
-		"storageclass":                   {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
-		"tcproute":                       routeReaches,
-		"thanosruler":                    thanosRulerReaches,
-		"tlsroute":                       append([]string{".Spec.Hostnames"}, routeReaches...),
-		"udproute":                       routeReaches,
+		"storageclass": {".Parameters", ".ReclaimPolicy", ".MountOptions", ".AllowedTopologies"},
+		"tcproute":     routeReaches,
+		"thanosruler":  thanosRulerReaches,
+		"tlsroute":     append([]string{".Spec.Hostnames"}, routeReaches...),
+		"udproute":     routeReaches,
+		"validatingadmissionpolicy": append(matchReaches(".Spec.MatchConstraints"),
+			".Spec.ParamKind", ".Spec.Validations", ".Spec.Validations[0].Reason", ".Spec.FailurePolicy",
+			".Spec.AuditAnnotations", ".Spec.MatchConditions", ".Spec.Variables"),
+		"validatingadmissionpolicybinding": append(matchReaches(".Spec.MatchResources"),
+			".Spec.ParamRef", ".Spec.ParamRef.ParameterNotFoundAction", ".Spec.ValidationActions"),
 		"validatingwebhookconfiguration": webhookReaches,
 		"volumeattributesclass":          {".Parameters"},
 	}
@@ -1946,6 +1999,91 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		{"solver sub-key", acmeIssuer(map[string]any{"http01": map[string]any{"ingress": map[string]any{"image": "registry.example/solver:1"}}}), notA},
 		{"null solver", map[string]any{"acme": acmeWith("solvers", []any{nil})}, "acme.solvers[0]"},
 		{"two spellings", map[string]any{"selfSigned": map[string]any{}, "SelfSigned": map[string]any{}}, "sets the same field as"},
+	}
+	// The two admission policy kinds refuse the same of their match, their
+	// parameter kind, their match conditions and their variables. policy
+	// builds the least a policy of the kind takes with the given fields over
+	// it, upstream is the type its decode names and operations the operations
+	// its rules take.
+	admissionPolicyCases := func(upstream, operations string, policy func(map[string]any) map[string]any) []refusal {
+		match := func(fields map[string]any) map[string]any {
+			return policy(map[string]any{"matchConstraints": map[string]any{"resourceRules": []any{admissionPolicyRule(fields)}}})
+		}
+		selector := func(at string, expr map[string]any) map[string]any {
+			return policy(map[string]any{"matchConstraints": map[string]any{
+				"resourceRules": []any{admissionPolicyRule(nil)},
+				at:              map[string]any{"matchExpressions": []any{expr}},
+			}})
+		}
+		return []refusal{
+			{"no properties", nil, "matchConstraints: required"},
+			{"match without rules", policy(map[string]any{"matchConstraints": map[string]any{"matchPolicy": "Exact"}}), "matchConstraints.resourceRules: required"},
+			{"match with no rule", policy(map[string]any{"matchConstraints": map[string]any{"resourceRules": []any{}}}), "matchConstraints.resourceRules: required"},
+			{"rule without operations", match(map[string]any{"operations": nil}), "matchConstraints.resourceRules[0].operations: required (the operations the rule matches, at least one: " + operations + ")"},
+			{"rule with no operation", match(map[string]any{"operations": []any{}}), "matchConstraints.resourceRules[0].operations: required"},
+			{"rule without API groups", match(map[string]any{"apiGroups": nil}), "matchConstraints.resourceRules[0].apiGroups: required"},
+			{"rule without API versions", match(map[string]any{"apiVersions": nil}), "matchConstraints.resourceRules[0].apiVersions: required"},
+			{"rule without resources", match(map[string]any{"resources": nil}), "matchConstraints.resourceRules[0].resources: required"},
+			{"an excluded rule without resources", policy(map[string]any{"matchConstraints": map[string]any{
+				"resourceRules":        []any{admissionPolicyRule(nil)},
+				"excludeResourceRules": []any{admissionPolicyRule(map[string]any{"resources": nil})},
+			}}), "matchConstraints.excludeResourceRules[0].resources: required"},
+			{"namespace selector expression without a key", selector("namespaceSelector", map[string]any{"operator": "Exists"}), "matchConstraints.namespaceSelector.matchExpressions[0].key: required"},
+			{"object selector In without values", selector("objectSelector", map[string]any{"key": "tier", "operator": "In"}), "matchConstraints.objectSelector.matchExpressions[0].values: required with the operator In"},
+			{"parameter kind without its apiVersion", policy(map[string]any{"paramKind": map[string]any{"kind": "ReplicaLimit"}}), "paramKind.apiVersion: required"},
+			{"parameter kind without its kind", policy(map[string]any{"paramKind": map[string]any{"apiVersion": "policy.example.com/v1"}}), "paramKind.kind: required"},
+			{"match condition without a name", policy(map[string]any{"matchConditions": []any{map[string]any{"expression": "true"}}}), "matchConditions[0].name: required"},
+			{"match condition without an expression", policy(map[string]any{"matchConditions": []any{map[string]any{"name": "always"}}}), "matchConditions[0].expression: required"},
+			{"variable without a name", policy(map[string]any{"variables": []any{map[string]any{"expression": "1"}}}), "variables[0].name: required"},
+			{"variable without an expression", policy(map[string]any{"variables": []any{map[string]any{"name": "one"}}}), "variables[0].expression: required"},
+			{"unknown key", policy(map[string]any{"matchResources": map[string]any{}}), notA + upstream},
+			{"failure policy a number", policy(map[string]any{"failurePolicy": 1}), notA},
+			{"two spellings", policy(map[string]any{"failurePolicy": "Fail", "FailurePolicy": "Ignore"}), "sets the same field as"},
+		}
+	}
+	// The two binding kinds refuse the same of their policy name, their
+	// parameter and their match. binding builds the least a binding of the
+	// kind takes with the given fields over it.
+	admissionBindingCases := func(upstream string, binding func(map[string]any) map[string]any) []refusal {
+		ref := func(fields map[string]any) map[string]any {
+			return binding(map[string]any{"paramRef": fields})
+		}
+		return []refusal{
+			{"no properties", nil, "policyName: required"},
+			{"an empty policy name", binding(map[string]any{"policyName": ""}), "policyName: required"},
+			{"parameter with neither a name nor a selector", ref(map[string]any{"parameterNotFoundAction": "Deny"}), "paramRef: exactly one of name and selector is required"},
+			{"parameter with both", ref(map[string]any{
+				"name": "limits", "selector": map[string]any{}, "parameterNotFoundAction": "Deny",
+			}), "paramRef: exactly one of name and selector is required"},
+			{"parameter without its not-found action", ref(map[string]any{"name": "limits"}), "paramRef.parameterNotFoundAction: required"},
+			{"parameter with an empty not-found action", ref(map[string]any{"name": "limits", "parameterNotFoundAction": ""}), "paramRef.parameterNotFoundAction: required"},
+			{"parameter selector expression without an operator", ref(map[string]any{
+				"selector":                map[string]any{"matchExpressions": []any{map[string]any{"key": "team"}}},
+				"parameterNotFoundAction": "Deny",
+			}), "paramRef.selector.matchExpressions[0].operator: required"},
+			{"parameter selector Exists with a value", ref(map[string]any{
+				"selector":                map[string]any{"matchExpressions": []any{map[string]any{"key": "team", "operator": "Exists", "values": []any{"a"}}}},
+				"parameterNotFoundAction": "Deny",
+			}), "paramRef.selector.matchExpressions[0].values: not allowed with the operator Exists"},
+			{"match rule without resources", binding(map[string]any{"matchResources": map[string]any{
+				"resourceRules": []any{admissionPolicyRule(map[string]any{"resources": nil})},
+			}}), "matchResources.resourceRules[0].resources: required"},
+			{"an excluded match rule without operations", binding(map[string]any{"matchResources": map[string]any{
+				"excludeResourceRules": []any{admissionPolicyRule(map[string]any{"operations": nil})},
+			}}), "matchResources.excludeResourceRules[0].operations: required"},
+			{"match object selector expression without a key", binding(map[string]any{"matchResources": map[string]any{
+				"objectSelector": map[string]any{"matchExpressions": []any{map[string]any{"operator": "Exists"}}},
+			}}), "matchResources.objectSelector.matchExpressions[0].key: required"},
+			{"unknown key", binding(map[string]any{"matchConstraints": map[string]any{}}), notA + upstream},
+			{"policy name a number", binding(map[string]any{"policyName": 1}), notA},
+			{"two spellings", binding(map[string]any{"PolicyName": "other"}), "sets the same field as"},
+		}
+	}
+	without := func(props map[string]any, keys ...string) map[string]any {
+		for _, key := range keys {
+			delete(props, key)
+		}
+		return props
 	}
 	// The two webhook configurations refuse the same of their webhooks.
 	// upstream is the type their decode names.
@@ -2724,6 +2862,36 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", map[string]any{"nodeSelectors": []any{map[string]any{}, nil}}, "nodeSelectors[1]"},
 			{"two spellings", map[string]any{"interfaces": []any{"eth1"}, "Interfaces": []any{"eth2"}}, "sets the same field as"},
 		},
+		"mutatingadmissionpolicy": append(admissionPolicyCases("admissionregistration.k8s.io/v1 MutatingAdmissionPolicySpec", "CREATE, UPDATE or *", mutatingAdmissionPolicy),
+			refusal{"no mutation", without(mutatingAdmissionPolicy(nil), "mutations"), "mutations: required"},
+			refusal{"an empty mutation list", mutatingAdmissionPolicy(map[string]any{"mutations": []any{}}), "mutations: required"},
+			refusal{"mutation without a patch type", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"applyConfiguration": map[string]any{"expression": "Object{}"}},
+			}}), "mutations[0].patchType: required"},
+			refusal{"apply configuration missing", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"patchType": "ApplyConfiguration"},
+			}}), "mutations[0].applyConfiguration: required with the patchType ApplyConfiguration"},
+			refusal{"apply configuration without an expression", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"patchType": "ApplyConfiguration", "applyConfiguration": map[string]any{}},
+			}}), "mutations[0].applyConfiguration.expression: required"},
+			refusal{"JSON patch missing", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"patchType": "JSONPatch", "applyConfiguration": map[string]any{"expression": "Object{}"}},
+			}}), "mutations[0].jsonPatch: required with the patchType JSONPatch"},
+			refusal{"JSON patch without an expression", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": ""}},
+			}}), "mutations[0].jsonPatch.expression: required"},
+			refusal{"a later mutation without its patch", mutatingAdmissionPolicy(map[string]any{"mutations": []any{
+				map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": "[]"}},
+				map[string]any{"patchType": "JSONPatch"},
+			}}), "mutations[1].jsonPatch: required"},
+			refusal{"no reinvocation policy", without(mutatingAdmissionPolicy(nil), "reinvocationPolicy"), "reinvocationPolicy: required"},
+			refusal{"an empty reinvocation policy", mutatingAdmissionPolicy(map[string]any{"reinvocationPolicy": ""}), "reinvocationPolicy: required"},
+			refusal{"a validating policy's key", mutatingAdmissionPolicy(map[string]any{"validations": []any{}}), notA},
+		),
+		"mutatingadmissionpolicybinding": append(admissionBindingCases("admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBindingSpec",
+			func(fields map[string]any) map[string]any { return admissionPolicyBinding(false, fields) }),
+			refusal{"a validating binding's key", admissionPolicyBinding(false, map[string]any{"validationActions": []any{"Deny"}}), notA},
+		),
 		"mutatingwebhookconfiguration": webhookCases("admissionregistration.k8s.io/v1 MutatingWebhookConfiguration"),
 		"poddisruptionbudget": {
 			{"unknown key", map[string]any{"minAvailable": 1, "minReady": 1}, notA + "policy/v1 PodDisruptionBudgetSpec"},
@@ -2956,6 +3124,20 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"no properties", nil, "rules: required"},
 			{"another route's key", withProperty(gatewayRouteMinimal(), "hostnames", []any{"dns.example.com"}), notA + "gateway.networking.k8s.io/v1 UDPRouteSpec"},
 		}, routeCases("gateway.networking.k8s.io/v1 UDPRouteSpec", nil)...),
+		"validatingadmissionpolicy": append(admissionPolicyCases("admissionregistration.k8s.io/v1 ValidatingAdmissionPolicySpec", "CREATE, UPDATE, DELETE, CONNECT or *", validatingAdmissionPolicy),
+			refusal{"no validation or audit annotation", without(validatingAdmissionPolicy(nil), "validations"), "validations: at least one of validations and auditAnnotations is required"},
+			refusal{"empty validations and audit annotations", validatingAdmissionPolicy(map[string]any{"validations": []any{}, "auditAnnotations": []any{}}), "validations: at least one of validations and auditAnnotations is required"},
+			refusal{"validation without an expression", validatingAdmissionPolicy(map[string]any{"validations": []any{map[string]any{"message": "no"}}}), "validations[0].expression: required"},
+			refusal{"audit annotation without a key", validatingAdmissionPolicy(map[string]any{"auditAnnotations": []any{map[string]any{"valueExpression": "'x'"}}}), "auditAnnotations[0].key: required"},
+			refusal{"audit annotation without a value expression", validatingAdmissionPolicy(map[string]any{"auditAnnotations": []any{map[string]any{"key": "seen"}}}), "auditAnnotations[0].valueExpression: required"},
+			refusal{"a mutating policy's key", validatingAdmissionPolicy(map[string]any{"reinvocationPolicy": "Never"}), notA},
+		),
+		"validatingadmissionpolicybinding": append(admissionBindingCases("admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBindingSpec",
+			func(fields map[string]any) map[string]any { return admissionPolicyBinding(true, fields) }),
+			refusal{"no validation action", without(admissionPolicyBinding(true, nil), "validationActions"), "validationActions: required"},
+			refusal{"an empty action list", admissionPolicyBinding(true, map[string]any{"validationActions": []any{}}), "validationActions: required"},
+			refusal{"an action a number", admissionPolicyBinding(true, map[string]any{"validationActions": []any{1}}), notA},
+		),
 		"validatingwebhookconfiguration": webhookCases("admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration"),
 		"volumeattributesclass": {
 			{"no properties", nil, "driverName: required"},

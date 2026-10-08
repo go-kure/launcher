@@ -150,6 +150,8 @@ var coreKindSchemas = []struct {
 	{"metallb-community", reflect.TypeFor[metallbv1beta1.CommunitySpec](), &components.MetalLBCommunityHandler{}, nil},
 	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
 	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, nil},
+	{"mutatingadmissionpolicy", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec](), &components.MutatingAdmissionPolicyHandler{}, nil},
+	{"mutatingadmissionpolicybinding", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec](), &components.MutatingAdmissionPolicyBindingHandler{}, nil},
 	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), &components.MutatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 MutatingWebhookConfiguration")},
 	{"namespace", reflect.TypeFor[corev1.NamespaceSpec](), &components.NamespaceHandler{}, nil},
 	{"networkpolicy", reflect.TypeFor[networkingv1.NetworkPolicySpec](), &components.NetworkPolicyHandler{}, nil},
@@ -194,6 +196,8 @@ var coreKindSchemas = []struct {
 	{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), &components.ThanosRulerHandler{}, nil},
 	{"tlsroute", reflect.TypeFor[gatewayv1.TLSRouteSpec](), &components.TLSRouteHandler{}, nil},
 	{"udproute", reflect.TypeFor[gatewayv1.UDPRouteSpec](), &components.UDPRouteHandler{}, nil},
+	{"validatingadmissionpolicy", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec](), &components.ValidatingAdmissionPolicyHandler{}, nil},
+	{"validatingadmissionpolicybinding", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec](), &components.ValidatingAdmissionPolicyBindingHandler{}, nil},
 	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), &components.ValidatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration")},
 	{"volumeattributesclass", reflect.TypeFor[storagev1.VolumeAttributesClass](), &components.VolumeAttributesClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 VolumeAttributesClass")},
 }
