@@ -22,6 +22,13 @@ import (
 // the end: TestKindLists_InOrder holds that, and the same of the tables of
 // kindTables.
 //
+// Some lists hold an entry only for the kinds of one family, or one per type a
+// kind decodes, as imageFieldTypes holds one per spec type that names an
+// image. kindListExceptions names none of them: they are held to their order,
+// not to the registered types. A kind's helpers, the functions and values only
+// its entries use, go in a test file of the kind's own, not beside the list
+// they serve, for the same reason.
+//
 // file is relative to this package. name is a package-level variable,
 // "Func.variable" for a variable a function declares, or "Func.return" for the
 // literal a function returns.
@@ -31,12 +38,24 @@ var kindLists = []struct {
 	{"../../oam/builtin/registry/registry.go", "ComponentHandlers.return"},
 	{"build_test.go", "TestBuiltinComponentHandlers_RegisteredTypes.wantHandlers"},
 	{"component_label_invariant_test.go", "componentLabelFixtures"},
+	{"kind_trait_object_claim_test.go", "kindTraitPairs"},
 	{"../../oam/builtin/components/core_kinds_test.go", "coreKindSchemas"},
+	{"../../oam/builtin/components/image_fields_internal_test.go", "imageFieldTypes"},
 	{"../../oam/builtin/components/kind_api_sets_internal_test.go", "apiSetKinds"},
 	{"../../oam/builtin/components/kind_policy_free_test.go", "policyFreeKinds"},
 	{"../../oam/builtin/components/kind_policy_free_test.go", "TestPolicyFreeKinds_GenerateCopies.reaches"},
 	{"../../oam/builtin/components/kind_policy_free_test.go", "TestPolicyFreeKinds_Refusals.cases"},
+	{"../../oam/builtin/components/monitoring_kinds_internal_test.go", "monitoringKinds"},
+	{"../../oam/builtin/components/required_written_pin_internal_test.go", "requiredWrittenKinds"},
 	{"../../oam/validate.go", "validComponentTypes"},
+}
+
+// kindListKeyFields names, for a list of kindLists whose entries are structs
+// written with field names and name their type in a field other than
+// component, that field.
+var kindListKeyFields = map[string]string{
+	"imageFieldTypes": "name",
+	"kindTraitPairs":  "typ",
 }
 
 // kindTables names the Markdown tables that hold one row per component type,
@@ -414,7 +433,7 @@ func kindListGaps(registered, rows []string, exceptions map[string]string) []str
 
 // goListKeys returns, in the order they are written, the component types of
 // the entries of the composite literal a Go source file gives the named
-// variable.
+// variable, read from the field kindListKeyFields names for it.
 func goListKeys(t *testing.T, file, name string) []string {
 	t.Helper()
 	parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.SkipObjectResolution)
@@ -427,7 +446,7 @@ func goListKeys(t *testing.T, file, name string) []string {
 	}
 	keys := make([]string, 0, len(lit.Elts))
 	for _, elt := range lit.Elts {
-		key, ok := goListKey(elt)
+		key, ok := goListKey(elt, kindListKeyFields[name])
 		if !ok {
 			t.Fatalf("%s: an entry of %s names no component type this test can read: write the type as a string literal", file, name)
 		}
@@ -490,32 +509,35 @@ func goListLiteral(file *ast.File, name string) *ast.CompositeLit {
 }
 
 // goListKey reads the component type of one entry: a string, the key of a map
-// entry, or of a struct the field named component, or its first field where
-// the struct is written without field names.
-func goListKey(elt ast.Expr) (string, bool) {
+// entry, or of a struct the field named key, component where key is empty, or
+// its first field where the struct is written without field names.
+func goListKey(elt ast.Expr, key string) (string, bool) {
+	if key == "" {
+		key = "component"
+	}
 	switch elt := elt.(type) {
 	case *ast.BasicLit:
 		if elt.Kind != token.STRING {
 			return "", false
 		}
-		key, err := strconv.Unquote(elt.Value)
-		return key, err == nil
+		value, err := strconv.Unquote(elt.Value)
+		return value, err == nil
 	case *ast.KeyValueExpr:
-		return goListKey(elt.Key)
+		return goListKey(elt.Key, key)
 	case *ast.CompositeLit:
 		if len(elt.Elts) == 0 {
 			return "", false
 		}
 		if _, named := elt.Elts[0].(*ast.KeyValueExpr); !named {
-			return goListKey(elt.Elts[0])
+			return goListKey(elt.Elts[0], key)
 		}
 		for _, field := range elt.Elts {
 			pair, ok := field.(*ast.KeyValueExpr)
 			if !ok {
 				continue
 			}
-			if ident, ok := pair.Key.(*ast.Ident); ok && ident.Name == "component" {
-				return goListKey(pair.Value)
+			if ident, ok := pair.Key.(*ast.Ident); ok && ident.Name == key {
+				return goListKey(pair.Value, key)
 			}
 		}
 	}
@@ -719,31 +741,63 @@ func renamed() {
 	inner := func() { want := []string{"alpha"}; _ = want }
 	inner()
 }
+
+var images = []struct {
+	name string
+	typ  int
+}{{typ: 1, name: "b spec"}, {name: "a spec", typ: 2}}
+
+var pairs = []struct{ kind, typ string }{{kind: "x", typ: "b"}, {typ: "a"}}
 `
 	parsed, err := parser.ParseFile(token.NewFileSet(), "src.go", src, parser.SkipObjectResolution)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	tests := []struct {
-		name string
-		want []string
+		name, key string
+		want      []string
 	}{
-		{"handlers.return", []string{"b", "a"}},
-		{"outer.want", []string{"b", "a"}},
-		{"renamed.want", nil},
+		{"handlers.return", "", []string{"b", "a"}},
+		{"outer.want", "", []string{"b", "a"}},
+		{"renamed.want", "", nil},
+		{"images", "name", []string{"b spec", "a spec"}},
+		{"images", "", nil},
+		{"pairs", "typ", []string{"b", "a"}},
+		{"pairs", "kind", []string{"x"}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		name := tt.name
+		if tt.key != "" {
+			name += "/" + tt.key
+		}
+		t.Run(name, func(t *testing.T) {
 			var got []string
 			if lit := goListLiteral(parsed, tt.name); lit != nil {
 				for _, elt := range lit.Elts {
-					key, _ := goListKey(elt)
-					got = append(got, key)
+					if key, ok := goListKey(elt, tt.key); ok {
+						got = append(got, key)
+					}
 				}
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("read %q, want %q", got, tt.want)
 			}
+		})
+	}
+}
+
+// TestKindLists_InOrderNamesASwap holds each list of kindLists, as it is read,
+// to failing TestKindLists_InOrder once two of its entries change places: its
+// entries are read as the types they name, not as one value each.
+func TestKindLists_InOrderNamesASwap(t *testing.T) {
+	for _, list := range kindLists {
+		t.Run(list.name, func(t *testing.T) {
+			keys := goListKeys(t, list.file, list.name)
+			if len(keys) < 2 {
+				t.Fatalf("%s: %s holds %d entries, too few to swap", list.file, list.name, len(keys))
+			}
+			keys[0], keys[1] = keys[1], keys[0]
+			expectDefects(t, kindListMisplaced(keys), []string{fmt.Sprintf("%q stands after %q", keys[1], keys[0])})
 		})
 	}
 }

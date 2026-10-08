@@ -107,56 +107,6 @@ func poolerTemplateTagRule(ps corev1.PodSpec) error {
 // over.
 var imageFieldTypes = []imageFieldType{
 	{
-		// The one check behind every raw pod spec: the pod kind, the pod template
-		// of the replicaset, replicationcontroller and podtemplate kinds and of
-		// cnpg-pooler, and the pod spec of an object template delivery,
-		// passthrough or a manifests source carries.
-		name: "pod spec",
-		typ:  reflect.TypeFor[corev1.PodSpec](),
-		held: map[string]func(string, oam.Policy) error{
-			"containers[].image": func(reference string, p oam.Policy) error {
-				return enforcePodTemplatePolicy("", &corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: reference}}}, p)
-			},
-			"initContainers[].image": func(reference string, p oam.Policy) error {
-				return enforcePodTemplatePolicy("", &corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
-			},
-			"volumes[].image": func(reference string, p oam.Policy) error {
-				return enforcePodTemplatePolicy("", &corev1.PodSpec{Volumes: []corev1.Volume{{
-					Name:         "ext",
-					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}}, p)
-			},
-		},
-		tagged: map[string]imageTagCheck{
-			"containers[].image": {
-				check: func(reference string) error {
-					return podSpecTagRule(corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: reference}}})
-				},
-				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
-			},
-			"initContainers[].image": {
-				check: func(reference string) error {
-					return podSpecTagRule(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
-				},
-				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
-			},
-			"volumes[].image": {check: func(reference string) error {
-				return podSpecTagRule(corev1.PodSpec{Volumes: []corev1.Volume{{
-					Name:         "ext",
-					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}})
-			}},
-		},
-		notHeld: map[string]string{
-			"ephemeralContainers[].image":           "every caller of the shared check refuses a pod spec that lists ephemeral containers (podSpecRejectedKeys)",
-			"containers[].imagePullPolicy":          "says when the image is pulled, not which image",
-			"initContainers[].imagePullPolicy":      "says when the image is pulled, not which image",
-			"ephemeralContainers[].imagePullPolicy": "says when the image is pulled, not which image",
-			"imagePullSecrets":                      "names the Secrets holding registry credentials, not an image",
-			"volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
-		},
-	},
-	{
 		// The alertmanager kind: its own image, and the containers and volumes
 		// it lists through the shared check. A listed container named for none
 		// the operator generates must name its image; one named for a container
@@ -207,6 +157,60 @@ var imageFieldTypes = []imageFieldType{
 			"initContainers[].imagePullPolicy": "says when the image is pulled, not which image",
 			"imagePullSecrets":                 "names the Secrets holding registry credentials, not an image",
 			"volumes[].rbd.image":              "the name of a Ceph RBD block image in a pool, not an OCI image reference",
+		},
+	},
+	{
+		// The cnpg-imagecatalog and cnpg-clusterimagecatalog kinds, which share the
+		// spec and the check. Major is set so the catalog is one the API would take.
+		name: "cnpg image catalog spec",
+		typ:  reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"images[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}}, p)
+			},
+			"images[].extensions[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
+					Image: "registry.example/team/postgresql:18",
+					Major: 18,
+					Extensions: []cnpgv1.ExtensionConfiguration{{
+						Name:              "ext",
+						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+					}},
+				}}}, p)
+			},
+			"componentImages[].image": func(reference string, p oam.Policy) error {
+				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}}, p)
+			},
+		},
+		// The check is the kinds' validate step, which config runs on every
+		// catalog it decodes, with or without a policy.
+		tagged: map[string]imageTagCheck{
+			"images[].image": {
+				check: func(reference string) error {
+					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}})
+				},
+				emptyRefused: "the CRD requires the image of a catalog entry: it is what a Cluster of that major version runs",
+			},
+			"images[].extensions[].image": {check: func(reference string) error {
+				return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
+					Image: "registry.example/team/postgresql:18",
+					Major: 18,
+					Extensions: []cnpgv1.ExtensionConfiguration{{
+						Name:              "ext",
+						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
+					}},
+				}}})
+			}},
+			"componentImages[].image": {
+				check: func(reference string) error {
+					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}})
+				},
+				emptyRefused: "the CRD requires the image of a component entry: it is what a Cluster resolves by the key",
+			},
+		},
+		notHeld: map[string]string{
+			"images":          "the list of the catalog's entries, not an image; the image each entry names is held under images[]",
+			"componentImages": "the list of the catalog's component entries, not an image; the image each entry names is held under componentImages[]",
 		},
 	},
 	{
@@ -311,57 +315,53 @@ var imageFieldTypes = []imageFieldType{
 		},
 	},
 	{
-		// The cnpg-imagecatalog and cnpg-clusterimagecatalog kinds, which share the
-		// spec and the check. Major is set so the catalog is one the API would take.
-		name: "cnpg image catalog spec",
-		typ:  reflect.TypeFor[cnpgv1.ImageCatalogSpec](),
+		// The one check behind every raw pod spec: the pod kind, the pod template
+		// of the replicaset, replicationcontroller and podtemplate kinds and of
+		// cnpg-pooler, and the pod spec of an object template delivery,
+		// passthrough or a manifests source carries.
+		name: "pod spec",
+		typ:  reflect.TypeFor[corev1.PodSpec](),
 		held: map[string]func(string, oam.Policy) error{
-			"images[].image": func(reference string, p oam.Policy) error {
-				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}}, p)
+			"containers[].image": func(reference string, p oam.Policy) error {
+				return enforcePodTemplatePolicy("", &corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: reference}}}, p)
 			},
-			"images[].extensions[].image": func(reference string, p oam.Policy) error {
-				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
-					Image: "registry.example/team/postgresql:18",
-					Major: 18,
-					Extensions: []cnpgv1.ExtensionConfiguration{{
-						Name:              "ext",
-						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
-					}},
+			"initContainers[].image": func(reference string, p oam.Policy) error {
+				return enforcePodTemplatePolicy("", &corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}}, p)
+			},
+			"volumes[].image": func(reference string, p oam.Policy) error {
+				return enforcePodTemplatePolicy("", &corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
 				}}}, p)
 			},
-			"componentImages[].image": func(reference string, p oam.Policy) error {
-				return enforceCnpgImageCatalogPolicy(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}}, p)
-			},
 		},
-		// The check is the kinds' validate step, which config runs on every
-		// catalog it decodes, with or without a policy.
 		tagged: map[string]imageTagCheck{
-			"images[].image": {
+			"containers[].image": {
 				check: func(reference string) error {
-					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{Image: reference, Major: 18}}})
+					return podSpecTagRule(corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: reference}}})
 				},
-				emptyRefused: "the CRD requires the image of a catalog entry: it is what a Cluster of that major version runs",
+				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
 			},
-			"images[].extensions[].image": {check: func(reference string) error {
-				return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{Images: []cnpgv1.CatalogImage{{
-					Image: "registry.example/team/postgresql:18",
-					Major: 18,
-					Extensions: []cnpgv1.ExtensionConfiguration{{
-						Name:              "ext",
-						ImageVolumeSource: corev1.ImageVolumeSource{Reference: reference},
-					}},
+			"initContainers[].image": {
+				check: func(reference string) error {
+					return podSpecTagRule(corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
+				},
+				emptyRefused: "a container the pod kinds build must name its image: nothing fills one in",
+			},
+			"volumes[].image": {check: func(reference string) error {
+				return podSpecTagRule(corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
 				}}})
 			}},
-			"componentImages[].image": {
-				check: func(reference string) error {
-					return validateCnpgImageCatalog(&cnpgv1.ImageCatalogSpec{ComponentImages: []cnpgv1.CatalogComponentImage{{Key: "pgbouncer", Image: reference}}})
-				},
-				emptyRefused: "the CRD requires the image of a component entry: it is what a Cluster resolves by the key",
-			},
 		},
 		notHeld: map[string]string{
-			"images":          "the list of the catalog's entries, not an image; the image each entry names is held under images[]",
-			"componentImages": "the list of the catalog's component entries, not an image; the image each entry names is held under componentImages[]",
+			"ephemeralContainers[].image":           "every caller of the shared check refuses a pod spec that lists ephemeral containers (podSpecRejectedKeys)",
+			"containers[].imagePullPolicy":          "says when the image is pulled, not which image",
+			"initContainers[].imagePullPolicy":      "says when the image is pulled, not which image",
+			"ephemeralContainers[].imagePullPolicy": "says when the image is pulled, not which image",
+			"imagePullSecrets":                      "names the Secrets holding registry credentials, not an image",
+			"volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
 		},
 	},
 }

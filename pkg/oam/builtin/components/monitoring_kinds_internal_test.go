@@ -46,10 +46,10 @@ type monitoringKindRow struct {
 // TestMonitoringKinds_DefaultedZeros does not read
 // (TestMonitoringWorkloadKinds_DefaultedZeros does).
 var monitoringKinds = []monitoringKindRow{
-	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil, serviceMonitorKind.defaultedZeros.fields},
 	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.required, nil, podMonitorKind.defaultedZeros.fields},
 	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.required, []string{"prober.url"}, prometheusProbeKind.defaultedZeros.fields},
 	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), prometheusRuleKind.required, nil, prometheusRuleKind.defaultedZeros.fields},
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil, serviceMonitorKind.defaultedZeros.fields},
 }
 
 // fieldMarkers is what the comment of one struct field says of it to the CRD

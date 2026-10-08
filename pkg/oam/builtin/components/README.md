@@ -478,6 +478,9 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | `coreKindSchemas`, `apiSetKinds` | the tests of this package | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a registered type with no row and no reason in `kindListExceptions` |
 | `parityKinds`, for a kind excepted there because it reads its own properties (`ownProperties`) | `hand_parsed_parity_internal_test.go` | not in order; `TestKindLists_OwnPropertiesHaveParityRows` (`pkg/cmd/kurel`) fails on a type with that reason and no row, and on a row of a type without it |
 | `policyFreeKinds` and the two maps of its tests, for a kind built on `policyFreeKind` | the tests of this package | `TestKindLists_InOrder` |
+| `requiredWrittenKinds`, for a kind whose API is a CRD a linked module ships or whose markers are read; `monitoringKinds`, for a kind of the Prometheus operator's API | the tests of this package | `TestKindLists_InOrder`. `testdata/required-written-not-refused.txt` is written in the order of `requiredWrittenKinds`, so a new kind's lines land at its position when it is regenerated |
+| `imageFieldTypes`, for a spec type a kind decodes that names an image | `image_fields_internal_test.go` | `TestKindLists_InOrder`, in the order of the entries' `name` |
+| `kindTraitPairs`, for a kind a trait also generates | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder`, in the order of the entries' `typ` |
 | `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
 | "Component types" | this file | `TestKindLists_InOrder` |
 | "Component type allowlist" | `pkg/oam/README.md` | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a type of `validComponentTypes` with no row and on a row of no type of it |
@@ -486,12 +489,15 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | "Per-type highlights" | this file | no test, and not yet in order: a new entry goes before the first entry whose head names a type that sorts after its own |
 | The "Shipped" entries of §6.2 that ship kinds | `docs/delivery-scope.md` | no test: the same position, before the entries that are not "Shipped" |
 
-In the Go lists an entry names its component type by a string literal, not by a constant:
-`TestKindLists_InOrder` reads the source file, and stops on an entry whose type it cannot read.
+In the Go lists an entry names its component type by a string literal, not by a constant (a
+struct written with field names, in its `component` field or the one `kindListKeyFields` in
+`pkg/cmd/kurel` names for its list): `TestKindLists_InOrder` reads the source file, and stops
+on an entry whose type it cannot read.
 
 What belongs to one kind goes in that kind's own files, not at the end of a shared one: the
 handler, its `ContractMetadata` and `ComponentObject` methods (not `contract.go`,
-`object_name.go`), and its tests.
+`object_name.go`), its tests, and the helpers only its entries in a shared list use, which go
+in its own test file rather than beside the list.
 
 No sentence names every kind. A sentence that needs the set points at the "Kind inventory",
 which its tests hold complete. One table names every component type, one row each: the

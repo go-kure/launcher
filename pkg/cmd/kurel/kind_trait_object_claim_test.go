@@ -20,14 +20,18 @@ var kindTraitPairs = []struct {
 	kind          string
 }{
 	{
-		typ: "ingress", identity: `Ingress.networking.k8s.io "default/api-ingress"`,
-		trait: claimIngressTrait, object: "api-ingress",
-		traitOwner: `component "api" traits[0] "ingress" (role "ingress", its default)`,
-		kind: `        defaultBackend:
-          service:
-            name: api
-            port:
-              number: 8080
+		// The trait's `name` is required: its object has no default name.
+		typ: "cilium-networkpolicy", identity: `CiliumNetworkPolicy.cilium.io "default/api-policy"`,
+		trait: claimCiliumTrait("api-policy"), object: "api-policy",
+		traitOwner: `component "api" traits[0] "cilium-networkpolicy" (its own object, set by name)`,
+		kind: `        spec:
+          endpointSelector:
+            matchLabels:
+              app: api
+          ingress:
+            - fromEndpoints:
+                - matchLabels:
+                    app: frontend
 `,
 	},
 	{
@@ -43,6 +47,17 @@ var kindTraitPairs = []struct {
 `,
 	},
 	{
+		typ: "ingress", identity: `Ingress.networking.k8s.io "default/api-ingress"`,
+		trait: claimIngressTrait, object: "api-ingress",
+		traitOwner: `component "api" traits[0] "ingress" (role "ingress", its default)`,
+		kind: `        defaultBackend:
+          service:
+            name: api
+            port:
+              number: 8080
+`,
+	},
+	{
 		// The trait's name has a role of its own; the claim space is the same.
 		typ: "networkpolicy", identity: `NetworkPolicy.networking.k8s.io "default/api-allow"`,
 		trait: networkPolicyTrait, object: "api-allow",
@@ -52,21 +67,6 @@ var kindTraitPairs = []struct {
             app: api
         policyTypes:
           - Ingress
-`,
-	},
-	{
-		// The trait's `name` is required: its object has no default name.
-		typ: "cilium-networkpolicy", identity: `CiliumNetworkPolicy.cilium.io "default/api-policy"`,
-		trait: claimCiliumTrait("api-policy"), object: "api-policy",
-		traitOwner: `component "api" traits[0] "cilium-networkpolicy" (its own object, set by name)`,
-		kind: `        spec:
-          endpointSelector:
-            matchLabels:
-              app: api
-          ingress:
-            - fromEndpoints:
-                - matchLabels:
-                    app: frontend
 `,
 	},
 }
