@@ -107,9 +107,9 @@ func appliedSelfAndMembers(obj client.Object) []client.Object {
 
 // checkObjectKinds holds every object obj stands for when Flux applies it
 // (appliedObjects) to the policy: obj itself, or a list envelope's members and
-// not the envelope, which Flux never applies. A typed object is read as it is
-// written (asWritten), so a typed list stands for its members too. Nil rules
-// check nothing.
+// not the envelope, which Flux never applies. A list is read as it is written
+// (asWritten), so one of any Go representation stands for its members, and one
+// whose items is null for none. Nil rules check nothing.
 func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
 	if o.kinds == nil {
 		return nil
@@ -122,13 +122,22 @@ func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
 	return nil
 }
 
-// asWritten returns a typed obj that is a list envelope as the manifest kure
-// writes for it, its JSON encoding, which Kustomize and Flux expand into its
-// members (appliedObjects reads an unstructured object only). Any other object,
-// or one that does not encode, which the writer fails on too, is returned as is.
+// asWritten returns obj as the manifest kure writes for it when that is a list
+// envelope: its JSON encoding, whose items array Kustomize and Flux expand into
+// its members. appliedObjects reads only an unstructured object whose items is
+// a []any, which neither a typed list nor one built with a typed Go slice is
+// until encoded. A list envelope whose items is null applies nothing, and
+// Kustomize drops one whose kind ends in "List", so it comes back as an empty
+// list. Any other object, or one that does not encode, which the writer fails
+// on too, is returned as is.
 func asWritten(obj client.Object) client.Object {
-	if _, ok := obj.(*unstructured.Unstructured); ok || isNullValue(obj) {
+	if isNullValue(obj) {
 		return obj
+	}
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		if _, has := u.Object["items"]; !has || u.IsList() {
+			return obj
+		}
 	}
 	data, err := json.Marshal(obj)
 	if err != nil {
@@ -138,7 +147,11 @@ func asWritten(obj client.Object) client.Object {
 	if json.Unmarshal(data, &m) != nil {
 		return obj
 	}
-	if u := (&unstructured.Unstructured{Object: m}); u.IsList() {
+	u := &unstructured.Unstructured{Object: m}
+	if items, has := m["items"]; has && items == nil && strings.HasSuffix(u.GetKind(), "List") {
+		m["items"] = []any{}
+	}
+	if u.IsList() {
 		return u
 	}
 	return obj
@@ -168,8 +181,11 @@ func (g layoutGenerators) collect(l *layout.ManifestLayout) {
 
 // checkAddedGenerators holds to the policy the ConfigMap of every
 // configMapGenerator entry on l and on its child layouts that is not in before:
-// one the wrapped augmenter added, which Kustomize turns into a ConfigMap at
-// build time and no Generate returns.
+// one the wrapped augmenter added under a name new to its layout, which
+// Kustomize turns into a ConfigMap at build time and no Generate returns. An
+// entry under a name its layout already held is the caller's and is not read;
+// one the augmenter adds beside it under that name is a duplicate, which kure
+// refuses when it writes the layout.
 func (o *ownedConfig) checkAddedGenerators(l *layout.ManifestLayout, before layoutGenerators) error {
 	if l == nil || o.kinds == nil {
 		return nil

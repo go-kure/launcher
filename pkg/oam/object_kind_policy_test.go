@@ -319,6 +319,21 @@ func TestObjectKindPolicy_TypedList(t *testing.T) {
 		list(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"thing","namespace":"ns"}}`)); err != nil {
 		t.Errorf("Generate = %v, want a typed List of a ConfigMap generated", err)
 	}
+
+	// An unstructured list whose items is a typed Go slice is written as the
+	// same list.
+	sliced := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "List",
+		"items": []map[string]any{kindObject("rbac.authorization.k8s.io/v1", "ClusterRole", "").Object},
+	}}
+	wantKindRefusal(t, generateUnderKinds(t, policy, "web", sliced), "web", `ClusterRole "thing" (rbac.authorization.k8s.io/ClusterRole)`)
+
+	// A typed List with no items is written with items null, which applies
+	// nothing: it is not held to the policy as an object of its own.
+	empty := &typedList{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "List"}}
+	if err := generateUnderKinds(t, &kindPolicy{allowed: []schema.GroupKind{{Kind: "ConfigMap"}}}, "web", empty); err != nil {
+		t.Errorf("Generate = %v, want an empty typed List generated", err)
+	}
 }
 
 // generatorAugmenter adds a configMapGenerator entry to the layout it augments.

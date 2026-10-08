@@ -366,8 +366,8 @@ type augmentingOwnedConfig struct {
 // one. It is read again for the object kind policy when this wrapper's Generate
 // returned it (recheckEmitted), so an augmenter that appends a forbidden member
 // to a list it generated is refused. A configMapGenerator entry the augmenter
-// adds is held to the object kind policy as the ConfigMap Kustomize builds from
-// it (checkAddedGenerators). And a caller that hands over a layout
+// adds under a name new to its layout is held to the object kind policy as the
+// ConfigMap Kustomize builds from it (checkAddedGenerators). And a caller that hands over a layout
 // holding objects that never passed through Generate gets them back unchecked
 // and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
