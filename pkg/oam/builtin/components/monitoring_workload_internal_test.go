@@ -469,7 +469,8 @@ func swaggerDocs(typ reflect.Type) (map[string]string, bool) {
 // in the source of its type, or, for a Kubernetes type, by the default its
 // published field description states (TestPodSpecDefaultedZeros_MatchFieldDocs,
 // whose limits apply). A string of a Kubernetes type is not read: those types
-// state a string default only in free text, and the pod kinds list none either.
+// state a string default only in free text, and the kinds hold none of them
+// (go-kure/launcher#938).
 // A field of that shape whose source is not read, or a Kubernetes one that
 // publishes no description, fails here. Each listed field is shown refused on
 // the kind's handler: properties that author a 0 or a "" there do not build,

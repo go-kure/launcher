@@ -3713,9 +3713,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the default markers of the operator's source and the field comments of the
   Kubernetes types, and shows each field refused on a document. A string
   default of the Kubernetes pod types (a container port's `protocol`, a
-  volume source's) is not refused, as on the pod kinds: those types state it
-  only in free text. An authored `hostNetwork: false` is left out, and the API
-  reads an absent one as `false`.
+  volume source's) is not refused, though the pod kinds refuse it, and
+  neither is a `hostPort` of `0` under `hostNetwork`
+  (go-kure/launcher#938). An authored `hostNetwork: false` is left out, and
+  the API reads an absent one as `false`.
 
   **What the operator builds from the spec is checked where the API or the
   operator would break it.** Each is refused, under any policy and none, at

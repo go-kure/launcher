@@ -1742,7 +1742,8 @@ and by scope, whatever component or trait emits it.
     pod kinds, on a patch of one of the operator's own containers too, and so is an
     empty `portName`, `retention` or `alertmanagerConfigMatcherStrategy.type`, which the
     CRD defaults, as on the other kinds of the operator's API. A string default of the
-    Kubernetes pod types is not refused, as on the pod kinds.
+    Kubernetes pod types, and a `hostPort` of `0` under `hostNetwork`, are not refused,
+    though the pod kinds refuse them (go-kure/launcher#938).
   - **What the operator builds from the spec is checked where it would break.** An
     `image` (or a listed `alertmanager` entry's) without `version`, whose flags the
     operator would choose for its own default version; a `version` the operator cannot
