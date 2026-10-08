@@ -4232,7 +4232,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     ReplicationController and ReplicaSet objects and every defaulting
     function they call. It fails on a field the code defaults and the list
     does not hold, on a default the list states otherwise, and on a row the
-    code does not set. Most defaults are set by a `SetDefaults_` function.
+    code does not set. It also fails on code it cannot follow, rather than
+    guess: a write through a copy of a field, a list element reached by
+    anything but a range over that list, or a write it cannot place in the
+    object. Most defaults are set by a `SetDefaults_` function.
     The exceptions are a port's `protocol` and the `iscsi`, `rbd` and
     `scaleIO` strings, which `k8s.io/api` declares with a `+default` marker
     and the generated functions apply, and `hostPort`, which
@@ -4570,7 +4573,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   or not refused with the reason. A newly defaulted list fails it until it
   is answered. The three refused defaults are held to the API server's
   defaulting code by `TestKubernetesDefaulters_ListDefaultsMatchVendoredSource`,
-  from the excerpt the `pod` kind's list is held to. Two limits: the lists
+  from the excerpt the `pod` kind's list is held to: the functions that
+  reach those defaults are held to their exact statements, and each default
+  to being the only write to its field or to anything beneath it. Two limits: the lists
   of the Kubernetes types are found from their field comments, so a list
   the API server defaults without its comment saying so is not found; and
   the table of kinds it walks is not itself proven to hold every kind
