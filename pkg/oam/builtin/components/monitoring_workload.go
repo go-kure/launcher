@@ -88,8 +88,10 @@ type monitoringWorkload struct {
 	replicasPath string
 	// storage is the spec's storage block, nil where it has none.
 	storage *monitoringv1.StorageSpec
-	// resources are the resource blocks the spec names outside pod: the ones of
-	// the containers the operator generates.
+	// resources are the resource blocks of the containers the operator
+	// generates from fields outside pod, as it runs them: the spec's block
+	// with the requests and limits of a listed entry that patches the container
+	// merged over it, key by key (mergedResources).
 	resources []fieldResources
 	// memoryRequests is the memory request the operator fills into a block of
 	// resources that names none, by the path of the block.
@@ -102,7 +104,10 @@ type monitoringWorkload struct {
 // or without an environment policy: an image reference without a tag or a
 // digest, or tagged latest (ValidateImageRef), on every image the workload
 // names, and a resource block whose request exceeds its limit
-// (validateCnpgResources). A listed container named for one the operator
+// (validateCnpgResources). A name listed twice in one list is refused: the
+// operator keeps the last entry of a name only, so an earlier one would be
+// held and not run (MergePatchContainers, pkg/k8s/merge.go at
+// prometheus-operator v0.94.1). A listed container named for one the operator
 // generates is merged into it, so such a patch may name no image; any other
 // listed container is added to the pods as written, and one that names no
 // image is refused, since no pod runs it. An image volume that names no image
@@ -120,8 +125,13 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 		name       string
 		containers []corev1.Container
 	}{{"initContainers", w.pod.InitContainers}, {"containers", w.pod.Containers}} {
+		first := map[string]int{}
 		for i, c := range list.containers {
 			where := fmt.Sprintf("%s[%d] %q", list.name, i, c.Name)
+			if j, seen := first[c.Name]; seen {
+				return errors.Errorf("%s: the name is listed already at %s[%d], and the Prometheus operator keeps only the last entry of a name; list each container once", where, list.name, j)
+			}
+			first[c.Name] = i
 			switch {
 			case c.Image != "":
 				if err := ValidateImageRef(c.Image); err != nil {
@@ -251,14 +261,45 @@ func storageClaim(s *monitoringv1.StorageSpec) (fieldResources, bool) {
 	}
 }
 
-// patchedImage returns the image a listed entry of containers named name
-// writes into the container of that name the operator generates, and "" where
-// no entry of that name names one.
-func patchedImage(containers []corev1.Container, name string) string {
-	for _, c := range containers {
-		if c.Name == name && c.Image != "" {
-			return c.Image
+// patchOf returns the index of the listed entry of containers that the
+// operator merges into the container of that name it generates, and -1 where
+// none is named so. The operator keeps the last entry of a name
+// (MergePatchContainers, pkg/k8s/merge.go at prometheus-operator v0.94.1);
+// validateMonitoringWorkload refuses a name listed twice.
+func patchOf(containers []corev1.Container, name string) int {
+	for i := len(containers) - 1; i >= 0; i-- {
+		if containers[i].Name == name {
+			return i
 		}
 	}
+	return -1
+}
+
+// patchedImage returns the image the listed entry of containers that patches
+// the generated container name writes into it, and "" where no entry patches
+// it or the patch names none: the operator's own image then stays.
+func patchedImage(containers []corev1.Container, name string) string {
+	if i := patchOf(containers, name); i >= 0 {
+		return containers[i].Image
+	}
 	return ""
+}
+
+// mergedResources returns the resource block of a generated container as the
+// operator runs it: base, the block it builds the container with, and the
+// requests and limits of the entry that patches the container merged over
+// it, key by key, as a strategic merge of the two maps does
+// (MergePatchContainers, pkg/k8s/merge.go at prometheus-operator v0.94.1). It
+// shares neither map with its arguments.
+func mergedResources(base, patch corev1.ResourceRequirements) corev1.ResourceRequirements {
+	merge := func(base, patch corev1.ResourceList) corev1.ResourceList {
+		if len(base) == 0 && len(patch) == 0 {
+			return nil
+		}
+		out := corev1.ResourceList{}
+		maps.Copy(out, base)
+		maps.Copy(out, patch)
+		return out
+	}
+	return corev1.ResourceRequirements{Requests: merge(base.Requests, patch.Requests), Limits: merge(base.Limits, patch.Limits)}
 }

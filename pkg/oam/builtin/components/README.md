@@ -3739,16 +3739,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   :latest tag not allowed`), and a resource block's request may not exceed
   its limit (`resources: cpu: request 2 must not exceed limit 1`,
   `containers[0] "proxy": resources: memory: request 2Gi must not exceed
-  limit 1Gi`). The operator fills an unset memory request of `resources` as
-  200Mi whatever the limit, so a memory limit under 200Mi with no request is
-  refused, as the API would refuse the pods (`resources: memory: the unset
-  request the Prometheus operator fills as 200Mi must not exceed limit
-  100Mi; …`). An entry named for a container the operator generates, in
+  limit 1Gi`). The alertmanager container runs with `resources` as the
+  operator fills it, an unset memory request as 200Mi whatever the limit,
+  and with the requests and limits of a listed `alertmanager` entry merged
+  over that block key by key (`makeStatefulSetSpec`, same source); the
+  checks hold that merged block. A memory limit under 200Mi with no memory
+  request in either is refused, as the API would refuse the pods
+  (`resources: memory: the unset request the Prometheus operator fills as
+  200Mi must not exceed limit 100Mi; …`; with a patch, the path is
+  `resources with containers[0] "alertmanager" merged over it`), while a
+  request the patch names replaces the 200Mi and is held with the limit of
+  `resources`. An entry named for a container the operator generates, in
   the list the operator generates it in, is merged into it, so such a patch
   may name no image; any other listed entry that names none is refused, as
   no pod could run it (`containers[1] "proxy": names no image, and the
   Prometheus operator generates no container of that name to merge it into;
-  …`). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  …`). A name listed twice in `containers` or `initContainers` is refused
+  (`containers[1] "config-reloader": the name is listed already at
+  containers[0], …`): the operator keeps only the last entry of a name
+  (`MergePatchContainers`, `pkg/k8s/merge.go` at v0.94.1), so the policy
+  would hold an entry that never runs. `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as
@@ -3771,11 +3781,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `oam.RefusalReplicaMaximum`);
   - the cpu or memory of `resources`, and of a listed container, over the
     maxima (`oam.RefusalResourceMaximum`), on a patch of one of the
-    operator's containers as on any other. Where `resources` names no memory
-    request, the 200Mi the operator requests for the alertmanager container
-    is held in its place (`resources, whose unset memory request the
-    Prometheus operator fills as 200Mi: memory request "200Mi" exceeds
-    enforced maximum "128Mi"`);
+    operator's containers as on any other; for the alertmanager container,
+    the block it runs with, a patch merged over `resources`. Where that block
+    names no memory request, the 200Mi the operator requests is held in its
+    place (`resources, whose unset memory request the Prometheus operator
+    fills as 200Mi: memory request "200Mi" exceeds enforced maximum
+    "128Mi"`);
   - the storage a claim requests over the storage maximum
     (`oam.RefusalStorageMaximum`): of `storage`, the arm the operator uses,
     reading `emptyDir`, then `ephemeral`, then `volumeClaimTemplate` and
