@@ -92,9 +92,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1: it chooses the alertmanager container's flags by it, and by its own default where it is unset. Required where image, or an entry of containers named alertmanager, names the image; name the version that image runs. A version the operator cannot parse, one under 0.15.0 and one of a major version above 0 are refused: the operator fails to build the pods for them."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
 			"One reference: name."),
-		"secrets": texts("secrets: the Secrets of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/secrets/<name>.",
+		"secrets": texts("secrets: the Secrets of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/secrets/<name>. An entry whose volume name, secret-<name> cut to 63 characters, ends in - is refused: the operator fails to build the pods.",
 			"The name of a Secret."),
-		"configMaps": texts("configMaps: the ConfigMaps of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/configmaps/<name>.",
+		"configMaps": texts("configMaps: the ConfigMaps of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/configmaps/<name>. An entry whose volume name, configmap-<name> cut to 63 characters, ends in - is refused: the operator fails to build the pods.",
 			"The name of a ConfigMap."),
 		"configSecret": text("configSecret: the name of the Secret, in the Alertmanager's namespace, that holds the Alertmanager configuration under the key alertmanager.yaml. Unset, alertmanager-<name of the Alertmanager>. Where the Secret or the key is missing the operator provisions a configuration that drops every notification."),
 		"logLevel":     text("logLevel: the log level of Alertmanager: debug, info, warn or error."),
@@ -438,7 +438,10 @@ func alertmanagerSourceVolume(prefix, entry string) string {
 //
 // Two entries of secrets, or of configMaps, whose volumes the operator gives
 // one name are refused for the same reason: it adds a volume for each
-// (:638-690), so the pods would have two of that name. On the claim template
+// (:638-690), so the pods would have two of that name. An entry whose volume
+// name is not a DNS-1123 label once cut to 63 characters (one cut after a -)
+// is refused: the operator checks the name after the cut and fails the
+// reconcile (ResourceNamer.DNS1123Label, :640-643). On the claim template
 // arm, a claim template named as a volume the operator adds is refused: the
 // StatefulSet controller replaces the pod's volume of that name with the
 // claim, so the pods would not get the operator's volume.
@@ -456,6 +459,9 @@ func refuseGeneratedAlertmanagerVolumes(spec *monitoringv1.AlertmanagerSpec) err
 	}{{"secrets", "secret", spec.Secrets}, {"configMaps", "configmap", spec.ConfigMaps}} {
 		for i, entry := range source.names {
 			volume := alertmanagerSourceVolume(source.prefix, entry)
+			if errs := validation.IsDNS1123Label(volume); len(errs) > 0 {
+				return errors.Errorf("%s[%d] %q: the Prometheus operator names its volume %q, which is not a DNS-1123 label: %s; the operator then fails to build the pods; list a name whose first 63 characters, with the prefix, end in a letter or a digit", source.field, i, entry, volume, strings.Join(errs, "; "))
+			}
 			if what, ok := generated[volume]; ok {
 				return errors.Errorf("%s[%d] %q: the Prometheus operator names its volume %q, which is %s, and the API refuses a pod with two volumes of one name; list each %s once, under names that differ in lower case and in their runs of a-z, 0-9 and -", source.field, i, entry, volume, what, source.prefix)
 			}
