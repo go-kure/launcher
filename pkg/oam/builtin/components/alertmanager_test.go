@@ -443,6 +443,10 @@ func alertmanagerRefusals(notA string) []struct {
 			`enableFeatures: one empty element: the Prometheus operator passes it as --enable-feature without a value, and Alertmanager exits at startup on a flag without its value; leave enableFeatures unset to enable no feature`},
 		{"one empty feature flag after the table's versions", map[string]any{"version": "v0.35.0", "enableFeatures": []any{""}},
 			`enableFeatures: one empty element`},
+		// Below 0.27.0 the operator drops the list, the empty element too: the
+		// version gate refuses it, and its refusal alone is returned.
+		{"one empty feature flag before the operator passes them", map[string]any{"version": "v0.26.0", "enableFeatures": []any{""}},
+			`enableFeatures: read by the Prometheus operator only for Alertmanager 0.27.0 and later; at version v0.26.0`},
 		{"a feature flag no version takes", map[string]any{"enableFeatures": []any{"no-such-feature"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0: the Prometheus operator passes the list joined with "," as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes alert-names-in-metrics, auto-gomemlimit, classic-mode, event-recorder, group-key-in-metrics, receiver-name-in-metrics, utf8-strict-mode`},
 		{"a feature flag dropped at 0.33", map[string]any{"version": "v0.33.0", "enableFeatures": []any{"auto-gomaxprocs"}},
