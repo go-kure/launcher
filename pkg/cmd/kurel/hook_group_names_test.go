@@ -1,6 +1,8 @@
 package kurel
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net/http"
@@ -246,9 +248,11 @@ func hookGroupsOnly(all map[string][]string) map[string][]string {
 var hookChartSuffixes = []string{"-00-pre-install", "-01-main", "-02-post-install"}
 
 // The default names, as the README states them: for a flat application the
-// component's Kustomization is "<bundle>-<component>" and its hook groups are
-// "<application>-<component>-<NN>-<phase>"; in an ordered application the
-// component's carries its group's bundle and the hook groups' do not.
+// component's Kustomization is "<bundle>-<component>" and its hook groups' are
+// "<bundle>-<application>-<component>-<NN>-<phase>", the base library's
+// default for a layout named "<application>-<component>-<NN>-<phase>"; in an
+// ordered application both carry the group's bundle. The hook-group
+// directories are the layout names.
 func TestHookGroupNames_Defaults(t *testing.T) {
 	url := serveHookChart(t)
 	const placed = `  policies:
@@ -278,24 +282,24 @@ func TestHookGroupNames_Defaults(t *testing.T) {
 			name: "flat",
 			doc:  hookApp("shop", hookComponent("db", "helmtemplate", url, ""), ""),
 			want: map[string][]string{
-				"shop":                    nil,
-				"shop-db":                 nil,
-				"shop-db-00-pre-install":  nil,
-				"shop-db-01-main":         {"shop-db-00-pre-install"},
-				"shop-db-02-post-install": {"shop-db-01-main"},
+				"shop":                         nil,
+				"shop-db":                      nil,
+				"shop-shop-db-00-pre-install":  nil,
+				"shop-shop-db-01-main":         {"shop-shop-db-00-pre-install"},
+				"shop-shop-db-02-post-install": {"shop-shop-db-01-main"},
 			},
 		},
 		{
 			name: "ordered",
 			doc:  hookApp("shop", hookComponent("db", "helmtemplate", url, "")+web, placed),
 			want: map[string][]string{
-				"shop":                    nil,
-				"shop-infra":              nil,
-				"shop-infra-db":           nil,
-				"shop-db-00-pre-install":  nil,
-				"shop-db-01-main":         {"shop-db-00-pre-install"},
-				"shop-db-02-post-install": {"shop-db-01-main"},
-				"shop-apps":               {"shop-infra"},
+				"shop":                               nil,
+				"shop-infra":                         nil,
+				"shop-infra-db":                      nil,
+				"shop-infra-shop-db-00-pre-install":  nil,
+				"shop-infra-shop-db-01-main":         {"shop-infra-shop-db-00-pre-install"},
+				"shop-infra-shop-db-02-post-install": {"shop-infra-shop-db-01-main"},
+				"shop-apps":                          {"shop-infra"},
 			},
 		},
 	} {
@@ -314,10 +318,63 @@ func TestHookGroupNames_Defaults(t *testing.T) {
 	}
 }
 
-// A long application and component name: each hook group's Kustomization name
-// is shortened to 63 characters by the one rule with its suffix whole, the
-// names differ per group, spec.dependsOn follows them, and the directories keep
-// the whole name.
+// baseLibraryLayoutName is the base library's default name for the Flux
+// Kustomization of a layout named name in a unit named unit
+// (go-kure/kure#1030, go-kure/kure#1036). It is "<unit>-<name>" where that has
+// at most 63 characters. A longer one is shortened to at most 63 with the
+// first 8 hexadecimal characters of the SHA-256 of "<unit>-<name>": a name of
+// at most 54 characters is kept whole as "<unit prefix>-<hash>-<name>", and a
+// longer one gives "<name prefix>-<hash>", its first 54 bytes. Each prefix
+// drops the hyphens and dots that end it. TestBaseLibraryLayoutName holds it
+// to names the base library gives.
+func baseLibraryLayoutName(unit, name string) string {
+	composed := unit + "-" + name
+	if len(composed) <= 63 {
+		return composed
+	}
+	sum := sha256.Sum256([]byte(composed))
+	hash := hex.EncodeToString(sum[:])[:8]
+	if len(name) > 54 {
+		if prefix := strings.TrimRight(name[:54], "-."); prefix != "" {
+			return prefix + "-" + hash
+		}
+		return hash
+	}
+	if keep := 63 - len(name) - len(hash) - 2; keep > 0 {
+		if prefix := strings.TrimRight(unit[:keep], "-."); prefix != "" {
+			return prefix + "-" + hash + "-" + name
+		}
+	}
+	return hash + "-" + name
+}
+
+// TestBaseLibraryLayoutName holds baseLibraryLayoutName to names the base
+// library gives: its own examples of a layout name over 54 characters, and one
+// of a shorter name with a long unit.
+func TestBaseLibraryLayoutName(t *testing.T) {
+	for _, tc := range []struct{ unit, name, want string }{
+		{"platform-services-payments", "db", "platform-services-payments-db"},
+		{
+			"platform-services-payments", "checkout-service-payments-reconciler-worker-pre-install-hooks-schema-migrate",
+			"checkout-service-payments-reconciler-worker-pre-instal-5c8f049d",
+		},
+		{
+			"platform-services-payments", "checkout-service-payments-reconciler-worker-pre-install-hooks-schema-migration-batch-jobs-and-post-install-checks",
+			"checkout-service-payments-reconciler-worker-pre-instal-41fb540e",
+		},
+		{strings.Repeat("a", 32), strings.Repeat("c", 32), strings.Repeat("a", 21) + "-9f94761c-" + strings.Repeat("c", 32)},
+	} {
+		if got := baseLibraryLayoutName(tc.unit, tc.name); got != tc.want {
+			t.Errorf("baseLibraryLayoutName(%q, %q) = %q, want %q", tc.unit, tc.name, got, tc.want)
+		}
+	}
+}
+
+// A long application and component name: each hook group's layout name is
+// over 54 characters, so the base library names its Kustomization by the first
+// 54 characters and a hash of the whole default. The phase shows in the hash
+// and in the directory, which keeps the whole name; the names differ per
+// group, and spec.dependsOn follows them.
 func TestHookGroupNames_LongDefaultsAreShortenedTo63(t *testing.T) {
 	url := serveHookChart(t)
 	application, component := strings.Repeat("a", 30), strings.Repeat("c", 30)
@@ -327,9 +384,9 @@ func TestHookGroupNames_LongDefaultsAreShortenedTo63(t *testing.T) {
 	var wantDirs, wantNames []string
 	for _, suffix := range hookChartSuffixes {
 		wantDirs = append(wantDirs, prefix+suffix)
-		name := oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitLabel)
-		if len(name) > 63 || !strings.HasSuffix(name, suffix) || name == prefix+suffix {
-			t.Fatalf("the expected name %q is not a shortened name of at most 63 characters ending in %q", name, suffix)
+		name := baseLibraryLayoutName(application, prefix+suffix)
+		if len(name) != 63 || !strings.HasPrefix(name, prefix[:54]+"-") {
+			t.Fatalf("the expected name %q is not the 54 characters %q, a hyphen and a hash", name, prefix[:54])
 		}
 		wantNames = append(wantNames, name)
 	}
@@ -337,21 +394,23 @@ func TestHookGroupNames_LongDefaultsAreShortenedTo63(t *testing.T) {
 		t.Fatalf("the shortened names are not all different: %v", wantNames)
 	}
 	want := map[string][]string{
+		application:  nil,
+		prefix:       nil,
 		wantNames[0]: nil,
 		wantNames[1]: {wantNames[0]},
 		wantNames[2]: {wantNames[1]},
 	}
-	if got := hookGroupsOnly(treeKustomizations(root)); !reflect.DeepEqual(got, want) {
-		t.Errorf("hook-group Kustomizations (name: dependsOn) = %v\nwant %v", got, want)
+	if got := treeKustomizations(root); !reflect.DeepEqual(got, want) {
+		t.Errorf("Kustomizations (name: dependsOn) = %v\nwant %v", got, want)
 	}
 	if got := hookGroupDirs(t, root, component); !slices.Equal(got, wantDirs) {
 		t.Errorf("hook-group directories = %v, want the whole names %v", got, wantDirs)
 	}
 }
 
-// Two components with long names that begin alike: their defaults are cut to
-// one beginning and told apart by their digests, so the six Kustomization names
-// differ.
+// Two components with long names that begin alike: their hook groups' defaults
+// are cut to one beginning and told apart by their hashes, so the six
+// Kustomization names differ.
 func TestHookGroupNames_LongDefaultsThatBeginAlike(t *testing.T) {
 	url := serveHookChart(t)
 	application := strings.Repeat("a", 30)
@@ -359,25 +418,28 @@ func TestHookGroupNames_LongDefaultsThatBeginAlike(t *testing.T) {
 	components := hookComponent(first, "helmtemplate", url, "") + hookComponent(second, "helmtemplate", url, "")
 	root := mustHookGroupTree(t, hookApp(application, components, ""), oam.TransformContext{})
 
-	want := map[string][]string{}
+	want := map[string][]string{application: nil}
 	for _, component := range []string{first, second} {
 		var names []string
 		for _, suffix := range hookChartSuffixes {
-			names = append(names, oam.ShortenNameWithSuffix(application+"-"+component, suffix, oam.ShortenLimitLabel))
+			names = append(names, baseLibraryLayoutName(application, application+"-"+component+suffix))
 		}
+		want[application+"-"+component] = nil
 		want[names[0]], want[names[1]], want[names[2]] = nil, []string{names[0]}, []string{names[1]}
 	}
-	if len(want) != 2*len(hookChartSuffixes) {
+	if len(want) != 3+2*len(hookChartSuffixes) {
 		t.Fatalf("the expected names are not all different: %v", want)
 	}
-	if got := hookGroupsOnly(treeKustomizations(root)); !reflect.DeepEqual(got, want) {
-		t.Errorf("hook-group Kustomizations (name: dependsOn) = %v\nwant %v", got, want)
+	if got := treeKustomizations(root); !reflect.DeepEqual(got, want) {
+		t.Errorf("Kustomizations (name: dependsOn) = %v\nwant %v", got, want)
 	}
 }
 
 // The prefix by its three sources. An authored prefix and the hook's answer
-// name directory and Kustomization alike; the hook is asked once per component,
-// with the default prefix, and not at all where the author wrote one.
+// name directory and Kustomization alike; the default names the directory, and
+// the base library adds the bundle to it for the Kustomization. The hook is
+// asked once per component, with the default prefix, and not at all where the
+// author wrote one.
 func TestHookGroupNames_PrefixOrder(t *testing.T) {
 	url := serveHookChart(t)
 	const authored = "        hookGroupNamePrefix: mine\n"
@@ -393,9 +455,10 @@ func TestHookGroupNames_PrefixOrder(t *testing.T) {
 		components string
 		answer     string // the hook's, "" to decline
 		wantPrefix string
+		wantUnit   string // what the base library leads the Kustomization names with
 		wantAsked  bool
 	}{
-		{name: "the default", components: hookComponent("db", "helmtemplate", url, ""), wantPrefix: "shop-db", wantAsked: true},
+		{name: "the default", components: hookComponent("db", "helmtemplate", url, ""), wantPrefix: "shop-db", wantUnit: "shop-", wantAsked: true},
 		{name: "the hook", components: hookComponent("db", "helmtemplate", url, ""), answer: "theirs", wantPrefix: "theirs", wantAsked: true},
 		{name: "the author", components: hookComponent("db", "helmtemplate", url, authored), answer: "theirs", wantPrefix: "mine"},
 		{name: "the author of a helm component under delivery: template",
@@ -413,8 +476,8 @@ func TestHookGroupNames_PrefixOrder(t *testing.T) {
 				return tc.answer, tc.answer != ""
 			}}
 			root := mustHookGroupTree(t, hookApp("shop", tc.components, ""), ctx)
-			if got := hookGroupsOnly(treeKustomizations(root)); !reflect.DeepEqual(got, want(tc.wantPrefix)) {
-				t.Errorf("hook-group Kustomizations (name: dependsOn) = %v\nwant %v", got, want(tc.wantPrefix))
+			if got := hookGroupsOnly(treeKustomizations(root)); !reflect.DeepEqual(got, want(tc.wantUnit+tc.wantPrefix)) {
+				t.Errorf("hook-group Kustomizations (name: dependsOn) = %v\nwant %v", got, want(tc.wantUnit+tc.wantPrefix))
 			}
 			wantDirs := slices.Sorted(maps.Keys(want(tc.wantPrefix)))
 			if got := hookGroupDirs(t, root, "db"); !slices.Equal(got, wantDirs) {
@@ -584,15 +647,6 @@ func TestHookGroupNames_TooLongIsRefusedByTheTransform(t *testing.T) {
 // layouts.
 func TestHookGroupNames_NamesThatMeetAreRefusedAtIntegration(t *testing.T) {
 	url := serveHookChart(t)
-	// A default prefix of 57 characters is shortened inside each group's
-	// Kustomization name to what the group's suffix leaves of 63: 47 beside the 16
-	// of "-02-post-install". A second component whose prefix is that shortened
-	// form, which fits and is used as written, names its post-install group so.
-	longComponent := strings.Repeat("c", 52)
-	shortened := oam.ShortenName("shop-"+longComponent, 63-len("-02-post-install"))
-	if want := "shop-" + strings.Repeat("c", 31) + "-"; len(shortened) != 47 || !strings.HasPrefix(shortened, want) {
-		t.Fatalf("the shortened default %q is not 47 characters beginning %q", shortened, want)
-	}
 	for _, tc := range []struct {
 		name       string
 		components string
@@ -600,20 +654,24 @@ func TestHookGroupNames_NamesThatMeetAreRefusedAtIntegration(t *testing.T) {
 		wantDirs   [2]string // the component directories of the two layouts
 	}{
 		{
-			name: "a shortened default equals a written prefix",
-			components: hookComponent(longComponent, "helmtemplate", url, "") +
-				hookComponent("db", "helmtemplate", url, "        hookGroupNamePrefix: "+shortened+"\n"),
-			wantName: shortened + "-02-post-install",
-			wantDirs: [2]string{longComponent, "db"},
+			// The base library names a default child's Kustomization
+			// "<bundle>-<child>": "shop-shop-db-00-pre-install" for component
+			// db. A second component whose written prefix is "shop-shop-db"
+			// names its pre-install group so, the first the base library meets.
+			name: "a default equals a written prefix",
+			components: hookComponent("db", "helmtemplate", url, "") +
+				hookComponent("web", "helmtemplate", url, "        hookGroupNamePrefix: shop-shop-db\n"),
+			wantName: "shop-shop-db-00-pre-install",
+			wantDirs: [2]string{"db", "web"},
 		},
 		{
 			// A phase is whatever the chart's hook annotation says. Component "a"
 			// has the groups "-00-main" and "-01-x-00-main", and component "b",
-			// under the prefix "shop-a-01-x", "-00-main" and "-01-a".
+			// under the prefix "shop-shop-a-01-x", "-00-main" and "-01-a".
 			name: "a prefix ends as another chart's phase begins",
 			components: hookComponent("a", "helmtemplate", serveChartWithHooks(t, "x-00-main"), "") +
-				hookComponent("b", "helmtemplate", serveChartWithHooks(t, "a"), "        hookGroupNamePrefix: shop-a-01-x\n"),
-			wantName: "shop-a-01-x-00-main",
+				hookComponent("b", "helmtemplate", serveChartWithHooks(t, "a"), "        hookGroupNamePrefix: shop-shop-a-01-x\n"),
+			wantName: "shop-shop-a-01-x-00-main",
 			wantDirs: [2]string{"a", "b"},
 		},
 	} {

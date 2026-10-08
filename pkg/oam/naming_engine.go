@@ -55,9 +55,10 @@ func (r *nameResolver) resolveBundleName(role NameRole, def string) (string, err
 // resolve one prefix are refused with both named.
 //
 // Only the prefix is claimed. The child names are built from it after the
-// render, and two different prefixes can still give one name: a default that
-// is shortened to another component's prefix, or a prefix that ends as the
-// phase of another component's group begins. The transform accepts those; the
+// render, and two different prefixes can still give one name: a prefix equal
+// to the Kustomization name the base library gives another component's default
+// child, less its suffix, or a prefix that ends as the phase of another
+// component's group begins. The transform accepts those; the
 // base library refuses a Flux Kustomization name used twice where it
 // integrates the walked tree, which is where every name is known.
 func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookGroupNamePrefixSetter) error {
@@ -81,37 +82,22 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 
 // resolveLayoutKustomizationName resolves the name of the Flux Kustomization of
 // component's own layout (NameRoleLayout), in the bundle launcher named bundle,
-// and hands config every name that is not the base library's own default:
-// the author's, the hook's answer, or the default launcher shortened.
+// and hands config a name that is not the base library's own default: the
+// author's, or the hook's answer.
 //
 // The base library names that Kustomization "<unit>-<layout name>", the unit
 // being the Kustomization name of the bundle and the layout being named after
-// the application, app, and refuses one over 63 characters. Launcher's default
-// is the same name, "<bundle>-<app>", measured with the bundle as launcher
-// named it: a consumer that renames the bundle afterwards
-// (Bundle.KustomizationName) is not seen here. A default that fits is left for
-// the base library to make, so no output changes where it did not fail; a
-// longer one is shortened to 63 by ShortenNameWithSuffix, with "-<app>" kept
-// whole unless the application's name is over 52 characters, when the whole
-// name is shortened. component names the owner, in the hook's request and in a refusal.
-//
-// With the base library launcher pins, that is launcher's one rule
-// (go-kure/launcher#793); go-kure/launcher#941 hands this default to the base
-// library's rule at the next re-pin. From go-kure/kure#1030 on, the base
-// library shortens its own over-63 "<unit>-<layout name>" default by another
-// rule (8 hex characters of the SHA-256 of the whole default, after a prefix
-// of the unit where room is left for one, then "-<layout name>"; one whose
-// layout name is over 54 refused), which gives another name for the same
-// input. It never applies to a name set
-// here: every default measured over 63 is set, and the base library uses a set
-// name as written. A shortened default is made from the bundle name launcher
-// measured and kept after a consumer renames the bundle; a default left to the
-// base library is made from the new name, so of the names resolved here only
-// that one can meet its rule (a HelmTemplateConfig built directly, with no
-// LayoutKustomizationName, never comes here and is left to it too).
+// the application, app, and shortens one over 63 characters by its own rule
+// (go-kure/kure#1030, go-kure/kure#1036). Launcher's default is the same name,
+// "<bundle>-<app>", unshortened and with the bundle as launcher named it, and
+// is never set: the base library makes it, from the bundle's name as the
+// consumer leaves it. A set name gives the layout a Kustomization of its own
+// that only per-layout placement carries; the base library refuses it under
+// any other (go-kure/kure#1032), so leaving the default unset keeps that
+// refusal from reaching a chart no one named. component names the owner, in
+// the hook's request and in a refusal.
 func (r *nameResolver) resolveLayoutKustomizationName(bundle, app, component string, config LayoutKustomizationNameSetter) error {
-	full := bundle + "-" + app
-	def := ShortenNameWithSuffix(bundle, "-"+app, stack.KustomizationNameMaxLength)
+	def := bundle + "-" + app
 	spec := NameSpec{Role: NameRoleLayout, Default: def}
 	if authored, ok := config.AuthoredLayoutKustomizationName(); ok {
 		spec.Property, spec.Authored = LayoutKustomizationNameProperty, authored
@@ -120,7 +106,7 @@ func (r *nameResolver) resolveLayoutKustomizationName(bundle, app, component str
 	if err != nil {
 		return err
 	}
-	if source != nameFromDefault || def != full {
+	if source != nameFromDefault {
 		config.SetLayoutKustomizationName(name)
 	}
 	return nil

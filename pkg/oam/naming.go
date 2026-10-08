@@ -154,9 +154,11 @@ const (
 	// the store by this name.
 	NameRolePostgresqlObjectStore NameRole = "postgresql-objectstore"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
-	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and the
-	// Flux Kustomization the base library generates for it under per-layout
-	// placement. Default: "<application>-<component>". It is the one role whose
+	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and, for
+	// a prefix the author or the hook set, the Flux Kustomization the base
+	// library generates for it under per-layout placement; with the default the
+	// Kustomization's name is the base library's own, "<unit>-<layout name>".
+	// Default: "<application>-<component>". It is the one role whose
 	// answer is a prefix and not a name: how many groups a chart has is known only
 	// once it is rendered, and the prefix is resolved before that.
 	NameRoleHookGroup NameRole = "hook-group"
@@ -164,10 +166,9 @@ const (
 	// per-layout placement for a component's own layout: the layout of a chart
 	// (a helmtemplate component, or a helm component under delivery: template).
 	// Default: "<bundle>-<component>", the bundle as launcher named it, the base
-	// library's own default; past 63 characters launcher shortens it to 63 with
-	// "-<component>" kept whole, or, for a component name over 52 characters, the
-	// whole name shortened (ShortenNameWithSuffix). It names neither the layout
-	// nor its directory.
+	// library's own default, which launcher never sets: the base library makes
+	// it, and shortens it past 63 characters by its own rule. It names neither
+	// the layout nor its directory.
 	NameRoleLayout NameRole = "layout"
 	// NameRoleGenerated is an object a lowering rule or a trait handler generates
 	// that no other role names: the role for a rule or a handler outside

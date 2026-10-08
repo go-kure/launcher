@@ -13,7 +13,7 @@ import (
 )
 
 // TestHookGroupNaming_ChildNames: with no prefix the directory keeps the whole
-// default name and the Kustomization name is shortened to 63 characters; a
+// default name and the Kustomization name is left to the base library; a
 // prefix names both as written. A prefix that makes a name too long is refused
 // for the longest child name, whichever group that is, so the prefix length the
 // message asks for fits every child.
@@ -27,26 +27,22 @@ func TestHookGroupNaming_ChildNames(t *testing.T) {
 			t.Fatalf("childNames: %v", err)
 		}
 		for i, suffix := range suffixes {
-			if want := "shop-" + long + suffix; got[i].dir != want {
-				t.Errorf("child %d: directory %q, want %q", i, got[i].dir, want)
-			}
-			want := oam.ShortenNameWithSuffix("shop-"+long, suffix, 63)
-			if got[i].kustomization != want || len(want) > 63 || !strings.HasSuffix(want, suffix) {
-				t.Errorf("child %d: Kustomization name %q, want %q: at most 63 characters and ending in %q", i, got[i].kustomization, want, suffix)
+			if want := (hookGroupChildNames{dir: "shop-" + long + suffix}); got[i] != want {
+				t.Errorf("child %d: %+v, want %+v", i, got[i], want)
 			}
 		}
 		short, err := hookGroupNaming{component: "db", application: "shop"}.childNames("db", suffixes)
 		if err != nil {
 			t.Fatalf("childNames: %v", err)
 		}
-		if want := (hookGroupChildNames{dir: "shop-db-01-main", kustomization: "shop-db-01-main"}); short[1] != want {
+		if want := (hookGroupChildNames{dir: "shop-db-01-main"}); short[1] != want {
 			t.Errorf("a name that fits: %+v, want %+v", short[1], want)
 		}
 		direct, err := hookGroupNaming{component: "db"}.childNames("db", suffixes)
 		if err != nil {
 			t.Fatalf("childNames: %v", err)
 		}
-		if want := (hookGroupChildNames{dir: "db-01-main", kustomization: "db-01-main"}); direct[1] != want {
+		if want := (hookGroupChildNames{dir: "db-01-main"}); direct[1] != want {
 			t.Errorf("no application: %+v, want %+v", direct[1], want)
 		}
 	})
@@ -155,8 +151,8 @@ metadata:
 				t.Fatalf("%d child layout(s), want %d", len(ml.Children), len(suffixes))
 			}
 			for i, child := range ml.Children {
-				if !strings.HasSuffix(child.Name, suffixes[i]) || !strings.HasSuffix(child.KustomizationName, suffixes[i]) || len(child.Resources) != 1 {
-					t.Errorf("child %d: name %q, Kustomization name %q, %d object(s); want both ending in %q and one object", i, child.Name, child.KustomizationName, len(child.Resources), suffixes[i])
+				if !strings.HasSuffix(child.Name, suffixes[i]) || child.KustomizationName != "" || len(child.Resources) != 1 {
+					t.Errorf("child %d: name %q, Kustomization name %q, %d object(s); want a name ending in %q, the base library's Kustomization name and one object", i, child.Name, child.KustomizationName, len(child.Resources), suffixes[i])
 				}
 			}
 			if got, want := resourceNames(layoutResources(ml)), "pre main post"; strings.Join(got, " ") != want {
