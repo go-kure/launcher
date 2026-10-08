@@ -157,6 +157,59 @@ var imageFieldTypes = []imageFieldType{
 		},
 	},
 	{
+		// The alertmanager kind: its own image, and the containers and volumes
+		// it lists through the shared check. A listed container named for none
+		// the operator generates must name its image; one named for a container
+		// the operator generates is merged into that container and may leave it
+		// out. Under allowed registries the spec's own image and the images of
+		// the two config-reloaders may not be left to the operator, so the
+		// checks of the other fields name them from the allowed registry.
+		name: "alertmanager spec",
+		typ:  reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"image": func(reference string, p oam.Policy) error {
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: &reference}), p)
+			},
+			"containers[].image": func(reference string, p oam.Policy) error {
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}), p)
+			},
+			"initContainers[].image": func(reference string, p oam.Policy) error {
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}), p)
+			},
+			"volumes[].image": func(reference string, p oam.Policy) error {
+				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}}), p)
+			},
+		},
+		tagged: map[string]imageTagCheck{
+			"image": {check: func(reference string) error {
+				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Image: &reference})
+			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
+			"containers[].image": {check: func(reference string) error {
+				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
+			}, emptyRefused: "a listed container the operator generates none of is added as written, and no pod runs one without an image"},
+			"initContainers[].image": {check: func(reference string) error {
+				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
+			}, emptyRefused: "a listed init container the operator generates none of is added as written, and no pod runs one without an image"},
+			"volumes[].image": {check: func(reference string) error {
+				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}})
+			}},
+		},
+		notHeld: map[string]string{
+			"baseImage":                        "refused when not empty, with or without a policy (validateAlertmanager): the operator composes the image it yields outside what the object states",
+			"imagePullPolicy":                  "says when the image is pulled, not which image",
+			"containers[].imagePullPolicy":     "says when the image is pulled, not which image",
+			"initContainers[].imagePullPolicy": "says when the image is pulled, not which image",
+			"imagePullSecrets":                 "names the Secrets holding registry credentials, not an image",
+			"volumes[].rbd.image":              "the name of a Ceph RBD block image in a pool, not an OCI image reference",
+		},
+	},
+	{
 		// The cnpg-cluster kind. Instances is set because the kind's policy step
 		// refuses a Cluster without one before it reads an image.
 		name: "cnpg-cluster spec",
@@ -309,59 +362,6 @@ var imageFieldTypes = []imageFieldType{
 		notHeld: map[string]string{
 			"images":          "the list of the catalog's entries, not an image; the image each entry names is held under images[]",
 			"componentImages": "the list of the catalog's component entries, not an image; the image each entry names is held under componentImages[]",
-		},
-	},
-	{
-		// The alertmanager kind: its own image, and the containers and volumes
-		// it lists through the shared check. A listed container named for none
-		// the operator generates must name its image; one named for a container
-		// the operator generates is merged into that container and may leave it
-		// out. Under allowed registries the spec's own image and the images of
-		// the two config-reloaders may not be left to the operator, so the
-		// checks of the other fields name them from the allowed registry.
-		name: "alertmanager spec",
-		typ:  reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
-		held: map[string]func(string, oam.Policy) error{
-			"image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: &reference}), p)
-			},
-			"containers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}), p)
-			},
-			"initContainers[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), InitContainers: []corev1.Container{{Name: "init", Image: reference}}}), p)
-			},
-			"volumes[].image": func(reference string, p oam.Policy) error {
-				return alertmanagerKind.enforce(amPatched(monitoringv1.AlertmanagerSpec{Image: amListedImage(), Volumes: []corev1.Volume{{
-					Name:         "ext",
-					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}}), p)
-			},
-		},
-		tagged: map[string]imageTagCheck{
-			"image": {check: func(reference string) error {
-				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Image: &reference})
-			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
-			"containers[].image": {check: func(reference string) error {
-				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
-			}, emptyRefused: "a listed container the operator generates none of is added as written, and no pod runs one without an image"},
-			"initContainers[].image": {check: func(reference string) error {
-				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
-			}, emptyRefused: "a listed init container the operator generates none of is added as written, and no pod runs one without an image"},
-			"volumes[].image": {check: func(reference string) error {
-				return validateAlertmanager(&monitoringv1.AlertmanagerSpec{Volumes: []corev1.Volume{{
-					Name:         "ext",
-					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
-				}}})
-			}},
-		},
-		notHeld: map[string]string{
-			"baseImage":                        "refused when not empty, with or without a policy (validateAlertmanager): the operator composes the image it yields outside what the object states",
-			"imagePullPolicy":                  "says when the image is pulled, not which image",
-			"containers[].imagePullPolicy":     "says when the image is pulled, not which image",
-			"initContainers[].imagePullPolicy": "says when the image is pulled, not which image",
-			"imagePullSecrets":                 "names the Secrets holding registry credentials, not an image",
-			"volumes[].rbd.image":              "the name of a Ceph RBD block image in a pool, not an OCI image reference",
 		},
 	},
 }
