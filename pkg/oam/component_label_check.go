@@ -67,6 +67,10 @@ type metadataHolder struct {
 	// noPods says the metadata reaches objects that are no pods. The reserved
 	// keys are read there; the component label, which selects pods, is not.
 	noPods bool
+	// unless lists objects, by their path from the object's root, that make
+	// the operator use another field in place of path's: where one of them is
+	// set, not null, the holder holds nothing.
+	unless [][]string
 }
 
 // heldMetadata is what a holder holds on one object: once, or once per element
@@ -84,14 +88,35 @@ type heldMetadata struct {
 }
 
 // held returns what h holds in content. An absent or null step of the path
-// holds nothing, as does a null element of a list; a step that is no object,
-// or no list where the path has a listStep, is an error.
+// holds nothing, as does a null element of a list, and so does the path where
+// an object h.unless names is set; a step that is no object, or no list where
+// the path has a listStep, is an error.
 func (h metadataHolder) held(content map[string]any) ([]heldMetadata, error) {
+	for _, other := range h.unless {
+		set, err := objectSet(content, other)
+		if err != nil || set {
+			return nil, err
+		}
+	}
 	var all []heldMetadata
 	if err := h.collect(content, h.path, "", &all); err != nil {
 		return nil, err
 	}
 	return all, nil
+}
+
+// objectSet says whether content holds an object at path, every step of it
+// present and not null.
+func objectSet(content map[string]any, path []string) (bool, error) {
+	m := content
+	for _, field := range path {
+		next, found, err := objectField(m, field)
+		if err != nil || !found {
+			return false, err
+		}
+		m = next
+	}
+	return true, nil
 }
 
 // collect appends to all what h holds below m at the steps left, where at is
@@ -211,7 +236,10 @@ type operatorMetadataKind struct {
 //     an Alertmanager and a ThanosRuler
 //     (spec.storage.volumeClaimTemplate.metadata), which the operator copies
 //     onto the volume claim template of the StatefulSet it creates
-//     (go-kure/launcher#957). The claim template of its ephemeral storage
+//     (go-kure/launcher#957), where neither spec.storage.emptyDir nor
+//     spec.storage.ephemeral is set: the operator uses the first storage arm
+//     set and makes no claim from the template beside either. The claim
+//     template of its ephemeral storage
 //     (spec.storage.ephemeral.volumeClaimTemplate) goes onto a claim of a pod
 //     and is not read.
 //
@@ -295,12 +323,15 @@ func solverHolders(kind string) []operatorMetadataKind {
 
 // storageClaimTemplates returns the rows of the Prometheus operator kinds:
 // spec.storage.volumeClaimTemplate.metadata of each, which the operator puts on
-// the volume claim template of the StatefulSet it creates.
+// the volume claim template of the StatefulSet it creates. The operator uses
+// the first storage arm set of emptyDir, ephemeral and volumeClaimTemplate, so
+// the claim template is held only where neither of the others is set.
 func storageClaimTemplates(kinds ...string) []operatorMetadataKind {
 	rows := make([]operatorMetadataKind, 0, len(kinds))
 	for _, kind := range kinds {
 		rows = append(rows, operatorMetadataKind{monitoringGroup, kind, metadataHolder{
 			path: []string{"spec", "storage", "volumeClaimTemplate", "metadata"}, in: ReservedKeyInVolumeClaimTemplate, noPods: true,
+			unless: [][]string{{"spec", "storage", "emptyDir"}, {"spec", "storage", "ephemeral"}},
 		}})
 	}
 	return rows

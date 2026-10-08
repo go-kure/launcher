@@ -910,7 +910,8 @@ and by scope, whatever component or trait emits it.
     for the reserved keys alone too (go-kure/launcher#944: the API server refuses a change to
     the claim templates, so launcher writes no component label there), as is the storage claim
     template of a Prometheus operator kind (`spec.storage.volumeClaimTemplate.metadata`), which
-    the operator copies onto its StatefulSet's volume claim template (go-kure/launcher#957).
+    the operator copies onto its StatefulSet's volume claim template where neither
+    `spec.storage.emptyDir` nor `spec.storage.ephemeral` is set (go-kure/launcher#957).
     Exempt: the `app`
     label and the component label key, and the annotations the platform sets on an Ingress, which the `expose` rule
     now hands to the `ingress` trait in a platform-reserved `platformAnnotations` property.
