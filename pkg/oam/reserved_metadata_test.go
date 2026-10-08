@@ -495,6 +495,14 @@ func noPodHolderRows() []noPodHolderRow {
 			[]string{"spec", "rsyncTLS", "serviceAnnotations"}, "annotations"},
 		{"a StatefulSet's volume claim template", "apps/v1", "StatefulSet", ReservedKeyInVolumeClaimTemplate,
 			[]string{"spec", "volumeClaimTemplates", listStep, "metadata"}, "metadata"},
+		{"a Prometheus's storage claim template", "monitoring.coreos.com/v1", "Prometheus", ReservedKeyInVolumeClaimTemplate,
+			[]string{"spec", "storage", "volumeClaimTemplate", "metadata"}, "metadata"},
+		{"a PrometheusAgent's storage claim template", "monitoring.coreos.com/v1alpha1", "PrometheusAgent", ReservedKeyInVolumeClaimTemplate,
+			[]string{"spec", "storage", "volumeClaimTemplate", "metadata"}, "metadata"},
+		{"an Alertmanager's storage claim template", "monitoring.coreos.com/v1", "Alertmanager", ReservedKeyInVolumeClaimTemplate,
+			[]string{"spec", "storage", "volumeClaimTemplate", "metadata"}, "metadata"},
+		{"a ThanosRuler's storage claim template", "monitoring.coreos.com/v1", "ThanosRuler", ReservedKeyInVolumeClaimTemplate,
+			[]string{"spec", "storage", "volumeClaimTemplate", "metadata"}, "metadata"},
 	}
 }
 
@@ -598,6 +606,12 @@ func TestOwnedConfig_ReservedKeyNotRead(t *testing.T) {
 			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
 		"podMetadata of another kind of the group": holding(t, unstructuredObject("monitoring.coreos.com/v1", "ServiceMonitor"),
 			map[string]string{"example.org/tenant": "a"}, "spec", "podMetadata"),
+		"a storage claim template of an Alertmanager of another group": holding(t, unstructuredObject("example.com/v1", "Alertmanager"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "storage", "volumeClaimTemplate", "metadata"),
+		// The claim template of ephemeral storage goes onto a claim of a pod,
+		// not onto the StatefulSet's volume claim templates.
+		"an Alertmanager's ephemeral storage claim template": holding(t, unstructuredObject("monitoring.coreos.com/v1", "Alertmanager"),
+			map[string]string{"example.org/tenant": "a"}, "spec", "storage", "ephemeral", "volumeClaimTemplate", "metadata"),
 		"the two labels in a mover's pod labels": holdingLabelMap(t, unstructuredObject("volsync.backube/v1alpha1", "ReplicationSource"),
 			map[string]string{"app": "db", ownershipKey: "web"}, "spec", "restic", "moverPodLabels"),
 		"moverPodLabels of a ReplicationSource of another group": holdingLabelMap(t, unstructuredObject("example.com/v1", "ReplicationSource"),

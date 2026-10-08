@@ -4025,11 +4025,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   writes after them, so an authored value does not replace those
   (statefulset.go:446-460). Launcher does not refuse such a key.
 
-  **The metadata of a claim template is not read:** the labels and
-  annotations of `storage.volumeClaimTemplate`, of
+  **The metadata of a claim template takes no component label.** The labels
+  and annotations of `storage.volumeClaimTemplate` are held to the reserved
+  metadata keys: the operator copies them onto the volume claim template of
+  its StatefulSet, and so onto every claim the StatefulSet controller creates
+  (`volume claim template label "…"`, go-kure/launcher#957). Those of
   `storage.ephemeral.volumeClaimTemplate` and of a generic ephemeral volume
-  under `volumes` are written as authored, are not checked for reserved keys
-  and take no component label.
+  under `volumes` go onto a claim of a pod and are not read. All three are
+  written as authored.
 
   **No field holds a credential in the clear, and none is checked.** Every
   credential of the spec is the key of a Secret (a `web` or `clusterTLS` key,

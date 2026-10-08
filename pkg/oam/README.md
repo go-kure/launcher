@@ -577,9 +577,12 @@ they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.
 read: `spec.commonMetadata` of an `ArtifactGenerator` and a `FluxInstance`, which go onto the
 ExternalArtifacts it generates and onto the objects of the Flux installation, no pods, and a
 `StatefulSet`'s volume claim templates (`spec.volumeClaimTemplates[].metadata`), which go onto
-the PersistentVolumeClaims the StatefulSet controller creates (go-kure/launcher#944). The
-reserved metadata keys are read in all three. Launcher writes no label into a volume claim
-template either: the API server refuses a change to a StatefulSet's
+the PersistentVolumeClaims the StatefulSet controller creates (go-kure/launcher#944), and the
+claim template of the storage of a `Prometheus`, `PrometheusAgent`, `Alertmanager` or
+`ThanosRuler` (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto
+the volume claim template of the StatefulSet it creates (go-kure/launcher#957). The reserved
+metadata keys are read in all four. Launcher writes no label into a volume claim template
+either: the API server refuses a change to a StatefulSet's
 `spec.volumeClaimTemplates`, so a label written there would fail the apply of a StatefulSet the
 cluster holds already, and the controller does not relabel a claim it created before. The
 controller puts the `matchLabels` of the StatefulSet's selector on each claim it creates.
@@ -901,6 +904,19 @@ text of its own; that refusal is the component label's now, text included.
 - New exported API: `ReservedKeyInVolumeClaimTemplate`, the `ReservedKeyHolder` of a volume
   claim template (`volume claim template label "…"`).
 
+**Breaking library changes** (go-kure/launcher#957, a Prometheus operator kind's storage claim
+template):
+
+- A document that built before is refused at generation when the storage claim template of a
+  `monitoring.coreos.com` `Prometheus`, `PrometheusAgent`, `Alertmanager` or `ThanosRuler`
+  (`spec.storage.volumeClaimTemplate.metadata`) holds a reserved metadata key as a label or an
+  annotation. Before, it was not read. This reaches the `alertmanager` kind's `storage`
+  property, a `passthrough` or `manifests` document, a chart rendered at build time and a
+  consumer's own config. The refusal names the holder `ReservedKeyInVolumeClaimTemplate`
+  (`volume claim template label "…"`); no new API.
+- The component label is neither read nor written there, as before, and the claim template of
+  ephemeral storage (`spec.storage.ephemeral.volumeClaimTemplate`) stays unread.
+
 ## Reserved metadata keys
 
 A consumer that keeps label and annotation keys to itself names them in
@@ -1030,7 +1046,13 @@ Flux applies it (a `List`, or an envelope with `items`):
   - the metadata of each volume claim template of an `apps` `StatefulSet`
     (`spec.volumeClaimTemplates[].metadata`), in every template of the list, which the
     StatefulSet controller copies onto each PersistentVolumeClaim it creates: `volume claim
-    template label "…"` (go-kure/launcher#944).
+    template label "…"` (go-kure/launcher#944);
+  - the metadata of the storage claim template of a `monitoring.coreos.com` `Prometheus`,
+    `PrometheusAgent`, `Alertmanager` or `ThanosRuler`
+    (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto the volume
+    claim template of its StatefulSet: `volume claim template label "…"`
+    (go-kure/launcher#957). The claim template of its ephemeral storage
+    (`spec.storage.ephemeral.volumeClaimTemplate`) goes onto a claim of a pod and is not read.
 
 These are the places the component label is held to its value in
 ([Component label and ownership](#component-label-and-ownership)), but the metadata that

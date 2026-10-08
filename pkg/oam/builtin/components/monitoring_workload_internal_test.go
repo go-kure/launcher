@@ -98,7 +98,7 @@ const (
 	rolloutField    = "says how the StatefulSet creates, replaces and removes its pods and claims: the environment policy has no dimension for it, on a statefulset either"
 	podSettingField = "a setting of the pods the environment policy has no dimension for, on a pod kind either"
 	pullPolicyField = "says when the image is pulled, not which image"
-	claimMetadata   = "the labels and annotations of a claim template: not read for reserved keys and given no component label"
+	claimMetadata   = "the labels and annotations of an ephemeral volume's claim template, which go onto a claim of a pod: not read for reserved keys and given no component label"
 )
 
 // The reasons a field named for a credential holds none.
@@ -180,7 +180,8 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 			},
 		},
 		owned: map[string]string{
-			"podMetadata": "read by the wrapper every component's objects pass (pkg/oam), which refuses a key the consumer reserves in its labels and annotations and writes nothing there: the pods carry the component label only where the author writes it",
+			"podMetadata":                          "read by the wrapper every component's objects pass (pkg/oam), which refuses a key the consumer reserves in its labels and annotations and writes nothing there: the pods carry the component label only where the author writes it",
+			"storage.volumeClaimTemplate.metadata": "read by the wrapper every component's objects pass (pkg/oam), which refuses a key the consumer reserves in its labels and annotations and writes nothing there: the operator copies them onto its StatefulSet's volume claim template",
 		},
 		stated: map[string]string{
 			"affinity":                             schedulingField,
@@ -205,7 +206,6 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 			"imagePullPolicy":                      pullPolicyField,
 			"imagePullSecrets":                     "names the Secrets holding registry credentials, not an image",
 			"volumeMounts":                         "mounts, into the alertmanager container, volumes that are held where they are declared (volumes)",
-			"storage.volumeClaimTemplate.metadata": claimMetadata,
 			"storage.ephemeral.volumeClaimTemplate.metadata":   claimMetadata,
 			"volumes[].ephemeral.volumeClaimTemplate.metadata": claimMetadata,
 		},

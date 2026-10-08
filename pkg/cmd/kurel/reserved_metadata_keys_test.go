@@ -225,6 +225,48 @@ var reservedKeyCarriers = map[string]struct {
 `,
 		object: `StatefulSet "store"`, what: "volume claim template label", path: "spec.volumeClaimTemplates[1].metadata.labels",
 	},
+	// The claim template of a Prometheus operator kind's storage: the operator
+	// copies its metadata onto its StatefulSet's volume claim template.
+	"an alertmanager's storage claim template label": {
+		component: `    - name: carrier
+      type: alertmanager
+      properties:
+        storage:
+          volumeClaimTemplate:
+            metadata:
+              labels:
+                %[1]s: a
+            spec:
+              resources:
+                requests:
+                  storage: 1Gi
+`,
+		object: `Alertmanager "carrier"`, what: "volume claim template label", path: "spec.storage.volumeClaimTemplate.metadata.labels",
+	},
+	// The holders are read by the object's group and kind, so a kind that has
+	// no kind component is held where a passthrough document carries it.
+	"a passthrough Prometheus's storage claim template annotation": {
+		component: `    - name: carrier
+      type: passthrough
+      properties:
+        object:
+          apiVersion: monitoring.coreos.com/v1
+          kind: Prometheus
+          metadata:
+            name: metrics
+          spec:
+            storage:
+              volumeClaimTemplate:
+                metadata:
+                  annotations:
+                    %[1]s: a
+                spec:
+                  resources:
+                    requests:
+                      storage: 1Gi
+`,
+		object: `Prometheus "metrics"`, what: "volume claim template annotation", path: "spec.storage.volumeClaimTemplate.metadata.annotations",
+	},
 	"an ingress trait's annotation": {
 		component: `    - name: carrier
       type: webservice

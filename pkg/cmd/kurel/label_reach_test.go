@@ -275,6 +275,13 @@ var labelReachReservedOnly = []struct {
 		field: "k8s.io/api/core/v1.PersistentVolumeClaim.ObjectMeta",
 		says:  "volumeClaimTemplates is a list of claims that pods are allowed to reference. The StatefulSet controller is responsible for mapping network identities to claims in a way that maintains the identity of a pod.",
 	},
+	{
+		// A Prometheus operator workload's spec.storage.volumeClaimTemplate: the
+		// operator copies its metadata onto its StatefulSet's volume claim
+		// templates (go-kure/launcher#957).
+		field: "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.EmbeddedPersistentVolumeClaim.EmbeddedObjectMetadata",
+		says:  "volumeClaimTemplate defines the PVC spec to be used by the Prometheus StatefulSets.",
+	},
 }
 
 // labelReachNotRead names every field the walk finds that the checks do not
@@ -283,17 +290,14 @@ var labelReachReservedOnly = []struct {
 // operatorMetadataKinds and podTemplateKinds), by both checks or, listed in
 // labelReachReservedOnly, by the reserved keys alone, or stands here.
 var labelReachNotRead = []labelReachUnread{
-	// The claim template of an ephemeral volume, in every pod spec and in a
-	// CloudNativePG Cluster's spec.ephemeralVolumeSource. A StatefulSet's
-	// spec.volumeClaimTemplates is held to the reserved keys
+	// The claim template of an ephemeral volume, in every pod spec, in a
+	// CloudNativePG Cluster's spec.ephemeralVolumeSource and in a Prometheus
+	// operator workload's spec.storage.ephemeral. A StatefulSet's
+	// spec.volumeClaimTemplates and a Prometheus operator workload's
+	// spec.storage.volumeClaimTemplate are held to the reserved keys
 	// (labelReachReservedOnly), and a CronJob's job template by both checks
 	// (pkg/oam podTemplateKinds).
 	{field: "k8s.io/api/core/v1.PersistentVolumeClaimTemplate.ObjectMeta", reason: unreadTemplate},
-	// The claim template of a Prometheus operator workload's spec.storage.
-	{
-		field:  "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.EmbeddedPersistentVolumeClaim.EmbeddedObjectMetadata",
-		reason: "a Prometheus operator workload's claim template (spec.storage): the operator copies it onto its StatefulSet's volume claim templates; not yet held, with the monitoring kinds (go-kure/launcher#945)",
-	},
 
 	// Maps that are named like metadata and are the metadata of no object.
 	{
