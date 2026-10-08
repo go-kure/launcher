@@ -65,9 +65,12 @@ func (h *HorizontalPodAutoscalerHandler) PropertySchema() map[string]oam.Propert
 
 // hpaDefaultedZeros lists the lists of HorizontalPodAutoscalerSpec that the
 // type omits when empty and that the API server then defaults, so an authored
-// [] there is refused (refuseUncarriedSpecValues). The defaults are the field
-// comments' (SwaggerDoc); TestKindComponents_DefaultedEmptyLists holds the list
-// to them.
+// [] there is refused (refuseUncarriedSpecValues). The defaults are the API
+// server's defaulting code's:
+// TestKubernetesDefaulters_ListDefaultsMatchVendoredSource holds them to it,
+// at the linked k8s.io/api's release, and
+// TestKindComponents_DefaultedEmptyLists holds the list to the lists the field
+// comments (SwaggerDoc) say are defaulted.
 var hpaDefaultedZeros = defaultedZeroFields{api: "Kubernetes", defaulter: "API server", fields: map[string]string{
 	"metrics":                     `[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":80}}}]`,
 	"behavior.scaleUp.policies":   `[{"type":"Pods","value":4,"periodSeconds":15},{"type":"Percent","value":100,"periodSeconds":15}]`,

@@ -80,8 +80,11 @@ var networkPolicyLabelSelectors = []string{
 // networkPolicyDefaultedZeros lists the lists of NetworkPolicySpec that the
 // type omits when empty and that the API server then defaults, so an authored
 // [] there is refused (refuseUncarriedSpecValues): policyTypes, which the API
-// server derives from the rules, as its field comment (SwaggerDoc) states.
-// TestKindComponents_DefaultedEmptyLists holds the list to it.
+// server derives from the rules.
+// TestKubernetesDefaulters_ListDefaultsMatchVendoredSource holds the default
+// to the API server's defaulting code, at the linked k8s.io/api's release, and
+// TestKindComponents_DefaultedEmptyLists holds the list to the lists the field
+// comments (SwaggerDoc) say are defaulted.
 var networkPolicyDefaultedZeros = defaultedZeroFields{api: "Kubernetes", defaulter: "API server", fields: map[string]string{
 	"policyTypes": `["Ingress"], with "Egress" when an egress rule is authored`,
 }}

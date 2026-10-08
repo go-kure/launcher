@@ -60,7 +60,7 @@ func (h *PodTemplateHandler) ToApplicationConfig(component *oam.Component, names
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseUncarriedSpecValues(props, authored, podTemplateDefaultedZeros()); err != nil {
+	if err := refuseUncarriedSpecValues(props, authored, podTemplateDefaultedZeros(&authored.Template)); err != nil {
 		return nil, err
 	}
 	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {

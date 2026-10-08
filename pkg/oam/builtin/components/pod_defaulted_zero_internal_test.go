@@ -19,17 +19,20 @@ import (
 var docDefault = regexp.MustCompile(`(?i)\bdefaults?(?: to| is)? (-?[0-9]+|true|false)\b`)
 
 // TestPodSpecDefaultedZeros_MatchFieldDocs derives the fields of a pod spec on
-// which an authored 0 or false would be silently replaced, and requires
-// podSpecDefaultedZeros to equal them. Such a field is a non-pointer omitempty
-// number or boolean under corev1.PodSpec (by json path) whose field comment, as
-// the linked k8s.io/api publishes it through SwaggerDoc, states a default that
-// is not zero or false. A dependency bump that adds one, drops one or changes
-// its default fails here, naming it.
+// which an authored 0 or false would be silently replaced, by their field
+// comments, and requires the numbers and booleans of podSpecDefaultedZeros to
+// equal them. Such a field is a non-pointer omitempty number or boolean under
+// corev1.PodSpec (by json path) whose field comment, as the linked k8s.io/api
+// publishes it through SwaggerDoc, states a default that is not zero or false.
+// A dependency bump that adds one, drops one or changes its default fails
+// here, naming it.
 //
-// The core types have no CRD to read defaults from, so the field comment is
-// the source, as it is for the list itself. A default the comment does not
-// state in one of docDefault's forms is not found: the test holds the list to
-// the documented defaults, not to the API server's defaulting code.
+// This is the second source the numbers are held to: a default the comment
+// does not state in one of docDefault's forms is not found here.
+// TestKubernetesDefaulters_MatchVendoredSource holds the whole list, strings
+// included, to the API server's defaulting code, and so the hostPort default
+// hostNetwork brings, which no comment states: the list compared here is the
+// one without it.
 //
 // ephemeralContainers is not walked: the kind components refuse the field
 // whole (validateAuthoredPodSpec).
@@ -60,7 +63,7 @@ func TestPodSpecDefaultedZeros_MatchFieldDocs(t *testing.T) {
 	}
 	t.Logf("walked %d fields, %d with a stated default, %d of them not zero", len(docs), stated, len(want))
 
-	got := podSpecDefaultedZeros("").fields
+	got := scalarRows(podSpecDefaultedZeros("", nil).fields, docs)
 	for _, path := range slices.Sorted(maps.Keys(want)) {
 		def, ok := got[path]
 		switch {
@@ -77,18 +80,67 @@ func TestPodSpecDefaultedZeros_MatchFieldDocs(t *testing.T) {
 	}
 }
 
-// TestPodSpecDefaultedZeros_Prefix: the list of a pod spec that sits under a
-// path in the properties is the same list under that path.
-func TestPodSpecDefaultedZeros_Prefix(t *testing.T) {
-	bare := podSpecDefaultedZeros("").fields
-	nested := podSpecDefaultedZeros("template.spec.").fields
-	if len(nested) != len(bare) {
-		t.Fatalf("prefixed list has %d fields, the bare one %d", len(nested), len(bare))
-	}
-	for path, def := range bare {
-		if nested["template.spec."+path] != def {
-			t.Errorf("template.spec.%s = %q, want %q", path, nested["template.spec."+path], def)
+// scalarRows is the rows of fields whose path is one of docs', the omitempty
+// numbers and booleans omitemptyScalarDocs walked: the rows a field comment
+// test compares. The string rows are left out.
+func scalarRows(fields map[string]string, docs map[string]string) map[string]string {
+	out := map[string]string{}
+	for path, def := range fields {
+		if _, ok := docs[path]; ok {
+			out[path] = def
 		}
+	}
+	return out
+}
+
+// TestPodSpecDefaultedZeros_Prefix: the list of a pod spec that sits under a
+// path in the properties is the same list under that path, with hostNetwork
+// set or not, and the pod template kinds' list is that list.
+func TestPodSpecDefaultedZeros_Prefix(t *testing.T) {
+	for _, ps := range []*corev1.PodSpec{nil, {}, {HostNetwork: true}} {
+		bare := podSpecDefaultedZeros("", ps).fields
+		nested := podSpecDefaultedZeros("template.spec.", ps).fields
+		if len(nested) != len(bare) {
+			t.Fatalf("prefixed list has %d fields, the bare one %d", len(nested), len(bare))
+		}
+		for path, def := range bare {
+			if nested["template.spec."+path] != def {
+				t.Errorf("template.spec.%s = %q, want %q", path, nested["template.spec."+path], def)
+			}
+		}
+		tmpl := podTemplateDefaultedZeros(nil).fields
+		if ps != nil {
+			tmpl = podTemplateDefaultedZeros(&corev1.PodTemplateSpec{Spec: *ps}).fields
+		}
+		if !maps.Equal(tmpl, nested) {
+			t.Errorf("podTemplateDefaultedZeros differs from the pod spec's list under template.spec. (hostNetwork %v)", ps != nil && ps.HostNetwork)
+		}
+	}
+}
+
+// TestPodSpecDefaultedZeros_HostNetwork: hostNetwork adds the hostPort of every
+// init and regular container's ports, and nothing else.
+func TestPodSpecDefaultedZeros_HostNetwork(t *testing.T) {
+	without := podSpecDefaultedZeros("", &corev1.PodSpec{}).fields
+	if !maps.Equal(without, podSpecDefaultedZeros("", nil).fields) {
+		t.Error("a spec without hostNetwork gives another list than none")
+	}
+	with := podSpecDefaultedZeros("", &corev1.PodSpec{HostNetwork: true}).fields
+	added := map[string]string{}
+	for path, def := range with {
+		switch prev, ok := without[path]; {
+		case !ok:
+			added[path] = def
+		case prev != def:
+			t.Errorf("hostNetwork changes the default of %s", path)
+		}
+	}
+	want := map[string]string{
+		"initContainers[].ports[].hostPort": hostNetworkHostPortDefault,
+		"containers[].ports[].hostPort":     hostNetworkHostPortDefault,
+	}
+	if !maps.Equal(added, want) || len(with) != len(without)+len(want) {
+		t.Errorf("hostNetwork adds %v, want %v", added, want)
 	}
 }
 

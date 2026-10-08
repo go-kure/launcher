@@ -3877,21 +3877,70 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - The same on the `reference` of an image volume (`volumes[0] "ext"
     image.reference: image "…" rejected: …`); a volume that names no
     reference is not checked. See *Image volumes* below.
-  - A `timeoutSeconds`, `periodSeconds`, `successThreshold` or
-    `failureThreshold` written as `0` on a liveness, readiness or startup
-    probe of an init or regular container. The Go type omits a zero there and
-    the API server would apply its default (1, 10, 1, 3), so the authored
-    value cannot be carried. A test derives the list from the field comments
-    of the linked `k8s.io/api` types (every non-pointer `omitempty` number or
-    boolean under `PodSpec` whose comment states a non-zero default) and fails
-    when the two differ. It holds the list to the documented defaults, not to
-    the API server's defaulting code. An authored empty string is not on it:
-    on a string field the API server defaults (a port's `protocol`,
-    `restartPolicy`, `dnsPolicy`, an `httpGet` probe's `scheme`) the type
-    omits `""` and the API server's defaulting applies its default. The field
-    comments state those defaults only in free text, some conditionally
-    (`imagePullPolicy`) and some not at all, so no list held to the API can
-    be built for them. This is a known gap.
+  - A value the API server would replace with its default: the Go type omits
+    a zero there, so the authored value cannot be carried
+    (`containers[0].ports[0].protocol: "" cannot be carried by the Kubernetes
+    API types (the field is omitted when zero, so the API server would apply
+    its default "TCP")`). These are:
+    - written as `0`: a probe's `timeoutSeconds`, `periodSeconds`,
+      `successThreshold` or `failureThreshold` (defaults 1, 10, 1, 3), on the
+      liveness, readiness and startup probes of every init and regular
+      container;
+    - written as `""`: `dnsPolicy` (`ClusterFirst`), `restartPolicy`
+      (`Always`) and `schedulerName` (`default-scheduler`); on every init and
+      regular container `imagePullPolicy`, `terminationMessagePath`
+      (`/dev/termination-log`), `terminationMessagePolicy` (`File`), a port's
+      `protocol` (`TCP`), an `env` entry's `valueFrom.fieldRef.apiVersion`
+      (`v1`), and the `httpGet` `path` (`/`) and `scheme` (`HTTP`) of its
+      probes and of its `postStart` and `preStop` hooks; on a volume, the
+      `fieldRef.apiVersion` of a `downwardAPI` item, also inside a `projected`
+      source (`v1`), an image volume's `pullPolicy`, `iscsi.iscsiInterface`
+      (`default`), `rbd.pool`, `rbd.user` and `rbd.keyring` (`rbd`, `admin`,
+      `/etc/ceph/keyring`) and `scaleIO.storageMode` and `scaleIO.fsType`
+      (`ThinProvisioned`, `xfs`). An `imagePullPolicy` or image volume
+      `pullPolicy` defaults to `Always` for an image tagged `latest` or naming
+      neither a tag nor a digest, else to `IfNotPresent`; the image rule
+      refuses the first two, so an accepted image gets `IfNotPresent`. The
+      code defaults an image volume's `pullPolicy` only under the
+      `ImageVolume` feature gate, which is on and locked since Kubernetes
+      1.36;
+    - written as `0` when `hostNetwork` is `true`: a container port's
+      `hostPort`, which the API server sets to the port's `containerPort`. It
+      does so on the Pod, so on a template it applies to each pod created
+      from it.
+
+    Two strings the API server sets are not refused. `serviceAccountName`
+    and its deprecated spelling `serviceAccount` are kept equal, so an
+    authored `""` with neither set stays `""`; the `default` service account
+    is set by an admission plugin, not by defaulting. A string field that is
+    a pointer in the Go type (a gRPC probe's `service`, an `httpGet`
+    `protocol`, a container's `restartPolicy`, a `hostPath` `type`,
+    `azureDisk`'s fields) carries an authored `""`, so nothing is lost there.
+
+    The list is held to the API server's own defaulting code by
+    `TestKubernetesDefaulters_MatchVendoredSource`. It reads an excerpt of
+    that code, copied unmodified from kubernetes/kubernetes at the release
+    of the linked `k8s.io/api` under its Apache-2.0 licence, in
+    `testdata/upstream/kubernetes/` (see the next paragraph). The test walks
+    the generated `SetObjectDefaults_` function of the Pod, PodTemplate,
+    ReplicationController and ReplicaSet objects and every defaulting
+    function they call. It fails on a field the code defaults and the list
+    does not hold, on a default the list states otherwise, and on a row the
+    code does not set. Most defaults are set by a `SetDefaults_` function.
+    The exceptions are a port's `protocol` and the `iscsi`, `rbd` and
+    `scaleIO` strings, which `k8s.io/api` declares with a `+default` marker
+    and the generated functions apply, and `hostPort`, which
+    `defaultHostNetworkPorts` sets. A second test holds the numbers to the
+    field comments of the linked types.
+
+    The excerpt in `testdata/upstream/kubernetes/` holds eight files of
+    kubernetes/kubernetes under its Apache-2.0 licence, each with its header,
+    and kubernetes/kubernetes's `LICENSE`, the licence's full text, at the
+    same tag. Its `SOURCE` file names the tag and the git blob id of each
+    file and of `LICENSE`; the tests check each against its file, the tag
+    against the linked `k8s.io/api`, and fail when `LICENSE` is missing. `mise run
+    vendor-k8s-defaulters vX.Y.Z` re-fetches it when that module moves. CI
+    never runs it, and the tests need no network.
   - A match expression without its `key` or `operator`, with an operator that
     is none of the four, or with `values` that do not go with the operator, in
     every label selector of the spec: a pod affinity or anti-affinity term's
@@ -4031,10 +4080,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
     same checks and named by path (`template.spec.containers: required`,
     `template.spec.priority: not authorable …`, the image rule, a probe timing
-    written as `0`, a defective match expression in a label selector of the
-    pod spec). A test holds the probe list to every non-pointer
+    written as `0`, a defaulted string written as `""`, a `hostPort` of `0`
+    under `hostNetwork`, a defective match expression in a label selector of
+    the pod spec). A test holds the probe list to every non-pointer
     `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
-    states a non-zero default, the template's metadata included.
+    states a non-zero default, the template's metadata included, and
+    `TestKubernetesDefaulters_MatchVendoredSource` holds the whole list to
+    the API server's defaulting code for a ReplicaSet.
   - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
     ReplicaSet's pod template, whose pods are replaced for as long as the
     controller exists; a `pod` or a Job may set it.
@@ -4117,8 +4169,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `template.spec`, what the `pod` kind refuses of its own spec, by the same
   checks and named by path (`template.spec.containers: required`, which an
   unauthored `template` also gives; `template.spec.priority: not authorable
-  …`; the image rule; a probe timing written as `0`; a defective match
-  expression in a label selector of the pod spec).
+  …`; the image rule; a probe timing written as `0`; a defaulted string
+  written as `""`; a `hostPort` of `0` under `hostNetwork`, which the API
+  server would replace in each pod created from the template; a defective
+  match expression in a label selector of the pod spec).
   `template.spec.activeDeadlineSeconds` is allowed, unlike on a
   `replicaset` or `replicationcontroller`: the API server accepts it on a
   PodTemplate. The two restart-rule fields and the two pod-certificate fields
@@ -4205,10 +4259,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   its source gives a default (a CRD schema or a default marker) or whose
   field comment mentions a default, and holds each to an answer: refused,
   or not refused with the reason. A newly defaulted list fails it until it
-  is answered. Two limits: the Kubernetes types are defaulted in the API
-  server's own code, which is not in the module graph, so a default their
-  field comment does not mention is not found; and the table of kinds it
-  walks is not itself proven to hold every kind component.
+  is answered. The three refused defaults are held to the API server's
+  defaulting code by `TestKubernetesDefaulters_ListDefaultsMatchVendoredSource`,
+  from the excerpt the `pod` kind's list is held to. Two limits: the lists
+  of the Kubernetes types are found from their field comments, so a list
+  the API server defaults without its comment saying so is not found; and
+  the table of kinds it walks is not itself proven to hold every kind
+  component.
 
   **What is authored.**
   - `ingressclass` and `csidriver` have a spec type, and the properties are
