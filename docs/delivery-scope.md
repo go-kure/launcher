@@ -1693,7 +1693,8 @@ and by scope, whatever component or trait emits it.
   projection of `AlertmanagerSpec`, built on `policyHeldKind`, namespaced, declaring its
   object and taking `objectName`. Launcher emits the Alertmanager and nothing else: the
   operator builds a StatefulSet from it and runs the pods.
-  - **No capability is required and nothing gates it,** as for the four kinds above.
+  - **No capability is required and none gates it,** as for the four kinds above; a
+    policy can keep the kind out of a build through `oam.ObjectKindPolicy` (§5.4).
   - **What the spec says of the pods is held to the environment policy as a workload
     kind's own fields are:** `image` (where no patch replaces it) and the images of the listed containers and image
     volumes (allowed registries, and the tag rule with or without a policy), `replicas`,
