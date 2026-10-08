@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
 	"github.com/go-kure/kure/pkg/stack"
@@ -437,11 +438,16 @@ func prometheusGenerated(spec *monitoringv1.PrometheusSpec) map[string][]string 
 // prometheusWorkload maps a Prometheus spec into the workload the two shared
 // functions read. It only reads spec.
 //
-// Held through it: image and thanos.image; the pods of all shards, replicas
+// Held through it: image and thanos.image, each where no patch of its
+// container names an image in its place; the pods of all shards, replicas
 // times shards as the operator counts them (prometheusPods), authored or not;
-// storage; resources, the prometheus container's and the Thanos sidecar's,
-// which the operator copies as written and fills no request of
-// (statefulset.go:346 and :639); the images of the containers the operator
+// storage; resources, the prometheus container's and the Thanos sidecar's as
+// the operator runs them: the spec's block, which the operator copies as
+// written and fills no request of (statefulset.go:346 and :639), with the
+// requests and limits of a listed entry that patches the container merged
+// over it, key by key, the entry's block then not checked alone (both are
+// generated before the listed containers are merged into them,
+// statefulset.go:334-366); the images of the containers the operator
 // generates, where the spec leaves them to it; the deprecated bearerToken of
 // each remoteWrite and remoteRead entry and of apiserverConfig, the
 // credentials the spec holds in the clear; and, as pod fields, containers,
@@ -464,22 +470,38 @@ func prometheusWorkload(spec *monitoringv1.PrometheusSpec) monitoringWorkload {
 		replicas:     &pods,
 		replicasPath: "replicas times shards",
 		storage:      spec.Storage,
-		resources:    []fieldResources{{"resources", spec.Resources}},
 	}
-	switch {
-	case spec.Image != nil && *spec.Image != "":
-		w.images = append(w.images, fieldValue{"image", *spec.Image})
-	case patchedImage(spec.Containers, "prometheus") == "":
-		w.unsetImages = append(w.unsetImages, "image")
-	}
-	if t := spec.Thanos; t != nil {
-		switch {
-		case t.Image != nil && *t.Image != "":
-			w.images = append(w.images, fieldValue{"thanos.image", *t.Image})
-		case patchedImage(spec.Containers, "thanos-sidecar") == "":
-			w.unsetImages = append(w.unsetImages, "thanos.image")
+	// The image a patch names replaces the spec's in the container the
+	// operator builds from it, so the spec's is then not run, and not held: the
+	// patch's own is, as a listed container's image.
+	held := func(path string, image *string, resources corev1.ResourceRequirements, container string) {
+		block := fieldResources{path, resources}
+		if i := patchOf(spec.Containers, container); i >= 0 {
+			patch := spec.Containers[i].Resources
+			if len(patch.Requests) > 0 || len(patch.Limits) > 0 {
+				block = fieldResources{
+					fmt.Sprintf("%s with containers[%d] %q merged over it", path, i, container),
+					mergedResources(resources, patch),
+				}
+				if w.mergedPatches == nil {
+					w.mergedPatches = map[string][]string{}
+				}
+				w.mergedPatches["containers"] = append(w.mergedPatches["containers"], container)
+			}
 		}
-		w.resources = append(w.resources, fieldResources{"thanos.resources", t.Resources})
+		w.resources = append(w.resources, block)
+		imagePath := strings.TrimSuffix(path, "resources") + "image"
+		switch {
+		case patchedImage(spec.Containers, container) != "":
+		case image != nil && *image != "":
+			w.images = append(w.images, fieldValue{imagePath, *image})
+		default:
+			w.unsetImages = append(w.unsetImages, imagePath)
+		}
+	}
+	held("resources", spec.Image, spec.Resources, "prometheus")
+	if t := spec.Thanos; t != nil {
+		held("thanos.resources", t.Image, t.Resources, "thanos-sidecar")
 	}
 	for _, reloader := range []struct {
 		list       string

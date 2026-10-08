@@ -686,6 +686,79 @@ func TestPrometheus_PatchedImage(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "other.example") {
 		t.Errorf("err = %v, want one naming the patch's image", err)
 	}
+	// The patch's image replaces image, which then never runs and is not
+	// held, to the registries or to the tag rule.
+	for _, image := range []string{"other.example/prometheus/prometheus:v3.5.0", "registry.example/prometheus/prometheus:latest"} {
+		props := patched(pmImage)
+		props["image"] = image
+		if _, err := pvTransform("prometheus", h, props, ptStrictPolicy()); err != nil {
+			t.Errorf("image %q replaced by a patch: %v, want it built", image, err)
+		}
+		prometheusOf(t, props)
+	}
+}
+
+// TestPrometheus_PatchResourcesMerged: the operator generates the prometheus
+// container from resources and the thanos-sidecar container from
+// thanos.resources, then merges a listed entry of either name into it
+// (makeStatefulSetSpec, pkg/prometheus/server/statefulset.go:334-366 at
+// prometheus-operator v0.94.1). Each block is held as the pods run it: the
+// entry's requests and limits merged over the spec's, key by key, named by
+// both, and the entry's block is not checked alone.
+func TestPrometheus_PatchResourcesMerged(t *testing.T) {
+	h := &components.PrometheusHandler{}
+	small := ptStrictPolicy()
+	small.maxMemory = "1Mi"
+	thanos := map[string]any{"version": "v0.39.2", "image": thanosImage}
+	patch := func(name string, resources map[string]any) []any {
+		return []any{map[string]any{"name": name, "resources": resources}}
+	}
+	for name, tc := range map[string]struct {
+		props  map[string]any
+		policy *stubPolicy
+		class  oam.RefusalClass
+		want   string // "" when the component builds
+	}{
+		"memory request of a prometheus patch over 1Mi": {map[string]any{
+			"containers": patch("prometheus", map[string]any{"requests": map[string]any{"memory": "2Mi"}}),
+		}, small, oam.RefusalResourceMaximum, `resources with containers[0] "prometheus" merged over it: memory request "2Mi" exceeds enforced maximum "1Mi"`},
+		"memory request of a thanos-sidecar patch over 1Mi": {map[string]any{
+			"thanos":     thanos,
+			"containers": patch("thanos-sidecar", map[string]any{"requests": map[string]any{"memory": "2Mi"}}),
+		}, small, oam.RefusalResourceMaximum, `thanos.resources with containers[0] "thanos-sidecar" merged over it: memory request "2Mi" exceeds enforced maximum "1Mi"`},
+		// A request of a patch replaces the spec's of the same key.
+		"a prometheus patch's request replacing one over 1Mi": {map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"memory": "2Mi"}},
+			"containers": patch("prometheus", map[string]any{"requests": map[string]any{"memory": "1Mi"}}),
+		}, small, "", ""},
+		// A patch's extended request meets the limit of the block it is merged
+		// with; alone, it would be refused for naming no limit.
+		"an extended request of a prometheus patch, its limit in resources": {map[string]any{
+			"resources":  map[string]any{"limits": map[string]any{"example.com/device": "1"}},
+			"containers": patch("prometheus", map[string]any{"requests": map[string]any{"example.com/device": "1"}}),
+		}, ptStrictPolicy(), "", ""},
+		"an extended request of a thanos-sidecar patch, its limit in thanos.resources": {map[string]any{
+			"thanos": map[string]any{"version": "v0.39.2", "image": thanosImage,
+				"resources": map[string]any{"limits": map[string]any{"example.com/device": "1"}}},
+			"containers": patch("thanos-sidecar", map[string]any{"requests": map[string]any{"example.com/device": "1"}}),
+		}, ptStrictPolicy(), "", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := pmHeld(tc.props)
+			_, err := pvTransform("prometheus", h, props, tc.policy)
+			if tc.want == "" {
+				if err != nil {
+					t.Errorf("err = %v, want it built", err)
+				}
+				prometheusOf(t, props)
+				return
+			}
+			rcWantClass(t, err, tc.class)
+			if err != nil && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
 }
 
 // TestPrometheus_ReloaderImages: the operator generates config-reloader and
@@ -792,6 +865,16 @@ func TestPrometheus_SidecarImage(t *testing.T) {
 	rcWantClass(t, err, oam.RefusalRegistry)
 	if err != nil && !strings.Contains(err.Error(), "other.example") {
 		t.Errorf("err = %v, want one naming the patch's image", err)
+	}
+	// The patch's image replaces thanos.image, which then never runs and is
+	// not held, to the registries or to the tag rule.
+	for _, image := range []string{"other.example/thanos/thanos:v0.39.2", "registry.example/thanos/thanos:latest"} {
+		props := patched(thanosImage)
+		props["thanos"] = map[string]any{"version": "v0.39.2", "image": image}
+		if _, err := pvTransform("prometheus", h, props, ptStrictPolicy()); err != nil {
+			t.Errorf("thanos.image %q replaced by a patch: %v, want it built", image, err)
+		}
+		prometheusOf(t, props)
 	}
 	err = coreKindErr(h, "prometheus", "main", map[string]any{"containers": []any{map[string]any{"name": "thanos-sidecar", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}})
 	if want := `containers[0] "thanos-sidecar": names no image, and the Prometheus operator generates no container of that name to merge it into`; err == nil || !strings.Contains(err.Error(), want) {
