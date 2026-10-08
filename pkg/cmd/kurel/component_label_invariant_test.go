@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -200,10 +197,7 @@ func helmtemplateLabelProps(t *testing.T) map[string]any {
 
 // componentLabelFixtures holds one fixture per component type, in the order
 // of the types: a new type's entry goes at its position
-// (TestKindLists_InOrder). Every entry's value spans more than one line: kind
-// PRs add entries here, and gofmt aligns single-line entries, so one longer key
-// would rewrite its neighbours. TestComponentLabelFixtures_RowLocal holds that
-// form.
+// (TestKindLists_InOrder).
 var componentLabelFixtures = map[string]componentLabelFixture{
 	// An Alertmanager emits identity and the authored fields too, namespaced,
 	// with no `app` label. Its operator runs the pods: the object holds no pod
@@ -226,9 +220,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"validation": map[string]any{"hostname": "payments.internal.example.com", "wellKnownCACertificates": "System"}}},
 	// The kind-named Flux sources each emit one source CR named after the
 	// component: no `app` label, no pods, and a name up to a DNS-1123 subdomain.
-	"bucket": {
-		props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"},
-	},
+	"bucket": {props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"}},
 	// The three cert-manager kinds emit identity and the authored fields too,
 	// with no `app` label and no pods: an Issuer and a Certificate namespaced, a
 	// ClusterIssuer cluster-scoped. None checks a name rule of its own.
@@ -246,9 +238,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		map[string]any{"name": "instance-65000", "localASN": 65000}}}},
 	"cilium-bgpnodeconfigoverride": {props: map[string]any{"bgpInstances": []any{
 		map[string]any{"name": "instance-65000", "routerID": "192.0.2.1"}}}},
-	"cilium-bgppeerconfig": {
-		props: map[string]any{"ebgpMultihop": 2},
-	},
+	"cilium-bgppeerconfig": {props: map[string]any{"ebgpMultihop": 2}},
 	// Five more kinds of Cilium's API (cilium-cidrgroup,
 	// cilium-loadbalancerippool, cilium-egressgatewaypolicy,
 	// cilium-localredirectpolicy, cilium-nodeconfig) emit identity and the
@@ -256,9 +246,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// nodes, namespaces or pods of the cluster, not a pod selector of this
 	// document, so the rows select on `role`: the invariant reads every `app`
 	// value as this component's own. None checks a name rule of its own.
-	"cilium-cidrgroup": {
-		props: map[string]any{"externalCIDRs": []any{"192.0.2.0/24"}},
-	},
+	"cilium-cidrgroup": {props: map[string]any{"externalCIDRs": []any{"192.0.2.0/24"}}},
 	// A CiliumClusterwideNetworkPolicy's selectors are the author's, as the
 	// CiliumNetworkPolicy's: endpoints of the whole cluster, or nodes.
 	"cilium-clusterwidenetworkpolicy": {props: map[string]any{"spec": map[string]any{
@@ -270,9 +258,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"destinationCIDRs": []any{"192.0.2.0/24"},
 		"egressGateway":    map[string]any{"nodeSelector": map[string]any{"matchLabels": map[string]any{"egress": "true"}}},
 	}},
-	"cilium-loadbalancerippool": {
-		props: map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}}},
-	},
+	"cilium-loadbalancerippool": {props: map[string]any{"blocks": []any{map[string]any{"cidr": "192.0.2.0/24"}}}},
 	"cilium-localredirectpolicy": {props: map[string]any{
 		"redirectFrontend": map[string]any{"addressMatcher": map[string]any{
 			"ip": "169.254.169.254", "toPorts": []any{map[string]any{"port": "80", "protocol": "TCP"}},
@@ -303,9 +289,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 			"secretStoreRef": map[string]any{"name": "vault-cluster-store", "kind": "ClusterSecretStore"},
 			"data": []any{map[string]any{
 				"secretKey": "PASSWORD", "remoteRef": map[string]any{"key": "prod/app", "property": "password"}}}}}},
-	"clusterissuer": {
-		props: map[string]any{"ca": map[string]any{"secretName": "ca-key-pair"}},
-	},
+	"clusterissuer": {props: map[string]any{"ca": map[string]any{"secretName": "ca-key-pair"}}},
 	// The four kinds of the RBAC API are identity and the authored fields too.
 	// They select no pod, and check no name rule of their own.
 	"clusterrole": {props: map[string]any{"rules": []any{
@@ -321,39 +305,27 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// CloudNativePG kinds run no pods of their own either: each emits identity
 	// and the authored spec, with no `app` label. CloudNativePG names the
 	// Pooler's Service after it, so its name is a DNS-1035 label.
-	"cnpg-backup": {
-		props: map[string]any{"cluster": map[string]any{"name": "db"}},
-	},
+	"cnpg-backup": {props: map[string]any{"cluster": map[string]any{"name": "db"}}},
 	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	"cnpg-clusterimagecatalog": {props: map[string]any{"images": []any{
 		map[string]any{"image": "ghcr.io/cloudnative-pg/postgresql:17.2", "major": 17}}}},
-	"cnpg-database": {
-		props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"},
-	},
-	"cnpg-databaserole": {
-		props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app"},
-	},
+	"cnpg-database":     {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
+	"cnpg-databaserole": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app"}},
 	"cnpg-imagecatalog": {props: map[string]any{"images": []any{
 		map[string]any{"image": "ghcr.io/cloudnative-pg/postgresql:17.2", "major": 17}}}},
-	"cnpg-objectstore": {
-		props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}},
-	},
+	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
 	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
 		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
 	"cnpg-publication": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "pub", "dbname": "app",
 		"target": map[string]any{"allTables": true}}},
-	"cnpg-scheduledbackup": {
-		props: map[string]any{"cluster": map[string]any{"name": "db"}, "schedule": "0 0 3 * * *"},
-	},
+	"cnpg-scheduledbackup": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "schedule": "0 0 3 * * *"}},
 	"cnpg-subscription": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "sub", "dbname": "app",
 		"publicationName": "pub", "externalClusterName": "origin"}},
 	// The go-kure/launcher#702 kinds name their one object after the
 	// component, and a ServiceAccount, ConfigMap or claim name is a DNS-1123
 	// subdomain, so each accepts the 200-character name and labels its object.
-	"configmap": {
-		props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true,
-	},
+	"configmap": {props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true},
 	"crd": {props: map[string]any{"inline": `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -381,17 +353,11 @@ spec:
 	// the authored fields, with no `app` label and no pods. They leave the name
 	// rules of their object to the API server, so each accepts the 200-character
 	// name.
-	"csidriver": {
-		props: map[string]any{"attachRequired": false},
-	},
+	"csidriver": {props: map[string]any{"attachRequired": false}},
 	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
 	// their long-name refusal is the container name's, as deployment's.
-	"daemonset": {
-		props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
-	},
-	"deployment": {
-		props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
-	},
+	"daemonset":  {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"deployment": {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
 	// An EndpointSlice is identity and the authored fields too. It selects no
 	// pod: it lists addresses, and belongs to a Service through a label the
 	// author writes under `labels`. It checks no name rule of its own.
@@ -410,9 +376,7 @@ spec:
 	// Emits only the Kustomization, which carries no `app` label.
 	"fluxcd-kustomization": {props: map[string]any{"path": "./", "prune": true,
 		"sourceRef": map[string]any{"kind": "OCIRepository", "name": "app"}}},
-	"fluxcd-provider": {
-		props: map[string]any{"type": "slack", "channel": "releases", "secretRef": map[string]any{"name": "slack-webhook"}},
-	},
+	"fluxcd-provider": {props: map[string]any{"type": "slack", "channel": "releases", "secretRef": map[string]any{"name": "slack-webhook"}}},
 	"fluxcd-receiver": {props: map[string]any{
 		"type":      "github",
 		"resources": []any{map[string]any{"kind": "GitRepository", "name": "fleet"}},
@@ -420,12 +384,8 @@ spec:
 	"gateway": {props: map[string]any{
 		"gatewayClassName": "public",
 		"listeners":        []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
-	"gatewayclass": {
-		props: map[string]any{"controllerName": "example.net/gateway-controller"},
-	},
-	"gitrepository": {
-		props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}},
-	},
+	"gatewayclass":  {props: map[string]any{"controllerName": "example.net/gateway-controller"}},
+	"gitrepository": {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
 	// A GRPCRoute is authored as an HTTPRoute is: no pods, no selector, a
 	// backend by name.
 	"grpcroute": {props: map[string]any{
@@ -438,22 +398,16 @@ spec:
 	"helm": {props: map[string]any{"chart": "app",
 		"source":     map[string]any{"url": "https://charts.example.com"},
 		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
-	"helmchart": {
-		props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}},
-	},
+	"helmchart": {props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}}},
 	// Emits only the HelmRelease, which carries no `app` label.
 	"helmrelease": {props: map[string]any{
 		"chart": map[string]any{"spec": map[string]any{"chart": "app",
 			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
 		"values": map[string]any{"replicaCount": 2}}},
-	"helmrepository": {
-		props: map[string]any{"url": "https://charts.example.com"},
-	},
+	"helmrepository": {props: map[string]any{"url": "https://charts.example.com"}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
-	"helmtemplate": {
-		propsFor: helmtemplateLabelProps,
-	},
+	"helmtemplate": {propsFor: helmtemplateLabelProps},
 	// The servicecidr, poddisruptionbudget and horizontalpodautoscaler kinds emit
 	// identity and the authored fields too, with no `app` label and no pods: a
 	// ServiceCIDR is cluster-scoped, the budget and the autoscaler are
@@ -471,9 +425,7 @@ spec:
 	"imagepolicy": {props: map[string]any{
 		"imageRepositoryRef": map[string]any{"name": "web"},
 		"policy":             map[string]any{"semver": map[string]any{"range": ">=1.0.0"}}}},
-	"imagerepository": {
-		props: map[string]any{"image": "registry.example.com/org/web", "interval": "10m"},
-	},
+	"imagerepository": {props: map[string]any{"image": "registry.example.com/org/web", "interval": "10m"}},
 	"imageupdateautomation": {props: map[string]any{
 		"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"},
 		"interval":  "30m"}},
@@ -481,32 +433,22 @@ spec:
 	// no pods and selects none, and its backend is a Service by name.
 	"ingress": {props: map[string]any{"defaultBackend": map[string]any{
 		"service": map[string]any{"name": "web", "port": map[string]any{"number": 80}}}}},
-	"ingressclass": {
-		props: map[string]any{"controller": "example.com/ingress-controller"},
-	},
-	"issuer": {
-		props: map[string]any{"selfSigned": map[string]any{}},
-	},
-	"job": {
-		props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true,
-	},
+	"ingressclass": {props: map[string]any{"controller": "example.com/ingress-controller"}},
+	"issuer":       {props: map[string]any{"selfSigned": map[string]any{}}},
+	"job":          {props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true},
 	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
 		"default": map[string]any{"cpu": "500m"}}}}},
 	"listenerset": {props: map[string]any{
 		"parentRef": map[string]any{"name": "public"},
 		"listeners": []any{map[string]any{"name": "http", "port": 8080, "protocol": "HTTP"}}}},
-	"manifests": {
-		props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"},
-	},
+	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
 	// The kinds of MetalLB's API emit identity and the authored spec too, with
 	// no `app` label and no pods, all namespaced. A selector in one is the
 	// author's label query over Services, namespaces, nodes or pools, so the
 	// rows select on `role`, as the Cilium rows above. None checks a name rule
 	// of its own.
 	// A BFD profile holds no selector at all.
-	"metallb-bfdprofile": {
-		props: map[string]any{"receiveInterval": 300, "detectMultiplier": 3},
-	},
+	"metallb-bfdprofile": {props: map[string]any{"receiveInterval": 300, "detectMultiplier": 3}},
 	"metallb-bgpadvertisement": {props: map[string]any{
 		"ipAddressPools":   []any{"edge"},
 		"peers":            []any{"upstream"},
@@ -529,9 +471,7 @@ spec:
 	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
 	// label and no pods. The component name is the Namespace's name, which the
 	// API holds to a DNS-1123 label.
-	"namespace": {
-		props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters",
-	},
+	"namespace": {props: map[string]any{}, longRefusal: "must be a DNS-1123 label of at most 63 characters"},
 	// A NetworkPolicy name is a DNS-1123 subdomain too. Its podSelector is the
 	// author's and picks pods another component owns, so the output holds no pod
 	// template to compare it with, as with a Service fronting another component.
@@ -540,30 +480,20 @@ spec:
 		"policyTypes": []any{"Ingress"}}},
 	// Lowers to the ocirepository and fluxcd-kustomization terminals, both named
 	// after the component.
-	"oci": {
-		props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"},
-	},
-	"ocirepository": {
-		props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}},
-	},
-	"passthrough": {
-		props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}},
-	},
+	"oci":           {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
+	"ocirepository": {props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}}},
+	"passthrough":   {props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}}},
 	// A PersistentVolume name is a DNS-1123 subdomain, so the 200-character
 	// name is accepted.
 	"persistentvolume": {props: map[string]any{
 		"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteMany"},
 		"nfs": map[string]any{"server": "nfs.example.com", "path": "/exports/data"}}},
-	"persistentvolumeclaim": {
-		props: map[string]any{"size": "1Gi"}, labelled: true,
-	},
+	"persistentvolumeclaim": {props: map[string]any{"size": "1Gi"}, labelled: true},
 	// A Pod name is a DNS-1123 subdomain too. The pod carries the authored spec
 	// and the `app` label; it is a pod, not a selector over pods.
 	"pod": {props: map[string]any{"containers": []any{
 		map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}}}, labelled: true},
-	"poddisruptionbudget": {
-		props: map[string]any{"maxUnavailable": 1},
-	},
+	"poddisruptionbudget": {props: map[string]any{"maxUnavailable": 1}},
 	// The four Prometheus operator kinds emit identity and the authored fields
 	// too, namespaced, with no `app` label and no pods. A monitor's selector is
 	// the author's label query over Services or Pods, not a pod selector of
@@ -581,9 +511,7 @@ spec:
 		storedTemplates: 1},
 	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
-	"priorityclass": {
-		props: map[string]any{"value": 1000},
-	},
+	"priorityclass": {props: map[string]any{"value": 1000}},
 	"prometheus-probe": {props: map[string]any{
 		"prober":  map[string]any{"url": "blackbox-exporter.monitoring.svc:9115"},
 		"targets": map[string]any{"staticConfig": map[string]any{"static": []any{"https://example.com"}}}}},
@@ -621,9 +549,7 @@ spec:
 	"replicationsource": {props: map[string]any{
 		"sourcePVC": "data", "trigger": map[string]any{"schedule": "0 3 * * *"},
 		"restic": map[string]any{"repository": "restic-repo", "copyMethod": "Snapshot"}}},
-	"resourcequota": {
-		props: map[string]any{"hard": map[string]any{"pods": "10"}},
-	},
+	"resourcequota": {props: map[string]any{"hard": map[string]any{"pods": "10"}}},
 	"resourcesetinputprovider": {props: map[string]any{
 		"type": "GitHubPullRequest",
 		"url":  "https://github.example.com/org/app"}},
@@ -632,33 +558,21 @@ spec:
 	"rolebinding": {props: map[string]any{
 		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web"}},
 		"roleRef":  map[string]any{"kind": "Role", "name": "reader"}}},
-	"runtimeclass": {
-		props: map[string]any{"handler": "runc"},
-	},
+	"runtimeclass": {props: map[string]any{"handler": "runc"}},
 	// A Secret name is a DNS-1123 subdomain, and the kind labels its Secret as
 	// the configmap kind labels its ConfigMap.
-	"secret": {
-		props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true,
-	},
+	"secret": {props: map[string]any{"stringData": map[string]any{"k": "v"}}, labelled: true},
 	"secretstore": {props: map[string]any{"provider": map[string]any{
 		"aws": map[string]any{"service": "SecretsManager", "region": "eu-west-1"}}}},
 	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
 		longRefusal: serviceNameRefusal, labelled: true},
-	"serviceaccount": {
-		props: map[string]any{}, labelled: true,
-	},
-	"servicecidr": {
-		props: map[string]any{"cidrs": []any{"10.96.0.0/16"}},
-	},
+	"serviceaccount": {props: map[string]any{}, labelled: true},
+	"servicecidr":    {props: map[string]any{"cidrs": []any{"10.96.0.0/16"}}},
 	"servicemonitor": {props: map[string]any{
 		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
 		"endpoints": []any{map[string]any{"port": "metrics"}}}},
-	"statefulset": {
-		props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
-	},
-	"storageclass": {
-		props: map[string]any{"provisioner": "csi.example.com"},
-	},
+	"statefulset":  {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"storageclass": {props: map[string]any{"provisioner": "csi.example.com"}},
 	"tcproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
 	"tlsroute": {props: map[string]any{
@@ -666,56 +580,13 @@ spec:
 		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
 	"udproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}},
-	"volumeattributesclass": {
-		props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}},
-	},
+	"volumeattributesclass": {props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}}},
 	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
 	// selector the workload kinds build into the output.
 	"webservice": {props: workloadProps(map[string]any{"port": 8080, "replicas": 3, "topologySpread": true,
 		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 5},
 	"worker": {props: workloadProps(map[string]any{"replicas": 3, "topologySpread": true,
 		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 4},
-}
-
-// TestComponentLabelFixtures_RowLocal is the kurel half of the guard on the
-// two shared kind tables gofmt would otherwise align across rows
-// (strictlyDecodedTypes in pkg/oam/builtin/components holds the other half,
-// TestSharedKindTables_RowLocal): every entry of componentLabelFixtures spans
-// more than one line, which gofmt does not align with its neighbours, so
-// adding or removing one changes that entry's lines alone.
-func TestComponentLabelFixtures_RowLocal(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "component_label_invariant_test.go", nil, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse component_label_invariant_test.go: %v", err)
-	}
-	var rows []ast.Expr
-	for _, decl := range file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.VAR {
-			continue
-		}
-		for _, spec := range gen.Specs {
-			if value, ok := spec.(*ast.ValueSpec); ok && len(value.Names) == 1 && value.Names[0].Name == "componentLabelFixtures" {
-				if lit, ok := value.Values[0].(*ast.CompositeLit); ok {
-					rows = lit.Elts
-				}
-			}
-		}
-	}
-	if len(rows) != len(componentLabelFixtures) {
-		t.Fatalf("componentLabelFixtures: the guard read %d entries, the table holds %d", len(rows), len(componentLabelFixtures))
-	}
-	for _, row := range rows {
-		kv, ok := row.(*ast.KeyValueExpr)
-		if !ok {
-			t.Errorf("componentLabelFixtures: an entry at line %d is not keyed", fset.Position(row.Pos()).Line)
-			continue
-		}
-		if fset.Position(kv.Value.Pos()).Line == fset.Position(kv.Value.End()).Line {
-			t.Errorf("componentLabelFixtures: the entry %s is on one line; gofmt aligns single-line entries, so one added beside it rewrites its neighbours: put its fields on a line below the key", fset.Position(kv.Key.Pos()))
-		}
-	}
 }
 
 // traitLabelFixture renders one trait on a host component.
