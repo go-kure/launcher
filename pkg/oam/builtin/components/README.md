@@ -3746,10 +3746,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     without a claim template, its access modes or its storage request, which
     the operator uses as written.
   - an entry of `volumes` named as a volume the operator adds: `config-volume`,
-    `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`, a name
-    starting `web-config-tls-` where `web.tlsConfig` is set, or
-    `cluster-tls-server-config-` or `cluster-tls-client-config-` where
-    `clusterTLS` is set, `notification-templates` where
+    `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`,
+    `notification-templates` where
     `alertmanagerConfiguration.templates` is set, the name the operator derives
     for each of `secrets` and `configMaps` (`secret-<name>`,
     `configmap-<name>`), and the data volume's: beside `storage.emptyDir` or
@@ -3759,7 +3757,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     adds to every Alertmanager's pods; name the volume otherwise`).
     `web-config` and `cluster-tls-config` are refused whatever `version`
     names, though the operator adds them only for Alertmanager 0.22.0 and
-    0.24.0 on: no field is held to `version` (go-kure/launcher#935).
+    0.24.0 on: no field is held to `version` (go-kure/launcher#935). The
+    volumes of the web and cluster TLS credentials are not checked: the
+    operator names each after the credential's source with a hash appended,
+    which the kind does not derive, so an entry under one of those names is
+    left to the API to refuse.
   - a name the operator's objects cannot be named after: the data volume
     `alertmanager-<name>-db`, unless a claim template's name names it, and the
     hostname `alertmanager-<name>-<replicas-1>` of the last pod must each be a

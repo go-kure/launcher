@@ -1752,8 +1752,9 @@ and by scope, whatever component or trait emits it.
     `storage.ephemeral` named otherwise than the operator's data volume, which leaves the
     data mount dangling; a storage arm in use whose claim has no storage request, or no
     access modes where the operator does not default them; an entry of `volumes` named as
-    a volume the operator adds (the TLS credentials' only where their TLS field is set;
-    `web-config` and `cluster-tls-config` whatever `version` names); and a name whose data volume `alertmanager-<name>-db` or last pod hostname is not
+    a volume the operator adds (`web-config` and `cluster-tls-config` whatever `version`
+    names; not the TLS credentials' volumes, whose hashed names are left to the API); and
+    a name whose data volume `alertmanager-<name>-db` or last pod hostname is not
     a DNS-1123 label (no dot, at most 47 characters with the defaults) are each refused.
     Fields the operator reads only from some version on are not held to `version`.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
