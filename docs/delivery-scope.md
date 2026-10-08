@@ -1779,9 +1779,11 @@ and by scope, whatever component or trait emits it.
     StatefulSet or the pods is refused here, as it would fail late and out of sight.
     A field the operator reads only from some Alertmanager version on (a flag of the
     container, the web or gossip TLS configuration, a field of
-    `alertmanagerConfiguration.global`) is refused where `version`, or the operator's
-    default where it is unset, is below that version, which the refusal names; the
-    operator's version comparisons are vendored and each is held to the list.
+    `alertmanagerConfiguration.global`) is refused where `version` is below that
+    version, which the refusal names; the operator's version comparisons are vendored
+    and each is held to the list. An unset `version` is judged against the operator
+    release launcher vendors (v0.94.1, default v0.34.0), as the deployed operator's
+    default is unknown at build time; at v0.34.0 no field is refused.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

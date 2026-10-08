@@ -3743,10 +3743,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `semver.ParseTolerant` cannot parse, one under 0.15.0, or one of a major
     version above 0 (operator.go:902-909).
   - a field the operator reads only from some Alertmanager version on, where
-    `version`, or the operator's default v0.34.0 where it is unset, is below
-    that version: below it the operator leaves the flag off the container, the
-    TLS or HTTP configuration out of the web server, the gossip TLS
-    configuration off the cluster, or the field out of the global
+    `version` is below that version. An unset `version` (which is required
+    only where the image is named) is judged against the operator release
+    launcher vendors (v0.94.1, default v0.34.0): the deployed operator's
+    default is unknown at build time, and at v0.34.0 no field below is
+    refused. Below its version the operator leaves the flag off the
+    container, the TLS or HTTP configuration out of the web server, the gossip
+    TLS configuration off the cluster, or the field out of the global
     configuration, or refuses the AlertmanagerConfig object `name` names at
     reconcile (`clusterPeerName: read by the Prometheus operator only for
     Alertmanager 0.30.0 and later; at version v0.28.1 it does not pass it to
