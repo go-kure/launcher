@@ -3801,9 +3801,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `externalUrl`, `enableFeatures`, `web.getConcurrency`, `web.timeout`,
     `limits`, `logLevel` other than `info`, `logFormat` other than `logfmt`,
     `clusterAdvertiseAddress`, the three cluster durations and `clusterTLS`
-    (statefulset.go:289-508, :700-748). `cluster.peer-name`, `cluster.label`
-    and `web.config.file` are refused whatever `version` names, though the
-    operator generates them only from 0.30.0, 0.26.0 and 0.22.0 on. Not
+    (statefulset.go:289-508, :700-748), and `cluster.peer-name`,
+    `cluster.label` and `web.config.file`. A flag the operator generates only
+    from some version on is refused from that version on (`cluster.peer-name`
+    0.30.0, `enable-feature` 0.27.0, `cluster.label` 0.26.0,
+    `cluster.tls-config` 0.24.0, `web.config.file` 0.22.0, `web.get-concurrency`
+    and `web.timeout` 0.17.0, `log.format` 0.16.0, the `limits` flags 0.28.0),
+    and always where `version` is unset: the operator then runs its default
+    version, v0.34.0 (`DefaultAlertmanagerVersion`, pkg/operator/defaults.go:25),
+    above every one of them, and no flag is generated only up to a version. Not
     `dispatch.start-delay`: the operator leaves its own out where an argument
     names it.
   - an entry of `alertmanagerConfiguration.templates` whose key an earlier
@@ -3882,7 +3888,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   container the Prometheus operator generates, …`). A patch's ports are
   merged into the generated container's by number, so a port of the patch
   named as one the operator gives that container, at another number, is
-  added beside it and refused, as the API refuses two ports of one name
+  added beside it and refused, as the API refuses two ports of one name,
+  unless the same patch has a port at the generated port's number, which
+  renames that one
   (`containers[0] "alertmanager": ports[0] "web": the Prometheus operator
   gives the container a port of that name at 9093, …`): the web port under
   `portName` at 9093 and the config-reloader's `reloader-web` at 8080 unless
