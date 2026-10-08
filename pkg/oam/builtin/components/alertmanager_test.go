@@ -913,12 +913,24 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a patched port of the web port's name on a pod listening locally": {"listenLocal": true, "containers": []any{map[string]any{
 			"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}},
 		}}},
-		"dnsPolicy None with a nameserver":                  {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
-		"a pod-level HostProcess on the host network":       {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
-		"a sidecar port of a generated port's name":         {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
-		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
-		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
-		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
+		// The merge by number renames the generated port at 8080 to metrics,
+		// so reloader-web at 9000 is the only port of that name.
+		"a patch that renames a generated port and reuses its name": {"containers": []any{map[string]any{"name": "config-reloader", "ports": []any{
+			map[string]any{"name": "metrics", "containerPort": 8080},
+			map[string]any{"name": "reloader-web", "containerPort": 9000},
+		}}}},
+		// The operator generates cluster.peer-name from 0.30.0 and
+		// cluster.label from 0.26.0 on, and enable-feature only from 0.27.0;
+		// unversioned, the operator's default v0.34.0 generates each.
+		"an argument of the peer name before 0.30.0":            {"version": amVersion, "additionalArgs": []any{map[string]any{"name": "cluster.peer-name", "value": "custom"}}},
+		"an argument of the cluster label before 0.26.0":        {"version": "v0.25.0", "additionalArgs": []any{map[string]any{"name": "cluster.label", "value": "custom"}}},
+		"an argument of the features with features before 0.27": {"version": "v0.26.0", "enableFeatures": []any{"x"}, "additionalArgs": []any{map[string]any{"name": "enable-feature", "value": "y"}}},
+		"dnsPolicy None with a nameserver":                      {"dnsPolicy": "None", "dnsConfig": map[string]any{"nameservers": []any{"10.0.0.10"}}},
+		"a pod-level HostProcess on the host network":           {"hostNetwork": true, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+		"a sidecar port of a generated port's name":             {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
+		"the mesh's port name on a pod listening locally":       {"portName": "mesh-tcp", "listenLocal": true},
+		"the Service's port name with a Service of its own":     {"portName": "tcp-mesh", "serviceName": "alerts"},
+		"an invalid port name written nowhere":                  {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],

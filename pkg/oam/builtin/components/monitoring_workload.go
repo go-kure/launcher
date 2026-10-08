@@ -162,10 +162,18 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}
+			// The patch's ports are merged by number: one at the generated
+			// port's number replaces it, name and all, and one at another
+			// number is added beside it.
 			for j, p := range c.Ports {
-				if number, ok := w.generatedPorts[c.Name][p.Name]; ok && slices.Contains(w.generated[list.name], c.Name) && p.ContainerPort != number {
-					return errors.Errorf("%s: ports[%d] %q: the Prometheus operator gives the container a port of that name at %d, and adds this one at %d beside it, and the API refuses a container with two ports of one name; name the port otherwise, or give it number %d", where, j, p.Name, number, p.ContainerPort, number)
+				number, ok := w.generatedPorts[c.Name][p.Name]
+				if !ok || !slices.Contains(w.generated[list.name], c.Name) || p.ContainerPort == number {
+					continue
 				}
+				if slices.ContainsFunc(c.Ports, func(q corev1.ContainerPort) bool { return q.ContainerPort == number }) {
+					continue
+				}
+				return errors.Errorf("%s: ports[%d] %q: the Prometheus operator gives the container a port of that name at %d, and adds this one at %d beside it, and the API refuses a container with two ports of one name; name the port otherwise, give it number %d, or rename the port at %d in the same patch", where, j, p.Name, number, p.ContainerPort, number, number)
 			}
 			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
 				continue

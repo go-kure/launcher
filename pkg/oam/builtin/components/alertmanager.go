@@ -127,7 +127,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"listenLocal":         flag("listenLocal: true makes the Alertmanager web server listen on loopback only, not on the pod's address; the gossip port is not affected."),
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSet creates and deletes pods when it scales: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSet."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSet replaces its pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. A patch's port named as one the operator gives that container (the web port under portName, mesh-tcp, mesh-udp, reloader-web) at another number is refused: it is added beside it. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (alertmanager, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. A patch's port named as one the operator gives that container (the web port under portName, mesh-tcp, mesh-udp, reloader-web) at another number is refused: it is added beside it, unless the patch renames that port with one at its number. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates (init-config-reloader). Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (alertmanager, config-reloader or a listed one), a patch's port as there (reloader-init), and, under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader must.",
 			"One container."+core+"Container in the Kubernetes API reference."),
@@ -156,7 +156,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
 		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Requires Alertmanager v0.27.0 or later.",
 			"The name of one feature flag."),
-		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec, or its negation with no-, is refused: the operator then fails to build the pods. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
+		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop. Unset, the operator's default of 120. At least 0."),
 		"hostUsers":                     flag("hostUsers: false runs the pods in a user namespace of their own, not the host's."),
@@ -655,12 +655,18 @@ func alertmanagerGeneratedPorts(spec *monitoringv1.AlertmanagerSpec) map[string]
 // pkg/operator/argument.go:26-79 at prometheus-operator v0.94.1). The flags
 // are those of makeStatefulSetSpec (pkg/alertmanager/statefulset.go:289-508,
 // :700-748). A flag the operator generates only from some Alertmanager
-// version on is reserved whatever version names, as the mounts of
-// refuseGeneratedAlertmanagerMounts are. dispatch.start-delay is not: the
-// operator leaves it out where an additional argument names it.
+// version on is reserved from that version on. Where version is unset the
+// operator runs its default, DefaultAlertmanagerVersion (v0.34.0,
+// pkg/operator/defaults.go:25), at or above every such version, as no flag is
+// generated only up to a version; so every such flag is reserved, as it is
+// where version does not parse, which validateAlertmanagerVersion refuses.
+// dispatch.start-delay is not: the operator leaves it out where an
+// additional argument names it.
 func refuseGeneratedAlertmanagerArgs(spec *monitoringv1.AlertmanagerSpec) error {
+	version, err := semver.ParseTolerant(spec.Version)
+	from := func(v string) bool { return spec.Version == "" || err != nil || version.GTE(semver.MustParse(v)) }
 	generated := map[string]bool{}
-	for _, name := range []string{"config.file", "storage.path", "data.retention", "web.listen-address", "web.route-prefix", "cluster.reconnect-timeout", "cluster.peer-name", "cluster.label", "web.config.file"} {
+	for _, name := range []string{"config.file", "storage.path", "data.retention", "web.listen-address", "web.route-prefix", "cluster.reconnect-timeout"} {
 		generated[name] = true
 	}
 	replicas := int32(alertmanagerOperatorReplicas)
@@ -676,18 +682,21 @@ func refuseGeneratedAlertmanagerArgs(spec *monitoringv1.AlertmanagerSpec) error 
 	for name, set := range map[string]bool{
 		"cluster.peer":                   replicas > 0 || len(spec.AdditionalPeers) > 0,
 		"web.external-url":               spec.ExternalURL != "",
-		"enable-feature":                 len(spec.EnableFeatures) > 0,
-		"web.get-concurrency":            web != nil && web.GetConcurrency != nil,
-		"web.timeout":                    web != nil && web.Timeout != nil,
-		"silences.max-silences":          limits != nil && limits.MaxSilences != nil,
-		"silences.max-per-silence-bytes": limits != nil && !limits.MaxPerSilenceBytes.IsEmpty(),
+		"enable-feature":                 from("0.27.0") && len(spec.EnableFeatures) > 0,
+		"web.get-concurrency":            from("0.17.0") && web != nil && web.GetConcurrency != nil,
+		"web.timeout":                    from("0.17.0") && web != nil && web.Timeout != nil,
+		"silences.max-silences":          from("0.28.0") && limits != nil && limits.MaxSilences != nil,
+		"silences.max-per-silence-bytes": from("0.28.0") && limits != nil && !limits.MaxPerSilenceBytes.IsEmpty(),
 		"log.level":                      spec.LogLevel != "" && spec.LogLevel != "info",
-		"log.format":                     spec.LogFormat != "" && spec.LogFormat != "logfmt",
+		"log.format":                     from("0.16.0") && spec.LogFormat != "" && spec.LogFormat != "logfmt",
 		"cluster.advertise-address":      spec.ClusterAdvertiseAddress != "",
 		"cluster.gossip-interval":        spec.ClusterGossipInterval != "",
 		"cluster.pushpull-interval":      spec.ClusterPushpullInterval != "",
 		"cluster.peer-timeout":           spec.ClusterPeerTimeout != "",
-		"cluster.tls-config":             spec.ClusterTLS != nil,
+		"cluster.peer-name":              from("0.30.0"),
+		"cluster.label":                  from("0.26.0"),
+		"web.config.file":                from("0.22.0"),
+		"cluster.tls-config":             from("0.24.0") && spec.ClusterTLS != nil,
 	} {
 		if set {
 			generated[name] = true
@@ -742,8 +751,9 @@ func refuseDuplicateAlertmanagerTemplateKeys(spec *monitoringv1.AlertmanagerSpec
 // web.tlsConfig (webconfig.New, pkg/webconfig/config.go:50-55), and
 // clusterTLS's server and client, the client with a certificate
 // (clustertlsconfig.New, pkg/alertmanager/clustertlsconfig/config.go:78-90 at
-// prometheus-operator v0.94.1). The operator reads them only for
-// Alertmanager 0.22.0 and 0.24.0 on; both are held whatever version names.
+// prometheus-operator v0.94.1). The reconcile builds both configuration
+// Secrets whatever version names (pkg/alertmanager/operator.go:648-656), so
+// both are held whatever version names.
 func validateAlertmanagerTLS(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.Web != nil {
 		if err := spec.Web.TLSConfig.Validate(); err != nil {
