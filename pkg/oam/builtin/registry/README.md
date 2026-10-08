@@ -17,7 +17,9 @@ library instead of keeping its own list. `kurel build` registers exactly these
 
 Each function returns a new map on every call: a caller may delete, replace or add
 entries, and the change reaches no other caller. A type launcher adds later appears in the
-map of its kind without a change on the caller's side.
+map of its kind without a change on the caller's side. Adding one takes two lines in one
+commit: its entry in `registry.go`, at its position, and its line in kurel's
+`testdata/builtin-registries.txt`.
 
 A type that is a lowering rule is never also a handler of the same position, and
 `RegisterComponentLowering` and `RegisterTraitLowering` panic on that collision. A consumer
