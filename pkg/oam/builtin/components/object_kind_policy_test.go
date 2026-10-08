@@ -41,6 +41,9 @@ const (
 	okRole        = "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: thing\nrules: []\n"
 	okConfigMap   = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  a: b\n"
 	okClusterRole = "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: thing\nrules: []\n"
+	// okUnknownKind is a custom resource whose CRD is not in the build, so its
+	// scope is unknown; the namespace it states does not make it namespaced.
+	okUnknownKind = "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\n  namespace: demo\n"
 )
 
 // okWantRefusal fails unless err is component web's violation of class
@@ -92,7 +95,8 @@ func TestObjectKindPolicy_ClusterScopedKindComponent(t *testing.T) {
 
 // TestObjectKindPolicy_ObjectsWrittenElsewhere: an object passthrough or a
 // manifests source carries, and one a chart renders, is refused for its kind
-// and for its scope, each refusal naming the object; an allowed kind is built.
+// and for its scope, each refusal naming the object, a kind of unknown scope
+// included whatever namespace it states; an allowed kind is built.
 func TestObjectKindPolicy_ObjectsWrittenElsewhere(t *testing.T) {
 	paths := []struct {
 		name  string
@@ -121,6 +125,10 @@ func TestObjectKindPolicy_ObjectsWrittenElsewhere(t *testing.T) {
 		t.Run(path.name, func(t *testing.T) {
 			okWantRefusal(t, path.build(t, okRole, okForbidRBAC()), `Role "thing" (rbac.authorization.k8s.io/Role)`, "forbids the kind")
 			okWantRefusal(t, path.build(t, okClusterRole, &okPolicy{}), `ClusterRole "thing"`, "cluster-scoped")
+			okWantRefusal(t, path.build(t, okUnknownKind, &okPolicy{}), `Widget "thing" (example.io/Widget)`, "does not know the kind's scope")
+			if err := path.build(t, okUnknownKind, &okPolicy{allowCluster: true}); err != nil {
+				t.Errorf("build = %v, want a kind of unknown scope built where cluster-scoped objects are allowed", err)
+			}
 			if err := path.build(t, okConfigMap, okForbidRBAC()); err != nil {
 				t.Errorf("build = %v, want an allowed kind built", err)
 			}

@@ -110,13 +110,15 @@ func appliedSelfAndMembers(obj client.Object) []client.Object {
 // The kind is the one the object states, else its Go type's
 // (objectGroupVersionKind). An object whose kind cannot be told is refused: the
 // check cannot hold it to the policy. The scope is kure's (manifest.Scope); a
-// kind whose scope kure does not know is taken as cluster-scoped when the
-// object carries no namespace, so the check fails closed.
+// kind whose scope kure does not know is taken as cluster-scoped, whatever
+// namespace the object states, so the check fails closed: the namespace is the
+// author's to write, and the API server ignores it on a cluster-scoped kind.
 //
 // The scope a CustomResourceDefinition in the build gives its kind is not read:
 // it could not change the outcome. A CRD is itself cluster-scoped, so a policy
 // that does not allow cluster-scoped objects refuses the build that emits it,
-// and a policy that does allow them reads no scope.
+// and a policy that does allow them reads no scope. A kind whose CRD is
+// installed apart from the build is of unknown scope here, and refused.
 func (o *ownedConfig) checkObjectKind(obj client.Object) error {
 	gvk, ok := objectGroupVersionKind(obj)
 	if !ok {
@@ -139,9 +141,7 @@ func (o *ownedConfig) checkObjectKind(obj client.Object) error {
 	case manifest.ScopeCluster:
 		return o.objectKindViolation(where + ": the kind is cluster-scoped, and the object kind policy does not allow cluster-scoped objects")
 	case manifest.ScopeUnknown:
-		if obj.GetNamespace() == "" {
-			return o.objectKindViolation(where + ": the build does not know the kind's scope and the object carries no namespace, so it is taken as cluster-scoped, which the object kind policy does not allow")
-		}
+		return o.objectKindViolation(where + ": the build does not know the kind's scope (it is neither a built-in kind nor one kure registers), so it is taken as cluster-scoped, which the object kind policy does not allow; a namespace the object states does not make it namespaced")
 	case manifest.ScopeNamespaced:
 	}
 	return nil
