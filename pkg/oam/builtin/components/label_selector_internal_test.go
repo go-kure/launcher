@@ -604,7 +604,8 @@ var labelSelectorKinds = []labelSelectorKind{
 	},
 	{
 		component: "alertmanager", typ: "monitoringv1.AlertmanagerSpec", config: kindConfig(&AlertmanagerHandler{}),
-		base:   map[string]any{},
+		// The storage arm a selector is written into must claim storage.
+		base:   map[string]any{"storage": amClaimingStorage()},
 		ground: generatorRuleGround,
 	},
 	{
