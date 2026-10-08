@@ -2,6 +2,8 @@ package components
 
 import (
 	"fmt"
+	"path"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,15 +12,26 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// alertmanagerGateFiles are the files of the operator's pkg/alertmanager
-// that compare the Alertmanager version: the pods (statefulset.go), the
-// configuration it generates (amcfg.go) and the reconcile (operator.go). No
-// other file of the package does at v0.94.1 (its tests aside);
-// scripts/vendor-prometheus-operator-gates.sh refuses a tag where one does.
-var alertmanagerGateFiles = []string{
-	"pkg/alertmanager/statefulset.go",
-	"pkg/alertmanager/amcfg.go",
-	"pkg/alertmanager/operator.go",
+// alertmanagerGateFiles are the files of the operator's package
+// pkg/alertmanager in the excerpt, which
+// scripts/vendor-prometheus-operator-gates.sh vendors whole, its tests aside.
+// The test walks each one, so a comparison in any file of the package is
+// classified or fails. At v0.94.1 the pods (statefulset.go), the
+// configuration the operator generates (amcfg.go) and the reconcile
+// (operator.go) compare the version; collector.go and types.go do not.
+func alertmanagerGateFiles(t *testing.T, src *vendoredPromOp) []string {
+	t.Helper()
+	var files []string
+	for rel := range src.files {
+		if dir, name := path.Split(rel); dir == "pkg/alertmanager/" && !strings.HasSuffix(name, "_test.go") {
+			files = append(files, rel)
+		}
+	}
+	slices.Sort(files)
+	if len(files) == 0 {
+		t.Fatal("the excerpt holds no file of pkg/alertmanager")
+	}
+	return files
 }
 
 // alertmanagerGateRows classify the gates of alertmanagerGateFiles one by
@@ -158,7 +171,7 @@ func TestAlertmanagerVersionGates_MatchVendoredSource(t *testing.T) {
 	if got := src.stringConst(t, "pkg/operator/defaults.go", "DefaultAlertmanagerVersion"); got != alertmanagerDefaultVersion {
 		t.Errorf("the operator's DefaultAlertmanagerVersion is %s, alertmanagerDefaultVersion %s", got, alertmanagerDefaultVersion)
 	}
-	holdVersionGates(t, src.versionGates(t, alertmanagerGateFiles...), alertmanagerGateRows, alertmanagerGateFuncs, alertmanagerVersionGates, alertmanagerMinimumVersion)
+	holdVersionGates(t, src.versionGates(t, alertmanagerGateFiles(t, src)...), alertmanagerGateRows, alertmanagerGateFuncs, alertmanagerVersionGates, alertmanagerMinimumVersion)
 }
 
 // alertmanagerGateFixtures author each gated field, alone, as the operator
