@@ -448,7 +448,9 @@ var requiredWrittenKinds = []pinKind{
 	// A listed container named for none the operator generates must name an
 	// image, so the controls of the fields under one fill it into this entry;
 	// the two entries' names differ, as the API requires of a pod's init
-	// containers and containers (refuseSharedContainerNames).
+	// containers and containers (refuseSharedContainerNames). A TLS block
+	// needs a certificate and a key, and the cluster's client a certificate
+	// (validateAlertmanagerTLS), so the base carries both blocks whole.
 	// The storage arm in use must claim storage, and an ephemeral one name its
 	// access modes (validateAlertmanagerStorage), so both arms carry them.
 	{component: "alertmanager", handler: &AlertmanagerHandler{}, typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
@@ -456,6 +458,8 @@ var requiredWrittenKinds = []pinKind{
 		base: map[string]any{
 			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
 			"initContainers": []any{map[string]any{"name": "y", "image": "registry.example/team/probe:1.0.0"}},
+			"web":            map[string]any{"tlsConfig": pinTLS()},
+			"clusterTLS":     map[string]any{"server": pinTLS(), "client": pinTLS()},
 			"storage":        amClaimingStorage(),
 		}},
 	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
@@ -595,6 +599,15 @@ func ciliumPinRule() map[string]any {
 
 func externalSecretsPinFake() map[string]any {
 	return map[string]any{"fake": map[string]any{"data": []any{map[string]any{"key": "k", "value": "v"}}}}
+}
+
+// pinTLS is a TLS block the Prometheus operator accepts: a certificate and a
+// key, each from a Secret.
+func pinTLS() map[string]any {
+	return map[string]any{
+		"cert":      map[string]any{"secret": map[string]any{"name": "tls", "key": "tls.crt"}},
+		"keySecret": map[string]any{"name": "tls", "key": "tls.key"},
+	}
 }
 
 func externalSecretsPinData() map[string]any {

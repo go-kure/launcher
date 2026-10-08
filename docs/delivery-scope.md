@@ -1765,7 +1765,9 @@ and by scope, whatever component or trait emits it.
     pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
     loads only the first; a name shared by an init container and a container of the
     pods, generated or listed; a port of a patch named as one the operator gives that
-    container, at another number, which the merge adds beside it; a negative request or
+    container, at another number, which the merge adds beside it; a web or cluster TLS
+    configuration the operator's own validation refuses; `dnsPolicy: None` without a
+    nameserver, and a pod-level HostProcess without `hostNetwork`; a negative request or
     limit; and a name whose data
     volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot,
     at most 47 characters with the defaults) are each refused. The line: what the CRD's

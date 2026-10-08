@@ -3810,6 +3810,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     entry names, `configMap` or `secret`: the operator projects each key at
     the path of its name and skips a later entry of a key it has projected
     (statefulset.go:575-620), so that template would not be loaded.
+  - a `web.tlsConfig`, `clusterTLS.server` or `clusterTLS.client` the
+    operator's own validation refuses (a certificate and a key, each named
+    once, and a certificate for the client; webconfig.New,
+    clustertlsconfig.New): it then builds no pods.
+  - `dnsPolicy: None` without `dnsConfig.nameservers`, and a pod-level
+    `securityContext.windowsOptions.hostProcess: true` without
+    `hostNetwork: true`: the API refuses the pods the operator copies them
+    into.
   - a negative request or limit in `resources`, as merged, or in a listed
     container: the CRD's quantity pattern admits a sign, and the API refuses
     the container the operator builds with it.
