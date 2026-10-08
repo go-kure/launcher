@@ -311,6 +311,12 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, 
 	}
 	schema := withEngineTraitProperties(p.PropertySchema())
 	exclusive := exclusiveProperties(handler)
+	// The groups are held to the schema as declared, before relaxation clears the
+	// Required that makes a group malformed, and before a value the rendering would
+	// otherwise be checked first on.
+	if err := checkObjectGroups(schema, exclusive, path); err != nil {
+		return withUnsupportedFieldHint(handler, err)
+	}
 	if err := validateAuthoredTopLevel(relaxObjectRequired(schema), exclusive, trait.Properties, path); err != nil {
 		return withUnsupportedFieldHint(handler, err)
 	}
@@ -518,10 +524,15 @@ func validateAuthoredProperties(schema map[string]PropertySchema, props map[stri
 }
 
 // validateAuthoredTopLevel is validateAuthoredProperties with the handler's top-level
-// exclusive groups (ExclusivePropertiesProvider). They are held to at most one, after
-// every key is checked; their Required is not enforced, for the reasons top-level
-// Required is not.
+// exclusive groups (ExclusivePropertiesProvider). A malformed group anywhere in the
+// schema, under an object or array props leaves out included, is reported first, as
+// the schema's error (checkObjectGroups); the groups are held to at most one after
+// every key is checked, and their Required is not enforced, for the reasons
+// top-level Required is not.
 func validateAuthoredTopLevel(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path string) error {
+	if err := checkObjectGroups(schema, exclusive, path); err != nil {
+		return err
+	}
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {

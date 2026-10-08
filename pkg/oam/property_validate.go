@@ -79,8 +79,13 @@ func validateProperties(schema map[string]PropertySchema, props map[string]any, 
 
 // validateTopLevelProperties is validateProperties with the handler's top-level
 // exclusive groups (ExclusivePropertiesProvider), held as a nested object's
-// PropertySchema.Exclusive is.
+// PropertySchema.Exclusive is. Every group the schema declares is checked for shape
+// first (checkObjectGroups), so one under an object or array props leaves out is
+// refused too.
 func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path string) error {
+	if err := checkObjectGroups(schema, exclusive, path); err != nil {
+		return err
+	}
 	return validateObjectProperties(schema, exclusive, false, props, path)
 }
 
@@ -89,10 +94,14 @@ func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []Ex
 // PropertySchema.AdditionalProperties.
 //
 // Keys are visited in sorted order at both stages so a props map with several
-// problems always reports the same one, rather than a different error per run. The
-// exclusive groups are checked with Required, before any value: both are rules of
-// which keys are present.
+// problems always reports the same one, rather than a different error per run. A
+// malformed exclusive group is reported first, as the schema's error rather than the
+// document's; the groups are then checked with Required, before any value: both are
+// rules of which keys are present.
 func validateObjectProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, additionalAllowed bool, props map[string]any, path string) error {
+	if err := checkExclusiveGroups(exclusive, schema, path); err != nil {
+		return err
+	}
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
 		if !schema[key].Required {
 			continue
@@ -203,14 +212,20 @@ func checkNestedRequired(schema map[string]PropertySchema, exclusive []Exclusive
 	return nil
 }
 
-// checkRequiredIn is checkNestedRequired for one present value: an object's own
-// Required keys first, as validateObjectProperties orders them, then its fields; an
-// array's elements in order.
+// checkRequiredIn is checkNestedRequired for one present value: an object's
+// malformed groups, then its own Required keys, as validateObjectProperties orders
+// them, then its fields; an array's elements in order.
 func checkRequiredIn(field PropertySchema, value any, path, capability string) error {
 	switch field.Type {
 	case PropertyTypeObject:
 		obj, ok := asObjectValue(value)
-		if !ok || len(field.Properties) == 0 {
+		if !ok {
+			return nil
+		}
+		if err := checkExclusiveGroups(field.Exclusive, field.Properties, path); err != nil {
+			return err
+		}
+		if len(field.Properties) == 0 {
 			return nil
 		}
 		for _, key := range slices.Sorted(maps.Keys(field.Properties)) {
@@ -313,6 +328,39 @@ func checkExclusiveGroups(groups []ExclusiveGroup, schema map[string]PropertySch
 			}
 			seen[key] = true
 		}
+	}
+	return nil
+}
+
+// checkObjectGroups reports a malformed group of the top level, exclusive, or of any
+// node the schema declares under it, through object fields and array Items alike: a
+// capability rendering may supply a value there that validation of what the author
+// wrote never visits, and relaxObjectRequired clears the Required that makes a group
+// malformed. It reads schema as declared, so a caller that relaxes, fills or merges
+// runs it first: a malformed group is refused, whatever the values, before the keys
+// it names are checked.
+func checkObjectGroups(schema map[string]PropertySchema, exclusive []ExclusiveGroup, path string) error {
+	if err := checkExclusiveGroups(exclusive, schema, path); err != nil {
+		return err
+	}
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		if err := checkFieldGroups(schema[key], path+"."+key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkFieldGroups is checkObjectGroups for one declared node: an object's groups
+// and fields, an array's Items, and no groups on any other node. Items are named "[]".
+func checkFieldGroups(field PropertySchema, path string) error {
+	switch {
+	case field.Type == PropertyTypeObject:
+		return checkObjectGroups(field.Properties, field.Exclusive, path)
+	case len(field.Exclusive) > 0:
+		return errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
+	case field.Type == PropertyTypeArray && field.Items != nil:
+		return checkFieldGroups(*field.Items, path+"[]")
 	}
 	return nil
 }
