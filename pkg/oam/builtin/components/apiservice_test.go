@@ -166,6 +166,10 @@ func TestAPIService_Name(t *testing.T) {
 	}
 	objs, err := clusterWideTransform("apiservice", h, apiServiceProps(map[string]any{oam.ObjectNameProperty: apiServiceName}), nil, nil)
 	named(t, objs, err)
+	_, err = clusterWideTransform("apiservice", h, apiServiceProps(map[string]any{oam.ObjectNameProperty: "wrong.example.com"}), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `the APIService is named "wrong.example.com", and the API requires the name "`+apiServiceName+`"`) {
+		t.Errorf("objectName wrong.example.com: %v, want the name refused, naming both", err)
+	}
 	_, err = clusterWideTransform("apiservice", h, apiServiceProps(nil), nil, hook)
 	if err == nil || !strings.Contains(err.Error(), `the APIService is named "hooked-`) {
 		t.Errorf("hooked name: %v, want the hook's name refused", err)
@@ -181,6 +185,24 @@ func TestAPIService_Name(t *testing.T) {
 	}
 	if _, err := cfg.Generate(stack.NewApplication(apiServiceName, "demo", cfg)); err != nil {
 		t.Errorf("Generate under the component name %q = %v, want it built", apiServiceName, err)
+	}
+}
+
+// TestAPIService_ValuesLeftToTheAPIServer: what the README leaves to the API
+// server builds: the priorities out of their ranges, a port out of range, and
+// caBundle beside insecureSkipTLSVerify.
+func TestAPIService_ValuesLeftToTheAPIServer(t *testing.T) {
+	h := &components.APIServiceHandler{}
+	for what, fields := range map[string]map[string]any{
+		"a group priority over 20000":           {"groupPriorityMinimum": 20001},
+		"a version priority over 1000":          {"versionPriority": 1001},
+		"a port out of range":                   {"service": map[string]any{"namespace": "metrics", "name": "metrics-server", "port": 70000}},
+		"caBundle beside insecureSkipTLSVerify": {"caBundle": "Y2EtYnVuZGxl", "insecureSkipTLSVerify": true},
+	} {
+		fields[oam.ObjectNameProperty] = apiServiceName
+		if _, err := clusterWideTransform("apiservice", h, apiServiceProps(fields), nil, nil); err != nil {
+			t.Errorf("%s: %v, want it built", what, err)
+		}
 	}
 }
 
