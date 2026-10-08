@@ -3959,9 +3959,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a name the operator's objects cannot be named after: the data volume
     `alertmanager-<name>-db`, unless a claim template's name names it, and the
     hostname `alertmanager-<name>-<replicas-1>` of the last pod must each be a
-    DNS-1123 label, so a name has no dot and at most 47 characters with the
-    defaults. The refusal names the component, or `objectName` where that set
-    the name.
+    DNS-1123 label; and the StatefulSet `alertmanager-<name>` must be at most
+    52 characters: the StatefulSet controller labels each of its pods
+    `controller-revision-hash` with that name, a `-` and a hash of up to 10
+    characters, a label value the API refuses beyond 63 characters. So a name
+    has no dot and at most 39 characters. The hostname and the label do not
+    apply where `replicas` is 0, with no pod to name or label. The refusal
+    names the component, or `objectName` where that set the name.
 
   **The API's expression rules are not checked.** The types the spec reaches
   state one: an `updateStrategy` with a `rollingUpdate` must have the type
@@ -4683,7 +4687,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
     the scrape failure log file, on a read-only root filesystem
-    (server/statefulset.go:510, :537; common.go:330-345). A writable volume
+    (server/statefulset.go:510, :537; common.go:334-347). A writable volume
     the author mounts there, in `volumeMounts` or a patch of the
     `prometheus` container, is accepted; a mount there with `readOnly` set,
     in either, is not. The path is compared cleaned (`/var/log/prometheus/`
@@ -4698,9 +4702,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `prometheus-<name>-rulefiles-2`, and the hostname of the last pod of the
     last shard, `prometheus-<name>-<replicas-1>` or
     `prometheus-<name>-shard-<shards-1>-<replicas-1>`, must each be a
-    DNS-1123 label, so a name has no dot and at most 40 characters, fewer
-    where the authored `shards` and `replicas` make the last hostname
-    longer (1000 shards of 11 replicas: 39). The operator mounts three rule
+    DNS-1123 label; and the name of the last shard's StatefulSet,
+    `prometheus-<name>` or `prometheus-<name>-shard-<shards-1>`, must be at
+    most 52 characters: the StatefulSet controller labels each of its pods
+    `controller-revision-hash` with that name, a `-` and a hash of up to 10
+    characters, a label value the API refuses beyond 63 characters. So a
+    name has no dot and at most 40 characters, 33 with 2 to 10 shards, and
+    fewer with more. Neither applies where `replicas` is 0, with no pod to
+    name or label. The operator mounts three rule
     ConfigMaps whatever the rules (server/rules.go:119), and more only where
     the PrometheusRules it selects outgrow three of half a MiB each; the
     name of an eleventh, `rulefiles-10`, depends on the cluster's rules and

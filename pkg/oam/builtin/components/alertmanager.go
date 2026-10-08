@@ -484,7 +484,9 @@ func refuseGeneratedAlertmanagerMounts(spec *monitoringv1.AlertmanagerSpec) erro
 // cannot be named after, and a data volume the pods would not get
 // (validateOperatorObjectName). The operator names the StatefulSet
 // alertmanager-<name>, whose pods take the hostname
-// alertmanager-<name>-<ordinal>, and the data volume alertmanager-<name>-db
+// alertmanager-<name>-<ordinal> and a controller-revision-hash label of the
+// StatefulSet's name (maxRevisedStatefulSetName), and the data volume
+// alertmanager-<name>-db
 // (volumeName and prefixedName, pkg/alertmanager/statefulset.go:909-915 at
 // v0.94.1). It mounts the data volume under the claim template's name where
 // that is set, whatever arm is in use (:531-535), and beside emptyDir or
@@ -505,6 +507,7 @@ func validateAlertmanagerName(name, componentName string, spec *monitoringv1.Ale
 	}
 	if replicas > 0 {
 		n.derived = []derivedName{{"the pod of the last replica takes the hostname", "alertmanager-" + name + "-" + strconv.Itoa(int(replicas)-1)}}
+		n.statefulSet = "alertmanager-" + name
 	}
 	return validateOperatorObjectName(n)
 }

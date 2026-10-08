@@ -10,6 +10,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -247,20 +248,34 @@ type derivedName struct {
 // is the one the object takes and componentName the component's, to say where
 // the name came from; dataVolume the name the operator gives the data volume;
 // derived the other names it derives that must be DNS-1123 labels, as the
-// hostname of the last pod.
+// hostname of the last pod; statefulSet the longest name of a StatefulSet the
+// operator creates with pods, empty where none has any.
 type operatorObjectName struct {
 	kind, label         string
 	name, componentName string
 	dataVolume          string
 	derived             []derivedName
+	statefulSet         string
 	storage             *monitoringv1.StorageSpec
 	volumes             []corev1.Volume
 }
 
+// maxRevisedStatefulSetName is the longest StatefulSet name whose pods the API
+// admits: the StatefulSet controller labels each pod controller-revision-hash
+// with the name of the revision it runs, the StatefulSet's name, a - and a
+// hash of up to 10 characters (setPodRevision and newVersionedStatefulSetPod,
+// pkg/controller/statefulset/stateful_set_utils.go:506-544;
+// ControllerRevisionName and HashControllerRevision,
+// pkg/controller/history/controller_history.go:95-101 and :145, at Kubernetes
+// v1.37.1), and the API refuses a label value over 63 characters.
+const maxRevisedStatefulSetName = content.LabelValueMaxLength - 1 - 10
+
 // validateOperatorObjectName refuses an object name the operator's objects
 // cannot be named after, and a data volume the pods would not get. The API
 // refuses a volume name and a pod hostname that is not a DNS-1123 label: at
-// most 63 characters, and no dot.
+// most 63 characters, and no dot; and a pod whose controller-revision-hash
+// label is over 63 characters, so a StatefulSet name over
+// maxRevisedStatefulSetName.
 //
 // The claim template's name, where it is set, is the name the operator mounts
 // the data volume under, whatever arm is in use. On the claim template arm it
@@ -299,6 +314,9 @@ func validateOperatorObjectName(n operatorObjectName) error {
 		if errs := validation.IsDNS1123Label(d.value); len(errs) > 0 {
 			return refuse(d.what+" %q, which must be a DNS-1123 label: %s", d.value, strings.Join(errs, "; "))
 		}
+	}
+	if len(n.statefulSet) > maxRevisedStatefulSetName {
+		return refuse("the Prometheus operator names the StatefulSet %q, of %d characters, and the StatefulSet controller labels each of its pods controller-revision-hash with that name, a - and a hash of up to 10 characters, which the API refuses beyond %d characters; the StatefulSet's name must be at most %d", n.statefulSet, len(n.statefulSet), content.LabelValueMaxLength, maxRevisedStatefulSetName)
 	}
 	for i, v := range n.volumes {
 		if v.Name != volume {

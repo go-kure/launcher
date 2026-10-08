@@ -1786,8 +1786,11 @@ and by scope, whatever component or trait emits it.
     configuration the operator's own validation refuses; `dnsPolicy: None` without a
     nameserver, and a pod-level HostProcess without `hostNetwork`; a negative request or
     limit; and a name whose data
-    volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot,
-    at most 47 characters with the defaults) are each refused. The line: what the CRD's
+    volume `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot),
+    or whose StatefulSet `alertmanager-<name>` is over 52 characters, which the
+    StatefulSet controller's `controller-revision-hash` pod label carries with a hash of
+    up to 10 (so at most 39 characters; the hostname and the label only where a replica
+    runs), are each refused. The line: what the CRD's
     own schema refuses when the Alertmanager is applied is left to the API, as it shows
     at once; what the CRD admits but the operator or the API then refuses on the
     StatefulSet or the pods is refused here, as it would fail late and out of sight.
@@ -1909,11 +1912,16 @@ and by scope, whatever component or trait emits it.
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
     and `mountPath`, which the operator drops; a `queryLogFile` named without a directory
     beside a `scrapeFailureLogFile`
-    named with one, where the operator mounts no volume for it and no volume of the
-    author's is mounted writable at `/var/log/prometheus`; a negative request or limit; and a
+    named with one, where the operator mounts no volume for it, unless a writable volume
+    of the author's is mounted at `/var/log/prometheus` (compared cleaned) and no mount
+    there, in `volumeMounts` or a patch of the prometheus container, sets `readOnly`; a
+    negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
-    characters, fewer where the authored shards and replicas make the hostname longer).
+    characters, fewer where the authored shards and replicas make the hostname longer),
+    or whose last shard's StatefulSet name is over 52 characters, which the StatefulSet
+    controller's `controller-revision-hash` pod label carries with a hash of up to 10
+    (the hostname and the label only where a replica runs).
     The operator mounts three rule ConfigMaps whatever the rules and more only for large
     rule sets the object does not name; the name of an eleventh is not checked.
   - **An `excludedFromEnforcement` entry that leaves `group` out is written with

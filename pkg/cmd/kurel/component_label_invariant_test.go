@@ -231,10 +231,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// An Alertmanager emits identity and the authored fields too, namespaced,
 	// with no `app` label. Its operator runs the pods: the object holds no pod
 	// template and no selector, and its podMetadata takes no label.
-	// The operator names the data volume alertmanager-<name>-db, a DNS-1123
-	// label, which leaves the name 47 characters.
+	// The operator names the StatefulSet alertmanager-<name>, whose pods the
+	// StatefulSet controller labels controller-revision-hash with that name and
+	// a hash of up to 10 characters, which leaves the name 39 characters; over
+	// 47 the data volume alertmanager-<name>-db is refused first.
 	"alertmanager": {props: map[string]any{"version": "v0.28.1", "replicas": 1},
-		nameBound: 47, longRefusal: "the component name is the Alertmanager's name, and the Prometheus operator names the data volume"},
+		nameBound: 39, longRefusal: "the component name is the Alertmanager's name, and the Prometheus operator names the "},
 	// An APIService must be named <version>.<group>: objectName names it, so
 	// the component name, long or not, is free.
 	"apiservice": {apiName: "v1beta1.metrics.example.com", props: map[string]any{
