@@ -4662,7 +4662,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `objectStorageConfig` or `objectStorageConfigFile` is set, and
     `/etc/thanos/config`, which it mounts from Thanos 0.24.0, reserved
     whatever `thanos.version` names, as `web-config` is
-    (`createThanosContainer`, server/statefulset.go:642-671 and :730-738).
+    (`createThanosContainer`, server/statefulset.go:642-671 and :730-738);
+    and any field of an entry but `name` and `mountPath`
+    (`readOnly`, `recursiveReadOnly`, `subPath`, `subPathExpr`,
+    `mountPropagation`, `bindMountOptions`), which the operator drops: it
+    copies only those two into the sidecar's mount (:642-647).
+    `TestThanosDroppedMountFields` holds the list to every field of the type.
   - a `queryLogFile` named without a directory beside a
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for

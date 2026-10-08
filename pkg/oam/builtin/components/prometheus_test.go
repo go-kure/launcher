@@ -432,6 +432,14 @@ func prometheusRefusals(notA string) []struct {
 		{"a sidecar mount at its configuration's directory before Thanos 0.24.0", map[string]any{"thanos": map[string]any{"version": "v0.23.0",
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/thanos/config"}},
 		}}, `thanos.volumeMounts[0] "/etc/thanos/config": the mount path is`},
+		// The operator copies only name and mountPath of a sidecar mount
+		// (server/statefulset.go:642-647).
+		{"a read-only sidecar mount", map[string]any{"thanos": map[string]any{
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/extra", "readOnly": true}},
+		}}, `thanos.volumeMounts[0].readOnly: not carried: the Prometheus operator copies only name and mountPath of a sidecar mount and drops it`},
+		{"a sidecar mount of a sub-path", map[string]any{"thanos": map[string]any{
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/extra"}, map[string]any{"name": "extra", "mountPath": "/other", "subPath": "a"}},
+		}}, `thanos.volumeMounts[1].subPath: not carried`},
 		// The operator adds no volume for a query log file named without a
 		// directory beside a scrape failure log file named with one
 		// (server/statefulset.go:510, :537; common.go:330-345).

@@ -231,7 +231,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalAlertManagerConfigs": object("additionalAlertManagerConfigs: the Secret key that holds further Alertmanager configurations, appended to the ones the operator generates as they are." + secretKey),
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
-		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
+		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names; the operator copies only an entry's name and mountPath, so any other field of one is refused. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
 		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory: refused there unless a volume is mounted at /var/log/prometheus. A full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
@@ -482,6 +482,27 @@ func validatePrometheusQueryLogFile(spec *monitoringv1.PrometheusSpec) error {
 	return errors.Errorf("queryLogFile: %q names no directory, so the Prometheus operator configures it under %s, but beside scrapeFailureLogFile %q, which names one, it mounts no volume there, and the prometheus container's root filesystem is read-only; name the file with scrapeFailureLogFile's directory, name scrapeFailureLogFile without one too, or mount a volume at %s", file, prometheusLogDirectory, *spec.ScrapeFailureLogFile, prometheusLogDirectory)
 }
 
+// thanosDroppedMountFields are the fields of a thanos.volumeMounts entry the
+// operator drops, each by its JSON name, with whether vm sets it.
+// TestThanosDroppedMountFields holds the list to every field of the type but
+// name and mountPath.
+func thanosDroppedMountFields(vm corev1.VolumeMount) []struct {
+	name string
+	set  bool
+} {
+	return []struct {
+		name string
+		set  bool
+	}{
+		{"readOnly", vm.ReadOnly},
+		{"recursiveReadOnly", vm.RecursiveReadOnly != nil},
+		{"subPath", vm.SubPath != ""},
+		{"mountPropagation", vm.MountPropagation != nil},
+		{"subPathExpr", vm.SubPathExpr != ""},
+		{"bindMountOptions", len(vm.BindMountOptions) > 0},
+	}
+}
+
 // prometheusLogDirectory is where the operator writes a log file named without
 // a directory, and mounts the log-file volume (DefaultLogDirectory,
 // pkg/prometheus/common.go:53 at prometheus-operator v0.94.1).
@@ -496,9 +517,20 @@ const prometheusLogDirectory = "/var/log/prometheus"
 // the HTTP client configuration, for Thanos 0.24.0 and later (:730-738,
 // thanosConfigDir in thanos_sidecar_config.go:29). The latter is reserved
 // whatever thanos.version names, as web-config is (validatePrometheusName).
+//
+// It refuses too a field of an entry other than name and mountPath: the
+// operator copies only those two into the sidecar's mount (:642-647), so any
+// other it drops, and the sidecar mounts the volume without it.
 func validateThanosSidecarMounts(t *monitoringv1.ThanosSpec) error {
 	if t == nil {
 		return nil
+	}
+	for i, vm := range t.VolumeMounts {
+		for _, f := range thanosDroppedMountFields(vm) {
+			if f.set {
+				return errors.Errorf("thanos.volumeMounts[%d].%s: not carried: the Prometheus operator copies only name and mountPath of a sidecar mount and drops it, so the thanos-sidecar container mounts the volume without it; leave it unset", i, f.name)
+			}
+		}
 	}
 	generated := map[string]string{
 		"/etc/thanos/config": "the path the Prometheus operator mounts the sidecar's HTTP client configuration at in the thanos-sidecar container for Thanos 0.24.0 and later",
