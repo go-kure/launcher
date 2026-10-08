@@ -3719,7 +3719,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the API reads an absent one as `false`.
 
   **What the operator builds from the spec is checked where the API or the
-  operator would break it.** Each is refused, under any policy and none, at
+  operator would break it.** The kind leaves to the API what the CRD's own
+  schema refuses when the Alertmanager is applied (a `retention` of another
+  form than a number and a unit, for one), which shows at once; it refuses
+  what the CRD admits but the operator or the API then refuses on the
+  StatefulSet or the pods built from it, which would fail late and out of
+  sight. Each is refused, under any policy and none, at
   `pkg/alertmanager/statefulset.go` of prometheus-operator v0.94.1:
   - `version` unset where `image`, or a listed `alertmanager` entry, names the
     image: the operator chooses the container's flags by `version`, and by the
@@ -3745,7 +3750,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `spec.resources.requests.storage` (unset or empty access modes, which are
     not serialized, the operator writes as `ReadWriteOnce`); the ephemeral arm
     without a claim template, its access modes or its storage request, which
-    the operator uses as written.
+    the operator uses as written; and on either, a storage request of `0` or
+    less, as the API requires a positive one.
+  - on the claim template arm, a claim template name that is not a DNS-1123
+    label, which the operator names the data volume with, or that names a
+    volume the operator adds, which the StatefulSet controller then replaces
+    with the claim.
   - an entry of `volumes` named as a volume the operator adds: `config-volume`,
     `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`,
     `notification-templates` where
@@ -3762,7 +3772,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     volumes of the web and cluster TLS credentials are not checked: the
     operator names each after the credential's source with a hash appended,
     which the kind does not derive, so an entry under one of those names is
-    left to the API to refuse.
+    left to the API to refuse. Two entries of `secrets`, or of `configMaps`,
+    that the operator's naming gives one volume name (`alerts.config` and
+    `alerts-config` both name `secret-alerts-config`) are refused as well:
+    the operator adds a volume for each (statefulset.go:638-690).
+  - an entry of `volumeMounts` at a path the operator mounts a volume at in
+    the alertmanager container, as the API refuses two mounts at one path:
+    `/alertmanager`, `/etc/alertmanager/config`, `config_out` and `certs`, the
+    web and cluster TLS configuration files whatever `version` names,
+    `/etc/alertmanager/templates` where `alertmanagerConfiguration.templates`
+    is set, and `/etc/alertmanager/secrets/<name>` and
+    `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
+    `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
+    credentials are left to the API, as their volumes are.
+  - a negative request or limit in `resources`, as merged, or in a listed
+    container: the CRD's quantity pattern admits a sign, and the API refuses
+    the container the operator builds with it.
   - a name the operator's objects cannot be named after: the data volume
     `alertmanager-<name>-db`, unless a claim template's name names it, and the
     hostname `alertmanager-<name>-<replicas-1>` of the last pod must each be a
@@ -3927,9 +3952,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   pods (`alertmanager`, `app.kubernetes.io/instance`,
   `app.kubernetes.io/managed-by`, `app.kubernetes.io/name`,
   `app.kubernetes.io/version`) and the annotation
-  `kubectl.kubernetes.io/default-container`; upstream documents that a value
-  authored for one of them does not replace the operator's. Launcher does
-  not refuse such a key.
+  `kubectl.kubernetes.io/default-container`. A value authored for
+  `app.kubernetes.io/version` replaces the operator's, which it copies
+  `podMetadata.labels` over; the other four labels and the annotation it
+  writes after them, so an authored value does not replace those
+  (statefulset.go:446-460). Launcher does not refuse such a key.
 
   **The metadata of a claim template is not read:** the labels and
   annotations of `storage.volumeClaimTemplate`, of
@@ -10892,7 +10919,7 @@ match expression), has no member: those are refused on every kind
 | `httproute` | 44 | | | | 44 |
 | `grpcroute` | 34 | | | | 34 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
-| `alertmanager` | 242 | 18 | 8 | 208 | 8 |
+| `alertmanager` | 241 | 18 | 8 | 207 | 8 |
 | `helmrelease` | 17 | | | | 17 |
 | `fluxcd-kustomization` | 14 | | | | 14 |
 | `bucket`, `ocirepository` | 7 each | | | | 7 |

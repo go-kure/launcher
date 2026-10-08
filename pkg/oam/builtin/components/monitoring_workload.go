@@ -155,6 +155,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
 				continue
 			}
+			if err := validateNonNegativeResources(where, c.Resources); err != nil {
+				return err
+			}
 			if err := validateCnpgResources(where, c.Resources); err != nil {
 				return err
 			}
@@ -164,6 +167,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 		return err
 	}
 	for _, r := range w.resources {
+		if err := validateNonNegativeResources(resourcesHolder(r.path), r.resources); err != nil {
+			return err
+		}
 		block := r.resources
 		if q, ok := w.memoryRequests[r.path]; ok {
 			if _, named := block.Requests[corev1.ResourceMemory]; !named {
@@ -190,7 +196,7 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 // block by that word themselves, so the error is prefixed with what holds the
 // block, and with nothing where the spec itself does.
 func validateResourcesAt(path string, r corev1.ResourceRequirements) error {
-	holder := strings.TrimSuffix(strings.TrimSuffix(path, "resources"), ".")
+	holder := resourcesHolder(path)
 	if holder == "" {
 		if err := validateHugePagesHaveCPUOrMemory("resources", r.Requests, r.Limits); err != nil {
 			return err
@@ -198,6 +204,38 @@ func validateResourcesAt(path string, r corev1.ResourceRequirements) error {
 		return validateResourceRequestLimit(r.Requests, r.Limits)
 	}
 	return validateCnpgResources(holder, r)
+}
+
+// resourcesHolder is what holds the resource block the spec names by path:
+// the path less its last word, resources, and nothing where the spec itself
+// holds the block.
+func resourcesHolder(path string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(path, "resources"), ".")
+}
+
+// validateNonNegativeResources refuses a negative request or limit in a block
+// of resources, prefixed with what holds the block, and with nothing where the
+// spec itself does. The API admits the operator's object with it, as the
+// CRD's quantity pattern allows a sign; the operator copies the block into the
+// container it builds, and the API refuses a container with a negative
+// quantity (ValidateResourceQuantityValue, k8s.io/kubernetes
+// pkg/apis/core/validation/validation.go), so the pods are never created.
+func validateNonNegativeResources(holder string, r corev1.ResourceRequirements) error {
+	for _, list := range []struct {
+		name string
+		rl   corev1.ResourceList
+	}{{"requests", r.Requests}, {"limits", r.Limits}} {
+		for _, name := range slices.Sorted(maps.Keys(list.rl)) {
+			if q := list.rl[name]; q.Sign() < 0 {
+				err := errors.Errorf("resources: %s: %s %s is below 0: the Prometheus operator puts it into the container it builds, and the API refuses a negative quantity", name, strings.TrimSuffix(list.name, "s"), q.String())
+				if holder == "" {
+					return err
+				}
+				return errors.Wrap(err, holder)
+			}
+		}
+	}
+	return nil
 }
 
 // enforceMonitoringWorkloadPolicy holds the workload to the environment policy
