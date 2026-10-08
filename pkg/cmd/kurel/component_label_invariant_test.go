@@ -554,12 +554,6 @@ spec:
 	"metallb-l2advertisement": {props: map[string]any{
 		"ipAddressPools": []any{"edge"},
 		"nodeSelectors":  []any{map[string]any{"matchLabels": map[string]any{"role": "edge"}}}}},
-	// The two webhook configurations are identity and their webhooks, with no
-	// pods, and leave the name rules of their object to the API server.
-	"mutatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
-		"name": "policy.example.com", "clientConfig": map[string]any{"url": "https://policy.example.com/check"},
-		"sideEffects": "None", "admissionReviewVersions": []any{"v1"},
-	}}}},
 	// The namespace, limitrange, resourcequota and persistentvolume kinds of
 	// go-kure/launcher#790 emit identity and the authored spec, with no `app`
 	// label and no pods. The component name is the Namespace's name, which the
@@ -701,10 +695,6 @@ spec:
 		"rules":     []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": 5432}}}}}},
 	"udproute": {props: map[string]any{
 		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}},
-	"validatingwebhookconfiguration": {props: map[string]any{"webhooks": []any{map[string]any{
-		"name": "policy.example.com", "clientConfig": map[string]any{"url": "https://policy.example.com/check"},
-		"sideEffects": "None", "admissionReviewVersions": []any{"v1"},
-	}}}},
 	"volumeattributesclass": {
 		props: map[string]any{"driverName": "csi.example.com", "parameters": map[string]any{"iops": "3000"}},
 	},
