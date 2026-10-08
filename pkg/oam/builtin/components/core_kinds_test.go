@@ -186,6 +186,7 @@ var coreKindSchemas = []struct {
 	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
 	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
 	{"tcproute", reflect.TypeFor[gatewayv1.TCPRouteSpec](), &components.TCPRouteHandler{}, nil},
+	{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), &components.ThanosRulerHandler{}, nil},
 	{"tlsroute", reflect.TypeFor[gatewayv1.TLSRouteSpec](), &components.TLSRouteHandler{}, nil},
 	{"udproute", reflect.TypeFor[gatewayv1.UDPRouteSpec](), &components.UDPRouteHandler{}, nil},
 	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), &components.ValidatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration")},
@@ -200,6 +201,32 @@ var coreKindHiddenFields = map[string]map[string]string{
 	"prometheus-probe": {
 		"HTTPConfig.HTTPConfigWithoutTLS.Authorization": "ProbeSpec declares authorization itself, of the same type; the one its HTTP settings embed is hidden by it",
 	},
+}
+
+// coreKindRenamedFields names, per component, the properties published under
+// another name than the json name of the field they set, each mapped to that
+// json name. Every other property is its field's json name, so a second rename
+// fails TestCoreKindSchemas_CoverSpec until it is listed here.
+var coreKindRenamedFields = map[string]map[string]string{
+	// The engine reads a kind component's `labels` property as the labels of
+	// the object's metadata, so the ThanosRuler's own labels, the Prometheus
+	// external labels, are published under another name.
+	"thanosruler": {"externalLabels": "labels"},
+}
+
+// asSpecFields is props with each property coreKindRenamedFields lists for
+// component under the json name of the field it sets: what props say in the
+// type's own terms.
+func asSpecFields(component string, props map[string]any) map[string]any {
+	renamed := coreKindRenamedFields[component]
+	out := make(map[string]any, len(props))
+	for key, value := range props {
+		if field, ok := renamed[key]; ok {
+			key = field
+		}
+		out[key] = value
+	}
+	return out
 }
 
 // objectIdentityExcluded is the excluded set of a kind that projects a whole
@@ -304,26 +331,53 @@ func checkCoreKindProperty(t *testing.T, key string, prop oam.PropertySchema, ty
 // kinds: the schema publishes exactly the spec type's json fields, less the
 // excluded ones, each with the type its Go field decodes from. A dependency
 // bump that adds, removes or retypes a top-level field fails here, naming it.
+// A field published under another name is read under the name
+// coreKindRenamedFields maps it to, and under that name only.
 func TestCoreKindSchemas_CoverSpec(t *testing.T) {
+	known := map[string]bool{}
 	for _, tt := range coreKindSchemas {
+		known[tt.component] = true
 		t.Run(tt.component, func(t *testing.T) {
 			fields := specJSONFields(t, tt.typ)
 			schema := tt.handler.PropertySchema()
+			renamed := coreKindRenamedFields[tt.component]
+			publishedAs := make(map[string]string, len(renamed))
+			for key, field := range renamed {
+				publishedAs[field] = key
+			}
 			for _, name := range slices.Sorted(maps.Keys(fields)) {
+				key := name
+				if as, ok := publishedAs[name]; ok {
+					key = as
+					if _, own := schema[name]; own {
+						t.Errorf("%s field %q is published as %q and under its own name too", tt.typ, name, as)
+					}
+				}
 				reason, excluded := tt.excluded[name]
-				prop, published := schema[name]
+				prop, published := schema[key]
 				switch {
 				case published && excluded:
 					t.Errorf("%s field %q is both published in the %s schema and excluded (%q); pick one", tt.typ, name, tt.component, reason)
 				case !published && !excluded:
 					t.Errorf("%s field %q is neither published in the %s schema nor excluded with a reason", tt.typ, name, tt.component)
 				case published:
-					checkCoreKindProperty(t, name, prop, fields[name])
+					checkCoreKindProperty(t, key, prop, fields[name])
 				}
 			}
 			for _, key := range slices.Sorted(maps.Keys(schema)) {
+				if field, ok := renamed[key]; ok {
+					if _, ok := fields[field]; !ok {
+						t.Errorf("renamed key %q is stale: %s has no json field %q", key, tt.typ, field)
+					}
+					continue
+				}
 				if _, ok := fields[key]; !ok {
 					t.Errorf("schema key %q has no %s json field; the strict decode would refuse every value", key, tt.typ)
+				}
+			}
+			for _, key := range slices.Sorted(maps.Keys(renamed)) {
+				if _, ok := schema[key]; !ok {
+					t.Errorf("renamed key %q is stale: the %s schema does not publish it", key, tt.component)
 				}
 			}
 			for _, name := range slices.Sorted(maps.Keys(tt.excluded)) {
@@ -335,6 +389,11 @@ func TestCoreKindSchemas_CoverSpec(t *testing.T) {
 				}
 			}
 		})
+	}
+	for _, component := range slices.Sorted(maps.Keys(coreKindRenamedFields)) {
+		if !known[component] {
+			t.Errorf("renamed fields are listed for %q, which is no kind of coreKindSchemas", component)
+		}
 	}
 }
 

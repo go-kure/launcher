@@ -41,6 +41,18 @@ func amPatched(spec monitoringv1.AlertmanagerSpec) *monitoringv1.AlertmanagerSpe
 	return &spec
 }
 
+// trListedImage is a thanos-ruler image from the registry
+// TestImageFields_HeldOrListed allows.
+const trListedImage = "registry.example/thanos/thanos:v0.39.2"
+
+// trPatched is spec with the config-reloader container the operator generates
+// patched with an image from that registry: under allowed registries an
+// unpatched one is refused, as the operator would choose its image.
+func trPatched(spec monitoringv1.ThanosRulerSpec) *monitoringv1.ThanosRulerSpec {
+	spec.Containers = append(slices.Clone(spec.Containers), corev1.Container{Name: "config-reloader", Image: "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"})
+	return &spec
+}
+
 // imageFieldType is a type whose document can name an image, and how each of
 // its fields that could is accounted for.
 type imageFieldType struct {
@@ -362,6 +374,54 @@ var imageFieldTypes = []imageFieldType{
 			"ephemeralContainers[].imagePullPolicy": "says when the image is pulled, not which image",
 			"imagePullSecrets":                      "names the Secrets holding registry credentials, not an image",
 			"volumes[].rbd.image":                   "the name of a Ceph RBD block image in a pool, not an OCI image reference",
+		},
+	},
+	{
+		// The thanosruler kind: as the alertmanager kind, with an image that is
+		// a plain string, unset when empty, one config-reloader and no init
+		// container of the operator's own.
+		name: "thanosruler spec",
+		typ:  reflect.TypeFor[monitoringv1.ThanosRulerSpec](),
+		held: map[string]func(string, oam.Policy) error{
+			"image": func(reference string, p oam.Policy) error {
+				return thanosRulerKind.enforce(trPatched(monitoringv1.ThanosRulerSpec{Image: reference}), p)
+			},
+			"containers[].image": func(reference string, p oam.Policy) error {
+				return thanosRulerKind.enforce(trPatched(monitoringv1.ThanosRulerSpec{Image: trListedImage, Containers: []corev1.Container{{Name: "sidecar", Image: reference}}}), p)
+			},
+			"initContainers[].image": func(reference string, p oam.Policy) error {
+				return thanosRulerKind.enforce(trPatched(monitoringv1.ThanosRulerSpec{Image: trListedImage, InitContainers: []corev1.Container{{Name: "init", Image: reference}}}), p)
+			},
+			"volumes[].image": func(reference string, p oam.Policy) error {
+				return thanosRulerKind.enforce(trPatched(monitoringv1.ThanosRulerSpec{Image: trListedImage, Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}}), p)
+			},
+		},
+		tagged: map[string]imageTagCheck{
+			"image": {check: func(reference string) error {
+				return thanosRulerKind.validate(&monitoringv1.ThanosRulerSpec{Image: reference})
+			}, emptyNotAllowed: "unset, the operator chooses the image the pods run"},
+			"containers[].image": {check: func(reference string) error {
+				return thanosRulerKind.validate(&monitoringv1.ThanosRulerSpec{Containers: []corev1.Container{{Name: "sidecar", Image: reference}}})
+			}, emptyRefused: "a listed container the operator generates none of is added as written, and no pod runs one without an image"},
+			"initContainers[].image": {check: func(reference string) error {
+				return thanosRulerKind.validate(&monitoringv1.ThanosRulerSpec{InitContainers: []corev1.Container{{Name: "init", Image: reference}}})
+			}, emptyRefused: "the operator generates no init container, so a listed one is added as written, and no pod runs one without an image"},
+			"volumes[].image": {check: func(reference string) error {
+				return thanosRulerKind.validate(&monitoringv1.ThanosRulerSpec{Volumes: []corev1.Volume{{
+					Name:         "ext",
+					VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: reference}},
+				}}})
+			}},
+		},
+		notHeld: map[string]string{
+			"imagePullPolicy":                  "says when the image is pulled, not which image",
+			"containers[].imagePullPolicy":     "says when the image is pulled, not which image",
+			"initContainers[].imagePullPolicy": "says when the image is pulled, not which image",
+			"imagePullSecrets":                 "names the Secrets holding registry credentials, not an image",
+			"volumes[].rbd.image":              "the name of a Ceph RBD block image in a pool, not an OCI image reference",
 		},
 	},
 }

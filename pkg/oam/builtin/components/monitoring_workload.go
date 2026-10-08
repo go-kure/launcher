@@ -16,7 +16,8 @@ import (
 )
 
 // This file holds what the kind components share whose object makes the
-// Prometheus operator run pods (go-kure/launcher#790): alertmanager. The
+// Prometheus operator run pods (go-kure/launcher#790): alertmanager and
+// thanosruler. The
 // operator builds a StatefulSet from the object's spec, so the fields of that
 // spec that shape the pods are held as a workload kind's own are: each kind
 // maps its spec into one monitoringWorkload, and the two functions below read
@@ -106,7 +107,8 @@ type monitoringWorkload struct {
 	// that lists them (containers, initContainers): a listed entry of one of
 	// these names is merged into that container, and may name no image. Every
 	// kind must set it: where it is nil, every listed entry without an image
-	// is refused, a patch of the operator's own containers included.
+	// is refused, a patch of the operator's own containers included. A list the
+	// operator merges into none of its containers has no key.
 	generated map[string][]string
 	// generatedPorts are the ports the operator gives the containers it
 	// generates, by container name, in the order it lists them, each with
@@ -194,6 +196,8 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 				if err := ValidateImageRef(c.Image); err != nil {
 					return errors.Wrap(err, where)
 				}
+			case len(w.generated[list.name]) == 0:
+				return errors.Errorf("%s: names no image, and the Prometheus operator merges no entry of %s into a container of its own; name an image", where, list.name)
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
 			}

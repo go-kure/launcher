@@ -131,6 +131,7 @@ var validComponentTypes = map[string]bool{
 	"statefulset":                     true,
 	"storageclass":                    true,
 	"tcproute":                        true,
+	"thanosruler":                     true,
 	"tlsroute":                        true,
 	"udproute":                        true,
 	"validatingwebhookconfiguration":  true,

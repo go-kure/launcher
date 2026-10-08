@@ -195,6 +195,7 @@ at its position.
 | `servicemonitor` | A ServiceMonitor in the build namespace. No capability is required of the cluster profile to build it. |
 | `storageclass` | Each component emits one object, named after the component unless `objectName` names it, with no namespace. |
 | `tcproute` | Two TCPRoutes in the build namespace, one with a single backend, one named by `objectName` that attaches to a Gateway of another namespace and splits its traffic over two backends, one of them in another namespace. No capability is required of the cluster profile to build them. |
+| `thanosruler` | A ThanosRuler in the build namespace, its Prometheus external labels authored as `externalLabels` and its own labels as `labels`, and an excluded-from-enforcement entry with no group written with the operator's one group. Its pods are held to the environment policy as the Alertmanager's are; no capability is required to build it. |
 | `tlsroute` | Two TLSRoutes as the `tcproute` fixture's, each naming its host names, one of them a wildcard. No capability is required of the cluster profile to build them. |
 | `udproute` | Two UDPRoutes as the `tcproute` fixture's. No capability is required of the cluster profile to build them. |
 | `validatingwebhookconfiguration` | Two ValidatingWebhookConfigurations with no namespace: one whose webhook a Service serves, with a rule, a selector and a match condition, and one named by `objectName` whose webhook a URL serves. Only the environment policy's object kind rules apply to it. |

@@ -569,6 +569,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"statefulset",
 		"storageclass",
 		"tcproute",
+		"thanosruler",
 		"tlsroute",
 		"udproute",
 		"validatingwebhookconfiguration",

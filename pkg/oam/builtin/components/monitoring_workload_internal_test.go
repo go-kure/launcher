@@ -73,6 +73,12 @@ type monitoringWorkloadKind struct {
 	// cites where it lists it.
 	podCopies map[string]string
 
+	// around is the required fields an entry of a top-level list needs, by the
+	// list's json name, so that a document authoring a defaulted field inside
+	// that entry (TestMonitoringWorkloadKinds_DefaultedZeros) reaches the
+	// field's refusal and, with the default, builds.
+	around map[string]map[string]any
+
 	// The fields of the spec that shape the pods, each in exactly one: held to
 	// the policy, with the proof; owned, read by the ownership rules of pkg/oam,
 	// with what they do; stated, not held, with the reason.
@@ -219,6 +225,100 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 			"web.tlsConfig.keyFile":                                       keyPathField,
 			"clusterTLS.server.clientAuthType":                            authTypeField,
 			"web.tlsConfig.clientAuthType":                                authTypeField,
+		},
+	},
+	{
+		monitoringKindRow: monitoringKindRow{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), thanosRulerKind.required, nil, thanosRulerKind.defaultedZeros.fields},
+		handler:           &ThanosRulerHandler{},
+		rulesLeft:         thanosRulerRulesLeft,
+		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
+		around:            map[string]map[string]any{"remoteWrite": {"url": "https://remote.example/api/v1/write"}},
+		held: map[string]heldField{
+			"image": {
+				props:  map[string]any{"image": "other.example/thanos/thanos:v0.39.2"},
+				policy: &workloadPolicy{allowed: []string{"registry.example"}},
+				class:  oam.RefusalRegistry,
+			},
+			"replicas": {
+				props:  map[string]any{"replicas": 5},
+				policy: &workloadPolicy{maxReplicas: new(int32(3))},
+				class:  oam.RefusalReplicaMaximum,
+			},
+			"resources": {
+				props:  map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "4"}}},
+				policy: &workloadPolicy{maxCPU: "2"},
+				class:  oam.RefusalResourceMaximum,
+			},
+			"storage": {
+				props: map[string]any{"storage": map[string]any{"volumeClaimTemplate": map[string]any{
+					"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "100Gi"}}},
+				}}},
+				policy: &workloadPolicy{maxStorage: "10Gi"},
+				class:  oam.RefusalStorageMaximum,
+			},
+			"volumes": {
+				props:  map[string]any{"volumes": []any{map[string]any{"name": "host", "hostPath": map[string]any{"path": "/var/lib"}}}},
+				policy: &workloadPolicy{noHostPath: true},
+				class:  oam.RefusalHostPath,
+			},
+			"containers": {
+				// A patch of the container the operator generates, which may
+				// name no image.
+				props:  map[string]any{"containers": []any{map[string]any{"name": "thanos-ruler", "securityContext": map[string]any{"privileged": true}}}},
+				policy: &workloadPolicy{noPrivileged: true},
+				class:  oam.RefusalPrivileged,
+			},
+			"initContainers": {
+				// The spec's own image and the reloader's are authored from the
+				// allowed registry, so that the unset-image refusal does not
+				// answer for this field.
+				props: map[string]any{
+					"image":          "registry.example/thanos/thanos:v0.39.2",
+					"containers":     []any{map[string]any{"name": "config-reloader", "image": "registry.example/prometheus-operator/prometheus-config-reloader:v0.94.1"}},
+					"initContainers": []any{map[string]any{"name": "init", "image": "other.example/team/init:1.0.0"}},
+				},
+				policy: &workloadPolicy{allowed: []string{"registry.example"}},
+				class:  oam.RefusalRegistry,
+			},
+		},
+		owned: map[string]string{
+			"podMetadata": "read by the wrapper every component's objects pass (pkg/oam), which refuses a key the consumer reserves in its labels and annotations and writes nothing there: the pods carry the component label only where the author writes it",
+		},
+		stated: map[string]string{
+			"affinity":                             schedulingField,
+			"nodeSelector":                         schedulingField,
+			"tolerations":                          schedulingField,
+			"topologySpreadConstraints":            schedulingField,
+			"schedulerName":                        schedulingField,
+			"priorityClassName":                    schedulingField,
+			"minReadySeconds":                      rolloutField,
+			"podManagementPolicy":                  rolloutField,
+			"updateStrategy":                       rolloutField,
+			"serviceName":                          "names the governing Service of the StatefulSet; launcher creates none for it and reads none",
+			"terminationGracePeriodSeconds":        podSettingField,
+			"serviceAccountName":                   podSettingField,
+			"dnsConfig":                            podSettingField,
+			"dnsPolicy":                            podSettingField,
+			"enableServiceLinks":                   podSettingField,
+			"hostAliases":                          podSettingField,
+			"hostUsers":                            podSettingField,
+			"imagePullPolicy":                      pullPolicyField,
+			"imagePullSecrets":                     "names the Secrets holding registry credentials, not an image",
+			"securityContext":                      "its windowsOptions.hostProcess, the part an EnvironmentPolicy holds on other kinds, is refused before any policy: the API requires hostNetwork: true of a HostProcess pod, and a ThanosRuler has no hostNetwork",
+			"volumeMounts":                         "mounts, into the thanos-ruler container, volumes that are held where they are declared (volumes)",
+			"storage.volumeClaimTemplate.metadata": claimMetadata,
+			"storage.ephemeral.volumeClaimTemplate.metadata":   claimMetadata,
+			"volumes[].ephemeral.volumeClaimTemplate.metadata": claimMetadata,
+		},
+		literals: []string{"remoteWrite[].bearerToken"},
+		notCredentials: map[string]string{
+			"grpcServerTlsConfig.keyFile":                 keyPathField,
+			"remoteWrite[].authorization.credentialsFile": keyPathField,
+			"remoteWrite[].bearerTokenFile":               keyPathField,
+			"remoteWrite[].tlsConfig.keyFile":             keyPathField,
+			"remoteWrite[].oauth2.tokenUrl":               "the URL tokens are fetched from; the client's secret is the key of a Secret (clientSecret)",
+			"web.tlsConfig.keyFile":                       keyPathField,
+			"web.tlsConfig.clientAuthType":                authTypeField,
 		},
 	},
 }
@@ -587,6 +687,11 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 							entries[0].(map[string]any)["image"] = "registry.example/team/probe:1.0.0"
 						}
 					}
+					for list, fields := range kind.around {
+						if strings.HasPrefix(path, list+"[].") {
+							maps.Copy(props[list].([]any)[0].(map[string]any), fields)
+						}
+					}
 					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
 					return err
 				}
@@ -615,8 +720,13 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 // hostPort of a container port to the port's containerPort. So under an
 // authored hostNetwork: true, a hostPort of 0 on a port of a listed container
 // or init container is refused, and without hostNetwork the same port builds.
+// A kind whose spec has no hostNetwork, such as thanosruler, only builds it.
 func TestMonitoringWorkloadKinds_HostNetworkHostPort(t *testing.T) {
 	for _, kind := range monitoringWorkloadKinds {
+		hasHostNetwork := slices.ContainsFunc(reflect.VisibleFields(kind.typ), func(f reflect.StructField) bool {
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			return name == "hostNetwork"
+		})
 		for _, list := range []string{"containers", "initContainers"} {
 			t.Run(kind.component+"/"+list, func(t *testing.T) {
 				build := func(hostNetwork bool) error {
@@ -632,7 +742,11 @@ func TestMonitoringWorkloadKinds_HostNetworkHostPort(t *testing.T) {
 					return err
 				}
 				want := list + "[0].ports[0].hostPort: 0 cannot be carried by the Prometheus operator API types (the field is omitted when zero, so the API server would apply its default " + hostNetworkHostPortDefault + ")"
-				if err := build(true); err == nil || err.Error() != want {
+				if !hasHostNetwork {
+					if _, ok := kind.defaulted[list+"[].ports[].hostPort"]; ok {
+						t.Errorf("%s lists %s[].ports[].hostPort, and its spec has no hostNetwork", kind.component, list)
+					}
+				} else if err := build(true); err == nil || err.Error() != want {
 					t.Errorf("under hostNetwork: err = %v\nwant %s", err, want)
 				}
 				if err := build(false); err != nil {
@@ -804,8 +918,9 @@ func isTextField(typ reflect.Type) bool {
 // and is named for a credential (credentialName), and fails on one that is
 // neither reported by the kind's workload as a credential in the clear nor
 // listed with the reason it holds none. The refusal a reported one yields is
-// shown in TestMonitoringWorkload_HeldOnASyntheticValue: no kind reports one
-// yet. A field of a Kubernetes type is not
+// shown in TestMonitoringWorkload_HeldOnASyntheticValue, and on the one kind
+// that reports one, through its handler (TestThanosRuler_PolicyRefusals). A
+// field of a Kubernetes type is not
 // derived: an environment variable's value is no more held here than on a pod
 // kind. That is the whole of what is recognised: a credential under a name
 // that does not say so is not.
@@ -840,9 +955,10 @@ func TestMonitoringWorkloadKinds_CredentialsHeldOrListed(t *testing.T) {
 
 // TestMonitoringWorkload_HeldOnASyntheticValue holds the two shared functions
 // to each refusal they state, on workloads no kind maps. A kind reaches only
-// the branches its spec has fields for: the alertmanager kind reports no
-// credential in the clear, and names one image and one resource block, both
-// at the top of its spec. A branch nothing reaches is not shown to work.
+// the branches its spec has fields for: the alertmanager and thanosruler
+// kinds name one image and one resource block, both at the top of their spec,
+// and the thanosruler kind reports one credential per entry of a list. A
+// branch nothing reaches is not shown to work.
 //
 // Each workload of the first table is valid without a policy, passes under one
 // that holds nothing, and is refused under one that holds it, with the class
