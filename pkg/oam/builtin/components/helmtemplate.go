@@ -77,7 +77,7 @@ const hookGroupNamePrefixDescription = "Prefix of the names of the component's h
 
 // layoutKustomizationNameDescription describes layoutKustomizationName for the
 // helmtemplate component, and for a helm component under delivery: template.
-const layoutKustomizationNameDescription = "Name of the Flux Kustomization generated under per-layout placement for the component's own layout, in place of <bundle>-<component> (over 63 characters, shortened by launcher's own rule with the base library launcher pins, -<component> kept whole up to 52 characters; go-kure/launcher#941 hands it to the rule the base library applies to its own default from go-kure/kure#1030 on, which gives another name, at the next re-pin). It names neither the layout nor its directory, and needs per-layout placement: under any other the layout gets no Kustomization of its own and the base library refuses the name. A DNS-1123 subdomain of at most 63 characters, used as written and never shortened. It must differ from that of every other component of the document."
+const layoutKustomizationNameDescription = "Name of the Flux Kustomization generated under per-layout placement for the component's own layout, in place of <bundle>-<component>, which the base library shortens when longer. It names neither the layout nor its directory, and needs per-layout placement: under any other the layout gets no Kustomization of its own and the base library refuses the name. A DNS-1123 subdomain of at most 63 characters, used as written and never shortened. It must differ from that of every other component of the document."
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values, secretValues and scopeOverrides excepted, which are split off before
@@ -223,18 +223,19 @@ type HelmTemplateConfig struct {
 	// Flux Kustomization alike. It is never shortened: AugmentLayout refuses a
 	// child name built from it that is no DNS-1123 subdomain of at most 63
 	// characters, and the transform refuses it before that
-	// (CheckHookGroupNames). Empty means the default, whose Kustomization name
-	// is shortened to 63 characters.
+	// (CheckHookGroupNames). Empty means the default, which names only the
+	// child layout: the base library names its Kustomization "<unit>-<child>"
+	// and shortens that name by its own rule.
 	HookGroupNamePrefix string
 	// LayoutKustomizationName is the name of the Flux Kustomization the base
 	// library generates under per-layout placement for the component's own
 	// layout, which AugmentLayout sets on that layout
 	// (ManifestLayout.KustomizationName) unless the layout already carries one:
 	// the author's layoutKustomizationName, the answer of the consumer's Naming
-	// hook for role "layout", the default the transform shortened to 63
-	// characters (SetLayoutKustomizationName), or what the builder of a direct
-	// config set. Empty leaves the base library's default,
-	// "<unit>-<layout name>". It names neither the layout nor its directory.
+	// hook for role "layout" (SetLayoutKustomizationName), or what the builder
+	// of a direct config set. Empty leaves the base library's default,
+	// "<unit>-<layout name>", which it shortens by its own rule. It names
+	// neither the layout nor its directory.
 	LayoutKustomizationName string
 	// Namespace is the application namespace: the render's .Release.Namespace,
 	// and the namespace given to a namespaced rendered object that carries none

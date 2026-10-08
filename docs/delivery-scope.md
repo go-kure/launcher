@@ -409,42 +409,34 @@ Decided in the ticket:
     refused in the transform. The names built from two different prefixes are not held
     apart there: they exist only after the render, and two that meet are refused by kure
     when the walked tree is integrated.
-  - Each child carries the name of its Flux Kustomization
-    (`ManifestLayout.KustomizationName`). The default is shortened to 63 characters by the
-    one shortening rule, while the directory keeps its 253-character name, so the two differ
-    for a long default. An authored or hook-given prefix is never shortened, and a child
+  - A default child carries no Kustomization name: kure names it
+    `<bundle's Kustomization>-<child>` and shortens it past 63 characters by its own rule
+    (go-kure/kure#1030, go-kure/kure#1036), while the directory keeps its 253-character
+    name. An authored or hook-given prefix names directory and Kustomization alike
+    (`ManifestLayout.KustomizationName`), is never shortened, and a child
     name over 63 characters built from it is refused: by the transform, which has the chart
     rendered by its policy step, and by `AugmentLayout` for a config no transform checked.
     A caller recognises the refusal from either with
     `errors.Is(err, ErrHookGroupNameTooLong)`, and `errors.As` finds a
     `*HookGroupNameError` with the component, the role, the name, its length and the limit
     (`pkg/oam/hook_group_name.go`).
-  - **Breaking:** under per-layout placement a child's Kustomization was named
-    `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`), and refused over 63
-    characters; it is now `shop-db-01-main`.
+  - **Breaking** (go-kure/launcher#941): under per-layout placement a default child's
+    Kustomization is `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`) again; from
+    go-kure/launcher#787 it was `shop-db-01-main`, shortened to 63 by launcher's rule.
 - **A chart's layout Kustomization** (`pkg/oam/README.md` "Pipeline" and "Name roles and the
   `Naming` hook"). Role `layout` names the Flux Kustomization kure generates under per-layout
   placement for the layout of a chart (`helmtemplate`, or `helm` under `delivery: template`),
   by `layoutKustomizationName`, else the hook, else kure's own `<bundle>-<component>`.
-  - Over 63 characters the default is shortened to 63 by the one shortening rule,
-    `-<component>` kept whole (for a component name over 52 characters the whole name is
-    shortened instead, as `ShortenNameWithSuffix` does), and set on the layout; kure refused
-    it before. Where it fits
-    nothing is set and the output does not change. An authored or hook-given name is never
-    shortened, and is refused in the transform unless it is a DNS-1123 subdomain of at most 63
-    characters.
+  - The default is never set: kure makes it and shortens it past 63 characters by its own
+    rule (go-kure/kure#1030, go-kure/kure#1036). **Breaking** (go-kure/launcher#941): a
+    default over 63 was shortened by launcher's rule and set on the layout before, so its
+    name changes. An authored or hook-given name is never shortened, and is refused in the
+    transform unless it is a DNS-1123 subdomain of at most 63 characters.
   - Charts only, and per-layout placement only: under any other the layout has no
     Kustomization of its own, and kure's Flux integration refuses a name set on it, naming
-    the layout (go-kure/kure#1032). The length is measured with the bundle's
-    name as launcher made it, not as a consumer renames it afterwards. The layout of any
-    other component under `ApplicationGrouping: GroupByName` keeps kure's default, which
-    kure shortens past 63 characters by its own rule (go-kure/kure#1030): it is no longer
-    launcher's open point.
-  - With the kure launcher pins, launcher shortens a chart's own layout default by its one
-    rule (go-kure/launcher#793); go-kure/launcher#941 hands that default to kure's rule
-    (go-kure/kure#1030). The two rules give different names for one input, and kure's never
-    reaches a name launcher sets on the layout, which kure uses as written
-    (`pkg/oam/README.md`, "Pipeline").
+    the layout (go-kure/kure#1032). The layout of any other component under
+    `ApplicationGrouping: GroupByName` keeps kure's default as well: the length of every
+    layout's default Kustomization name is the base library's, not launcher's.
   - Hook groups need per-layout placement too: a hook-group child's name and its
     `DependsOn` on the group before are refused by kure's Flux integration under any other
     placement (go-kure/kure#1032), where kure dropped them without an error before and the
@@ -494,8 +486,9 @@ Decided in the ticket:
   whole name; a fixed suffix is kept whole, unless it leaves less room than the digest
   needs (a long routing `scope`): name and suffix are then shortened together. The caller
   passes the limit:
-  - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`, and the
-    default name of a hook-group child's Flux Kustomization (go-kure/launcher#787, §3.2).
+  - `ShortenLimitLabel` (63): the component label value, `ComponentLabelValue`. The
+    default name of a Flux Kustomization, a hook-group child's or a chart layout's, is
+    kure's to shorten (go-kure/launcher#941, §3.2).
   - `ShortenLimitSubdomain` (253): every object name launcher generates by default, the
     hook-group child layouts and the ordered-group bundles.
   - `ShortenLimitHelmRelease` (53): the one exception to the rule. The result is what Flux
@@ -1988,7 +1981,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. A chart's layout names and hook-group order need per-layout placement (go-kure/kure#1032). With the kure launcher pins, launcher shortens a chart's own layout default by its one rule (go-kure/launcher#793); go-kure/launcher#941 hands that default to kure's rule (go-kure/kure#1030). The override length check is the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. A chart's layout names and hook-group order need per-layout placement (go-kure/kure#1032). Default Kustomization names, a chart's layout's and a hook-group child's alike, are left to the base library and its shortening (go-kure/launcher#941). The override length check is the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Partly: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787 |

@@ -127,11 +127,11 @@ var bundleSettingsSet = kustomizationSettings{
 // component of three hook groups: every Kustomization, with its spec.dependsOn.
 // The settings of a bundle change none of it.
 var bundleSettingsChain = map[string][]string{
-	"shop":                    nil,
-	"shop-db":                 nil,
-	"shop-db-00-pre-install":  nil,
-	"shop-db-01-main":         {"shop-db-00-pre-install"},
-	"shop-db-02-post-install": {"shop-db-01-main"},
+	"shop":                         nil,
+	"shop-db":                      nil,
+	"shop-shop-db-00-pre-install":  nil,
+	"shop-shop-db-01-main":         {"shop-shop-db-00-pre-install"},
+	"shop-shop-db-02-post-install": {"shop-shop-db-01-main"},
 }
 
 // A bundle as launcher returns it sets none of the five, and no Kustomization
@@ -192,8 +192,8 @@ func TestBundleSettings_OrderedApplicationTakesTheGroupBundle(t *testing.T) {
 `
 	url := serveHookChart(t)
 	doc := hookApp("shop", hookComponent("db", "helmtemplate", url, "")+hookComponent("web", "helmtemplate", url, ""), placed)
-	infra := []string{"shop-db-00-pre-install", "shop-db-01-main", "shop-db-02-post-install", "shop-infra", "shop-infra-db"}
-	apps := []string{"shop-apps", "shop-apps-web", "shop-web-00-pre-install", "shop-web-01-main", "shop-web-02-post-install"}
+	infra := []string{"shop-infra", "shop-infra-db", "shop-infra-shop-db-00-pre-install", "shop-infra-shop-db-01-main", "shop-infra-shop-db-02-post-install"}
+	apps := []string{"shop-apps", "shop-apps-shop-web-00-pre-install", "shop-apps-shop-web-01-main", "shop-apps-shop-web-02-post-install", "shop-apps-web"}
 	all := slices.Sorted(slices.Values(slices.Concat([]string{"shop"}, infra, apps)))
 	for _, tc := range []struct {
 		bundle string

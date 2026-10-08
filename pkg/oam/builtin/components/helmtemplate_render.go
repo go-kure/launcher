@@ -475,13 +475,13 @@ func (r *chartRender) objects() []*client.Object {
 // empty application — a config built directly — leaves the names beginning
 // with ml.Name.
 //
-// Each child carries the name of its Flux Kustomization
-// (ManifestLayout.KustomizationName, go-kure/launcher#787), which the base
-// library's layout integrator reads under per-layout placement in place of
-// its own default, "<unit>-<child name>". A child's DependsOn lists the
-// previous child's layout name; the integrator writes that sibling's
-// Kustomization name into spec.dependsOn. A child name naming refuses is
-// returned before ml is touched.
+// A child carries the name of its Flux Kustomization
+// (ManifestLayout.KustomizationName, go-kure/launcher#787) only where a prefix
+// names it; otherwise the base library's layout integrator names it
+// "<unit>-<child name>" under per-layout placement (childNames). A child's
+// DependsOn lists the previous child's layout name; the integrator writes that
+// sibling's Kustomization name into spec.dependsOn, whichever named it. A
+// child name naming refuses is returned before ml is touched.
 func (r *chartRender) partition(naming hookGroupNaming, ml *layout.ManifestLayout) error {
 	if len(r.hookGroups) <= 1 {
 		return nil
@@ -1026,30 +1026,30 @@ type hookGroupNaming struct {
 
 // hookGroupChildNames are the two names of one hook-group child layout: dir is
 // its layout name, which is its directory, and kustomization the name of its
-// Flux Kustomization.
+// Flux Kustomization, empty where the base library names it.
 type hookGroupChildNames struct{ dir, kustomization string }
 
 // childNames returns the names of the hook-group children of the layout named
 // mlName, one per suffix (hookGroupSuffix), in order.
 //
-// With no prefix both names of a child come from the default prefix
-// (hookGroupDefaultPrefix), each shortened by the one shortening rule to its
-// own limit with the suffix kept whole: the layout name to 253 characters
-// (hookGroupChildName), the Kustomization name to 63. The two are equal unless
-// the name is over 63 characters. Shortening only the Kustomization name
-// leaves every directory where it was (go-kure/launcher#787).
+// With no prefix a child's layout name comes from the default prefix
+// (hookGroupDefaultPrefix), shortened to 253 characters by the one shortening
+// rule with the suffix kept whole (hookGroupChildName), and its Kustomization
+// name is left to the base library: "<unit>-<layout name>", which it shortens
+// past 63 characters by its own rule (go-kure/kure#1030). Its unit keeps two
+// applications of one name in different bundles apart, and it refuses a
+// Kustomization name used twice.
 //
 // A prefix is used as written, for both names, and never shortened: a child
 // name built from it that cannot be a Flux Kustomization's is refused (check).
+// The author or the consumer chose that name, so the base library does not
+// add its unit to it.
 func (n hookGroupNaming) childNames(mlName string, suffixes []string) ([]hookGroupChildNames, error) {
 	names := make([]hookGroupChildNames, len(suffixes))
 	if n.prefix == "" {
 		prefix := hookGroupDefaultPrefix(n.application, mlName)
 		for i, suffix := range suffixes {
-			names[i] = hookGroupChildNames{
-				dir:           oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitSubdomain),
-				kustomization: oam.ShortenNameWithSuffix(prefix, suffix, hookGroupKustomizationNameLimit),
-			}
+			names[i] = hookGroupChildNames{dir: oam.ShortenNameWithSuffix(prefix, suffix, oam.ShortenLimitSubdomain)}
 		}
 		return names, nil
 	}

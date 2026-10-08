@@ -10,9 +10,9 @@ import (
 
 // These tests pin the name of the Flux Kustomization of a chart component's own
 // layout under per-layout placement (go-kure/launcher#787): the base library
-// names it "<bundle>-<component>", and launcher sets it only where that is over
-// 63 characters, shortened to 63, or where the author or the Naming hook names
-// it.
+// names it "<bundle>-<component>", shortened by its own rule where that is over
+// 63 characters (go-kure/launcher#941), and launcher sets it only where the
+// author or the Naming hook names it.
 
 // layoutPlaced puts component db in tier infra and web in tier apps, which
 // makes the application ordered.
@@ -52,8 +52,9 @@ func hasKustomization(t *testing.T, doc string, ctx oam.TransformContext, name s
 	return ok, names
 }
 
-// A bundle and component whose "<bundle>-<component>" is over 63 characters now
-// build, with the name shortened to 63 by the one rule; one at 61 keeps it whole.
+// A bundle and component whose "<bundle>-<component>" is over 63 characters
+// build, with the name shortened to 63 by the base library's rule
+// (baseLibraryLayoutName); one at 61 keeps it whole.
 func TestLayoutKustomizationName_Defaults(t *testing.T) {
 	url := serveHookChart(t)
 	a30, a32 := strings.Repeat("a", 30), strings.Repeat("a", 32)
@@ -67,19 +68,19 @@ func TestLayoutKustomizationName_Defaults(t *testing.T) {
 		{
 			name: "flat, 32 and 32",
 			doc:  hookApp(a32, hookComponent(c32, "helmtemplate", url, ""), ""),
-			want: oam.ShortenNameWithSuffix(a32, "-"+c32, 63),
+			want: baseLibraryLayoutName(a32, c32),
 			size: 63,
 		},
 		{
 			name: "flat, 32 and 32, helm under delivery: template",
 			doc:  hookApp(a32, hookComponent(c32, "helm", url, "        delivery: template\n"), ""),
-			want: oam.ShortenNameWithSuffix(a32, "-"+c32, 63),
+			want: baseLibraryLayoutName(a32, c32),
 			size: 63,
 		},
 		{
 			name: "ordered, 30 and 30 under the group bundle",
 			doc:  hookApp(a30, strings.ReplaceAll(hookComponent("db", "helmtemplate", url, ""), "name: db", "name: "+c30)+layoutWeb, strings.ReplaceAll(layoutPlaced, "component: db", "component: "+c30)),
-			want: oam.ShortenNameWithSuffix(a30+"-infra", "-"+c30, 63),
+			want: baseLibraryLayoutName(a30+"-infra", c30),
 			size: 63,
 		},
 		{
