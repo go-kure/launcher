@@ -325,6 +325,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 		monitoringKindRow: monitoringKindRow{"prometheus", reflect.TypeFor[monitoringv1.PrometheusSpec](), prometheusKind.required, nil, prometheusKind.defaultedZerosFor(&monitoringv1.PrometheusSpec{}).fields},
 		handler:           &PrometheusHandler{},
 		rulesLeft:         prometheusRulesLeft,
+		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
 		around: map[string]map[string]any{
 			"remoteWrite":            {"url": "https://remote.example/api/v1/write"},
 			"alerting.alertmanagers": {"name": "alertmanager-operated", "port": "web"},

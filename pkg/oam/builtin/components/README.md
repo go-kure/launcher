@@ -4506,16 +4506,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   StatefulSet and no Service for it: the operator builds one StatefulSet per
   shard from the object and runs the pods. What is said of `alertmanager`
   above holds here unless this entry says otherwise: no capability is
-  required and nothing gates the kind; an authored `0` the type cannot carry
-  is refused on a listed container, and so is an empty `portName`,
+  required and nothing gates the kind; on a listed container, init container
+  or volume, an authored `0` or `""` the type cannot carry is refused, a
+  `hostPort` of `0` under `hostNetwork: true` included, and so is an empty
+  `schedulerName` or `imagePullPolicy`, which the operator copies unchanged
+  to the pods and to its own containers (prometheus, thanos-sidecar and both
+  reloaders), where the API server defaults an empty one; so is an empty `portName`,
   `scrapeInterval`, `evaluationInterval` or `thanos.blockSize`, which the CRD
   defaults to `web`, `30s`, `30s` and `2h`, and an empty `action` of a
   relabeling rule (`replace`) in a `remoteWrite` entry's
   `writeRelabelConfigs`, an Alertmanager endpoint's `relabelings` or
   `alertRelabelings`, or a scrape class's `relabelings` or
   `metricRelabelings` (`scrapeInterval: "" cannot be carried by the
-  Prometheus operator API types (…)`), while a string default of the
-  Kubernetes pod types is not refused; the tag rule and the request-over-limit
+  Prometheus operator API types (…)`); the tag rule and the request-over-limit
   check hold with or without a policy; no policy default is filled; an image
   the operator chooses is refused under a registry allowlist, and the
   operator's own replica and shard counts are held, not written (both below);

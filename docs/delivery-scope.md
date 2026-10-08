@@ -1880,7 +1880,10 @@ and by scope, whatever component or trait emits it.
     `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
     so is an empty `action` of a relabeling rule in the five lists of rules the spec
     holds (a remote write entry's, an Alertmanager endpoint's two, a scrape class's
-    two); a string default of the Kubernetes pod types is not, as on the pod kinds.
+    two). On a listed container, init container or volume the kind refuses what the pod
+    kinds refuse, an empty string the API server defaults and a `hostPort` of `0` under
+    `hostNetwork` included, and an empty `schedulerName` or `imagePullPolicy`, which the
+    operator copies unchanged to the pods, is refused as well.
   - **Credentials: three are held, the rest are stated.** A literal `bearerToken`
     (deprecated upstream) of a `remoteWrite` or `remoteRead` entry or of
     `apiserverConfig` is refused under a policy that forbids explicit secrets. A

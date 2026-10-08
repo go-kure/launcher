@@ -238,25 +238,6 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// prometheusDefaultedZeroFields are the strings of the operator's own types
-// that cannot be carried empty, in the prometheus kind's defaulted-zero list
-// (monitoringWorkloadDefaultedZeros): portName, scrapeInterval,
-// evaluationInterval, the Thanos sidecar's blockSize, and the action of a
-// relabeling rule in the five lists of rules the spec holds
-// (monitoringDefaultedZeros).
-var prometheusDefaultedZeroFields = monitoringDefaultedZeros([]string{
-	"remoteWrite[].writeRelabelConfigs",
-	"alerting.alertmanagers[].relabelings",
-	"alerting.alertmanagers[].alertRelabelings",
-	"scrapeClasses[].relabelings",
-	"scrapeClasses[].metricRelabelings",
-}, map[string]string{
-	"portName":           `"web"`,
-	"scrapeInterval":     `"30s"`,
-	"evaluationInterval": `"30s"`,
-	"thanos.blockSize":   `"2h"`,
-}).fields
-
 // prometheusKind is the prometheus kind: see policyHeldKind. The API requires
 // no top-level field of the spec, and of what is authored below it the fields
 // prometheusRequired lists; the type would write each one empty. The API's
@@ -290,6 +271,33 @@ var prometheusKind = &policyHeldKind[monitoringv1.PrometheusSpec]{
 		return enforceMonitoringWorkloadPolicy(prometheusWorkload(spec), p)
 	},
 }
+
+// prometheusDefaultedZeroFields are the fields of the operator's own types in
+// the prometheus kind's defaulted-zero list (monitoringWorkloadDefaultedZeros):
+// four to which the CRD gives another default, the action of a relabeling rule
+// in the five lists of rules the spec holds (monitoringDefaultedZeros), and two
+// the operator copies to a pod field the API server defaults
+// (pkg/prometheus/server/statefulset.go at prometheus-operator v0.94.1):
+// schedulerName to the pod's (:399), and imagePullPolicy to its prometheus
+// container's (:338), the Thanos sidecar's (:620) and both config reloaders'
+// (pkg/prometheus/common.go:380, pkg/operator/config_reloader.go:360).
+var prometheusDefaultedZeroFields = func() map[string]string {
+	fields := monitoringDefaultedZeros([]string{
+		"remoteWrite[].writeRelabelConfigs",
+		"alerting.alertmanagers[].relabelings",
+		"alerting.alertmanagers[].alertRelabelings",
+		"scrapeClasses[].relabelings",
+		"scrapeClasses[].metricRelabelings",
+	}, map[string]string{
+		"portName":           `"web"`,
+		"scrapeInterval":     `"30s"`,
+		"evaluationInterval": `"30s"`,
+		"thanos.blockSize":   `"2h"`,
+	}).fields
+	fields["schedulerName"] = `"default-scheduler"`
+	fields["imagePullPolicy"] = imagePullPolicyDefault
+	return fields
+}()
 
 // prometheusRequired lists the fields the API requires below an authored
 // parent that the type would write unauthored, the key and the operator of
