@@ -1,4 +1,5 @@
 component alertmanager *components.AlertmanagerHandler
+component apiservice *components.APIServiceHandler
 component artifactgenerator *components.ArtifactGeneratorHandler
 component backendtlspolicy *components.BackendTLSPolicyHandler
 component bucket *components.BucketHandler
@@ -68,6 +69,7 @@ component metallb-bgppeer *components.MetalLBBGPPeerHandler
 component metallb-community *components.MetalLBCommunityHandler
 component metallb-ipaddresspool *components.MetalLBIPAddressPoolHandler
 component metallb-l2advertisement *components.MetalLBL2AdvertisementHandler
+component mutatingwebhookconfiguration *components.MutatingWebhookConfigurationHandler
 component namespace *components.NamespaceHandler
 component networkpolicy *components.NetworkPolicyHandler
 component ocirepository *components.OCIRepositoryHandler
@@ -102,6 +104,7 @@ component storageclass *components.StorageClassHandler
 component tcproute *components.TCPRouteHandler
 component tlsroute *components.TLSRouteHandler
 component udproute *components.UDPRouteHandler
+component validatingwebhookconfiguration *components.ValidatingWebhookConfigurationHandler
 component volumeattributesclass *components.VolumeAttributesClassHandler
 component-lowering helm components.HelmRule
 component-lowering oci components.OCIRule
