@@ -1,0 +1,30 @@
+# Copies of prometheus/alertmanager's featurecontrol.go, one per minor at its latest release,
+# copied unmodified by scripts/vendor-alertmanager-features.sh.
+# Licensed under the Apache License, Version 2.0 (each file carries its header);
+# LICENSE is the project's copy of the licence, the same at each tag, and each NOTICE its notice file at that tag.
+# The components tests check each file against its git blob id below.
+licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+tag v0.27.0 4bb056f1d70d925d2358ac42d87d8bae3656562d
+notice v0.27.0/NOTICE f5d0bbb4211937014a4631220c26c41787842235
+file v0.27.0/featurecontrol/featurecontrol.go 9ff7a2d8fd23434f9ee301cebdb23b8a71ea97db
+tag v0.28.1 661b9feecf3366a7080c82a32c2d7c3caf4da676
+notice v0.28.1/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.28.1/featurecontrol/featurecontrol.go 1df215acb1be3b3ca21061c3183d863084ef5dd9
+tag v0.29.0 3cc60673d4b00c7f5a95a38f7434f587c6858993
+notice v0.29.0/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.29.0/featurecontrol/featurecontrol.go d6da3ac88f257b10abea18e78f04ab987ec60642
+tag v0.30.1 afc1b527c2fccabaa77151ec42f425d4ec4d4944
+notice v0.30.1/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.30.1/featurecontrol/featurecontrol.go b4b7cf4735c54c0c5ea8ddd3a98b3fedba571bca
+tag v0.31.1 fa60bc606d939126807b137c3db9a8852288a3ad
+notice v0.31.1/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.31.1/featurecontrol/featurecontrol.go 63e1056a2cd3e4248ed849bd5c252d150dd0a4a6
+tag v0.32.3 20c0b061a11a83ea23a9aa32caf4ee1d53647373
+notice v0.32.3/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.32.3/featurecontrol/featurecontrol.go e613704566e56e85914b5102f4837383fc1f6b4c
+tag v0.33.1 baca8cf2c61f50a448ddbf5a04dc4feb9b3d6d26
+notice v0.33.1/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.33.1/featurecontrol/featurecontrol.go 3b5e65680dcad080bddfd50d54cb0536cb261680
+tag v0.34.1 35aab4b30bd2c50bc058d58fcb9fe817893f9ea5
+notice v0.34.1/NOTICE e0dd624377b5689eb65bb46fe18617f9ead14d18
+file v0.34.1/featurecontrol/featurecontrol.go 3b5e65680dcad080bddfd50d54cb0536cb261680
