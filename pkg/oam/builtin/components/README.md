@@ -4241,7 +4241,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     listed shapes it cannot follow: among others, a write through a copy of a
     field (read by name or through a dereference), a list element reached by
     anything but a range over that list, a `break` out of a loop, a method
-    called on the object, or a write it cannot place in the object. The
+    called on the object, a variable shadowing one of an enclosing block, or
+    a write it cannot place in the object. The
     trade-off is that a re-vendoring whose code uses a new shape or call
     fails the test until that shape is understood and listed, even when it
     changes no default. Most defaults are set by a `SetDefaults_` function.

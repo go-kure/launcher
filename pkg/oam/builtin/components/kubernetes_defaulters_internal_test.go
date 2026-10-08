@@ -346,7 +346,44 @@ type walkFrame struct {
 	// element type of a list of the object, else the list's text. A method
 	// is listed by its receiver's identity, which these give.
 	elems map[string]string
-	conds []string
+	// scopes are the names each open block declares, outermost first. The
+	// maps above are flat, so a name leaves them when its block ends, and a
+	// declaration that would shadow a name of an enclosing block fails.
+	scopes []map[string]bool
+	conds  []string
+	// exitCond is the negated condition of the last if walked, which holds
+	// after it when its body leaves the block.
+	exitCond string
+}
+
+func (f *walkFrame) open() {
+	f.scopes = append(f.scopes, map[string]bool{})
+}
+
+func (f *walkFrame) close() {
+	for name := range f.scopes[len(f.scopes)-1] {
+		delete(f.vars, name)
+		delete(f.locals, name)
+		delete(f.copies, name)
+		delete(f.ranges, name)
+		delete(f.elems, name)
+	}
+	f.scopes = f.scopes[:len(f.scopes)-1]
+}
+
+// declare records name as declared in the innermost block. A name the
+// block already declares is assigned, as := does.
+func (f *walkFrame) declare(pos token.Pos, name string) {
+	cur := f.scopes[len(f.scopes)-1]
+	if name == "_" || cur[name] {
+		return
+	}
+	for _, s := range f.scopes[:len(f.scopes)-1] {
+		if s[name] {
+			f.w.fail(pos, "%s shadows a variable of an enclosing block, which the walk does not follow", name)
+		}
+	}
+	cur[name] = true
 }
 
 func (w *defaulterWalk) fail(pos token.Pos, format string, args ...any) {
@@ -362,12 +399,14 @@ func (w *defaulterWalk) call(fn *vendoredFunc, args []ast.Expr, caller *walkFram
 		w.fail(fn.decl.Pos(), "the call depth passes 30: a recursion the walk does not follow")
 	}
 	f := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, elems: map[string]string{}, conds: caller.conds}
+	f.open()
 	i := 0
 	for _, field := range fn.decl.Type.Params.List {
 		for _, name := range field.Names {
 			if i >= len(args) {
 				w.fail(fn.decl.Pos(), "%s takes more parameters than the call passes", fn.decl.Name.Name)
 			}
+			f.declare(name.Pos(), name.Name)
 			if pv, ok := caller.alias(args[i]); ok {
 				f.vars[name.Name] = pv
 			} else {
@@ -388,7 +427,7 @@ func (s *vendoredK8s) podSpecWrites(t *testing.T, pkgPath, name string, typ refl
 	fn := s.fn(t, pkgPath, name)
 	w := &defaulterWalk{t: t, src: s, prefix: prefix}
 	param := fn.decl.Type.Params.List[0].Names[0].Name
-	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, elems: map[string]string{}}
+	top := &walkFrame{w: w, fn: fn, vars: map[string]pathVal{param: {typ: typ}}, copies: map[string]bool{}, locals: map[string]string{}, ranges: map[string]string{}, elems: map[string]string{}, scopes: []map[string]bool{{param: true}}}
 	top.stmts(fn.decl.Body.List)
 	out := map[string][]specWrite{}
 	for _, wr := range w.writes {
@@ -424,6 +463,13 @@ func endsInExit(b *ast.BlockStmt) bool {
 
 // stmts walks a block. What follows an if whose body leaves the block, with
 // no else, runs only when its condition is false.
+// block walks list as a block of its own.
+func (f *walkFrame) block(list []ast.Stmt) {
+	f.open()
+	defer f.close()
+	f.stmts(list)
+}
+
 func (f *walkFrame) stmts(list []ast.Stmt) {
 	saved := f.conds
 	defer func() { f.conds = saved }()
@@ -432,7 +478,7 @@ func (f *walkFrame) stmts(list []ast.Stmt) {
 			return
 		}
 		if is, ok := s.(*ast.IfStmt); ok && is.Else == nil && endsInExit(is.Body) {
-			f.conds = append(slices.Clip(f.conds), "!("+f.render(is.Cond)+")")
+			f.conds = append(slices.Clip(f.conds), f.exitCond)
 		}
 	}
 }
@@ -455,7 +501,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 	w := f.w
 	switch x := s.(type) {
 	case *ast.BlockStmt:
-		f.stmts(x.List)
+		f.block(x.List)
 	case *ast.ReturnStmt:
 		for _, r := range x.Results {
 			f.check(r)
@@ -469,6 +515,8 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 		}
 		return true
 	case *ast.IfStmt:
+		f.open()
+		defer f.close()
 		if x.Init != nil {
 			f.stmt(x.Init)
 		}
@@ -477,14 +525,18 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			f.check(c)
 			f.conds = append(slices.Clip(f.conds), f.render(c))
 		}
-		f.stmts(x.Body.List)
+		f.block(x.Body.List)
 		f.conds = saved
 		if x.Else != nil {
 			f.conds = append(slices.Clip(saved), "!("+f.render(x.Cond)+")")
 			f.stmt(x.Else)
 			f.conds = saved
 		}
+		// Rendered while the variables of the if's initialiser are bound.
+		f.exitCond = "!(" + f.render(x.Cond) + ")"
 	case *ast.SwitchStmt:
+		f.open()
+		defer f.close()
 		if x.Init != nil {
 			f.stmt(x.Init)
 		}
@@ -504,14 +556,20 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 				cond = "(" + strings.Join(parts, " || ") + ")"
 			}
 			f.conds = append(slices.Clip(saved), cond)
-			f.stmts(clause.Body)
+			f.block(clause.Body)
 		}
 		f.conds = saved
 	case *ast.RangeStmt:
 		f.check(x.X)
+		f.open()
+		defer f.close()
 		for _, kv := range []ast.Expr{x.Key, x.Value} {
-			if _, ok := kv.(*ast.Ident); kv != nil && !ok {
+			id, ok := kv.(*ast.Ident)
+			if kv != nil && !ok {
 				w.fail(x.Pos(), "a range assigning to %s, which the walk does not follow", f.render(kv))
+			}
+			if ok && x.Tok == token.DEFINE {
+				f.declare(id.Pos(), id.Name)
 			}
 		}
 		if k, ok := x.Key.(*ast.Ident); ok && k.Name != "_" {
@@ -530,7 +588,7 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 				}
 			}
 		}
-		f.stmts(x.Body.List)
+		f.block(x.Body.List)
 	case *ast.DeclStmt:
 		gen, ok := x.Decl.(*ast.GenDecl)
 		if !ok {
@@ -545,6 +603,9 @@ func (f *walkFrame) stmt(s ast.Stmt) bool {
 			for i, name := range vs.Names {
 				if i < len(vs.Values) {
 					f.check(vs.Values[i])
+				}
+				f.declare(name.Pos(), name.Name)
+				if i < len(vs.Values) {
 					f.bindValue(name.Name, vs.Values[i])
 				} else {
 					f.bindLocal(name.Name, name.Name)
@@ -604,6 +665,9 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 			if !ok {
 				w.fail(x.Pos(), "a tuple assignment to %s, which the walk does not follow", f.render(l))
 			}
+			if x.Tok == token.DEFINE {
+				f.declare(id.Pos(), id.Name)
+			}
 			if id.Name != "_" {
 				f.bindLocal(id.Name, fmt.Sprintf("%s[%d]", rhs, i))
 			}
@@ -620,6 +684,9 @@ func (f *walkFrame) assign(x *ast.AssignStmt) {
 		if id, ok := l.(*ast.Ident); ok {
 			if id.Name == "_" {
 				continue
+			}
+			if x.Tok == token.DEFINE {
+				f.declare(id.Pos(), id.Name)
 			}
 			f.bindValue(id.Name, r)
 			continue
