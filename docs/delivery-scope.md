@@ -1745,11 +1745,15 @@ and by scope, whatever component or trait emits it.
     Kubernetes pod types is not refused, as on the pod kinds.
   - **What the operator builds from the spec is checked where it would break.** An
     `image` (or a listed `alertmanager` entry's) without `version`, whose flags the
-    operator would choose for its own default version; a named claim template beside
-    `storage.emptyDir` or `storage.ephemeral`, which leaves the data mount dangling; an
-    entry of `volumes` named as a volume the operator adds; and a name whose data volume
-    `alertmanager-<name>-db` or last pod hostname is not a DNS-1123 label (no dot, at most
-    47 characters with the defaults) are each refused.
+    operator would choose for its own default version; a `version` the operator cannot
+    parse or does not support; a `portName` the API refuses on the container; a negative
+    `replicas`, which the operator runs as 0; a named claim template beside
+    `storage.emptyDir` or `storage.ephemeral`, which leaves the data mount dangling; a
+    storage arm in use whose claim has no storage request, or no access modes where the
+    operator does not default them; an entry of `volumes` named as a volume the operator
+    adds; and a name whose data volume `alertmanager-<name>-db` or last pod hostname is not
+    a DNS-1123 label (no dot, at most 47 characters with the defaults) are each refused.
+    Fields the operator reads only from some version on are not held to `version`.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

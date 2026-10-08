@@ -243,11 +243,11 @@ func alertmanagerRefusals(notA string) []struct {
 		// and ephemeral (statefulset.go:174-198 and :531-535).
 		{"a named claim template beside emptyDir", map[string]any{"storage": map[string]any{
 			"emptyDir":            map[string]any{},
-			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
 		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
 		{"a named claim template beside ephemeral", map[string]any{"storage": map[string]any{
 			"ephemeral":           map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}}},
-			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
 		}}, "storage.volumeClaimTemplate.metadata.name: refused beside storage.emptyDir or storage.ephemeral"},
 		// A volume named as one the operator adds to the pods
 		// (statefulset.go:215, :510-529, :617-690, :698-738).
@@ -268,8 +268,40 @@ func alertmanagerRefusals(notA string) []struct {
 		{"a volume named as the data volume", amVolume("alertmanager-fast-db"),
 			`volumes[0] "alertmanager-fast-db": the name is the data volume's`},
 		{"a volume named as the claim template's", withAmVolume(map[string]any{"storage": map[string]any{
-			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}},
+			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim},
 		}}, "data"), `volumes[0] "data": the name is the data volume's`},
+		// A version the operator fails the reconcile on (operator.go:902-909,
+		// statefulset.go:284).
+		{"a version that does not parse", map[string]any{"version": "banana"},
+			`version: "banana" is not a version the Prometheus operator can parse`},
+		{"a version under 0.15.0", map[string]any{"version": "v0.14.0"},
+			`version: "v0.14.0" is not supported by the Prometheus operator`},
+		{"a version of major version 1", map[string]any{"version": "v1.0.0"},
+			`version: "v1.0.0" is not supported by the Prometheus operator`},
+		// A web port name the API refuses on the container (statefulset.go:483-500).
+		{"a port name over 15 characters", map[string]any{"portName": "alertmanager-web"},
+			`portName: "alertmanager-web" is not a valid port name`},
+		{"a port name of the mesh", map[string]any{"portName": "mesh-tcp"},
+			`portName: "mesh-tcp" is the name of a port the Prometheus operator adds`},
+		// The operator rewrites a negative count to 0 (statefulset.go:137-139).
+		{"negative replicas", map[string]any{"replicas": -1}, "replicas: -1 is below 0"},
+		// A claim the API refuses (statefulset.go:191-212).
+		{"a claim template without a storage request", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}},
+		}}, "storage.volumeClaimTemplate.spec.resources.requests.storage: required where neither storage.emptyDir nor storage.ephemeral is set"},
+		{"an empty storage", map[string]any{"storage": map[string]any{}},
+			"storage.volumeClaimTemplate.spec.resources.requests.storage: required"},
+		{"a claim template with access modes written empty", map[string]any{"storage": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{}, "resources": amClaim["resources"]}},
+		}}, "storage.volumeClaimTemplate.spec.accessModes: written empty"},
+		{"an ephemeral arm without a claim template", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{}}},
+			"storage.ephemeral.volumeClaimTemplate: required"},
+		{"an ephemeral claim without access modes", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": amClaim},
+		}}}, "storage.ephemeral.volumeClaimTemplate.spec.accessModes: required"},
+		{"an ephemeral claim without a storage request", map[string]any{"storage": map[string]any{"ephemeral": map[string]any{
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{"accessModes": []any{"ReadWriteOnce"}}},
+		}}}, "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage: required"},
 		// The operator fills an unset memory request as 200Mi whatever the
 		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
@@ -342,6 +374,10 @@ const amImage = "registry.example/prometheus/alertmanager:v0.28.1"
 
 // amVersion is the version amImage runs.
 const amVersion = "v0.28.1"
+
+// amClaim is the spec of a claim template that claims storage, as the claim
+// template arm in use must.
+var amClaim = map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
 
 // amReloader is an image from that registry for the two config-reloader
 // containers the operator generates: under ptStrictPolicy each is refused
@@ -681,7 +717,7 @@ func TestAlertmanager_PatchedImage(t *testing.T) {
 func TestAlertmanager_Name(t *testing.T) {
 	h := &components.AlertmanagerHandler{}
 	long := strings.Repeat("a", 48)
-	named := map[string]any{"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}}}}
+	named := map[string]any{"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}}
 	for name, tc := range map[string]struct {
 		component string
 		props     map[string]any
@@ -713,6 +749,32 @@ func TestAlertmanager_Name(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := alertmanagerNamed(h, tc.component, tc.props); err != nil {
+				t.Fatalf("err = %v, want it built", err)
+			}
+		})
+	}
+}
+
+// TestAlertmanager_OperatorRunsIt: the specs beside each refusal of what the
+// operator or the API would refuse or rewrite, that both run as written, build.
+func TestAlertmanager_OperatorRunsIt(t *testing.T) {
+	h := &components.AlertmanagerHandler{}
+	for name, props := range map[string]map[string]any{
+		"the least version supported":           {"version": "v0.15.0"},
+		"a version without its patch":           {"version": "0.28"},
+		"zero replicas":                         {"replicas": 0},
+		"a port name of 15 characters":          {"portName": "alertmanagerweb"},
+		"emptyDir alone":                        {"storage": map[string]any{"emptyDir": map[string]any{}}},
+		"a claim template without access modes": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
+		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
+			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],
+			}}},
+			"volumeClaimTemplate": map[string]any{"spec": map[string]any{}},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := coreKindErr(h, "alertmanager", "fast", props); err != nil {
 				t.Fatalf("err = %v, want it built", err)
 			}
 		})

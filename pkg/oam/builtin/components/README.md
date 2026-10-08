@@ -3724,10 +3724,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     image: the operator chooses the container's flags by `version`, and by its
     own default where none is, whatever the image runs (`version: required
     where image, or an entry of containers named alertmanager, names the
-    image`).
+    image`); and a `version` the operator fails the reconcile on: one
+    `semver.ParseTolerant` cannot parse, one under 0.15.0, or one of a major
+    version above 0 (operator.go:902-909).
+  - a `portName` the API refuses as the name of the alertmanager container's
+    web port: not an IANA service name (at most 15 characters, lower-case
+    letters, digits and `-`), or `mesh-tcp`/`mesh-udp`, the ports the
+    operator adds beside it.
+  - a negative `replicas`, which the operator runs as 0.
   - `storage.volumeClaimTemplate.metadata.name` beside `storage.emptyDir` or
     `storage.ephemeral`: the operator mounts the data volume under that name and
     creates it under its own, so the pods mount a volume that does not exist.
+  - a storage arm in use whose claim the API refuses: the claim template arm
+    (which an unset arm selects, an empty `storage` included) without
+    `spec.resources.requests.storage`, or with `spec.accessModes` written
+    empty (unset, the operator writes `ReadWriteOnce`); the ephemeral arm
+    without a claim template, its access modes or its storage request, which
+    the operator uses as written.
   - an entry of `volumes` named as a volume the operator adds: `config-volume`,
     `tls-assets`, `config-out`, `web-config`, `cluster-tls-config`, a name
     starting `web-config-tls-`, `cluster-tls-server-config-` or

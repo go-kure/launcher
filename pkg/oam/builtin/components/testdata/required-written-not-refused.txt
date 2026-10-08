@@ -797,7 +797,6 @@ alertmanager	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].ap
 alertmanager	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].kind	KIND	""
 alertmanager	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].name	KIND	""
 alertmanager	storage.ephemeral.volumeClaimTemplate.metadata.ownerReferences[].uid	KIND	""
-alertmanager	storage.ephemeral.volumeClaimTemplate.spec	POD	{"resources":{}}
 alertmanager	storage.ephemeral.volumeClaimTemplate.spec.dataSource.kind	POD	""
 alertmanager	storage.ephemeral.volumeClaimTemplate.spec.dataSource.name	POD	""
 alertmanager	storage.ephemeral.volumeClaimTemplate.spec.dataSourceRef.kind	POD	""

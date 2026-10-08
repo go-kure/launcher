@@ -447,11 +447,14 @@ var requiredWrittenKinds = []pinKind{
 		base:   map[string]any{"groups": []any{map[string]any{"name": "g", "rules": []any{map[string]any{"alert": "Down", "expr": "up == 0"}}}}}},
 	// A listed container named for none the operator generates must name an
 	// image, so the controls of the fields under one fill it into this entry.
+	// The storage arm in use must claim storage, and an ephemeral one name its
+	// access modes (validateAlertmanagerStorage), so both arms carry them.
 	{component: "alertmanager", handler: &AlertmanagerHandler{}, typ: reflect.TypeFor[monitoringv1.AlertmanagerSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[monitoringv1.AlertmanagerSpec](), false),
 		base: map[string]any{
 			"containers":     []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
 			"initContainers": []any{map[string]any{"name": "x", "image": "registry.example/team/probe:1.0.0"}},
+			"storage":        amClaimingStorage(),
 		}},
 	{component: "artifactgenerator", handler: &ArtifactGeneratorHandler{}, typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), false)},
@@ -846,6 +849,21 @@ func pinControl(k pinKind, base map[string]any, path string, schema pinSchema) (
 		}
 	}
 	return nil, last
+}
+
+// amClaimingStorage is an alertmanager storage whose claim template arm and
+// ephemeral arm each build: whichever is in use claims storage, and the
+// ephemeral one names its access modes.
+func amClaimingStorage() map[string]any {
+	claim := func() map[string]any {
+		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
+	}
+	ephemeral := claim()
+	ephemeral["accessModes"] = []any{"ReadWriteOnce"}
+	return map[string]any{
+		"volumeClaimTemplate": map[string]any{"spec": claim()},
+		"ephemeral":           map[string]any{"volumeClaimTemplate": map[string]any{"spec": ephemeral}},
+	}
 }
 
 // pinCandidates are the strings a sample tries against a property's pattern.
