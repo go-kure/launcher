@@ -221,9 +221,6 @@ func alertmanagerRefusals(notA string) []struct {
 		{"request over its limit", map[string]any{"resources": map[string]any{
 			"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"},
 		}}, "resources: cpu: request 2 must not exceed limit 1"},
-		{"hugepages without cpu or memory", map[string]any{"resources": map[string]any{
-			"requests": map[string]any{"hugepages-2Mi": "64Mi"}, "limits": map[string]any{"hugepages-2Mi": "64Mi"},
-		}}, "resources: hugepages require cpu or memory in requests or limits"},
 		// The operator fills an unset memory request as 200Mi whatever the
 		// limit (pkg/alertmanager/statefulset.go:144-149 at v0.94.1).
 		{"memory limit under the operator's request", map[string]any{"resources": map[string]any{
@@ -239,6 +236,9 @@ func alertmanagerRefusals(notA string) []struct {
 			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
 			"containers": []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
 		}, `resources with containers[0] "alertmanager" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		{"extended resource of a patch with no limit in either block", container(map[string]any{"name": "alertmanager", "resources": map[string]any{
+			"requests": map[string]any{"example.com/device": "1"},
+		}}), `resources with containers[0] "alertmanager" merged over it: resources: example.com/device: limit must be set when request is set`},
 		// The operator keeps the last entry of a name (MergePatchContainers,
 		// pkg/k8s/merge.go at v0.94.1), so an earlier one would be held and not
 		// run.
@@ -390,8 +390,9 @@ func TestAlertmanager_DeprecatedImageFields(t *testing.T) {
 // container is the property of that name, so its refusal carries the word once.
 func TestAlertmanager_ResourceRefusalNamesItsPathOnce(t *testing.T) {
 	for name, block := range map[string]map[string]any{
-		"request over its limit":          {"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}},
-		"hugepages without cpu or memory": {"limits": map[string]any{"hugepages-2Mi": "64Mi"}},
+		"request over its limit":                {"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}},
+		"extended request without a limit":      {"requests": map[string]any{"example.com/device": "1"}},
+		"memory limit under the filled request": {"limits": map[string]any{"memory": "100Mi"}},
 	} {
 		err := coreKindErr(&components.AlertmanagerHandler{}, "alertmanager", "main", map[string]any{"resources": block})
 		if err == nil || strings.Count(err.Error(), "resources: ") != 1 {
@@ -590,6 +591,16 @@ func TestAlertmanager_PatchedImage(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "other.example") {
 		t.Errorf("err = %v, want one naming the patch's image", err)
 	}
+	// The patch's image replaces image, which then never runs and is not
+	// held, to the registries or to the tag rule.
+	for _, image := range []string{"other.example/prometheus/alertmanager:v0.28.1", "registry.example/prometheus/alertmanager:latest"} {
+		props := patched(amImage)
+		props["image"] = image
+		if _, err := pvTransform("alertmanager", h, props, ptStrictPolicy()); err != nil {
+			t.Errorf("image %q replaced by a patch: %v, want it built", image, err)
+		}
+		alertmanagerOf(t, props)
+	}
 }
 
 // TestAlertmanager_ReloaderImages: the operator generates config-reloader and
@@ -720,7 +731,17 @@ func TestAlertmanager_OperatorDefaultsHeld(t *testing.T) {
 			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
 			"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "64Mi"}})},
 		}, small, "", ""},
-		"memory request of a patch over 128Mi":              {map[string]any{"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "256Mi"}})}}, small, oam.RefusalResourceMaximum, `resources with containers[0] "alertmanager" merged over it: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+		"memory request of a patch over 128Mi": {map[string]any{"containers": []any{amPatch(map[string]any{"requests": map[string]any{"memory": "256Mi"}})}}, small, oam.RefusalResourceMaximum, `resources with containers[0] "alertmanager" merged over it: memory request "256Mi" exceeds enforced maximum "128Mi"`},
+		// The block is checked as the pods run it: the filled request names
+		// memory beside hugepages, and a patch's extended request meets the
+		// limit of resources it is merged with.
+		"hugepages alone, the filled request naming memory": {map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"hugepages-2Mi": "64Mi"}, "limits": map[string]any{"hugepages-2Mi": "64Mi"},
+		}}, exact, "", ""},
+		"an extended request of a patch, its limit in resources": {map[string]any{
+			"resources":  map[string]any{"limits": map[string]any{"example.com/device": "1"}},
+			"containers": []any{amPatch(map[string]any{"requests": map[string]any{"example.com/device": "1"}})},
+		}, exact, "", ""},
 		"a patch that names no memory request, under 128Mi": {map[string]any{"containers": []any{amPatch(map[string]any{"limits": map[string]any{"cpu": "1"}})}}, small, oam.RefusalResourceMaximum, `resources with containers[0] "alertmanager" merged over it, whose unset memory request the Prometheus operator fills as 200Mi`},
 	} {
 		t.Run(name, func(t *testing.T) {
