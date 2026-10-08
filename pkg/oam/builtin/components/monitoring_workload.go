@@ -159,7 +159,7 @@ type monitoringWorkload struct {
 // dnsPolicy of None without a nameserver and a pod-level HostProcess without
 // hostNetwork, which the API refuses of a pod (podspec.go holds both on the
 // pod kinds), as are two volumes of one name and a serviceName that is not a
-// DNS-1035 label, which names no Service. A listed container named for one
+// DNS-1035 label, the rule of every Service name here. A listed container named for one
 // the operator generates is merged into it, its ports by number (runPorts),
 // and may name no image; any other listed container is added to the pods as
 // written, and one that names no image is refused, since no pod runs it. A
@@ -231,10 +231,13 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	}
 	// The operator fails the reconcile where it cannot get the Service the
 	// spec names (EnsureCustomGoverningService, pkg/k8s/network.go:135-140
-	// at v0.94.1), and no Service has a name that is not a DNS-1035 label.
+	// at v0.94.1). The name is held to the rule every Service name of this
+	// package is (validateServiceName), a DNS-1035 label: the API refuses a
+	// Service of another name before Kubernetes 1.36, by default (the
+	// RelaxedServiceNameValidation feature gate; go-kure/launcher#959).
 	if w.serviceName != nil {
 		if err := validateServiceName("serviceName", *w.serviceName); err != nil {
-			return errors.Errorf("%w; no Service has such a name, so the Prometheus operator fails to find the governing Service and builds no pods", err)
+			return errors.Errorf("%w; the API refuses a Service of such a name before Kubernetes 1.36 (by default), so the Prometheus operator fails to find the governing Service and builds no pods", err)
 		}
 	}
 	// The API's pod rules across fields the spec carries apart: the operator
