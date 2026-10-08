@@ -178,8 +178,10 @@ launcher set: launcher sets every default it measures as over 63 itself, and kur
 name set on a layout as written, checking only that it is a valid Kustomization name of at
 most 63 characters. Once launcher pins a kure with that rule, it reaches only the layouts
 launcher leaves at kure's default: a component's that is no chart (the first point above),
-and a chart's whose default launcher measured as fitting before a consumer renamed the
-bundle (the third point), both of which kure then shortens where it refused them before.
+a chart's whose default launcher measured as fitting before a consumer renamed the bundle
+(the third point), and a chart's whose `HelmTemplateConfig` was built directly with no
+`LayoutKustomizationName`, which no transform measured; kure then shortens each of them
+where it refused them before.
 Launcher keeps one rule per component on purpose (go-kure/launcher#793): the chart's
 hook-group children below are shortened by the same rule, and every refusal of a name
 launcher sets agrees with kure's, at the same 63 characters.

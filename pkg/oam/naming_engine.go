@@ -104,7 +104,9 @@ func (r *nameResolver) resolveHookGroupNamePrefix(component string, config HookG
 // here: every default measured over 63 is set, and the base library uses a set
 // name as written. A shortened default is made from the bundle name launcher
 // measured and kept after a consumer renames the bundle; a default left to the
-// base library is made from the new name, so only there can its rule apply.
+// base library is made from the new name, so of the names resolved here only
+// that one can meet its rule (a HelmTemplateConfig built directly, with no
+// LayoutKustomizationName, never comes here and is left to it too).
 func (r *nameResolver) resolveLayoutKustomizationName(bundle, app, component string, config LayoutKustomizationNameSetter) error {
 	full := bundle + "-" + app
 	def := ShortenNameWithSuffix(bundle, "-"+app, stack.KustomizationNameMaxLength)
