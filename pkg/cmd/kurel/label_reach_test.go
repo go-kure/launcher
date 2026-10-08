@@ -289,7 +289,11 @@ var labelReachNotRead = []labelReachUnread{
 	// (labelReachReservedOnly), and a CronJob's job template by both checks
 	// (pkg/oam podTemplateKinds).
 	{field: "k8s.io/api/core/v1.PersistentVolumeClaimTemplate.ObjectMeta", reason: unreadTemplate},
-	{field: "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.EmbeddedPersistentVolumeClaim.EmbeddedObjectMetadata", reason: unreadTemplate},
+	// The claim template of a Prometheus operator workload's spec.storage.
+	{
+		field:  "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1.EmbeddedPersistentVolumeClaim.EmbeddedObjectMetadata",
+		reason: "a Prometheus operator workload's claim template (spec.storage): the operator copies it onto its StatefulSet's volume claim templates; not yet held, with the monitoring kinds (go-kure/launcher#945)",
+	},
 
 	// Maps that are named like metadata and are the metadata of no object.
 	{
