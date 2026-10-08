@@ -847,7 +847,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 		replicas = int64(*spec.Replicas)
 	}
 	resources := fieldResources{"resources", spec.Resources}
-	var merged map[string]string
+	var merged map[string][]string
 	if i := patchOf(spec.Containers, "alertmanager"); i >= 0 {
 		patch := spec.Containers[i].Resources
 		if len(patch.Requests) > 0 || len(patch.Limits) > 0 {
@@ -855,7 +855,7 @@ func alertmanagerWorkload(spec *monitoringv1.AlertmanagerSpec) monitoringWorkloa
 				fmt.Sprintf("resources with containers[%d] %q merged over it", i, "alertmanager"),
 				mergedResources(spec.Resources, patch),
 			}
-			merged = map[string]string{"containers": "alertmanager"}
+			merged = map[string][]string{"containers": {"alertmanager"}}
 		}
 	}
 	w := monitoringWorkload{

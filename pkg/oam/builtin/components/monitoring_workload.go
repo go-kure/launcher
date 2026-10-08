@@ -136,11 +136,11 @@ type monitoringWorkload struct {
 	// with the requests and limits of a listed entry that patches the container
 	// merged over it, key by key (mergedResources).
 	resources []fieldResources
-	// mergedPatches names, by the property that lists it, the generated
-	// container whose patch's resources are held merged in resources: the
+	// mergedPatches names, by the property that lists them, the generated
+	// containers whose patch's resources are held merged in resources: the
 	// patch's block alone is then not checked against the API's rules, as the
 	// operator never runs it alone.
-	mergedPatches map[string]string
+	mergedPatches map[string][]string
 	// memoryRequests is the memory request the operator fills into a block of
 	// resources that names none, by the path of the block. The block is checked
 	// with it filled.
@@ -209,7 +209,7 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			if err := refuseDuplicatePortNames(where, merging, runPorts(merging, w.generatedPorts[c.Name], c.Ports)); err != nil {
 				return err
 			}
-			if patched, merged := w.mergedPatches[list.name]; merged && patched == c.Name {
+			if slices.Contains(w.mergedPatches[list.name], c.Name) {
 				continue
 			}
 			if err := validateNonNegativeResources(where, c.Resources); err != nil {

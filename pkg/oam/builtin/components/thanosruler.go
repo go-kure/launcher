@@ -533,7 +533,7 @@ func thanosRulerWorkload(spec *monitoringv1.ThanosRulerSpec) monitoringWorkload 
 		replicas = int64(*spec.Replicas)
 	}
 	resources := fieldResources{"resources", spec.Resources}
-	var merged map[string]string
+	var merged map[string][]string
 	if i := patchOf(spec.Containers, "thanos-ruler"); i >= 0 {
 		patch := spec.Containers[i].Resources
 		if len(patch.Requests) > 0 || len(patch.Limits) > 0 {
@@ -541,7 +541,7 @@ func thanosRulerWorkload(spec *monitoringv1.ThanosRulerSpec) monitoringWorkload 
 				fmt.Sprintf("resources with containers[%d] %q merged over it", i, "thanos-ruler"),
 				mergedResources(spec.Resources, patch),
 			}
-			merged = map[string]string{"containers": "thanos-ruler"}
+			merged = map[string][]string{"containers": {"thanos-ruler"}}
 		}
 	}
 	w := monitoringWorkload{
