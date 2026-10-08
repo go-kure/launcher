@@ -345,6 +345,43 @@ func alertmanagerRefusals(notA string) []struct {
 			"alertmanagerConfiguration": map[string]any{"name": "global", "templates": []any{map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}}}},
 			"volumeMounts":              []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}},
 		}, `volumeMounts[0] "/etc/alertmanager/templates": the mount path is the path the Prometheus operator mounts alertmanagerConfiguration.templates at`},
+		// The operator skips a template whose key it has projected
+		// (statefulset.go:575-620), configMap or secret.
+		{"two templates of one key", map[string]any{
+			"alertmanagerConfiguration": map[string]any{"name": "global", "templates": []any{
+				map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}},
+				map[string]any{"secret": map[string]any{"name": "private", "key": "slack.tmpl"}},
+			}},
+		}, `alertmanagerConfiguration.templates[1].secret.key: "slack.tmpl" is the key alertmanagerConfiguration.templates[0].configMap.key names already, and the Prometheus operator skips a template whose key it has already loaded`},
+		// BuildArgs fails the reconcile on an additional argument that names a
+		// generated flag, or its negation (pkg/operator/argument.go:26-79).
+		{"an argument naming a flag generated for every spec", map[string]any{"additionalArgs": []any{map[string]any{"name": "web.route-prefix", "value": "/am"}}},
+			`additionalArgs[0] "web.route-prefix": the Prometheus operator generates the flag "web.route-prefix" for this spec, and fails to build the pods`},
+		{"an argument negating a generated flag", map[string]any{"additionalArgs": []any{map[string]any{"name": "no-cluster.label"}}},
+			`additionalArgs[0] "no-cluster.label": the Prometheus operator generates the flag "cluster.label" for this spec`},
+		{"an argument naming the flag of a set field", map[string]any{"logLevel": "debug", "additionalArgs": []any{map[string]any{"name": "log.level", "value": "warn"}}},
+			`additionalArgs[0] "log.level": the Prometheus operator generates the flag "log.level" for this spec`},
+		{"an argument naming the peers of a replica", map[string]any{"additionalArgs": []any{map[string]any{"name": "cluster.peer", "value": "other:9094"}}},
+			`additionalArgs[0] "cluster.peer": the Prometheus operator generates the flag "cluster.peer" for this spec`},
+		// The API requires the names of a pod's init containers and containers
+		// to be unique together.
+		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
+			`containers[0] "init-config-reloader": the name is also that of the init container the Prometheus operator generates, and the API refuses a pod whose init containers and containers share a name`},
+		{"an init container named as a generated container", map[string]any{"initContainers": []any{map[string]any{"name": "config-reloader", "image": "registry.example/team/proxy:1.2.3"}}},
+			`initContainers[0] "config-reloader": the name is that of a container the Prometheus operator generates, and the API refuses a pod whose init containers and containers share a name`},
+		{"a name listed in both lists", map[string]any{
+			"initContainers": []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
+			"containers":     []any{map[string]any{"name": "setup", "image": "registry.example/team/proxy:1.2.3"}},
+		}, `containers[0] "setup": the name is also that of initContainers[0]`},
+		// A patch's ports are merged by number (MergePatchContainers, a
+		// strategic merge), so a port of a generated name at another number
+		// is added beside the generated one.
+		{"a patched port of the web port's name at another number", container(map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}),
+			`containers[0] "alertmanager": ports[0] "web": the Prometheus operator gives the container a port of that name at 9093, and adds this one at 8080 beside it, and the API refuses a container with two ports of one name`},
+		{"a patched port of the authored web port name", map[string]any{"portName": "http", "containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "http", "containerPort": 8080}}}}},
+			`containers[0] "alertmanager": ports[0] "http": the Prometheus operator gives the container a port of that name at 9093`},
+		{"a patched port of the reloader's name", container(map[string]any{"name": "config-reloader", "ports": []any{map[string]any{"name": "reloader-web", "containerPort": 9000}}}),
+			`containers[0] "config-reloader": ports[0] "reloader-web": the Prometheus operator gives the container a port of that name at 8080`},
 		// The CRD's quantity pattern admits a sign; the API refuses the
 		// container the operator builds with it.
 		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
@@ -845,6 +882,18 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 			"clusterTLS": map[string]any{"server": amTLS, "client": amTLS},
 			"volumes":    []any{map[string]any{"name": "cluster-tls-server-config-x", "emptyDir": map[string]any{}}},
 		},
+		"two templates of distinct keys": {"alertmanagerConfiguration": map[string]any{"name": "global", "templates": []any{
+			map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}},
+			map[string]any{"secret": map[string]any{"name": "templates", "key": "email.tmpl"}},
+		}}},
+		"an argument of a flag the operator does not generate":       {"additionalArgs": []any{map[string]any{"name": "log.level", "value": "warn"}}},
+		"an argument of the start delay":                             {"minReadySeconds": 30, "additionalArgs": []any{map[string]any{"name": "dispatch.start-delay", "value": "1m"}}},
+		"an argument of the clustered listen address on one replica": {"additionalArgs": []any{map[string]any{"name": "cluster.listen-address", "value": "[$(POD_IP)]:9094"}}},
+		"a patched port of the web port's name and number":           {"containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 9093}}}}},
+		"a patched port of the web port's name on a pod listening locally": {"listenLocal": true, "containers": []any{map[string]any{
+			"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}},
+		}}},
+		"a sidecar port of a generated port's name":         {"containers": []any{map[string]any{"name": "proxy", "image": "registry.example/team/proxy:1.2.3", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}}}}},
 		"the mesh's port name on a pod listening locally":   {"portName": "mesh-tcp", "listenLocal": true},
 		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
 		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
@@ -897,13 +946,6 @@ func TestAlertmanager_ReloaderImages(t *testing.T) {
 				"containers":     []any{map[string]any{"name": "config-reloader", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
 				"initContainers": []any{map[string]any{"name": "init-config-reloader", "image": amReloader}}},
 			"the image of the config-reloader container (containers): unset",
-		},
-		"init-config-reloader patched in containers": {
-			map[string]any{"image": amImage, "containers": []any{
-				map[string]any{"name": "config-reloader", "image": amReloader},
-				map[string]any{"name": "init-config-reloader", "image": amReloader},
-			}},
-			"the image of the init-config-reloader container (initContainers): unset",
 		},
 		"config-reloader patched outside the allowed registries": {
 			amReloaders(map[string]any{"image": amImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),

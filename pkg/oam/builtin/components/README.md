@@ -3654,8 +3654,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `alertmanager` takes its image from the spec; the two reloaders run the
   image of the operator's own configuration unless an entry patches them.
   Launcher holds every entry the same way, patch or not. `additionalArgs` is
-  passed to the alertmanager container as written and is not read: an
-  argument can change what the other fields configure.
+  passed to the alertmanager container as written; only an argument's name is
+  read, to refuse one that names a flag the operator generates (below). An
+  argument can still change what the other fields configure.
 
   **Not authorable: `baseImage`, `tag` and `sha`.** Each is refused when not
   empty, beside an `image` too, with or without a policy (`tag: not
@@ -3789,6 +3790,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
     `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
     credentials are left to the API, as their volumes are.
+  - an entry of `additionalArgs` whose name, or that name with `no-` added or
+    taken away, is a flag the operator generates for the spec: it then fails
+    to build the pods (`BuildArgs`, `pkg/operator/argument.go:26-79`). The
+    flags are `config.file`, `storage.path`, `data.retention`,
+    `web.listen-address`, `web.route-prefix`, `cluster.reconnect-timeout`,
+    `cluster.listen-address` (written `cluster.listen-address=` on one
+    replica without `forceEnableClusterMode`), `cluster.peer` where a replica
+    or `additionalPeers` is, and the flag of each field set among
+    `externalUrl`, `enableFeatures`, `web.getConcurrency`, `web.timeout`,
+    `limits`, `logLevel` other than `info`, `logFormat` other than `logfmt`,
+    `clusterAdvertiseAddress`, the three cluster durations and `clusterTLS`
+    (statefulset.go:289-508, :700-748). `cluster.peer-name`, `cluster.label`
+    and `web.config.file` are refused whatever `version` names, though the
+    operator generates them only from 0.30.0, 0.26.0 and 0.22.0 on. Not
+    `dispatch.start-delay`: the operator leaves its own out where an argument
+    names it.
+  - an entry of `alertmanagerConfiguration.templates` whose key an earlier
+    entry names, `configMap` or `secret`: the operator projects each key at
+    the path of its name and skips a later entry of a key it has projected
+    (statefulset.go:575-620), so that template would not be loaded.
   - a negative request or limit in `resources`, as merged, or in a listed
     container: the CRD's quantity pattern admits a sign, and the API refuses
     the container the operator builds with it.
@@ -3846,7 +3867,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`containers[1] "config-reloader": the name is listed already at
   containers[0], …`): the operator keeps only the last entry of a name
   (`MergePatchContainers`, `pkg/k8s/merge.go` at v0.94.1), so the policy
-  would hold an entry that never runs. `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  would hold an entry that never runs. A name shared by an init container and
+  a container of the pods, generated or listed, is refused, as the API
+  requires the two lists' names to be unique together
+  (`containers[0] "init-config-reloader": the name is also that of the init
+  container the Prometheus operator generates, …`). A patch's ports are
+  merged into the generated container's by number, so a port of the patch
+  named as one the operator gives that container, at another number, is
+  added beside it and refused, as the API refuses two ports of one name
+  (`containers[0] "alertmanager": ports[0] "web": the Prometheus operator
+  gives the container a port of that name at 9093, …`): the web port under
+  `portName` at 9093 and the config-reloader's `reloader-web` at 8080 unless
+  `listenLocal` is set, `mesh-tcp` and `mesh-udp` at 9094, and the
+  init-config-reloader's `reloader-init` at 8081. `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as
