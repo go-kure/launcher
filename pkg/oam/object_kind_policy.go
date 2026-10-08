@@ -108,8 +108,8 @@ func appliedSelfAndMembers(obj client.Object) []client.Object {
 // checkObjectKinds holds every object obj stands for when Flux applies it
 // (appliedObjects) to the policy: obj itself, or a list envelope's members and
 // not the envelope, which Flux never applies. A list is read as it is written
-// (asWritten), so one of any Go representation stands for its members, and one
-// whose items is null for none. Nil rules check nothing.
+// (asWritten), so one of any Go representation stands for its members at every
+// depth, and one whose items is null for none. Nil rules check nothing.
 func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
 	if o.kinds == nil {
 		return nil
@@ -122,20 +122,18 @@ func (o *ownedConfig) checkObjectKinds(obj client.Object) error {
 	return nil
 }
 
-// asWritten returns obj as the manifest kure writes for it when that is a list
-// envelope: its JSON encoding, whose items array Kustomize and Flux expand into
-// its members. appliedObjects reads only an unstructured object whose items is
-// a []any, which neither a typed list nor one built with a typed Go slice is
-// until encoded. A list envelope whose items is null applies nothing, and
-// Kustomize drops one whose kind ends in "List", so it comes back as an empty
-// list. Any other object, or one that does not encode, which the writer fails
+// asWritten returns obj as the manifest kure writes for it when it has items:
+// its whole JSON encoding, the form Kustomize and Flux expand. appliedObjects
+// reads only unstructured items arrays of []any whose members are maps, which a
+// typed list, a typed Go slice or a typed member is not until encoded, at any
+// depth. Any other object, or one that does not encode, which the writer fails
 // on too, is returned as is.
 func asWritten(obj client.Object) client.Object {
 	if isNullValue(obj) {
 		return obj
 	}
 	if u, ok := obj.(*unstructured.Unstructured); ok {
-		if _, has := u.Object["items"]; !has || u.IsList() {
+		if _, has := u.Object["items"]; !has {
 			return obj
 		}
 	}
@@ -147,14 +145,10 @@ func asWritten(obj client.Object) client.Object {
 	if json.Unmarshal(data, &m) != nil {
 		return obj
 	}
-	u := &unstructured.Unstructured{Object: m}
-	if items, has := m["items"]; has && items == nil && strings.HasSuffix(u.GetKind(), "List") {
-		m["items"] = []any{}
+	if _, has := m["items"]; !has {
+		return obj
 	}
-	if u.IsList() {
-		return u
-	}
-	return obj
+	return &unstructured.Unstructured{Object: m}
 }
 
 // layoutGenerators is the configMapGenerator entries on a layout and on its

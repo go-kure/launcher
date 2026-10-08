@@ -328,11 +328,37 @@ func TestObjectKindPolicy_TypedList(t *testing.T) {
 	}}
 	wantKindRefusal(t, generateUnderKinds(t, policy, "web", sliced), "web", `ClusterRole "thing" (rbac.authorization.k8s.io/ClusterRole)`)
 
+	// So is a list inside a list whose items is a typed Go slice, and a typed
+	// member of an envelope Flux expands whatever its kind.
+	nested := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "List",
+		"items": []any{map[string]any{
+			"apiVersion": "v1", "kind": "List",
+			"items": []map[string]any{kindObject("rbac.authorization.k8s.io/v1", "ClusterRole", "").Object},
+		}},
+	}}
+	wantKindRefusal(t, generateUnderKinds(t, policy, "web", nested), "web", `ClusterRole "thing" (rbac.authorization.k8s.io/ClusterRole)`)
+	role := &unstructured.Unstructured{}
+	role.SetAPIVersion("rbac.authorization.k8s.io/v1")
+	role.SetKind("Role")
+	role.SetName("thing")
+	role.SetNamespace("ns")
+	mixed := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "example.io/v1", "kind": "Bundle", "metadata": map[string]any{"name": "b", "namespace": "ns"},
+		"items": []any{role},
+	}}
+	wantKindRefusal(t, generateUnderKinds(t, policy, "web", mixed), "web", `Role "thing" (rbac.authorization.k8s.io/Role)`)
+
 	// A typed List with no items is written with items null, which applies
-	// nothing: it is not held to the policy as an object of its own.
+	// nothing: it is not held to the policy as an object of its own, at any
+	// depth.
+	allowConfigMaps := &kindPolicy{allowed: []schema.GroupKind{{Kind: "ConfigMap"}}}
 	empty := &typedList{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "List"}}
-	if err := generateUnderKinds(t, &kindPolicy{allowed: []schema.GroupKind{{Kind: "ConfigMap"}}}, "web", empty); err != nil {
+	if err := generateUnderKinds(t, allowConfigMaps, "web", empty); err != nil {
 		t.Errorf("Generate = %v, want an empty typed List generated", err)
+	}
+	if err := generateUnderKinds(t, allowConfigMaps, "web", list(`{"apiVersion":"v1","kind":"List","items":null}`)); err != nil {
+		t.Errorf("Generate = %v, want a List of an empty List generated", err)
 	}
 }
 
