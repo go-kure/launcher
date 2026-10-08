@@ -462,7 +462,7 @@ func prometheusRefusals(notA string) []struct {
 		}}, `thanos.volumeMounts[0].bindMountOptions: not carried`},
 		// The operator adds no volume for a query log file named without a
 		// directory beside a scrape failure log file named with one
-		// (server/statefulset.go:510, :537; common.go:330-345).
+		// (server/statefulset.go:510, :537; common.go:334-347).
 		{"a query log file beside a scrape failure log file in a directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log"},
 			`queryLogFile: "query.log" names no directory, so the Prometheus operator configures it under /var/log/prometheus, but beside scrapeFailureLogFile "/var/log/scrape/failures.log", which names one, it mounts no volume there`},
 		// A read-only mount there leaves Prometheus unable to open the file,
@@ -727,8 +727,9 @@ func TestPrometheus_ReplicasTimesShards(t *testing.T) {
 // TestPrometheus_Name: the operator names the data volume, the rule
 // ConfigMaps' volumes and the pods' hostnames after the Prometheus, each a
 // DNS-1123 label; the third rule ConfigMap's volume, mounted whatever the
-// rules, binds a name to 40 characters at most, and the last pod's hostname to
-// fewer where the authored shards and replicas make it longer.
+// rules, binds a name to 40 characters at most; the controller-revision-hash
+// label of the last shard's pods, its StatefulSet's name and a hash of up to
+// 10, binds it to fewer where there is more than one shard (33 with 2 to 10).
 func TestPrometheus_Name(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	for name, tc := range map[string]struct {
@@ -742,6 +743,12 @@ func TestPrometheus_Name(t *testing.T) {
 			`"metrics.example" is not a valid name for this Prometheus`},
 		"the hostname of the last shard's last pod": {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 11},
 			`the pod of the last replica of the last shard takes the hostname "prometheus-` + strings.Repeat("a", 40) + `-shard-999-10", which must be a DNS-1123 label`},
+		// prometheus-<40>-shard-1 is 59 characters, and its pods' label 70
+		// with a hash of 10, which the volumes and the hostname all allow.
+		"40 characters and two shards": {strings.Repeat("a", 40), map[string]any{"shards": 2},
+			`prometheus "` + strings.Repeat("a", 40) + `": the component name is the Prometheus's name, and the Prometheus operator names the StatefulSet "prometheus-` + strings.Repeat("a", 40) + `-shard-1", of 59 characters, and the StatefulSet controller labels each of its pods controller-revision-hash with that name, a - and a hash of up to 10 characters, which the API refuses beyond 63 characters; the StatefulSet's name must be at most 52`},
+		"34 characters and two shards": {strings.Repeat("a", 34), map[string]any{"shards": 2},
+			`the Prometheus operator names the StatefulSet "prometheus-` + strings.Repeat("a", 34) + `-shard-1", of 53 characters`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := policyFreeTransform("prometheus", h, nil, oam.Component{Name: tc.component, Properties: tc.props})
@@ -755,7 +762,8 @@ func TestPrometheus_Name(t *testing.T) {
 		props     map[string]any
 	}{
 		"40 characters":                    {strings.Repeat("a", 40), nil},
-		"40 characters, 1000 shards of 10": {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 10}},
+		"33 characters and two shards":     {strings.Repeat("a", 33), map[string]any{"shards": 2}},
+		"31 characters, 1000 shards of 10": {strings.Repeat("a", 31), map[string]any{"shards": 1000, "replicas": 10}},
 		"40 characters, no replica's pod":  {strings.Repeat("a", 40), map[string]any{"shards": 1000, "replicas": 0}},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -459,7 +459,7 @@ func refusePrometheusExternalURL(value string) error {
 // pkg/prometheus/server/statefulset.go:510 and :537); where
 // scrapeFailureLogFile is set, it adds the volume only for a
 // scrapeFailureLogFile named without a directory (BuildCommonVolumes,
-// common.go:330-345). Without that volume Prometheus writes the file to the
+// common.go:334-347). Without that volume Prometheus writes the file to the
 // prometheus container's root filesystem, which the operator makes read-only
 // (server/statefulset.go:349). A writable mount of the author's at
 // /var/log/prometheus, in volumeMounts or a listed patch of the prometheus
@@ -576,7 +576,7 @@ func validatePrometheusPortName(spec *monitoringv1.PrometheusSpec) error {
 // /var/log/prometheus in the prometheus container: where scrapeFailureLogFile
 // is a bare file name, or queryLogFile is one and scrapeFailureLogFile is
 // unset (UsesDefaultFileVolume, BuildCommonVolumes, pkg/prometheus/common.go:
-// 226-228 and :330-345; appendServerVolumes,
+// 226-228 and :334-347; appendServerVolumes,
 // pkg/prometheus/server/statefulset.go:508-541 at prometheus-operator v0.94.1).
 func usesLogFileVolume(spec *monitoringv1.PrometheusSpec) bool {
 	bare := func(file string) bool { return file != "" && filepath.Dir(file) == "." }
@@ -618,7 +618,10 @@ const prometheusRuleFiles = 3
 // operator reads them (prometheusPods). The volume of the third rule
 // ConfigMap, prometheus-<name>-rulefiles-2, which the operator mounts
 // whatever the rules, is longer than the hostname of a Prometheus of one shard,
-// and must be a DNS-1123 label too.
+// and must be a DNS-1123 label too. The pods of the last shard carry a
+// controller-revision-hash label of its StatefulSet's name, which binds that
+// name to maxRevisedStatefulSetName characters; only where there is more than
+// one shard is it longer than the rule ConfigMap's volume allows.
 //
 // The volumes the operator adds under a fixed name are config, tls-assets and
 // config-out (BuildCommonVolumes, common.go:242-261), web-config
@@ -661,6 +664,7 @@ func validatePrometheusName(name, componentName string, spec *monitoringv1.Prome
 			statefulSet = fmt.Sprintf("%s-shard-%d", prefix, *spec.Shards-1)
 		}
 		n.derived = append(n.derived, derivedName{"the pod of the last replica of the last shard takes the hostname", fmt.Sprintf("%s-%d", statefulSet, replicas-1)})
+		n.statefulSet = statefulSet
 	}
 	ruleFiles := fmt.Sprintf("%s-rulefiles-%d", prefix, prometheusRuleFiles-1)
 	n.derived = append(n.derived, derivedName{"the Prometheus operator names the volume of a rule ConfigMap it mounts", ruleFiles})

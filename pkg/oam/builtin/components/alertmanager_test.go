@@ -935,10 +935,12 @@ func TestAlertmanager_PatchedImage(t *testing.T) {
 
 // TestAlertmanager_Name: the operator names the data volume
 // alertmanager-<name>-db, unless a claim template's name names it, and each
-// pod alertmanager-<name>-<ordinal>; the API refuses a pod whose volume name or
-// hostname is not a DNS-1123 label. A name either breaks is refused, naming the
-// component or the objectName it came from; the longest the defaults allow, 47
-// characters, builds, and 48 where a claim template names the data volume.
+// pod alertmanager-<name>-<ordinal>, labelled controller-revision-hash
+// alertmanager-<name>-<hash>; the API refuses a pod whose volume name or
+// hostname is not a DNS-1123 label, or whose label is over 63 characters with
+// a hash of up to 10. A name any breaks is refused, naming the component or
+// the objectName it came from; the longest the StatefulSet's name allows, 39
+// characters, builds, and 47 where no replica runs.
 func TestAlertmanager_Name(t *testing.T) {
 	h := &components.AlertmanagerHandler{}
 	long := strings.Repeat("a", 48)
@@ -956,6 +958,12 @@ func TestAlertmanager_Name(t *testing.T) {
 			`the pod of the last replica takes the hostname "alertmanager-` + strings.Repeat("a", 50) + `-0", which must be a DNS-1123 label`},
 		"eleven replicas and 48 characters": {strings.Repeat("a", 48), map[string]any{"replicas": 11, "storage": named["storage"]},
 			`the pod of the last replica takes the hostname "alertmanager-` + strings.Repeat("a", 48) + `-10"`},
+		// alertmanager-<40> is 53 characters, and its pods' label 64 with a
+		// hash of 10, which the volume and the hostname both allow.
+		"a component name over 39 characters": {strings.Repeat("a", 40), nil,
+			`the Prometheus operator names the StatefulSet "alertmanager-` + strings.Repeat("a", 40) + `", of 53 characters, and the StatefulSet controller labels each of its pods controller-revision-hash with that name, a - and a hash of up to 10 characters, which the API refuses beyond 63 characters; the StatefulSet's name must be at most 52`},
+		"48 characters and a named template": {strings.Repeat("a", 48), named,
+			`the Prometheus operator names the StatefulSet "alertmanager-` + strings.Repeat("a", 48) + `", of 61 characters`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := alertmanagerNamed(h, tc.component, tc.props)
@@ -968,8 +976,9 @@ func TestAlertmanager_Name(t *testing.T) {
 		component string
 		props     map[string]any
 	}{
-		"47 characters":                      {strings.Repeat("a", 47), nil},
-		"48 characters and a named template": {strings.Repeat("a", 48), named},
+		"39 characters":                      {strings.Repeat("a", 39), nil},
+		"39 characters and a named template": {strings.Repeat("a", 39), named},
+		"47 characters of no replica's pod":  {strings.Repeat("a", 47), map[string]any{"replicas": 0}},
 		"a dotted name of no replica's pod":  {"web", map[string]any{oam.ObjectNameProperty: "alerts.example", "replicas": 0, "storage": named["storage"]}},
 	} {
 		t.Run(name, func(t *testing.T) {
