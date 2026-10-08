@@ -3748,6 +3748,38 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     image`); and a `version` the operator fails the reconcile on: one
     `semver.ParseTolerant` cannot parse, one under 0.15.0, or one of a major
     version above 0 (operator.go:902-909).
+  - a field the operator reads only from some Alertmanager version on, where
+    `version`, or the operator's default v0.34.0 where it is unset, is below
+    that version: below it the operator leaves the flag off the container, the
+    TLS or HTTP configuration out of the web server, the gossip TLS
+    configuration off the cluster, or the field out of the global
+    configuration, or refuses the AlertmanagerConfig object `name` names at
+    reconcile (`clusterPeerName: read by the Prometheus operator only for
+    Alertmanager 0.30.0 and later; at version v0.28.1 it does not pass it to
+    Alertmanager, and the pods run without it; raise version to 0.30.0 or
+    later, or leave clusterPeerName unset`). Pods: `logFormat` other than `logfmt` (0.16.0),
+    `web.getConcurrency` and `web.timeout` (0.17.0), `web.tlsConfig` and
+    `web.httpConfig` (0.22.0), `clusterTLS` (0.24.0), `clusterLabel` (0.26.0),
+    `enableFeatures` (0.27.0), `limits.maxSilences` and
+    `limits.maxPerSilenceBytes` (0.28.0), `minReadySeconds` and
+    `clusterPeerName` (0.30.0). Under `alertmanagerConfiguration.global`:
+    `httpConfig.authorization`, `httpConfig.oauth2` and
+    `httpConfig.followRedirects` (0.22.0); `telegram` (0.24.0); `webex`,
+    `httpConfig.enableHttp2`, `httpConfig.tlsConfig.minVersion` and `maxVersion`,
+    and `httpConfig.oauth2.proxyUrl`, `noProxy` and `proxyConnectHeader`
+    (0.25.0); `httpConfig.proxyFromEnvironment` set to true,
+    `httpConfig.noProxy` and `httpConfig.proxyConnectHeader` (0.26.0); `jira`,
+    `rocketChat` and `smtp.tlsConfig` (0.28.0); `smtp.forceImplicitTLS`
+    (0.31.0); `mattermost` (0.32.0).
+    `TestAlertmanagerVersionGates_MatchVendoredSource` parses every version
+    comparison of the operator's `statefulset.go`, `amcfg.go` and `operator.go`
+    and holds each to this list, or to the reason it gates no field of this
+    kind (the configuration of a receiver, a route or a configSecret Secret);
+    the files are vendored unmodified under
+    `testdata/upstream/prometheus-operator`, with the project's LICENSE and
+    NOTICE and a SOURCE file naming each file's git blob id, and
+    `mise run vendor-prometheus-operator-gates <tag>` re-fetches them for the
+    tag `go.mod` links.
   - a `portName` the API refuses where the operator writes it: not an IANA
     service name (at most 15 characters, lower-case letters, digits and `-`);
     unless `listenLocal` is set, `mesh-tcp`/`mesh-udp`, the container ports the
@@ -3782,11 +3814,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     adds to every Alertmanager's pods; name the volume otherwise`).
     `web-config` and `cluster-tls-config` are refused whatever `version`
     names, though the operator adds them only for Alertmanager 0.22.0 and
-    0.24.0 on: no field is held to `version` (go-kure/launcher#935). The
-    volumes of the web and cluster TLS credentials are not checked: the
-    operator names each after the credential's source with a hash appended,
-    which the kind does not derive, so an entry under one of those names is
-    left to the API to refuse. Two entries of `secrets`, or of `configMaps`,
+    0.24.0 on, so that raising `version` does not turn a volume of the
+    author's into a clash. The volumes of the web and cluster TLS credentials
+    are not checked: the operator names each after the credential's source
+    with a hash appended, which the kind does not derive, so an entry under one
+    of those names is left to the API to refuse. Two entries of `secrets`, or of `configMaps`,
     that the operator's naming gives one volume name (`alerts.config` and
     `alerts-config` both name `secret-alerts-config`) are refused as well:
     the operator adds a volume for each (statefulset.go:638-690). So is an

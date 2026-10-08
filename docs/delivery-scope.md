@@ -1783,7 +1783,11 @@ and by scope, whatever component or trait emits it.
     own schema refuses when the Alertmanager is applied is left to the API, as it shows
     at once; what the CRD admits but the operator or the API then refuses on the
     StatefulSet or the pods is refused here, as it would fail late and out of sight.
-    Fields the operator reads only from some version on are not held to `version`.
+    A field the operator reads only from some Alertmanager version on (a flag of the
+    container, the web or gossip TLS configuration, a field of
+    `alertmanagerConfiguration.global`) is refused where `version`, or the operator's
+    default where it is unset, is below that version, which the refusal names; the
+    operator's version comparisons are vendored and each is held to the list.
 - **Shipped: the two kinds of VolSync's `volsync.backube/v1alpha1` API,**
   `replicationsource` and `replicationdestination` (`replicationsource.go`,
   `replicationdestination.go`, with what they share in `volsync_common.go`), each the

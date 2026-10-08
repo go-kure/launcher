@@ -89,7 +89,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own; a value authored here replaces its app.kubernetes.io/version label, and not the other four labels or the annotation." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. Where this or an entry of containers named alertmanager names the image, version is required: the operator chooses the container's flags by it."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
-		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1: it chooses the alertmanager container's flags by it, and by its own default where it is unset. Required where image, or an entry of containers named alertmanager, names the image; name the version that image runs. A version the operator cannot parse, one under 0.15.0 and one of a major version above 0 are refused: the operator fails to build the pods for them."),
+		"version":         text("version: the Alertmanager version the operator configures for, such as v0.28.1: it chooses the alertmanager container's flags by it, and by its own default where it is unset. Required where image, or an entry of containers named alertmanager, names the image; name the version that image runs. A version the operator cannot parse, one under 0.15.0 and one of a major version above 0 are refused: the operator fails to build the pods for them. A field the operator reads only from a later version than this one, or than its default v0.34.0 where this is unset, is refused, naming the version it needs: below it the operator drops the field, or refuses the object; the components README lists them."),
 		"imagePullSecrets": objects("imagePullSecrets: the Secrets of the Alertmanager's namespace that hold the credentials the images are pulled with.",
 			"One reference: name."),
 		"secrets": texts("secrets: the Secrets of the Alertmanager's namespace mounted into the alertmanager container, each under /etc/alertmanager/secrets/<name>. An entry whose volume name, secret-<name> cut to 63 characters, ends in - is refused: the operator fails to build the pods.",
@@ -139,7 +139,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterPeerTimeout":                  text("clusterPeerTimeout: the timeout of cluster peering, as a Go duration. Not 0 or less, which the operator ignores."),
-		"clusterPeerName":                     text("clusterPeerName: the name this instance advertises to its peers; may refer to environment variables of the alertmanager container, as $(POD_NAME). Unset, the pod's name. Requires Alertmanager v0.30.0 or later. Not empty."),
+		"clusterPeerName":                     text("clusterPeerName: the name this instance advertises to its peers; may refer to environment variables of the alertmanager container, as $(POD_NAME). Unset, the pod's name. Refused where version is under v0.30.0, which the operator does not pass it to. Not empty."),
 		"portName":                            text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it. A name the API refuses for a port (not an IANA service name: at most 15 characters, lower-case letters, digits and -) is refused where the operator writes it; so are mesh-tcp and mesh-udp, the container ports the operator adds beside it, unless listenLocal is set, and tcp-mesh and udp-mesh, the ports of the governing Service, unless serviceName is set."),
 		"forceEnableClusterMode":              flag("forceEnableClusterMode: true keeps the cluster mode on with a single replica, for a cluster that spans several Kubernetes clusters."),
 		"alertmanagerConfigSelector":          object("alertmanagerConfigSelector: the AlertmanagerConfig objects merged into this Alertmanager's configuration, by their labels. A Kubernetes label selector: matchLabels and matchExpressions."),
@@ -150,11 +150,11 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One entry: ip and hostnames, both required."),
 		"hostNetwork":                  flag("hostNetwork: true runs the pods in the node's network namespace. Refused under an EnvironmentPolicy that does not allow the host network."),
 		"web":                          object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout. A tlsConfig the operator refuses is refused: one without a certificate or a key, or naming one twice." + decoded + "AlertmanagerWebSpec in its API reference."),
-		"limits":                       object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Requires Alertmanager v0.28.0 or later." + decoded + "AlertmanagerLimitsSpec in its API reference."),
-		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Requires Alertmanager v0.24.0 or later. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
+		"limits":                       object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Refused where version is under v0.28.0, which the operator does not pass them to." + decoded + "AlertmanagerLimitsSpec in its API reference."),
+		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
 		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
-		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Requires Alertmanager v0.27.0 or later.",
+		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to.",
 			"The name of one feature flag."),
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
@@ -346,21 +346,25 @@ func alertmanagerURLSchemes(spec *monitoringv1.AlertmanagerSpec) []string {
 // flags by that version, and by its own default where it is unset. That default
 // is the deployed operator's, which a build cannot know, so an image named without
 // a version may be run with the flags of another.
+//
+// It then refuses a field the operator reads only from a later version than
+// the one it compares, which is version, or its default where version is unset
+// (alertmanagerVersionGates).
 func validateAlertmanagerVersion(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.Version == "" {
 		if (spec.Image != nil && *spec.Image != "") || patchedImage(spec.Containers, "alertmanager") != "" {
 			return errors.New("version: required where image, or an entry of containers named alertmanager, names the image: the Prometheus operator chooses the flags of the alertmanager container by the version named here, and by the deployed operator's default where none is, which need not be the version the image runs; name the version of the image")
 		}
-		return nil
+		return refuseVersionGates(spec, semver.MustParse(strings.TrimPrefix(alertmanagerDefaultVersion, "v")), "the operator's default version "+alertmanagerDefaultVersion, "Alertmanager", alertmanagerVersionGates)
 	}
 	version, err := semver.ParseTolerant(spec.Version)
 	if err != nil {
 		return errors.Errorf("version: %q is not a version the Prometheus operator can parse (%v), and it fails to build the pods; name one such as v0.28.1", spec.Version, err)
 	}
-	if version.LT(semver.MustParse("0.15.0")) || version.Major > 0 {
-		return errors.Errorf("version: %q is not supported by the Prometheus operator, which runs Alertmanager 0.15.0 and later of major version 0; name one such as v0.28.1", spec.Version)
+	if version.LT(semver.MustParse(alertmanagerMinimumVersion)) || version.Major > 0 {
+		return errors.Errorf("version: %q is not supported by the Prometheus operator, which runs Alertmanager %s and later of major version 0; name one such as v0.28.1", spec.Version, alertmanagerMinimumVersion)
 	}
-	return nil
+	return refuseVersionGates(spec, version, "version "+spec.Version, "Alertmanager", alertmanagerVersionGates)
 }
 
 // validateAlertmanagerPortName refuses a portName the API refuses where the
@@ -450,8 +454,8 @@ func positiveAlertmanagerStorage(template string, q resource.Quantity) error {
 // pkg/webconfig/config.go and pkg/alertmanager/clustertlsconfig/config.go at
 // prometheus-operator v0.94.1). The operator adds web-config only for
 // Alertmanager 0.22.0 and later, and cluster-tls-config only for 0.24.0 and
-// later; both are reserved whatever version names, as no field is held to
-// version.
+// later; both are reserved whatever version names, so that raising version
+// does not turn a volume of the author's into a clash.
 var alertmanagerGeneratedVolumes = []string{"config-volume", "tls-assets", "config-out", "web-config", "cluster-tls-config"}
 
 // invalidDNS1123Characters is what the operator replaces in a name it derives
