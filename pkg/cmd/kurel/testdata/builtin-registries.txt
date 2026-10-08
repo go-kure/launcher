@@ -69,6 +69,8 @@ component metallb-bgppeer *components.MetalLBBGPPeerHandler
 component metallb-community *components.MetalLBCommunityHandler
 component metallb-ipaddresspool *components.MetalLBIPAddressPoolHandler
 component metallb-l2advertisement *components.MetalLBL2AdvertisementHandler
+component mutatingadmissionpolicy *components.MutatingAdmissionPolicyHandler
+component mutatingadmissionpolicybinding *components.MutatingAdmissionPolicyBindingHandler
 component mutatingwebhookconfiguration *components.MutatingWebhookConfigurationHandler
 component namespace *components.NamespaceHandler
 component networkpolicy *components.NetworkPolicyHandler
@@ -106,6 +108,8 @@ component tcproute *components.TCPRouteHandler
 component thanosruler *components.ThanosRulerHandler
 component tlsroute *components.TLSRouteHandler
 component udproute *components.UDPRouteHandler
+component validatingadmissionpolicy *components.ValidatingAdmissionPolicyHandler
+component validatingadmissionpolicybinding *components.ValidatingAdmissionPolicyBindingHandler
 component validatingwebhookconfiguration *components.ValidatingWebhookConfigurationHandler
 component volumeattributesclass *components.VolumeAttributesClassHandler
 component-lowering helm components.HelmRule

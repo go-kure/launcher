@@ -573,6 +573,8 @@ var apiSetKinds = []apiSetKind{
 	{component: "metallb-community", typ: reflect.TypeFor[metallbv1beta1.CommunitySpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_communities.yaml", metallbVersion)},
 	{component: "metallb-ipaddresspool", typ: reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_ipaddresspools.yaml", metallbVersion)},
 	{component: "metallb-l2advertisement", typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion)},
+	{component: "mutatingadmissionpolicy", typ: reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec](), source: markerAPISource},
+	{component: "mutatingadmissionpolicybinding", typ: reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec](), source: markerAPISource},
 	{component: "mutatingwebhookconfiguration", typ: reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), source: markerAPISource, skip: objectIdentity},
 	{component: "namespace", typ: reflect.TypeFor[corev1.NamespaceSpec](), source: markerAPISource},
 	{component: "networkpolicy", typ: reflect.TypeFor[networkingv1.NetworkPolicySpec](), source: markerAPISource},
@@ -669,6 +671,16 @@ var apiSetKinds = []apiSetKind{
 			return map[string]any{"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "dns", "port": 53}}}}}
 		}},
 		refused: []string{"rules", "rules[].backendRefs"},
+	},
+	{component: "validatingadmissionpolicy", typ: reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec](), source: markerAPISource},
+	{
+		component: "validatingadmissionpolicybinding", typ: reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec](),
+		source: markerAPISource,
+		build:  handlerBuild(&ValidatingAdmissionPolicyBindingHandler{}, "validatingadmissionpolicybinding"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{"policyName": "replica-limit", "validationActions": []any{"Deny"}}
+		}},
+		refused: []string{"policyName", "validationActions"},
 	},
 	{component: "validatingwebhookconfiguration", typ: reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), source: markerAPISource, skip: objectIdentity},
 	{component: "volumeattributesclass", typ: reflect.TypeFor[storagev1.VolumeAttributesClass](), source: markerAPISource, skip: objectIdentity},

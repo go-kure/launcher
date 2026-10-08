@@ -1,0 +1,50 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: team-label
+      type: mutatingadmissionpolicy
+      properties:
+        paramKind:
+          apiVersion: v1
+          kind: ConfigMap
+        matchConstraints:
+          resourceRules:
+            - operations: [CREATE]
+              apiGroups: [apps]
+              apiVersions: [v1]
+              resources: [deployments]
+          objectSelector:
+            matchExpressions:
+              - key: team
+                operator: DoesNotExist
+        matchConditions:
+          - name: not-system
+            expression: "!request.userInfo.username.startsWith('system:')"
+        variables:
+          - name: team
+            expression: params.data.team
+        mutations:
+          - patchType: ApplyConfiguration
+            applyConfiguration:
+              expression: "Object{metadata: Object.metadata{labels: {'team': variables.team}}}"
+        reinvocationPolicy: IfNeeded
+        failurePolicy: Ignore
+    - name: seen-annotation
+      type: mutatingadmissionpolicy
+      properties:
+        objectName: seen.example.com
+        matchConstraints:
+          resourceRules:
+            - operations: [CREATE, UPDATE]
+              apiGroups: [""]
+              apiVersions: [v1]
+              resources: [configmaps]
+        mutations:
+          - patchType: JSONPatch
+            jsonPatch:
+              expression: "[JSONPatch{op: 'add', path: '/metadata/annotations', value: {'seen': 'true'}}]"
+        reinvocationPolicy: Never

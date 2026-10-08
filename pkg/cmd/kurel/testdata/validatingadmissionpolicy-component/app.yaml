@@ -1,0 +1,51 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: replica-limit
+      type: validatingadmissionpolicy
+      properties:
+        paramKind:
+          apiVersion: v1
+          kind: ConfigMap
+        matchConstraints:
+          resourceRules:
+            - operations: [CREATE, UPDATE]
+              apiGroups: [apps]
+              apiVersions: [v1]
+              resources: [deployments]
+          namespaceSelector:
+            matchExpressions:
+              - key: policy.example.com/enforce
+                operator: In
+                values: ["true"]
+        matchConditions:
+          - name: not-system
+            expression: "!request.userInfo.username.startsWith('system:')"
+        variables:
+          - name: maxReplicas
+            expression: int(params.data.maxReplicas)
+        validations:
+          - expression: object.spec.replicas <= variables.maxReplicas
+            messageExpression: "'at most ' + string(variables.maxReplicas) + ' replicas'"
+            reason: Invalid
+        auditAnnotations:
+          - key: replicas
+            valueExpression: string(object.spec.replicas)
+        failurePolicy: Fail
+    - name: audit-only
+      type: validatingadmissionpolicy
+      properties:
+        objectName: audit-deletes.example.com
+        matchConstraints:
+          resourceRules:
+            - operations: [DELETE]
+              apiGroups: [""]
+              apiVersions: [v1]
+              resources: [namespaces]
+        auditAnnotations:
+          - key: deleted-by
+            valueExpression: request.userInfo.username

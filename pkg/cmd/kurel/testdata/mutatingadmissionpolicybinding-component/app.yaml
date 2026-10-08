@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: team-label-apps
+      type: mutatingadmissionpolicybinding
+      properties:
+        policyName: team-label
+        paramRef:
+          name: team-defaults
+          namespace: policy
+          parameterNotFoundAction: Allow
+        matchResources:
+          namespaceSelector:
+            matchLabels:
+              team.example.com/managed: "true"
+          excludeResourceRules:
+            - operations: [CREATE]
+              apiGroups: [apps]
+              apiVersions: [v1]
+              resources: [deployments]
+              resourceNames: [system-agent]
+    - name: seen
+      type: mutatingadmissionpolicybinding
+      properties:
+        objectName: seen.example.com
+        policyName: seen.example.com

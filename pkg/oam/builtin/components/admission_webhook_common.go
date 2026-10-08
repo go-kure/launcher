@@ -83,22 +83,33 @@ func validateAdmissionWebhook(at string, hook admissionWebhook) error {
 		return errors.Errorf("%s.admissionReviewVersions: required (the AdmissionReview versions the webhook accepts, at least one: v1)", at)
 	}
 	for i, rule := range hook.rules {
-		ruleAt := fmt.Sprintf("%s.rules[%d]", at, i)
-		switch {
-		case len(rule.Operations) == 0:
-			return errors.Errorf("%s.operations: required (the operations the rule matches, at least one: CREATE, UPDATE, DELETE, CONNECT or *)", ruleAt)
-		case len(rule.APIGroups) == 0:
-			return errors.Errorf(`%s.apiGroups: required (the API groups the rule matches, at least one; "" is the core group)`, ruleAt)
-		case len(rule.APIVersions) == 0:
-			return errors.Errorf("%s.apiVersions: required (the API versions the rule matches, at least one)", ruleAt)
-		case len(rule.Resources) == 0:
-			return errors.Errorf("%s.resources: required (the resources the rule matches, at least one)", ruleAt)
+		if err := validateRuleWithOperations(fmt.Sprintf("%s.rules[%d]", at, i), rule, admissionOperations); err != nil {
+			return err
 		}
 	}
 	if err := validateLabelSelector(at+".namespaceSelector", hook.namespaceSelector); err != nil {
 		return err
 	}
 	return validateLabelSelector(at+".objectSelector", hook.objectSelector)
+}
+
+// validateRuleWithOperations refuses a rule at the path at that leaves out one
+// of the four lists the API server requires of it (validateRuleWithOperations
+// and validateRule, Kubernetes v1.37.1): at least one operation, API group,
+// API version and resource. operations names the operations the rule's object
+// takes, for the message.
+func validateRuleWithOperations(at string, rule admissionregistrationv1.RuleWithOperations, operations string) error {
+	switch {
+	case len(rule.Operations) == 0:
+		return errors.Errorf("%s.operations: required (the operations the rule matches, at least one: %s)", at, operations)
+	case len(rule.APIGroups) == 0:
+		return errors.Errorf(`%s.apiGroups: required (the API groups the rule matches, at least one; "" is the core group)`, at)
+	case len(rule.APIVersions) == 0:
+		return errors.Errorf("%s.apiVersions: required (the API versions the rule matches, at least one)", at)
+	case len(rule.Resources) == 0:
+		return errors.Errorf("%s.resources: required (the resources the rule matches, at least one)", at)
+	}
+	return nil
 }
 
 // admissionWebhooksSchema is the `webhooks` property of a webhook

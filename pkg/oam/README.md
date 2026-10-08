@@ -2002,6 +2002,8 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `metallb-community` |
 | `metallb-ipaddresspool` |
 | `metallb-l2advertisement` |
+| `mutatingadmissionpolicy` |
+| `mutatingadmissionpolicybinding` |
 | `mutatingwebhookconfiguration` |
 | `namespace` |
 | `networkpolicy` |
@@ -2041,6 +2043,8 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `thanosruler` |
 | `tlsroute` |
 | `udproute` |
+| `validatingadmissionpolicy` |
+| `validatingadmissionpolicybinding` |
 | `validatingwebhookconfiguration` |
 | `volumeattributesclass` |
 | `webservice` |

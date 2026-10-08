@@ -13,27 +13,36 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
-// builtinMarkerKinds lists the whole-object kind components of the Kubernetes
-// API whose required lists are derived from the markers of the linked
-// modules' source (markerAPISource), with the type each decodes into. The API
+// builtinMarkerKinds lists the kind components of the Kubernetes API whose
+// required lists are derived from the markers of the linked modules' source
+// (markerAPISource), with the type each decodes into: the whole object, or
+// its spec. The API
 // types of Kubernetes publish their field comments, but not whether a field
 // is required: that is the +required and +optional markers of the source,
 // which the generated OpenAPI is built from. emittedEmpty names the fields the
 // type writes when they are not authored and the API does not require: the
-// object carries them empty, and the kind's README entry says so.
+// object carries them empty, and the kind's README entry says so. refused
+// names the fields the API requires and the type omits when unauthored: the
+// kind's validate refuses each on the decoded value, and apiSetKinds holds
+// that refusal.
 var builtinMarkerKinds = []struct {
 	component    string
 	typ          reflect.Type
 	required     map[string]string
 	emittedEmpty []string
+	refused      []string
 }{
-	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), endpointSliceKind.required, []string{"endpoints", "endpoints[].conditions", "ports"}},
-	{"role", reflect.TypeFor[rbacv1.Role](), roleKind.required, []string{"rules"}},
-	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), roleBindingKind.required, []string{"roleRef.apiGroup"}},
-	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), clusterRoleKind.required, []string{"rules"}},
-	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), clusterRoleBindingKind.required, []string{"roleRef.apiGroup"}},
-	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), validatingWebhookConfigurationKind.required, nil},
-	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), mutatingWebhookConfigurationKind.required, nil},
+	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), endpointSliceKind.required, []string{"endpoints", "endpoints[].conditions", "ports"}, nil},
+	{"role", reflect.TypeFor[rbacv1.Role](), roleKind.required, []string{"rules"}, nil},
+	{"rolebinding", reflect.TypeFor[rbacv1.RoleBinding](), roleBindingKind.required, []string{"roleRef.apiGroup"}, nil},
+	{"clusterrole", reflect.TypeFor[rbacv1.ClusterRole](), clusterRoleKind.required, []string{"rules"}, nil},
+	{"clusterrolebinding", reflect.TypeFor[rbacv1.ClusterRoleBinding](), clusterRoleBindingKind.required, []string{"roleRef.apiGroup"}, nil},
+	{"validatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration](), validatingWebhookConfigurationKind.required, nil, nil},
+	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), mutatingWebhookConfigurationKind.required, nil, nil},
+	{"validatingadmissionpolicy", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec](), validatingAdmissionPolicyKind.required, nil, nil},
+	{"validatingadmissionpolicybinding", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec](), validatingAdmissionPolicyBindingKind.required, nil, []string{"policyName", "validationActions"}},
+	{"mutatingadmissionpolicy", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec](), mutatingAdmissionPolicyKind.required, nil, nil},
+	{"mutatingadmissionpolicybinding", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec](), mutatingAdmissionPolicyBindingKind.required, nil, nil},
 }
 
 // fieldClasses is how the fields a kind's type reaches divide, by what the API
@@ -104,8 +113,8 @@ func classifyKindFields(typ reflect.Type, skip []string, src apiSource) fieldCla
 // kind's required list holds exactly them (refuseUnauthoredRequired).
 //
 // The second is the fields the API requires and the type omits when
-// unauthored. The kind's validate would have to refuse each on the decoded
-// value; these kinds have none, and a member fails here, naming it.
+// unauthored. The kind's validate refuses each on the decoded value, so the
+// set is exactly the row's refused, and a member it does not name fails here.
 //
 // A field written unauthored that the API does not require is held to the
 // row's emittedEmpty, which the kind's README entry states. The object's kind,
@@ -161,8 +170,8 @@ func TestBuiltinMarkerKinds_RequiredMatchMarkers(t *testing.T) {
 					t.Errorf("required field %s says nothing of itself", path)
 				}
 			}
-			for _, path := range classes.omitted {
-				t.Errorf("%s is required and omitted when unauthored: the kind's validate must refuse it on the decoded value, and this test must then list it", path)
+			if got := slices.Sorted(slices.Values(kind.refused)); !slices.Equal(got, classes.omitted) {
+				t.Errorf("refused = %v\nthe source marks required and omitted when unauthored %v: the kind's validate must refuse each on the decoded value, and the row name it", got, classes.omitted)
 			}
 			for _, path := range classes.forced {
 				t.Errorf("%s is required under a parent that is written unauthored and not required: a required list cannot hold it, the kind's validate must", path)

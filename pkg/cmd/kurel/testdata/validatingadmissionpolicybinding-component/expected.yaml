@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: replica-limit-prod
+  name: replica-limit-prod
+spec:
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        environment: production
+  paramRef:
+    name: replica-limit-prod
+    namespace: policy
+    parameterNotFoundAction: Deny
+  policyName: replica-limit
+  validationActions:
+  - Deny
+  - Audit
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    launcher.gokure.dev/component: replica-limit-teams
+  name: replica-limit-teams.example.com
+spec:
+  paramRef:
+    parameterNotFoundAction: Allow
+    selector:
+      matchExpressions:
+      - key: team
+        operator: Exists
+  policyName: replica-limit
+  validationActions:
+  - Warn

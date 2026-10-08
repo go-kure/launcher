@@ -1,0 +1,61 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: team-label
+  name: team-label
+spec:
+  failurePolicy: Ignore
+  matchConditions:
+  - expression: '!request.userInfo.username.startsWith(''system:'')'
+    name: not-system
+  matchConstraints:
+    objectSelector:
+      matchExpressions:
+      - key: team
+        operator: DoesNotExist
+    resourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      resources:
+      - deployments
+  mutations:
+  - applyConfiguration:
+      expression: 'Object{metadata: Object.metadata{labels: {''team'': variables.team}}}'
+    patchType: ApplyConfiguration
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  reinvocationPolicy: IfNeeded
+  variables:
+  - expression: params.data.team
+    name: team
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  labels:
+    launcher.gokure.dev/component: seen-annotation
+  name: seen.example.com
+spec:
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - configmaps
+  mutations:
+  - jsonPatch:
+      expression: '[JSONPatch{op: ''add'', path: ''/metadata/annotations'', value:
+        {''seen'': ''true''}}]'
+    patchType: JSONPatch
+  reinvocationPolicy: Never

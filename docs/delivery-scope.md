@@ -2030,6 +2030,26 @@ and by scope, whatever component or trait emits it.
     objects or on the API itself; a mutating webhook changes objects after the build;
     a webhook's `clientConfig` and an APIService's `service` are not resolved at build;
     a match condition's CEL expression is compiled by the API server.
+- **Shipped: the four admission policy kinds,** `validatingadmissionpolicy`,
+  `validatingadmissionpolicybinding`, `mutatingadmissionpolicy` and
+  `mutatingadmissionpolicybinding` (with what they share in `admission_policy_common.go`),
+  cluster-scoped kinds on `policyFreeKind`, gated as the webhook configurations above
+  (go-kure/launcher#943).
+  - Each decodes its spec strictly. Its required list is derived from the markers of the
+    linked `k8s.io/api` module; beyond them the kinds check presence rules read by hand
+    from the API server's validation at Kubernetes v1.37.1: a policy's `matchConstraints`
+    with at least one rule, a validating policy's validations or audit annotations, a
+    mutating policy's mutations with the patch each names and its `reinvocationPolicy`, a
+    binding's `policyName`, a validating binding's `validationActions`, and a `paramRef`'s
+    one of `name` and `selector` with its `parameterNotFoundAction`.
+  - The API server serves the validating pair at `admissionregistration.k8s.io/v1` from
+    Kubernetes 1.30 and the mutating pair from 1.36; a cluster below refuses the object
+    at apply. The build has no target version and does not check it; each kind's schema
+    and README entry state it.
+  - Stated limits, in each kind's README entry: a policy applies to the requests of any
+    namespace once bound; a mutating policy changes objects after the build; neither the
+    policy a binding names nor its parameters are resolved at build; CEL is compiled by
+    the API server.
 - **Held: `ResourceSet` and `FluxInstance`** (fluxcd.controlplane.io/v1), each with its
   reason in its inventory row. A ResourceSet's `resourcesTemplate` is a Go template the
   operator renders on the cluster into the objects it reconciles: no build sees them,
@@ -2085,10 +2105,6 @@ and by scope, whatever component or trait emits it.
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket.
-- **Held, for now: the four admission policy kinds,** ValidatingAdmissionPolicy and
-  MutatingAdmissionPolicy with their bindings. Their kind components follow under
-  go-kure/launcher#943, on the terms of the webhook configurations above (README
-  "Cluster-wide admission and API registration").
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

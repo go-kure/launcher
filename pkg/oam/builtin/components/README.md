@@ -205,6 +205,8 @@ reads it.
 | `metallb-community` | Community | Kind-named MetalLB Community: the whole `CommunitySpec` (`communities`, a list of aliases of a `name` and a `value`, none required), strictly decoded. It gives names to BGP community values; a BGP advertisement that names one attaches its value to what it announces. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-ipaddresspool` | IPAddressPool | Kind-named MetalLB address pool: the whole `IPAddressPoolSpec` (`addresses`, required, `autoAssign`, `avoidBuggyIPs` and `serviceAllocation`), strictly decoded. It says which Services, in which namespaces, MetalLB gives an address of which range. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-l2advertisement` | L2Advertisement | Kind-named MetalLB advertisement on the local network: the whole `L2AdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `nodeSelectors`, `interfaces` and `serviceSelectors`, none required), strictly decoded. It says which pools' addresses MetalLB announces on the local network, from which nodes and interfaces, for which Services; one that authors nothing limits none of them. Namespaced; no environment policy applies and no capability is required — see below. |
+| `mutatingadmissionpolicy` | MutatingAdmissionPolicy | Kind-named MutatingAdmissionPolicy: its `MutatingAdmissionPolicySpec`, strictly decoded; `matchConstraints` with at least one rule, at least one of `mutations`, each with its `patchType` and the patch of that type, and `reinvocationPolicy` are required. It changes objects of any namespace after the build. Served from Kubernetes 1.36. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
+| `mutatingadmissionpolicybinding` | MutatingAdmissionPolicyBinding | Kind-named MutatingAdmissionPolicyBinding: its `MutatingAdmissionPolicyBindingSpec`, strictly decoded; `policyName` is required, and a `paramRef` holds exactly one of `name` and `selector` and its `parameterNotFoundAction`. Neither the policy nor the parameter is resolved at build. Served from Kubernetes 1.36. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `mutatingwebhookconfiguration` | MutatingWebhookConfiguration | Kind-named MutatingWebhookConfiguration: its `webhooks`, strictly decoded; a webhook's `name`, `clientConfig` (exactly one of `url` and `service`), `sideEffects` and `admissionReviewVersions` are required, and a rule names its operations, API groups, versions and resources. It changes objects of any namespace after the build. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `namespace` | Namespace | Kind-named Namespace: the whole `NamespaceSpec` (`finalizers`), strictly decoded. Cluster-scoped, named after the component; its labels are the `labels` property — see below. |
 | `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; a defective match expression of a selector is refused; no environment policy applies — see below. |
@@ -244,6 +246,8 @@ reads it.
 | `thanosruler` | ThanosRuler | Kind-named Prometheus operator ThanosRuler: the whole `ThanosRulerSpec`, strictly decoded, with the spec's `labels` (Prometheus external labels) published as `externalLabels`; no top-level field is required. The operator runs the pods: `image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes` and `securityContext` are held to the environment policy as the Alertmanager's are, and a literal `remoteWrite[].bearerToken` under a policy that forbids explicit secrets. The replica count and memory request the operator fills where they are unset are held, not written. An image the operator chooses, for `thanos-ruler` or its config-reloader, is refused under a policy with allowed registries. No capability is required — see below. |
 | `tlsroute` | TLSRoute | Kind-named Gateway API TLSRoute: the whole `TLSRouteSpec`, strictly decoded; `hostnames` is required, and the rest as on a `tcproute`. An authored object on the same terms — see below. |
 | `udproute` | UDPRoute | Kind-named Gateway API UDPRoute: the whole `UDPRouteSpec`, strictly decoded; required as on a `tcproute`, and an authored object on the same terms — see below. |
+| `validatingadmissionpolicy` | ValidatingAdmissionPolicy | Kind-named ValidatingAdmissionPolicy: its `ValidatingAdmissionPolicySpec`, strictly decoded; `matchConstraints` with at least one rule and at least one of `validations` and `auditAnnotations` are required. It can deny the requests of any namespace its rules match, once bound. Served from Kubernetes 1.30. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
+| `validatingadmissionpolicybinding` | ValidatingAdmissionPolicyBinding | Kind-named ValidatingAdmissionPolicyBinding: its `ValidatingAdmissionPolicyBindingSpec`, strictly decoded; `policyName` and at least one of `validationActions` are required, and a `paramRef` as on a `mutatingadmissionpolicybinding`. Neither the policy nor the parameter is resolved at build. Served from Kubernetes 1.30. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `validatingwebhookconfiguration` | ValidatingWebhookConfiguration | Kind-named ValidatingWebhookConfiguration: its `webhooks`, strictly decoded, required as on a `mutatingwebhookconfiguration`. The API server calls it to admit or deny the requests of any namespace its rules match. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `volumeattributesclass` | VolumeAttributesClass | Kind-named VolumeAttributesClass: `driverName` and `parameters` (both required, `parameters` with at least one entry), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
@@ -294,24 +298,31 @@ Status is one of:
 - `not authorable`: no component is planned; Notes gives the reason.
 
 **Cluster-wide admission and API registration** (go-kure/launcher#943). The
-ValidatingWebhookConfiguration, MutatingWebhookConfiguration and APIService kinds are `kind`
-rows. No dimension of the environment policy reads what they match or where they send a
-request. They are gated as every emitted object is, by the policy's object kind rules
+ValidatingWebhookConfiguration, MutatingWebhookConfiguration, APIService,
+ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding, MutatingAdmissionPolicy and
+MutatingAdmissionPolicyBinding kinds are `kind` rows. No dimension of the environment policy
+reads what they match, where they send a request or what a policy checks. They are gated as every emitted object is, by the policy's object kind rules
 (`ObjectKindPolicy`): an environment that must not emit them forbids their group, their kind,
 or cluster-scoped objects, and the build refuses them on every path. What they do once
 applied is out of the build's reach, and each kind's entry states it:
 
 - **They act on every other document's objects, or on the API itself.** The API server
-  applies a webhook configuration to the requests its rules match, in any namespace and from
-  any author; an APIService hands a group and version of the API to the Service it names.
-- **A mutating webhook changes objects after the build,** so what the build checked need
-  not hold of the object that is stored.
+  applies a webhook configuration, or a bound admission policy, to the requests its rules
+  match, in any namespace and from any author; an APIService hands a group and version of the
+  API to the Service it names.
+- **A mutating webhook or a mutating admission policy changes objects after the build,** so
+  what the build checked need not hold of the object that is stored.
 - **Where they send a request is not resolved at build:** a webhook's `clientConfig` (a URL
   or a Service) and an APIService's `service` are written as authored.
-- **A match condition's CEL expression is compiled by the API server,** not at build.
-
-ValidatingAdmissionPolicy and its binding, and MutatingAdmissionPolicy and its binding, are
-still `held`: their kind components follow under go-kure/launcher#943, on the same terms.
+- **What a binding names is not resolved at build:** neither the policy of its `policyName`
+  nor the parameter resources of its `paramRef`. A policy does nothing until a binding names
+  it.
+- **CEL is compiled by the API server,** not at build: a match condition's expression, and an
+  admission policy's validations, audit annotations, variables and mutations.
+- **An admission policy kind is served from a Kubernetes version:** ValidatingAdmissionPolicy
+  and its binding at `admissionregistration.k8s.io/v1` from 1.30, MutatingAdmissionPolicy and
+  its binding from 1.36. A cluster below that refuses the object at apply. The build has no
+  target version and does not check it; each kind's schema and entry state it.
 
 An RBAC grant, which launcher also emits, differs: it names its subjects, and the document
 that makes the grant states it. These kinds act on objects no document of the build names.
@@ -357,8 +368,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateLease` | coordination.k8s.io/v1 Lease | not authorable | - | - | Written at run time by its holder: a leader-election client, or the kubelet for its node's heartbeat. |
 | `kubernetes.CreateLimitRange` | v1 LimitRange | kind | `limitrange` | strict decode of `LimitRangeSpec` | - |
 | `kubernetes.CreateListenerSet` | gateway.networking.k8s.io/v1 ListenerSet | kind | `listenerset` | strict decode of `ListenerSetSpec` | `parentRef` with its `name` and `listeners`, at least one, must be written, and of each listener its `name`, `port` and `protocol`, as on a Gateway's. No capability is required. No environment policy applies. |
-| `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | held | - | - | It changes objects of any namespace after the build. Its component follows under go-kure/launcher#943. See "Cluster-wide admission and API registration" above. |
-| `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | held | - | - | It puts a MutatingAdmissionPolicy into effect. Its component follows under go-kure/launcher#943. See "Cluster-wide admission and API registration" above. |
+| `kubernetes.CreateMutatingAdmissionPolicy` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicy (cluster-scoped) | kind | `mutatingadmissionpolicy` | strict decode of `MutatingAdmissionPolicySpec` | As the `validatingadmissionpolicy` row for `matchConstraints`, `paramKind`, match conditions and variables, its rules taking only CREATE and UPDATE; at least one of `mutations` must be written, each with its `patchType` and, for ApplyConfiguration or JSONPatch, the patch of that type with its `expression`, and `reinvocationPolicy`, which the API server does not default. It changes objects of any namespace after the build, so what the build checked need not hold of what is stored. Served from Kubernetes 1.36. Only the object kind rules of the environment policy apply. See "Cluster-wide admission and API registration" above. |
+| `kubernetes.CreateMutatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 MutatingAdmissionPolicyBinding (cluster-scoped) | kind | `mutatingadmissionpolicybinding` | strict decode of `MutatingAdmissionPolicyBindingSpec` | As the `validatingadmissionpolicybinding` row, without `validationActions`. It puts a MutatingAdmissionPolicy into effect. Served from Kubernetes 1.36. See "Cluster-wide admission and API registration" above. |
 | `kubernetes.CreateMutatingWebhookConfiguration` | admissionregistration.k8s.io/v1 MutatingWebhookConfiguration (cluster-scoped) | kind | `mutatingwebhookconfiguration` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | As the `validatingwebhookconfiguration` row, and it changes objects of any namespace after the build, so what the build checked need not hold of what is stored. `reinvocationPolicy` is written as authored. See "Cluster-wide admission and API registration" above. |
 | `kubernetes.CreateNamespace` | v1 Namespace (cluster-scoped) | kind | `namespace` | strict decode of `NamespaceSpec` | The component name is the Namespace's name. Its labels and annotations are the `labels` and `annotations` properties. |
 | `kubernetes.CreateNetworkPolicy` | networking.k8s.io/v1 NetworkPolicy | kind | `networkpolicy` | strict decode of `NetworkPolicySpec` | No type under `NetworkPolicySpec` unmarshals itself except `intstr.IntOrString` (a port), a scalar with no nested key to drop. The `networkpolicy` trait builds its own NetworkPolicy with a hand-written parser and scopes it to its component's pods; the kind selects what the author wrote. The transform's NetworkPolicy synthesis in `pkg/oam` emits NetworkPolicies of its own and reads neither. |
@@ -386,8 +397,8 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | kind | `tcproute` | strict decode of `TCPRouteSpec` | No type under `TCPRouteSpec` unmarshals itself, so the decode reaches every depth. The kind refuses a route without `rules`, a rule without `backendRefs` and a Service backend without its `port`, which the API server refuses too; of a parent and a backend that are authored, the `name` must be written. A parent and a backend of another namespace are written as authored, as the `httproute` kind writes them. No capability is required. No environment policy applies. |
 | `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | kind | `tlsroute` | strict decode of `TLSRouteSpec` | As the `tcproute` row, and the kind refuses a route without `hostnames` too, which the API requires of a TLSRoute. The host names are not held to the allowed registries, and their form is left to the API server. |
 | `kubernetes.CreateUDPRoute` | gateway.networking.k8s.io/v1 UDPRoute | kind | `udproute` | strict decode of `UDPRouteSpec` | As the `tcproute` row: the decode reaches every depth, the kind refuses a route without `rules`, a rule without `backendRefs` and a Service backend without its `port`, and a parent and a backend of another namespace are written as authored. No capability is required. No environment policy applies. |
-| `kubernetes.CreateValidatingAdmissionPolicy` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (cluster-scoped) | held | - | - | It can deny writes for the whole cluster, and no consumer has asked for it. Its component follows under go-kure/launcher#943. See "Cluster-wide admission and API registration" above. |
-| `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | held | - | - | It puts a ValidatingAdmissionPolicy into effect. Its component follows under go-kure/launcher#943. See "Cluster-wide admission and API registration" above. |
+| `kubernetes.CreateValidatingAdmissionPolicy` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (cluster-scoped) | kind | `validatingadmissionpolicy` | strict decode of `ValidatingAdmissionPolicySpec` | The object is named after the component unless `objectName` names it. `matchConstraints` must be written with at least one rule, and a rule names at least one operation, API group, API version and resource; at least one of `validations` and `auditAnnotations`; a validation its `expression`, an audit annotation its `key` and `valueExpression`, a match condition and a variable their `name` and `expression`, and an authored `paramKind` its `apiVersion` and `kind`; a selector's match expression is checked as every selector's is. Once bound, it can deny writes for the whole cluster. CEL is compiled by the API server, and the form of every other value (the enumerations, names and their uniqueness) is left to it. Served from Kubernetes 1.30. Only the object kind rules of the environment policy apply. See "Cluster-wide admission and API registration" above. |
+| `kubernetes.CreateValidatingAdmissionPolicyBinding` | admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding (cluster-scoped) | kind | `validatingadmissionpolicybinding` | strict decode of `ValidatingAdmissionPolicyBindingSpec` | `policyName` and at least one of `validationActions` must be written; an authored `paramRef` holds exactly one of `name` and `selector`, and its `parameterNotFoundAction`; an authored `matchResources` is checked as a policy's `matchConstraints`, without requiring a rule. It puts a ValidatingAdmissionPolicy into effect. Neither the policy nor the parameter is resolved at build. Served from Kubernetes 1.30. Only the object kind rules of the environment policy apply. See "Cluster-wide admission and API registration" above. |
 | `kubernetes.CreateValidatingWebhookConfiguration` | admissionregistration.k8s.io/v1 ValidatingWebhookConfiguration (cluster-scoped) | kind | `validatingwebhookconfiguration` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. A webhook's `name`, `clientConfig`, `sideEffects` and at least one of `admissionReviewVersions` must be written; `clientConfig` holds exactly one of `url` and `service`, and a service its `namespace` and `name`; a rule names at least one operation, API group, API version and resource; a match condition its `name` and `expression`; a selector's match expression is checked as every selector's is. The API server calls the webhooks on the requests of any namespace their rules match. Neither the URL nor the Service is resolved at build, and a match condition's CEL expression is compiled by the API server. The form of every other value (a webhook's name, the enumerations, the timeout's range) is left to the API server. Only the object kind rules of the environment policy apply. See "Cluster-wide admission and API registration" above. |
 | `kubernetes.CreateVolumeAttachment` | storage.k8s.io/v1 VolumeAttachment (cluster-scoped) | not authorable | - | - | Written by the attach/detach controller. |
 | `kubernetes.CreateVolumeAttributesClass` | storage.k8s.io/v1 VolumeAttributesClass (cluster-scoped) | kind | `volumeattributesclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `driverName` and at least one of `parameters` must be written. No environment policy applies. |
@@ -2304,6 +2315,53 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   webhook changes objects after the build, so what the build checked need
   not hold of what is stored. An authored `webhooks: []` emits a
   configuration with no webhook.
+- **validatingadmissionpolicy**, **validatingadmissionpolicybinding**,
+  **mutatingadmissionpolicy**, **mutatingadmissionpolicybinding**
+  (go-kure/launcher#943) are the kind-named projections of four
+  cluster-scoped `admissionregistration.k8s.io/v1` objects. Each decodes its
+  spec strictly and emits that one object, named after the component unless
+  `objectName` names it, with no namespace, holding exactly what was
+  authored, on `policyFreeKind`, gated as the webhook configurations above.
+
+  **Minimum Kubernetes version.** The API server serves
+  ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding at `v1`
+  from Kubernetes 1.30, and MutatingAdmissionPolicy and
+  MutatingAdmissionPolicyBinding from 1.36. A cluster below that refuses the
+  object at apply. The build has no target version and does not check it;
+  the description of each kind's `matchConstraints` or `policyName` states
+  the same.
+
+  From the markers, a validation's `expression`, an audit annotation's `key`
+  and `valueExpression`, a match condition's and a variable's `name` and
+  `expression`, a mutation's `patchType`, a binding's `policyName` and a
+  validating binding's `validationActions` must be written. By hand, from
+  the API server's validation at Kubernetes v1.37.1: a policy holds
+  `matchConstraints` with at least one rule
+  (`matchConstraints.resourceRules: required …`), a rule names at least one
+  operation, API group, API version and resource, an authored `paramKind`
+  its `apiVersion` and `kind`. A validating policy holds at least one of
+  `validations` and `auditAnnotations`. A mutating policy holds at least one
+  mutation, each with the patch its `patchType` names and that patch's
+  `expression` (`mutations[0].jsonPatch: required with the patchType
+  JSONPatch …`), and a `reinvocationPolicy`, which the API server does not
+  default. A validating binding holds at least one of `validationActions`.
+  A binding's authored `paramRef` holds exactly one of `name` and `selector`
+  (`paramRef: exactly one of name and selector is required …`) and its
+  `parameterNotFoundAction`, which the API server does not default; its
+  authored `matchResources` is checked as a policy's match, without
+  requiring a rule. The selectors of a match and a `paramRef` are held to
+  the shared check (see "A label selector's match expressions").
+
+  Not checked here: the values of `failurePolicy`, `matchPolicy`, a rule's
+  operations and scope (a mutating policy takes only CREATE and UPDATE),
+  `validationActions` and how they combine, `parameterNotFoundAction`,
+  `reinvocationPolicy`, `patchType` and a validation's `reason`; the form
+  and uniqueness of names and keys; a mutation holding the other patch
+  beside its own; and every CEL expression, which the API server compiles.
+  Neither the policy a binding names nor its parameter resources are
+  resolved at build. A policy does nothing until a binding names it. A
+  mutating policy changes objects after the build, so what the build
+  checked need not hold of what is stored.
 - **fluxcd-alert, fluxcd-provider, fluxcd-receiver, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator, resourcesetinputprovider**
   (go-kure/launcher#790) are the kind-named projections of objects of the
   Flux APIs beside the sources, the HelmRelease and the Kustomization: a
@@ -11730,6 +11788,8 @@ refuses both.
 | `poddisruptionbudget` | `selector` |
 | `clusterrole` | every entry of `aggregationRule.clusterRoleSelectors` |
 | `validatingwebhookconfiguration`, `mutatingwebhookconfiguration` | the `namespaceSelector` and `objectSelector` of every webhook |
+| `validatingadmissionpolicy`, `mutatingadmissionpolicy` | the `namespaceSelector` and `objectSelector` of `matchConstraints` |
+| `validatingadmissionpolicybinding`, `mutatingadmissionpolicybinding` | `paramRef.selector`; the `namespaceSelector` and `objectSelector` of `matchResources` |
 | `pod`, and under `template.spec` `podtemplate`, `replicaset` and `replicationcontroller` | the `labelSelector` and `namespaceSelector` of every `podAffinity` and `podAntiAffinity` term, required or preferred; a topology spread constraint's `labelSelector`; a projected `clusterTrustBundle` source's `labelSelector`; the `selector` of a generic ephemeral volume's claim template |
 
 A `replicaset`'s own `selector` is refused for the same defects by the check that compares it

@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: replica-limit-prod
+      type: validatingadmissionpolicybinding
+      properties:
+        policyName: replica-limit
+        validationActions: [Deny, Audit]
+        paramRef:
+          name: replica-limit-prod
+          namespace: policy
+          parameterNotFoundAction: Deny
+        matchResources:
+          namespaceSelector:
+            matchLabels:
+              environment: production
+    - name: replica-limit-teams
+      type: validatingadmissionpolicybinding
+      properties:
+        objectName: replica-limit-teams.example.com
+        policyName: replica-limit
+        validationActions: [Warn]
+        paramRef:
+          selector:
+            matchExpressions:
+              - key: team
+                operator: Exists
+          parameterNotFoundAction: Allow
