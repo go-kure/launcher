@@ -465,6 +465,10 @@ func alertmanagerRefusals(notA string) []struct {
 			`enableFeatures: classic-mode with utf8-strict-mode: Alertmanager exits at startup on both; name one of them`},
 		{"both matcher modes in one element at 0.27", map[string]any{"version": "v0.27.0", "enableFeatures": []any{"utf8-strict-mode,classic-mode"}},
 			`enableFeatures: classic-mode with utf8-strict-mode`},
+		// The kubelet passes $$ as $, so an escaped reference is a name as
+		// written, which no version takes.
+		{"a feature flag of an escaped reference", map[string]any{"enableFeatures": []any{"$$(AM_FEATURE)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
 		// The API requires the names of a pod's init containers and containers
 		// to be unique together.
 		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
@@ -1127,6 +1131,10 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"two feature flags in one element":          {"enableFeatures": []any{"classic-mode,receiver-name-in-metrics"}},
 		"no feature flag":                           {"enableFeatures": []any{}},
 		"a feature flag after the table's versions": {"version": "v0.35.0", "enableFeatures": []any{"a-later-feature"}},
+		// The kubelet expands a reference to a variable before Alertmanager
+		// reads the list; the kind cannot see the value.
+		"a feature flag of an environment variable": {"enableFeatures": []any{"$(AM_FEATURE)"}},
+		"a reference beside a feature flag":         {"enableFeatures": []any{"classic-mode", "$(AM_FEATURE)"}},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],
