@@ -805,15 +805,21 @@ func ipAddressCharacters(host string) bool {
 // alertmanagerParsesIPAsGo123 reports whether the Alertmanager of the spec's
 // version is built with Go 1.23 or later, whose net.ParseIP this is: from
 // v0.28.0 on, its prerelease v0.28.0-rc.0 included (.promu.yml:4 at
-// v0.28.0-rc.0; v0.27.0 is built with Go 1.21). Unset, the version is the
-// operator's default (v0.34.0 at v0.94.1), and where it does not parse
-// validateAlertmanagerVersion refuses it. An older Go parses IP addresses by
-// older rules, taking some that Go 1.23 refuses (leading zeros, as 010.0.0.1
-// or fd00::00001); those are not modelled, so an older version's host is not
-// held to net.ParseIP, only to ipAddressCharacters.
+// v0.28.0-rc.0; v0.27.0 is built with Go 1.21), alertmanagerGo123Version.
+// Where version is unset it is judged at the operator's default,
+// alertmanagerDefaultVersion, as the version gates are. Where it does not
+// parse validateAlertmanagerVersion refuses it, and its host is held to
+// net.ParseIP. An older Go parses IP addresses by older rules, taking some
+// that Go 1.23 refuses (leading zeros, as 010.0.0.1 or fd00::00001); those
+// are not modelled, so an older version's host is not held to net.ParseIP,
+// only to ipAddressCharacters.
 func alertmanagerParsesIPAsGo123(spec *monitoringv1.AlertmanagerSpec) bool {
-	version, err := semver.ParseTolerant(spec.Version)
-	return spec.Version == "" || err != nil || version.GTE(semver.MustParse("0.28.0-0"))
+	judged := spec.Version
+	if judged == "" {
+		judged = alertmanagerDefaultVersion
+	}
+	version, err := semver.ParseTolerant(judged)
+	return err != nil || version.GTE(semver.MustParse(alertmanagerGo123Version))
 }
 
 // refuseGeneratedAlertmanagerArgs refuses an entry of additionalArgs that
