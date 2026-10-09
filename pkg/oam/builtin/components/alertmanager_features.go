@@ -51,7 +51,10 @@ var alertmanagerFeatureFlags = []alertmanagerFeatureFlagsOfMinor{
 // flag of its version, an empty one included, and on classic-mode with
 // utf8-strict-mode (NewFlags, featurecontrol/featurecontrol.go:135-180 at
 // v0.34.0), and then exits (cmd/alertmanager/main.go:104-108 at v0.34.0). So
-// an element with a "," in it is read as two. Below 0.27.0 the version gate
+// an element with a "," in it is read as two. The value is read as the kubelet
+// passes it (kubeletArgument): $$ as $, and a list that refers to an
+// environment variable, as $(AM_FEATURE), is not refused, as the kind cannot
+// see what the kubelet expands it to. Below 0.27.0 the version gate
 // has refused a nonempty list already; above the table's last minor the names
 // are not known, and are not refused. No message names the value, as
 // refuseUnservableExternalURL names none.
@@ -63,7 +66,8 @@ func refuseUnusableAlertmanagerFeatures(spec *monitoringv1.AlertmanagerSpec, ver
 	if joined == "" {
 		return errors.New("enableFeatures: one empty element: the Prometheus operator passes it as --enable-feature without a value, and Alertmanager exits at startup on a flag without its value; leave enableFeatures unset to enable no feature")
 	}
-	if version.Major != 0 {
+	joined, refers := kubeletArgument(joined)
+	if refers || version.Major != 0 {
 		return nil
 	}
 	i := slices.IndexFunc(alertmanagerFeatureFlags, func(r alertmanagerFeatureFlagsOfMinor) bool { return r.minor == version.Minor })

@@ -3877,7 +3877,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `--enable-feature` alone (`pkg/operator/argument.go:69-75` at v0.94.1),
     which Alertmanager's flag parser refuses (kingpin v2.4.0
     `flags.go:126-130`) before it exits; leave `enableFeatures` unset for no
-    feature. The names, by minor: `classic-mode`, `receiver-name-in-metrics`
+    feature. The joined list is read as the kubelet passes it, which reads
+    `$$` as `$` and leaves `$(` without its closing parenthesis as written; one
+    that refers to an environment variable, as `$(AM_FEATURE)`, is not refused,
+    since the kubelet expands it to a value the component cannot see. The
+    names, by minor: `classic-mode`, `receiver-name-in-metrics`
     and `utf8-strict-mode` from 0.27;
     `auto-gomaxprocs` and `auto-gomemlimit` from 0.28; `alert-names-in-metrics`
     from 0.31; `event-recorder` and `group-key-in-metrics` from 0.33, which
