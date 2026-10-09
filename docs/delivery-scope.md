@@ -1864,7 +1864,9 @@ and by scope, whatever component or trait emits it.
   `monitoring_workload.go` shares): the strict projection of `PrometheusSpec`, built on
   `policyHeldKind`, namespaced, declaring its object and taking `objectName`. Launcher
   emits the Prometheus and nothing else; the operator runs the pods, one StatefulSet per
-  shard.
+  shard. Fields the operator reads only from some Prometheus version on are not held to
+  `version`; nor, unlike on `alertmanager`, is an image named without a `version`, or a
+  `version` the operator cannot parse, refused.
   - **No field is renamed.** The spec has no top-level `labels` or `annotations`, so
     `externalLabels` keeps its upstream name; it is not checked as Kubernetes labels are.
   - **The pods are held as the Alertmanager's are, those of every shard:** `replicas`

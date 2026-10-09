@@ -4508,9 +4508,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   unless `objectName` names it; the handler declares the object as
   namespaced and adds no label and no annotation. Launcher emits no pod, no
   StatefulSet and no Service for it: the operator builds one StatefulSet per
-  shard from the object and runs the pods. What is said of `alertmanager`
-  above holds here unless this entry says otherwise: no capability is
-  required and nothing gates the kind; on a listed container, init container
+  shard from the object and runs the pods. Unlike on `alertmanager`, nothing
+  is held to `version`: an image named without one is not refused, nor is a
+  `version` the operator cannot parse, and fields the operator reads only
+  from some Prometheus version on are not held to `version`. What is said of
+  `alertmanager` above holds here unless this entry says otherwise: no
+  capability is required and nothing gates the kind; on a listed container, init container
   or volume, an authored `0` or `""` the type cannot carry is refused, a
   `hostPort` of `0` under `hostNetwork: true` included, and so is an empty
   `schedulerName` or `imagePullPolicy`, which the operator copies unchanged
