@@ -26,6 +26,10 @@ const (
 	// the pods for; it refuses a version of a major above 0 too
 	// (provisionAlertmanagerConfiguration, pkg/alertmanager/operator.go).
 	alertmanagerMinimumVersion = "0.15.0"
+	// alertmanagerGo123Version is the least version whose Alertmanager is
+	// built with Go 1.23 or later: the least prerelease of v0.28.0, as
+	// v0.28.0-rc.0 already is (alertmanagerParsesIPAsGo123).
+	alertmanagerGo123Version = "0.28.0-0"
 )
 
 // alertmanagerGlobal is the global block of alertmanagerConfiguration, nil
