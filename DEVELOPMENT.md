@@ -15,7 +15,7 @@ make check
 ## Prerequisites
 
 - [mise](https://mise.jdx.dev) — tool version manager
-- Go 1.26.8 (managed by mise)
+- Go 1.26.9 (managed by mise)
 - golangci-lint 2.14.0 (managed by mise)
 
 ```bash
