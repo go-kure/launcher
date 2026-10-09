@@ -113,6 +113,41 @@ packages:
     readme: pkg/oam/builtin/components/README.md
     mounted: false
     reason: "Vendored Prometheus operator source read by the components tests; not a launcher package."
+  # Alertmanager's feature flag source, one copy per minor, that the components
+  # enableFeatures test parses (testdata, so Go never builds it). The components
+  # README describes it.
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.27.0/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.28.1/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.29.0/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.30.1/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.31.1/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.32.3/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.33.1/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/alertmanager/v0.34.1/featurecontrol
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Alertmanager source read by the components tests; not a launcher package."
 
 # Non-package docs mounted into the site. Not gated by code changes.
 # (README.md, examples/README.md, and design-capability-schema.md are deferred to
