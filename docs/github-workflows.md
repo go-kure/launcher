@@ -412,13 +412,6 @@ Runs on main and `release/*` branches only (not PRs):
     only imports `external-secrets/apis` to generate CRD manifests; reachable traces are generated
     deepcopy boilerplate and package init, never a reconciler. The apis module is untagged and the Go
     vuln DB records no fixed version (`Fixed in: N/A`), so no dependency bump can clear it.
-  - Currently allowlisted: `GO-2026-6596` (Cilium HTTPRoute cross-namespace redirect). Upstream
-    fixed it in 1.17.17, 1.18.11 and 1.19.5, and the 1.20 line Launcher pins is not affected. The
-    unreviewed vuln DB report carries an `introduced 0` range with no fix, a placeholder for the
-    1.18.0-1.18.11 range it could not map, so it flags every version and no bump can clear it. It
-    lists no symbols, and Launcher reaches only the cilium CRD API types and package init (through
-    kure's cilium builders), never Gateway API translation. Remove the entry once the vuln DB report
-    is corrected (the `introduced 0` placeholder range dropped); tracked in go-kure/launcher#675.
 
 ---
 
