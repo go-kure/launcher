@@ -4529,7 +4529,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   check hold with or without a policy; no policy default is filled; an image
   the operator chooses is refused under a registry allowlist, and the
   operator's own replica and shard counts are held, not written (both below);
-  a claim template's metadata is read for its name only. An empty `retention` is not
+  the labels and annotations of `storage.volumeClaimTemplate` are held to the
+  reserved metadata keys where it is the arm in use, and no claim template
+  takes a component label. An empty `retention` is not
   refused: its 24h default is the operator's code (where `retentionSize` and
   `retentionPercentage` are empty too), not a CRD default, so the derived list
   cannot hold it, and the object then gets the operator's default. The
