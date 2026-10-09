@@ -15,8 +15,8 @@ import (
 // and Secrets it reads by name from that namespace (FluxNamespaceReads, see
 // flux_namespace_reads.go). The decode and its refusals are policyFreeKind's,
 // unchanged, as for a policyHeldKind. A kind whose object names a host the
-// environment policy holds is held to it as well (enforce), as the sources
-// are.
+// environment policy holds, or holds a credential, is held to it as well
+// (enforce), as the sources are.
 //
 // The Flux kinds written before this file (the sources, helmrelease,
 // fluxcd-kustomization) keep their own configs.

@@ -404,6 +404,11 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			props:  props(metallbPeerOf("password", esSentinel)),
 			policy: rcNoSecrets,
 		},
+		{
+			name: "fluxcd-provider, webhook address", class: oam.RefusalExplicitSecret, typ: "fluxcd-provider", handler: &components.FluxcdProviderHandler{},
+			props:  props(map[string]any{"type": "msteams", "address": "https://hooks.example/" + esSentinel}),
+			policy: rcNoSecrets,
+		},
 	}
 	// The pod of an ACME HTTP01 solver is held to the workload maxima on both
 	// kinds an Issuer's spec builds and on both ways a solver answers.
