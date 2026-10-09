@@ -19,7 +19,10 @@ Each function returns a new map on every call: a caller may delete, replace or a
 entries, and the change reaches no other caller. A type launcher adds later appears in the
 map of its kind without a change on the caller's side. Adding one takes two lines in one
 commit: its entry in `registry.go`, at its position, and its line in kurel's
-`testdata/builtin-registries.txt`.
+`testdata/builtin-registries.txt`. The table names the maps, not the types: the kind
+components themselves, each with what it emits and refuses, are listed in
+[`pkg/oam/builtin/components`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components),
+so a new kind changes nothing here but those two lines.
 
 A type that is a lowering rule is never also a handler of the same position, and
 `RegisterComponentLowering` and `RegisterTraitLowering` panic on that collision. A consumer
