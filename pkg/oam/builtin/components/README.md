@@ -2185,6 +2185,43 @@ a class, which a consumer reads from `oam.ViolationError.Class` instead of match
 A new policy check in this package builds its refusal with `oam.NewPolicyRefusal` and a class
 constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that does not.
 
+## Pod view of a monitoring workload object (`MonitoringPodSpec`)
+
+An object from which the Prometheus operator builds pods, the `Alertmanager`, `Prometheus` and
+`ThanosRuler` of the `alertmanager`, `prometheus` and `thanosruler` kinds, has no pod template:
+its pod fields sit under `spec` in the operator's own type, so a consumer that scans the pods of
+the rendered output finds none to scan (go-kure/launcher#974). `MonitoringPodSpec(obj)` returns them as a `corev1.PodSpec`, with the
+prefix its paths sit under in the object (`spec`) and whether the object is of such a kind:
+
+```go
+if pod, prefix, ok := components.MonitoringPodSpec(obj); ok {
+	// pod.Containers[0].SecurityContext is at <prefix>.containers[0].securityContext in obj.
+	scanPod(pod, prefix)
+}
+```
+
+- **What it holds:** the fields the kind's policy checks read, from the same mapping: the listed
+  `containers` and `initContainers`, `volumes`, `securityContext`, `hostNetwork` where the spec
+  has it (a `ThanosRuler`'s has none), `dnsPolicy`, and the `nameservers` of `dnsConfig`. A
+  listed container named for one the operator generates is a patch the operator merges into that
+  container, and is in the view as written.
+- **What it does not hold:** the containers the operator generates itself. Their images,
+  arguments and security context are the operator's, and launcher holds only what the author
+  wrote. The `searches` and `options` of `dnsConfig` are not in the view either.
+
+  | Kind | Generated containers | Generated init containers |
+  |---|---|---|
+  | `alertmanager` | `alertmanager`, `config-reloader` | `init-config-reloader` |
+  | `prometheus` | `prometheus`, `config-reloader`, and `thanos-sidecar` where `thanos` is set | `init-config-reloader` |
+  | `thanosruler` | `thanos-ruler`, `config-reloader` | none |
+- **A copy:** a change to the view does not reach the object.
+- **Typed objects only:** an unstructured monitoring object is converted to its typed object
+  first. Any other object, a nil one included, gives `nil, "", false`.
+
+Each monitoring workload kind adds its case from its own `monitoringWorkload` mapping;
+`TestMonitoringPodSpec_CoversEveryRegisteredWorkloadKind` (`pkg/oam/builtin/registry`) fails on a
+registered kind of the operator's API whose spec lists containers and that has no case.
+
 ## Per-type highlights
 
 Wrong-type handling for the optional top-level properties go-kure/launcher#405
