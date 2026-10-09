@@ -990,7 +990,15 @@ and by scope, whatever component or trait emits it.
     are written as authored and not held: the Provider sends events there, it fetches
     no artifact. A token in the path or the query of an address is not something the
     kind can tell.
-  - **Two of them are held to the environment policy:** the registry of an
+  - **An `address` that is the credential is refused under a policy that forbids
+    explicit secrets** (go-kure/launcher#973): that of `discord`, `generic`, `generic-hmac`, `googlechat`, `lark`, `msteams`, `rocket` and `slack`,
+    and an `azureeventhub` address that holds `SharedAccessKey`. The notifiers of
+    `discord`, `googlechat`, `lark`, `msteams` and `rocket` post to the address with
+    no token of their own, and so does `slack` where the Secret holds none, which the
+    kind does not read; `generic` and `generic-hmac` post to the address as written,
+    and nothing tells an endpoint from one whose path or query is the credential. The remedy is the `address` key of the Secret `secretRef`
+    names, which the controller reads in place of `address`.
+  - **Two of them are held to the environment policy's allowed registries:** the registry of an
     `imagerepository`'s `image` to the allowed registries, by the rule that holds the
     image of a pod. No tag rule applies, since the field names a repository. Its
     `accessFrom`, which opens the scanned tags to other namespaces,

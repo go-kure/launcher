@@ -529,7 +529,7 @@ var policyFreeKinds = []policyFreeKind{
 	{
 		component: "fluxcd-provider", handler: &components.FluxcdProviderHandler{},
 		gvk: notificationv1beta3.GroupVersion.WithKind(notificationv1beta3.ProviderKind),
-		typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), namespaced: true, flux: true,
+		typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), namespaced: true, flux: true, held: true,
 		minimal: fluxProviderMinimal(),
 		full:    fluxProviderFull(),
 	},

@@ -847,7 +847,6 @@ func TestFluxDurations_ThroughAList(t *testing.T) {
 func TestFluxKinds_UnheldHaveNoEnforce(t *testing.T) {
 	for component, held := range map[string]bool{
 		fluxcdAlertType:           fluxcdAlertKind.enforce != nil,
-		fluxcdProviderType:        fluxcdProviderKind.enforce != nil,
 		fluxcdReceiverType:        fluxcdReceiverKind.enforce != nil,
 		imagePolicyType:           imagePolicyKind.enforce != nil,
 		imageUpdateAutomationType: imageUpdateAutomationKind.enforce != nil,

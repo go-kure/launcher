@@ -463,7 +463,7 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 	}
 	// Vacuity guard: these are the kinds the policy does not reach.
 	slices.Sort(unheld)
-	if want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-provider", "fluxcd-receiver", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
+	if want := []string{"artifactgenerator", "fluxcd-alert", "fluxcd-receiver", "imagepolicy", "imageupdateautomation"}; !slices.Equal(unheld, want) {
 		t.Fatalf("the Flux kinds the policy does not reach are %v, want %v", unheld, want)
 	}
 }
