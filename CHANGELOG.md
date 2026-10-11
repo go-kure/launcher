@@ -1,6 +1,598 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.1] - 2026-10-11
+
+### Added
+
+- Remove Flux delivery fields and kurel's Flux delivery mode
+- Order components only where the document declares it
+- Declare contract metadata and lowering targets on every builtin
+- Let an author name the scaler, rbac and networkpolicy objects
+- Label what a component owns and report its owner
+- Default the Helm release name to the component name under both deliveries
+- Order oci Kustomizations after their shared source
+- Resolve generated names through a consumer naming hook
+- Prune-protection and force-replace set a delivery intent
+- Let the author and the naming hook name the postgresql Pooler and Databases
+- Refuse a pod-spec trait on a component without a workload
+- ObjectName names the object of a kind component
+- Add six cluster-scoped kind components on a shared helper
+- Let the six cluster-scoped kinds take objectName
+- Name the generated source and the helm values objects
+- Add the servicecidr, poddisruptionbudget and horizontalpodautoscaler kinds
+- Refuse reserved metadata keys on every generated object
+- Name the Kustomization of each helmtemplate hook-group child
+- Give every policy refusal a class a consumer can read
+- Labels and annotations on every kind component
+- Make the name-collision refusal recognisable
+- Make the reserved metadata key refusal recognisable
+- Recognise the over-long hook-group name refusal and raise it in the transform
+- Give the component label's refusal a type and a sentinel
+- Name the claim a role component's pvc volume generates
+- Resolve the ingress and httproute trait objects under name roles
+- Label a CronJob's job template and hold it to the reserved keys
+- Resolve the Secrets the traits have written under two name roles
+- Add the generated name role
+- Declare exactly-one-of and at-most-one-of property groups
+- Add the object kind policy
+- Export the built-in handlers and lowering rules from pkg/oam/builtin/registry
+- Expose the pod view of a monitoring workload object
+
+### Build
+
+- Bump kure to v0.2.0-beta.15.0.20261004180425-97dce7a4b760
+- Bump kure to v0.2.0-beta.15.0.20261004224508-0afd7ca8c4b8
+- Bump kure to v0.2.0-beta.15.0.20261005031541-144a533dbcf3
+- Bump kure to v0.2.0-beta.15.0.20261005101450-d3a45fad7a9a
+- Keep Renovate off the monitoring API module shared with kure
+- Bump kure to v0.2.0-beta.15.0.20261005142203-fef959cefb0a
+- Bump kure to v0.2.0-beta.15.0.20261005152652-5dd0e22643ce
+- Bump kure to v0.2.0-beta.15.0.20261005182950-3afb93e06660
+- Require k8s.io/apiserver directly
+- Update dependency syft to v1.54.1
+- Require the Flux API modules of the new kinds directly
+- Keep k8s.io/kube-openapi from being proposed on its own
+- Name the vulnerability-alert exception for kube-openapi
+- Require the flux-operator module directly
+- Bump external-secrets apis to 2.12 and kure to 3978ab14
+- Re-pin kure to main
+- Bump Go to 1.26.9 and golang.org/x/net to v0.60.0
+- Keep goimports out of testdata and hidden directories
+- Update dependency goreleaser to v2.18.3
+- Update module golang.org/x/mod to v0.42.0
+- Update module golang.org/x/vuln to v1.9.0
+- Pin kure v0.2.0-beta.16
+
+### CI
+
+- Key the Go build cache on a UTC-day bucket, not a source hash
+- Save the tool-binary caches from main only
+- Drop the stale GO-2026-6596 allowlist entry
+
+### Changed
+
+- Shorten every generated name by one rule
+- Shorten the routing, backup and TLS default names too
+- Shorten the role PVC claim name, keep an oversized suffix in bounds
+- Drop a repeated nil check in the sibling group's Generate
+- Write the component type maps in the order of their types
+
+### Dependencies
+
+- Exclude fluxcd pkg/apis/kustomize from Renovate
+
+### Document Format
+
+- Hold a helmtemplate chart in app.yaml to the replica maximum
+- Add the namespace kind component
+- Add the limitrange kind component
+- Add the resourcequota kind component
+- Add the persistentvolume kind component
+- Set the release name of a template-rendered chart in app.yaml
+- Let the pod-template policy check take an empty path
+- Add the pod kind component
+- State what a schema-validating caller sees for the refused pod fields
+- Make the pod kind a trait target
+- Refuse a rendered list that involves a Helm hook
+- Hold each item of a registered list to the undeclared-field rule
+- Check the hook only in the items a list is replaced by
+- Add fluxcd-kustomization to app.yaml; oci lowers to kind components
+- Take scopeOverrides on helmtemplate
+- State the order manifest.Scope resolves in
+- Add the replicaset kind component
+- Add the replicationcontroller kind component
+- Add the podtemplate kind component
+- Refuse an unknown key inside a Cilium selector
+- Turn a panicking API decoder into a build error
+- Report a decoder panic on a manifest document as a build error
+- Take sensitive Helm values in app.yaml as secretValues
+- Read a nil map as a null in the secretValues shared-path check
+- Resolve the secret trait's sub-application through the naming hook
+- A Secret is no longer unchecked on passthrough and manifests
+- Name the explicit-secret refusal where other kinds are said to pass
+- Take scopeOverrides on helm under delivery: template
+- Read seven container fields on every workload container
+- Raw tolerations and topology spread on statefulset
+- Raw affinity, topology spread and sidecars on daemonset
+- Raw affinity, tolerations and topology spread on job
+- Raw affinity, tolerations and topology spread on cronjob
+- Selector, dataSourceRef and volumeName on a standalone claim
+- Scope a passthrough object in app.yaml by its kind
+- Read the remaining ServiceSpec fields on the service kind
+- Claim the object names the routing and Cilium traits settle
+- Add the ingress kind component
+- Add the httproute kind component
+- Add the networkpolicy kind component
+- Add the cilium-networkpolicy kind component
+- Say why the Cilium trait claims its name as authored
+- Add the secret kind component
+- Hold cnpg-cluster to the shared spec comparison
+- Add the servicemonitor, podmonitor, prometheus-probe and prometheusrule kind components
+- Add the issuer, clusterissuer and certificate kind components
+- State three limits of the cert-manager kinds exactly
+- Add the cilium-bgpadvertisement, cilium-bgpclusterconfig, cilium-bgpnodeconfigoverride and cilium-bgppeerconfig kind components
+- Add the cilium-cidrgroup, cilium-loadbalancerippool, cilium-egressgatewaypolicy, cilium-localredirectpolicy and cilium-nodeconfig kind components
+- Add the cilium-clusterwidenetworkpolicy kind component
+- Refuse a cilium-networkpolicy rule without a required field
+- Refuse a cilium-networkpolicy trait rule without a required field
+- Name the Cilium kind helper for every Cilium kind
+- Add the gatewayclass, gateway, listenerset, referencegrant and backendtlspolicy kind components
+- Say when a BackendTLSPolicy hostname authenticates the backend
+- Name the Kustomization and the kept source of an oci component
+- Name the HelmRelease of a helm component
+- Refuse a required field that a kind's type leaves out
+- Name the empty strings a cnpg-cluster does refuse
+- Hold a pod's image volume to the allowed registries
+- Hold every image a cnpg-cluster names to the allowed registries
+- Say where a cnpg-cluster takes an image it does not name
+- Name the objects of a webservice and a worker component
+- Refuse a required field that a kind's type writes as null
+- Say what an issuer's solver fields leave to the API server
+- Hold every image a document names to the tag rule
+- Name the Cluster and the ObjectStore of a postgresql component
+- Refuse the endpoints of a postgresql pooler named as its Cluster
+- Refuse the endpoint of a cnpg-pooler named as its cluster
+- Read a cnpg-pooler's cluster reference as its decode does
+- Read a cnpg-pooler's properties for its endpoint as the build does
+- Refuse a required string that a kind's type writes empty
+- Say which refusals of the cnpg kinds Generate repeats
+- Refuse an object store path postgresql would write empty
+- Count an external object store path in any spelling
+- Check a peer's timers rule against the CRD's defaults
+- Refuse a postgresql block that would not be built
+- Write a postgresql pooler's authored instances of 0 or less
+- Add the endpointslice kind component
+- Add the role, rolebinding, clusterrole and clusterrolebinding kind components
+- Name the traits README by its path in the RBAC kinds entry
+- Add the secretstore, clustersecretstore, externalsecret and clusterexternalsecret kind components
+- Hold an external secret's target.manifest to the environment policy
+- Refuse a target.manifest apiVersion that is no API version
+- Hold a target.manifest apiVersion to group and version names
+- Correct two statements about an external secret's references
+- Refuse a cnpg-cluster's endpoint where the build refuses its properties
+- Refuse the endpoints of a postgresql pooler named as its component
+- Answer an endpoint only for a component its type's parse accepts
+- Hold the postgresql endpoint entry to the members its lowering emits
+- Add the replicationsource and replicationdestination kind components
+- State what of a VolSync mover's pod the policy does not hold
+- Hold a VolSync rsync mover to the policy's container capabilities
+- Say that no kind is reachable only as a trait any more
+- App.yaml helm and helmtemplate components take layoutKustomizationName; shorten a chart layout's Kustomization name over 63
+- Refuse every unread upstream field of a hand-parsed kind with its reason
+- Refuse a defective match expression in a built-in kind's label selector
+- Require a match expression's key and operator on a CRD-backed kind
+- Refuse an app.yaml Application whose objects hold another component's label
+- Hold an app.yaml Application's mover pod, solver pod and Gateway infrastructure labels
+- Add the fluxcd-alert kind component
+- Add the imagepolicy kind component
+- Add the imageupdateautomation kind component
+- Add the artifactgenerator kind component
+- Hold the ResourceSet and FluxInstance kinds
+- Say what a kind in the Flux namespace shares
+- Correct two statements about an Alert's event sources
+- Say in the fluxcd-alert schema what matchLabels narrows
+- Put the highlights of the Flux kinds where the placement rule says
+- Keep the contract and object methods of the Flux kinds in their files
+- Require a policySelector match expression's key and operator
+- Mark as required the properties six kinds refuse a component without
+- Hold the seven Flux kinds to what their API requires and defaults
+- Refuse reserved keys in an app.yaml Application's metadata that reaches no pods
+- Refuse an empty string on a field whose default the API applies
+- Read statefulset affinity as the raw corev1 shape
+- Add the metallb-ipaddresspool kind component
+- Add the metallb-l2advertisement kind component
+- Add the metallb-bgpadvertisement kind component
+- Add the metallb-bfdprofile kind component
+- Add the metallb-community kind component
+- Exclude MetalLB from Renovate and describe empty advertisements as the widest
+- Add the metallb-bgppeer kind component
+- App.yaml volsync trait takes an optional name for its ReplicationSource
+- App.yaml configmap, secret and pvc traits claim their object names
+- Read a container's windowsOptions and an init container's restart policy
+- Hold windowsOptions strings to upstream's rules
+- Let a Flux kind be held to the environment policy
+- Write a Flux kind's durations in the form their pattern takes
+- Add the imagerepository kind component
+- Add the fluxcd-provider kind component
+- Add the fluxcd-receiver kind component
+- Check a Flux kind's duration under a list by its authored text
+- Add the resourcesetinputprovider kind component
+- Refuse an @ in a Provider address that is no URL with a host
+- Refuse an @ in a proxy or url that is no URL with a host
+- App.yaml fluxcd-receiver refuses a user or password in an OIDC issuerURL
+- Say that a fluxcd-receiver issuerURL that does not parse is refused
+- Say the standard channel's HTTPRoute CRD does not hold useDefaultGateways
+- Hold the two Cilium Envoy config kinds
+- Refuse an authored empty list the API would default
+- Give a key refused below the top level the reason its parser has
+- Give podResources.claims the reason upstream refuses it with
+- Publish app.yaml one-of groups and refuse an empty member beside a set one
+- Add the tcproute, udproute and tlsroute kind components
+- Add the grpcroute kind component
+- Say the standard channel's GRPCRoute CRD does not hold useDefaultGateways
+- Name gateway-api v1.6.3 as the version the experimental-field claim holds at
+- Add the cnpg-imagecatalog, cnpg-clusterimagecatalog, cnpg-backup, cnpg-scheduledbackup, cnpg-databaserole, cnpg-publication and cnpg-subscription kind components
+- Refuse an image the CloudNativePG operator would choose under a registry allowlist
+- Refuse an unnamed CloudNativePG image only after the authored checks
+- App.yaml pod kinds refuse a defaulted string written as ""
+- Make the defaulter vendoring script executable
+- App.yaml refuses a reserved key in a raw StatefulSet's volume claim templates
+- Add the alertmanager kind component
+- Refuse an unset alertmanager image under a registry allowlist
+- Say an image-less monitoring container is unchecked by any name
+- Say kurel build refuses an empty deprecated alertmanager image field
+- Hold the alertmanager kind to what the operator runs
+- Refuse an alertmanager memory limit under the operator's request
+- Say which alertmanager pod fields the derivation recognises
+- Hold the alertmanager container as the operator merges it
+- Check the alertmanager container only as the operator runs it
+- Check an unnamed container's resources alone
+- Refuse alertmanager specs the operator cannot run
+- Refuse alertmanager values the operator or the API refuse
+- Refuse alertmanager values only where the operator writes them
+- Leave alertmanager TLS credential volume names to the API
+- Keep the monitoring kinds' defaulted-zero list to the pod numbers
+- Refuse alertmanager specs the CRD admits and the pods cannot run
+- Name retention values the alertmanager CRD refuses
+- Say the object kind policy can keep the alertmanager kind out of a build
+- Refuse an alertmanager secret or configMap whose volume name is cut after a -
+- Drop the alertmanager claim templates' comparison with a statefulset's
+- Refuse four alertmanager specs the operator cannot build
+- Refuse alertmanager DNS, HostProcess and TLS specs the pods cannot carry
+- Hold alertmanager flags and patched ports only where the operator generates them
+- Refuse alertmanager zeros the pods' defaulting replaces
+- Refuse an alertmanager externalUrl Alertmanager exits on
+- Hold the externalUrl scheme at v0.19.0's prerelease too
+- App.yaml refuses a reserved key in a monitoring kind's storage claim template
+- Read a monitoring kind's storage claim template only as the arm in use
+- Model the merge of a monitoring patch's ports and refuse duplicate names
+- Take a monitoring patch's ports as listed where the operator gives the container none
+- Hold a monitoring serviceName to the Service name rule, a DNS-1035 label
+- Say where the API refuses a monitoring serviceName that is not a DNS-1035 label
+- Refuse alertmanager fields below the version that reads them
+- State what an unset alertmanager version is judged at
+- Judge alertmanager flags and field gates at one pinned default
+- Hold minReadySeconds at every alertmanager version
+- Refuse an alertmanager clusterAdvertiseAddress Alertmanager exits on
+- Hold the advertise address to the Go and the args Alertmanager starts with
+- Read the advertise address as the kubelet passes it, judge its host only at Go 1.23
+- Refuse an advertise host name at every alertmanager version
+- Read an advertise port at 32 bits and scan the address once
+- Say an empty clusterAdvertiseAddress host is not refused
+- App.yaml takes the two admission webhook configuration kinds and apiservice
+- Drop the webhook and apiservice handlers from builtinComponentHandlers for the rebase
+- Register the webhook and apiservice handlers in pkg/oam/builtin/registry
+- Hold the operator kinds' pod checks in kind-neutral helpers
+- Add the thanosruler kind component
+- Judge a thanosruler portName on the container as the pods run the web port
+- Say in the thanosruler portName schema how a patch's ports change the container check
+- App.yaml refuses a fluxcd-provider address that is its credential under a policy that forbids explicit secrets
+- Add the prometheus kind component
+- Hold the prometheus operator's own defaults
+- Merge prometheus and thanos-sidecar patches as the operator runs them
+- Refuse the prometheus pods the API refuses, as on alertmanager
+- Refuse a prometheus schedulerName or imagePullPolicy the pods' defaulting replaces
+- Refuse a prometheus externalUrl Prometheus exits on at startup
+- Refuse the prometheus ports, volumes and serviceName the API refuses
+- Refuse what the operator builds into a broken Prometheus
+- Refuse prometheus sidecar mounts, log files and shard counts the operator breaks
+- Refuse thanos sidecar mount fields the operator drops
+- Refuse a prometheus secret or configMap whose volume name is cut after a -
+- Hold the prometheus rule volume names, query log mount and pod metadata text to the operator
+- Refuse a monitoring StatefulSet name its pods' revision label cannot carry
+- Say the prometheus kind holds nothing to version
+- Say the prometheus kind's claim template holds reserved keys
+- Refuse an alertmanager enableFeatures Alertmanager exits on
+- Refuse an alertmanager enableFeatures of one empty element
+- Read an alertmanager enableFeatures as the kubelet passes it
+- App.yaml HelmReleases under a Flux namespace keep their Helm storage with the release
+
+### Documentation
+
+- Cite the gocache cost figure and narrow the PR-cache claim
+- Separate PR and merge-queue cache scope in the caching guide
+- Add delivery-scope design sub-report
+- Record the release-name default and image-check recommendation
+- Replace provisional ticket IDs with the filed issues
+- Correct five current-behaviour claims in delivery-scope
+- Align delivery-scope with the filed tickets
+- Drop leftover Flux delivery wording
+- Drop the removed readiness check from the paused description
+- Say the forwarded delivery traits are consumer-registered
+- Keep bundle-only handlers in the terminal-type definition
+- State every condition of a generated source
+- Qualify where the postgresql members share a bundle
+- Say what counts as a list inside an unregistered list
+- Leave the design page out of the hook-group naming change
+- State that hook-group child names carry no namespace
+- Qualify the remaining hook-group uniqueness statements
+- Say which authored names have a default
+- Name the traits README by path, not by a relative link
+- Add the kind inventory, held to the base library by test
+- State the stamp on the helmtemplate config's Namespace field
+- State the decided handler asymmetries where they live
+- Mark the delivery-field and ordering sections as shipped
+- Say when the post-renderer parts a chart's selector from its pods
+- Move the ownership note to the ConfigWrapper row
+- Bring the delivery-scope page up to what main holds
+- State that an existing Job cannot take the component label
+- State the suspended-Job exception as the cluster applies it
+- Leave the feature-gate fallback out of the Job exception
+- State what template delivery does with an undeclared field
+- State the release name default as shipped on the delivery-scope page
+- Name the pinned kure commit and what it means for lists
+- Name the oci rule and the fluxcd-kustomization kind
+- Withdraw the tier placement of the oci rule's sources
+- List fluxcd-kustomization with the Flux kinds
+- State the naming hook as shipped on the delivery-scope page
+- Say where kure maps a delivery intent and where it refuses one
+- Say what ClusterScoped does and does not replace
+- Drop a comparison the transform does not bear out
+- State the passthrough scope precedence in the summaries
+- State the forwarded-trait rule and close the asymmetries ticket
+- State the scaling kinds' value checks as they are
+- Say object metadata on kind components is decided, not shipped
+- Say what the endpointslice row is held for
+- State where hook-group names that meet are refused
+- The cert-manager kinds take labels and annotations
+- Say where a Job's annotations come from and what ApplyTo checks
+- Say the policy is not applied again after a post-policy step
+- Say which bundle's settings a component's Kustomization takes
+- Say when a lowered name collision carries a namespace
+- State the rule the endpoint entries hold to and its three limits
+- State the fourth thing an endpoint entry does not see
+- Name the cnpg-pooler endpoint's selector by the Pooler's object
+- Say what names the object the CNPG endpoint selectors carry
+- Name the entry a reference points at
+- Put the per-type highlights in the order of their types
+- Put the tables of component types in the order of their types
+- Put the shipped kinds of the delivery scope in the order of their types
+- Point at the kind inventory instead of naming every kind
+- List the kind components of the build reference in a table
+- Say where the lines of a new kind component go
+- Leave the per-type highlights in the order they were written
+- A long component name shortens the whole layout Kustomization name
+- State what a hand-parsed kind does with an upstream field it does not read
+- Describe the label-reach test and which name a labels refusal holds
+- List ReservedKeyInPodMetadata among the new exported API
+- Say that a policy-free kind may list its defaulted zeros
+- Word the defaulted-zero claims to what their tests hold
+- Name the component types again in the OAM README
+- Name the exactly-one rules the published schema cannot express
+- Say a trait's Flux namespace input is claimed where it lands
+- Name a kind's own validation and the empty list in the required-written pin
+- Name the kure commit and gateway-api v1.6.3 that go.mod pins
+- Say what a bundle's settings reach under the kure pin
+- Qualify patch placement and the two new kure refusals
+- Limit patch placement to plain patches before any other entry
+- List the four patch placements by entry kind
+- Say which per-layout Kustomizations a bundle patch reaches
+- Count the 263 required store paths External Secrets 2.12 generates
+- Correct the ComponentLabelKey GoDoc for go-kure/launcher#790
+- State that a chart's own-layout Kustomization name is shortened by launcher's rule, not kure's
+- State that helmtemplate's own-layout Kustomization name is shortened by launcher's rule
+- Settle go-kure/launcher#787's open point in the delivery scope and scope kure's rule
+- State the chart layout shortening as the pinned state, not a lasting rule
+- State when the object kind policy refuses the rbac trait
+- A listed allowlist that leaves out either rbac kind refuses the trait
+- Name the CloudNativePG ephemeral volume claim template the checks leave unread
+- Say a hookGroupNamePrefix names the Kustomization, the default does not
+- Count the Naming hook's prefix out of the hook-group default
+- Point from the registry's maps to the list of kind components
+- ExplicitSecretPolicy names a fluxcd-provider credential address among its sources
+
+### Fixed
+
+- Check a generated name's characters before shortening it
+- Keep a generated source out of an inherited order
+- Exempt from an inherited order only the source that is hoisted
+- Hold template-delivered charts to the environment policy
+- Close three gaps in the rendered-workload checks
+- Name the authored component for a forwarded trait with no handler
+- Name the authored component for a trait a document rule moved
+- Name helmtemplate hook-group layouts after their application
+- Hold a passthrough object to environment policy
+- Report a passthrough refusal at generation as a policy violation
+- Refuse an authored trait name no object can carry
+- Refuse an authored empty trait name
+- Hold the objects of a manifests source to environment policy
+- Give namespaced template-delivery objects the application namespace
+- Keep a labelled workload admissible and state the label's limits
+- Refuse a non-string pod label whether or not the key is there
+- Read an unstructured object's labels as written
+- Label the members of an unstructured list envelope
+- Label the pods of a ReplicaSet and a ReplicationController
+- Write the component label into a label map of its own
+- Label a bare Pod a Flux-installed chart renders
+- Label the pod template of a standalone PodTemplate
+- Read a nil map on an unstructured object as absent
+- Keep the core-kind label patches to the core API group
+- Select a synthesized policy's pods by the authored component
+- Refuse or keep a field the Go type does not declare
+- Name a remedy both Helm terminals have in the no-release-name error
+- Follow the decoder's field selection in UnknownJSONFieldPath
+- Declare the contract of the oci rule and the fluxcd-kustomization kind
+- Keep the path of an unknown fluxcd-kustomization key that contains a dot
+- Ask the naming hook before refusing a name, and tell every applied trait apart
+- Tell apart every owner of a resolved name, and compare a hook-named sub-application by name
+- Keep a hook answer that is the default as the hook's, and tell a rule's trait from an authored one
+- Say of a trait's equal-named sub-applications only what holds for all of them
+- Name the lowered document in a naming hook request
+- Warn conditionally about a volume under the force-replace intent alone
+- Refuse a name two lowering rules resolve, and hold raw documents apart by namespace
+- Keep a lowering rule's name claim apart from a later owner's
+- Claim a lowering rule's cluster-scoped name with no namespace
+- Hold a document without a namespace as one of default under LowerRaws
+- ObjectName applies to what a document rule returns
+- Leave a handler's own objectName alone, and read a null as none on a member
+- Resolve no object name where no endpoints are read, and name both its sources
+- Take objectName out before a handler fills capability defaults
+- Hold a CronJob's name to 52 characters and a Job's to 63
+- Hold an Indexed job's name to one its pods can be named after
+- Hold an Indexed job's name to its first index where completions is unset
+- Require controller on the ingressclass kind
+- Refuse one owner's Flux-scoped and plain claims of one object
+- Read inheritedMetadata of a typed Cluster that states no kind
+- Read platform annotations a capability gives in a typed map
+- Find the platform's annotations under a config wrapper
+- End the walk for platform annotations on any wrapper chain
+- Read a null entry of a trait's string map as absent
+- Make a policy refusal in a post-policy step a violation
+- A refused ObjectMetadata.ApplyTo leaves the object as it was
+- Hold the annotations ApplyTo merges to the size limit
+- Read labels and annotations a component built in Go holds
+- One root-node shape for a flat and an ordered application
+- Name a policy once in its refusal
+- Keep the parser's two readings of a list apart
+- Check only what the augmenter added to a layout
+- Compare the objects a List holds wherever generated objects are keyed
+- Leave a hook-group prefix that names nothing unmeasured
+- Measure a chart layout's Kustomization name with its application's name
+- Refuse two spellings of a Flux verification's provider
+- Claim a trait's Flux namespace input where it lands
+- Tell a trait's owner its Flux namespace before a claim asks what it reads
+- Refuse managedTLS on expose and read it from any string-keyed map
+- Hold a Flux object's commonMetadata to the reserved keys and the component label
+- Hold an ArtifactGenerator's commonMetadata to the reserved keys alone
+- Hold a ResourceSet's and a FluxInstance's commonMetadata
+- Refuse two applications of one name in one bundle
+- Refuse a workload whose selector rules the component label out
+- Select a renamed entry's pods under the component label key app
+- Refuse a malformed exclusive group before checking its keys
+- Refuse a kind of unknown scope whatever namespace it states
+- Hold a list by its members and re-read what an augmenter edits
+- Hold a typed list's members and an added configMapGenerator to the object kind policy
+- Read a list as it is written for the object kind policy
+- Read nested and mixed lists as written for the object kind policy
+- Drop a null List for the object kind check alone
+- Hold one generation for the object kind recheck and document the policy for traits
+- Leave default Kustomization names to kure
+
+### Testing
+
+- Qualify the suffix-preservation comment
+- Let a trait row's constructor be called from the components package
+- Hold the kind inventory's API versions to the base library
+- Hold the kind inventory's Type column to the handlers
+- Pin that generation rechecks an inline manifests source
+- Hold labels, scale target and selectors to the component beside a name override
+- Compare whole selectors, the scale target and the namespace beside a name override
+- Add the component label to the core-kind goldens
+- Name the returned type when the ownership wrapper is not one
+- Pin what passthrough does with a full strict record
+- Make the passthrough full-record test reach its case
+- Say what the refuse-set test probes by hand
+- Rework the Helm goldens and release-name docs for the rebase onto main
+- Hold the pod kind to the app-label invariant
+- Register the scheme in the list mismatch test
+- The secret trait's sub-application takes the delivery intent
+- Hold the cluster-scoped kinds' copy and input checks tighter
+- Compare the whole input in the cluster-scoped kinds' input check
+- Hold the two object metadata cases the comments name
+- Count the objects before reading the first
+- Count the hook's requests for the HelmRelease
+- Select the workload roles without a switch
+- Count the object name properties of webservice and worker
+- Say what the cert-manager required-list test derives
+- Hold the name-collision text to the claim key's
+- Show a required field in another spelling is not refused
+- Hold checked CRD rules to the API server's validator
+- Show the postgresql values a block that is not built drops
+- Show a postgresql pooler's instances of 0 or less is left out
+- Drop a document's status in the CRD create harness
+- Hold the endpointslice, RBAC and six Cilium kinds in the table of API sets
+- Hold the marker guards on the markers themselves
+- Classify the counts over named fields of the external-secrets API
+- Put typed objects to the rendered-object check itself
+- Show endpoints answered for a document the build refuses
+- Read the registries for the endpoint guard, show refusals past the parse
+- Hold the VolSync CRDs to no default on list elements and map values
+- Read the whole rsync mover package for the capabilities it adds
+- Hold the rsync mover's source to a digest
+- Say which builders take the privileged-movers answer
+- Hold the per-kind test tables in the order of their types
+- Hold coreKindSchemas and apiSetKinds complete
+- Hold the tables of component types in the docs in order
+- Put the comment of the RBAC kinds back over them
+- Read a kind list from the function's own body
+- Account for every line with a bar in a kind table's section
+- Hold the nine hand-parsed kinds to every field of their upstream type
+- Report a label-reach entry whose type is gone instead of panicking
+- Hold the Flux rows of the policy-free kinds to the four kinds
+- Put the comment of the Kustomization fixture back over it
+- Say that the Flux kinds set no defaulted-zero list
+- Give the Flux source kinds their own reason for having no API-set row
+- Say which kinds set no defaulted-zero list
+- List the ArtifactGenerator's commonMetadata among what is not read
+- Show the postgresql rule writes what its members' schemas require
+- Count a null as absent and guard only a full run in the postgresql members test
+- Name every nil kind the postgresql members test reads as null
+- Rename the routing objects through the naming hook
+- Run statefulset raw affinity through the selector matrix
+- Claim a Flux namespace input where it lands
+- Refuse a FluxInput spec outside a trait's Secret or ConfigMap
+- Pin the required fields a CRD-backed kind writes unauthored and does not refuse
+- Measure the Flux kinds in the required-written pin
+- Match a refused omission to the field's full path
+- Measure the MetalLB kinds in the required-written pin
+- Measure the four new Flux kinds in the required-written pin
+- Hold the required-written pin's kinds to the kind inventory
+- Count only omitempty lists as losing an authored empty list
+- Hold the secret kind to every field of its upstream type
+- Hold every ownProperties kind to a parity row
+- Count the route kinds' omitted paths in the Gateway defaulted-zero test
+- Hold the cnpg kinds' checked rules to the API server's validator
+- Measure the cnpg kinds in the required-written pin
+- The defaulting drift test fails on code it cannot follow
+- State what the defaulting drift test does not detect
+- The drift test fails on a dereferenced copy, a break and a guard initialiser
+- The drift test fails on a call in a case or on the object
+- The drift test looks through parentheses around a callee
+- The drift test walks only the shapes the excerpt uses
+- The closed walk checks types, shadowing and receivers
+- The closed walk scopes its names to their block
+- Hold each alertmanager policy proof to its own field
+- Measure the alertmanager kind in the required-written pin
+- List the alertmanager image fields right after the pod spec's
+- Give the alertmanager's claim template row its own reason
+- Keep strictlyDecodedTypes and componentLabelFixtures row-local
+- Restore the aligned layout of the two shared kind tables
+- Re-apply the row-local layout of the two shared kind tables
+- Hold the per-kind test tables in the order of their type
+- Say why a leading digit in a monitoring serviceName is refused
+- Vendor the Prometheus operator's Alertmanager gates at v0.94.1
+- Hold the alertmanager gate source to every comparing file
+- Scan every reading shape and fail on a broken scan
+- Vendor and walk the whole alertmanager package
+- Catch parenthesized and method-value version comparisons
+- Hold the gate fixtures' leftover check under a -run filter
+- Cover what the app.yaml apiservice and webhook kinds leave to the API server, and a wrong objectName
+- Drop the webhook and apiservice rows from the two shared kind tables for the rebase
+- Restore the webhook and apiservice rows in the two shared kind tables
+- Measure the prometheus kind in the required-written pin
+- Pin the refusal of one empty alertmanager enableFeatures below 0.27.0
+
 ## [0.2.0-beta.0] - 2026-10-03
 
 ### Added
