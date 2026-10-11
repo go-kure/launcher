@@ -360,7 +360,8 @@ sub-application config names the ConfigMap or Secret it produces (`FluxNamespace
 `certificate` trait's Certificate writes). Both kind and name must match. Every other trait object —
 a ConfigMap or Secret the Flux object does not name, a Certificate whose Secret it does not name, a
 claim, a NetworkPolicy, a route — stays in the application namespace with the
-workloads, where a HelmRelease installs them (`targetNamespace`). A ConfigMap or Secret the Flux
+workloads, where a HelmRelease installs them (`targetNamespace`) and keeps its Helm release
+storage (`storageNamespace`, defaulted to the same namespace, go-kure/launcher#988). A ConfigMap or Secret the Flux
 object names moves even when the chart's pods read it as well: the Flux object cannot reconcile
 without it, and a reference through the chart's values is invisible here. Every built-in config
 that takes the Flux namespace reports its reads, possibly none; decorators and sibling

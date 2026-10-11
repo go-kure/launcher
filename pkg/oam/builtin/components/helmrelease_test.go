@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -259,6 +260,38 @@ func TestHelmReleaseHandler_TargetNamespaceUnderFluxNamespace(t *testing.T) {
 	}
 }
 
+// TestHelmReleaseHandler_StorageNamespace (go-kure/launcher#988): under a Flux
+// namespace an unauthored storageNamespace is the effective targetNamespace,
+// authored or defaulted, so the release's Helm storage stays with the release
+// rather than in the Flux namespace. An authored storageNamespace is written
+// as it is, and without a Flux namespace none is set.
+func TestHelmReleaseHandler_StorageNamespace(t *testing.T) {
+	cases := []struct {
+		name        string
+		fluxNS      string
+		props       map[string]any
+		wantStorage string
+	}{
+		{"Flux namespace, target defaulted", "flux-system", map[string]any{}, "demo"},
+		{"Flux namespace, target authored", "flux-system", map[string]any{"targetNamespace": "elsewhere"}, "elsewhere"},
+		{"Flux namespace, storage authored", "flux-system", map[string]any{"storageNamespace": "helm-state"}, "helm-state"},
+		{"Flux namespace, both authored", "flux-system", map[string]any{"targetNamespace": "elsewhere", "storageNamespace": "helm-state"}, "helm-state"},
+		{"no Flux namespace", "", map[string]any{}, ""},
+		{"no Flux namespace, target authored", "", map[string]any{"targetNamespace": "elsewhere"}, ""},
+		{"no Flux namespace, storage authored", "", map[string]any{"storageNamespace": "helm-state"}, "helm-state"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"chart": hrChart()}
+			maps.Copy(props, tc.props)
+			hr := hrGenerate(t, hrConfig(t, "web", props), tc.fluxNS)
+			if hr.Spec.StorageNamespace != tc.wantStorage {
+				t.Errorf("storageNamespace = %q, want %q", hr.Spec.StorageNamespace, tc.wantStorage)
+			}
+		})
+	}
+}
+
 func TestHelmReleaseHandler_IntervalDefault(t *testing.T) {
 	hr := hrGenerate(t, hrConfig(t, "web", map[string]any{"chart": hrChart()}), "")
 	if hr.Spec.Interval.Duration != 60*time.Minute {
@@ -421,7 +454,7 @@ func TestHelmReleaseConfig_GenerateValidatesDirectConfig(t *testing.T) {
 
 // TestTransform_HelmRelease_FluxNamespace runs the transform pipeline with a
 // Flux namespace: the HelmRelease lands in the Flux namespace and the release
-// targets the application namespace.
+// targets the application namespace, where its Helm storage stays too.
 func TestTransform_HelmRelease_FluxNamespace(t *testing.T) {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"helmrelease": &components.HelmReleaseHandler{}}, nil)
 	app := &oam.Application{
@@ -448,8 +481,8 @@ func TestTransform_HelmRelease_FluxNamespace(t *testing.T) {
 				}
 				found = true
 				hr := hrGenerate(t, a.Config, "")
-				if hr.Namespace != "flux-system" || hr.Spec.TargetNamespace != "shop" {
-					t.Errorf("HelmRelease %s, targetNamespace %q", hr.Namespace, hr.Spec.TargetNamespace)
+				if hr.Namespace != "flux-system" || hr.Spec.TargetNamespace != "shop" || hr.Spec.StorageNamespace != "shop" {
+					t.Errorf("HelmRelease %s, targetNamespace %q, storageNamespace %q", hr.Namespace, hr.Spec.TargetNamespace, hr.Spec.StorageNamespace)
 				}
 			}
 		}

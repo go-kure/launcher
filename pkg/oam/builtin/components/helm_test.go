@@ -444,6 +444,40 @@ func TestHelmRule_TemplateReleaseName(t *testing.T) {
 	}
 }
 
+// TestHelmRule_StorageNamespace (go-kure/launcher#988): the helmrelease a helm
+// component lowers to keeps its Helm storage with the release under a Flux
+// namespace: storageNamespace is the effective targetNamespace, authored or
+// defaulted to the application namespace. Without a Flux namespace none is set.
+// helm takes no storageNamespace of its own, so the default always applies.
+func TestHelmRule_StorageNamespace(t *testing.T) {
+	cases := []struct {
+		name        string
+		fluxNS      string
+		extra       map[string]any
+		wantStorage string
+	}{
+		{"Flux namespace, target defaulted", "flux-system", nil, "demo"},
+		{"Flux namespace, target authored", "flux-system", map[string]any{"targetNamespace": "apps"}, "apps"},
+		{"no Flux namespace", "", nil, ""},
+		{"no Flux namespace, target authored", "", map[string]any{"targetNamespace": "apps"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"chart": "podinfo", "version": "6.5.0", "source": map[string]any{"url": "https://charts.example.com"}}
+			maps.Copy(props, tc.extra)
+			release := componentByType(t, lowerHelm(t, helmLowering("shop"), "podinfo", props), "helmrelease")
+			cfg, err := (&components.HelmReleaseHandler{}).ToApplicationConfig(&release, "demo")
+			if err != nil {
+				t.Fatalf("helmrelease ToApplicationConfig: %v", err)
+			}
+			hr := hrGenerate(t, cfg, tc.fluxNS)
+			if hr.Spec.StorageNamespace != tc.wantStorage {
+				t.Errorf("storageNamespace = %q, want %q", hr.Spec.StorageNamespace, tc.wantStorage)
+			}
+		})
+	}
+}
+
 // TestHelmRule_NullPassthroughIsAbsent: a passthrough key set to null is not
 // forwarded, and so is not refused under delivery: template either.
 func TestHelmRule_NullPassthroughIsAbsent(t *testing.T) {
