@@ -215,8 +215,8 @@ type HelmReleaseConfig struct {
 
 	// Spec is the HelmRelease spec as authored. Generate copies it and
 	// applies the interval default, the releaseName default, the
-	// chart.spec.verify.provider default and the targetNamespace default
-	// under a Flux namespace to that copy.
+	// chart.spec.verify.provider default, and under a Flux namespace the
+	// targetNamespace and storageNamespace defaults, to that copy.
 	Spec helmv2.HelmReleaseSpec
 
 	// fluxNS overrides the HelmRelease's namespace. Set by
@@ -386,8 +386,19 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	// application namespace, and Flux installs a release into the
 	// HelmRelease's own namespace unless targetNamespace says otherwise. So
 	// the application namespace becomes the target unless one is authored.
-	if c.fluxNS != "" && hr.Spec.TargetNamespace == "" {
-		hr.Spec.TargetNamespace = c.Namespace
+	// helm-controller likewise keeps the release's Helm storage (the
+	// sh.helm.release.v1.* Secrets, with the rendered manifests and the
+	// merged values) in the HelmRelease's own namespace unless
+	// storageNamespace says otherwise, so an unauthored storageNamespace
+	// follows the effective target, authored or defaulted
+	// (go-kure/launcher#988).
+	if c.fluxNS != "" {
+		if hr.Spec.TargetNamespace == "" {
+			hr.Spec.TargetNamespace = c.Namespace
+		}
+		if hr.Spec.StorageNamespace == "" {
+			hr.Spec.StorageNamespace = hr.Spec.TargetNamespace
+		}
 	}
 
 	return kindObject(hr, c.Metadata)

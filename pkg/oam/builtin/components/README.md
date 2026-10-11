@@ -9094,6 +9094,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
   `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the
   release still installs there rather than into the Flux namespace; an authored value wins.
+  The release's Helm storage follows the release (go-kure/launcher#988): a component that
+  does not author `storageNamespace` gets `spec.storageNamespace` set to the effective
+  target namespace, authored or defaulted, so the `sh.helm.release.v1.*` Secrets, which hold
+  the rendered manifests and the merged values, stay with the release rather than collect in
+  the Flux namespace; an authored value wins. Without a Flux namespace neither is set, and
+  helm-controller keeps the storage in the HelmRelease's own namespace, the application
+  namespace. A `helm` component takes no `storageNamespace`, so its release always gets the
+  default.
   The Kustomization `oci` emits has no such default, deliberately (go-kure/launcher#794,
   item 1): a HelmRelease's `targetNamespace` only says where the release installs, while a
   Kustomization's overrides the namespace of every namespaced object in the artifact (see
@@ -9109,8 +9117,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The target namespace does not reach the release name: `spec.releaseName` is always set
   (see **Release name**), so Flux does not derive `<targetNamespace>-<name>`. Author
   `releaseName` when a specific release name matters — for instance when taking over a
-  release installed under another name. Helm keeps its release state in the HelmRelease's
-  own namespace unless `storageNamespace` says otherwise (Flux's default).
+  release installed under another name.
+
+  **Breaking output change** (go-kure/launcher#988): under a Flux namespace every
+  HelmRelease that authors no `storageNamespace` gains `spec.storageNamespace`. Left unset,
+  helm-controller kept the release's Helm storage in the Flux namespace, where the
+  HelmRelease sits. Where such a release is already installed, helm-controller reads the
+  changed storage namespace as a changed release target: it uninstalls the existing release
+  from the old storage namespace and installs it again in the new one (its
+  `ReleaseTargetChanged` check), so the release's objects are deleted and recreated and its
+  history starts over. To keep an installed release in place, author `storageNamespace` as
+  the Flux namespace on a `helmrelease` component. Output without a Flux namespace is
+  unchanged.
 
   **Values in a ConfigMap.** The HelmRelease is the only object `helmrelease` emits.
   Until go-kure/launcher#702 it took a launcher-owned `valuesMode: configMap` and emitted
