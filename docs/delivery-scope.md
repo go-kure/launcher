@@ -15,9 +15,8 @@ go-kure/launcher#781 deleted with the `kurel` layer it described.
 all. Each issue links back to this document.
 
 **Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
-Paths are relative to the repository root. Kure paths refer to the kure commit `go.mod`
-pins, `v0.2.0-beta.15.0.20261008113235-5af12ede2a72`: a commit of kure's `main` after
-v0.2.0-beta.15, pinned while both libraries are being worked on. Everything here is
+Paths are relative to the repository root. Kure paths refer to the kure release `go.mod`
+pins, `v0.2.0-beta.16`. Everything here is
 pre-release: output, names and the library contract may change, and live-cluster upgrade
 effects are not a constraint. A section or
 row marked **Shipped** states what the code does since its ticket merged, in place of the
