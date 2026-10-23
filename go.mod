@@ -6,7 +6,7 @@ require (
 	github.com/backube/volsync v0.16.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.21.2
-	github.com/cilium/cilium v1.20.2
+	github.com/cilium/cilium v1.20.3
 	github.com/cloudnative-pg/barman-cloud v0.6.0
 	github.com/cloudnative-pg/cloudnative-pg v1.30.1
 	github.com/cloudnative-pg/machinery v0.6.1
@@ -23,7 +23,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.32.0
 	github.com/fluxcd/source-controller/api v1.9.5
 	github.com/fluxcd/source-watcher/api/v2 v2.2.4
-	github.com/go-kure/kure v0.2.0-beta.16
+	github.com/go-kure/kure v0.2.0-beta.17
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.94.1
@@ -32,7 +32,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	go.universe.tf/metallb v0.16.1
 	gopkg.in/yaml.v3 v3.0.1
-	helm.sh/helm/v4 v4.3.0
+	helm.sh/helm/v4 v4.3.1
 	k8s.io/api v0.37.1
 	k8s.io/apiextensions-apiserver v0.37.1
 	k8s.io/apimachinery v0.37.1
