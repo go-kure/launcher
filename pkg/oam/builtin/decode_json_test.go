@@ -436,8 +436,8 @@ type (
 	SelDeep struct {
 		Open map[string]any `json:"beta"`
 	}
-	// selFoldDepth: the promoted field comes first in declaration order, so a
-	// folded key lands on it although the other field is shallower.
+	// selFoldDepth: the other field is shallower, so a folded key lands on it
+	// although the promoted field is declared first.
 	selFoldDepth struct {
 		SelDeep
 		Closed SelLeaf `json:"BETA"`
@@ -465,8 +465,8 @@ func unknownPathAgrees[T any](t *testing.T, src map[string]any, want string) {
 // TestUnknownJSONFieldPath_FollowsFieldSelection: the walk descends into the
 // field encoding/json fills from a key, not into another field that merely
 // matches it: one a tagged field dominates, or one a case-folded key does not
-// reach because a field declared earlier folds to the same key. It reads no
-// element the decoder discards.
+// reach because a shallower field, or at the same depth one declared earlier,
+// folds to the same key. It reads no element the decoder discards.
 func TestUnknownJSONFieldPath_FollowsFieldSelection(t *testing.T) {
 	extra := map[string]any{"extra": true}
 	t.Run("a dominated field is not walked", func(t *testing.T) {
@@ -480,8 +480,9 @@ func TestUnknownJSONFieldPath_FollowsFieldSelection(t *testing.T) {
 		unknownPathAgrees[selFoldFirst](t, map[string]any{"ALPHA": extra}, "ALPHA.extra")
 		unknownPathAgrees[selFoldClosed](t, map[string]any{"ALPHA": extra}, "")
 	})
-	t.Run("declaration order, not depth, decides a folded key", func(t *testing.T) {
-		unknownPathAgrees[selFoldDepth](t, map[string]any{"Beta": extra}, "")
+	t.Run("a shallower field wins a folded key", func(t *testing.T) {
+		unknownPathAgrees[selFoldDepth](t, map[string]any{"Beta": extra}, "Beta.extra")
+		unknownPathAgrees[selFoldDepth](t, map[string]any{"beta": extra}, "")
 		unknownPathAgrees[selFoldDepth](t, map[string]any{"BETA": extra}, "BETA.extra")
 	})
 	t.Run("an element past a fixed array's length is not read", func(t *testing.T) {

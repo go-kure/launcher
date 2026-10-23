@@ -566,15 +566,67 @@ func TestPassthrough_ObjectValuedItemsStillBuilds(t *testing.T) {
 	}
 }
 
+// TestPassthrough_IntegerMapKeyBuilds: YAML `80: http` decodes to a map[any]any
+// keyed by an integer. encoding/json uses an integer key as a string name, so
+// the object has a JSON form, a policy can read it, and the no-policy emit
+// encodes it. A key with no JSON name is still refused
+// (TestPassthrough_UnserializableObjectIsRefused).
+func TestPassthrough_IntegerMapKeyBuilds(t *testing.T) {
+	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n  ports:\n    80: http\n"
+	ports, ok := ptObject(t, doc)["spec"].(map[string]any)["ports"].(map[any]any)
+	if !ok {
+		t.Fatal("control: the test object's spec.ports is not a map[any]any")
+	}
+	if !hasIntegerKey(ports, "http") {
+		t.Fatalf("control: spec.ports = %#v, want an integer key", ports)
+	}
+
+	if _, err := ptTransform(ptObject(t, doc), ptStrictPolicy()); err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+
+	cfg, err := (&components.PassthroughHandler{}).ToApplicationConfig(passthroughComponent(map[string]any{"object": ptObject(t, doc)}), "demo")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	objs, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate with no policy applied: %v", err)
+	}
+	out, err := kureio.EncodeObjectsToYAML(objs)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if !strings.Contains(string(out), "80") || !strings.Contains(string(out), "http") {
+		t.Fatalf("manifest does not carry the integer key as a string name:\n%s", out)
+	}
+}
+
+// hasIntegerKey reports whether m has one integer key whose value is want.
+func hasIntegerKey(m map[any]any, want string) bool {
+	for k, v := range m {
+		switch k.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			return v == want
+		}
+	}
+	return false
+}
+
 // TestPassthrough_UnserializableObjectIsRefused: an object holding a value
-// with no JSON form (a mapping with a key that is not a string, which the
-// authored path decodes to a map[any]any) cannot be read, so it is refused
-// under a policy. Nothing that built before is lost: the same object, emitted
+// with no JSON form cannot be read, so it is refused under a policy. A
+// mapping key that is not a string and not an integer (YAML `80.5: http`
+// decodes to a map[any]any) is such a value: encoding/json rejects it as an
+// object name. Nothing that built before is lost: the same object, emitted
 // with no policy applied, does not encode as a manifest either.
 func TestPassthrough_UnserializableObjectIsRefused(t *testing.T) {
-	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n  ports:\n    80: http\n"
-	if _, ok := ptObject(t, doc)["spec"].(map[string]any)["ports"].(map[any]any); !ok {
+	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n  ports:\n    80.5: http\n"
+	ports, ok := ptObject(t, doc)["spec"].(map[string]any)["ports"].(map[any]any)
+	if !ok {
 		t.Fatal("control: the test object's spec.ports is not a map[any]any")
+	}
+	if ports[80.5] != "http" {
+		t.Fatalf("control: spec.ports = %#v, want float key 80.5", ports)
 	}
 
 	_, err := ptTransform(ptObject(t, doc), ptStrictPolicy())
