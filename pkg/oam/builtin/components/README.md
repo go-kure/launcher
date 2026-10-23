@@ -10988,7 +10988,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   decode as that kind (`replicas: three`), a workload kind, a claim or a PersistentVolume
   in an API version the scheme does not register (`batch/v1beta1`, `apps/v1beta2`), a
   HorizontalPodAutoscaler in such a
-  version whose `maxReplicas` is not an integer, and an object that does not serialize.
+  version whose `maxReplicas` is not an integer, and an object that does not serialize
+  (a float or bool mapping key; an integer key is a string name, so `80: http` on a
+  custom resource is checked and emitted).
   So is an object the decoder of its kind panics on, which crashed the build before: a
   `CiliumNetworkPolicy` or `CiliumClusterwideNetworkPolicy` whose `icmps` field leaves its
   `type` out, for one (`passthrough: object CiliumNetworkPolicy "demo/p": the object cannot

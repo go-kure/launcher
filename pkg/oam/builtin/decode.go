@@ -236,12 +236,13 @@ func unknownJSONFieldPath(t reflect.Type, value any, shapes SelfDecodedShapes) (
 
 // jsonFieldType returns the type of the field of t that encoding/json fills
 // from key, selecting it the way the decoder does: the field keyed exactly
-// so, else the first in declaration order whose key equals it ignoring case.
-// Only a field encoding/json keeps counts. Of several fields with one key it
-// keeps the dominant one (the shallowest, a tagged one before an untagged one)
-// or none, and which is asked of encoding/json itself (encodesField). It
-// reports false when that cannot be shown, so the caller walks no field the
-// decoder may not fill.
+// so, else the shallowest field whose key equals it ignoring case, and at one
+// depth the first in declaration order. That is the decoder's breadth-first
+// order. Only a field encoding/json keeps counts. Of several fields with one
+// key it keeps the dominant one (the shallowest, a tagged one before an
+// untagged one) or none, and which is asked of encoding/json itself
+// (encodesField). It reports false when that cannot be shown, so the caller
+// walks no field the decoder may not fill.
 func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type, bool) {
 	// kept is the one field keyed k that encoding/json keeps. ok is false when
 	// several fields are keyed k and none can be shown to be kept.
@@ -282,7 +283,7 @@ func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type
 		if !ok {
 			return nil, false
 		}
-		if first == nil || slices.Compare(f.index, first.index) < 0 {
+		if first == nil || foldedBefore(f.index, first.index) {
 			first = &f
 		}
 	}
@@ -290,6 +291,15 @@ func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type
 		return nil, false
 	}
 	return t.FieldByIndex(first.index).Type, true
+}
+
+// foldedBefore reports whether index a is visited before b in the decoder's
+// breadth-first order: a shallower field, then one declared earlier.
+func foldedBefore(a, b []int) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return slices.Compare(a, b) < 0
 }
 
 // UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),

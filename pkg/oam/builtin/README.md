@@ -32,7 +32,9 @@ and fail when a Cilium bump adds such a type. Its unknown-key error is `encoding
 `UnknownJSONFieldPath[T](props, owned...)` returns the path of the first such key from the
 property root (`sourceRef.tag`, `patches[0].target.kinds`), or `""` when it finds none, for a
 caller whose type declares the same key in several places (go-kure/launcher#784; used by
-`fluxcd-kustomization`). `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
+`fluxcd-kustomization`). The walk descends into the field the decoder fills. A key that
+matches several fields ignoring case lands on the shallowest, and at one depth on the
+first declared. `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
 way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
 shadowed by an owned key, or behind an unexported embedded pointer the decoder cannot set),
 including embedded ones; each key is probed against `encoding/json`, so the list agrees with
