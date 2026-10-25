@@ -219,6 +219,11 @@ type operatorContainerMounts struct {
 // refuseGeneratedMounts refuses an entry of the field at a path the operator
 // mounts a volume at in that container: it appends the field's entries to its
 // own mounts, and the API refuses a container with two mounts at one path.
+//
+// It refuses too an entry at the path of an earlier one, compared cleaned: the
+// API refuses two mounts written alike, and of two written otherwise, as /data
+// and /data/, the container runtime mounts one over the other, so the
+// container does not see the volume of the one beneath.
 func refuseGeneratedMounts(m operatorContainerMounts) error {
 	generated := make(map[string]string, len(m.generated))
 	maps.Copy(generated, m.generated)
@@ -228,10 +233,16 @@ func refuseGeneratedMounts(m operatorContainerMounts) error {
 	for i, c := range m.configMaps {
 		generated[path.Join(m.root, "configmaps", c)] = fmt.Sprintf("the path the Prometheus operator mounts configMaps[%d] at", i)
 	}
+	authored := make(map[string]int, len(m.mounts))
 	for i, vm := range m.mounts {
 		if what, ok := reservedAs(generated, m.patterns, vm.MountPath); ok {
 			return errors.Errorf("%s[%d] %q: the mount path is %s, and the API refuses a container with two mounts at one path; mount the volume elsewhere", m.field, i, vm.MountPath, what)
 		}
+		cleaned := path.Clean(vm.MountPath)
+		if j, ok := authored[cleaned]; ok {
+			return errors.Errorf("%s[%d] %q: the mount path is that of %s[%d] %q, and a container takes one mount at a path; mount one of the two volumes elsewhere", m.field, i, vm.MountPath, m.field, j, m.mounts[j].MountPath)
+		}
+		authored[cleaned] = i
 	}
 	return nil
 }

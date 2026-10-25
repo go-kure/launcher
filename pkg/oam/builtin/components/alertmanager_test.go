@@ -422,6 +422,14 @@ func alertmanagerRefusals(notA string) []struct {
 			"alertmanagerConfiguration": map[string]any{"name": "global", "templates": []any{map[string]any{"configMap": map[string]any{"name": "templates", "key": "slack.tmpl"}}}},
 			"volumeMounts":              []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}},
 		}, `volumeMounts[0] "/etc/alertmanager/templates": the mount path is the path the Prometheus operator mounts alertmanagerConfiguration.templates at`},
+		// Of two mounts at one path the API refuses those written alike, and
+		// the runtime mounts one over the other where they are not.
+		{"two mounts at one path", map[string]any{"volumeMounts": []any{
+			map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "other", "mountPath": "/scratch"},
+		}}, `volumeMounts[1] "/scratch": the mount path is that of volumeMounts[0] "/scratch", and a container takes one mount at a path`},
+		{"two mounts at one path written otherwise", map[string]any{"volumeMounts": []any{
+			map[string]any{"name": "extra", "mountPath": "/scratch/"}, map[string]any{"name": "other", "mountPath": "/scratch//"},
+		}}, `volumeMounts[1] "/scratch//": the mount path is that of volumeMounts[0] "/scratch/"`},
 		// The operator skips a template whose key it has projected
 		// (statefulset.go:575-620), configMap or secret.
 		{"two templates of one key", map[string]any{
@@ -1049,9 +1057,11 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"a Secret whose volume name is cut":               {"secrets": []any{strings.Repeat("a", 60)}},
 		"a mount beside the operator's":                   {"secrets": []any{"alerts"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/secrets/extra"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
 		"the templates' path without templates":           {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/alertmanager/templates"}}, "volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}}},
-		"a claim template of its own name":                {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
-		"a request and a limit of 0":                      {"resources": map[string]any{"requests": map[string]any{"cpu": "0"}, "limits": map[string]any{"cpu": "0"}}},
-		"a claim template without access modes":           {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
+		"two mounts at different paths": {"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "other", "mountPath": "/scratch/other"}},
+			"volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}, map[string]any{"name": "other", "emptyDir": map[string]any{}}}},
+		"a claim template of its own name":      {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
+		"a request and a limit of 0":            {"resources": map[string]any{"requests": map[string]any{"cpu": "0"}, "limits": map[string]any{"cpu": "0"}}},
+		"a claim template without access modes": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}},
 		"a claim template with access modes written empty": {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 			"accessModes": []any{}, "resources": amClaim["resources"],
 		}}}},

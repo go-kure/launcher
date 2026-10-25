@@ -1808,7 +1808,8 @@ and by scope, whatever component or trait emits it.
     `secrets` or of `configMaps` the operator gives one volume name, or one whose volume
     name the operator cuts to 63 characters after a `-`; an entry of
     `volumeMounts` at a path the operator mounts at in the alertmanager container (not
-    the TLS credentials' mounts); an entry of `additionalArgs` naming, or negating with
+    the TLS credentials' mounts), or at the path of an earlier entry, compared cleaned
+    (`/data` beside `/data/`); an entry of `additionalArgs` naming, or negating with
     `no-`, a flag the operator generates for the spec, on which it fails to build the
     pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
     loads only the first; a name shared by an init container and a container of the
@@ -1874,7 +1875,8 @@ and by scope, whatever component or trait emits it.
     named as a volume the operator adds (`tls-assets`, `web-config`,
     `remote-write-config`, each Secret key's, the rule ConfigMaps'
     `thanos-ruler-<name>-rulefiles-<n>`, the data volume); an entry of `volumeMounts` at
-    a path it mounts at in the thanos-ruler container; `dnsPolicy: None` without a
+    a path it mounts at in the thanos-ruler container, or at the path of an earlier
+    entry, compared cleaned; `dnsPolicy: None` without a
     nameserver, which the operator copies into the pods; and a name whose data volume or
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
     are each refused. So is a field the operator reads only from some Thanos version on,
@@ -1950,12 +1952,18 @@ and by scope, whatever component or trait emits it.
     are left to the API, as on the Alertmanager), and of `thanos.volumeMounts` at one it mounts at in the sidecar
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
-    and `mountPath`, which the operator drops; a `queryLogFile` named without a directory
+    and `mountPath`, which the operator drops; an entry of either at the path of an
+    earlier entry of the same field, compared cleaned; a `queryLogFile` named without a directory
     beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, unless a writable volume
     of the author's is mounted at `/var/log/prometheus` (compared cleaned) and no mount
-    there, in `volumeMounts` or a patch of the prometheus container, sets `readOnly`; a
-    negative request or limit; and a
+    there, in `volumeMounts` or a patch of the prometheus container, sets `readOnly` or
+    mounts a `configMap`, `secret`, `downwardAPI` or `projected` volume, which the kubelet
+    mounts read-only; a `queryLogFile` or `scrapeFailureLogFile` with a directory (a
+    relative one joined to `/etc/prometheus/config_out`, as Prometheus does) no such
+    writable volume is mounted at exactly, other than `/prometheus`, the
+    operator's log-file volume and `/dev` or `/proc`, unless a prometheus patch sets
+    `readOnlyRootFilesystem: false`; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
     characters, fewer where the authored shards and replicas make the hostname longer),
