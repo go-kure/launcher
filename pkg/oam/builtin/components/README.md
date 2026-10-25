@@ -4573,6 +4573,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     comparison of the operator's package `pkg/thanos` (every Go file of it,
     its tests aside), vendored as for `alertmanager`, and holds each to this
     list.
+  - a remote write entry's `azureAd` authored with no authentication
+    method (none of `managedIdentity`, `oauth`, `sdk` and
+    `workloadIdentity`), as on `prometheus` (go-kure/launcher#1023): the
+    operator refuses it at reconcile whatever it drops
+    (`validateRemoteWriteSpec`, which it applies to the ruler's entries
+    too). The gates above of `remoteWrite` and of `azureAd`, which refuse
+    any `azureAd` below 0.31.0, are refused ahead of it; it is refused
+    ahead of the other gates and of the fields below, naming the methods
+    the operator passes to Thanos at the version: from 0.40.0 on
+    `remoteWrite[0].azureAd: no authentication method: … at every version,
+    wherever it generates the remote write configuration; set
+    managedIdentity, oauth or sdk (the operator does not pass
+    workloadIdentity to Thanos), or leave azureAd unset`, below it a
+    `managedIdentity with a clientId`, and below 0.36.0 no `sdk`.
   - a remote write entry's `azureAd.workloadIdentity`, `azureAd.scope`, or
     `sigv4.externalId` with a `roleArn` (go-kure/launcher#1020), at every
     `version` the operator can parse, after the gates above of `remoteWrite`
@@ -4601,11 +4615,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`BuildArgs`, :352), and a `web.tlsConfig` its validation refuses
   (`webconfig.New`, :383-386). Each fails the reconcile, and is left to the
   operator. So is a remote write entry that `validateRemoteWriteSpec`
-  (`pkg/prometheus/operator.go`) refuses: two of `basicAuth`, `oauth2`,
-  `authorization`, `sigv4` and `azureAd`, an `azureAd` with no method or
-  two, or an `oauth` `clientId` that is not a UUID. Where one applies, a
-  refusal above that says the ruler runs or writes without a field is given
-  all the same.
+  (`pkg/prometheus/operator.go`) refuses for more than its authentication
+  method being absent: two of `basicAuth`, `oauth2`, `authorization`,
+  `sigv4` and `azureAd`, two `azureAd` methods, or an `oauth` `clientId`
+  that is not a UUID. Where one applies, a refusal above that says the ruler
+  runs or writes without a field is given all the same.
 
   **The group of an excluded object is written.** An `excludedFromEnforcement`
   entry that leaves `group` out (or writes it `null`) is written with
@@ -4920,6 +4934,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a parseable `version` of a major other than 2 or 3: the operator
     builds no configuration for it (`NewConfigGenerator`,
     `pkg/prometheus/promcfg.go`).
+  - a remote write entry's `azureAd` with no authentication method:
+    none of `managedIdentity`, `oauth`, `sdk` and `workloadIdentity`
+    (go-kure/launcher#1023). The operator refuses the object at reconcile
+    without one, at every version, wherever it generates the configuration
+    (`validateRemoteWriteSpec`, `pkg/prometheus/operator.go`): not with
+    every monitor selector unset, unless it is run with unmanaged
+    configuration disabled. The CRD states no rule for it. It is refused
+    wherever the operator may reach the entries, the kind not seeing how the
+    operator is run: at an unset `version` or a parseable one of major 2 or
+    3 (on another major the major is refused, and an unparsable one is left
+    to the operator, which fails before it reads them), ahead of the version
+    gates below, so the gate of `azureAd`, which says the operator drops it
+    below 2.45.0, fires only on one with a method
+    (`remoteWrite[0].azureAd: no authentication method: the Prometheus
+    operator requires one of managedIdentity, oauth, sdk and
+    workloadIdentity, and refuses the object at reconcile without one, at
+    every version, wherever it generates the remote write configuration;
+    set one, or leave azureAd unset`).
   - a field the operator reads only from some Prometheus version on, where
     `version` is below that version. An unset `version` is judged against
     the operator release launcher vendors (v0.94.1, default v3.14.0), at

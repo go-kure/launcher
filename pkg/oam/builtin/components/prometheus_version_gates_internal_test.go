@@ -3,8 +3,10 @@ package components
 import (
 	"cmp"
 	"fmt"
+	"go/ast"
 	"maps"
 	"path"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -877,5 +879,104 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 				t.Errorf("err = %v, want one mentioning %q", err, c.want)
 			}
 		})
+	}
+}
+
+// TestPrometheusAzureADWithoutMethod_MatchVendoredSource holds
+// thanosRulerAzureADMethods to the operator's source: validateRemoteWriteSpec
+// (pkg/prometheus/operator.go) refuses an azureAd where each of them, and no
+// other field, is nil. TestPrometheusAzureADWithoutMethod_Refused builds an
+// azureAd with each of them in turn, so refuseAzureADWithoutMethod accepts
+// every method the operator does.
+func TestPrometheusAzureADWithoutMethod_MatchVendoredSource(t *testing.T) {
+	src := loadVendoredPromOp(t)
+	const op = "pkg/prometheus/operator.go"
+	file := src.files[op]
+	if file == nil {
+		t.Fatalf("the excerpt holds no %s", op)
+	}
+	jsonName := map[string]string{}
+	for f := range reflect.TypeFor[monitoringv1.AzureAD]().Fields() {
+		jsonName[f.Name], _, _ = strings.Cut(f.Tag.Get("json"), ",")
+	}
+	var conds [][]string
+	for _, d := range file.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || funcName(fd) != "(*ConfigGenerator).validateRemoteWriteSpec" {
+			continue
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			s, isIf := n.(*ast.IfStmt)
+			if !isIf {
+				return true
+			}
+			cond := src.text(s.Cond)
+			if !strings.HasPrefix(cond, "spec.AzureAD.") || !strings.Contains(cond, "== nil") || strings.Contains(cond, "!=") {
+				return true
+			}
+			var methods []string
+			for term := range strings.SplitSeq(cond, "&&") {
+				field, isNil := strings.CutSuffix(strings.TrimSpace(term), " == nil")
+				name, inAzure := strings.CutPrefix(field, "spec.AzureAD.")
+				if !isNil || !inAzure || jsonName[name] == "" {
+					t.Errorf("%s: %q is not a test of a field of azureAd being nil", op, term)
+					continue
+				}
+				methods = append(methods, jsonName[name])
+			}
+			slices.Sort(methods)
+			conds = append(conds, methods)
+			return true
+		})
+	}
+	if len(conds) != 1 {
+		t.Fatalf("%s: validateRemoteWriteSpec tests azureAd for no method %d times, want once", op, len(conds))
+	}
+	if want := slices.Sorted(slices.Values(thanosRulerAzureADMethods)); !slices.Equal(conds[0], want) {
+		t.Errorf("the operator requires one of %v, refuseAzureADWithoutMethod one of %v", conds[0], want)
+	}
+}
+
+// TestPrometheusAzureADWithoutMethod_Refused: an azureAd that sets no
+// authentication method is refused at every version the operator generates a
+// configuration for, ahead of the version gates, naming the entry; one that
+// sets any one method builds at the operator's default. The object sets a
+// monitor selector, so that the operator generates the configuration whatever
+// it is run with; the kind, which cannot see that, refuses one without as
+// well.
+func TestPrometheusAzureADWithoutMethod_Refused(t *testing.T) {
+	type m = map[string]any
+	const url = "https://metrics.example.com/api/v1/write"
+	entry := func(azure m) m { return m{"url": url, "azureAd": azure} }
+	none := m{"remoteWrite": []any{m{"url": url}, entry(m{"cloud": "AzurePublic"})}, "serviceMonitorSelector": m{}}
+	want := "remoteWrite[1].azureAd: no authentication method: the Prometheus operator requires one of managedIdentity, oauth, sdk and workloadIdentity, and refuses the object at reconcile without one, at every version, wherever it generates the remote write configuration; set one, or leave azureAd unset"
+	for _, version := range []string{"", "v2.44.0", "v2.45.0", "v3.14.0"} {
+		if err := promBuild(t, none, "version", version); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("at %q: err = %v, want one mentioning %q", version, err, want)
+		}
+	}
+	// The operator fails in NewConfigGenerator first, before it reads the
+	// entries: the major is refused, and an unparsable version left to it.
+	if err := promBuild(t, none, "version", "v1.0.0"); err == nil || !strings.HasPrefix(err.Error(), `version: "v1.0.0" is not supported`) {
+		t.Errorf("at v1.0.0: err = %v, want the major refused", err)
+	}
+	if err := promBuild(t, none, "version", "main"); err != nil {
+		t.Errorf("at an unparsable version: err = %v, want it left to the operator", err)
+	}
+	methods := map[string]m{
+		"managedIdentity":  {"clientId": "00000000-0000-0000-0000-000000000000"},
+		"oauth":            {"clientId": "00000000-0000-0000-0000-000000000000", "clientSecret": m{"name": "azure", "key": "secret"}, "tenantId": "00000000-0000-0000-0000-000000000001"},
+		"sdk":              {"tenantId": "00000000-0000-0000-0000-000000000001"},
+		"workloadIdentity": {"clientId": "00000000-0000-0000-0000-000000000000", "tenantId": "00000000-0000-0000-0000-000000000001"},
+	}
+	for _, method := range thanosRulerAzureADMethods {
+		v, ok := methods[method]
+		if !ok {
+			t.Errorf("no fixture sets the method %s", method)
+			continue
+		}
+		if err := promBuild(t, m{"remoteWrite": []any{entry(m{method: v})}}, "version", ""); err != nil {
+			t.Errorf("azureAd with %s: err = %v, want it built", method, err)
+		}
 	}
 }

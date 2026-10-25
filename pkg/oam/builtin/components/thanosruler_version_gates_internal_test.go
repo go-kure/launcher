@@ -453,6 +453,57 @@ func TestThanosRulerNeverRead_Refused(t *testing.T) {
 	}
 }
 
+// TestThanosRulerAzureADWithoutMethod_Refused: an azureAd authored with no
+// authentication method, which the operator refuses at reconcile whatever it
+// drops, is refused as such from v0.31.0 on, naming the methods the operator
+// passes to Thanos at the version, ahead of a gate of a field it drops (here
+// enableFeatures, below v0.39.0) and of a field it passes to Thanos at no
+// version: the scope it would drop, or what is left where the
+// workloadIdentity of the fixture is unset. Below v0.31.0 the gate of azureAd
+// is refused instead, and below thanosRulerMinRemoteWrite that of
+// remoteWrite; a version the operator cannot parse is left to it.
+func TestThanosRulerAzureADWithoutMethod_Refused(t *testing.T) {
+	type m = map[string]any
+	rw := func(azure m) m {
+		return m{"remoteWrite": []any{m{"url": "https://metrics.example.com/api/v1/write", "azureAd": azure}}, "enableFeatures": []any{"promql-experimental-functions"}}
+	}
+	fixture := thanosRulerNeverReadFixtures()["remoteWrite[].azureAd.workloadIdentity"]["remoteWrite"].([]any)[0].(m)
+	withoutWorkload := maps.Clone(fixture["azureAd"].(m))
+	delete(withoutWorkload, "workloadIdentity")
+	want := func(set string) string {
+		return "remoteWrite[0].azureAd: no authentication method: the Prometheus operator requires one of managedIdentity, oauth, sdk and workloadIdentity, and refuses the object at reconcile without one, at every version, wherever it generates the remote write configuration; set " + set + " (the operator does not pass workloadIdentity to Thanos), or leave azureAd unset"
+	}
+	sets := map[string]string{
+		"":        "managedIdentity, oauth or sdk",
+		"v0.42.4": "managedIdentity, oauth or sdk",
+		"v0.40.0": "managedIdentity, oauth or sdk",
+		"v0.38.0": "managedIdentity with a clientId, oauth or sdk",
+		"v0.36.0": "managedIdentity with a clientId, oauth or sdk",
+		"v0.35.0": "managedIdentity with a clientId or oauth",
+		"v0.31.0": "managedIdentity with a clientId or oauth",
+	}
+	for name, props := range map[string]m{
+		"cloud only": rw(m{"cloud": "AzurePublic"}),
+		"scope only": rw(m{"scope": "https://monitor.azure.com/.default"}),
+		"the workloadIdentity fixture without it": rw(withoutWorkload),
+	} {
+		for version, set := range sets {
+			if err := trBuild(props, version); err == nil || err.Error() != want(set) {
+				t.Errorf("%s at %q: err = %v, want %q", name, version, err, want(set))
+			}
+		}
+		if err := trBuild(props, "v0.30.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite[].azureAd: read by the Prometheus operator only for Thanos 0.31.0 and later") {
+			t.Errorf("%s at v0.30.0: err = %v, want the gate of azureAd", name, err)
+		}
+		if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later") {
+			t.Errorf("%s at v0.23.0: err = %v, want the gate of remoteWrite", name, err)
+		}
+		if err := trBuild(props, "main"); err != nil {
+			t.Errorf("%s at an unparsable version: err = %v, want it left to the operator", name, err)
+		}
+	}
+}
+
 // thanosRulerGateFixtures are the fixtures of thanosRulerVersionGates, by id,
 // as promGateFixture describes them.
 func thanosRulerGateFixtures() map[string]promGateFixture {
