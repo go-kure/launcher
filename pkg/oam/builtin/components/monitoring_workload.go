@@ -374,7 +374,8 @@ func portAt(p corev1.ContainerPort) string {
 // container that renames its web port, the port of number webPort the
 // operator names portName (web where unset), where a probe the operator writes
 // on that container still names the port by portName once the patch is
-// merged: the kubelet then finds no port of that name, and the probe fails.
+// merged, and no port of the merged container has that name: the kubelet then
+// finds no port of that name, and the probe fails.
 // The operator's probes name the web port by portName (pkg/alertmanager/
 // statefulset.go:409-444; buildProbeHandler, pkg/prometheus/promcfg.go:
 // 1426-1451 at prometheus-operator v0.94.1), and a patch port of that number
@@ -396,10 +397,12 @@ func refuseRenamedProbedPort(containers []corev1.Container, container string, we
 		portName = "web"
 	}
 	ports := runPorts(true, generated, containers[i].Ports)
-	web := ports[slices.IndexFunc(ports, func(p runPort) bool { return p.port.ContainerPort == webPort })]
-	if web.port.Name == portName {
+	// A probe names a port by name, not by number: one of portName's name at
+	// any number, the web port's kept name or a port the patch adds, serves it.
+	if slices.ContainsFunc(ports, func(p runPort) bool { return p.port.Name == portName }) {
 		return nil
 	}
+	web := ports[slices.IndexFunc(ports, func(p runPort) bool { return p.port.ContainerPort == webPort })]
 	names := func(port intstr.IntOrString) bool { return port.Type == intstr.String && port.StrVal == portName }
 	var named []string
 	restarts, unready := false, false

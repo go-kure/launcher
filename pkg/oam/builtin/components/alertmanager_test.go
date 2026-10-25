@@ -1177,6 +1177,7 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// (go-kure/launcher#963).
 		"a patch that renames the web port on a pod listening locally":   {"listenLocal": true, "containers": renamedWebPortPatch("alertmanager", 9093, nil)},
 		"a patch that names the web port as portName does":               {"portName": "http", "containers": renamedWebPortPatch("alertmanager", 9093, nil)},
+		"a patch that renames the web port and adds a port of its name":  {"containers": []any{map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093), map[string]any{"name": "web", "containerPort": 9095}}}}},
 		"a patch that renames the web port and probes it by number":      {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("httpGet", 9093), "liveness", "readiness")},
 		"a patch that renames the web port and probes it by its name":    {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("httpGet", "http"), "liveness", "readiness")},
 		"a patch that renames the web port and probes it over TCP":       {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("tcpSocket", 9093), "liveness", "readiness")},

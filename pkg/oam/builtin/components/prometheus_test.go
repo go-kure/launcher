@@ -674,6 +674,7 @@ func TestPrometheus_PatchedPorts(t *testing.T) {
 		// handler of its own (go-kure/launcher#963).
 		"a patch that renames the web port listening locally":            {"listenLocal": true, "containers": renamedWebPortPatch("prometheus", 9090, nil)},
 		"a patch that names the web port as portName does":               {"portName": "http", "containers": renamedWebPortPatch("prometheus", 9090, nil)},
+		"a patch that renames the web port and adds a port of its name":  {"containers": []any{map[string]any{"name": "prometheus", "ports": []any{httpPortAt(9090), map[string]any{"name": "web", "containerPort": 9091}}}}},
 		"a patch that renames the web port and probes it by number":      {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("httpGet", 9090), "startup", "liveness", "readiness")},
 		"a patch that renames the web port and probes it by its name":    {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("httpGet", "http"), "startup", "liveness", "readiness")},
 		"a patch that renames the web port and probes it over TCP":       {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("tcpSocket", 9090), "startup", "liveness", "readiness")},
