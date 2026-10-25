@@ -1796,8 +1796,10 @@ and by scope, whatever component or trait emits it.
     `image` (or a listed `alertmanager` entry's) without `version`, whose flags the
     operator would choose for its own default version; a `version` the operator cannot
     parse or does not support; a `portName` the API refuses on the container or on the
-    governing Service, where the operator writes it there; a negative `replicas`, which
-    the operator runs as 0; a claim template beside `storage.emptyDir` or
+    governing Service, where the operator writes it there; a `containers` patch that
+    renames the web port while a probe the operator writes still names `portName`, which
+    then names a port the container does not have (go-kure/launcher#963); a negative
+    `replicas`, which the operator runs as 0; a claim template beside `storage.emptyDir` or
     `storage.ephemeral` named otherwise than the operator's data volume, which leaves the
     data mount dangling; a storage arm in use whose claim has no storage request or one
     of `0` or less, or no access modes where the operator does not default them; on the
@@ -1938,7 +1940,8 @@ and by scope, whatever component or trait emits it.
     not held.
   - **What the operator builds from the spec is checked as on the Alertmanager,** by the
     same shared checks: a `portName` the API refuses on the container or the governing
-    Service (`grpc` where `thanos` is set and `serviceName` is not); a negative
+    Service (`grpc` where `thanos` is set and `serviceName` is not); a `containers` patch
+    that renames the web port while a probe the operator writes still names `portName`; a negative
     `replicas`, which the operator runs as 1, and a `shards` below 1, for which it runs
     1 shard; the storage arms; an entry of `volumes`
     named as a volume the operator adds (`config`, `tls-assets`, `config-out`,

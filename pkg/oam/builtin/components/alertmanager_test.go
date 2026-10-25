@@ -535,6 +535,32 @@ func alertmanagerRefusals(notA string) []struct {
 		// listed after it; the patch's port is named.
 		{"a patch that renames the web port to the mesh's UDP name", container(map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "mesh-udp", "containerPort": 9093}}}),
 			`containers[0] "alertmanager": ports[0] "mesh-udp" at 9093/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9094/UDP`},
+		// A patch port at the web port's number renames it, and a probe the
+		// operator writes still names portName (statefulset.go:409-444): the
+		// probe names a port the container does not have (go-kure/launcher#963).
+		{"a patch that renames the web port", container(map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)}}),
+			`containers[0] "alertmanager": ports[0] "http" at 9093/TCP renames the web port, whose name portName "web" the Prometheus operator's liveness and readiness probes name; those probes then name a port the container does not have and fail, which restarts the container and keeps the pod unready; keep the name portName gives the port, set portName to it, or give the patch those probes`},
+		{"a patch that renames the authored web port", map[string]any{"portName": "alerts", "containers": []any{map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)}}}},
+			`ports[0] "http" at 9093/TCP renames the web port, whose name portName "alerts" the Prometheus operator's liveness and readiness probes name`},
+		// The invalid name is refused first.
+		{"an invalid port name with a patch that renames the web port", map[string]any{"portName": "alertmanager-web", "containers": []any{map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)}}}},
+			`portName: "alertmanager-web" is not a valid port name`},
+		// A probe of the patch that sets a handler type replaces the
+		// operator's handler; one that sets none keeps it (MergePatchContainers
+		// and sanitizeProbeHandlers, pkg/k8s/merge.go:27-121).
+		{"a patch that renames the web port and re-points the liveness probe only", container(map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)},
+			"livenessProbe": probeOn("httpGet", "http")}),
+			`containers[0] "alertmanager": ports[0] "http" at 9093/TCP renames the web port, whose name portName "web" the Prometheus operator's readiness probe names; that probe then names a port the container does not have and fails, which keeps the pod unready; keep the name portName gives the port, set portName to it, or give the patch that probe`},
+		{"a patch that renames the web port and times the liveness probe only", container(map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)},
+			"livenessProbe": map[string]any{"periodSeconds": 10}, "readinessProbe": probeOn("httpGet", 9093)}),
+			`the Prometheus operator's liveness probe names; that probe then names a port the container does not have and fails, which restarts the container;`},
+		{"a patch that renames the web port and points a probe at portName", container(map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)},
+			"livenessProbe": probeOn("tcpSocket", 9093), "readinessProbe": probeOn("httpGet", "web")}),
+			`the Prometheus operator's readiness probe names;`},
+		{"a patch that renames the web port and gives a probe two handler types", container(map[string]any{"name": "alertmanager", "ports": []any{httpPortAt(9093)},
+			"livenessProbe":  map[string]any{"exec": map[string]any{"command": []any{"true"}}, "httpGet": map[string]any{"port": "web"}},
+			"readinessProbe": probeOn("httpGet", 9093)}),
+			`the Prometheus operator's liveness probe names;`},
 		{"two patched ports of one name", container(map[string]any{"name": "config-reloader", "ports": []any{
 			map[string]any{"name": "metrics", "containerPort": 9000},
 			map[string]any{"name": "metrics", "containerPort": 9001},
@@ -661,6 +687,35 @@ var amClaim = map[string]any{"resources": map[string]any{"requests": map[string]
 var amTLS = map[string]any{
 	"keySecret": map[string]any{"name": "alerts-tls", "key": "tls.key"},
 	"cert":      map[string]any{"secret": map[string]any{"name": "alerts-tls", "key": "tls.crt"}},
+}
+
+// httpPortAt is a patch port named http at number, which renames a web port
+// the operator gives that number (go-kure/launcher#963).
+func httpPortAt(number int) map[string]any {
+	return map[string]any{"name": "http", "containerPort": number}
+}
+
+// renamedWebPortPatch is a containers list of one patch of container that
+// renames its web port, at number, to http (httpPortAt), and sets each probe
+// it names (startup, liveness, readiness) to probe.
+func renamedWebPortPatch(container string, number int, probe map[string]any, probes ...string) []any {
+	c := map[string]any{"name": container, "ports": []any{httpPortAt(number)}}
+	for _, p := range probes {
+		c[p+"Probe"] = probe
+	}
+	return []any{c}
+}
+
+// probeOn is a probe of a patch whose one handler, of type handler (httpGet,
+// tcpSocket, grpc or exec), names port; exec names none.
+func probeOn(handler string, port any) map[string]any {
+	switch handler {
+	case "exec":
+		return map[string]any{"exec": map[string]any{"command": []any{"true"}}}
+	case "httpGet":
+		return map[string]any{"httpGet": map[string]any{"path": "/-/healthy", "port": port}}
+	}
+	return map[string]any{handler: map[string]any{"port": port}}
 }
 
 // amReloader is an image from that registry for the two config-reloader
@@ -1116,6 +1171,17 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"an argument of the start delay":                             {"minReadySeconds": 30, "additionalArgs": []any{map[string]any{"name": "dispatch.start-delay", "value": "1m"}}},
 		"an argument of the clustered listen address on one replica": {"additionalArgs": []any{map[string]any{"name": "cluster.listen-address", "value": "[$(POD_IP)]:9094"}}},
 		"a patched port of the web port's name and number":           {"containers": []any{map[string]any{"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 9093}}}}},
+		// A web port renamed where no probe the operator writes names it
+		// still: none is written under listenLocal, the name is portName's,
+		// or the patch gives each probe a handler of its own
+		// (go-kure/launcher#963).
+		"a patch that renames the web port on a pod listening locally":   {"listenLocal": true, "containers": renamedWebPortPatch("alertmanager", 9093, nil)},
+		"a patch that names the web port as portName does":               {"portName": "http", "containers": renamedWebPortPatch("alertmanager", 9093, nil)},
+		"a patch that renames the web port and probes it by number":      {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("httpGet", 9093), "liveness", "readiness")},
+		"a patch that renames the web port and probes it by its name":    {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("httpGet", "http"), "liveness", "readiness")},
+		"a patch that renames the web port and probes it over TCP":       {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("tcpSocket", 9093), "liveness", "readiness")},
+		"a patch that renames the web port and probes it with a command": {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("exec", nil), "liveness", "readiness")},
+		"a patch that renames the web port and probes it over gRPC":      {"containers": renamedWebPortPatch("alertmanager", 9093, probeOn("grpc", 9093), "liveness", "readiness")},
 		"a patched port of the web port's name on a pod listening locally": {"listenLocal": true, "containers": []any{map[string]any{
 			"name": "alertmanager", "ports": []any{map[string]any{"name": "web", "containerPort": 8080}},
 		}}},

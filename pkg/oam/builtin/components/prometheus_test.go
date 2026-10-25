@@ -321,6 +321,18 @@ func prometheusRefusals(notA string) []struct {
 			`containers[0] "prometheus": ports[0] "web" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9090/TCP, and the API refuses a container with two ports of one name`},
 		{"a patched port of the authored web port name", map[string]any{"portName": "http-web", "containers": []any{map[string]any{"name": "prometheus", "ports": []any{map[string]any{"name": "http-web", "containerPort": 8080}}}}},
 			`containers[0] "prometheus": ports[0] "http-web" at 8080/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 9090/TCP`},
+		// A patch port at the web port's number renames it, and a probe the
+		// operator writes still names portName (promcfg.go:1398-1451): the
+		// probe names a port the container does not have (go-kure/launcher#963).
+		{"a patch that renames the web port", map[string]any{"containers": renamedWebPortPatch("prometheus", 9090, nil)},
+			`containers[0] "prometheus": ports[0] "http" at 9090/TCP renames the web port, whose name portName "web" the Prometheus operator's startup, liveness and readiness probes name; those probes then name a port the container does not have and fail, which restarts the container and keeps the pod unready; keep the name portName gives the port, set portName to it, or give the patch those probes`},
+		// The invalid name is refused first.
+		{"an invalid port name with a patch that renames the web port", map[string]any{"portName": "prometheus-webui", "containers": renamedWebPortPatch("prometheus", 9090, nil)},
+			`portName: "prometheus-webui" is not a valid port name`},
+		{"a patch that renames the web port and re-points the liveness and readiness probes only", map[string]any{"containers": renamedWebPortPatch("prometheus", 9090, probeOn("httpGet", 9090), "liveness", "readiness")},
+			`the Prometheus operator's startup probe names; that probe then names a port the container does not have and fails, which restarts the container;`},
+		{"a patch that renames the web port and re-points the startup and liveness probes only", map[string]any{"containers": renamedWebPortPatch("prometheus", 9090, probeOn("tcpSocket", 9090), "startup", "liveness")},
+			`the Prometheus operator's readiness probe names; that probe then names a port the container does not have and fails, which keeps the pod unready;`},
 		{"a patched port of the reloader's name", container(map[string]any{"name": "config-reloader", "ports": []any{map[string]any{"name": "reloader-web", "containerPort": 9000}}}),
 			`containers[0] "config-reloader": ports[0] "reloader-web" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 8080/TCP`},
 		// Under the ProcessSignal reloadStrategy the operator does not hand
@@ -655,9 +667,20 @@ func TestPrometheus_PatchedPorts(t *testing.T) {
 		return []any{map[string]any{"name": name, "ports": list}}
 	}
 	for name, props := range map[string]map[string]any{
-		"the web port's name and number":        {"containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 9090})},
-		"the web port's name listening locally": {"listenLocal": true, "containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 8080})},
-		"the reloader's name listening locally": {"listenLocal": true, "containers": patch("config-reloader", map[string]any{"name": "reloader-web", "containerPort": 9000})},
+		"the web port's name and number": {"containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 9090})},
+		// A web port renamed where no probe the operator writes names it
+		// still: under listenLocal each probe is an exec and no web port is
+		// given, the name is portName's, or the patch gives each probe a
+		// handler of its own (go-kure/launcher#963).
+		"a patch that renames the web port listening locally":            {"listenLocal": true, "containers": renamedWebPortPatch("prometheus", 9090, nil)},
+		"a patch that names the web port as portName does":               {"portName": "http", "containers": renamedWebPortPatch("prometheus", 9090, nil)},
+		"a patch that renames the web port and probes it by number":      {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("httpGet", 9090), "startup", "liveness", "readiness")},
+		"a patch that renames the web port and probes it by its name":    {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("httpGet", "http"), "startup", "liveness", "readiness")},
+		"a patch that renames the web port and probes it over TCP":       {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("tcpSocket", 9090), "startup", "liveness", "readiness")},
+		"a patch that renames the web port and probes it with a command": {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("exec", nil), "startup", "liveness", "readiness")},
+		"a patch that renames the web port and probes it over gRPC":      {"containers": renamedWebPortPatch("prometheus", 9090, probeOn("grpc", 9090), "startup", "liveness", "readiness")},
+		"the web port's name listening locally":                          {"listenLocal": true, "containers": patch("prometheus", map[string]any{"name": "web", "containerPort": 8080})},
+		"the reloader's name listening locally":                          {"listenLocal": true, "containers": patch("config-reloader", map[string]any{"name": "reloader-web", "containerPort": 9000})},
 		// The merge by number renames the generated port at 10902 to
 		// metrics, so http at 9000 is the only port of that name.
 		"a patch that renames a sidecar port and reuses its name": {"thanos": map[string]any{}, "containers": patch("thanos-sidecar",

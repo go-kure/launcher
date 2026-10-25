@@ -162,7 +162,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalScrapeConfigs":     object("additionalScrapeConfigs: the Secret key that holds further scrape configurations, appended to the ones the operator generates as they are." + secretKey),
 		"apiserverConfig":             object("apiserverConfig: the Kubernetes API server Prometheus discovers targets from, and how it authenticates. Unset, the cluster Prometheus runs in, with the pod's service account. The deprecated bearerToken is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential is the key of a Secret or the path of a file in the container." + decoded + "APIServerConfig in its API reference."),
 		"priorityClassName":           text("priorityClassName: the priority class of the pods."),
-		"portName":                    text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it."),
+		"portName":                    text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it. A containers patch of prometheus that renames the web port at 9090 is refused while a probe the operator writes there still names portName."),
 		"arbitraryFSAccessThroughSMs": object("arbitraryFSAccessThroughSMs: deny, true to forbid ServiceMonitor, PodMonitor and Probe objects to name files of the prometheus container, such as its service account token." + decoded + "ArbitraryFSAccessThroughSMsConfig in its API reference."),
 		"overrideHonorLabels":         flag("overrideHonorLabels: true renames the scraped labels that conflict with the target's to exported_<name>, for every ServiceMonitor, PodMonitor and ScrapeConfig object, whatever its honorLabels."),
 		"overrideHonorTimestamps":     flag("overrideHonorTimestamps: true ignores the scraped timestamps for every ServiceMonitor and PodMonitor object, whatever its honorTimestamps."),
@@ -435,6 +435,14 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 		return err
 	}
 	if err := validateMonitoringWorkload(prometheusWorkload(spec)); err != nil {
+		return err
+	}
+	// The operator writes a startup, a liveness and a readiness probe on the
+	// prometheus container; unless listenLocal is set each names portName
+	// (BuildProbes and buildProbeHandler, pkg/prometheus/promcfg.go:1398-1451
+	// at prometheus-operator v0.94.1), and under it each is an exec and no web
+	// port is given (prometheusGeneratedPorts).
+	if err := refuseRenamedProbedPort(spec.Containers, "prometheus", 9090, spec.PortName, prometheusGeneratedPorts(spec)["prometheus"], []string{"startup", "liveness", "readiness"}); err != nil {
 		return err
 	}
 	return validatePrometheusVersion(spec)

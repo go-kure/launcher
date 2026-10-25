@@ -10,6 +10,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -367,6 +368,86 @@ func portAt(p corev1.ContainerPort) string {
 		protocol = corev1.ProtocolTCP
 	}
 	return fmt.Sprintf("%d/%s", p.ContainerPort, protocol)
+}
+
+// refuseRenamedProbedPort refuses a patch of the generated container named
+// container that renames its web port, the port of number webPort the
+// operator names portName (web where unset), where a probe the operator writes
+// on that container still names the port by portName once the patch is
+// merged: the kubelet then finds no port of that name, and the probe fails.
+// The operator's probes name the web port by portName (pkg/alertmanager/
+// statefulset.go:409-444; buildProbeHandler, pkg/prometheus/promcfg.go:
+// 1426-1451 at prometheus-operator v0.94.1), and a patch port of that number
+// replaces its name (runPorts). A probe of the patch that sets no handler type
+// keeps the operator's handler. One that sets any gives the patch's handler: a
+// patch's httpGet merges into the operator's field by field, and its port,
+// which is always written, replaces the operator's; any other handler type
+// leaves two set after the merge, and the operator then keeps the patch's
+// handler whole (MergePatchContainers and sanitizeProbeHandlers,
+// pkg/k8s/merge.go:27-121). probes names the probes the operator writes on
+// the container: startup, liveness, readiness. Where generated holds no port
+// of number webPort (listenLocal), there is none to rename.
+func refuseRenamedProbedPort(containers []corev1.Container, container string, webPort int32, portName string, generated []corev1.ContainerPort, probes []string) error {
+	i := patchOf(containers, container)
+	if i < 0 || !slices.ContainsFunc(generated, func(p corev1.ContainerPort) bool { return p.ContainerPort == webPort }) {
+		return nil
+	}
+	if portName == "" {
+		portName = "web"
+	}
+	ports := runPorts(true, generated, containers[i].Ports)
+	web := ports[slices.IndexFunc(ports, func(p runPort) bool { return p.port.ContainerPort == webPort })]
+	if web.port.Name == portName {
+		return nil
+	}
+	names := func(port intstr.IntOrString) bool { return port.Type == intstr.String && port.StrVal == portName }
+	var named []string
+	restarts, unready := false, false
+	for _, probe := range probes {
+		var patched *corev1.Probe
+		switch probe {
+		case "startup":
+			patched = containers[i].StartupProbe
+		case "liveness":
+			patched = containers[i].LivenessProbe
+		case "readiness":
+			patched = containers[i].ReadinessProbe
+		}
+		if patched != nil {
+			h := patched.ProbeHandler
+			if h.HTTPGet != nil || h.TCPSocket != nil || h.Exec != nil || h.GRPC != nil {
+				if !(h.HTTPGet != nil && names(h.HTTPGet.Port) || h.TCPSocket != nil && names(h.TCPSocket.Port)) {
+					continue
+				}
+			}
+		}
+		named = append(named, probe)
+		if probe == "readiness" {
+			unready = true
+		} else {
+			restarts = true
+		}
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	list := named[len(named)-1]
+	if len(named) > 1 {
+		list = strings.Join(named[:len(named)-1], ", ") + " and " + list
+	}
+	noun, nameVerb, those, fails := "probe", "names", "that probe", "names a port the container does not have and fails"
+	if len(named) > 1 {
+		noun, nameVerb, those, fails = "probes", "name", "those probes", "name a port the container does not have and fail"
+	}
+	var effects []string
+	if restarts {
+		effects = append(effects, "restarts the container")
+	}
+	if unready {
+		effects = append(effects, "keeps the pod unready")
+	}
+	return errors.Errorf("containers[%d] %q: %s %q at %s renames the web port, whose name portName %q the Prometheus operator's %s %s %s; %s then %s, which %s; keep the name portName gives the port, set portName to it, or give the patch %s",
+		i, container, web.from, web.port.Name, portAt(web.port), portName, list, noun, nameVerb, those, fails, strings.Join(effects, " and "), those)
 }
 
 // refuseSharedContainerNames refuses a name shared by an init container and a
