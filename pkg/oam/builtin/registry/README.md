@@ -30,6 +30,13 @@ A type that is a lowering rule is never also a handler of the same position, and
 that replaces a handler sets its own under the same key; one that replaces a lowered type
 (say `webservice`) with a handler deletes the type from the lowering-rule map.
 
+`ComponentHandlers` holds every kind whatever Kubernetes version a cluster runs. The
+`validatingadmissionpolicy` and `validatingadmissionpolicybinding` kinds are served from
+Kubernetes 1.30, and `mutatingadmissionpolicy` and `mutatingadmissionpolicybinding` from
+1.36. The build does not check the version, so a cluster below it refuses the object at
+apply. A consumer that targets such a cluster and wants the refusal at build deletes those
+keys from the map.
+
 launcher has no handler for the `app-dependency`, `reconciliation` and `health-checks`
 policies or the `fluxcd-patches` and `fluxcd-postbuild` traits, so none of the maps holds
 them: a consumer that implements them registers its own.
