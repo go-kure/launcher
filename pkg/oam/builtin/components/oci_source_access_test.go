@@ -13,8 +13,8 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// The registry access keys of an oci component's source (go-kure/launcher#999)
-// are passed to the generated OCIRepository as written, joined to the source
+// The registry access keys of an oci component's source (go-kure/launcher#999,
+// serviceAccountName go-kure/launcher#1009) are passed to the generated OCIRepository as written, joined to the source
 // identity after the interval, and left out of both when unset.
 
 // withSource is props with key set to value in its source.
@@ -46,6 +46,7 @@ func TestOCIRule_SourceAccess_Rendered(t *testing.T) {
 	props = withSource(props, "insecure", true)
 	props = withSource(props, "certSecretRef", map[string]any{"name": "registry-ca"})
 	props = withSource(props, "proxySecretRef", map[string]any{"name": "registry-proxy"})
+	props = withSource(props, "serviceAccountName", "registry-puller")
 	objs := generateOCI(t, props)
 	repo := objs[0].(*sourcev1.OCIRepository)
 	if repo.Spec.SecretRef == nil || repo.Spec.SecretRef.Name != "regcred" {
@@ -63,6 +64,9 @@ func TestOCIRule_SourceAccess_Rendered(t *testing.T) {
 	if repo.Spec.ProxySecretRef == nil || repo.Spec.ProxySecretRef.Name != "registry-proxy" {
 		t.Errorf("spec.proxySecretRef = %+v, want registry-proxy", repo.Spec.ProxySecretRef)
 	}
+	if repo.Spec.ServiceAccountName != "registry-puller" {
+		t.Errorf("spec.serviceAccountName = %q, want registry-puller", repo.Spec.ServiceAccountName)
+	}
 	if base := generateOCI(t, validOCIProps()); !reflect.DeepEqual(objs[1], base[1]) {
 		t.Errorf("Kustomization = %+v\nwant the one without access %+v", objs[1], base[1])
 	}
@@ -72,7 +76,7 @@ func TestOCIRule_SourceAccess_Rendered(t *testing.T) {
 // does.
 func TestOCIRule_SourceAccess_UnsetIsUnchanged(t *testing.T) {
 	base := generateOCI(t, validOCIProps())
-	unset := map[string]any{"insecure": false, "provider": "", "secretRef": nil, "certSecretRef": nil, "proxySecretRef": nil}
+	unset := map[string]any{"insecure": false, "provider": "", "secretRef": nil, "certSecretRef": nil, "proxySecretRef": nil, "serviceAccountName": ""}
 	all := validOCIProps()
 	for key, value := range unset {
 		all = withSource(all, key, value)
@@ -103,6 +107,7 @@ func TestOCIRule_SourceAccess_AuthoredPipeline(t *testing.T) {
 	for key, value := range map[string]any{
 		"secretRef": map[string]any{"name": "regcred"}, "provider": "aws", "insecure": true,
 		"certSecretRef": map[string]any{"name": "registry-ca"}, "proxySecretRef": map[string]any{"name": "registry-proxy"},
+		"serviceAccountName": "registry-puller",
 	} {
 		valid = withSource(valid, key, value)
 	}
@@ -130,9 +135,10 @@ func TestOCIRule_SourceAccess_AuthoredPipeline(t *testing.T) {
 		value any
 		want  string
 	}{
-		"insecure":  {"yes", "oci: source.insecure: must be a boolean, got string"},
-		"secretRef": {"x", "oci: source.secretRef: must be an object, got string"},
-		"provider":  {7, "oci: source.provider"},
+		"insecure":           {"yes", "oci: source.insecure: must be a boolean, got string"},
+		"secretRef":          {"x", "oci: source.secretRef: must be an object, got string"},
+		"provider":           {7, "oci: source.provider"},
+		"serviceAccountName": {7, "oci: source.serviceAccountName"},
 	} {
 		_, err := ociViaRule{}.ToApplicationConfig(ociComponent(withSource(validOCIProps(), key, tc.value)), "checkout")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -174,6 +180,11 @@ func ociAccessCases() []ociAccessCase {
 		ociAccessCase{name: "insecure true vs true", key: "insecure", a: true, b: true, share: true, identity: `"insecure":true`, sharedProp: true},
 		ociAccessCase{name: "insecure true vs absent", key: "insecure", a: true, absentB: true},
 		ociAccessCase{name: "insecure false vs absent", key: "insecure", a: false, absentB: true, share: true},
+		ociAccessCase{name: "serviceAccountName equal", key: "serviceAccountName", a: "puller", b: "puller", share: true,
+			identity: `"serviceAccountName":"puller"`, sharedProp: "puller"},
+		ociAccessCase{name: "serviceAccountName different", key: "serviceAccountName", a: "puller", b: "other"},
+		ociAccessCase{name: "serviceAccountName set vs absent", key: "serviceAccountName", a: "puller", absentB: true},
+		ociAccessCase{name: "serviceAccountName empty vs absent", key: "serviceAccountName", a: "", absentB: true, share: true},
 	)
 }
 
@@ -271,6 +282,7 @@ func TestOCIRule_SourceAccess_ObjectName(t *testing.T) {
 	for _, key := range []string{"secretRef", "certSecretRef", "proxySecretRef"} {
 		access = withSource(access, key, map[string]any{"name": "regcred"})
 	}
+	access = withSource(access, "serviceAccountName", "registry-puller")
 	app := ociDocument(
 		oam.Component{Name: "a", Type: "oci", Properties: withSource(access, "objectName", "kept")},
 		oam.Component{Name: "b", Type: "oci", Properties: access},
@@ -287,6 +299,9 @@ func TestOCIRule_SourceAccess_ObjectName(t *testing.T) {
 		if got := a[0].Properties[key]; !reflect.DeepEqual(got, map[string]any{"name": "regcred"}) {
 			t.Errorf("a's source %s = %#v, want regcred", key, got)
 		}
+	}
+	if got := a[0].Properties["serviceAccountName"]; got != "registry-puller" {
+		t.Errorf("a's source serviceAccountName = %#v, want registry-puller", got)
 	}
 }
 

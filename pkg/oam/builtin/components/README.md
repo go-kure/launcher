@@ -9745,7 +9745,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the component keeps to itself, see below), `kustomizationName` (a name for
   the Kustomization, see below), the source's registry access
   `source.secretRef`, `source.provider`, `source.insecure`,
-  `source.certSecretRef` and `source.proxySecretRef` (go-kure/launcher#999),
+  `source.certSecretRef`, `source.proxySecretRef` (go-kure/launcher#999) and
+  `source.serviceAccountName` (go-kure/launcher#1009),
   `version` (tag or `sha256:…`), `path`, `prune`, `interval`,
   `targetNamespace`, `wait`, `healthChecks`.
 
@@ -9760,7 +9761,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   terminals' own.
   Each Secret reference of the registry access names a Secret in the
   namespace the OCIRepository lands in, the Flux namespace when one is set,
-  as on `ocirepository`. A Secret-making trait (`secret`,
+  as on `ocirepository`; `source.serviceAccountName` names a ServiceAccount
+  in that namespace. A Secret-making trait (`secret`,
   `external-secret`, `certificate`) goes to the Kustomization, not the source, so the Secret it
   makes is not moved to the Flux namespace for the source to read: provide the
   Secret there, or author `ocirepository` and `fluxcd-kustomization`.
@@ -9841,10 +9843,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     interval. Components whose intervals differ do not share: each keeps a
     source of its own, polling at its own interval, as a component alone on
     its artifact does. Nor do components whose access differs in any key, so
-    no component pulls with another's credentials, provider or TLS settings;
-    one `source.name` written with two accesses is refused as one name for
-    two identities. An unset key (a `null` reference, an empty `provider`,
-    `insecure: false`) is no access and leaves the identity, and a shared
+    no component pulls with another's credentials, provider, ServiceAccount
+    or TLS settings; one `source.name` written with two accesses is refused
+    as one name for two identities. An unset key (a `null` reference, an
+    empty `provider` or `serviceAccountName`, `insecure: false`) is no access and leaves the identity, and a shared
     source's name, as they were before these keys; an authored `{}`
     reference is access of its own, and `provider: generic` differs from no
     provider.

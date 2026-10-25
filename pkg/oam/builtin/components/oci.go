@@ -123,17 +123,18 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // ociSourceAccessKeys are the keys of source that set the generated
-// OCIRepository's registry access (go-kure/launcher#999). Each is passed on as
-// written, under the ocirepository terminal's own schema entry, and the
-// terminal's strict decode checks its shape: an oci component takes them with
-// the meaning and validation an ocirepository has.
-var ociSourceAccessKeys = []string{"secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef"}
+// OCIRepository's registry access (go-kure/launcher#999, serviceAccountName
+// go-kure/launcher#1009). Each is passed on as written, under the ocirepository
+// terminal's own schema entry, and the terminal's strict decode checks its
+// shape: an oci component takes them with the meaning and validation an
+// ocirepository has.
+var ociSourceAccessKeys = []string{"secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef", "serviceAccountName"}
 
 // ociSourceSchema declares the keys of the oci component's source.
 func ociSourceSchema() map[string]oam.PropertySchema {
 	out := map[string]oam.PropertySchema{
 		"url":        {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
-		"name":       {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version, interval and registry access (secretRef, provider, insecure, certSecretRef, proxySecretRef) are the same. Not with objectName."},
+		"name":       {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version, interval and registry access (secretRef, provider, insecure, certSecretRef, proxySecretRef, serviceAccountName) are the same. Not with objectName."},
 		"objectName": {Type: oam.PropertyTypeString, Description: "Name of the OCIRepository this component keeps to itself, in place of the component name, used as written. Unlike name, it leaves the source with the component: the source is deployed with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits. A component that writes it keeps its own source, also when another component has the same source. Not with name."},
 	}
 	terminal := (&OCIRepositoryHandler{}).PropertySchema()
@@ -168,10 +169,10 @@ type ociProperties struct {
 
 	// The source's registry access (ociSourceAccessKeys), each as authored.
 	// A reference is nil when absent or null, and an authored {} is kept as
-	// an empty map; provider is "" when absent or empty, and insecure is
-	// true only when written true.
+	// an empty map; provider and serviceAccountName are "" when absent or
+	// empty, and insecure is true only when written true.
 	secretRef, certSecretRef, proxySecretRef map[string]any
-	provider                                 string
+	provider, serviceAccountName             string
 	insecure                                 bool
 
 	path            string
@@ -193,11 +194,12 @@ type ociProperties struct {
 //	  url: oci://registry.example.com/org/artifact   # required, oci:// scheme
 //	  name: artifact-source                           # optional; names the OCIRepository, generated on its own
 //	  objectName: artifact                            # optional, not with name; names the OCIRepository the component keeps
-//	  secretRef: {name: regcred}                      # optional; as on ocirepository, so are the next four
+//	  secretRef: {name: regcred}                      # optional; as on ocirepository, so are the next five
 //	  provider: aws                                   # optional; generic, aws, azure or gcp
 //	  insecure: true                                  # optional; false emits nothing
 //	  certSecretRef: {name: registry-ca}              # optional
 //	  proxySecretRef: {name: registry-proxy}          # optional
+//	  serviceAccountName: registry-puller             # optional
 //	kustomizationName: artifact-delivery              # optional; names the Kustomization
 //	version: 1.2.3                                    # required; tag, or sha256:<digest>
 //	path: ./                                          # optional, default "./"
@@ -321,6 +323,9 @@ func (p *ociProperties) parseSourceAccess(src map[string]any) error {
 		return err
 	}
 	if p.provider, _, err = parseStringField(src, "provider", "oci: source.provider"); err != nil {
+		return err
+	}
+	if p.serviceAccountName, _, err = parseStringField(src, "serviceAccountName", "oci: source.serviceAccountName"); err != nil {
 		return err
 	}
 	insecure, err := parseBoolField(src, "insecure", "oci: source.insecure")
@@ -508,12 +513,16 @@ func (p *ociProperties) sourceIdentity() (string, error) {
 		Insecure       bool   `json:"insecure,omitempty"`
 		CertSecretRef  any    `json:"certSecretRef,omitempty"`
 		ProxySecretRef any    `json:"proxySecretRef,omitempty"`
+		// After the go-kure/launcher#999 keys, so that adding it changed
+		// no identity.
+		ServiceAccountName string `json:"serviceAccountName,omitempty"`
 	}{
 		p.url, p.version, interval.Duration.String(),
 		// Through refOrNil: a nil map in an `any` is a non-nil interface,
 		// which omitempty keeps and encodes as null, changing every identity.
 		refOrNil(p.secretRef), p.provider, p.insecure,
 		refOrNil(p.certSecretRef), refOrNil(p.proxySecretRef),
+		p.serviceAccountName,
 	})
 	if err != nil {
 		return "", errors.Wrapf(err, "%s: encoding the source identity", ociType)
@@ -579,6 +588,9 @@ func (p *ociProperties) sourceProperties() map[string]any {
 	}
 	if p.provider != "" {
 		out["provider"] = p.provider
+	}
+	if p.serviceAccountName != "" {
+		out["serviceAccountName"] = p.serviceAccountName
 	}
 	if p.insecure {
 		out["insecure"] = true
