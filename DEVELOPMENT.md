@@ -16,7 +16,7 @@ make check
 
 - [mise](https://mise.jdx.dev) — tool version manager
 - Go 1.27.3 (managed by mise)
-- golangci-lint 2.14.0 (managed by mise)
+- golangci-lint 2.15.0 (managed by mise)
 
 ```bash
 # Install mise, then:
