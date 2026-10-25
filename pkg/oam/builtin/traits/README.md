@@ -627,6 +627,23 @@ traffic source's `podSelector` and a routing trait's `backendSelector`. A null
 map used to pass the presence check and render an empty selector, which matches every
 pod; a `backendSelector` already refused it, as an empty `matchLabels`.
 
+### Validating `trafficSources` before lowering
+
+`traits.ValidateTrafficSources(props)` runs the checks above on a routing trait's
+merged properties without rendering, so a caller that validates an application
+before lowering can refuse a malformed entry at submit time
+(go-kure/launcher#997). It returns nil when `networkPolicy` is absent, and
+otherwise the same refusal the trait raises when it renders, as an
+`*errors.ValidationError` for the first refused value. Its `Field` is the deepest
+of `networkPolicy`, `networkPolicy.trafficSources`,
+`networkPolicy.trafficSources[i]`, `networkPolicy.trafficSources[i].namespace`
+and `networkPolicy.trafficSources[i].podSelector` that holds that value: an
+unsupported key is reported at the object that holds it, and anything wrong
+inside a `podSelector` (an unsupported key, a missing, null or non-object
+`matchLabels`, a non-string label value) at the `podSelector`. The message
+names the inner key or label. The error names no component; the caller
+attaches the one it is checking.
+
 ## Extending
 
 Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally

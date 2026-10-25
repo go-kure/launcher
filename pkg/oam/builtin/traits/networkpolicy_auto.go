@@ -22,15 +22,46 @@ import (
 // An explicit trafficSources: [] is the mechanism for intentionally disabling
 // auto-synthesis without removing the networkPolicy key.
 func parseTrafficSources(props map[string]any, component, traitType string) ([]netpol.TrafficSource, error) {
-	ve := func(field, msg string, args ...any) error {
+	return readTrafficSources(props, func(field, msg string, args ...any) error {
 		return &errors.ValidationError{
 			Field:     field,
 			Component: component,
 			Message: fmt.Sprintf("component %q trait %q field %q: %s",
 				component, traitType, field, fmt.Sprintf(msg, args...)),
 		}
-	}
+	})
+}
 
+// ValidateTrafficSources runs the checks a routing trait (ingress, httproute,
+// expose) applies to networkPolicy.trafficSources when it renders, without
+// rendering anything. props are the trait's merged properties, the map the
+// trait's Apply reads; a nil or empty map, or one without a networkPolicy key,
+// is valid.
+//
+// A refusal is an *errors.ValidationError for the first refused value. Its
+// Field, relative to props, is the deepest of these paths that holds that
+// value: "networkPolicy", "networkPolicy.trafficSources",
+// "networkPolicy.trafficSources[i]", "networkPolicy.trafficSources[i].namespace"
+// or "networkPolicy.trafficSources[i].podSelector". So an unsupported key is
+// reported at the object that holds it, and anything wrong inside a
+// podSelector (an unsupported key, a missing, null or non-object matchLabels,
+// a non-string label value) at the podSelector; the message names the inner
+// key or label. Entries are checked in order, so the path names the first
+// invalid entry. The error carries no component:
+// a caller validating an application attaches the component it is checking.
+func ValidateTrafficSources(props map[string]any) error {
+	_, err := readTrafficSources(props, func(field, msg string, args ...any) error {
+		return &errors.ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("field %q: %s", field, fmt.Sprintf(msg, args...)),
+		}
+	})
+	return err
+}
+
+// readTrafficSources holds the checks parseTrafficSources and
+// ValidateTrafficSources share; ve builds the refusal for a field path.
+func readTrafficSources(props map[string]any, ve func(field, msg string, args ...any) error) ([]netpol.TrafficSource, error) {
 	rawNP, hasNP := props["networkPolicy"]
 	if !hasNP {
 		return nil, nil
