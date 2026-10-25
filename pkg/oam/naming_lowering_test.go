@@ -18,6 +18,7 @@ import (
 var (
 	poolerKind   = schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Pooler"}
 	databaseKind = schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Database"}
+	clusterKind  = schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Cluster"}
 )
 
 // loweringHarness is a LoweringContext as the engine hands one to a component
@@ -152,9 +153,9 @@ func TestLoweringResolveName_Refusals(t *testing.T) {
 			want: "Not_A_Name",
 		},
 		{
-			name: "an authored pooler name that is no DNS-1035 label", suffix: "pooler",
+			name: "an authored pooler name that is no DNS-1123 label", suffix: "pooler",
 			spec: NameSpec{Role: NameRolePooler, Kind: poolerKind, Property: "poolerName", Authored: "a.b"},
-			want: `poolerName "a.b" cannot be the name for role "pooler": not a valid DNS-1035 label: `,
+			want: `poolerName "a.b" cannot be the name for role "pooler": not a valid DNS-1123 label: `,
 		},
 		{
 			name: "an empty authored name", suffix: "pooler",
@@ -162,8 +163,13 @@ func TestLoweringResolveName_Refusals(t *testing.T) {
 			want: `poolerName "" cannot be the name for role "pooler": it is empty; write a valid name, or leave the property out for the default "db-pooler"`,
 		},
 		{
-			name: "a hook answer that is no DNS-1035 label", suffix: "pooler", spec: pooler, answers: map[string]string{"db-pooler": "1st"},
-			want: `the Naming hook returned "1st" for role "pooler" in place of "db-pooler": not a valid DNS-1035 label: `,
+			name: "a hook answer that is no DNS-1123 label", suffix: "pooler", spec: pooler, answers: map[string]string{"db-pooler": "a.b"},
+			want: `the Naming hook returned "a.b" for role "pooler" in place of "db-pooler": not a valid DNS-1123 label: `,
+		},
+		{
+			name: "a hook answer that is no DNS-1035 label, for a cluster", suffix: "pg",
+			spec: NameSpec{Role: NameRolePostgresqlCluster, Kind: clusterKind}, answers: map[string]string{"db-pg": "1st"},
+			want: `the Naming hook returned "1st" for role "postgresql-cluster" in place of "db-pg": not a valid DNS-1035 label: `,
 		},
 		{
 			name: "a hook answer that is no subdomain, for a database", suffix: "orders",
@@ -191,6 +197,16 @@ func TestLoweringResolveName_Refusals(t *testing.T) {
 		got, err := h.lctx("db").ResolveName("db", "orders", NameSpec{Role: NameRoleDatabase, Kind: databaseKind})
 		if err != nil || got != "orders.v2" {
 			t.Fatalf("ResolveName = %q, %v; want the hook's dotted name", got, err)
+		}
+	})
+
+	// A leading digit is a Pooler's, whose Service takes its name, and not a
+	// Cluster's (go-kure/launcher#959).
+	t.Run("a leading digit is a pooler's", func(t *testing.T) {
+		h := newLoweringHarness(map[string]string{"db-pooler": "1st"})
+		got, err := h.lctx("db").ResolveName("db", "pooler", pooler)
+		if err != nil || got != "1st" {
+			t.Fatalf("ResolveName = %q, %v; want the hook's name", got, err)
 		}
 	})
 }

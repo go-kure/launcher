@@ -351,7 +351,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// CloudNativePG admits a Cluster name of at most 50 characters. The other
 	// CloudNativePG kinds run no pods of their own either: each emits identity
 	// and the authored spec, with no `app` label. CloudNativePG names the
-	// Pooler's Service after it, so its name is a DNS-1035 label.
+	// Pooler's Service after it, so its name is a DNS-1123 label (go-kure/launcher#959).
 	"cnpg-backup": {
 		props: map[string]any{"cluster": map[string]any{"name": "db"}},
 	},
@@ -371,7 +371,7 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}},
 	},
 	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
-		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
+		longRefusal: "must be a DNS-1123 label of at most 63 characters"},
 	"cnpg-publication": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "pub", "dbname": "app",
 		"target": map[string]any{"allTables": true}}},
 	"cnpg-scheduledbackup": {

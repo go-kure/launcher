@@ -281,7 +281,7 @@ func TestPostgresqlObjectNames_ComponentNameNoClusterCanCarry(t *testing.T) {
 
 	const pooled = "        clusterObjectName: pg\n        pooler:\n          enabled: true\n"
 	err = transformErr(t, doc(pooled), postgresqlNamesContext(nil))
-	want := `pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1035 label of at most 63 characters (CloudNativePG names the pooler's Service after it); the default derives from the component name: set poolerName to name the Pooler otherwise`
+	want := `pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1123 label of at most 63 characters (CloudNativePG names the pooler's Service after it); the default derives from the component name: set poolerName to name the Pooler otherwise`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("with a pooler and no poolerName: err = %v\nwant one containing %q", err, want)
 	}

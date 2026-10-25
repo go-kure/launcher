@@ -264,6 +264,16 @@ func TestWorkloadNames_HookAnswerIsUsed(t *testing.T) {
 	}
 }
 
+// A Service name starting with a digit is a DNS-1123 label, a Service name by default from
+// Kubernetes 1.36 (go-kure/launcher#959): the hook's answer names the Service.
+func TestWorkloadNames_HookAnswerStartingWithADigit(t *testing.T) {
+	hook := renameBy(map[string]string{"workload-service web": "1web"})
+	cluster, apps := namingTransform(t, workloadNamesDoc("", ""), workloadNamesContext(hook))
+	if got := generatedNames(cluster, apps); !slices.Contains(got, "web: Service default/1web") {
+		t.Errorf("generated names:\n  %s\nwant one Service default/1web", strings.Join(got, "\n  "))
+	}
+}
+
 // An authored name is used as written and the hook is not asked for it, through
 // the whole build: kurel writes the objects under the authored names, with the
 // references following.
@@ -423,14 +433,14 @@ func TestWorkloadNames_Refusals(t *testing.T) {
 				`so the component generates none for serviceAccountObjectName to name; remove one of them`,
 		},
 		{
-			name: "an authored Service name that is no DNS-1035 label",
+			name: "an authored Service name that is no DNS-1123 label",
 			doc:  helmNamesApp(workload("web", "webservice", "        serviceObjectName: web.v1\n")),
-			want: `naming the Service: serviceObjectName "web.v1" cannot be the name for role "workload-service": not a valid DNS-1035 label: `,
+			want: `naming the Service: serviceObjectName "web.v1" cannot be the name for role "workload-service": not a valid DNS-1123 label: `,
 		},
 		{
-			name: "a hook answer for the Service that is no DNS-1035 label",
-			doc:  helmNamesApp(workload("web", "webservice", "")), ctx: answer(oam.NameRoleWorkloadService, "1web"),
-			want: `naming the Service: the Naming hook returned "1web" for role "workload-service" in place of "web": not a valid DNS-1035 label: `,
+			name: "a hook answer for the Service that is no DNS-1123 label",
+			doc:  helmNamesApp(workload("web", "webservice", "")), ctx: answer(oam.NameRoleWorkloadService, "web.v2"),
+			want: `naming the Service: the Naming hook returned "web.v2" for role "workload-service" in place of "web": not a valid DNS-1123 label: `,
 		},
 		{
 			name: "a hook answer for the Deployment that is no subdomain",

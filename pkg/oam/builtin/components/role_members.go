@@ -38,7 +38,7 @@ func schemaRoleObjectNames(service bool) map[string]oam.PropertySchema {
 		serviceAccountObjectNameProperty: {Type: oam.PropertyTypeString, Description: "Name of the ServiceAccount the component generates for its pods, in place of the component name, used as written. The pods run as it, and an rbac trait binds it. Not with serviceAccountName, which names an existing account: the component then generates none."},
 	}
 	if service {
-		m[serviceObjectNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the Service the component generates, in place of the component name, used as written; a DNS-1035 label. The routing traits on the component and the synthesized NetworkPolicy follow it. The Service's name is its DNS name in the cluster. Launcher builds no such address, so every address written with the component name (an env value, a URL in another component) is the author's to change."}
+		m[serviceObjectNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the Service the component generates, in place of the component name, used as written; a DNS-1123 label (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36). The routing traits on the component and the synthesized NetworkPolicy follow it. The Service's name is its DNS name in the cluster. Launcher builds no such address, so every address written with the component name (an env value, a URL in another component) is the author's to change."}
 	}
 	return m
 }

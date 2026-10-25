@@ -92,7 +92,8 @@ type TransformContext struct {
 	// (go-kure/launcher#787). It is asked once for each name of a role in
 	// NameRoles that the author did not set: return a name and true to use it in
 	// place of NameRequest.Default, or false to keep the default. A returned name
-	// must be a DNS-1123 subdomain (a DNS-1035 label for the pooler role); it is
+	// must be a DNS-1123 subdomain (a DNS-1123 label for the pooler and
+	// workload-service roles, a DNS-1035 label for postgresql-cluster); it is
 	// used as returned or refused, never shortened. Two names that end up naming one object, or one bundle, fail the
 	// transform with both named. nil asks nothing: every name is the author's or
 	// the default. Non-authorable platform input.

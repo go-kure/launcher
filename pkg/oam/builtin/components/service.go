@@ -28,7 +28,7 @@ import (
 // workload component owns their ServiceAccount. `selector` names those pods
 // explicitly when the workload is named differently.
 //
-// The component name is the Service's name, so it must be a DNS-1035 label,
+// The component name is the Service's name, so it must be a DNS-1123 label,
 // as the API server requires of a Service (validateServiceName).
 //
 // `ports` is the full corev1.ServicePort list, each entry with its own
@@ -328,18 +328,24 @@ func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr
 }
 
 // validateServiceName refuses a name the API server would refuse for a
-// Service. Kubernetes validates a Service name as a DNS-1035 label (at most 63
-// characters, lowercase alphanumerics and '-', starting with a letter), which
-// is stricter than the DNS-1123 subdomain every component name already
-// passes: "api.v1", a 64-character name and "1api" all pass that check.
+// Service. Kubernetes validates a Service name as a DNS-1123 label (at most 63
+// characters, lowercase alphanumerics and '-', starting and ending with an
+// alphanumeric), which is stricter than the DNS-1123 subdomain every component
+// name already passes: "api.v1" and a 64-character name both pass that check.
+// That is the rule under the RelaxedServiceNameValidation feature gate: alpha
+// and off by default in Kubernetes 1.34 and 1.35, on by default from 1.36, GA
+// and locked on in 1.37. With the gate off the API server holds a Service name
+// to a DNS-1035 label, which also refuses a leading digit ("1api"): this
+// package does not see the target cluster, so that is a documented limit, not
+// a check (go-kure/launcher#959).
 // field names where the value came from ("name" for the component name,
 // "serviceName" for statefulset's authored property), so the author can find
 // it. Every kind that emits a Service calls it, service and webservice
 // (go-kure/launcher#546), and so does statefulset for the governing Service its
 // serviceName names.
 func validateServiceName(field, name string) error {
-	if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
-		return errors.Errorf("%s: %q is not a valid Service name, which must be a DNS-1035 label: %s", field, name, strings.Join(errs, "; "))
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return errors.Errorf("%s: %q is not a valid Service name, which must be a DNS-1123 label: %s", field, name, strings.Join(errs, "; "))
 	}
 	return nil
 }

@@ -132,7 +132,7 @@ func TestPostgresqlRule_ComponentNameNoClusterCanCarry(t *testing.T) {
 		}
 
 		comp.Properties["pooler"] = map[string]any{"enabled": true}
-		want := `pooler: cnpg-pooler name "` + name + `-pooler": must be a DNS-1035 label of at most 63 characters (CloudNativePG names the pooler's Service after it); the default derives from the component name: set poolerName to name the Pooler otherwise`
+		want := `pooler: cnpg-pooler name "` + name + `-pooler": must be a DNS-1123 label of at most 63 characters (CloudNativePG names the pooler's Service after it); the default derives from the component name: set poolerName to name the Pooler otherwise`
 		_, err := components.PostgresqlRule{}.Endpoints(comp)
 		if err == nil || err.Error() != want {
 			t.Errorf("component %q: Endpoints err = %v\nwant %q", name, err, want)

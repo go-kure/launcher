@@ -19,8 +19,9 @@ import (
 // TestPostgresqlRule_PropertySchemaUnchanged pins the rule's schema byte for byte
 // against the one the former PostgresqlHandler published, captured before
 // postgresql became a lowering rule, with the `poolerName`, `clusterObjectName`
-// and `objectStoreObjectName` the rule gained since, and `pooler.image` in the
-// pooler's description.
+// and `objectStoreObjectName` the rule gained since, `pooler.image` in the
+// pooler's description, and the DNS-1123 label rule in `poolerName`'s
+// (go-kure/launcher#959).
 func TestPostgresqlRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/postgresql-property-schema.json")
 	if err != nil {

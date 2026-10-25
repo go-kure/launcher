@@ -52,6 +52,8 @@ func TestRoleRules_AuthoredObjectNames(t *testing.T) {
 		{name: "none", wantDeployment: "app", wantService: "app", wantAccount: "app"},
 		{name: "the Deployment", deployment: "app-workload", wantDeployment: "app-workload", wantService: "app", wantAccount: "app"},
 		{name: "the Service", service: "app-entry", wantDeployment: "app", wantService: "app-entry", wantAccount: "app"},
+		// A DNS-1123 label, no DNS-1035 label (go-kure/launcher#959).
+		{name: "the Service, starting with a digit", service: "1app", wantDeployment: "app", wantService: "1app", wantAccount: "app"},
 		{name: "the ServiceAccount", account: "app-identity", wantDeployment: "app", wantService: "app", wantAccount: "app-identity"},
 		{name: "all three", deployment: "app-workload", service: "app-entry", account: "app-identity",
 			wantDeployment: "app-workload", wantService: "app-entry", wantAccount: "app-identity"},
@@ -159,9 +161,9 @@ func TestRoleRules_ObjectNameRefusals(t *testing.T) {
 		{"a deploymentObjectName that is no subdomain", "worker", with("deploymentObjectName", "Not_A_Name"),
 			`naming the Deployment: deploymentObjectName "Not_A_Name" cannot be the name for role "workload-deployment": not a valid DNS-1123 subdomain: `},
 		{"a serviceObjectName that is a subdomain but no label", "webservice", with("serviceObjectName", "app.v1"),
-			`naming the Service: serviceObjectName "app.v1" cannot be the name for role "workload-service": not a valid DNS-1035 label: `},
+			`naming the Service: serviceObjectName "app.v1" cannot be the name for role "workload-service": not a valid DNS-1123 label: `},
 		{"a serviceObjectName over 63 characters", "webservice", with("serviceObjectName", strings.Repeat("s", 64)),
-			`cannot be the name for role "workload-service": not a valid DNS-1035 label: must be no more than 63`},
+			`cannot be the name for role "workload-service": not a valid DNS-1123 label: must be no more than 63`},
 		{"a serviceAccountObjectName over 253 characters", "webservice", with("serviceAccountObjectName", strings.Repeat("a", 254)),
 			`cannot be the name for role "workload-serviceaccount": not a valid DNS-1123 subdomain: must be no more than 253`},
 	} {

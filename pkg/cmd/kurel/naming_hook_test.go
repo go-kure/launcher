@@ -724,9 +724,9 @@ func TestNamingHook_PostgresqlRefusals(t *testing.T) {
 		endpoint bool
 	}{
 		{
-			name:     "a pooler answer that is no DNS-1035 label",
+			name:     "a pooler answer that is no DNS-1123 label",
 			names:    map[string]string{"pooler db-pooler": "edge.v2"},
-			want:     `pooler: the Naming hook returned "edge.v2" for role "pooler" in place of "db-pooler": not a valid DNS-1035 label: `,
+			want:     `pooler: the Naming hook returned "edge.v2" for role "pooler" in place of "db-pooler": not a valid DNS-1123 label: `,
 			endpoint: true,
 		},
 		{
@@ -791,7 +791,7 @@ spec:
 	for _, tc := range []struct {
 		name, component, typ, props, bad, want string
 	}{
-		{"service", "api", "service", servicePorts, "1api", `"1api" is not a valid Service name`},
+		{"service", "api", "service", servicePorts, "api.v1", `"api.v1" is not a valid Service name`},
 		{"namespace", "tenant", "namespace", "        finalizers: []\n", "tenant.a", `"tenant.a" is not a valid Namespace name`},
 		{"cronjob", "nightly", "cronjob", "        image: busybox:1\n        schedule: \"0 2 * * *\"\n", over52,
 			`"` + over52 + `" is not a valid CronJob name, which must be at most 52 characters`},
@@ -812,6 +812,25 @@ spec:
 			err := transformErr(t, app(tc.component, tc.typ, tc.props), namingContext(hook))
 			if err == nil || !strings.Contains(err.Error(), source+tc.want) {
 				t.Fatalf("err = %v\nwant one containing %q", err, source+tc.want)
+			}
+		})
+	}
+
+	// A Service name starting with a digit is a DNS-1123 label, a Service name
+	// by default from Kubernetes 1.36 (go-kure/launcher#959): the Service takes
+	// it, from the author and from the hook alike.
+	for _, tc := range []struct {
+		name string
+		doc  string
+		hook func(oam.NameRequest) (string, bool)
+	}{
+		{"authored", app("api", "service", servicePorts+"        "+oam.ObjectNameProperty+": 1api\n"), nil},
+		{"from the hook", app("api", "service", servicePorts), renameBy(map[string]string{"object api": "1api"})},
+	} {
+		t.Run("service "+tc.name+", starting with a digit", func(t *testing.T) {
+			cluster, apps := namingTransform(t, tc.doc, namingContext(tc.hook))
+			if got := generatedNames(cluster, apps); !slices.Contains(got, "api: Service default/1api") {
+				t.Errorf("generated names:\n  %s\nwant one Service default/1api", strings.Join(got, "\n  "))
 			}
 		})
 	}

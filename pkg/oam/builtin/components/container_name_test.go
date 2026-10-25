@@ -19,9 +19,9 @@ import (
 // named after the component, with the minimal properties that build it.
 //
 // serviceNamed marks a kind that always names a Service after the component
-// too (go-kure/launcher#546): the Service-name rule, a DNS-1035 label and so
-// stricter than the container name's DNS-1123 label, refuses a dotted or long
-// name at conversion, before the container is built. statefulset and daemonset
+// too (go-kure/launcher#546): the Service-name rule, a DNS-1123 label as the
+// container name's is (go-kure/launcher#959), refuses a dotted or long name at
+// conversion, before the container is built. statefulset and daemonset
 // would too, so their properties keep the Service's name off the component
 // name (an authored serviceName) or emit no Service at all (no port).
 //
@@ -63,7 +63,7 @@ func generateWorkload(t *testing.T, h oam.ComponentHandler, name, typ string, pr
 // rule, or for a serviceNamed kind the Service-name rule that refuses it first.
 func containerNameRefusal(serviceNamed bool, name string, containerRule ...string) []string {
 	if serviceNamed {
-		return []string{name, "is not a valid Service name", "DNS-1035 label"}
+		return []string{name, "is not a valid Service name", "DNS-1123 label"}
 	}
 	return append([]string{name, "container name", "DNS-1123 label"}, containerRule...)
 }

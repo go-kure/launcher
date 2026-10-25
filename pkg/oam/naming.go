@@ -65,8 +65,8 @@ const (
 	NameRoleVolSyncReplicationSource NameRole = "volsync-replicationsource"
 	// NameRolePooler is the CloudNativePG Pooler the postgresql component
 	// generates. Default: "<component>-pooler". CloudNativePG names the pooler's
-	// Service after it, so a name that is not the default must be a DNS-1035
-	// label.
+	// Service after it, so a name that is not the default must be a valid
+	// Service name, a DNS-1123 label.
 	NameRolePooler NameRole = "pooler"
 	// NameRoleDatabase is one CloudNativePG Database object the postgresql
 	// component generates. Default: "<component>-<database name>".
@@ -121,7 +121,7 @@ const (
 	NameRoleWorkloadDeployment NameRole = "workload-deployment"
 	// NameRoleWorkloadService is the Service a `webservice` component generates.
 	// Default: the component name. The hook is asked with the component. A name
-	// that is not the default must be a DNS-1035 label, as every Service name.
+	// that is not the default must be a DNS-1123 label, as every Service name.
 	// The Service's name is its DNS name in the cluster: launcher writes no such
 	// address, so one written with the component name is the author's to change.
 	NameRoleWorkloadService NameRole = "workload-service"
@@ -189,6 +189,13 @@ const (
 	nameSyntaxSubdomain nameSyntax = iota
 	// nameSyntaxLabel1035 is a DNS-1035 label of at most 63 characters.
 	nameSyntaxLabel1035
+	// nameSyntaxServiceName is a Service name: a DNS-1123 label of at most 63
+	// characters, the rule the API server holds a Service name to under the
+	// RelaxedServiceNameValidation feature gate, on by default from Kubernetes
+	// 1.36. With the gate off it holds the name to a DNS-1035 label, which also
+	// refuses a leading digit: a documented limit, not a check
+	// (go-kure/launcher#959).
+	nameSyntaxServiceName
 	// nameSyntaxKustomization is a Flux Kustomization name: a DNS-1123 subdomain
 	// of at most 63 characters (stack.ValidateKustomizationName).
 	nameSyntaxKustomization
@@ -243,7 +250,7 @@ var nameRoles = []struct {
 	{NameRoleIngress, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHTTPRoute, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleVolSyncReplicationSource, nameClassObject, nameSyntaxSubdomain},
-	{NameRolePooler, nameClassObject, nameSyntaxLabel1035},
+	{NameRolePooler, nameClassObject, nameSyntaxServiceName},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHelmSource, nameClassObject, nameSyntaxSubdomain},
@@ -253,7 +260,7 @@ var nameRoles = []struct {
 	{NameRoleOCIKustomization, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleOCISource, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleWorkloadDeployment, nameClassObject, nameSyntaxSubdomain},
-	{NameRoleWorkloadService, nameClassObject, nameSyntaxLabel1035},
+	{NameRoleWorkloadService, nameClassObject, nameSyntaxServiceName},
 	{NameRoleWorkloadServiceAccount, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleWorkloadVolumeClaim, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
@@ -980,10 +987,12 @@ func clusterScopeProblem(spec NameSpec) error {
 // name under syntax, or "". Most roles take the DNS-1123 subdomain, at most 253
 // characters: an object's own rule for the kinds launcher names, and launcher's
 // rule for a bundle, a group and a sub-application, whose defaults are built
-// from an application or component name it already holds to it. A role whose
-// object lends its name to a Service (the pooler) takes the DNS-1035 label. A
-// role that names a Flux Kustomization the base library generates (the layout)
-// takes the subdomain of at most 63 characters it holds that name to.
+// from an application or component name it already holds to it. A role that
+// names a Service, or whose object lends its name to one (the pooler), takes
+// the DNS-1123 label of a Service name. The CloudNativePG Cluster takes the
+// DNS-1035 label its operator requires. A role that names a Flux Kustomization
+// the base library generates (the layout) takes the subdomain of at most 63
+// characters it holds that name to.
 func overrideNameProblem(name string, syntax nameSyntax) string {
 	if name == "" {
 		return "it is empty"
@@ -991,6 +1000,12 @@ func overrideNameProblem(name string, syntax nameSyntax) string {
 	if syntax == nameSyntaxLabel1035 {
 		if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
 			return "not a valid DNS-1035 label: " + strings.Join(errs, "; ")
+		}
+		return ""
+	}
+	if syntax == nameSyntaxServiceName {
+		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+			return "not a valid DNS-1123 label: " + strings.Join(errs, "; ")
 		}
 		return ""
 	}

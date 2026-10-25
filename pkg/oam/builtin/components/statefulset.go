@@ -30,7 +30,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
 		"ports":                schemaMainContainerPorts(),
-		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the governing Service that gives the pods their stable network identity, a headless `service` component authored beside this one. No default. Must be a valid Service name, a DNS-1035 label."},
+		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the governing Service that gives the pods their stable network identity, a headless `service` component authored beside this one. No default. Must be a valid Service name, a DNS-1123 label (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36)."},
 		"env":                  schemaEnv(false),
 		"envFrom":              schemaEnvFrom(false),
 		"resources":            schemaResources(false),
