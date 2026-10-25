@@ -718,6 +718,41 @@ func TestFluxReceiver_RefusesAUserOrPassword(t *testing.T) {
 	}
 }
 
+// TestFluxReceiver_UnversionedResourceNeedsADefaultKind: a resource with no
+// apiVersion is accepted only for a kind the notification controller gives a
+// default version (go-kure/launcher#984); with an apiVersion, any kind is
+// accepted. Each kind of the default list is held to acceptance by
+// TestReceiverDefaultAPIVersionKinds_AcceptedUnversioned, which reads the list.
+func TestFluxReceiver_UnversionedResourceNeedsADefaultKind(t *testing.T) {
+	cases := []struct {
+		name     string
+		resource map[string]any
+		wantErr  string
+	}{
+		{"HelmRelease without apiVersion", map[string]any{"kind": "HelmRelease", "name": "shop"}, `fluxcd-receiver: resources[1].apiVersion: required for kind "HelmRelease", which the notification controller has no default version for; set apiVersion, such as helm.toolkit.fluxcd.io/v2`},
+		{"Kustomization without apiVersion", map[string]any{"kind": "Kustomization", "name": "*"}, `resources[1].apiVersion: required for kind "Kustomization"`},
+		{"ImagePolicy with an empty apiVersion", map[string]any{"apiVersion": "", "kind": "ImagePolicy", "name": "app"}, `resources[1].apiVersion: required for kind "ImagePolicy"`},
+		{"HelmRelease with apiVersion", map[string]any{"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "name": "shop"}, ""},
+		{"Kustomization with apiVersion", map[string]any{"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "name": "*"}, ""},
+		{"HelmRepository without apiVersion", map[string]any{"kind": "HelmRepository", "name": "*"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := withProperty(fluxReceiverMinimal(), "resources", []any{fluxReceiverResource(), tc.resource})
+			_, err := (&components.FluxcdReceiverHandler{}).ToApplicationConfig(&oam.Component{Name: "hook", Type: "fluxcd-receiver", Properties: props}, coreKindNamespace)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("ToApplicationConfig = %v, want no refusal", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ToApplicationConfig = %v, want an error that says %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestResourceSetInputProvider_ScheduleWindowIsCheckedAsAuthored: a
 // schedule's `window` is a duration under a list, held to its pattern by its
 // authored text in every schedule, and written as the type writes it.

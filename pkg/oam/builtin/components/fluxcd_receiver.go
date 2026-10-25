@@ -1,7 +1,9 @@
 package components
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
@@ -10,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
@@ -65,7 +68,7 @@ func (h *FluxcdReceiverHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: "Required. " + spec + "resources: the Flux objects a webhook makes the controller reconcile. An entry may name another namespace, and with the name `*` every object of a kind there, or with `matchLabels` every one that carries those labels: nothing holds it to the application's own namespace.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
-				Description: "One resource: `kind` and `name` (`*` for every object of the kind), both required, `apiVersion`, `namespace`, `matchLabels`, which narrows the name `*` to the objects that carry those labels and which the API documents as needing that name, and `filter`, a CEL expression the controller evaluates.",
+				Description: "One resource: `kind` and `name` (`*` for every object of the kind), both required, `apiVersion`, required unless the kind is one the notification controller defaults it for (" + strings.Join(receiverDefaultAPIVersionKinds, ", ") + "), `namespace`, `matchLabels`, which narrows the name `*` to the objects that carry those labels and which the API documents as needing that name, and `filter`, a CEL expression the controller evaluates.",
 			},
 		},
 		"resourceFilter": fluxSourceString(spec + "resourceFilter: a CEL expression the controller evaluates for each resource when a webhook is received; launcher writes it as authored and does not parse it."),
@@ -98,6 +101,54 @@ func refuseReceiverUserinfo(spec *notificationv1.ReceiverSpec) error {
 	return nil
 }
 
+// receiverDefaultAPIVersionKinds lists the kinds for which the notification
+// controller fills in an omitted `apiVersion` of a resource: the keys of
+// defaultFluxAPIVersions in internal/server/receiver_handlers.go of
+// notification-controller v1.9.4, the version go.mod pins
+// (go-kure/launcher#984). For any other kind, an omitted apiVersion makes the
+// controller fail each webhook request with "apiVersion must be specified".
+// It is the one copy production code reads: the refusal and the schema
+// description both read it, as does
+// TestReceiverDefaultAPIVersionKinds_AcceptedUnversioned. A Flux upgrade that
+// changes the list also edits the other copies:
+// TestReceiverDefaultAPIVersionKinds_PinsTheControllerDefaults keeps a
+// deliberate second copy, and the prose docs name the kinds (this package's
+// README, in the fluxcd-receiver catalog row and the apiVersion paragraph, and
+// docs/oam/design-kurel-package.md, in the fluxcd-receiver row).
+var receiverDefaultAPIVersionKinds = []string{
+	"Bucket",            // source.toolkit.fluxcd.io/v1
+	"GitRepository",     // source.toolkit.fluxcd.io/v1
+	"HelmChart",         // source.toolkit.fluxcd.io/v1
+	"HelmRepository",    // source.toolkit.fluxcd.io/v1
+	"OCIRepository",     // source.toolkit.fluxcd.io/v1
+	"ImageRepository",   // image.toolkit.fluxcd.io/v1
+	"ArtifactGenerator", // source.extensions.fluxcd.io/v1beta1
+}
+
+// refuseReceiverUnversionedResources refuses a resource with no `apiVersion`
+// whose kind is not in receiverDefaultAPIVersionKinds: the API admits it, and
+// the Receiver then fails on every webhook it receives instead of at build
+// time.
+func refuseReceiverUnversionedResources(spec *notificationv1.ReceiverSpec) error {
+	for i, r := range spec.Resources {
+		if r.APIVersion == "" && !slices.Contains(receiverDefaultAPIVersionKinds, r.Kind) {
+			return errors.Errorf("%s: resources[%d].apiVersion: required for kind %q, which the notification controller has no default version for; set apiVersion, such as helm.toolkit.fluxcd.io/v2 for a HelmRelease", fluxcdReceiverType, i, r.Kind)
+		}
+	}
+	return nil
+}
+
+// validateReceiver refuses what the strict decode admits and the Receiver
+// cannot carry: an unversioned resource of a kind with no default
+// (refuseReceiverUnversionedResources) and a credential in an issuer URL
+// (refuseReceiverUserinfo).
+func validateReceiver(spec *notificationv1.ReceiverSpec) error {
+	if err := refuseReceiverUnversionedResources(spec); err != nil {
+		return err
+	}
+	return refuseReceiverUserinfo(spec)
+}
+
 // fluxcdReceiverKind is the fluxcd-receiver kind: see fluxKind. The API
 // requires `type` and `resources`, of a resource its `kind` and `name`, of an
 // authored `secretRef` its `name`, and of an OIDC provider its `issuerURL` and
@@ -105,13 +156,14 @@ func refuseReceiverUserinfo(spec *notificationv1.ReceiverSpec) error {
 // write each one empty. TestFluxKinds_RequiredMatchMarkers holds the list to
 // the markers of the upstream source. The API's expression rules, which tie
 // `secretRef` and `oidcProviders` to `type`, are left to the API server
-// (fluxRulesLeft). A user or a password in an issuer URL is refused
-// (refuseReceiverUserinfo). The object reads the Secret of `secretRef` from
-// its own namespace.
+// (fluxRulesLeft). A resource with no `apiVersion` of a kind the controller
+// has no default version for is refused, and so is a user or a password in an
+// issuer URL (validateReceiver). The object reads the Secret of `secretRef`
+// from its own namespace.
 var fluxcdReceiverKind = &fluxKind[notificationv1.ReceiverSpec]{
 	policyFreeKind: policyFreeKind[notificationv1.ReceiverSpec]{
 		upstream: "notification.toolkit.fluxcd.io/v1 ReceiverSpec",
-		validate: refuseReceiverUserinfo,
+		validate: validateReceiver,
 		required: map[string]string{
 			"type":                        "the sender of the webhook, such as `github` or `generic-hmac`",
 			"resources":                   "the Flux objects a webhook makes the controller reconcile",

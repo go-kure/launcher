@@ -407,8 +407,11 @@ var requiredWrittenKinds = []pinKind{
 		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}}},
 	{component: "fluxcd-provider", handler: &FluxcdProviderHandler{}, typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.ProviderSpec](), false)},
+	// A resource of a kind with no default version needs its apiVersion
+	// (refuseReceiverUnversionedResources), which the sample "x" kind is.
 	{component: "fluxcd-receiver", handler: &FluxcdReceiverHandler{}, typ: reflect.TypeFor[notificationv1.ReceiverSpec](),
-		schema: pinMarkerSchema(reflect.TypeFor[notificationv1.ReceiverSpec](), false)},
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1.ReceiverSpec](), false),
+		base:   map[string]any{"resources": []any{map[string]any{"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "GitRepository", "name": "fleet"}}}},
 	{component: "gateway", handler: &GatewayHandler{}, typ: reflect.TypeFor[gatewayv1.GatewaySpec](),
 		schema: pinCRDSchema(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1"),
 		base:   map[string]any{"gatewayClassName": "public", "listeners": []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}}}},
