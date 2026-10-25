@@ -536,12 +536,26 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}, map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log"}}, "containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/var/log"}}}}},
 			`queryLogFile: "/var/log/query.log" is in /var/log, under the read-only mount at /var/log in the prometheus container`},
-		// Prometheus joins a relative path to the configuration's directory,
-		// which the operator mounts read-only.
-		{"a log file in a relative directory", map[string]any{"queryLogFile": "logs/query.log"},
-			`queryLogFile: "logs/query.log" is in /etc/prometheus/config_out/logs, under the read-only mount at /etc/prometheus/config_out in the prometheus container`},
-		{"a scrape failure log in a relative directory", map[string]any{"scrapeFailureLogFile": "logs/scrape.log"},
-			`scrapeFailureLogFile: "logs/scrape.log" is in /etc/prometheus/config_out/logs, under the read-only mount at /etc/prometheus/config_out in the prometheus container`},
+		// A patch merged into the operator's read-only configuration mount
+		// keeps its readOnly.
+		{"a log file in the generated configuration with its mount patched", map[string]any{"queryLogFile": "/etc/prometheus/config_out/query.log",
+			"volumes": []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}}, "containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/etc/prometheus/config_out"}}}}},
+			`queryLogFile: "/etc/prometheus/config_out/query.log" is in /etc/prometheus/config_out, under the read-only mount at /etc/prometheus/config_out in the prometheus container`},
+		// The kubelet mounts each of these volume types read-only.
+		{"a log file in a directory with a secret mounted there", map[string]any{"queryLogFile": "/var/log/query.log",
+			"volumes": []any{map[string]any{"name": "s", "secret": map[string]any{"secretName": "s"}}}, "volumeMounts": []any{map[string]any{"name": "s", "mountPath": "/var/log"}}},
+			`queryLogFile: "/var/log/query.log" is in /var/log, under the read-only mount at /var/log in the prometheus container`},
+		{"a log file in a directory with a downwardAPI volume mounted there", map[string]any{"queryLogFile": "/var/log/query.log",
+			"volumes": []any{map[string]any{"name": "d", "downwardAPI": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "d", "mountPath": "/var/log"}}},
+			`queryLogFile: "/var/log/query.log" is in /var/log, under the read-only mount at /var/log in the prometheus container`},
+		{"a log file in a directory with a projected volume mounted there", map[string]any{"queryLogFile": "/var/log/query.log",
+			"volumes": []any{map[string]any{"name": "p", "projected": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "p", "mountPath": "/var/log"}}},
+			`queryLogFile: "/var/log/query.log" is in /var/log, under the read-only mount at /var/log in the prometheus container`},
+		// The operator mounts the web configuration file from Prometheus
+		// v2.24.0, its default version included.
+		{"a log file at the web configuration file on a writable root filesystem", map[string]any{"queryLogFile": "/etc/prometheus/web_config/web-config.yaml",
+			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
+			`queryLogFile: "/etc/prometheus/web_config/web-config.yaml" is the read-only mount at /etc/prometheus/web_config/web-config.yaml in the prometheus container`},
 		{"a log file in the operator's log directory without its volume", map[string]any{"queryLogFile": "/var/log/prometheus/query.log"},
 			`queryLogFile: "/var/log/prometheus/query.log" is in /var/log/prometheus, where no volume is known to be mounted`},
 		// A writable root filesystem does not make a read-only mount over the
@@ -966,6 +980,20 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus/query.log", "subPath": "query.log"}}},
 		"a log file in the operator's log directory": {"queryLogFile": "/var/log/prometheus/query.log", "scrapeFailureLogFile": "scrape.log"},
 		"a log file in a device directory":           {"queryLogFile": "/dev/fd/1"},
+		"a log file in a process directory":          {"queryLogFile": "/proc/self/fd/1"},
+		// Prometheus joins a relative path to the configuration's directory
+		// only from v2.21.0, and reads it from its working directory before,
+		// so the file is not judged.
+		"a log file in a relative directory":           {"queryLogFile": "logs/query.log"},
+		"a scrape failure log in a relative directory": {"scrapeFailureLogFile": "logs/scrape.log"},
+		// The config reloader expands a $( reference before Prometheus
+		// reads the path, from variables the kind does not see.
+		"a log file with a reference in its directory":           {"queryLogFile": "/logs/$(POD_NAME)/query.log"},
+		"a scrape failure log with a reference in its directory": {"scrapeFailureLogFile": "/logs/$(POD_NAME)/scrape.log"},
+		"a query log file named alone by a reference":            {"queryLogFile": "$(LOG_FILE)", "scrapeFailureLogFile": "/dev/stdout"},
+		// Below Prometheus v2.24.0 the operator mounts no web configuration.
+		"a log file at the web configuration file below v2.24.0": {"version": "v2.23.0", "queryLogFile": "/etc/prometheus/web_config/web-config.yaml",
+			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
 		// A patch's false is carried over the operator's true, so the root
 		// filesystem is writable.
 		"a log file in a directory on a writable root filesystem": {"queryLogFile": "/tmp/query.log",

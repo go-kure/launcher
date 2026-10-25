@@ -595,6 +595,20 @@ var prometheusThanosVersionGates = func() []idGate[monitoringv1.PrometheusSpec] 
 // (prometheusThanosVersionGates), or at the operator's default Thanos
 // version, and where both versions parse, thanos.blockSize is held to the
 // compaction mode they choose (refuseDelayedCompactionBlockSize).
+// prometheusMountsWebConfig reports whether the operator mounts the web
+// configuration file in the prometheus container, which it does from
+// Prometheus v2.24.0 (WithMinimumVersion, pkg/prometheus/server/
+// statefulset.go:196-205 at prometheus-operator v0.94.1). A version it cannot
+// parse builds no StatefulSet, so no mount is counted there.
+func prometheusMountsWebConfig(spec *monitoringv1.PrometheusSpec) bool {
+	version := prometheusDefaultVersion
+	if spec.Version != "" {
+		version = spec.Version
+	}
+	v, err := semver.ParseTolerant(version)
+	return err == nil && v.GTE(semver.MustParse("2.24.0"))
+}
+
 func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 	version, at := prometheusDefaultVersion, "the operator's default version "+prometheusDefaultVersion
 	if spec.Version != "" {

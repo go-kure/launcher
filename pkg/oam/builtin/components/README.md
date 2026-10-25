@@ -4920,9 +4920,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (server/statefulset.go:510, :537; common.go:334-347), unless the file
     there is writable all the same, judged as in the next entry.
   - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. A name alone is in `/var/log/prometheus`; the operator
-    passes any other path unchanged (common.go:230-236), and Prometheus
-    joins a relative one, as `logs/query.log`, to the directory of its
-    configuration, `/etc/prometheus/config_out`. The mount that covers the
+    passes any other path unchanged (common.go:230-236). A path the kind
+    cannot resolve is not judged: a relative one with a directory, as
+    `logs/query.log`, which Prometheus joins to the directory of its
+    configuration, `/etc/prometheus/config_out`, from v2.21.0 and reads from
+    its working directory before, and one with a `$(` reference, which the
+    config reloader expands from variables the kind does not see
+    (`--config-envsubst-file`, common.go:378). The mount that covers the
     file most closely, at the file itself (as a `subPath` mount of an
     existing file, which Prometheus opens for appending without writing to
     its directory), at its directory or at the nearest directory above it
@@ -4930,7 +4934,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     kubelet does), decides: the data volume at `/prometheus` and the
     `log-file` volume at `/var/log/prometheus` where the operator adds it
     are writable; `config_out` and the operator's certificate, secret,
-    configMap and web configuration mounts are read-only; a mount of the
+    configMap and web configuration mounts (the last from Prometheus
+    v2.24.0, where the operator adds it, server/statefulset.go:196) are
+    read-only; a mount of the
     author's, in `volumeMounts` or a patch of the `prometheus` container, is
     writable unless it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only.

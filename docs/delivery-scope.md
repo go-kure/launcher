@@ -1957,12 +1957,13 @@ and by scope, whatever component or trait emits it.
     beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, unless the file there
     is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
-    write (a name alone in `/var/log/prometheus`, a relative path joined
-    to `/etc/prometheus/config_out`, as Prometheus does), where the mount covering the
+    write (a name alone in `/var/log/prometheus`; a relative path with a directory, which
+    Prometheus joins to `/etc/prometheus/config_out` from v2.21.0 only, and a path with a
+    `$(` reference, which the config reloader expands, are not judged), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
     directory or above, decides: `/prometheus` and the operator's
     log-file volume are writable, `config_out` and its certificate, secret, configMap and
-    web configuration mounts read-only, and a mount of the author's, in `volumeMounts` or a
+    web configuration mounts (the last from Prometheus v2.24.0) read-only, and a mount of the author's, in `volumeMounts` or a
     prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only (a patch mount
     at a path written as an earlier one's is merged into it, taking its volume and keeping
