@@ -1921,14 +1921,16 @@ and by scope, whatever component or trait emits it.
     Prometheus cannot write (a name alone in `/var/log/prometheus`, a relative path joined
     to `/etc/prometheus/config_out`, as Prometheus does), where the mount covering the
     directory most closely, at it or above it, decides: `/prometheus` and the operator's
-    log-file volume are writable, its other mounts read-only, and a mount of the author's,
-    in `volumeMounts` or a prometheus patch, read-only where it sets `readOnly` or mounts a
-    `configMap`, `secret`, `downwardAPI` or `projected` volume, which the kubelet mounts
-    read-only (a patch mount at a path written as an earlier one's is merged into it,
-    taking its volume and keeping `readOnly` from either); where none covers it, the
-    read-only root filesystem refuses unless a prometheus patch sets
-    `readOnlyRootFilesystem: false`, and a directory under `/dev` or `/proc` (as for
-    `/dev/stdout`) is never refused; a negative request or limit; and a
+    log-file volume are writable, `config_out` and its certificate, secret, configMap and
+    web configuration mounts read-only, and a mount of the author's, in `volumeMounts` or a
+    prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
+    `downwardAPI` or `projected` volume, which the kubelet mounts read-only (a patch mount
+    at a path written as an earlier one's is merged into it, taking its volume and keeping
+    `readOnly` from either); other read-only sources are not judged, so the check refuses
+    only a directory it knows is read-only; where none covers it, the read-only root
+    filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
+    a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
+    refused; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
     characters, fewer where the authored shards and replicas make the hostname longer),
