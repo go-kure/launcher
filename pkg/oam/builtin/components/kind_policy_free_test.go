@@ -2862,7 +2862,7 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null selector", map[string]any{"nodeSelectors": []any{map[string]any{}, nil}}, "nodeSelectors[1]"},
 			{"two spellings", map[string]any{"interfaces": []any{"eth1"}, "Interfaces": []any{"eth2"}}, "sets the same field as"},
 		},
-		"mutatingadmissionpolicy": append(admissionPolicyCases("admissionregistration.k8s.io/v1 MutatingAdmissionPolicySpec", "CREATE, UPDATE or *", mutatingAdmissionPolicy),
+		"mutatingadmissionpolicy": append(admissionPolicyCases("admissionregistration.k8s.io/v1 MutatingAdmissionPolicySpec", "CREATE, UPDATE, CONNECT or *", mutatingAdmissionPolicy),
 			refusal{"no mutation", without(mutatingAdmissionPolicy(nil), "mutations"), "mutations: required"},
 			refusal{"an empty mutation list", mutatingAdmissionPolicy(map[string]any{"mutations": []any{}}), "mutations: required"},
 			refusal{"mutation without a patch type", mutatingAdmissionPolicy(map[string]any{"mutations": []any{

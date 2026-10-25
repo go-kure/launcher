@@ -40,10 +40,10 @@ import (
 // checks is left to the API server: the values of failurePolicy, matchPolicy,
 // reinvocationPolicy, a validation action, a parameter-not-found action, a
 // patch type, a validation's reason and a rule's operations and scope; that a
-// mutating policy matches only CREATE and UPDATE; names, keys and identifiers;
-// a parameter kind's apiVersion and kind; how wildcards combine in a rule; the
-// limits on the number of match conditions and audit annotations; and that a
-// mutation names only the patch its type takes.
+// mutating policy matches only CREATE, UPDATE and CONNECT; names, keys and
+// identifiers; a parameter kind's apiVersion and kind; how wildcards combine in
+// a rule; the limits on the number of match conditions and audit annotations;
+// and that a mutation names only the patch its type takes.
 
 // admissionPolicyServedFrom is the Kubernetes version from which the API
 // server serves each kind's object at admissionregistration.k8s.io/v1: the
@@ -67,7 +67,7 @@ func admissionPolicyServed(kind string) string {
 // those of a mutating admission policy, for the messages.
 const (
 	admissionOperations               = "CREATE, UPDATE, DELETE, CONNECT or *"
-	admissionMutatingPolicyOperations = "CREATE, UPDATE or *"
+	admissionMutatingPolicyOperations = "CREATE, UPDATE, CONNECT or *"
 )
 
 // admissionPolicyRequired is the part of a policy's required list its two
