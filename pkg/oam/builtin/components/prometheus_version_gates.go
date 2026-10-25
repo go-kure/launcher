@@ -54,14 +54,18 @@ const (
 	promKeyDropped   = "drops it from the configuration it generates, and Prometheus runs without it"
 	promRefused      = "refuses the object at reconcile, and the Prometheus is not updated"
 	promWebPlainHTTP = "mounts no web configuration, and the web endpoint serves plain HTTP without the authored settings"
-	// promWebTLSUnserved: the probes (BuildProbes), the config reloader and
-	// the Thanos sidecar (PrometheusURIScheme) turn to HTTPS on a tlsConfig
-	// at any version.
-	promWebTLSUnserved = "mounts no web configuration, so the web endpoint serves plain HTTP, while the probes, the config reloader and the Thanos sidecar it configures speak HTTPS to it, and the pods never become ready"
+	// promWebTLSUnserved: the config reloader and the Thanos sidecar
+	// (PrometheusURIScheme) turn to HTTPS on a tlsConfig at any version, and
+	// so do the probes (BuildProbes) but under listenLocal, where they are an
+	// exec of plain HTTP.
+	promWebTLSUnserved = "mounts no web configuration, so the web endpoint serves plain HTTP while the config reloader and the Thanos sidecar it configures speak HTTPS to it: every configuration reload fails, and, without listenLocal, the probes fail too and the pods never become ready"
+	// promOperatorExits: nothing recovers a panic of Sync, which runs in an
+	// errgroup goroutine (pkg/operator/resource_reconciler.go).
+	promOperatorExits = ", and the operator exits, to panic again on each restart, so nothing it manages is reconciled"
 	// promAuthorizationPanics: addAuthorizationToYaml indexes the first item
 	// of what addSafeAuthorizationToYaml returns, which is empty below
 	// 2.26.0.
-	promAuthorizationPanics = "panics while generating the configuration, and the Prometheus is not updated"
+	promAuthorizationPanics = "panics while generating the configuration" + promOperatorExits
 	promScrapeDropped       = "drops it from the scrape configurations it generates, and the targets are scraped without it"
 	promSidecarDropped      = "does not pass it to the Thanos sidecar, and the sidecar runs without it"
 )
@@ -441,10 +445,10 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 
 		// The API server's settings (generateK8SSDConfig) and the scrape
 		// classes' authorization, the fallback of a monitor without its own.
-		g("apiserverConfig.authorization", "2.26.0", promAuthorizationPanics, func(s *spec) bool {
+		g("apiserverConfig.authorization", "2.26.0", "panics while generating the Kubernetes service discovery of a selected monitor, probe or Alertmanager endpoint"+promOperatorExits, func(s *spec) bool {
 			return s.APIServerConfig != nil && s.APIServerConfig.Authorization != nil
 		}),
-		g("scrapeClasses[].authorization", "2.26.0", "panics while generating the scrape configuration of a monitor that falls back to it, and the Prometheus is not updated", func(s *spec) bool {
+		g("scrapeClasses[].authorization", "2.26.0", "panics while generating the scrape configuration of a monitor that falls back to it"+promOperatorExits, func(s *spec) bool {
 			return anyOf(s.ScrapeClasses, func(c *monitoringv1.ScrapeClass) bool { return c.Authorization != nil })
 		}),
 	}
