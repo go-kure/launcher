@@ -11,22 +11,33 @@ import (
 
 // These tests pin the names of the Cluster and the ObjectStore a postgresql
 // component generates (go-kure/launcher#787) on the rule itself:
-// `clusterObjectName` and `objectStoreObjectName` name the two objects, the
+// `clusterObjectName` and `backup.objectStoreObjectName` name the two objects, the
 // members keep the component's name, and every reference the rule writes to
 // one of them follows the name it took.
 
-// postgresqlWithStore is a postgresql component "db" with an object store, a
-// pooler and a database, and props on top.
-func postgresqlWithStore(props map[string]any) *oam.Component {
+// postgresqlWithStore is a postgresql component "db" with a backup, a pooler
+// and a database, and props on top; a storeName that is not empty is its
+// backup.objectStoreObjectName.
+func postgresqlWithStore(props map[string]any, storeName string) *oam.Component {
+	backup := map[string]any{"objectStore": postgresqlTestStore()}
+	if storeName != "" {
+		backup["objectStoreObjectName"] = storeName
+	}
 	all := map[string]any{
-		"pooler":      map[string]any{"enabled": true},
-		"objectStore": map[string]any{"destinationPath": "s3://bucket/db/"},
-		"databases":   []any{map[string]any{"name": "orders", "owner": "app"}},
+		"pooler":    map[string]any{"enabled": true},
+		"backup":    backup,
+		"databases": []any{map[string]any{"name": "orders", "owner": "app"}},
 	}
 	for k, v := range props {
 		all[k] = v
 	}
 	return &oam.Component{Name: "db", Type: "postgresql", Properties: all}
+}
+
+// postgresqlTestStore is the least backup.objectStore a postgresql component
+// lowers: a path and IAM credentials.
+func postgresqlTestStore() map[string]any {
+	return map[string]any{"destinationPath": "s3://bucket/db/", "s3Credentials": map[string]any{"inheritFromIAMRole": true}}
 }
 
 // clusterReference returns the `cluster.name` a Pooler or a Database member
@@ -69,15 +80,16 @@ func TestPostgresqlRule_ClusterAndObjectStoreNames(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		props          map[string]any
+		storeName      string
 		cluster, store string
 	}{
-		{"neither", nil, "db", "db"},
-		{"both", map[string]any{"clusterObjectName": "shop-pg", "objectStoreObjectName": "shop.backups"}, "shop-pg", "shop.backups"},
-		{"the Cluster alone", map[string]any{"clusterObjectName": "shop-pg"}, "shop-pg", "db"},
-		{"the ObjectStore alone", map[string]any{"objectStoreObjectName": "shop.backups"}, "db", "shop.backups"},
+		{"neither", nil, "", "db", "db"},
+		{"both", map[string]any{"clusterObjectName": "shop-pg"}, "shop.backups", "shop-pg", "shop.backups"},
+		{"the Cluster alone", map[string]any{"clusterObjectName": "shop-pg"}, "", "shop-pg", "db"},
+		{"the ObjectStore alone", nil, "shop.backups", "db", "shop.backups"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			comp := postgresqlWithStore(tc.props)
+			comp := postgresqlWithStore(tc.props, tc.storeName)
 			res := lowerPostgresql(t, comp, nil)
 
 			want := []string{"cnpg-cluster/db", "cnpg-objectstore/db", "cnpg-pooler/db-pooler", "cnpg-database/db-orders"}
@@ -104,7 +116,7 @@ func TestPostgresqlRule_ClusterAndObjectStoreNames(t *testing.T) {
 				t.Errorf("the cluster endpoint selects cnpg.io/cluster=%q, want %q", got, tc.cluster)
 			}
 			for _, member := range res.Components {
-				for _, property := range []string{"clusterObjectName", "objectStoreObjectName"} {
+				for _, property := range []string{"clusterObjectName", "objectStoreObjectName", "backup"} {
 					if _, has := member.Properties[property]; has {
 						t.Errorf("%s reached the spec of %s/%s", property, member.Type, member.Name)
 					}
@@ -154,7 +166,9 @@ func TestPostgresqlRule_ComponentNameNoClusterCanCarry(t *testing.T) {
 }
 
 func TestPostgresqlRule_RefusesClusterAndObjectStoreNames(t *testing.T) {
-	store := map[string]any{"destinationPath": "s3://bucket/db/"}
+	backup := func(name any) map[string]any {
+		return map[string]any{"backup": map[string]any{"objectStore": postgresqlTestStore(), "objectStoreObjectName": name}}
+	}
 	tooLong := strings.Repeat("a", 51)
 	for _, tc := range []struct {
 		name  string
@@ -182,24 +196,29 @@ func TestPostgresqlRule_RefusesClusterAndObjectStoreNames(t *testing.T) {
 			`naming the Cluster: clusterObjectName "" cannot be the name for role "postgresql-cluster": it is empty; write a valid name, or leave the property out for the default "db"`,
 		},
 		{
-			"objectStoreObjectName without objectStore",
+			"a top-level objectStoreObjectName",
 			map[string]any{"objectStoreObjectName": "backups"},
-			"objectStoreObjectName: names the ObjectStore, and objectStore is not set; remove it, or set objectStore",
+			"objectStoreObjectName: moved to backup.objectStoreObjectName",
 		},
 		{
-			"an objectStoreObjectName that is no string",
-			map[string]any{"objectStore": store, "objectStoreObjectName": true},
-			"objectStoreObjectName: ",
+			"backup.objectStoreObjectName without backup.objectStore",
+			map[string]any{"backup": map[string]any{"objectStoreObjectName": "backups"}},
+			"backup.objectStore: required (the object store backups and WAL are written to)",
 		},
 		{
-			"an objectStoreObjectName that is no subdomain",
-			map[string]any{"objectStore": store, "objectStoreObjectName": "Backups_1"},
-			`naming the ObjectStore: objectStoreObjectName "Backups_1" cannot be the name for role "postgresql-objectstore": not a valid DNS-1123 subdomain: `,
+			"a backup.objectStoreObjectName that is no string",
+			backup(true),
+			"backup.objectStoreObjectName: ",
 		},
 		{
-			"an empty objectStoreObjectName",
-			map[string]any{"objectStore": store, "objectStoreObjectName": ""},
-			`naming the ObjectStore: objectStoreObjectName "" cannot be the name for role "postgresql-objectstore": it is empty; write a valid name, or leave the property out for the default "db"`,
+			"a backup.objectStoreObjectName that is no subdomain",
+			backup("Backups_1"),
+			`naming the ObjectStore: backup.objectStoreObjectName "Backups_1" cannot be the name for role "postgresql-objectstore": not a valid DNS-1123 subdomain: `,
+		},
+		{
+			"an empty backup.objectStoreObjectName",
+			backup(""),
+			`naming the ObjectStore: backup.objectStoreObjectName "" cannot be the name for role "postgresql-objectstore": it is empty; write a valid name, or leave the property out for the default "db"`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

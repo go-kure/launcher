@@ -10,32 +10,34 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// TestPostgresqlRule_BlockNotBuilt: five blocks of a postgresql component are
+// TestPostgresqlRule_BlockNotBuilt: four blocks of a postgresql component are
 // built only when one field of theirs is set (go-kure/launcher#790): the
-// Cluster's backup (destinationPath), its bootstrap (the source of recovery or
-// of pg_basebackup), its synchronous replication (method) and its monitoring
-// (enabled), and the Pooler (enabled). A document that authors other values of
-// such a block and not that field used to build, with none of them in the
-// result. It is refused where the author wrote the block, by the name of the
-// field that is missing. One such document was refused already and did not
-// build: a backup with a retention policy that is not empty and no path.
+// Cluster's bootstrap (the source of recovery or of pg_basebackup), its
+// synchronous replication (method) and its monitoring (enabled), and the
+// Pooler (enabled). A document that authors other values of such a block and
+// not that field used to build, with none of them in the result. It is refused
+// where the author wrote the block, by the name of the field that is missing.
+// `backup` is refused without backup.objectStore, its destinationPath (empty
+// included) and its s3Credentials (go-kure/launcher#1001), an empty `backup`
+// too: it is no switch.
 //
-// Three shapes still build. An authored `enabled: false` is the block's own
+// Two shapes still build. An authored `enabled: false` is the block's own
 // switch, so the settings beside it are kept in the document and build
-// nothing. An outer block with nothing in it (backup, bootstrap, replication,
+// nothing. An outer block with nothing in it (bootstrap, replication,
 // monitoring or pooler as {}), or with an empty list or map only, authors no
 // value to drop; an empty bootstrap.recovery, bootstrap.pg_basebackup or
-// replication.synchronous is refused like one without its field. An authored
-// empty backup path is a value: the backup is built from it.
+// replication.synchronous is refused like one without its field.
 func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 	const (
-		pathRequired   = "backup.destinationPath: required (the object store path backups and WAL are written to)"
+		storeRequired  = "backup.objectStore: required (the object store backups and WAL are written to)"
+		pathRequired   = "backup.objectStore.destinationPath: required (the object store path backups and WAL are written to)"
 		methodRequired = "replication.synchronous.method: required (any or first)"
 		copied         = "(the externalClusters entry the cluster is copied from)"
 		recovered      = "(the externalClusters entry the cluster is recovered from)"
 		poolerOnly     = " (the Pooler is emitted only when it is true)"
 	)
 	queries := []any{map[string]any{"name": "queries", "key": "custom.yaml"}}
+	iam := map[string]any{"inheritFromIAMRole": true}
 	for _, tc := range []struct {
 		name    string
 		props   map[string]any
@@ -48,42 +50,35 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 		pooler      map[string]any
 	}{
 		{
-			name:    "backup with an endpoint and no path",
-			props:   map[string]any{"backup": map[string]any{"endpointURL": "https://s3.example"}},
+			name:    "backup without an object store",
+			props:   map[string]any{"backup": map[string]any{"retentionPolicy": "30d"}},
+			refused: storeRequired,
+		},
+		{
+			name:    "empty backup",
+			props:   map[string]any{"backup": map[string]any{}},
+			refused: storeRequired,
+		},
+		{
+			name:    "an object store with an endpoint and no path",
+			props:   map[string]any{"backup": map[string]any{"objectStore": map[string]any{"endpointURL": "https://s3.example", "s3Credentials": iam}}},
 			refused: pathRequired,
 		},
 		{
-			name:    "backup with a secret and no path",
-			props:   map[string]any{"backup": map[string]any{"secretName": "s3-credentials"}},
-			refused: pathRequired,
+			name:    "an object store with an empty path",
+			props:   map[string]any{"backup": map[string]any{"objectStore": map[string]any{"destinationPath": "", "s3Credentials": iam}}},
+			refused: "backup.objectStore.destinationPath: must not be empty (the object store path backups and WAL are written to)",
 		},
 		{
-			name:    "backup with an endpoint and an empty retention policy",
-			props:   map[string]any{"backup": map[string]any{"endpointURL": "https://s3.example", "retentionPolicy": ""}},
-			refused: pathRequired,
+			name:    "an object store with a path and no credentials",
+			props:   map[string]any{"backup": map[string]any{"objectStore": map[string]any{"destinationPath": "s3://bucket/db"}}},
+			refused: "backup.objectStore.s3Credentials: required (accessKeyId and secretAccessKey, or inheritFromIAMRole: true)",
 		},
 		{
-			name:    "backup with an empty retention policy only",
-			props:   map[string]any{"backup": map[string]any{"retentionPolicy": ""}},
-			refused: pathRequired,
-		},
-		{
-			name:        "backup with an empty path only",
-			props:       map[string]any{"backup": map[string]any{"destinationPath": ""}},
-			clusterPath: []string{"backup"},
-			cluster:     map[string]any{"barmanObjectStore": map[string]any{"destinationPath": ""}},
-		},
-		{
-			name: "backup with a path, an endpoint and a secret",
-			props: map[string]any{"backup": map[string]any{
-				"destinationPath": "s3://bucket/db", "endpointURL": "https://s3.example", "secretName": "s3-credentials",
-			}},
-			clusterPath: []string{"backup", "barmanObjectStore", "endpointURL"},
-			cluster:     "https://s3.example",
-		},
-		{
-			name:        "empty backup",
-			props:       map[string]any{"backup": map[string]any{}},
+			// The Cluster carries no in-tree spec.backup: the plugin entry
+			// replaces it.
+			name:        "an object store with a path, an endpoint and credentials",
+			props:       map[string]any{"backup": map[string]any{"objectStore": map[string]any{"destinationPath": "s3://bucket/db", "endpointURL": "https://s3.example", "s3Credentials": iam}}},
 			clusterPath: []string{"backup"},
 		},
 		{

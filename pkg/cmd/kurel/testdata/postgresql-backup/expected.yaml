@@ -7,21 +7,15 @@ metadata:
   namespace: default
 spec:
   affinity: {}
-  backup:
-    barmanObjectStore:
-      destinationPath: s3://my-bucket/backups
-      endpointURL: https://s3.amazonaws.com
-      s3Credentials:
-        accessKeyId:
-          key: ACCESS_KEY_ID
-          name: backup-creds
-        secretAccessKey:
-          key: SECRET_ACCESS_KEY
-          name: backup-creds
-    retentionPolicy: 30d
   enablePDB: false
   imageName: ghcr.io/cloudnative-pg/postgresql:16
   instances: 1
+  plugins:
+  - isWALArchiver: true
+    name: barman-cloud.cloudnative-pg.io
+    parameters:
+      barmanObjectName: postgres-store
+      serverName: postgres-v2
   postgresql:
     syncReplicaElectionConstraint:
       enabled: false
@@ -29,3 +23,74 @@ spec:
   resources: {}
   storage:
     size: 10Gi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres-store
+  namespace: default
+spec:
+  configuration:
+    data:
+      compression: gzip
+      immediateCheckpoint: true
+      jobs: 2
+    destinationPath: s3://my-bucket/backups
+    endpointCA:
+      key: ca.crt
+      name: s3-ca
+    endpointURL: https://s3.example.com
+    s3Credentials:
+      accessKeyId:
+        key: ACCESS_KEY_ID
+        name: backup-creds
+      region:
+        key: REGION
+        name: backup-creds
+      secretAccessKey:
+        key: SECRET_ACCESS_KEY
+        name: backup-creds
+    wal:
+      compression: gzip
+      maxParallel: 4
+  instanceSidecarConfiguration:
+    resources: {}
+  retentionPolicy: 30d
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres-nightly
+  namespace: default
+spec:
+  backupOwnerReference: self
+  cluster:
+    name: postgres
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  schedule: 0 0 2 * * *
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres-weekly
+  namespace: default
+spec:
+  backupOwnerReference: cluster
+  cluster:
+    name: postgres
+  immediate: false
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  schedule: '@weekly'
+  suspend: true
+  target: prefer-standby

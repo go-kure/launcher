@@ -495,6 +495,7 @@ func TestPolicyRefusalClass_PostgresqlStorageFallback(t *testing.T) {
 	tr.RegisterComponent("cnpg-objectstore", &components.CnpgObjectStoreHandler{})
 	tr.RegisterComponent("cnpg-pooler", &components.CnpgPoolerHandler{})
 	tr.RegisterComponent("cnpg-database", &components.CnpgDatabaseHandler{})
+	tr.RegisterComponent("cnpg-scheduledbackup", &components.CnpgScheduledBackupHandler{})
 	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
 	tr.RegisterPolicy("placement", &policies.PlacementHandler{})
 	build := func(props map[string]any) error {

@@ -11,8 +11,8 @@ import (
 )
 
 // postgresqlMembersApp is a postgresql component emitting every member kind:
-// the Cluster, the ObjectStore under its name, the Pooler, a Database and a
-// Database named like the Pooler, followed by traitsYAML (indented for the
+// the Cluster, the ObjectStore under its name, the Pooler, a Database, a
+// Database named like the Pooler and a ScheduledBackup, followed by traitsYAML (indented for the
 // component's traits list) and policiesYAML (for spec.policies, or empty).
 func postgresqlMembersApp(traitsYAML, policiesYAML string) string {
 	return `apiVersion: launcher.gokure.dev/v1alpha1
@@ -27,8 +27,14 @@ spec:
       properties:
         pooler:
           enabled: true
-        objectStore:
-          destinationPath: s3://bucket/db/
+        backup:
+          objectStore:
+            destinationPath: s3://bucket/db/
+            s3Credentials:
+              inheritFromIAMRole: true
+          schedules:
+            - name: nightly
+              schedule: "0 0 3 * * *"
         databases:
           - name: orders
             owner: app
@@ -88,7 +94,7 @@ func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
 		if err != nil {
 			t.Fatalf("transforming: %v", err)
 		}
-		want := []string{"shop-00: db", "shop-01: db-pooler db-orders", "shop-02: api"}
+		want := []string{"shop-00: db", "shop-01: db-pooler db-orders db-nightly", "shop-02: api"}
 		if got := groupNames(t, cluster); !slices.Equal(got, want) {
 			t.Errorf("groups = %v, want %v", got, want)
 		}
@@ -112,7 +118,7 @@ func TestBuild_PostgresqlAndWebserviceUnorderedIsOneBundle(t *testing.T) {
 	for _, a := range root.Applications {
 		apps = append(apps, a.Name)
 	}
-	if want := []string{"db", "db-pooler", "db-orders", "api"}; !slices.Equal(apps, want) {
+	if want := []string{"db", "db-pooler", "db-orders", "db-nightly", "api"}; !slices.Equal(apps, want) {
 		t.Errorf("applications = %v, want %v in document order", apps, want)
 	}
 }
@@ -155,7 +161,7 @@ func TestBuild_PostgresqlDependentWaitsForEveryMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transforming: %v", err)
 	}
-	want := []string{"shop-00: db", "shop-01: db-pooler db-orders", "shop-services: api"}
+	want := []string{"shop-00: db", "shop-01: db-pooler db-orders db-nightly", "shop-services: api"}
 	if got := groupNames(t, cluster); !slices.Equal(got, want) {
 		t.Errorf("groups = %v, want %v", got, want)
 	}
@@ -211,7 +217,7 @@ func TestBuild_PostgresqlObjectTraitsReachEveryObject(t *testing.T) {
 					}
 				}
 			}
-			want := map[string]int{"Cluster": 1, "ObjectStore": 1, "Pooler": 1, "Database": 2}
+			want := map[string]int{"Cluster": 1, "ObjectStore": 1, "Pooler": 1, "Database": 2, "ScheduledBackup": 1}
 			if !maps.Equal(kinds, want) {
 				t.Errorf("generated %v, want %v", kinds, want)
 			}
@@ -253,7 +259,7 @@ func TestBuild_PostgresqlDatabaseNamedLikeThePooler(t *testing.T) {
 		}
 		// The Database joins the Pooler's sibling group, so it comes right
 		// after the Pooler, ahead of the other Databases.
-		want := "Cluster/db,ObjectStore/db,Pooler/db-pooler,Database/db-pooler,Database/db-orders"
+		want := "Cluster/db,ObjectStore/db,Pooler/db-pooler,Database/db-pooler,Database/db-orders,ScheduledBackup/db-nightly"
 		if got := strings.Join(order, ","); got != want {
 			t.Errorf("object order = %s, want %s", got, want)
 		}

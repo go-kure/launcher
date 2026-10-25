@@ -1212,8 +1212,9 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `workload-service` | The Service a `webservice` component generates; a DNS-1123 label (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36; `docs/delivery-scope.md` §3.5). Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
 | `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
 | `workload-volume-claim` | The PersistentVolumeClaim a `pvc` volume of a `webservice` or `worker` component generates, asked once per such volume. The volume mounts the claim by this name. | `<component>-<volume>`, each half hyphen-escaped, shortened to 253 with `-<volume>` kept whole. | `volumes[].claimObjectName` | unless that volume's `claimObjectName` is set; not for a volume whose `claimName` references an existing claim, since it then generates none |
-| `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
-| `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `objectStore`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `objectStoreObjectName` | unless `objectStoreObjectName` is set; not without `objectStore`, since the component then generates none |
+| `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
+| `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `backup`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `backup.objectStoreObjectName` | unless `backup.objectStoreObjectName` is set; not without `backup`, since the component then generates none |
+| `postgresql-scheduledbackup` | Each ScheduledBackup a `postgresql` component generates, asked once per `backup.schedules` entry, with the component. It names the Cluster by the name the Cluster took. Every name is held to 63 characters, the hook's and the default included: the operator copies it into a label of each Backup. | `<component>-<schedule name>` | none: the schedule's `name` is the suffix | once per `backup.schedules` entry |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and, for a prefix the author or the hook set, its Flux Kustomization; with the default the Kustomization's name is kure's, `<unit name>-<layout name>` ([Pipeline](#pipeline)). It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
 | `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under any other placement the layout has no Kustomization of its own, and kure's Flux integration refuses a name set on it (go-kure/kure#1032). | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer): kure's own default, which launcher never sets and kure shortens past 63 characters by its own rule. | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
 | `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
@@ -1331,8 +1332,8 @@ document rule may still change. Most names are made after lowering, and carry th
 name where a `DocumentLoweringRule` renamed the document, as their defaults use it. A name a
 lowering rule makes (`pooler`, `database`, `helm-source`, `values-configmap`, `values-secret`,
 `helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`, `workload-service`,
-`workload-serviceaccount`, `workload-volume-claim`, `postgresql-cluster`, `postgresql-objectstore`)
-carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
+`workload-serviceaccount`, `workload-volume-claim`, `postgresql-cluster`, `postgresql-objectstore`,
+`postgresql-scheduledbackup`) carries the name of the document the rule is lowering. A component, trait or policy rule runs only once the document's kind is final, so
 for those that is the lowered name too; a document rule that resolves a name of its own is
 asked with the name of the document it was given, which it or a later document rule may then
 change.
@@ -1472,7 +1473,9 @@ the Pooler's Service carries the Pooler's name. A leading digit is accepted, whi
 with RelaxedServiceNameValidation off (the default before Kubernetes 1.36) refuses in a Service name (`docs/delivery-scope.md` §3.5). Narrower
 still is `postgresql-cluster`, whose Services carry the Cluster's name with a suffix: a
 DNS-1035 label of at most 50 characters (CloudNativePG's own rule), a rule its default, the
-component name, is held to as well. For
+component name, is held to as well. `postgresql-scheduledbackup` keeps the subdomain's syntax
+but at most 63 characters, its default included: the operator copies the name into a label
+of each Backup. For
 an object that is the rule of its kind. For `bundle`, `group` and `sub-application` it is
 launcher's own rule, on these grounds: a bundle's and a group's name is written as the name
 of a Flux Kustomization, all three become a directory segment in a written tree, and their
@@ -1719,7 +1722,8 @@ name collision: Pooler.postgresql.cnpg.io "default/db-pooler" is named by compon
 `objectName` and the `object` request apply only to a component no rule emitted. On a member
 a component or trait lowering rule emitted the property is refused and the hook is not asked:
 a rule that wants a member's name choosable resolves it itself at lowering time, under its
-own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`),
+own role: `LoweringContext.ResolveName` for an object it names apart (`pooler`, `database`,
+`postgresql-scheduledbackup`),
 `LoweringContext.ResolveMemberName` for the object of a member it emits under the
 component's name (`helm-release`, `oci-kustomization`, `oci-source`, `workload-deployment`,
 `workload-service`, `workload-serviceaccount`, `postgresql-cluster`,
@@ -1769,20 +1773,20 @@ address. Launcher builds no such address: every address written with the compone
 names) is the author's to change.**
 
 A `postgresql` component's Cluster and ObjectStore are named on their own too
-(`clusterObjectName`, `objectStoreObjectName`, or the hook's answer for `postgresql-cluster`,
+(`clusterObjectName`, `backup.objectStoreObjectName`, or the hook's answer for `postgresql-cluster`,
 `postgresql-objectstore`), and what launcher writes to them follows:
 
-- the Pooler's `cluster.name` and each Database's `cluster.name` name the Cluster by the
-  name it took;
+- the Pooler's, each Database's and each ScheduledBackup's `cluster.name` name the Cluster
+  by the name it took;
 - the pod selector of the component's cluster endpoint (`cnpg.io/cluster`) is the Cluster's
   name, which `ComponentEndpoints` reads with the authored name and
   `ComponentEndpointsNamed` with the hook's as well;
 - the Cluster's backup plugin names the ObjectStore by the name it took
   (`barmanObjectName`).
 
-The default names of the Pooler and the Databases (`<component>-pooler`,
-`<component>-<database name>`) keep deriving from the component name, whatever the Cluster
-is named. A component name the Pooler's default cannot be built from is refused with
+The default names of the Pooler, the Databases and the ScheduledBackups
+(`<component>-pooler`, `<component>-<database name>`, `<component>-<schedule name>`) keep
+deriving from the component name, whatever the Cluster is named. A component name the Pooler's default cannot be built from is refused with
 `poolerName` named as what settles it. The two properties end in `ObjectName`, as
 `objectName` does on a kind component; `poolerName`, the older property, keeps its name.
 
@@ -2724,7 +2728,9 @@ The built-in hand-parsed kinds answer with the reason they refuse a field of the
 Kubernetes type they project, `webservice` and `worker` with their `deployment`'s,
 and the `pvc` trait with the `persistentvolumeclaim` kind's
 (`pkg/oam/builtin/components/README.md`, "Upstream fields a hand-parsed kind does
-not read"); `helmchart` and `helmrelease` point a removed key to its replacement.
+not read"); `helmchart` and `helmrelease` point a removed key to its replacement,
+and `postgresql` a key its `backup` replaced (`objectStore`, `objectStoreObjectName`)
+to where it went (go-kure/launcher#1001).
 An empty answer adds nothing. The hint was asked of a terminal component
 handler alone before go-kure/launcher#790; the three other positions are new.
 
@@ -2743,7 +2749,9 @@ component "web" (type "webservice"): properties.affinity: unsupported field "nod
 
 The built-in workload kinds, `webservice` and `worker` answer with the reason
 their parser gives for the key at that position (the components README, "Below
-the top level"). Before go-kure/launcher#790 a nested refusal carried no hint.
+the top level"), and `postgresql` names the replacement of a key `backup` no longer
+takes (`destinationPath`, `endpointURL`, `secretName`) and the reason `backup.objectStore` refuses a key
+(`serverName`, `azureCredentials`, `googleCredentials`; go-kure/launcher#1001). Before go-kure/launcher#790 a nested refusal carried no hint.
 The refusal text itself is unchanged at every depth.
 
 Before any of that, it runs `Transform`'s own reservation check
@@ -3077,7 +3085,7 @@ type. The built-in rules declare:
 | `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
-| `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database` | | `dependency`, `placement` |
+| `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
 | `expose` (trait) | | `ingress`, `httproute` | |
 
 ### The "no handler" error

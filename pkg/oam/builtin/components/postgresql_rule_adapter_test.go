@@ -45,10 +45,11 @@ func (postgresqlViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		return nil, err
 	}
 	handlers := map[string]oam.ComponentHandler{
-		"cnpg-cluster":     &components.CnpgClusterHandler{},
-		"cnpg-objectstore": &components.CnpgObjectStoreHandler{},
-		"cnpg-pooler":      &components.CnpgPoolerHandler{},
-		"cnpg-database":    &components.CnpgDatabaseHandler{},
+		"cnpg-cluster":         &components.CnpgClusterHandler{},
+		"cnpg-objectstore":     &components.CnpgObjectStoreHandler{},
+		"cnpg-pooler":          &components.CnpgPoolerHandler{},
+		"cnpg-database":        &components.CnpgDatabaseHandler{},
+		"cnpg-scheduledbackup": &components.CnpgScheduledBackupHandler{},
 	}
 	out := &postgresqlViaRuleConfig{PostgresqlConfig: parsed}
 	for i := range res.Components {

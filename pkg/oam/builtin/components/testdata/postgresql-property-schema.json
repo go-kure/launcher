@@ -6,8 +6,130 @@
   },
   "backup": {
     "type": "object",
-    "description": "Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName).",
-    "additionalProperties": true
+    "description": "Backups and WAL archiving to an S3-compatible object store through the Barman Cloud plugin. Set, the component also emits a cnpg-objectstore and the Cluster's barman-cloud plugin entry archives WAL to it; each schedules entry emits a cnpg-scheduledbackup. Unset, nothing is backed up. Needs the CloudNativePG operator 1.26 or later and the Barman Cloud plugin with its CRD installed.",
+    "properties": {
+      "objectStore": {
+        "type": "object",
+        "description": "Required. Where backups and WAL are written: the configuration of the ObjectStore the component emits.",
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "How base backups are written.",
+            "properties": {
+              "compression": {
+                "type": "string",
+                "description": "Compression of the base backup: bzip2, gzip, lz4 or snappy. Unset, none."
+              },
+              "encryption": {
+                "type": "string",
+                "description": "Server-side encryption: AES256 or aws:kms. Unset, the bucket's policy."
+              },
+              "immediateCheckpoint": {
+                "type": "boolean",
+                "description": "true, a backup starts with an immediate checkpoint instead of a spread one."
+              },
+              "jobs": {
+                "type": "integer",
+                "description": "How many files are uploaded at once, at least 1."
+              }
+            }
+          },
+          "destinationPath": {
+            "type": "string",
+            "description": "Required, not empty. The object store path backups and WAL are written to (for example s3://bucket/path)."
+          },
+          "endpointCA": {
+            "type": "object",
+            "description": "The CA bundle the endpoint's TLS certificate is checked against: a reference to one key of a Secret in the namespace, {name, key}.",
+            "additionalProperties": true
+          },
+          "endpointURL": {
+            "type": "string",
+            "description": "The endpoint of an S3-compatible service, in place of the AWS endpoint discovery."
+          },
+          "s3Credentials": {
+            "type": "object",
+            "description": "Required. Exactly one way to authenticate: accessKeyId and secretAccessKey, each a reference to one key of a Secret in the namespace, {name, key} (region and sessionToken, references alike, may be set beside them), or inheritFromIAMRole: true. Decoded strictly into the Barman Cloud S3Credentials type.",
+            "additionalProperties": true
+          },
+          "wal": {
+            "type": "object",
+            "description": "How WAL files are archived.",
+            "properties": {
+              "compression": {
+                "type": "string",
+                "description": "Compression of each WAL file: bzip2, gzip, lz4, snappy, xz or zstd. Unset, none."
+              },
+              "encryption": {
+                "type": "string",
+                "description": "Server-side encryption: AES256 or aws:kms. Unset, the bucket's policy."
+              },
+              "maxParallel": {
+                "type": "integer",
+                "description": "How many WAL files are archived or restored at once, at least 1."
+              }
+            }
+          }
+        }
+      },
+      "objectStoreObjectName": {
+        "type": "string",
+        "description": "Name of the generated ObjectStore, in place of the component name, used as written. The Cluster's plugin entry names the store by it."
+      },
+      "retentionPolicy": {
+        "type": "string",
+        "description": "How long backups are kept, as \u003cn\u003e\u003cd|w|m\u003e (for example 30d). Set on the ObjectStore."
+      },
+      "schedules": {
+        "type": "array",
+        "description": "Base backups on a schedule. Without one only WAL is archived, and a point-in-time recovery then needs a base backup taken otherwise (a cnpg-backup).",
+        "items": {
+          "type": "object",
+          "description": "One schedule: a cnpg-scheduledbackup named \u003ccomponent\u003e-\u003cname\u003e, of method plugin.",
+          "properties": {
+            "backupOwnerReference": {
+              "type": "string",
+              "description": "The owner of each Backup the schedule creates: none, self (the ScheduledBackup, so its Backups go with it) or cluster. Default self.",
+              "enum": [
+                "none",
+                "self",
+                "cluster"
+              ]
+            },
+            "immediate": {
+              "type": "boolean",
+              "description": "Whether a first backup is taken as soon as the ScheduledBackup is created. Default true."
+            },
+            "name": {
+              "type": "string",
+              "description": "Required, unique among the schedules. The ScheduledBackup is named \u003ccomponent\u003e-\u003cname\u003e, at most 63 characters.",
+              "required": true
+            },
+            "schedule": {
+              "type": "string",
+              "description": "Required. When a backup is taken, as a cron expression of six fields, the first of which is the seconds (\"0 0 3 * * *\" is every day at 03:00). It must parse as the operator parses it. A schedule that parses but whose time never comes within the operator's five-year look-ahead (February the 30th) is not refused: the operator records NoSchedule for it and runs no backup.",
+              "required": true
+            },
+            "suspend": {
+              "type": "boolean",
+              "description": "true, no backup is scheduled until it is set back."
+            },
+            "target": {
+              "type": "string",
+              "description": "Which instance takes the backup: primary or prefer-standby. Unset, the operator's default.",
+              "enum": [
+                "primary",
+                "prefer-standby"
+              ]
+            }
+          }
+        }
+      },
+      "serverName": {
+        "type": "string",
+        "description": "The folder of this Cluster's backups and WAL within destinationPath. Unset, the Cluster name."
+      }
+    }
   },
   "bootstrap": {
     "type": "object",
@@ -16,7 +138,7 @@
   },
   "clusterObjectName": {
     "type": "string",
-    "description": "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup path moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."
+    "description": "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup folder (backup.serverName) moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."
   },
   "databases": {
     "type": "array",
@@ -58,15 +180,6 @@
     "type": "object",
     "description": "Monitoring settings, including the PodMonitor toggle and custom queries.",
     "additionalProperties": true
-  },
-  "objectStore": {
-    "type": "object",
-    "description": "Barman Cloud ObjectStore settings for backups (destinationPath, endpointURL, secretName, retentionPolicy, serverName).",
-    "additionalProperties": true
-  },
-  "objectStoreObjectName": {
-    "type": "string",
-    "description": "Name of the generated ObjectStore, in place of the component name, used as written. The Cluster's backup plugin names the store by it. Only with objectStore."
   },
   "pooler": {
     "type": "object",

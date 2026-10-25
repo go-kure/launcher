@@ -315,7 +315,7 @@ func newBuiltinTransformer() *oam.Transformer {
 	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
 	// an inline URL, and "postgresql" into the CNPG kinds ("cnpg-cluster" with a
 	// post-policy step for its policy-dependent defaults, "cnpg-objectstore",
-	// "cnpg-pooler", "cnpg-database"), and "oci" into a same-name "ocirepository"
+	// "cnpg-pooler", "cnpg-database", "cnpg-scheduledbackup"), and "oci" into a same-name "ocirepository"
 	// and "fluxcd-kustomization" pair, or into the "fluxcd-kustomization" alone
 	// beside a generated "ocirepository" that several "oci" components share.
 	// None may also appear in

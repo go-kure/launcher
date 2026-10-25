@@ -59,13 +59,20 @@ func dropRoleObjectNames(depProps map[string]any) {
 // refusal calls it. The member keeps the component's name, so the group, the
 // labels and the selectors stay where they were.
 func nameRoleMember(comp *oam.Component, lctx oam.LoweringContext, member *oam.Component, handler oam.ComponentObjectProvider, role oam.NameRole, property, object string) error {
+	return nameRoleMemberAt(comp, lctx, member, handler, role, comp.Properties, property, property, object)
+}
+
+// nameRoleMemberAt is nameRoleMember for a property read from props, an
+// object of comp's properties, which path names: postgresql's
+// backup.objectStoreObjectName.
+func nameRoleMemberAt(comp *oam.Component, lctx oam.LoweringContext, member *oam.Component, handler oam.ComponentObjectProvider, role oam.NameRole, props map[string]any, property, path, object string) error {
 	spec := memberNameSpec(handler, role)
-	name, named, err := parseRawStringField(comp.Properties, property, property)
+	name, named, err := parseRawStringField(props, property, path)
 	if err != nil {
 		return err
 	}
 	if named {
-		spec.Property, spec.Authored = property, name
+		spec.Property, spec.Authored = path, name
 	}
 	// The name is the component's own, whatever context the rule was handed.
 	lctx.Component = comp

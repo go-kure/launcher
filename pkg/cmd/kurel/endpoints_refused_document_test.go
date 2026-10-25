@@ -170,9 +170,9 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			answer: endpointRefused,
 		},
 		{
-			name:       "postgresql: a backup value without its path",
-			components: component("postgresql", "        backup:\n          endpointURL: https://s3.example.com\n"),
-			stage:      "transform", want: `backup.destinationPath: required`,
+			name:       "postgresql: a backup retention policy of no count and unit",
+			components: component("postgresql", "        backup:\n          objectStore:\n            destinationPath: s3://bucket/db/\n            s3Credentials:\n              inheritFromIAMRole: true\n          retentionPolicy: 30 days\n"),
+			stage:      "transform", want: `backup.retentionPolicy "30 days": must be a positive count of days, weeks or months`,
 			answer: endpointRefused,
 		},
 		{

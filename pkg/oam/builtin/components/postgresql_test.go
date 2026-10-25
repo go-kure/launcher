@@ -406,19 +406,6 @@ func TestPostgresqlHandler_SynchronousValidation(t *testing.T) {
 	}
 }
 
-func TestPostgresqlHandler_ObjectStore_MissingDestinationPath(t *testing.T) {
-	h := postgresqlViaRule{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db", Type: "postgresql",
-		Properties: map[string]any{
-			"objectStore": map[string]any{"endpointURL": "https://s3.example.com"},
-		},
-	}, "default")
-	if err == nil {
-		t.Error("expected error for missing objectStore.destinationPath")
-	}
-}
-
 func TestPostgresqlHandler_Databases_MissingName(t *testing.T) {
 	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
@@ -573,9 +560,15 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 				"parameters": map[string]any{"max_client_conn": "500"},
 			},
 			"backup": map[string]any{
-				"destinationPath": "s3://my-bucket/backups",
-				"endpointURL":     "https://s3.example.com",
-				"secretName":      "backup-creds",
+				"objectStore": map[string]any{
+					"destinationPath": "s3://my-bucket/postgres/",
+					"endpointURL":     "https://s3.example.com",
+					"s3Credentials": map[string]any{
+						"accessKeyId":     map[string]any{"name": "backup-creds", "key": "ACCESS_KEY_ID"},
+						"secretAccessKey": map[string]any{"name": "backup-creds", "key": "SECRET_ACCESS_KEY"},
+					},
+				},
+				"serverName":      "my-server",
 				"retentionPolicy": "30d",
 			},
 			"monitoring": map[string]any{
@@ -606,11 +599,6 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 					"connectionLimit": float64(10),
 					"inRoles":         []any{"pg_read_all_data"},
 				},
-			},
-			"objectStore": map[string]any{
-				"destinationPath": "s3://my-bucket/postgres/",
-				"serverName":      "my-server",
-				"retentionPolicy": "30d",
 			},
 			"databases": []any{
 				map[string]any{
@@ -654,8 +642,8 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 	if !pc.PoolerEnabled || pc.PoolerType != "ro" {
 		t.Errorf("Pooler: enabled=%v type=%q", pc.PoolerEnabled, pc.PoolerType)
 	}
-	if pc.BackupDestinationPath != "s3://my-bucket/backups" {
-		t.Errorf("BackupDestinationPath: got %q", pc.BackupDestinationPath)
+	if pc.Backup == nil || pc.Backup.ObjectStore.DestinationPath != "s3://my-bucket/postgres/" || pc.Backup.ServerName != "my-server" || pc.Backup.RetentionPolicy != "30d" {
+		t.Errorf("Backup: %+v", pc.Backup)
 	}
 	if !pc.MonitoringEnabled || len(pc.MonitoringCustomQueries) != 1 {
 		t.Errorf("Monitoring: enabled=%v queries=%d", pc.MonitoringEnabled, len(pc.MonitoringCustomQueries))
@@ -668,9 +656,6 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 	}
 	if len(pc.ManagedRoles) != 1 || pc.ManagedRoles[0].Name != "app_user" {
 		t.Errorf("ManagedRoles: %v", pc.ManagedRoles)
-	}
-	if pc.ObjectStore == nil || pc.ObjectStore.ServerName != "my-server" {
-		t.Errorf("ObjectStore: %v", pc.ObjectStore)
 	}
 	if len(pc.Databases) != 1 || len(pc.Databases[0].Extensions) != 2 {
 		t.Errorf("Databases: %v", pc.Databases)
@@ -697,24 +682,53 @@ func TestPostgresqlConfig_Generate_WithResources(t *testing.T) {
 	}
 }
 
+// backup emits the ObjectStore beside the Cluster and one ScheduledBackup per
+// schedule; the Cluster archives WAL through the plugin and carries no in-tree
+// spec.backup (go-kure/launcher#1001).
 func TestPostgresqlConfig_Generate_WithBackup(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
 		"backup": map[string]any{
-			"destinationPath": "s3://my-bucket/backups",
+			"objectStore": map[string]any{
+				"destinationPath": "s3://my-bucket/backups",
+				"s3Credentials": map[string]any{
+					"accessKeyId":     map[string]any{"name": "backup-creds", "key": "ACCESS_KEY_ID"},
+					"secretAccessKey": map[string]any{"name": "backup-creds", "key": "SECRET_ACCESS_KEY"},
+				},
+			},
 			"retentionPolicy": "30d",
-			"secretName":      "backup-creds",
+			"schedules":       []any{map[string]any{"name": "daily", "schedule": "0 0 2 * * *"}},
 		},
 	})
 	objs := generatePostgresql(t, pc)
-	if len(objs) != 1 {
-		t.Fatalf("expected 1 object, got %d", len(objs))
+	if len(objs) != 3 {
+		t.Fatalf("expected 3 objects, got %d", len(objs))
 	}
 	cluster := (*objs[0]).(*cnpgv1.Cluster)
-	if cluster.Spec.Backup == nil {
-		t.Fatal("expected non-nil Backup")
+	if cluster.Spec.Backup != nil {
+		t.Errorf("Cluster spec.backup = %+v, want none", cluster.Spec.Backup)
 	}
-	if cluster.Spec.Backup.RetentionPolicy != "30d" {
-		t.Errorf("Backup.RetentionPolicy: got %q", cluster.Spec.Backup.RetentionPolicy)
+	if len(cluster.Spec.Plugins) != 1 || cluster.Spec.Plugins[0].IsWALArchiver == nil || !*cluster.Spec.Plugins[0].IsWALArchiver {
+		t.Errorf("Plugins = %+v, want the one WAL-archiving barman-cloud entry", cluster.Spec.Plugins)
+	}
+	store := (*objs[1]).(*barmanv1.ObjectStore)
+	if store.Spec.RetentionPolicy != "30d" {
+		t.Errorf("ObjectStore retentionPolicy: got %q", store.Spec.RetentionPolicy)
+	}
+	if ref := store.Spec.Configuration.AWS; ref == nil || ref.AccessKeyIDReference == nil || ref.AccessKeyIDReference.Name != "backup-creds" || ref.AccessKeyIDReference.Key != "ACCESS_KEY_ID" {
+		t.Errorf("ObjectStore s3Credentials = %+v, want the authored references", ref)
+	}
+	sb, ok := (*objs[2]).(*cnpgv1.ScheduledBackup)
+	if !ok {
+		t.Fatalf("objs[2]: expected *cnpgv1.ScheduledBackup, got %T", *objs[2])
+	}
+	if sb.Name != "db-daily" || sb.Spec.Schedule != "0 0 2 * * *" || sb.Spec.Cluster.Name != "db" {
+		t.Errorf("ScheduledBackup %q = %+v", sb.Name, sb.Spec)
+	}
+	if sb.Spec.Method != cnpgv1.BackupMethodPlugin || sb.Spec.PluginConfiguration == nil || sb.Spec.PluginConfiguration.Name != "barman-cloud.cloudnative-pg.io" {
+		t.Errorf("ScheduledBackup method %q, plugin %+v; want the barman-cloud plugin", sb.Spec.Method, sb.Spec.PluginConfiguration)
+	}
+	if sb.Spec.Immediate == nil || !*sb.Spec.Immediate || sb.Spec.BackupOwnerReference != "self" || sb.Spec.Suspend != nil {
+		t.Errorf("ScheduledBackup immediate %v, backupOwnerReference %q, suspend %v; want true, self and unset", sb.Spec.Immediate, sb.Spec.BackupOwnerReference, sb.Spec.Suspend)
 	}
 }
 
@@ -897,10 +911,10 @@ func TestPostgresqlConfig_Generate_WithPooler(t *testing.T) {
 
 func TestPostgresqlConfig_Generate_WithObjectStore(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
-		"objectStore": map[string]any{
+		"backup": map[string]any{"objectStore": map[string]any{
 			"destinationPath": "s3://my-bucket/postgres/",
-			"secretName":      "backup-creds",
-		},
+			"s3Credentials":   map[string]any{"inheritFromIAMRole": true},
+		}},
 	})
 	objs := generatePostgresql(t, pc)
 	if len(objs) != 2 {
@@ -930,12 +944,15 @@ func TestPostgresqlConfig_Generate_WithObjectStore(t *testing.T) {
 }
 
 // The ObjectStore CRD forbids configuration.serverName, so an authored
-// objectStore.serverName goes onto the plugin entry, where the plugin reads it.
+// backup.serverName goes onto the plugin entry, where the plugin reads it.
 func TestPostgresqlConfig_Generate_ObjectStoreServerName(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
-		"objectStore": map[string]any{
-			"destinationPath": "s3://my-bucket/postgres/",
-			"serverName":      "my-server",
+		"backup": map[string]any{
+			"objectStore": map[string]any{
+				"destinationPath": "s3://my-bucket/postgres/",
+				"s3Credentials":   map[string]any{"inheritFromIAMRole": true},
+			},
+			"serverName": "my-server",
 		},
 	})
 	objs := generatePostgresql(t, pc)
@@ -984,21 +1001,25 @@ func TestPostgresqlConfig_Generate_WithDatabase(t *testing.T) {
 
 // The objects come in the order the rule emits their components: the Cluster and
 // the ObjectStore (one same-name sibling group, generated together), then the
-// Pooler, then the Databases. postgresql generated the Pooler before the
-// ObjectStore; the objects are the same.
+// Pooler, then the Databases, then the ScheduledBackups. postgresql generated
+// the Pooler before the ObjectStore; the objects are the same.
 func TestPostgresqlConfig_Generate_CombinedOrder(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
 		"pooler": map[string]any{"enabled": true},
-		"objectStore": map[string]any{
-			"destinationPath": "s3://my-bucket/postgres/",
+		"backup": map[string]any{
+			"objectStore": map[string]any{
+				"destinationPath": "s3://my-bucket/postgres/",
+				"s3Credentials":   map[string]any{"inheritFromIAMRole": true},
+			},
+			"schedules": []any{map[string]any{"name": "daily", "schedule": "@daily"}},
 		},
 		"databases": []any{
 			map[string]any{"name": "mydb", "owner": "myapp"},
 		},
 	})
 	objs := generatePostgresql(t, pc)
-	if len(objs) != 4 {
-		t.Fatalf("expected 4 objects, got %d", len(objs))
+	if len(objs) != 5 {
+		t.Fatalf("expected 5 objects, got %d", len(objs))
 	}
 	if _, ok := (*objs[0]).(*cnpgv1.Cluster); !ok {
 		t.Errorf("objs[0]: expected *cnpgv1.Cluster, got %T", *objs[0])
@@ -1011,6 +1032,9 @@ func TestPostgresqlConfig_Generate_CombinedOrder(t *testing.T) {
 	}
 	if _, ok := (*objs[3]).(*cnpgv1.Database); !ok {
 		t.Errorf("objs[3]: expected *cnpgv1.Database, got %T", *objs[3])
+	}
+	if _, ok := (*objs[4]).(*cnpgv1.ScheduledBackup); !ok {
+		t.Errorf("objs[4]: expected *cnpgv1.ScheduledBackup, got %T", *objs[4])
 	}
 }
 

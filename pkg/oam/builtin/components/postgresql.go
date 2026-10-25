@@ -6,7 +6,6 @@ import (
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -27,15 +26,9 @@ const (
 )
 
 // barmanCloudPluginName is the name the barman-cloud plugin registers with CNPG, and so
-// the Cluster's plugin entry that archives WAL to a Barman Cloud ObjectStore.
-// s3AccessKeyIDKey and s3SecretAccessKeyKey are the keys read from a backup/objectStore
-// credentials Secret. kure's retired config-struct layer injected all three; launcher's
-// output has always carried them, so they are written explicitly here.
-const (
-	barmanCloudPluginName = "barman-cloud.cloudnative-pg.io"
-	s3AccessKeyIDKey      = "ACCESS_KEY_ID"
-	s3SecretAccessKeyKey  = "SECRET_ACCESS_KEY"
-)
+// the Cluster's plugin entry that archives WAL to a Barman Cloud ObjectStore and the
+// plugin a ScheduledBackup of method plugin names.
+const barmanCloudPluginName = "barman-cloud.cloudnative-pg.io"
 
 // PostgresqlRule is the component lowering rule for the "postgresql" component
 // type (oam.ComponentLoweringRule). It re-expresses postgresql through the
@@ -45,13 +38,15 @@ const (
 //     the Cluster spec postgresql used to write, minus the two values that
 //     depend on the environment policy: spec.enablePDB and, when storageSize
 //     was not authored, spec.storage.size;
-//   - a `cnpg-objectstore` of the same name when objectStore is set, a member
+//   - a `cnpg-objectstore` of the same name when backup is set, a member
 //     of the same same-name sibling group as the Cluster;
 //   - a `cnpg-pooler` named `<name>-pooler` when pooler.enabled is true;
 //   - a `cnpg-database` named `<name>-<database>` for each databases entry;
+//   - a `cnpg-scheduledbackup` named `<name>-<schedule>` for each
+//     backup.schedules entry;
 //   - when the document already orders its components with a dependency
-//     policy, a dependency policy making the pooler and the databases wait for
-//     the Cluster (see dependencyPolicy).
+//     policy, a dependency policy making the pooler, the databases and the
+//     scheduled backups wait for the Cluster (see dependencyPolicy).
 //
 // LowerComponent first runs postgresql's full parse (Parse, the former
 // handler's sequence unchanged), so every input the handler refused is still
@@ -76,7 +71,8 @@ type PostgresqlRule struct{}
 func (PostgresqlRule) ComponentType() string { return "postgresql" }
 
 // The properties a postgresql component names its Cluster and its ObjectStore
-// with (go-kure/launcher#787), in place of the component name. They end in
+// with (go-kure/launcher#787), in place of the component name: the first at
+// the top level, the second under backup (go-kure/launcher#1001). They end in
 // ObjectName, as a database's `objectName` and the workload types' properties
 // do: each names the object alone, and `objectStoreName` was once a plugin
 // parameter of the Cluster.
@@ -185,8 +181,8 @@ func postgresqlPoolerName(lctx oam.LoweringContext, component *oam.Component) (s
 // the Pooler (postgresqlPoolerName): the consumer hook's where the caller set
 // one and the author wrote no `clusterObjectName` or `poolerName`. The names
 // come from the rule's own lowering of the component, so the hook is asked
-// every request the transform asks for it: the ObjectStore's and each
-// Database's as well.
+// every request the transform asks for it: the ObjectStore's, each
+// Database's and each ScheduledBackup's as well.
 func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.LoweringContext) ([]netpol.Endpoint, error) {
 	// Endpoints are collected separately from the build, so the rule's own
 	// lowering runs here too: it names the Cluster, parses the component and
@@ -243,10 +239,11 @@ func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Loweri
 }
 
 // PropertySchema declares the postgresql component's top-level user-facing
-// properties. The CNPG-shaped sub-objects (backup, pooler, bootstrap, databases,
-// …) are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
+// properties. The CNPG-shaped sub-objects (pooler, bootstrap, databases, …)
+// are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
 // rather than modeled field-by-field, so a database's `objectName` is declared
-// by no entry of its own. TestPostgresqlRule_PropertySchemaUnchanged pins it
+// by no entry of its own. `backup` is the exception, declared key by key
+// (schemaPostgresqlBackup, go-kure/launcher#1001). TestPostgresqlRule_PropertySchemaUnchanged pins it
 // byte for byte.
 func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 	// The CNPG-shaped sub-objects are kept open; each reuses the same open shape
@@ -268,7 +265,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of PostgreSQL instances in the cluster."},
 		"imageName":         {Type: oam.PropertyTypeString, Description: "Override for the container image (defaults to the CloudNativePG image for the version)."},
 		"resources":         schemaResources(false),
-		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
+		"backup":            schemaPostgresqlBackup(),
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses."),
 		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, used as written (default: the component name followed by -pooler); a DNS-1123 label, since CloudNativePG names the Pooler's Service after it (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36). Only with pooler.enabled: true."},
@@ -276,15 +273,14 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
 		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),
 		"inheritedMetadata": openObj("Labels and annotations propagated to the generated resources."),
-		"objectStore":       openObj("Barman Cloud ObjectStore settings for backups (destinationPath, endpointURL, secretName, retentionPolicy, serverName)."),
 		"affinity":          openObj("Pod affinity and anti-affinity scheduling settings."),
 		"externalClusters":  openArr("External clusters referenced for bootstrap or replica sources.", "A single external cluster definition."),
 		"managedRoles":      openArr("Database roles created and reconciled by the operator.", "A single managed role definition."),
 		"databases":         openArr("Databases created and reconciled within the cluster.", "A single database definition."),
 	}
-	// The names of the Cluster and the ObjectStore (go-kure/launcher#787).
-	schema[postgresqlClusterNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's and each Database's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler and the Databases keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup path moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."}
-	schema[postgresqlObjectStoreNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated ObjectStore, in place of the component name, used as written. The Cluster's backup plugin names the store by it. Only with objectStore."}
+	// The name of the Cluster (go-kure/launcher#787); the ObjectStore's is
+	// backup.objectStoreObjectName.
+	schema[postgresqlClusterNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup folder (backup.serverName) moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."}
 	return schema
 }
 
@@ -383,46 +379,9 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		config.Resources = r
 	}
 
-	backup, present, err := parseObjectField(props, "backup", "backup")
-	if err != nil {
+	// `backup` and the top-level keys it replaced (postgresql_backup.go).
+	if config.Backup, err = parsePostgresqlBackup(props); err != nil {
 		return nil, err
-	}
-	if present {
-		for _, f := range []struct {
-			key string
-			dst *string
-		}{
-			{"retentionPolicy", &config.BackupRetentionPolicy},
-			{"destinationPath", &config.BackupDestinationPath},
-			{"endpointURL", &config.BackupEndpointURL},
-			{"secretName", &config.BackupSecretName},
-		} {
-			v, present, err := parseRawStringField(backup, f.key, "backup."+f.key)
-			if err != nil {
-				return nil, err
-			}
-			if present {
-				*f.dst = v
-			}
-		}
-		// The lowering builds the Cluster's backup with a barmanObjectStore,
-		// whose destinationPath the CRD requires and bounds; the block's
-		// other values are carried by that backup. Without the path a
-		// retention policy that is not empty would build a store that carries
-		// "" there, a value the author did not write and the API server
-		// refuses, and the other values, an empty retention policy among
-		// them, would build nothing and be dropped. An authored empty path is
-		// a value: the backup is built from it, and refusing it is left to
-		// the API server.
-		if _, authored := authoredValue(backup, "destinationPath"); authored {
-			config.explicitBackupDestinationPath = true
-		} else {
-			for _, key := range []string{"retentionPolicy", "endpointURL", "secretName"} {
-				if _, set := authoredValue(backup, key); set {
-					return nil, errors.New("backup.destinationPath: required (the object store path backups and WAL are written to)")
-				}
-			}
-		}
 	}
 
 	monitoring, present, err := parseObjectField(props, "monitoring", "monitoring")
@@ -598,8 +557,8 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		if bos, present, err := parseObjectField(ecMap, "barmanObjectStore", label+".barmanObjectStore"); err != nil {
 			return nil, err
 		} else if present {
-			// As for backup.destinationPath above: an authored barmanObjectStore
-			// is lowered whole, and without the path the Cluster would carry "".
+			// An authored barmanObjectStore is lowered whole, and without the
+			// path the Cluster would carry "".
 			// The map is decoded into the upstream type (toBarmanObjectStore),
 			// which reads the key in any spelling, so any spelling is authored.
 			if !authoredInAnySpelling(bos, "destinationPath") {
@@ -778,42 +737,6 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, err
 		}
 		config.ManagedRoles = append(config.ManagedRoles, role)
-	}
-
-	osMap, present, err := parseObjectField(props, "objectStore", "objectStore")
-	if err != nil {
-		return nil, err
-	}
-	if present {
-		dp, present, err := parseStringField(osMap, "destinationPath", "objectStore.destinationPath")
-		if err != nil {
-			return nil, err
-		}
-		if !present {
-			return nil, errors.New("objectStore: 'destinationPath' is required")
-		}
-		os := &ObjectStoreConfig{DestinationPath: dp}
-		for _, f := range []struct {
-			key string
-			dst *string
-		}{
-			{"endpointURL", &os.EndpointURL},
-			{"secretName", &os.SecretName},
-			{"retentionPolicy", &os.RetentionPolicy},
-			{"serverName", &os.ServerName},
-		} {
-			if *f.dst, _, err = parseRawStringField(osMap, f.key, "objectStore."+f.key); err != nil {
-				return nil, err
-			}
-		}
-		config.ObjectStore = os
-	}
-	// The name itself is read and resolved by LowerComponent; here only its
-	// type, and that there is an ObjectStore to name.
-	if _, named, err := parseRawStringField(props, postgresqlObjectStoreNameProperty, postgresqlObjectStoreNameProperty); err != nil {
-		return nil, err
-	} else if named && config.ObjectStore == nil {
-		return nil, errors.Errorf("%s: names the ObjectStore, and objectStore is not set; remove it, or set objectStore", postgresqlObjectStoreNameProperty)
 	}
 
 	dbList, _, err := parseObjectListField(props, "databases", "databases")
@@ -1026,19 +949,6 @@ type ManagedRoleConfig struct {
 	InRoles         []string
 }
 
-// ObjectStoreConfig holds config for a CNPG ObjectStore CR.
-type ObjectStoreConfig struct {
-	// ObjectName is the name LowerComponent resolved for the ObjectStore (role
-	// oam.NameRolePostgresqlObjectStore), which the Cluster's plugin entry
-	// names. Empty for the component's name: Parse resolves none.
-	ObjectName      string
-	DestinationPath string
-	EndpointURL     string
-	SecretName      string
-	RetentionPolicy string
-	ServerName      string
-}
-
 // DatabaseEntry holds config for a single CNPG Database CR.
 type DatabaseEntry struct {
 	Name          string
@@ -1071,10 +981,8 @@ type PostgresqlConfig struct {
 	Resources   ResourceRequirements
 	ImageName   string
 
-	BackupRetentionPolicy string
-	BackupDestinationPath string
-	BackupEndpointURL     string
-	BackupSecretName      string
+	// Backup is `backup`; nil when it is not set.
+	Backup *PostgresqlBackup
 
 	MonitoringEnabled       bool
 	MonitoringCustomQueries []CustomQueryRef
@@ -1102,7 +1010,6 @@ type PostgresqlConfig struct {
 	InheritedAnnotations map[string]string
 
 	ManagedRoles []ManagedRoleConfig
-	ObjectStore  *ObjectStoreConfig
 	Databases    []DatabaseEntry
 
 	AffinityEnabled               bool
@@ -1113,9 +1020,6 @@ type PostgresqlConfig struct {
 
 	explicitReplicas    bool
 	explicitStorageSize bool
-	// explicitBackupDestinationPath is set when backup.destinationPath was
-	// authored, an empty one included: the backup is then built from it.
-	explicitBackupDestinationPath bool
 	// explicitPoolerInstances is set when pooler.instances was authored: the
 	// count is then written as authored, a 0 or a negative one included.
 	explicitPoolerInstances bool
@@ -1165,21 +1069,6 @@ func cnpgResourceList(rl corev1.ResourceList) corev1.ResourceList {
 		out[name] = q.DeepCopy()
 	}
 	return out
-}
-
-// s3Credentials references the access-key pair in secretName under the key names
-// launcher has always emitted (ACCESS_KEY_ID / SECRET_ACCESS_KEY).
-func s3Credentials(secretName string) *barmanapi.S3Credentials {
-	return &barmanapi.S3Credentials{
-		AccessKeyIDReference: &machineryapi.SecretKeySelector{
-			LocalObjectReference: machineryapi.LocalObjectReference{Name: secretName},
-			Key:                  s3AccessKeyIDKey,
-		},
-		SecretAccessKeyReference: &machineryapi.SecretKeySelector{
-			LocalObjectReference: machineryapi.LocalObjectReference{Name: secretName},
-			Key:                  s3SecretAccessKeyKey,
-		},
-	}
 }
 
 // toBarmanObjectStore converts an authored externalClusters[].barmanObjectStore map into the

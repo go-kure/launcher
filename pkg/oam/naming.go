@@ -148,11 +148,18 @@ const (
 	// component name.
 	NameRolePostgresqlCluster NameRole = "postgresql-cluster"
 	// NameRolePostgresqlObjectStore is the Barman Cloud ObjectStore a
-	// `postgresql` component generates for `objectStore`. Default: the component
+	// `postgresql` component generates for `backup`. Default: the component
 	// name. The hook is asked with the component, and not at all for a component
-	// without `objectStore`: it generates none. The Cluster's plugin entry names
-	// the store by this name.
+	// without `backup`: it generates none. The Cluster's plugin entry names the
+	// store by this name.
 	NameRolePostgresqlObjectStore NameRole = "postgresql-objectstore"
+	// NameRolePostgresqlScheduledBackup is one CloudNativePG ScheduledBackup a
+	// `postgresql` component generates, one per `backup.schedules` entry.
+	// Default: "<component>-<schedule name>". The hook is asked with the
+	// component. CloudNativePG copies the name into a label of each Backup it
+	// creates, so the rule holds every name, the default included, to 63
+	// characters.
+	NameRolePostgresqlScheduledBackup NameRole = "postgresql-scheduledbackup"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
 	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and, for
 	// a prefix the author or the hook set, the Flux Kustomization the base
@@ -265,6 +272,7 @@ var nameRoles = []struct {
 	{NameRoleWorkloadVolumeClaim, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
 	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
+	{NameRolePostgresqlScheduledBackup, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 	{NameRoleLayout, nameClassLayout, nameSyntaxKustomization},
 	{NameRoleGenerated, nameClassObject, nameSyntaxSubdomain},
