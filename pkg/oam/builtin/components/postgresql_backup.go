@@ -61,13 +61,17 @@ var postgresqlBackupMovedKeys = map[string]string{
 }
 
 // postgresqlObjectStoreRefusedKeys are the fields of the vendored
-// BarmanObjectStoreConfiguration that backup.objectStore refuses with a
-// reason. Its other fields outside postgresqlObjectStoreKeys are refused as
-// any unknown key is.
-var postgresqlObjectStoreRefusedKeys = map[string]string{
-	"serverName":        "backup.objectStore.serverName: not allowed (the ObjectStore CRD forbids it); use backup.serverName",
-	"azureCredentials":  "backup.objectStore.azureCredentials: not supported (backup writes to S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)",
-	"googleCredentials": "backup.objectStore.googleCredentials: not supported (backup writes to S3-compatible storage only; the cnpg-objectstore kind takes Google credentials)",
+// BarmanObjectStoreConfiguration that an object store of the rule
+// (backup.objectStore, recovery.source.objectStore) refuses with a reason;
+// path is the store's, and its serverName is set at path's parent. Its other
+// fields outside postgresqlObjectStoreKeys are refused as any unknown key is.
+func postgresqlObjectStoreRefusedKeys(path string) map[string]string {
+	parent := strings.TrimSuffix(path, ".objectStore")
+	return map[string]string{
+		"serverName":        path + ".serverName: not allowed (the ObjectStore CRD forbids it); use " + parent + ".serverName",
+		"azureCredentials":  path + ".azureCredentials: not supported (S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)",
+		"googleCredentials": path + ".googleCredentials: not supported (S3-compatible storage only; the cnpg-objectstore kind takes Google credentials)",
+	}
 }
 
 // The keys each block of `backup` reads.
@@ -99,13 +103,14 @@ func (PostgresqlRule) UnsupportedFieldHint(key string) string {
 }
 
 // NestedUnsupportedFieldHint gives the document check's refusal of a key of
-// `backup` or of backup.objectStore the reason the parser refuses it with.
+// `backup`, of backup.objectStore or of recovery.source.objectStore the reason
+// the parser refuses it with.
 func (PostgresqlRule) NestedUnsupportedFieldHint(parents []string, key string) string {
-	switch strings.Join(parents, ".") {
+	switch path := strings.Join(parents, "."); path {
 	case "backup":
 		return postgresqlBackupMovedKeys[key]
-	case "backup.objectStore":
-		return postgresqlObjectStoreRefusedKeys[key]
+	case "backup.objectStore", postgresqlRecoveryObjectStorePath:
+		return postgresqlObjectStoreRefusedKeys(path)[key]
 	}
 	return ""
 }
@@ -252,7 +257,7 @@ func parsePostgresqlBackup(props map[string]any) (*PostgresqlBackup, error) {
 		return nil, err
 	}
 	backup := &PostgresqlBackup{}
-	store, err := parsePostgresqlObjectStore(raw)
+	store, err := parsePostgresqlObjectStore(raw, "backup.objectStore", "the object store backups and WAL are written to")
 	if err != nil {
 		return nil, err
 	}
@@ -279,21 +284,22 @@ func parsePostgresqlBackup(props map[string]any) (*PostgresqlBackup, error) {
 	return backup, nil
 }
 
-// parsePostgresqlObjectStore reads backup.objectStore, required, strictly
+// parsePostgresqlObjectStore reads the objectStore of parent, at path, strictly
 // into the vendored BarmanObjectStoreConfiguration, and refuses what the
 // ObjectStore or the plugin would refuse at apply for a reason the decode
 // cannot see: no destination path, and S3 credentials other than exactly one
-// way to authenticate, held to the Barman types' own check.
-func parsePostgresqlObjectStore(backup map[string]any) (*barmanapi.BarmanObjectStoreConfiguration, error) {
-	const path = "backup.objectStore"
-	raw, present, err := parseObjectField(backup, "objectStore", path)
+// way to authenticate, held to the Barman types' own check. role says what
+// the store is for; the caller has made sure it is present when it may be
+// absent.
+func parsePostgresqlObjectStore(parent map[string]any, path, role string) (*barmanapi.BarmanObjectStoreConfiguration, error) {
+	raw, present, err := parseObjectField(parent, "objectStore", path)
 	if err != nil {
 		return nil, err
 	}
 	if !present {
-		return nil, errors.New(path + ": required (the object store backups and WAL are written to)")
+		return nil, errors.Errorf("%s: required (%s)", path, role)
 	}
-	if err := refusedProperty(raw, postgresqlObjectStoreRefusedKeys); err != nil {
+	if err := refusedProperty(raw, postgresqlObjectStoreRefusedKeys(path)); err != nil {
 		return nil, err
 	}
 	if err := rejectUnknownKeys(raw, postgresqlObjectStoreKeys, path); err != nil {
@@ -323,19 +329,21 @@ func parsePostgresqlObjectStore(backup map[string]any) (*barmanapi.BarmanObjectS
 	if err := refuseUnauthoredRequired(authored, postgresqlSecretKeyRefsRequired); err != nil {
 		return nil, errors.Wrap(err, path)
 	}
+	pathRole := strings.Replace(role, "object store", "object store path", 1)
 	if _, present := authored["destinationPath"]; !present {
-		return nil, errors.New(path + ".destinationPath: required (the object store path backups and WAL are written to)")
+		return nil, errors.Errorf("%s.destinationPath: required (%s)", path, pathRole)
 	}
 	if store.DestinationPath == "" {
-		return nil, errors.New(path + ".destinationPath: must not be empty (the object store path backups and WAL are written to)")
+		return nil, errors.Errorf("%s.destinationPath: must not be empty (%s)", path, pathRole)
 	}
 	if store.AWS == nil {
 		return nil, errors.New(path + ".s3Credentials: required (accessKeyId and secretAccessKey, or inheritFromIAMRole: true)")
 	}
-	if errs := store.AWS.ValidateAwsCredentials(field.NewPath("backup", "objectStore", "s3Credentials")); len(errs) > 0 {
+	steps := strings.Split(path, ".")
+	if errs := store.AWS.ValidateAwsCredentials(field.NewPath(steps[0], steps[1:]...).Child("s3Credentials")); len(errs) > 0 {
 		return nil, errors.Errorf("%s: %s", errs[0].Field, errs[0].Detail)
 	}
-	if err := checkPostgresqlObjectStoreValues(raw, store); err != nil {
+	if err := checkPostgresqlObjectStoreValues(raw, store, path); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -354,8 +362,7 @@ var (
 // plain string or int, and not to the CRD's enum or minimum. An authored
 // value the type omits when zero (`maxParallel: 0`, `compression: ""`) is
 // refused the same way, rather than dropped from the output.
-func checkPostgresqlObjectStoreValues(raw map[string]any, store *barmanapi.BarmanObjectStoreConfiguration) error {
-	const path = "backup.objectStore"
+func checkPostgresqlObjectStoreValues(raw map[string]any, store *barmanapi.BarmanObjectStoreConfiguration, path string) error {
 	authored := func(block, key string) bool {
 		m, _ := raw[block].(map[string]any)
 		_, present := authoredValue(m, key)

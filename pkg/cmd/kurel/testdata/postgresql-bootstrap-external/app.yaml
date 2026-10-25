@@ -25,19 +25,6 @@ spec:
           host: origin-rw.default.svc
           user: streaming_replica
           dbname: postgres
-        barmanObjectStore:
-          destinationPath: s3://origin-bucket/postgres/
-          endpointURL: https://s3.example.com
-          serverName: origin
-          s3Credentials:
-            accessKeyId:
-              name: origin-backup-creds
-              key: ACCESS_KEY_ID
-            secretAccessKey:
-              name: origin-backup-creds
-              key: SECRET_ACCESS_KEY
-          wal:
-            maxParallel: 4
       pooler:
         enabled: true
         type: ro

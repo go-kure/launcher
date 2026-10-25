@@ -1,0 +1,52 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  bootstrap:
+    recovery:
+      source: postgres-recovery-source
+  enablePDB: false
+  externalClusters:
+  - name: postgres-recovery-source
+    plugin:
+      name: barman-cloud.cloudnative-pg.io
+      parameters:
+        barmanObjectName: postgres-recovery-source
+        serverName: origin
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres-recovery-source
+  namespace: default
+spec:
+  configuration:
+    destinationPath: s3://origin-bucket/backups
+    endpointURL: https://s3.example.com
+    s3Credentials:
+      accessKeyId:
+        key: ACCESS_KEY_ID
+        name: origin-backup-creds
+      secretAccessKey:
+        key: SECRET_ACCESS_KEY
+        name: origin-backup-creds
+    wal:
+      maxParallel: 4
+  instanceSidecarConfiguration:
+    resources: {}

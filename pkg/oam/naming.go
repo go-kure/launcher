@@ -160,6 +160,14 @@ const (
 	// creates, so the rule holds every name, the default included, to 63
 	// characters.
 	NameRolePostgresqlScheduledBackup NameRole = "postgresql-scheduledbackup"
+	// NameRolePostgresqlRecoveryObjectStore is the Barman Cloud ObjectStore a
+	// `postgresql` component generates for an inline `recovery.source.objectStore`,
+	// the store the new Cluster is recovered from. Default:
+	// "<component>-recovery-source". The hook is asked with the component, and
+	// not at all for a component whose recovery source names an existing store
+	// (`recovery.source.objectStoreName`): it generates none. The Cluster's
+	// recovery source names the store by this name.
+	NameRolePostgresqlRecoveryObjectStore NameRole = "postgresql-recovery-objectstore"
 	// NameRoleHookGroup is the prefix of the names of a helmtemplate component's
 	// hook-group layouts, each "<prefix>-<NN>-<phase>": its directory, and, for
 	// a prefix the author or the hook set, the Flux Kustomization the base
@@ -273,6 +281,7 @@ var nameRoles = []struct {
 	{NameRolePostgresqlCluster, nameClassObject, nameSyntaxLabel1035},
 	{NameRolePostgresqlObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePostgresqlScheduledBackup, nameClassObject, nameSyntaxSubdomain},
+	{NameRolePostgresqlRecoveryObjectStore, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHookGroup, nameClassHookGroupPrefix, nameSyntaxSubdomain},
 	{NameRoleLayout, nameClassLayout, nameSyntaxKustomization},
 	{NameRoleGenerated, nameClassObject, nameSyntaxSubdomain},

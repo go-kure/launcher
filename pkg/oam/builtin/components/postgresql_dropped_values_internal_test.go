@@ -33,7 +33,7 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 		pathRequired   = "backup.objectStore.destinationPath: required (the object store path backups and WAL are written to)"
 		methodRequired = "replication.synchronous.method: required (any or first)"
 		copied         = "(the externalClusters entry the cluster is copied from)"
-		recovered      = "(the externalClusters entry the cluster is recovered from)"
+		folder         = "the folder the source cluster wrote within the store: its backup.serverName, else its Cluster's name"
 		poolerOnly     = " (the Pooler is emitted only when it is true)"
 	)
 	queries := []any{map[string]any{"name": "queries", "key": "custom.yaml"}}
@@ -98,19 +98,19 @@ func TestPostgresqlRule_BlockNotBuilt(t *testing.T) {
 		},
 		{
 			name:    "recovery without a source",
-			props:   map[string]any{"bootstrap": map[string]any{"recovery": map[string]any{}}},
-			refused: "bootstrap.recovery.source: required " + recovered,
+			props:   map[string]any{"recovery": map[string]any{}},
+			refused: "recovery.source: required (the object store and the folder the cluster is recovered from)",
 		},
 		{
-			name:    "recovery with an empty source",
-			props:   map[string]any{"bootstrap": map[string]any{"recovery": map[string]any{"source": ""}}},
-			refused: "bootstrap.recovery.source: must not be empty " + recovered,
+			name:    "recovery with an empty server name",
+			props:   map[string]any{"recovery": map[string]any{"source": map[string]any{"serverName": "", "objectStoreName": "origin"}}},
+			refused: "recovery.source.serverName: must not be empty (" + folder + ")",
 		},
 		{
 			name:        "recovery with a source",
-			props:       map[string]any{"bootstrap": map[string]any{"recovery": map[string]any{"source": "origin"}}},
+			props:       map[string]any{"recovery": map[string]any{"source": map[string]any{"serverName": "origin", "objectStoreName": "origin"}}},
 			clusterPath: []string{"bootstrap"},
-			cluster:     map[string]any{"recovery": map[string]any{"source": "origin"}},
+			cluster:     map[string]any{"recovery": map[string]any{"source": "db-recovery-source"}},
 		},
 		{
 			name:        "empty bootstrap",

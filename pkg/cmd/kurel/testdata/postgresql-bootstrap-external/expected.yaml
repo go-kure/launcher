@@ -12,20 +12,7 @@ spec:
       source: origin
   enablePDB: true
   externalClusters:
-  - barmanObjectStore:
-      destinationPath: s3://origin-bucket/postgres/
-      endpointURL: https://s3.example.com
-      s3Credentials:
-        accessKeyId:
-          key: ACCESS_KEY_ID
-          name: origin-backup-creds
-        secretAccessKey:
-          key: SECRET_ACCESS_KEY
-          name: origin-backup-creds
-      serverName: origin
-      wal:
-        maxParallel: 4
-    connectionParameters:
+  - connectionParameters:
       dbname: postgres
       host: origin-rw.default.svc
       user: streaming_replica

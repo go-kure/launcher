@@ -183,6 +183,17 @@ const namingDBStore = namingDB + `        backup:
               schedule: "@daily"
 `
 
+// namingDBRecovery is namingDBStore recovered from an inline object store, so
+// that the rule generates the recovery ObjectStore as well.
+const namingDBRecovery = namingDBStore + `        recovery:
+          source:
+            serverName: origin
+            objectStore:
+              destinationPath: s3://backups/origin
+              s3Credentials:
+                inheritFromIAMRole: true
+`
+
 const (
 	poolerKindName      = "Pooler.postgresql.cnpg.io"
 	databaseKindName    = "Database.postgresql.cnpg.io"
@@ -200,7 +211,7 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// the first two make other controllers write, have roles of their own. The
 	// expose trait's ingress trait stands for the ingress role.
 	extra := namingSecretTraits + claimHTTPRouteTrait + claimVolSyncTrait
-	doc := withWebVolume(namingApp(extra, namingDBStore+namingChart+jobs+artifact), "")
+	doc := withWebVolume(namingApp(extra, namingDBRecovery+namingChart+jobs+artifact), "")
 	namingTransform(t, doc, withManagedTLS(namingContext(declineEveryName(&requests))))
 
 	const (
@@ -222,7 +233,8 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// helm rule for its HelmRelease and the oci rule for the two objects it names
 	// after its component, each under its own role. The postgresql rule asks for
 	// its Cluster first and its ObjectStore next, each named after the component,
-	// before the Pooler, the Database and the ScheduledBackup.
+	// then the recovery ObjectStore, before the Pooler, the Database and the
+	// ScheduledBackup.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadVolumeClaim, Kind: "PersistentVolumeClaim", Default: "web-data"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
@@ -230,6 +242,7 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlRecoveryObjectStore, Kind: objectStoreKindName, Default: "db-recovery-source"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlScheduledBackup, Kind: scheduledBackupKind, Default: "db-nightly"},

@@ -331,11 +331,11 @@ func TestBuild_PostgresqlDependencyPolicyNameIsFree(t *testing.T) {
 }
 
 // TestBuild_PostgresqlLargeIntegerSurvivesLowering: an integer field the
-// former typed decode accepted still builds, instead of rounding through a
-// float64 in the rule's encoding of the Cluster spec into a value the
-// cnpg-cluster decode refuses as overflowing. (The exact value on the
-// generated Cluster is pinned in the components package; the printed YAML is
-// the output serializer's.)
+// typed decode accepts still builds, instead of rounding through a float64 in
+// the rule's encoding of the recovery ObjectStore spec into a value the
+// cnpg-objectstore decode refuses as overflowing. (The exact value on the
+// generated ObjectStore is pinned in the components package; the printed YAML
+// is the output serializer's.)
 func TestBuild_PostgresqlLargeIntegerSurvivesLowering(t *testing.T) {
 	app := `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -347,13 +347,13 @@ spec:
     - name: db
       type: postgresql
       properties:
-        bootstrap:
-          recovery:
-            source: origin
-        externalClusters:
-          - name: origin
-            barmanObjectStore:
+        recovery:
+          source:
+            serverName: origin
+            objectStore:
               destinationPath: s3://bucket/origin/
+              s3Credentials:
+                inheritFromIAMRole: true
               wal:
                 maxParallel: 9223372036854775807
 `

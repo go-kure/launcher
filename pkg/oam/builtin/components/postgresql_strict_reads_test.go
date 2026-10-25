@@ -31,6 +31,17 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 	withSchedule := func(key string, value any) map[string]any {
 		return withBackup("schedules", []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *", key: value}})
 	}
+	// withSource, withRecovery and withTarget are a valid recovery.source,
+	// recovery and recovery.target with one key set on top.
+	withSource := func(key string, value any) map[string]any {
+		return map[string]any{"serverName": "origin", "objectStoreName": "origin", key: value}
+	}
+	withRecovery := func(key string, value any) map[string]any {
+		return map[string]any{"source": withSource("serverName", "origin"), key: value}
+	}
+	withTarget := func(key string, value any) map[string]any {
+		return withRecovery("target", map[string]any{"backupID": "20261020T030000", key: value})
+	}
 	cases := []struct {
 		name  string
 		props map[string]any
@@ -74,16 +85,34 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 		{"pooler.image", map[string]any{"pooler": map[string]any{"image": 1}}, "pooler.image"},
 
 		{"bootstrap", map[string]any{"bootstrap": "x"}, "bootstrap"},
-		{"bootstrap.recovery", map[string]any{"bootstrap": map[string]any{"recovery": "x"}}, "bootstrap.recovery"},
-		{"bootstrap.recovery.source", map[string]any{"bootstrap": map[string]any{"recovery": map[string]any{"source": 1}}}, "bootstrap.recovery.source"},
+		{"bootstrap.recovery", map[string]any{"bootstrap": map[string]any{"recovery": "x"}}, "bootstrap.recovery: moved to recovery"},
 		{"bootstrap.pg_basebackup", map[string]any{"bootstrap": map[string]any{"pg_basebackup": "x"}}, "bootstrap.pg_basebackup"},
 		{"bootstrap.pg_basebackup.source", map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{"source": 1}}}, "bootstrap.pg_basebackup.source"},
+
+		{"recovery", map[string]any{"recovery": "x"}, "recovery"},
+		{"recovery.source", map[string]any{"recovery": map[string]any{"source": "x"}}, "recovery.source"},
+		{"recovery.source.serverName", map[string]any{"recovery": map[string]any{"source": withSource("serverName", 1)}}, "recovery.source.serverName"},
+		{"recovery.source.objectStoreName", map[string]any{"recovery": map[string]any{"source": withSource("objectStoreName", 1)}}, "recovery.source.objectStoreName"},
+		{"recovery.source.objectStore", map[string]any{"recovery": map[string]any{"source": map[string]any{"serverName": "origin", "objectStore": "x"}}}, "recovery.source.objectStore"},
+		{"recovery.target", map[string]any{"recovery": withRecovery("target", "x")}, "recovery.target"},
+		{"recovery.target.time", map[string]any{"recovery": withTarget("time", 1)}, "recovery.target.time"},
+		{"recovery.target.lsn", map[string]any{"recovery": withTarget("lsn", 1)}, "recovery.target.lsn"},
+		{"recovery.target.xid", map[string]any{"recovery": withTarget("xid", 1)}, "recovery.target.xid"},
+		{"recovery.target.name", map[string]any{"recovery": withTarget("name", 1)}, "recovery.target.name"},
+		{"recovery.target.immediate", map[string]any{"recovery": withTarget("immediate", "true")}, "recovery.target.immediate"},
+		{"recovery.target.backupID", map[string]any{"recovery": withTarget("backupID", 1)}, "recovery.target.backupID"},
+		{"recovery.target.timeline", map[string]any{"recovery": withTarget("timeline", 1)}, "recovery.target.timeline"},
+		{"recovery.target.exclusive", map[string]any{"recovery": withTarget("exclusive", "false")}, "recovery.target.exclusive"},
+		{"recovery.database", map[string]any{"recovery": withRecovery("database", 1)}, "recovery.database"},
+		{"recovery.owner", map[string]any{"recovery": withRecovery("owner", 1)}, "recovery.owner"},
+		{"recovery.secret", map[string]any{"recovery": withRecovery("secret", "x")}, "recovery.secret"},
+		{"recovery.secret.name", map[string]any{"recovery": withRecovery("secret", map[string]any{"name": 1})}, "recovery.secret.name"},
 
 		{"externalClusters", map[string]any{"externalClusters": map[string]any{}}, "externalClusters"},
 		{"externalClusters[0]", map[string]any{"externalClusters": []any{"x"}}, "externalClusters[0]"},
 		{"externalClusters[0].name", map[string]any{"externalClusters": []any{map[string]any{"name": 1}}}, "externalClusters[0].name"},
 		{"externalClusters[0] nameless", map[string]any{"externalClusters": []any{map[string]any{"connectionParameters": map[string]any{"host": "h"}}}}, "externalClusters[0]"},
-		{"externalClusters[0].barmanObjectStore", map[string]any{"externalClusters": []any{map[string]any{"name": "e", "barmanObjectStore": "x"}}}, "externalClusters[0].barmanObjectStore"},
+		{"externalClusters[0].barmanObjectStore", map[string]any{"externalClusters": []any{map[string]any{"name": "e", "barmanObjectStore": "x"}}}, "externalClusters[0].barmanObjectStore: removed"},
 		{"externalClusters[0].connectionParameters", map[string]any{"externalClusters": []any{map[string]any{"name": "e", "connectionParameters": "x"}}}, "externalClusters[0].connectionParameters"},
 
 		{"replication", map[string]any{"replication": "x"}, "replication"},
@@ -156,31 +185,21 @@ func TestPostgresql_NullIsAbsence(t *testing.T) {
 	}
 }
 
-// TestPostgresql_BootstrapNullSiblingIsAbsent: recovery and pg_basebackup are
-// mutually exclusive, and a null or typed-nil sibling is absent for that check, as
-// for every other read. Before the strict reads a typed-nil sibling passed the
-// map assertion and counted as authored, refusing a valid bootstrap.
-func TestPostgresql_BootstrapNullSiblingIsAbsent(t *testing.T) {
-	siblings := map[string]func(b map[string]any, key string){
-		"omitted":   func(map[string]any, string) {},
-		"nil":       func(b map[string]any, key string) { b[key] = nil },
-		"typed nil": func(b map[string]any, key string) { b[key] = map[string]any(nil) },
+// TestPostgresql_FormerBootstrapRecoveryNullIsRefused: the former
+// bootstrap.recovery is refused whatever its value, null and typed nil included,
+// as every removed key is (refusedProperty); pg_basebackup alone reads.
+func TestPostgresql_FormerBootstrapRecoveryNullIsRefused(t *testing.T) {
+	for name, recovery := range map[string]any{"nil": nil, "typed nil": map[string]any(nil)} {
+		t.Run(name, func(t *testing.T) {
+			b := map[string]any{"pg_basebackup": map[string]any{"source": "src"}, "recovery": recovery}
+			if _, err := postgresqlConfigFor(t, map[string]any{"bootstrap": b}); err == nil || !strings.Contains(err.Error(), "bootstrap.recovery: moved to recovery") {
+				t.Errorf("bootstrap %v: err = %v, want refused", b, err)
+			}
+		})
 	}
-	for authored, sibling := range map[string]string{"recovery": "pg_basebackup", "pg_basebackup": "recovery"} {
-		for name, set := range siblings {
-			t.Run(authored+"/"+sibling+" "+name, func(t *testing.T) {
-				b := map[string]any{authored: map[string]any{"source": "src"}}
-				set(b, sibling)
-				cfg, err := postgresqlConfigFor(t, map[string]any{"bootstrap": b})
-				if err != nil {
-					t.Fatalf("bootstrap %v: %v", b, err)
-				}
-				got := map[string]string{"recovery": cfg.BootstrapRecoverySource, "pg_basebackup": cfg.BootstrapPgBasebackupSource}
-				if got[authored] != "src" || got[sibling] != "" {
-					t.Errorf("bootstrap %v: sources = %v, want only %s", b, got, authored)
-				}
-			})
-		}
+	cfg, err := postgresqlConfigFor(t, map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{"source": "src"}}})
+	if err != nil || cfg.BootstrapPgBasebackupSource != "src" {
+		t.Errorf("pg_basebackup alone: %+v, %v", cfg, err)
 	}
 }
 

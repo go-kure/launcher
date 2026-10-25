@@ -224,6 +224,28 @@ that archives WAL to that store (no in-tree `spec.backup`), and each
 `backup.schedules` entry emits a `cnpg-scheduledbackup` of method `plugin`,
 named `<component>-<schedule>`, after the Databases.
 
+`recovery` (the same ticket) lowers onto them likewise. The Cluster gets
+`bootstrap.recovery` whose source is one `externalClusters` entry the rule
+writes, `<component>-recovery-source`, naming the barman-cloud plugin, the
+store and the source's folder (`serverName`). The store is an existing one
+(`recovery.source.objectStoreName`) or an inline
+`recovery.source.objectStore`, which the component emits as a
+`cnpg-objectstore` named `<component>-recovery-source`. The former
+`bootstrap.recovery` and an external cluster's in-tree `barmanObjectStore`
+(gone in CloudNativePG 1.31) are refused.
+
+The inline recovery store is ordered differently from the other members. The
+Pooler, the Databases and the ScheduledBackups wait for the Cluster where the
+document orders its components. The store cannot: the recovering Cluster reads
+it before it can become ready, and under a dependency policy Flux applies a
+group only once the group before it is ready, so a store ordered after the
+Cluster would never be applied. So, where the document orders its components,
+the Cluster is ordered after the store instead: the store gets a group of its
+own before the Cluster's, with the placements and bundle traits the members
+get. Leaving it unordered there would leave its group and bundle undecided.
+Where the document does not order its components, nothing is ordered, and the
+store is applied with the Cluster, as the backup store is.
+
 ## Consequences
 
 - An author who needs a CR field the semantic component does not publish uses

@@ -1,0 +1,74 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  bootstrap:
+    recovery:
+      source: postgres-recovery-source
+  enablePDB: false
+  externalClusters:
+  - name: postgres-recovery-source
+    plugin:
+      name: barman-cloud.cloudnative-pg.io
+      parameters:
+        barmanObjectName: postgres
+        serverName: origin
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  plugins:
+  - isWALArchiver: true
+    name: barman-cloud.cloudnative-pg.io
+    parameters:
+      barmanObjectName: postgres
+      serverName: postgres-v2
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres
+  namespace: default
+spec:
+  configuration:
+    destinationPath: s3://my-bucket/backups
+    endpointURL: https://s3.example.com
+    s3Credentials:
+      accessKeyId:
+        key: ACCESS_KEY_ID
+        name: backup-creds
+      secretAccessKey:
+        key: SECRET_ACCESS_KEY
+        name: backup-creds
+  instanceSidecarConfiguration:
+    resources: {}
+  retentionPolicy: 30d
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    launcher.gokure.dev/component: postgres
+  name: postgres-nightly
+  namespace: default
+spec:
+  backupOwnerReference: self
+  cluster:
+    name: postgres
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  schedule: 0 0 2 * * *
