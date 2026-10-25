@@ -29,3 +29,4 @@ file pkg/thanos/operator.go 2305867c39f8f213ac04efdde1535e4ec4b24e4a
 file pkg/thanos/rules.go f7e29b44f089e3c2b3fadde2adcf2f25a4f8ef82
 file pkg/thanos/statefulset.go fe5093cde242423a83aad03456d6ebf189775378
 file pkg/operator/defaults.go e0a4d715bd29b7467658f3a9cff464c507501a87
+file pkg/operator/validations.go 7811b1a21bdb283ec265a5ffe7f40fe571e6b93b

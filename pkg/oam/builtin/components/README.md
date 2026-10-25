@@ -3986,7 +3986,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `amcfg.go` and `operator.go`) and holds each to this list, or to the
     reason it gates no field of this kind (the configuration of a receiver, a
     route or a configSecret Secret); the files, with the operator's
-    `pkg/operator/defaults.go`, are vendored unmodified under
+    `pkg/operator/defaults.go` and `pkg/operator/validations.go`, are
+    vendored unmodified under
     `testdata/upstream/prometheus-operator`, with the project's LICENSE and
     NOTICE and a SOURCE file naming each file's git blob id, and
     `mise run vendor-prometheus-operator-gates <tag>` re-fetches them for the
@@ -5119,6 +5120,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `apiVersion: v1` (Prometheus 2.x only; refused at every 3.x version, prereleases included),
     a remote write entry's `queueConfig.maxRetries` (below 2.11.0), and
     `allowOverlappingBlocks` (from 2.11.0 and below 2.39.0).
+  - a relabeling rule's `targetLabel` that is not a legacy label name
+    (`[a-zA-Z_][a-zA-Z0-9_]*`), such as `service.name` or a `${1}`
+    template, below Prometheus 3.0.0, from which the operator judges label
+    names by the UTF-8 scheme instead (`ValidationSchemeForPrometheus`,
+    `pkg/operator/validations.go`): it refuses the object at reconcile
+    (go-kure/launcher#1018). The operator checks the `targetLabel` of the
+    actions `replace` (an empty action included), `hashmod`, `lowercase`,
+    `uppercase`, `keepequal` and `dropequal`, in the four lists whose
+    actions are gated above. Unset, `version` is the operator's default
+    v3.14.0, at which none is refused; an unparsable `version` is left to
+    the operator, and an action refused below its version is refused first.
+    `TestPrometheusRelabelTargetLabels_MatchVendoredSource` holds the
+    threshold, the actions and the lists to the operator's source.
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
     v0.42.4, at which none is refused (an empty `thanos.version` is not

@@ -61,7 +61,8 @@ git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/thano
 
 # The files the tests read, by their path in prometheus-operator/prometheus-operator:
 # every Go file of each package of PACKAGES, its tests aside, so that the tests
-# walk each one for a version comparison, and the operator's defaults.
+# walk each one for a version comparison, the operator's defaults, and the
+# label-name scheme it picks by Prometheus version (go-kure/launcher#1018).
 # pkg/prometheus/agent is left out: no kind of launcher's runs a Prometheus
 # agent.
 shopt -s nullglob
@@ -79,7 +80,7 @@ for pkg in "${PACKAGES[@]}"; do
   fi
 done
 shopt -u nullglob
-FILES+=(pkg/operator/defaults.go)
+FILES+=(pkg/operator/defaults.go pkg/operator/validations.go)
 
 # Each file is read from the tag's tree, not the checkout, so that no checkout
 # conversion (core.autocrlf, a filter) changes its bytes.
