@@ -1519,6 +1519,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		typ   string
 	}
 	decorated := make(map[slotTrait]string)
+	// A sibling group's Flux members, taken before its first trait can decorate
+	// a member (groupFluxMembers).
+	fluxMembers := groupFluxMembers(e)
 	steps := e.traitSteps(app)
 	// The names are taken only for an entry with a trait to check: a traitless
 	// one would pay for every entry's name and use none (go-kure/launcher#747).
@@ -1623,18 +1626,21 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			if len(e.members) > 0 {
 				member = entry.component.Type
 			}
+			readers := fluxInputReaders(e, fluxMembers, entry.app)
 			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
 			if resolved.naming != nil {
 				resolved.naming.objectName = entry.component.ObjectName()
-				resolved.naming.fluxNamespace, resolved.naming.owner = ctx.FluxNamespace, entry.app
-				// What the owner's Flux object reads can depend on where it
+				resolved.naming.fluxNamespace, resolved.naming.readers = ctx.FluxNamespace, readers
+				// What a reader's Flux object reads can depend on where it
 				// lands (a HelmRelease's chart verification Secret is read only
-				// when the chart's source is in its own namespace), so the
-				// owner is told the Flux namespace before a claim asks
+				// when the chart's source is in its own namespace), so every
+				// reader is told the Flux namespace before a claim asks
 				// (fluxObjectReads), as postProcessFluxNamespace tells it again
 				// before the move: both ask the same question of the same state.
-				if setter, ok := entry.app.Config.(fluxNamespaceSettable); ok && ctx.FluxNamespace != "" {
-					setter.SetFluxNamespace(ctx.FluxNamespace)
+				for _, r := range readers {
+					if setter, ok := r.Config.(fluxNamespaceSettable); ok && ctx.FluxNamespace != "" {
+						setter.SetFluxNamespace(ctx.FluxNamespace)
+					}
 				}
 			}
 			prev := slices.Clone(bundle.Applications)
@@ -1693,10 +1699,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				}
 			}
 			subApps = append(subApps, added...)
-			// Recorded under the member the trait ran on, not the group: only
-			// that member's Flux object reading one moves it.
+			// Recorded under the member the trait ran on, not the group, with the
+			// readers its claim asked: a group's Flux member's trait objects move
+			// when any Flux member reads them, a non-Flux member's never.
 			if len(added) > 0 && ctx.traitSubApps != nil {
-				*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: entry.app, subApps: added})
+				*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: entry.app, readers: readers, subApps: added})
 			}
 
 			if d, ok := handler.(SubApplicationDecorator); ok && d.DecoratesSubApplications() {

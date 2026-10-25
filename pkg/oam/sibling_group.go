@@ -187,8 +187,10 @@ func (e componentEntry) traitSteps(app *Application) []traitStep {
 //   - fluxNamespaceSettable (transform.go postProcessFluxNamespace): set on
 //     every member.
 //   - fluxNamespaceReader: every member's reads. moveFluxNamespaceInputs asks
-//     the member a trait ran on instead, so the union never moves one member's
-//     trait object for another member's read.
+//     the group's Flux members instead (fluxInputReaders): a Flux member's trait
+//     object moves when any of them reads it, as they land in the one Flux
+//     namespace together, and a member that is no Flux object never moves its
+//     trait objects for another member's read.
 //   - ComponentNamed (for consumers attributing objects to their component):
 //     the group's name, which every member shares.
 //   - servicePortProvider, serviceBackendNamer, serviceRoutingTargeter
