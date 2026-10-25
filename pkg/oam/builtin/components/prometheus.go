@@ -208,7 +208,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One scrape class: name, required. An empty action of a relabelings or metricRelabelings rule is refused, since the API server would replace it with replace."+decoded+"ScrapeClass in its API reference."),
 		"serviceDiscoveryRole":          text("serviceDiscoveryRole: the role ServiceMonitor targets and Alertmanager endpoints are discovered with: Endpoints, the operator's default, or EndpointSlice."),
 		"tsdb":                          object("tsdb: the settings of the time series database that are reloaded at runtime: outOfOrderTimeWindow, staleSeriesCompactionThreshold and chunkEncoding. Requires Prometheus v2.39.0 or later." + decoded + "TSDBSpec in its API reference."),
-		"scrapeFailureLogFile":          text("scrapeFailureLogFile: the file scrape failures are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a relative path with a directory is read from the directory of the configuration, /etc/prometheus/config_out. The file's directory is refused unless the mount that covers it most closely, at it or above it, is writable: the data volume at /prometheus and that emptyDir are; /etc/prometheus/config_out and the operator's certificate, secret, configMap and web configuration mounts are not; nor is a mount with readOnly set or of a configMap, secret, downwardAPI or projected volume, which the kubelet mounts read-only. Other read-only sources are not judged, and a mount of one is admitted. Where no mount covers it, it is refused unless a prometheus patch sets securityContext.readOnlyRootFilesystem to false. A file in /dev, /proc or a directory under them, as /dev/stdout, is not refused. Requires Prometheus v2.55.0 or later. Not empty."),
+		"scrapeFailureLogFile":          text("scrapeFailureLogFile: the file scrape failures are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a relative path with a directory is read from the directory of the configuration, /etc/prometheus/config_out. The file's directory is refused unless the mount that covers it most closely, at it or above it, is writable: the data volume at /prometheus and that emptyDir are; /etc/prometheus/config_out and the operator's certificate, secret, configMap and web configuration mounts are not; nor is a mount with readOnly set or of a configMap, secret, downwardAPI or projected volume, which the kubelet mounts read-only. Of mounts at one path written differently, one writable makes it writable. The rule ConfigMap and web TLS mounts are not listed, so a directory in one is judged as one no mount covers; an author's mount of an image volume, a readOnly CSI volume or one of the operator's own volumes counts as writable. Where no mount covers it, it is refused unless a prometheus patch sets securityContext.readOnlyRootFilesystem to false. A file in /dev, /proc or a directory under them, as /dev/stdout, is not refused. Requires Prometheus v2.55.0 or later. Not empty."),
 		"serviceName":                   text("serviceName: the name of the governing Service of the StatefulSets, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named prometheus-operated. Not empty, and a DNS-1035 label (starting with a letter), the rule of every Service name here: the API refuses a Service of another name before Kubernetes 1.36 (by default), and the operator fails to reconcile where it finds no Service of the name."),
 		"runtime":                       object("runtime: the settings of the Prometheus process: goGC." + decoded + "RuntimeConfig in its API reference."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop; 0 kills them at once, which may corrupt data. Unset, 600. At least 0."),
@@ -233,7 +233,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
 		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names; the operator copies only an entry's name and mountPath, so any other field of one is refused. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
-		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory; a relative path with a directory is read from the directory of the configuration, /etc/prometheus/config_out. The file's directory is refused unless the mount that covers it most closely, at it or above it, is writable: the data volume at /prometheus and that emptyDir are; /etc/prometheus/config_out and the operator's certificate, secret, configMap and web configuration mounts are not; nor is a mount with readOnly set or of a configMap, secret, downwardAPI or projected volume, which the kubelet mounts read-only. Other read-only sources are not judged, and a mount of one is admitted. Where no mount covers it, it is refused unless a prometheus patch sets securityContext.readOnlyRootFilesystem to false. A file in /dev, /proc or a directory under them, as a standard stream such as /dev/stdout, is not refused."),
+		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory; a relative path with a directory is read from the directory of the configuration, /etc/prometheus/config_out. The file's directory is refused unless the mount that covers it most closely, at it or above it, is writable: the data volume at /prometheus and that emptyDir are; /etc/prometheus/config_out and the operator's certificate, secret, configMap and web configuration mounts are not; nor is a mount with readOnly set or of a configMap, secret, downwardAPI or projected volume, which the kubelet mounts read-only. Of mounts at one path written differently, one writable makes it writable. The rule ConfigMap and web TLS mounts are not listed, so a directory in one is judged as one no mount covers; an author's mount of an image volume, a readOnly CSI volume or one of the operator's own volumes counts as writable. Where no mount covers it, it is refused unless a prometheus patch sets securityContext.readOnlyRootFilesystem to false. A file in /dev, /proc or a directory under them, as a standard stream such as /dev/stdout, is not refused."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
 		"evaluationInterval":     text("evaluationInterval: the interval between two evaluations of the rules. Unset, the API fills 30s; an empty one is refused, since the API server would replace it." + duration),
@@ -516,7 +516,7 @@ func validatePrometheusLogFileDirectories(spec *monitoringv1.PrometheusSpec) err
 		if cover != "" {
 			return errors.Errorf("%s: %q is in %s, under the read-only mount at %s in the prometheus container, so Prometheus cannot create the file; mount a writable volume at %s, or name a standard stream such as /dev/stdout", f.field, f.file, dir, cover, dir)
 		}
-		return errors.Errorf("%s: %q is in %s, where no volume is mounted, and the prometheus container's root filesystem is read-only, so Prometheus cannot create the file; mount a writable volume at %s or a directory above it, or name a standard stream such as /dev/stdout", f.field, f.file, dir, dir)
+		return errors.Errorf("%s: %q is in %s, where no volume is known to be mounted, and the prometheus container's root filesystem is read-only, so Prometheus cannot create the file; mount a writable volume at %s or a directory above it, or name a standard stream such as /dev/stdout", f.field, f.file, dir, dir)
 	}
 	return nil
 }
@@ -541,8 +541,8 @@ type prometheusMount struct {
 // mount is at (paths compared cleaned, a relative mountPath taken from /, as
 // the kubelet joins it to the root, makeMounts, pkg/kubelet/kubelet_pods.go:
 // 400-402 at Kubernetes v1.37.1). Where several mounts are at that path,
-// spelled differently so that all of them stay, any read-only one makes it
-// read-only, as which the container runtime mounts last is not derived. Where
+// spelled differently so that all of them stay, a writable one makes it
+// writable, as which the container runtime mounts last is not derived. Where
 // none covers dir, the root filesystem decides, which the operator makes
 // read-only (pkg/prometheus/server/statefulset.go:349 at prometheus-operator
 // v0.94.1) unless a patch of the prometheus container sets
@@ -560,7 +560,7 @@ func prometheusDirectoryWritable(spec *monitoringv1.PrometheusSpec, dir string) 
 		case len(c) > len(cover):
 			cover, writable = c, m.writable
 		case c == cover:
-			writable = writable && m.writable
+			writable = writable || m.writable
 		}
 	}
 	if cover != "" {
@@ -590,11 +590,12 @@ func prometheusDirectoryWritable(spec *monitoringv1.PrometheusSpec, dir string) 
 // secret, downwardAPI or projected volume of the spec's is read-only whatever
 // it says, as the kubelet mounts those read-only (makeMounts,
 // pkg/kubelet/kubelet_pods.go:409 and :425, from each plugin's GetAttributes,
-// at Kubernetes v1.37.1). Other read-only sources are not modelled: the rule
-// ConfigMaps' mounts under /etc/prometheus/rules and the web TLS mounts, image
-// volumes, CSI volumes set readOnly, and the operator's own volumes named in
-// a mount. A mount of one of those counts as writable, so the check admits
-// where it cannot be sure and refuses only a directory it knows is read-only.
+// at Kubernetes v1.37.1). Other read-only sources are not modelled. The rule
+// ConfigMaps' mounts under /etc/prometheus/rules and the web TLS mounts are
+// not listed, so a directory in one is judged on the root filesystem, which
+// refuses it unless it is made writable. An author's mount of an image
+// volume, a CSI volume set readOnly, or one of the operator's own volumes
+// counts as writable: the check admits where it cannot be sure.
 func prometheusMounts(spec *monitoringv1.PrometheusSpec) []prometheusMount {
 	readOnlyVolumes := map[string]bool{}
 	for _, v := range spec.Volumes {

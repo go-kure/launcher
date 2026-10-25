@@ -4855,15 +4855,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     author's, in `volumeMounts` or a patch of the `prometheus` container, is
     writable unless it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only.
-    Other read-only sources are not judged, and a mount of one is admitted:
-    the rule ConfigMap and web TLS mounts, image volumes, CSI volumes set
-    `readOnly`, and the operator's own volumes named in a mount. The check
-    refuses only a directory it knows is read-only. A patch mount at a path written as
-    an earlier mount's is merged into it by the operator's strategic merge:
-    it takes the patch's volume and keeps `readOnly` if either sets it. Of
-    mounts at one path written differently, as `/data` and `/data/`, any
-    read-only one makes it read-only, since which one the container runtime
-    mounts over the other is not derived. A directory below a writable mount
+    Other read-only sources are not modelled: the rule ConfigMap and web TLS
+    mounts are not listed, so a directory in one is judged as one no mount
+    covers, below; an author's mount of an image volume, a CSI volume set
+    `readOnly`, or one of the operator's own volumes counts as writable. A
+    patch mount at a path written as an earlier mount's is merged into it by
+    the operator's strategic merge: it takes the patch's volume and keeps
+    `readOnly` if either sets it. Of mounts at one path written differently,
+    as `/data` and `/data/`, one writable makes it writable, since which one
+    the container runtime mounts over the other is not derived. The check
+    refuses only where it knows the directory is read-only. A directory below a writable mount
     counts as writable, since it may exist on the volume or be made by an
     init container. Where no mount covers the directory, the root filesystem
     decides, which the operator makes read-only unless a patch of the
