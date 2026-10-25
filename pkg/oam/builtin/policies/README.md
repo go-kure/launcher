@@ -52,8 +52,8 @@ Dependency edges combine with the tier order of `placement`: both are edges of o
 graph. An edge against the tier order (a component placed in `infra` depending on one
 placed in `apps`) cannot hold and fails the transform, naming both declarations.
 
-When several `oci` components share one Flux source (the same OCI artifact at the same
-interval), the source is a generated one (go-kure/launcher#784): it is emitted once and
+When several `oci` components share one Flux source (the same OCI artifact, version, interval
+and registry access), the source is a generated one (go-kure/launcher#784): it is emitted once and
 applied with the application bundle, ahead of every group, so no rule can put a consumer
 before it. A rule naming an `oci` component orders its Kustomization only. An `oci`
 component alone on its artifact keeps its source with it: a rule orders both objects.
