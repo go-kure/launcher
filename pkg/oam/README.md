@@ -352,7 +352,12 @@ Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxName
 `helmrelease`, `fluxcd-kustomization`, Flux source, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation`, `artifactgenerator` and `resourcesetinputprovider` kinds) moves its Flux objects there, and a trait
 sub-application of that component follows only when the Flux object reads it by name from its own
-namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespaceReads`: a
+namespace (go-kure/launcher#740). In a sibling group the Flux object is any of the group's Flux
+members, the members whose config takes the Flux namespace before the component's first trait runs:
+they land in the Flux namespace together, so a Flux member's trait sub-application follows when any
+of them reads it, whichever member carries the trait (an `oci` component's source reads the Secret
+of a trait on its Kustomization, go-kure/launcher#1012). A member that is no Flux object keeps its
+trait sub-applications with its workloads, whatever a Flux member reads. The config reports what it reads (`FluxNamespaceReads`: a
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
 `secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
 sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the
@@ -1634,7 +1639,8 @@ claimed under kind `Secret` too, so a `certificate` or `secret` trait's Secret o
 is refused.
 
 All of these but the PersistentVolumeClaim move with the component's Flux object to the Flux namespace
-(`TransformContext.FluxNamespace`) when that object reads the ConfigMap or Secret by name, and
+(`TransformContext.FluxNamespace`) when that object reads the ConfigMap or Secret by name (in a
+sibling group, any of the group's Flux members when the trait is on one of them), and
 are claimed in the namespace they land in, decided by the same test that moves them: a Secret a HelmRepository
 reads from its own trait no longer collides with a same-named Secret another component makes in
 the application namespace, while two that land in the Flux namespace still collide. A Secret the

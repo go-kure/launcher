@@ -630,11 +630,12 @@ type traitNaming struct {
 	// objectName is the name of the object of the component the trait is applied
 	// on (Component.ObjectName).
 	objectName string
-	// fluxNamespace is the transform's TransformContext.FluxNamespace, and owner
-	// the application the trait is applied on, whose Flux object a trait object
-	// may follow there (landingNamespace).
+	// fluxNamespace is the transform's TransformContext.FluxNamespace, and
+	// readers the applications whose Flux objects a trait object may follow
+	// there (landingNamespace): fluxInputReaders' answer for the application the
+	// trait is applied on, which the move asks too.
 	fluxNamespace string
-	owner         *stack.Application
+	readers       []*stack.Application
 	// subApps holds, by name, every sub-application name this trait resolved
 	// since the engine last took them.
 	subApps map[string][]subAppName
@@ -805,11 +806,11 @@ func (t *Trait) ClaimGeneratedObjectName(kind schema.GroupKind, namespace, name,
 
 // landingNamespace returns the namespace a trait object generated in namespace
 // lands in when it is a Flux namespace input of the ConfigMap or Secret (kind)
-// name: the Flux namespace when the transform has one and the Flux object of
-// the application the trait is applied on reads name (fluxObjectReads, the test
+// name: the Flux namespace when the transform has one and a Flux object of the
+// trait's readers reads name (fluxObjectReads, the test
 // moveFluxNamespaceInputs moves by), else namespace.
 func (n *traitNaming) landingNamespace(namespace, kind, name string) string {
-	if n == nil || n.fluxNamespace == "" || !fluxObjectReads(n.owner, kind, name) {
+	if n == nil || n.fluxNamespace == "" || !fluxObjectReads(n.readers, kind, name) {
 		return namespace
 	}
 	return n.fluxNamespace
