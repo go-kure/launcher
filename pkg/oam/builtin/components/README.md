@@ -4047,6 +4047,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
     `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
     credentials are left to the API, as their volumes are.
+  - an entry of `volumeMounts` at the path of an earlier one, compared cleaned:
+    the API refuses two mounts written alike, and of two written otherwise,
+    as `/data` and `/data/`, the container runtime mounts one over the other.
+    The message names both entries.
   - an entry of `additionalArgs` whose name, or that name with `no-` added or
     taken away, is a flag the operator generates for the spec: it then fails
     to build the pods (`BuildArgs`, `pkg/operator/argument.go:26-79`). The
@@ -4516,6 +4520,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of each Secret key's volume above, and
     `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
     :441-471, :601-626).
+  - an entry of `volumeMounts` at the path of an earlier one, compared cleaned:
+    the API refuses two mounts written alike, and of two written otherwise,
+    as `/data` and `/data/`, the container runtime mounts one over the other.
+    The message names both entries.
   - `dnsPolicy: None` without `dnsConfig.nameservers`: the API refuses the
     pods the operator copies them into (:539-540).
   - a name the operator's objects cannot be named after: the data volume
@@ -4821,6 +4829,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `mountPropagation`, `bindMountOptions`), which the operator drops: it
     copies only those two into the sidecar's mount (:642-647).
     `TestThanosDroppedMountFields` holds the list to every field of the type.
+  - an entry of `volumeMounts`, or of `thanos.volumeMounts`, at the path of
+    an earlier one of the same field, compared cleaned: the API refuses two
+    mounts written alike, and of two written otherwise, as `/data` and
+    `/data/`, the container runtime mounts one over the other. The message
+    names both entries.
   - a `queryLogFile` named without a directory beside a
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
@@ -4828,11 +4841,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (server/statefulset.go:510, :537; common.go:334-347). A writable volume
     the author mounts there, in `volumeMounts` or a patch of the
     `prometheus` container, is accepted; a mount there with `readOnly` set,
-    in either, is not. The path is compared cleaned (`/var/log/prometheus/`
+    in either, is not, nor is one of a `configMap`, `secret`, `downwardAPI`
+    or `projected` volume, which the kubelet mounts read-only; where the
+    patch names the path as `volumeMounts` does, the merged mount takes the
+    patch's volume. The path is compared cleaned (`/var/log/prometheus/`
     is the same directory). Where both name the path alike, the operator's
     strategic merge keeps `readOnly` if either sets it; where they spell it
     differently, both mounts stay, and which one the container runtime mounts
     over the other is not derived, so the read-only one still refuses.
+  - a `queryLogFile` or `scrapeFailureLogFile` named with an absolute
+    directory no writable volume is mounted at: the operator passes the path
+    unchanged (common.go:230-236), and Prometheus cannot create the file on
+    the read-only root filesystem. The data volume at `/prometheus`, the
+    `log-file` volume at `/var/log/prometheus` where the operator adds it,
+    and a writable mount of the author's at exactly that directory, judged
+    as above, count; one at a directory above it does not, since Prometheus
+    does not create the subdirectory. Prometheus joins a relative path with
+    a directory, as `logs/query.log`, to the directory of its configuration,
+    `/etc/prometheus/config_out`, which the operator mounts read-only, so it
+    is judged there. A path under `/dev` or `/proc`, as `/dev/stdout`, is not
+    refused, nor is any where a patch of the `prometheus` container
+    sets `securityContext.readOnlyRootFilesystem` to `false`, which the
+    operator's merge carries over its `true`.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a name the operator's objects cannot be named after: the data volume

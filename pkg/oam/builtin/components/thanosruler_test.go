@@ -345,6 +345,10 @@ func thanosRulerRefusals(notA string) []struct {
 			`volumeMounts[0] "/etc/thanos/config/alertrelabel-config": the mount path is a path the Prometheus operator mounts a Secret key of the spec at`},
 		{"a mount at a rule ConfigMap's path", trMount(nil, "/etc/thanos/rules/thanos-ruler-fast-rulefiles-0"),
 			`volumeMounts[0] "/etc/thanos/rules/thanos-ruler-fast-rulefiles-0": the mount path is the path the Prometheus operator mounts the volume of a rule ConfigMap it generates at`},
+		// Of two mounts at one path the API refuses those written alike, and
+		// the runtime mounts one over the other where they are not.
+		{"two mounts at one path", trMounts("/scratch", "/scratch/"),
+			`volumeMounts[1] "/scratch/": the mount path is that of volumeMounts[0] "/scratch", and a container takes one mount at a path`},
 	}
 }
 
@@ -376,6 +380,21 @@ func trMount(props map[string]any, mountPath string) map[string]any {
 	}
 	out["volumeMounts"] = []any{map[string]any{"name": "extra", "mountPath": mountPath}}
 	return out
+}
+
+// trMounts returns props of two emptyDir volumes, extra and other, mounted
+// at the paths.
+func trMounts(first, second string) map[string]any {
+	return map[string]any{
+		"volumes": []any{
+			map[string]any{"name": "extra", "emptyDir": map[string]any{}},
+			map[string]any{"name": "other", "emptyDir": map[string]any{}},
+		},
+		"volumeMounts": []any{
+			map[string]any{"name": "extra", "mountPath": first},
+			map[string]any{"name": "other", "mountPath": second},
+		},
+	}
 }
 
 // trImage is a thanos-ruler image from the one registry ptStrictPolicy allows:
@@ -1045,6 +1064,7 @@ func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 		"a rule ConfigMap volume of another ruler":     trVolume(nil, "thanos-ruler-other-rulefiles-0"),
 		"a mount beside the operator's configuration":  trMount(nil, "/etc/thanos/config/extra"),
 		"a mount below the rule ConfigMaps' directory": trMount(nil, "/etc/thanos/rules/extra"),
+		"two mounts at different paths":                trMounts("/scratch", "/scratch/other"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := coreKindErr(h, "thanosruler", "fast", props); err != nil {
