@@ -5,7 +5,12 @@ import (
 	"strconv"
 	"strings"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,15 +130,37 @@ var receiverDefaultAPIVersionKinds = []string{
 	"ArtifactGenerator", // source.extensions.fluxcd.io/v1beta1
 }
 
+// receiverKindAPIVersions gives the apiVersion the refusal of an unversioned
+// resource suggests for its kind: for each kind the Receiver API's `kind` enum
+// admits and receiverDefaultAPIVersionKinds leaves out, the GroupVersion of the
+// Flux API module go.mod pins for that kind (go-kure/launcher#1010). It holds
+// no defaulted kind, so the default list stays the one copy;
+// TestReceiverKindAPIVersions_CoverTheEnum holds the two together to the enum
+// marker of the pinned notification-controller API.
+var receiverKindAPIVersions = map[string]string{
+	"Kustomization":         kustv1.GroupVersion.String(),
+	"HelmRelease":           helmv2.GroupVersion.String(),
+	"ImagePolicy":           imagev1.GroupVersion.String(),
+	"ImageUpdateAutomation": autov1.GroupVersion.String(),
+	"ExternalArtifact":      sourcev1.GroupVersion.String(),
+}
+
 // refuseReceiverUnversionedResources refuses a resource with no `apiVersion`
 // whose kind is not in receiverDefaultAPIVersionKinds: the API admits it, and
 // the Receiver then fails on every webhook it receives instead of at build
-// time.
+// time. The refusal suggests the kind's own apiVersion
+// (receiverKindAPIVersions), and for a kind outside the enum the HelmRelease
+// one as an example.
 func refuseReceiverUnversionedResources(spec *notificationv1.ReceiverSpec) error {
 	for i, r := range spec.Resources {
-		if r.APIVersion == "" && !slices.Contains(receiverDefaultAPIVersionKinds, r.Kind) {
-			return errors.Errorf("%s: resources[%d].apiVersion: required for kind %q, which the notification controller has no default version for; set apiVersion, such as helm.toolkit.fluxcd.io/v2 for a HelmRelease", fluxcdReceiverType, i, r.Kind)
+		if r.APIVersion != "" || slices.Contains(receiverDefaultAPIVersionKinds, r.Kind) {
+			continue
 		}
+		hint := "such as " + helmv2.GroupVersion.String() + " for a HelmRelease"
+		if gv, ok := receiverKindAPIVersions[r.Kind]; ok {
+			hint = "such as " + gv
+		}
+		return errors.Errorf("%s: resources[%d].apiVersion: required for kind %q, which the notification controller has no default version for; set apiVersion, %s", fluxcdReceiverType, i, r.Kind, hint)
 	}
 	return nil
 }
