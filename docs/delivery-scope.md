@@ -177,7 +177,8 @@ Decided in the ticket:
   component deployed first. The rule orders each Kustomization after it (§2.2 item 2), so
   it sits in the application bundle itself, ahead of the ordered groups. The identity is
   the url, the version, the effective interval and the registry access (`source.secretRef`,
-  `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, go-kure/launcher#999):
+  `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, go-kure/launcher#999;
+  `serviceAccountName`, go-kure/launcher#1009):
   components whose intervals or access differ keep a source each, so no component's
   interval or credentials are replaced by another's. An `oci` and a `helm`
   component on one artifact do not share.

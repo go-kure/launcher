@@ -166,10 +166,24 @@ func TestOCIRule_SchemaDeclaresTheNameProperties(t *testing.T) {
 		t.Error("the oci schema does not declare kustomizationName")
 	}
 	source := schema["source"]
-	// With the registry access keys (go-kure/launcher#999).
-	for _, key := range []string{"name", "objectName", "secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef"} {
+	// With the registry access keys (go-kure/launcher#999,
+	// go-kure/launcher#1009).
+	for _, key := range []string{"name", "objectName", "secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef", "serviceAccountName"} {
 		if _, ok := source.Properties[key]; !ok {
 			t.Errorf("the oci schema does not declare source.%s", key)
+		}
+	}
+}
+
+// Each registry access key has the type and the description the ocirepository
+// component gives it, behind the pass-through prefix.
+func TestOCIRule_SchemaAccessKeysMatchOCIRepository(t *testing.T) {
+	source := components.OCIRule{}.PropertySchema()["source"]
+	terminal := (&components.OCIRepositoryHandler{}).PropertySchema()
+	for _, key := range []string{"secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef", "serviceAccountName"} {
+		got, want := source.Properties[key], terminal[key]
+		if got.Type != want.Type || got.Description != "Passed as written to the generated "+want.Description {
+			t.Errorf("source.%s = %s %q\nwant %s %q behind the prefix", key, got.Type, got.Description, want.Type, want.Description)
 		}
 	}
 }
