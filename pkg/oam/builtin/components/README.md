@@ -9743,17 +9743,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 - **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
   OCIRepository, see below), `source.objectName` (a name for the OCIRepository
   the component keeps to itself, see below), `kustomizationName` (a name for
-  the Kustomization, see below), `version` (tag or `sha256:…`), `path`,
-  `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
+  the Kustomization, see below), the source's registry access
+  `source.secretRef`, `source.provider`, `source.insecure`,
+  `source.certSecretRef` and `source.proxySecretRef` (go-kure/launcher#999),
+  `version` (tag or `sha256:…`), `path`, `prune`, `interval`,
+  `targetNamespace`, `wait`, `healthChecks`.
 
   **Lowering (go-kure/launcher#784).** `oci` is a role-named component: `OCIRule`
   lowers it to the two kind-named terminals it stands for, an `ocirepository`
-  (`url`, `ref.tag` from `version`, or `ref.digest` for a `sha256:` value, and
-  the authored `interval`) and a `fluxcd-kustomization` (`path`, `prune`,
+  (`url`, `ref.tag` from `version`, or `ref.digest` for a `sha256:` value, the
+  authored `interval`, and each registry access key that is set, as written)
+  and a `fluxcd-kustomization` (`path`, `prune`,
   `sourceRef`, and `interval`, `targetNamespace`, `wait` and `healthChecks`
   when set). No handler is registered for `oci`. The rule runs the checks
   below first, with their `oci:` messages; everything past them is the
   terminals' own.
+  Each Secret reference of the registry access names a Secret in the
+  namespace the OCIRepository lands in, the Flux namespace when one is set,
+  as on `ocirepository`. The component's traits go to the Kustomization, not
+  the source, so a Secret an `external-secret` or `certificate` trait makes
+  is not moved to the Flux namespace for the source to read: provide the
+  Secret there, or author `ocirepository` and `fluxcd-kustomization`.
   - *A component alone on its artifact* lowers to a same-name group: both
     objects are named after the component (unless `kustomizationName` or
     `source.objectName` names them, below) and deploy as one unit, the
@@ -9826,10 +9836,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     writes `source.objectName` keeps its own source whatever other component
     has the same identity, and is not counted among the consumers of a shared
     one.
-  - *The source identity* is the `url`, the `version` and the effective
-    `interval`. Unset, `0s`, `60m` and `1h` are one interval. Components
-    whose intervals differ do not share: each keeps a source of its own,
-    polling at its own interval, as a component alone on its artifact does.
+  - *The source identity* is the `url`, the `version`, the effective
+    `interval` and the registry access. Unset, `0s`, `60m` and `1h` are one
+    interval. Components whose intervals differ do not share: each keeps a
+    source of its own, polling at its own interval, as a component alone on
+    its artifact does. Nor do components whose access differs in any key, so
+    no component pulls with another's credentials, provider or TLS settings;
+    one `source.name` written with two accesses is refused as one name for
+    two identities. An unset key (a `null` reference, an empty `provider`,
+    `insecure: false`) is no access and leaves the identity, and a shared
+    source's name, as they were before these keys; an authored `{}`
+    reference is access of its own, and `provider: generic` differs from no
+    provider.
     An `oci` and a `helm` component on one artifact never share either: the
     identities differ, and a Helm source copies the chart layer instead of
     extracting it.

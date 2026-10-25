@@ -166,7 +166,8 @@ func TestOCIRule_SchemaDeclaresTheNameProperties(t *testing.T) {
 		t.Error("the oci schema does not declare kustomizationName")
 	}
 	source := schema["source"]
-	for _, key := range []string{"name", "objectName"} {
+	// With the registry access keys (go-kure/launcher#999).
+	for _, key := range []string{"name", "objectName", "secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef"} {
 		if _, ok := source.Properties[key]; !ok {
 			t.Errorf("the oci schema does not declare source.%s", key)
 		}

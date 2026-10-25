@@ -39,13 +39,13 @@ const ociType = "oci"
 // and ordered after it (Component.OrderAfter). That order makes it a generated
 // source, which pkg/oam keeps out of the ordered groups and applies with the
 // application bundle itself, so every consumer follows it wherever it is placed.
-// The source identity is the url, the version and the effective interval
-// (ociSourceIdentity): components share only when all three are equal, so a
-// component with its own interval keeps its own source. The identity differs
-// from the helm rule's, so an oci and a helm component on one artifact never
-// share a source; the helm one copies the chart layer instead of extracting
-// it. Sharing is decided among the oci components the document holds in the
-// round the rule runs in.
+// The source identity is the url, the version, the effective interval and the
+// registry access (sourceIdentity): components share only when all are equal,
+// so a component with its own interval or credentials keeps its own source.
+// The identity differs from the helm rule's, so an oci and a helm component on
+// one artifact never share a source; the helm one copies the chart layer
+// instead of extracting it. Sharing is decided among the oci components the
+// document holds in the round the rule runs in.
 //
 // source.name names the source (go-kure/launcher#787), and makes it the shared
 // form whatever the number of consumers: emitted once under that name, with
@@ -96,11 +96,7 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 			Type:        oam.PropertyTypeObject,
 			Required:    true,
 			Description: "OCIRepository source of the artifact to reconcile.",
-			Properties: map[string]oam.PropertySchema{
-				"url":        {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
-				"name":       {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version and interval are the same. Not with objectName."},
-				"objectName": {Type: oam.PropertyTypeString, Description: "Name of the OCIRepository this component keeps to itself, in place of the component name, used as written. Unlike name, it leaves the source with the component: the source is deployed with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits. A component that writes it keeps its own source, also when another component has the same url, version and interval. Not with name."},
-			},
+			Properties:  ociSourceSchema(),
 		},
 		"kustomizationName": {Type: oam.PropertyTypeString, Description: "Name of the generated Kustomization, in place of the component name, used as written. It names the object alone: the component keeps its name everywhere else."},
 		"version":           {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
@@ -126,6 +122,29 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// ociSourceAccessKeys are the keys of source that set the generated
+// OCIRepository's registry access (go-kure/launcher#999). Each is passed on as
+// written, under the ocirepository terminal's own schema entry, and the
+// terminal's strict decode checks its shape: an oci component takes them with
+// the meaning and validation an ocirepository has.
+var ociSourceAccessKeys = []string{"secretRef", "provider", "insecure", "certSecretRef", "proxySecretRef"}
+
+// ociSourceSchema declares the keys of the oci component's source.
+func ociSourceSchema() map[string]oam.PropertySchema {
+	out := map[string]oam.PropertySchema{
+		"url":        {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
+		"name":       {Type: oam.PropertyTypeString, Description: "Name of the generated OCIRepository, in place of the component name (or of <document>-source-<digest> for a source several components share), used as written. The source is then generated on its own, apart from the Kustomization: it carries none of the component's annotations and traits. It must differ from every component name of the document; components that write the same name share the source only when their url, version, interval and registry access (secretRef, provider, insecure, certSecretRef, proxySecretRef) are the same. Not with objectName."},
+		"objectName": {Type: oam.PropertyTypeString, Description: "Name of the OCIRepository this component keeps to itself, in place of the component name, used as written. Unlike name, it leaves the source with the component: the source is deployed with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits. A component that writes it keeps its own source, also when another component has the same source. Not with name."},
+	}
+	terminal := (&OCIRepositoryHandler{}).PropertySchema()
+	for _, key := range ociSourceAccessKeys {
+		schema := terminal[key]
+		schema.Description = "Passed as written to the generated " + schema.Description
+		out[key] = schema
+	}
+	return out
+}
+
 // ociHealthCheckKeys is the accepted key set of one `healthChecks` entry, the
 // fields of Flux's NamespacedObjectKindReference. Any other key is refused.
 var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
@@ -147,6 +166,14 @@ type ociProperties struct {
 	kustomizationName  string
 	kustomizationNamed bool
 
+	// The source's registry access (ociSourceAccessKeys), each as authored.
+	// A reference is nil when absent or null, and an authored {} is kept as
+	// an empty map; provider is "" when absent or empty, and insecure is
+	// true only when written true.
+	secretRef, certSecretRef, proxySecretRef map[string]any
+	provider                                 string
+	insecure                                 bool
+
 	path            string
 	prune           bool
 	interval        string // as authored; "" when unset
@@ -166,6 +193,11 @@ type ociProperties struct {
 //	  url: oci://registry.example.com/org/artifact   # required, oci:// scheme
 //	  name: artifact-source                           # optional; names the OCIRepository, generated on its own
 //	  objectName: artifact                            # optional, not with name; names the OCIRepository the component keeps
+//	  secretRef: {name: regcred}                      # optional; as on ocirepository, so are the next four
+//	  provider: aws                                   # optional; generic, aws, azure or gcp
+//	  insecure: true                                  # optional; false emits nothing
+//	  certSecretRef: {name: registry-ca}              # optional
+//	  proxySecretRef: {name: registry-proxy}          # optional
 //	kustomizationName: artifact-delivery              # optional; names the Kustomization
 //	version: 1.2.3                                    # required; tag, or sha256:<digest>
 //	path: ./                                          # optional, default "./"
@@ -215,6 +247,9 @@ func parseOCI(props map[string]any) (*ociProperties, error) {
 	}
 	if out.sourceObjectNamed && out.sourceName != "" {
 		return nil, errors.New("oci: source.objectName and source.name are both set, and each names the OCIRepository in another way: write source.objectName to rename the source the component keeps to itself, which stays with the Kustomization and carries the component's annotations and its prune-protection and force-replace traits; write source.name for a source generated on its own, which components that write the same name share")
+	}
+	if err := out.parseSourceAccess(src); err != nil {
+		return nil, err
 	}
 	if out.kustomizationName, out.kustomizationNamed, err = parseRawStringField(props, "kustomizationName", "oci: kustomizationName"); err != nil {
 		return nil, err
@@ -270,6 +305,40 @@ func parseOCI(props map[string]any) (*ociProperties, error) {
 	}
 
 	return out, nil
+}
+
+// parseSourceAccess reads the registry access keys of source. It checks only
+// each key's type: shape and values are the ocirepository terminal's.
+func (p *ociProperties) parseSourceAccess(src map[string]any) error {
+	var err error
+	if p.secretRef, err = parseOCISourceRef(src, "secretRef"); err != nil {
+		return err
+	}
+	if p.certSecretRef, err = parseOCISourceRef(src, "certSecretRef"); err != nil {
+		return err
+	}
+	if p.proxySecretRef, err = parseOCISourceRef(src, "proxySecretRef"); err != nil {
+		return err
+	}
+	if p.provider, _, err = parseStringField(src, "provider", "oci: source.provider"); err != nil {
+		return err
+	}
+	insecure, err := parseBoolField(src, "insecure", "oci: source.insecure")
+	if err != nil {
+		return err
+	}
+	p.insecure = insecure != nil && *insecure
+	return nil
+}
+
+// parseOCISourceRef reads the optional Secret reference source.<key>: nil when
+// absent or null, else the authored map, an empty one included.
+func parseOCISourceRef(src map[string]any, key string) (map[string]any, error) {
+	ref, present, err := parseObjectField(src, key, "oci: source."+key)
+	if err != nil || !present {
+		return nil, err
+	}
+	return ref, nil
 }
 
 // parseOCIHealthChecks reads the optional `healthChecks` list. Absent, null or
@@ -418,24 +487,47 @@ func (p *ociProperties) nameKustomization(lctx oam.LoweringContext, kustomizatio
 }
 
 // sourceIdentity is the content identity of the component's source: every
-// input that shapes the OCIRepository, namely the url, the version and the
-// effective interval, as JSON so that no separator inside a url can make two
-// identities collide. The interval is the parsed duration, so 60m, 1h and
-// unset (the default, and zero, which the terminals read as unset) are one
-// identity. The "oci-artifact:" prefix keeps it apart from the helm rule's
-// identity for an OCI chart (helmSourceIdentity).
+// input that shapes the OCIRepository, namely the url, the version, the
+// effective interval and the registry access, as JSON so that no separator
+// inside a url can make two identities collide. The interval is the parsed
+// duration, so 60m, 1h and unset (the default, and zero, which the terminals
+// read as unset) are one identity. The access keys follow the interval and are
+// left out when unset, so a source without them keeps the identity, and the
+// shared name, it had before they existed; a reference is encoded as authored,
+// an empty {} included. The "oci-artifact:" prefix keeps it apart from the
+// helm rule's identity for an OCI chart (helmSourceIdentity).
 func (p *ociProperties) sourceIdentity() (string, error) {
 	interval := parseDuration(effectiveInterval(p.interval))
 	defaultFluxSourceInterval(&interval)
 	b, err := json.Marshal(struct {
-		URL      string `json:"url"`
-		Version  string `json:"version"`
-		Interval string `json:"interval"`
-	}{p.url, p.version, interval.Duration.String()})
+		URL            string `json:"url"`
+		Version        string `json:"version"`
+		Interval       string `json:"interval"`
+		SecretRef      any    `json:"secretRef,omitempty"`
+		Provider       string `json:"provider,omitempty"`
+		Insecure       bool   `json:"insecure,omitempty"`
+		CertSecretRef  any    `json:"certSecretRef,omitempty"`
+		ProxySecretRef any    `json:"proxySecretRef,omitempty"`
+	}{
+		p.url, p.version, interval.Duration.String(),
+		// Through refOrNil: a nil map in an `any` is a non-nil interface,
+		// which omitempty keeps and encodes as null, changing every identity.
+		refOrNil(p.secretRef), p.provider, p.insecure,
+		refOrNil(p.certSecretRef), refOrNil(p.proxySecretRef),
+	})
 	if err != nil {
 		return "", errors.Wrapf(err, "%s: encoding the source identity", ociType)
 	}
 	return "oci-artifact:" + string(b), nil
+}
+
+// refOrNil is ref as an interface value: nil when ref is nil, so that
+// omitempty leaves it out.
+func refOrNil(ref map[string]any) any {
+	if ref == nil {
+		return nil
+	}
+	return ref
 }
 
 // ociSourceConsumers counts the oci components of doc that name no source of
@@ -467,8 +559,10 @@ func ociSourceConsumers(doc *oam.Application, identity string) int {
 }
 
 // sourceProperties are the ocirepository component's properties: the url, the
-// version as ref.tag, or ref.digest for a sha256: value, and the authored
-// interval; unset, the terminal applies its own 60m default.
+// version as ref.tag, or ref.digest for a sha256: value, the authored
+// interval (unset, the terminal applies its own 60m default) and the registry
+// access keys that are set. A reference is a copy, so that no two lowered
+// components share one map.
 func (p *ociProperties) sourceProperties() map[string]any {
 	ref := map[string]any{"tag": p.version}
 	if strings.HasPrefix(p.version, digestPrefix) {
@@ -477,6 +571,17 @@ func (p *ociProperties) sourceProperties() map[string]any {
 	out := map[string]any{"url": p.url, "ref": ref}
 	if p.interval != "" {
 		out["interval"] = p.interval
+	}
+	for key, secret := range map[string]map[string]any{"secretRef": p.secretRef, "certSecretRef": p.certSecretRef, "proxySecretRef": p.proxySecretRef} {
+		if secret != nil {
+			out[key] = maps.Clone(secret)
+		}
+	}
+	if p.provider != "" {
+		out["provider"] = p.provider
+	}
+	if p.insecure {
+		out["insecure"] = true
 	}
 	return out
 }

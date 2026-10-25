@@ -176,8 +176,10 @@ Decided in the ticket:
   `<document>-source-<digest>`, `helm`'s scheme, and no longer under the name of the
   component deployed first. The rule orders each Kustomization after it (§2.2 item 2), so
   it sits in the application bundle itself, ahead of the ordered groups. The identity is
-  the url, the version and the effective interval: components whose intervals differ keep
-  a source each, so no component's interval is replaced by another's. An `oci` and a `helm`
+  the url, the version, the effective interval and the registry access (`source.secretRef`,
+  `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, go-kure/launcher#999):
+  components whose intervals or access differ keep a source each, so no component's
+  interval or credentials are replaced by another's. An `oci` and a `helm`
   component on one artifact do not share.
 - **`SourceDeduplicatable` is removed**, with the engine pass that read it
   (`deduplicateSourceRefs`): no builtin implemented it any more, and a rule that shares a
