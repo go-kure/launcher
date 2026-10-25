@@ -50,12 +50,20 @@ const (
 const (
 	// The consequences under a minimum, or from a maximum on, by what the
 	// operator does there.
-	promFlagDropped    = "does not pass it to Prometheus, and the pods run without it"
-	promKeyDropped     = "drops it from the configuration it generates, and Prometheus runs without it"
-	promRefused        = "refuses the object at reconcile, and the Prometheus is not updated"
-	promWebPlainHTTP   = "mounts no web configuration, and the web endpoint serves plain HTTP without the authored settings"
-	promScrapeDropped  = "drops it from the scrape configurations it generates, and the targets are scraped without it"
-	promSidecarDropped = "does not pass it to the Thanos sidecar, and the sidecar runs without it"
+	promFlagDropped  = "does not pass it to Prometheus, and the pods run without it"
+	promKeyDropped   = "drops it from the configuration it generates, and Prometheus runs without it"
+	promRefused      = "refuses the object at reconcile, and the Prometheus is not updated"
+	promWebPlainHTTP = "mounts no web configuration, and the web endpoint serves plain HTTP without the authored settings"
+	// promWebTLSUnserved: the probes (BuildProbes), the config reloader and
+	// the Thanos sidecar (PrometheusURIScheme) turn to HTTPS on a tlsConfig
+	// at any version.
+	promWebTLSUnserved = "mounts no web configuration, so the web endpoint serves plain HTTP, while the probes, the config reloader and the Thanos sidecar it configures speak HTTPS to it, and the pods never become ready"
+	// promAuthorizationPanics: addAuthorizationToYaml indexes the first item
+	// of what addSafeAuthorizationToYaml returns, which is empty below
+	// 2.26.0.
+	promAuthorizationPanics = "panics while generating the configuration, and the Prometheus is not updated"
+	promScrapeDropped       = "drops it from the scrape configurations it generates, and the targets are scraped without it"
+	promSidecarDropped      = "does not pass it to the Thanos sidecar, and the sidecar runs without it"
 )
 
 // promAlertmanagers are the endpoints of alerting, none where alerting is not
@@ -275,7 +283,7 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 			return s.AllowOverlappingBlocks //nolint:staticcheck // SA1019: deprecated upstream, still authorable and read from 2.11.0 to below 2.39.0.
 		}),
 		g("walCompression", "2.11.0", promFlagDropped, func(s *spec) bool { return s.WALCompression != nil }),
-		g("web.tlsConfig", "2.24.0", promWebPlainHTTP, func(s *spec) bool { return s.Web != nil && s.Web.TLSConfig != nil }),
+		g("web.tlsConfig", "2.24.0", promWebTLSUnserved, func(s *spec) bool { return s.Web != nil && s.Web.TLSConfig != nil }),
 		g("web.httpConfig", "2.24.0", promWebPlainHTTP, func(s *spec) bool { return s.Web != nil && s.Web.HTTPConfig != nil }),
 		g("tsdb.chunkEncoding", "3.13.0", promKeyDropped, func(s *spec) bool {
 			return s.TSDB != nil && s.TSDB.ChunkEncoding != nil && s.TSDB.ChunkEncoding.Floats != nil
@@ -380,7 +388,7 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		// The remote read endpoints (generateRemoteReadConfig).
 		remoteRead("name", "2.15.0", promKeyDropped, func(r *rr) bool { return r.Name != "" }),
 		remoteRead("headers", "2.26.0", promKeyDropped, func(r *rr) bool { return len(r.Headers) > 0 }),
-		remoteRead("authorization", "2.26.0", promKeyDropped, func(r *rr) bool { return r.Authorization != nil }),
+		remoteRead("authorization", "2.26.0", promAuthorizationPanics, func(r *rr) bool { return r.Authorization != nil }),
 		remoteRead("followRedirects", "2.26.0", promKeyDropped, func(r *rr) bool { return r.FollowRedirects != nil }),
 		remoteRead("oauth2", "2.27.0", promKeyDropped, func(r *rr) bool { return r.OAuth2 != nil }),
 		remoteRead("filterExternalLabels", "2.34.0", promKeyDropped, func(r *rr) bool { return r.FilterExternalLabels != nil }),
@@ -393,18 +401,17 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		remoteWrite("messageVersion", "2.54.0", promKeyDropped, func(r *rw) bool { return r.MessageVersion != nil }),
 		remoteWrite("sendExemplars", "2.27.0", promKeyDropped, func(r *rw) bool { return r.SendExemplars != nil }),
 		remoteWrite("sendNativeHistograms", "2.40.0", promKeyDropped, func(r *rw) bool { return r.SendNativeHistograms != nil }),
-		remoteWrite("authorization", "2.26.0", promKeyDropped, func(r *rw) bool { return r.Authorization != nil }),
+		remoteWrite("authorization", "2.26.0", promAuthorizationPanics, func(r *rw) bool { return r.Authorization != nil }),
 		remoteWrite("oauth2", "2.27.0", promKeyDropped, func(r *rw) bool { return r.OAuth2 != nil }),
 		remoteWrite("sigv4", "2.26.0", promKeyDropped, func(r *rw) bool { return r.Sigv4 != nil }),
 		remoteWrite("sigv4.externalId", "3.11.0", promKeyDropped, func(r *rw) bool { return r.Sigv4 != nil && r.Sigv4.ExternalID != "" }),
 		remoteWrite("sigv4.useFIPSSTSEndpoint", "2.54.0", promKeyDropped, func(r *rw) bool {
 			return r.Sigv4 != nil && r.Sigv4.UseFIPSSTSEndpoint != nil
 		}),
-		remoteWrite("azureAd", "2.45.0", promKeyDropped, func(r *rw) bool { return r.AzureAD != nil }),
-		azure("oauth", "2.48.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.OAuth != nil }),
-		azure("sdk", "2.52.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.SDK != nil }),
-		azure("workloadIdentity", "3.7.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.WorkloadIdentity != nil }),
-		azure("scope", "3.9.0", promKeyDropped, func(a *monitoringv1.AzureAD) bool { return a.Scope != nil && *a.Scope != "" }),
+		// The first gate missed is the one refused: the operator refuses an
+		// authentication method below its version at reconcile, before it
+		// generates any configuration, so those gates precede azureAd's own,
+		// which it drops below 2.45.0.
 		promGate(`remoteWrite[].azureAd.managedIdentity.clientId=""`, "remoteWrite[].azureAd.managedIdentity", "3.5.0",
 			"refuses one without a clientId at reconcile, and the Prometheus is not updated", func(s *spec) bool {
 				return anyOf(s.RemoteWrite, func(r *rw) bool {
@@ -412,6 +419,11 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 						(r.AzureAD.ManagedIdentity.ClientID == nil || *r.AzureAD.ManagedIdentity.ClientID == "")
 				})
 			}),
+		azure("oauth", "2.48.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.OAuth != nil }),
+		azure("sdk", "2.52.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.SDK != nil }),
+		azure("workloadIdentity", "3.7.0", promRefused, func(a *monitoringv1.AzureAD) bool { return a.WorkloadIdentity != nil }),
+		remoteWrite("azureAd", "2.45.0", promKeyDropped, func(r *rw) bool { return r.AzureAD != nil }),
+		azure("scope", "3.9.0", promKeyDropped, func(a *monitoringv1.AzureAD) bool { return a.Scope != nil && *a.Scope != "" }),
 		remoteWrite("followRedirects", "2.26.0", promKeyDropped, func(r *rw) bool { return r.FollowRedirects != nil }),
 		remoteWrite("enableHTTP2", "2.35.0", promKeyDropped, func(r *rw) bool { return r.EnableHttp2 != nil }),
 		remoteWrite("queueConfig.minShards", "2.6.0", promKeyDropped, func(r *rw) bool { return r.QueueConfig != nil && r.QueueConfig.MinShards != 0 }),
@@ -429,10 +441,10 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 
 		// The API server's settings (generateK8SSDConfig) and the scrape
 		// classes' authorization, the fallback of a monitor without its own.
-		g("apiserverConfig.authorization", "2.26.0", promKeyDropped, func(s *spec) bool {
+		g("apiserverConfig.authorization", "2.26.0", promAuthorizationPanics, func(s *spec) bool {
 			return s.APIServerConfig != nil && s.APIServerConfig.Authorization != nil
 		}),
-		g("scrapeClasses[].authorization", "2.26.0", promScrapeDropped, func(s *spec) bool {
+		g("scrapeClasses[].authorization", "2.26.0", "panics while generating the scrape configuration of a monitor that falls back to it, and the Prometheus is not updated", func(s *spec) bool {
 			return anyOf(s.ScrapeClasses, func(c *monitoringv1.ScrapeClass) bool { return c.Authorization != nil })
 		}),
 	}
@@ -602,7 +614,9 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 	}
 	thanosAt := "the operator's default Thanos version " + prometheusThanosDefaultVersion
 	version = prometheusThanosDefaultVersion
-	if set(spec.Thanos.Version) {
+	// The operator reads thanos.version with ptr.Deref, so an empty one is
+	// not its default but a version it cannot parse.
+	if spec.Thanos.Version != nil {
 		version, thanosAt = *spec.Thanos.Version, "thanos.version "+*spec.Thanos.Version
 	}
 	if v, err := semver.ParseTolerant(version); err == nil {

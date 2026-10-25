@@ -7,7 +7,7 @@ import (
 )
 
 // A version gate is a field of a kind whose pods the Prometheus operator runs
-// (alertmanager, prometheus, and the thanosruler kind to come) that the
+// (alertmanager, prometheus and thanosruler) that the
 // operator reads only from some version of the software on: below it, the
 // operator drops the field and runs the pods without it, or refuses the object
 // at reconcile. A few the operator reads only below some version: a ceiling.

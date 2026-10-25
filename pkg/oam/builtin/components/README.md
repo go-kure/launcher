@@ -4899,7 +4899,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     operator. Below its version the operator leaves the flag off the
     container, the setting out of the configuration or of the scrape
     configurations of the monitor objects, serves the web endpoints over
-    plain HTTP, or refuses the object at reconcile (`retentionPercentage:
+    plain HTTP (with `web.tlsConfig`, while the probes, the config reloader
+    and the Thanos sidecar it configures speak HTTPS, so the pods never
+    become ready), refuses the object at reconcile, or, for an
+    `authorization` other than an Alertmanager endpoint's, panics while
+    generating the configuration (`retentionPercentage:
     read by the Prometheus operator only for Prometheus 3.11.0 and later; at
     version v3.10.0 it drops it from the configuration it generates, and
     Prometheus runs without it; raise version to 3.11.0 or later, or leave
@@ -4941,8 +4945,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       2.37.0 for ServiceMonitors) and `fallbackScrapeProtocol` (3.0.0); and
       `scrapeProtocols: [PrometheusText1.0.0]` (3.0.0-rc.0).
 
-      A limit, enforced or not, of 0 is written at no version, and is not
-      refused at any.
+      A count or length limit, enforced or not, of 0 is written at no
+      version, and is not refused at any; a body size limit is written
+      whatever its value, `0` included.
     - an Alertmanager endpoint: `apiVersion` (2.11.0), `basicAuth` and
       `authorization` (2.26.0), `enableHttp2` (2.35.0), `sigv4` (2.48.0),
       `alertRelabelings` (2.51.0), `sigv4.useFIPSSTSEndpoint` (2.54.0),
@@ -4982,7 +4987,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `allowOverlappingBlocks` (from 2.11.0 and below 2.39.0).
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
-    v0.42.4, at which none is refused: `getConfigTimeout` and
+    v0.42.4, at which none is refused (an empty `thanos.version` is not
+    unset to the operator, which cannot parse it, and is left to it): `getConfigTimeout` and
     `getConfigInterval` (0.29.0), `grpcServerTlsConfig.minVersion` (0.37.0),
     `grpcServerTlsConfig.cipherSuites` and `curves` (0.42.0). Below it the
     operator leaves the flag off the sidecar.
