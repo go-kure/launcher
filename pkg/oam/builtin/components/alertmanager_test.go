@@ -588,6 +588,15 @@ func alertmanagerRefusals(notA string) []struct {
 			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
 			"containers": []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
 		}, `resources with containers[0] "alertmanager" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		// Where both blocks name a key, the patch's value wins (mergedResources).
+		{"request of a patch over the spec's request of one key", map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"memory": "64Mi"}, "limits": map[string]any{"memory": "100Mi"}},
+			"containers": []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
+		}, `resources with containers[0] "alertmanager" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		{"limit of a patch over the spec's limit of one key", map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"memory": "128Mi"}, "limits": map[string]any{"memory": "256Mi"}},
+			"containers": []any{map[string]any{"name": "alertmanager", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+		}, `resources with containers[0] "alertmanager" merged over it: resources: memory: request 128Mi must not exceed limit 64Mi`},
 		{"extended resource of a patch with no limit in either block", container(map[string]any{"name": "alertmanager", "resources": map[string]any{
 			"requests": map[string]any{"example.com/device": "1"},
 		}}), `resources with containers[0] "alertmanager" merged over it: resources: example.com/device: limit must be set when request is set`},

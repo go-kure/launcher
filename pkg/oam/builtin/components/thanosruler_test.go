@@ -210,6 +210,15 @@ func thanosRulerRefusals(notA string) []struct {
 			"resources":  map[string]any{"limits": map[string]any{"memory": "100Mi"}},
 			"containers": []any{map[string]any{"name": "thanos-ruler", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
 		}, `resources with containers[0] "thanos-ruler" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		// Where both blocks name a key, the patch's value wins (mergedResources).
+		{"request of a patch over the spec's request of one key", map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"memory": "64Mi"}, "limits": map[string]any{"memory": "100Mi"}},
+			"containers": []any{map[string]any{"name": "thanos-ruler", "resources": map[string]any{"requests": map[string]any{"memory": "256Mi"}}}},
+		}, `resources with containers[0] "thanos-ruler" merged over it: resources: memory: request 256Mi must not exceed limit 100Mi`},
+		{"limit of a patch over the spec's limit of one key", map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"memory": "128Mi"}, "limits": map[string]any{"memory": "256Mi"}},
+			"containers": []any{map[string]any{"name": "thanos-ruler", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}},
+		}, `resources with containers[0] "thanos-ruler" merged over it: resources: memory: request 128Mi must not exceed limit 64Mi`},
 		{"a negative memory limit of a patch", container(map[string]any{"name": "thanos-ruler", "resources": map[string]any{"limits": map[string]any{"memory": "-1Gi"}}}),
 			`resources with containers[0] "thanos-ruler" merged over it: resources: memory: limit -1Gi is below 0`},
 		// The operator copies both into the pod template (statefulset.go:539-540).
@@ -260,6 +269,11 @@ func thanosRulerRefusals(notA string) []struct {
 			`portName: "grpc" is the name of a port the Prometheus operator adds to the thanos-ruler container`},
 		{"an invalid port name, the patch renaming no port", map[string]any{"portName": "thanos-ruler-web", "serviceName": "rules",
 			"containers": []any{map[string]any{"name": "thanos-ruler", "resources": map[string]any{"limits": map[string]any{"cpu": "1"}}}}},
+			`portName: "thanos-ruler-web" is not a valid port name`},
+		// A patched port at the web port's number with no name keeps the
+		// operator's name, so portName is still written there.
+		{"an invalid port name, the patch's web port unnamed", map[string]any{"portName": "thanos-ruler-web", "serviceName": "rules",
+			"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"containerPort": 10902}}}}},
 			`portName: "thanos-ruler-web" is not a valid port name`},
 		{"a port name of the Service's gRPC port, the patch renaming the web port", map[string]any{"portName": "grpc",
 			"containers": []any{trWebPortRenamed()}},
@@ -1029,6 +1043,8 @@ func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 		"the gRPC port name, the patch renaming the gRPC port": {"portName": "grpc", "serviceName": "rules", "containers": []any{
 			map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "grpc-api", "containerPort": 10901}}},
 		}},
+		"a valid port name, the patch's web port unnamed": {"portName": "rulerweb", "serviceName": "rules",
+			"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"containerPort": 10902}}}}},
 		"a patched port of the web port's name and number": {"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "web", "containerPort": 10902}}}}},
 		// A request a patch of the thanos-ruler container names replaces the
 		// 200Mi the operator fills, and is held with the spec's limit.
