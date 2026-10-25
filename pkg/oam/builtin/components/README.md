@@ -4644,10 +4644,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   unless `objectName` names it; the handler declares the object as
   namespaced and adds no label and no annotation. Launcher emits no pod, no
   StatefulSet and no Service for it: the operator builds one StatefulSet per
-  shard from the object and runs the pods. Unlike on `alertmanager`, nothing
-  is held to `version`: an image named without one is not refused, nor is a
-  `version` the operator cannot parse, and fields the operator reads only
-  from some Prometheus version on are not held to `version`. What is said of
+  shard from the object and runs the pods. Unlike on `alertmanager`, an image
+  named without `version` is not refused, nor is a `version` the operator
+  cannot parse. A parseable `version` of a major other than 2 or 3 is
+  refused, and so is a field the operator reads only from some Prometheus
+  version on, or, under `thanos`, from some Thanos version on, where
+  `version` or `thanos.version` is below it; both are listed below. What is said of
   `alertmanager` above holds here unless this entry says otherwise: no
   capability is required and nothing gates the kind; on a listed container, init container
   or volume, an authored `0` or `""` the type cannot carry is refused, a
@@ -4785,7 +4787,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     operator adds (`VolumeClaimName`, server/statefulset.go:105-138).
   - an entry of `volumes` named as a volume the operator adds: `config`,
     `tls-assets`, `config-out` and `web-config` (the last whatever `version`
-    names, though the operator adds it only for Prometheus 2.24.0 on);
+    names, though the operator adds it only for Prometheus 2.24.0 on, so
+    that raising `version` does not turn a volume of the author's into a
+    clash, as on `alertmanager`);
     `log-file` where `scrapeFailureLogFile` is a file name without a
     directory, or `queryLogFile` is one and `scrapeFailureLogFile` is unset;
     `thanos-prometheus-http-client-file` where `thanos` is set, whatever
@@ -4817,7 +4821,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     volume at in the thanos-sidecar container: `/prometheus` where
     `objectStorageConfig` or `objectStorageConfigFile` is set, and
     `/etc/thanos/config`, which it mounts from Thanos 0.24.0, reserved
-    whatever `thanos.version` names, as `web-config` is
+    whatever `thanos.version` names, as `web-config` is, so that raising
+    `thanos.version` does not turn a mount of the author's into a clash
     (`createThanosContainer`, server/statefulset.go:642-671 and :730-738);
     and any field of an entry but `name` and `mountPath`
     (`readOnly`, `recursiveReadOnly`, `subPath`, `subPathExpr`,
@@ -4838,6 +4843,126 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     over the other is not derived, so the read-only one still refuses.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
+  - a parseable `version` of a major other than 2 or 3: the operator
+    builds no configuration for it (`NewConfigGenerator`,
+    `pkg/prometheus/promcfg.go`).
+  - a field the operator reads only from some Prometheus version on, where
+    `version` is below that version. An unset `version` is judged against
+    the operator release launcher vendors (v0.94.1, default v3.14.0), at
+    which no field below is refused; an unparsable one is left to the
+    operator. Below its version the operator leaves the flag off the
+    container, the setting out of the configuration or of the scrape
+    configurations of the monitor objects, serves the web endpoints over
+    plain HTTP, or refuses the object at reconcile (`retentionPercentage:
+    read by the Prometheus operator only for Prometheus 3.11.0 and later; at
+    version v3.10.0 it drops it from the configuration it generates, and
+    Prometheus runs without it; raise version to 3.11.0 or later, or leave
+    retentionPercentage unset`). Where a field holds several gates, the
+    highest it misses is named. The gates under v2.45.0, the oldest
+    Prometheus in the operator's compatibility matrix, are below the range
+    the operator tests, and are kept.
+    - flags: `rules.alert.forOutageTolerance`, `forGracePeriod` and
+      `resendDelay` (2.4.0), `query.maxSamples` (2.5.0), `web.pageTitle` and
+      `logFormat` other than `logfmt` (2.6.0), `retentionSize` (2.7.0),
+      `allowOverlappingBlocks` and `walCompression` (2.11.0),
+      `web.tlsConfig` and `web.httpConfig` (2.24.0), `enableFeatures`
+      (2.25.0), `enableRemoteWriteReceiver` (2.33.0), `enableOTLPReceiver`
+      (2.47.0), `remoteWriteReceiverMessageVersions` (2.54.0).
+    - the configuration: `queryLogFile` (2.16.0), `exemplars`
+      (2.29.0), `tsdb.outOfOrderTimeWindow` (2.39.0), `bodySizeLimit`,
+      `sampleLimit`, `targetLimit`, `labelLimit`, `labelNameLengthLimit` and
+      `labelValueLengthLimit` (2.45.0), `keepDroppedTargets` (2.47.0),
+      `scrapeProtocols` (2.49.0), `ruleQueryOffset` (2.53.0),
+      `scrapeFailureLogFile` (2.55.0), `nameValidationScheme` (3.0.0),
+      `nameEscapingScheme` and `convertClassicHistogramsToNHCB` (3.4.0),
+      `scrapeClassicHistograms` (3.5.0), `scrapeNativeHistograms` (3.8.0),
+      `tsdb.staleSeriesCompactionThreshold` (3.10.0), `retentionPercentage`
+      (3.11.0), `tsdb.chunkEncoding` (3.13.0); `otlp` (2.55.0, refused at
+      reconcile) with `promoteResourceAttributes` (2.55.0),
+      `translationStrategy` (3.0.0; `NoTranslation` 3.4.0 and
+      `UnderscoreEscapingWithoutSuffixes` 3.6.0, refused at reconcile),
+      `keepIdentifyingResourceAttributes` (3.1.0), `convertHistogramsToNHCB`
+      (3.4.0), `promoteAllResourceAttributes` and `ignoreResourceAttributes`
+      (3.5.0), `promoteScopeMetadata` (3.6.0),
+      `labelNameUnderscoreSanitization` and
+      `labelNamePreserveMultipleUnderscores` (3.8.0).
+    - the scrape configurations: `overrideHonorTimestamps` (2.9.0),
+      `serviceDiscoveryRole: EndpointSlice` (2.21.0), `enforcedTargetLimit`
+      (2.21.0), `enforcedLabelLimit`, `enforcedLabelNameLengthLimit` and
+      `enforcedLabelValueLengthLimit` (2.27.0), `enforcedBodySizeLimit`
+      (2.28.0), `enforcedKeepDroppedTargets` (2.47.0); a scrape class's
+      `authorization` (2.26.0), `attachMetadata` (2.35.0 for PodMonitors,
+      2.37.0 for ServiceMonitors) and `fallbackScrapeProtocol` (3.0.0); and
+      `scrapeProtocols: [PrometheusText1.0.0]` (3.0.0-rc.0).
+
+      A limit, enforced or not, of 0 is written at no version, and is not
+      refused at any.
+    - an Alertmanager endpoint: `apiVersion` (2.11.0), `basicAuth` and
+      `authorization` (2.26.0), `enableHttp2` (2.35.0), `sigv4` (2.48.0),
+      `alertRelabelings` (2.51.0), `sigv4.useFIPSSTSEndpoint` (2.54.0),
+      `sigv4.externalId` (3.11.0).
+    - a remote read entry: `name` (2.15.0), `headers`, `authorization` and
+      `followRedirects` (2.26.0), `oauth2` (2.27.0), `filterExternalLabels`
+      (2.34.0).
+    - a remote write entry: `headers` and `name` (2.15.0), `metadataConfig`
+      (2.23.0), `queueConfig.minShards` (2.6.0), `authorization`, `sigv4`,
+      `followRedirects` and `queueConfig.retryOnRateLimit` (2.26.0),
+      `oauth2` and `sendExemplars` (2.27.0),
+      `metadataConfig.maxSamplesPerSend` (2.29.0), `enableHTTP2` (2.35.0),
+      `sendNativeHistograms` (2.40.0), `azureAd` (2.45.0),
+      `queueConfig.sampleAgeLimit` (2.50.0), `messageVersion` and
+      `sigv4.useFIPSSTSEndpoint` (2.54.0), `roundRobinDNS` (3.1.0),
+      `sigv4.externalId` (3.11.0); under `azureAd`, refused at reconcile:
+      `oauth` (2.48.0), `sdk` (2.52.0), a `managedIdentity` without
+      `clientId` (3.5.0), `workloadIdentity` (3.7.0); and `azureAd.scope`
+      (3.9.0).
+    - `apiserverConfig.authorization` (2.26.0); the `minVersion` (2.35.0)
+      and `maxVersion` (2.41.0) of a TLS configuration (under
+      `apiserverConfig`, `tracingConfig`, a scrape class, an Alertmanager
+      endpoint, a remote read or write entry and its `oauth2`); the proxy
+      settings `noProxy`, `proxyFromEnvironment` and `proxyConnectHeader`
+      (2.43.0, under `apiserverConfig`, an Alertmanager endpoint and a remote
+      read or write entry), and an `oauth2`'s `proxyUrl`, its proxy settings
+      and its `tlsConfig` (2.43.0); a relabeling `action` of `lowercase` or
+      `uppercase` (2.36.0) or of `keepequal` or `dropequal` (2.41.0), refused
+      at reconcile, in a scrape class's `relabelings` and
+      `metricRelabelings` and an Alertmanager endpoint's `relabelings` and
+      `alertRelabelings`.
+
+    The operator reads three fields only below some version, refused at it
+    and above, and so with `version` unset: an Alertmanager endpoint's
+    `apiVersion: v1` (Prometheus 2.x only; refused from 3.0.0-rc.0),
+    a remote write entry's `queueConfig.maxRetries` (below 2.11.0), and
+    `allowOverlappingBlocks` (from 2.11.0 and below 2.39.0).
+  - a field of `thanos` the operator reads only from some Thanos version on,
+    where `thanos.version` is below it; unset, the operator's default
+    v0.42.4, at which none is refused: `getConfigTimeout` and
+    `getConfigInterval` (0.29.0), `grpcServerTlsConfig.minVersion` (0.37.0),
+    `grpcServerTlsConfig.cipherSuites` and `curves` (0.42.0). Below it the
+    operator leaves the flag off the sidecar.
+  - `thanos.blockSize`, other than the CRD's default `2h` that the API
+    server writes where it is unset, where the operator reads it at neither
+    version: with
+    object storage configured and `disableCompaction` unset, from
+    Prometheus 3.9.0 and Thanos 0.42.0 on it keeps local compaction on in
+    step with the sidecar and passes no block duration
+    (`compactionModeFor`), so it is refused there, with both versions unset
+    too. Below either
+    version, or with `disableCompaction`, it disables compaction and passes
+    `blockSize` as the block duration. An unparsable `version` or
+    `thanos.version` is left to the operator. Without object storage and
+    without `disableCompaction` the operator reads `blockSize` at no
+    version; that is not held here.
+
+    `TestPrometheusVersionGates_MatchVendoredSource` parses every version
+    comparison of the operator's packages `pkg/prometheus`,
+    `pkg/prometheus/server` and `pkg/prometheus/validation` (every Go file,
+    its tests aside) and holds each to these lists, or to the reason it
+    gates no field of this kind (a field of a ServiceMonitor, PodMonitor,
+    Probe or ScrapeConfig object, the configuration of a PrometheusAgent, a
+    choice of how the operator spells a flag), and the two defaults to the
+    operator's `pkg/operator/defaults.go`; the files are vendored as for
+    `alertmanager`.
   - a name the operator's objects cannot be named after: the data volume
     `prometheus-<name>-db`, the volume of the third rule ConfigMap
     `prometheus-<name>-rulefiles-2`, and the hostname of the last pod of the

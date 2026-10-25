@@ -171,7 +171,8 @@ func TestAlertmanagerVersionGates_MatchVendoredSource(t *testing.T) {
 	if got := src.stringConst(t, "pkg/operator/defaults.go", "DefaultAlertmanagerVersion"); got != alertmanagerDefaultVersion {
 		t.Errorf("the operator's DefaultAlertmanagerVersion is %s, alertmanagerDefaultVersion %s", got, alertmanagerDefaultVersion)
 	}
-	holdVersionGates(t, src.versionGates(t, alertmanagerGateFiles(t, src)...), alertmanagerGateRows, alertmanagerGateFuncs, alertmanagerVersionGates, alertmanagerMinimumVersion)
+	holdVersionGates(t, src.versionGates(t, alertmanagerGateFiles(t, src)...), alertmanagerGateRows, alertmanagerGateFuncs,
+		gateEntriesOf(alertmanagerVersionGates), nil, []string{alertmanagerMinimumVersion})
 }
 
 // alertmanagerGateFixtures author each gated field, alone, as the operator

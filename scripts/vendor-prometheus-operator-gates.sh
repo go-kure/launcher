@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # vendor-prometheus-operator-gates.sh — re-fetch the excerpt of the Prometheus
-# operator's code that the alertmanager kind's version gates are held to
-# (go-kure/launcher#935), and rewrite its SOURCE file.
+# operator's code that the version gates of the alertmanager and prometheus
+# kinds are held to (go-kure/launcher#935, go-kure/launcher#980), and rewrite
+# its SOURCE file.
 #
 # The excerpt lives under
 # pkg/oam/builtin/components/testdata/upstream/prometheus-operator/ and is read
-# by TestAlertmanagerVersionGates_MatchVendoredSource, which parses it with
-# go/ast and needs no network. The files are copied unmodified, Apache-2.0
+# by TestAlertmanagerVersionGates_MatchVendoredSource and
+# TestPrometheusVersionGates_MatchVendoredSource, which parse it with go/ast
+# and need no network. The files are copied unmodified, Apache-2.0
 # headers included, with the operator's LICENSE, the licence's full text, and
 # its NOTICE, which the licence asks a redistributor to pass on; SOURCE names
 # the tag, the tag object and the git blob id of each file, of LICENSE and of
@@ -50,24 +52,32 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE" ${UPSTREAM:+"$UPSTREAM"}' EXIT
 UPSTREAM="$(mktemp -d)"
 
-# The tag's tree, sparse: pkg/alertmanager, pkg/operator, and the root files
+# The tag's tree, sparse: the packages below, pkg/operator, and the root files
 # (LICENSE, NOTICE), which a cone-mode sparse checkout always holds.
+PACKAGES=(pkg/alertmanager pkg/prometheus pkg/prometheus/server pkg/prometheus/validation)
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
-git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/operator
+git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/operator
 
-# The files the test reads, by their path in prometheus-operator/prometheus-operator:
-# every Go file of the package pkg/alertmanager, its tests aside, so that the
-# test walks each one for a version comparison, and the operator's defaults.
+# The files the tests read, by their path in prometheus-operator/prometheus-operator:
+# every Go file of each package of PACKAGES, its tests aside, so that the tests
+# walk each one for a version comparison, and the operator's defaults.
+# pkg/prometheus/agent is left out: no kind of launcher's runs a Prometheus
+# agent.
 shopt -s nullglob
 FILES=()
-for f in "$UPSTREAM"/pkg/alertmanager/*.go; do
-  [[ "$f" == *_test.go ]] || FILES+=("${f#"$UPSTREAM"/}")
+for pkg in "${PACKAGES[@]}"; do
+  found=0
+  for f in "$UPSTREAM/$pkg"/*.go; do
+    [[ "$f" == *_test.go ]] && continue
+    FILES+=("${f#"$UPSTREAM"/}")
+    found=1
+  done
+  if (( found == 0 )); then
+    echo "ERROR: $REPO $TAG has no Go file in $pkg" >&2
+    exit 1
+  fi
 done
 shopt -u nullglob
-if (( ${#FILES[@]} == 0 )); then
-  echo "ERROR: $REPO $TAG has no Go file in pkg/alertmanager" >&2
-  exit 1
-fi
 FILES+=(pkg/operator/defaults.go)
 
 # Each file is read from the tag's tree, not the checkout, so that no checkout

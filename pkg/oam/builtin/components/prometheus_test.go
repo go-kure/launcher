@@ -28,6 +28,8 @@ var prometheusUnfixtured = map[string]string{
 	"tag":         "refused when not empty; an empty one writes nothing (TestPrometheus_DeprecatedImageFields)",
 	"sha":         "refused when not empty; an empty one writes nothing (TestPrometheus_DeprecatedImageFields)",
 	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestPrometheus_HostNetwork)",
+	"allowOverlappingBlocks": "true is refused from version 2.39.0, below the version the fixture's other fields need, and the type omits false " +
+		"(TestPrometheusVersionGates_Refused)",
 }
 
 // prometheusFull sets every other top-level field of the spec, inside
@@ -54,9 +56,9 @@ func prometheusFull() map[string]any {
 		"probeNamespaceSelector":             everywhere,
 		"scrapeConfigSelector":               selector,
 		"scrapeConfigNamespaceSelector":      everywhere,
-		"version":                            "v3.5.0",
+		"version":                            "v3.14.0",
 		"paused":                             true,
-		"image":                              "registry.example/prometheus/prometheus:v3.5.0",
+		"image":                              "registry.example/prometheus/prometheus:v3.14.0",
 		"imagePullPolicy":                    "IfNotPresent",
 		"imagePullSecrets":                   []any{map[string]any{"name": "registry-credentials"}},
 		"replicas":                           1,
@@ -208,12 +210,11 @@ func prometheusFull() map[string]any {
 			"objectStorageConfig": secretKey("thanos-objstore", "objstore.yml"),
 			"blockSize":           "2h",
 		},
-		"queryLogFile":           "/dev/stdout",
-		"allowOverlappingBlocks": true,
-		"exemplars":              map[string]any{"maxSize": 100000},
-		"evaluationInterval":     "30s",
-		"ruleQueryOffset":        "30s",
-		"enableAdminAPI":         true,
+		"queryLogFile":       "/dev/stdout",
+		"exemplars":          map[string]any{"maxSize": 100000},
+		"evaluationInterval": "30s",
+		"ruleQueryOffset":    "30s",
+		"enableAdminAPI":     true,
 	}
 }
 
@@ -265,6 +266,13 @@ func prometheusRefusals(notA string) []struct {
 		{"remote read without a URL", map[string]any{"remoteRead": []any{map[string]any{"readRecent": true}}}, "remoteRead[0].url: required"},
 		{"an Alertmanager endpoint without a name", map[string]any{"alerting": map[string]any{"alertmanagers": []any{map[string]any{"port": "web"}}}}, "alerting.alertmanagers[0].name: required"},
 		{"a scrape class without a name", map[string]any{"scrapeClasses": []any{map[string]any{"default": true}}}, "scrapeClasses[0].name: required"},
+
+		// The operator runs Prometheus of major version 2 or 3 only
+		// (NewConfigGenerator, promcfg.go:179-183).
+		{"a version of major 4", map[string]any{"version": "v4.0.0"},
+			`version: "v4.0.0" is not supported by the Prometheus operator, which runs Prometheus of major version 2 or 3 only`},
+		{"a version of major 1", map[string]any{"version": "v1.8.0"},
+			`version: "v1.8.0" is not supported by the Prometheus operator, which runs Prometheus of major version 2 or 3 only`},
 
 		{"image without a tag", map[string]any{"image": "registry.example/prometheus/prometheus"},
 			`image: image "registry.example/prometheus/prometheus" rejected: no tag or digest specified`},
@@ -395,6 +403,10 @@ func prometheusRefusals(notA string) []struct {
 			`volumes[0] "config": the name is a volume the Prometheus operator adds to every Prometheus's pods`},
 		{"a volume named as the web configuration's", amVolume("web-config"),
 			`volumes[0] "web-config": the name is a volume the Prometheus operator adds`},
+		// Reserved whatever version names: the operator adds it from
+		// Prometheus 2.24.0 on.
+		{"a volume named as the web configuration's before Prometheus 2.24.0", withAmVolume(map[string]any{"version": "v2.23.0"}, "web-config"),
+			`volumes[0] "web-config": the name is a volume the Prometheus operator adds`},
 		{"a volume named as the data volume", amVolume("prometheus-fast-db"),
 			`volumes[0] "prometheus-fast-db": the name is the data volume's, which the Prometheus operator adds to the pods`},
 		{"a volume named as a rule ConfigMap's", amVolume("prometheus-fast-rulefiles-7"),
@@ -402,6 +414,11 @@ func prometheusRefusals(notA string) []struct {
 		{"a volume named as the log file's", withAmVolume(map[string]any{"queryLogFile": "query.log"}, "log-file"),
 			`volumes[0] "log-file": the name is the volume the Prometheus operator adds for a log file named without a directory`},
 		{"a volume named as the sidecar's configuration's", withAmVolume(map[string]any{"thanos": map[string]any{}}, "thanos-prometheus-http-client-file"),
+			`volumes[0] "thanos-prometheus-http-client-file": the name is the volume the Prometheus operator adds for the Thanos sidecar's configuration`},
+		// Reserved whatever thanos.version names: the operator adds it from
+		// Thanos 0.24.0 on.
+		{"a volume named as the sidecar's configuration's before Thanos 0.24.0",
+			withAmVolume(map[string]any{"thanos": map[string]any{"version": "v0.23.0"}}, "thanos-prometheus-http-client-file"),
 			`volumes[0] "thanos-prometheus-http-client-file": the name is the volume the Prometheus operator adds for the Thanos sidecar's configuration`},
 		{"a volume named as a listed Secret's", withAmVolume(map[string]any{"secrets": []any{"Remote.TLS"}}, "secret-remote-tls"),
 			`volumes[0] "secret-remote-tls": the name is the volume the Prometheus operator adds for secrets[0]`},
@@ -420,6 +437,10 @@ func prometheusRefusals(notA string) []struct {
 		{"a mount at the data volume's path", map[string]any{"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/prometheus"}}},
 			`volumeMounts[0] "/prometheus": the mount path is a path the Prometheus operator mounts a volume at in every prometheus container`},
 		{"a mount at the web configuration file", map[string]any{"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/web_config/web-config.yaml"}}},
+			`volumeMounts[0] "/etc/prometheus/web_config/web-config.yaml": the mount path is a path the Prometheus operator mounts a volume at`},
+		// Reserved whatever version names, as the volume is.
+		{"a mount at the web configuration file before Prometheus 2.24.0",
+			map[string]any{"version": "v2.23.0", "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/web_config/web-config.yaml"}}},
 			`volumeMounts[0] "/etc/prometheus/web_config/web-config.yaml": the mount path is a path the Prometheus operator mounts a volume at`},
 		{"a mount at a listed ConfigMap's path", map[string]any{"configMaps": []any{"targets"}, "volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/configmaps/targets"}}},
 			`volumeMounts[0] "/etc/prometheus/configmaps/targets": the mount path is the path the Prometheus operator mounts configMaps[0] at`},
@@ -559,15 +580,30 @@ func TestPrometheus_PatchedPorts(t *testing.T) {
 // pmImage is a Prometheus image of the registry ptStrictPolicy allows.
 const pmImage = "registry.example/prometheus/prometheus:v3.5.0"
 
+// pmVersion is the version pmImage runs.
+const pmVersion = "v3.5.0"
+
 // thanosImage is a Thanos image of the registry ptStrictPolicy allows.
 const thanosImage = "registry.example/thanos/thanos:v0.39.2"
 
+// pmReloaders is amReloaders naming pmVersion where props names no version,
+// as amReloaders would name an Alertmanager version, of a major the kind
+// refuses. props is not changed.
+func pmReloaders(props map[string]any) map[string]any {
+	if _, named := props["version"]; named {
+		return amReloaders(props)
+	}
+	out := maps.Clone(props)
+	out["version"] = pmVersion
+	return amReloaders(out)
+}
+
 // pmHeld returns props with image pmImage where props names none, and both
-// reloaders patched (amReloaders), so that a document built under
+// reloaders patched (pmReloaders), so that a document built under
 // ptStrictPolicy is not refused for an image left to the operator. props is
 // not changed.
 func pmHeld(props map[string]any) map[string]any {
-	out := amReloaders(props)
+	out := pmReloaders(props)
 	if _, named := out["image"]; !named {
 		out["image"] = pmImage
 	}
@@ -1014,9 +1050,9 @@ func TestPrometheus_UnsetImage(t *testing.T) {
 	patch := []any{map[string]any{"name": "prometheus", "resources": map[string]any{"limits": map[string]any{"memory": "64Mi"}}}}
 	h := &components.PrometheusHandler{}
 	for name, props := range map[string]map[string]any{
-		"unset": amReloaders(map[string]any{"version": "v3.5.0"}),
-		"null":  amReloaders(map[string]any{"version": "v3.5.0", "image": nil}),
-		"empty": amReloaders(map[string]any{"version": "v3.5.0", "image": ""}),
+		"unset": pmReloaders(map[string]any{"version": "v3.5.0"}),
+		"null":  pmReloaders(map[string]any{"version": "v3.5.0", "image": nil}),
+		"empty": pmReloaders(map[string]any{"version": "v3.5.0", "image": ""}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if name != "empty" {
@@ -1051,7 +1087,7 @@ func TestPrometheus_UnsetImage(t *testing.T) {
 func TestPrometheus_PatchedImage(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	patched := func(image string) map[string]any {
-		return amReloaders(map[string]any{"containers": []any{map[string]any{"name": "prometheus", "image": image}}})
+		return pmReloaders(map[string]any{"containers": []any{map[string]any{"name": "prometheus", "image": image}}})
 	}
 	p := prometheusOf(t, patched(pmImage), ptStrictPolicy())
 	if p.Spec.Image != nil || p.Spec.Containers[0].Image != pmImage {
@@ -1168,7 +1204,7 @@ func TestPrometheus_ReloaderImages(t *testing.T) {
 			"the image of the config-reloader container (containers): unset",
 		},
 		"config-reloader patched outside the allowed registries": {
-			amReloaders(map[string]any{"image": pmImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),
+			pmReloaders(map[string]any{"image": pmImage, "containers": []any{map[string]any{"name": "config-reloader", "image": "other.example/prometheus-config-reloader:v0.94.1"}}}),
 			`containers[0] "config-reloader"`,
 		},
 	} {
