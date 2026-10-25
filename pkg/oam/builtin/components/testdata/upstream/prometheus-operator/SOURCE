@@ -24,4 +24,8 @@ file pkg/prometheus/server/rules.go 5ee727447752bd2a88b5150cca0089f7d2e2846f
 file pkg/prometheus/server/statefulset.go 3db33231f19b5c3e4b335231984125002f37db5e
 file pkg/prometheus/server/thanos_sidecar_config.go e5e971d9d89f53277fc868bc693ca7a0e8c3d2ae
 file pkg/prometheus/validation/validator.go 1ba146d433875baf7be6ba6b365690b0b2600d3a
+file pkg/thanos/collector.go 4b55a3df4edbd47c39ff67b7426a7c0af3708686
+file pkg/thanos/operator.go 2305867c39f8f213ac04efdde1535e4ec4b24e4a
+file pkg/thanos/rules.go f7e29b44f089e3c2b3fadde2adcf2f25a4f8ef82
+file pkg/thanos/statefulset.go fe5093cde242423a83aad03456d6ebf189775378
 file pkg/operator/defaults.go e0a4d715bd29b7467658f3a9cff464c507501a87

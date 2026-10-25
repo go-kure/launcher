@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # vendor-prometheus-operator-gates.sh — re-fetch the excerpt of the Prometheus
-# operator's code that the version gates of the alertmanager and prometheus
-# kinds are held to (go-kure/launcher#935, go-kure/launcher#980), and rewrite
-# its SOURCE file.
+# operator's code that the version gates of the alertmanager, prometheus and
+# thanosruler kinds are held to (go-kure/launcher#935, go-kure/launcher#980,
+# go-kure/launcher#976), and rewrite its SOURCE file.
 #
 # The excerpt lives under
 # pkg/oam/builtin/components/testdata/upstream/prometheus-operator/ and is read
-# by TestAlertmanagerVersionGates_MatchVendoredSource and
-# TestPrometheusVersionGates_MatchVendoredSource, which parse it with go/ast
+# by TestAlertmanagerVersionGates_MatchVendoredSource,
+# TestPrometheusVersionGates_MatchVendoredSource and
+# TestThanosRulerVersionGates_MatchVendoredSource, which parse it with go/ast
 # and need no network. The files are copied unmodified, Apache-2.0
 # headers included, with the operator's LICENSE, the licence's full text, and
 # its NOTICE, which the licence asks a redistributor to pass on; SOURCE names
@@ -54,9 +55,9 @@ UPSTREAM="$(mktemp -d)"
 
 # The tag's tree, sparse: the packages below, pkg/operator, and the root files
 # (LICENSE, NOTICE), which a cone-mode sparse checkout always holds.
-PACKAGES=(pkg/alertmanager pkg/prometheus pkg/prometheus/server pkg/prometheus/validation)
+PACKAGES=(pkg/alertmanager pkg/prometheus pkg/prometheus/server pkg/prometheus/validation pkg/thanos)
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
-git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/operator
+git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/thanos pkg/operator
 
 # The files the tests read, by their path in prometheus-operator/prometheus-operator:
 # every Go file of each package of PACKAGES, its tests aside, so that the tests

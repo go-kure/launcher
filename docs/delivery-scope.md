@@ -1846,7 +1846,10 @@ and by scope, whatever component or trait emits it.
     a path it mounts at in the thanos-ruler container; `dnsPolicy: None` without a
     nameserver, which the operator copies into the pods; and a name whose data volume or
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
-    are each refused. Left to the operator, which fails the reconcile on each: neither
+    are each refused. So is a field the operator reads only from some Thanos version on,
+    where `version` is below it, or the operator's default v0.42.4 where it is unset
+    (go-kure/launcher#976); `web-config` stays reserved whatever `version` names. Left to
+    the operator, which fails the reconcile on each: neither
     `queryConfig` nor `queryEndpoints`, a `version` it cannot parse, an argument naming a
     flag it generates, and a web TLS configuration its validation refuses.
   - **Credentials: one is held, the rest are stated.** A literal `remoteWrite[].bearerToken`

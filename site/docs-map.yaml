@@ -125,6 +125,10 @@ packages:
     readme: pkg/oam/builtin/components/README.md
     mounted: false
     reason: "Vendored Prometheus operator source read by the components tests; not a launcher package."
+  - path: pkg/oam/builtin/components/testdata/upstream/prometheus-operator/pkg/thanos
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Vendored Prometheus operator source read by the components tests; not a launcher package."
   # Alertmanager's feature flag source, one copy per minor, that the components
   # enableFeatures test parses (testdata, so Go never builds it). The components
   # README describes it.

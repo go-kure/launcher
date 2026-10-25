@@ -85,7 +85,7 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	const secretKey = " A Secret key selector: name and key, in the ThanosRuler's namespace. Launcher emits no Secret for it." //nolint:gosec // G101: a description, not a credential
 	return map[string]oam.PropertySchema{
-		"version":          text("version: the Thanos version the operator configures for."),
+		"version":          text("version: the Thanos version the operator configures for, such as v0.39.2. Unset, the operator's default, v0.42.4 at the operator release the kind is built against. A field the operator reads only from a later version than this one, or than v0.42.4 where this is unset, is refused, naming the version it needs: below it the operator drops the field, writes it for a Thanos that does not read it, or refuses the object; the components README lists them. A version the operator cannot parse is left to it."),
 		"podMetadata":      object("podMetadata: the labels and annotations the operator copies onto the ThanosRuler pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets four labels and one annotation of its own, which a value authored here does not replace." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"image":            text("image: the full image reference of the thanos-ruler container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named thanos-ruler names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named thanos-ruler names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without."),
 		"imagePullPolicy":  text("imagePullPolicy: when the image of the thanos-ruler container is pulled: Always, Never or IfNotPresent."),
@@ -135,10 +135,10 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"portName":            text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it. A name the API refuses for a port (not an IANA service name: at most 15 characters, lower-case letters, digits and -) is refused where the operator writes it, and so is grpc, the port the operator adds beside it. On the thanos-ruler container, unless listenLocal is set, both are judged as the pods run the web port once a thanos-ruler entry of containers is merged over it by port number: an entry at 10902 that names the port leaves portName out of the container, and one that renames grpc frees that name. On the governing Service, unless serviceName is set, grpc is refused whatever an entry says."),
 		"evaluationInterval":  text("evaluationInterval: the interval between two evaluations of the rules. Unset, the API fills 15s; an empty one is refused, since the API server would replace it." + duration),
 		"resendDelay":         text("resendDelay: the least time before an alert is sent to Alertmanager again." + duration),
-		"ruleOutageTolerance": text("ruleOutageTolerance: the longest outage of the query endpoints after which the for state of an alert is still restored. Requires Thanos v0.30.0 or later." + duration),
-		"ruleQueryOffset":     text("ruleQueryOffset: the default query offset of a rule group. Requires Thanos v0.38.0 or later." + duration),
-		"ruleConcurrentEval":  number("ruleConcurrentEval: how many rules may be evaluated at once. At least 1. Requires Thanos v0.37.0 or later."),
-		"ruleGracePeriod":     text("ruleGracePeriod: the least time between an alert and the restored for state, for alerts with a longer for. Requires Thanos v0.30.0 or later." + duration),
+		"ruleOutageTolerance": text("ruleOutageTolerance: the longest outage of the query endpoints after which the for state of an alert is still restored. Refused below Thanos v0.30.0, where the operator drops it." + duration),
+		"ruleQueryOffset":     text("ruleQueryOffset: the default query offset of a rule group. Refused below Thanos v0.38.0, where the operator drops it." + duration),
+		"ruleConcurrentEval":  number("ruleConcurrentEval: how many rules may be evaluated at once. At least 1. Refused below Thanos v0.37.0, where the operator drops it."),
+		"ruleGracePeriod":     text("ruleGracePeriod: the least time between an alert and the restored for state, for alerts with a longer for. Refused below Thanos v0.30.0, where the operator drops it." + duration),
 		"retention":           text("retention: how long Thanos Ruler keeps its data. Unset, the API fills 24h; an empty one is refused, since the API server would replace it. No effect with remoteWrite, where the ruler keeps none." + duration),
 		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (thanos-ruler, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of a listed init container is refused. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
@@ -164,10 +164,10 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the thanos-ruler container, passed as they are; launcher does not read them. Upstream documents that an argument the operator already sets, or an invalid one, fails the reconciliation.",
 			"One argument: name (required) and value."),
 		"web": object("web: the web server's settings: tlsConfig and httpConfig." + decoded + "ThanosRulerWebSpec in its API reference."),
-		"remoteWrite": objects("remoteWrite: the remote write endpoints the ruler sends its series to; with one, the ruler keeps no data of its own. Requires Thanos v0.24.0 or later. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
+		"remoteWrite": objects("remoteWrite: the remote write endpoints the ruler sends its series to; with one, the ruler keeps no data of its own. Refused below Thanos v0.24.0, where the operator refuses the object at reconcile; a field of an entry is refused below the Thanos version the operator reads it from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required. An empty action of a writeRelabelConfigs rule is refused, since the API server would replace it with replace."+decoded+"RemoteWriteSpec in its API reference."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop. Unset, the operator's default of 120. At least 0."),
-		"enableFeatures": texts("enableFeatures: the Thanos Ruler feature flags to enable. Requires Thanos v0.39.0 or later.",
+		"enableFeatures": texts("enableFeatures: the Thanos Ruler feature flags to enable. Refused below Thanos v0.39.0, where the operator drops it.",
 			"The name of one feature flag."),
 		"hostUsers": flag("hostUsers: false runs the pods in a user namespace of their own, not the host's."),
 	}
@@ -291,7 +291,8 @@ var thanosRulerGenerated = map[string][]string{
 }
 
 // validateThanosRuler refuses what the operator or the API refuses of the
-// spec alone, then holds the pods as a workload's (validateMonitoringWorkload).
+// spec alone, then holds the pods as a workload's (validateMonitoringWorkload)
+// and the fields to version (validateThanosRulerVersion).
 // What depends on the ThanosRuler's name as well is validateThanosRulerName's.
 //
 // The operator copies the replica count into the StatefulSet as it is
@@ -310,7 +311,10 @@ func validateThanosRuler(spec *monitoringv1.ThanosRulerSpec) error {
 	if err := validateOperatorStorage(spec.Storage); err != nil {
 		return err
 	}
-	return validateMonitoringWorkload(thanosRulerWorkload(spec))
+	if err := validateMonitoringWorkload(thanosRulerWorkload(spec)); err != nil {
+		return err
+	}
+	return validateThanosRulerVersion(spec)
 }
 
 // validateThanosRulerPortName refuses a portName the API refuses where the
@@ -454,7 +458,8 @@ const thanosRulerRuleFileNumber = "(0|[1-9][0-9]*)$"
 // the Secret keys' (thanosRulerSecretKeyVolumes), tls-assets (:297), the rule
 // ConfigMaps' (:452-469) and web-config, which it adds only for Thanos 0.21.0
 // and later (:377-398; volumeName in pkg/webconfig/config.go) and which is
-// reserved whatever version names, as no field is held to version. The data
+// reserved whatever version names, so that raising version does not turn a
+// volume of the author's into a clash, as on the other monitoring kinds. The data
 // volume is held by validateOperatorObjectName. The volumes of the web TLS
 // credentials, which the operator names after each credential's source, are
 // left to the API, as an alertmanager's are.
