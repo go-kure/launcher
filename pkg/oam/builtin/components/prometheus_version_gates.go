@@ -7,6 +7,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"github.com/prometheus/common/model"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -638,6 +639,9 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		if err := refuseVersionCeilings(spec, v, at, "Prometheus", "version", prometheusVersionCeilings); err != nil {
 			return err
 		}
+		if err := refusePromRelabelTargetLabels(spec, v, at); err != nil {
+			return err
+		}
 	}
 	if spec.Thanos == nil {
 		return nil
@@ -655,6 +659,46 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		}
 		if promParsed {
 			return refuseDelayedCompactionBlockSize(spec, prom, at, v, thanosAt)
+		}
+	}
+	return nil
+}
+
+// prometheusUTF8LabelNamesMinimum is the Prometheus version from which the
+// operator judges a label name by the UTF-8 scheme, and below which by the
+// legacy one, [a-zA-Z_][a-zA-Z0-9_]* (ValidationSchemeForPrometheus,
+// pkg/operator/validations.go at prometheus-operator v0.94.1).
+const prometheusUTF8LabelNamesMinimum = "3.0.0"
+
+// promTargetLabelActions are the relabeling actions whose targetLabel the
+// operator checks against the label-name scheme of the version
+// ((*LabelConfigValidator).ValidateRelabelConfig, pkg/prometheus/validation/
+// validator.go); it reads an empty action as replace.
+var promTargetLabelActions = []string{"replace", "hashmod", "lowercase", "uppercase", "keepequal", "dropequal"}
+
+// refusePromRelabelTargetLabels refuses, at a version v below
+// prometheusUTF8LabelNamesMinimum, named at, the targetLabel of a rule of a
+// relabeling list the operator validates (promRelabelLists) that is not a
+// legacy label name, for an action whose targetLabel it checks: the operator
+// refuses the object at reconcile. An empty targetLabel is not judged here.
+func refusePromRelabelTargetLabels(spec *monitoringv1.PrometheusSpec, v semver.Version, at string) error {
+	if v.GTE(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
+		return nil
+	}
+	for _, l := range promRelabelLists {
+		for i, list := range l.of(spec) {
+			for j, rc := range list {
+				action := strings.ToLower(rc.Action)
+				if action == "" {
+					action = "replace"
+				}
+				if rc.TargetLabel == "" || !slices.Contains(promTargetLabelActions, action) || model.LegacyValidation.IsValidLabelName(rc.TargetLabel) {
+					continue
+				}
+				path := strings.Replace(l.path, "[]", "["+strconv.Itoa(i)+"]", 1) + "[" + strconv.Itoa(j) + "].targetLabel"
+				return errors.Errorf("%s: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; name a legacy label, or set version to %s or later",
+					path, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
+			}
 		}
 	}
 	return nil
