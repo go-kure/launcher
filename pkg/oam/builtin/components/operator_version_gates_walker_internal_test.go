@@ -95,6 +95,80 @@ func guard(cg *ConfigGenerator) {
 	_ = g
 }
 `,
+	"pkg/d/forms.go": `package d
+
+var atLeast = semver.MustParseRange(">=2.30.0")
+
+func methodExpr(v semver.Version) {
+	if semver.Version.LT(v, semver.MustParse("3.0.0")) {
+	}
+}
+
+func pointerMethodExpr(v semver.Version) {
+	if (*semver.Version).GTE(&v, semver.MustParse("2.40.0")) {
+	}
+}
+
+func mustRange(v semver.Version) {
+	if semver.MustParseRange(">=2.30.0 <3.0.0")(v) {
+	}
+}
+
+func parsedRange(v semver.Version) {
+	r, _ := semver.ParseRange(">=2.30.0")
+	_ = r(v)
+}
+
+func notAComparison(v semver.Version) {
+	_ = semver.Version.String(v)
+}
+`,
+	"pkg/d/typealias.go": `package d
+
+import (
+	"cmp"
+
+	"github.com/blang/semver/v4"
+	corev1 "k8s.io/api/core/v1"
+)
+
+type V = semver.Version
+
+func typeAlias(v V) bool {
+	return V.LT(v, semver.MustParse("3.0.0"))
+}
+
+func otherPackages(a, b string) bool {
+	return cmp.Compare(a, b) < 0 && corev1.Compare(a, b)
+}
+`,
+	"pkg/e/alias.go": `package e
+
+import sv "github.com/blang/semver/v4"
+
+func aliased(v sv.Version) bool {
+	return sv.Version.LT(v, sv.MustParse("3.0.0")) || sv.MustParseRange(">=2.30.0")(v)
+}
+`,
+	"pkg/e/dot.go": `package e
+
+import . "github.com/blang/semver/v4"
+
+func dotted(v Version) bool {
+	return MustParseRange(">=2.30.0")(v)
+}
+`,
+	"pkg/e/plain.go": `package e
+
+import (
+	_ "github.com/blang/semver/v4"
+	semver "github.com/blang/semver/v4"
+)
+
+func plain(v semver.Version) bool {
+	return v.GTE(semver.MustParse("2.6.0"))
+}
+`,
 }
 
 // syntheticPromOp parses walkerSources as an excerpt.
@@ -189,6 +263,49 @@ func TestVersionGateWalker_Reads(t *testing.T) {
 	for _, want := range []string{"a version comparison outside a function", "takes the version method GTE as a value", "takes the version method WithMaximumVersion as a value"} {
 		if !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, want) }) {
 			t.Errorf("pkg/c/value.go: reported %q, want one mentioning %q", errs, want)
+		}
+	}
+
+	// W11 a method expression of a comparison method of semver.Version, and
+	// a range of semver, in a function or outside one, carry no bound the
+	// walker reads; it reports each, and nothing of a method expression that
+	// compares nothing.
+	errs = recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, "pkg/d/forms.go") })
+	wantForms := []string{
+		"pkg/d/forms.go:3:15: a version comparison outside a function",
+		"pkg/d/forms.go:6:5: methodExpr compares a version through the method expression semver.Version.LT, on 2 arguments; the test cannot read its bound",
+		"pkg/d/forms.go:11:5: pointerMethodExpr compares a version through the method expression (*semver.Version).GTE, on 2 arguments; the test cannot read its bound",
+		"pkg/d/forms.go:16:5: mustRange compares a version through the range semver.MustParseRange; the test cannot read its bound",
+		"pkg/d/forms.go:21:10: parsedRange compares a version through the range semver.ParseRange; the test cannot read its bound",
+	}
+	if !slices.Equal(errs, wantForms) {
+		t.Errorf("pkg/d/forms.go: reported\n%s\nwant\n%s", strings.Join(errs, "\n"), strings.Join(wantForms, "\n"))
+	}
+
+	// W13 the method expression is read by its call, not by the name of its
+	// receiver type: through a type alias of semver.Version it is reported
+	// too, and a function of another package the file imports, as
+	// cmp.Compare(a, b), is no version method.
+	errs = recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, "pkg/d/typealias.go") })
+	wantAlias := []string{"pkg/d/typealias.go:13:9: typeAlias compares a version through the method expression V.LT, on 2 arguments; the test cannot read its bound"}
+	if !slices.Equal(errs, wantAlias) {
+		t.Errorf("pkg/d/typealias.go: reported %q, want %q", errs, wantAlias)
+	}
+
+	// W12 semver imported under another name, or dot-imported, would let a
+	// comparison or a range escape the walk, which reads semver by that
+	// name; the walker reports the import. One imported as itself, beside a
+	// blank import, is walked.
+	for rel, want := range map[string][]string{
+		"pkg/e/alias.go": {
+			"pkg/e/alias.go:3:8: pkg/e/alias.go imports github.com/blang/semver/v4 as sv; the walker reads it only as semver",
+			"pkg/e/alias.go:6:9: aliased compares a version through the method expression sv.Version.LT, on 2 arguments; the test cannot read its bound",
+		},
+		"pkg/e/dot.go":   {"pkg/e/dot.go:3:8: pkg/e/dot.go imports github.com/blang/semver/v4 as .; the walker reads it only as semver"},
+		"pkg/e/plain.go": nil,
+	} {
+		if errs := recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, rel) }); !slices.Equal(errs, want) {
+			t.Errorf("%s: reported %q, want %q", rel, errs, want)
 		}
 	}
 }

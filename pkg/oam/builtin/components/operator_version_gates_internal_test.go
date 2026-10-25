@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -415,6 +416,89 @@ func readAt(n ast.Node, stack []ast.Node) versionRead {
 	return noRead
 }
 
+// unreadForm names a comparison n makes that readAt reads no bound of: a
+// call of a version method on other than one argument, as the method
+// expression semver.Version.LT(v, w), whose bound is its second argument,
+// whatever the receiver type is named (a type alias of semver.Version
+// included); and any use of a range of semver, as
+// semver.MustParseRange(">=2.30.0")(v), which holds no single bound. Neither
+// occurs at v0.94.1; the walker fails on each, as on a version method taken
+// as a value, so that a re-vendor that brings one in is classified by hand
+// (go-kure/launcher#1024). A function of another package the file imports,
+// as cmp.Compare(a, b), is no version method. "" is no such form.
+func unreadForm(n ast.Node, others map[string]bool) string {
+	if call, ok := n.(*ast.CallExpr); ok {
+		sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+		if !ok {
+			return ""
+		}
+		if pkg, isIdent := sel.X.(*ast.Ident); isIdent && others[pkg.Name] {
+			return ""
+		}
+		if versionMethods[sel.Sel.Name] && len(call.Args) != 1 {
+			var b bytes.Buffer
+			printer.Fprint(&b, token.NewFileSet(), sel)
+			return fmt.Sprintf("the method expression %s, on %d arguments", b.String(), len(call.Args))
+		}
+		return ""
+	}
+	sel, ok := n.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "semver" && strings.Contains(sel.Sel.Name, "Range") {
+		return "the range semver." + sel.Sel.Name
+	}
+	return ""
+}
+
+// semverImportPath is the import path of the semver package the vendored
+// source compares versions with.
+const semverImportPath = "github.com/blang/semver/v4"
+
+// otherImports are the names file may refer to its imports by, semver's
+// aside: the name given, or else the last element of the path and, where
+// that is a major version (k8s.io/api/core/v1, a module's /v2), the element
+// before it too, since only the package itself says which it declares.
+func otherImports(file *ast.File) map[string]bool {
+	names := map[string]bool{}
+	for _, imp := range file.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p == semverImportPath {
+			continue
+		}
+		if imp.Name != nil {
+			names[imp.Name.Name] = true
+			continue
+		}
+		elems := strings.Split(p, "/")
+		last := elems[len(elems)-1]
+		names[last] = true
+		if len(elems) > 1 && majorVersion.MatchString(last) {
+			names[elems[len(elems)-2]] = true
+		}
+	}
+	return names
+}
+
+// majorVersion matches a path element naming a major version.
+var majorVersion = regexp.MustCompile(`^v[0-9]+$`)
+
+// renamedSemver returns file's import of semver under a name other than
+// semver, a dot import included, or nil. The walker reads a comparison, a
+// method expression or a range of semver by that name only (readAt,
+// unreadForm, resolveVersion), so one made through another name would escape
+// it (go-kure/launcher#1024). A blank import compares nothing.
+func renamedSemver(file *ast.File) *ast.ImportSpec {
+	for _, imp := range file.Imports {
+		if p, err := strconv.Unquote(imp.Path.Value); err == nil && p == semverImportPath &&
+			imp.Name != nil && imp.Name.Name != "semver" && imp.Name.Name != "_" {
+			return imp
+		}
+	}
+	return nil
+}
+
 // inspectWithStack calls visit for every node under root, with its
 // ancestors, root first.
 func inspectWithStack(root ast.Node, visit func(n ast.Node, stack []ast.Node)) {
@@ -435,7 +519,8 @@ func inspectWithStack(root ast.Node, visit func(n ast.Node, stack []ast.Node)) {
 // WithMinimumVersion or of WithMaximumVersion, and a read of a version's
 // Major, Minor or Patch. A version the walker cannot resolve is recorded as
 // unread, which holdVersionGates fails unless the gate is classified as not
-// the kind's or the test reads its bounds itself.
+// the kind's or the test reads its bounds itself. A file that imports semver
+// under another name fails the walk (renamedSemver).
 func (v *vendoredPromOp) versionGates(t testing.TB, files ...string) []operatorGate {
 	t.Helper()
 	var gates []operatorGate
@@ -444,12 +529,16 @@ func (v *vendoredPromOp) versionGates(t testing.TB, files ...string) []operatorG
 		if file == nil {
 			t.Fatalf("the excerpt holds no %s", rel)
 		}
+		if imp := renamedSemver(file); imp != nil {
+			t.Errorf("%s: %s imports %s as %s; the walker reads it only as semver", v.fset.Position(imp.Pos()), rel, semverImportPath, imp.Name.Name)
+		}
+		others := otherImports(file)
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				// A comparison outside a function would escape the walk.
 				inspectWithStack(decl, func(n ast.Node, stack []ast.Node) {
-					if readAt(n, stack) != noRead {
+					if readAt(n, stack) != noRead || unreadForm(n, others) != "" {
 						t.Errorf("%s: a version comparison outside a function", v.fset.Position(n.Pos()))
 					}
 				})
@@ -491,9 +580,14 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 	t.Helper()
 	fn := funcName(fd)
 	locals := localNames(fd)
+	others := otherImports(v.files[rel])
 	byNode := map[ast.Node]*operatorGate{}
 	var order []ast.Node
 	inspectWithStack(fd, func(n ast.Node, stack []ast.Node) {
+		if form := unreadForm(n, others); form != "" {
+			t.Errorf("%s: %s compares a version through %s; the test cannot read its bound", v.fset.Position(n.Pos()), fn, form)
+			return
+		}
 		if sel, ok := n.(*ast.SelectorExpr); ok && versionMethods[sel.Sel.Name] && !calledAt(stack, sel) {
 			t.Errorf("%s: %s takes the version method %s as a value; the test cannot read its bound", v.fset.Position(n.Pos()), fn, sel.Sel.Name)
 			return
