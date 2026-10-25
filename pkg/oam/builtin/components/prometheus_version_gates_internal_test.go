@@ -856,6 +856,13 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 		{"blockSize with an object storage file", m{"thanos": m{"objectStorageConfigFile": "/etc/thanos/objstore.yml", "blockSize": "4h"}}, "version", "",
 			"thanos.blockSize: read by the Prometheus operator only where it disables local compaction"},
 		{"blockSize with an unparsable thanos.version", blockSize(m{"version": "main"}), "version", "", ""},
+		{"blockSize with an empty thanos.version, which the operator cannot parse", blockSize(m{"version": ""}), "version", "", ""},
+		{"an azureAd method below both its version and azureAd's is refused as the method", m{"remoteWrite": []any{m{
+			"url": "https://metrics.example.com/api/v1/write", "azureAd": m{"sdk": m{"tenantId": "00000000-0000-0000-0000-000000000001"}},
+		}}}, "version", "v2.44.0", "remoteWrite[].azureAd.sdk: read by the Prometheus operator only for Prometheus 2.52.0 and later; at version v2.44.0 it refuses the object at reconcile"},
+		{"a remote write authorization below 2.26.0 names the panic", m{"remoteWrite": []any{m{
+			"url": "https://metrics.example.com/api/v1/write", "authorization": m{"credentials": m{"name": "token", "key": "token"}},
+		}}}, "version", "v2.25.0", "at version v2.25.0 it panics while generating the configuration"},
 		{"attachMetadata at v2.34.0", sc, "version", "v2.34.0", "scrapeClasses[].attachMetadata: read by the Prometheus operator only for Prometheus 2.37.0 and later"},
 		{"attachMetadata at v2.36.0", sc, "version", "v2.36.0", "at version v2.36.0 it drops it from the scrape configurations of the ServiceMonitors"},
 		{"attachMetadata at v2.37.0", sc, "version", "v2.37.0", ""},
