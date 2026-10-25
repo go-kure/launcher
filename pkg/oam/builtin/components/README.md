@@ -4502,7 +4502,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     template arm one that is not a DNS-1123 label or that names a volume the
     operator adds.
   - an entry of `volumes` named as a volume the operator adds: `tls-assets`,
-    `web-config` (whatever `version` names, as on `alertmanager`),
+    `web-config` (whatever `version` names, though the operator adds it only
+    for Thanos 0.21.0 on, so that raising `version` does not turn a volume
+    of the author's into a clash, as on `alertmanager`),
     `remote-write-config`, the volume of each Secret key the spec sets
     (`query-config`, `alertmanager-config`, and `objstorage-config`,
     `tracing-config` and `alertrelabel-config` where the file field that
@@ -4528,6 +4530,43 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     characters. Each pod's hostname, `thanos-ruler-<name>-<ordinal>`, is no
     longer than that volume's name at any replica count. The refusal names
     the component, or `objectName` where that set the name.
+  - a field the operator reads only from some Thanos version on, where
+    `version` is below that version (go-kure/launcher#976). An unset
+    `version` is judged against the operator release launcher vendors
+    (v0.94.1, default v0.42.4), at which no field below is refused; one the
+    operator cannot parse is left to it, as below. Below its version the
+    operator leaves the flag off the thanos-ruler container, serves the web
+    endpoint over plain HTTP without the web configuration, or refuses the
+    object at reconcile. Of a remote write entry it logs every such field as
+    ignored, but resets a copy of the entry, so only a field reached through
+    one of its pointers is dropped: `tlsConfig.minVersion`,
+    `tlsConfig.maxVersion`, `queueConfig.sampleAgeLimit`, and the `azureAd`
+    methods `sdk` and `oauth`. The entry's own fields are written all the
+    same, for a Thanos that does not read them. `azureAd` among them is
+    written only where a managed identity survives: an `azureAd` left with
+    no method is refused at reconcile, whether by a dropped `sdk` or
+    `oauth`, whose refusal names it, or with only a `workloadIdentity`,
+    which the operator drops at every version (go-kure/launcher#1020)
+    (`ruleQueryOffset: read by the Prometheus operator only for
+    Thanos 0.38.0 and later; at version v0.37.0 it does not pass it to
+    Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
+    later, or leave ruleQueryOffset unset`). Flags (`makeStatefulSetSpec`):
+    `web.tlsConfig` and `web.httpConfig` (0.21.0), `ruleOutageTolerance` and
+    `ruleGracePeriod` (0.30.0), `ruleConcurrentEval` above 0 and
+    `grpcServerTlsConfig.minVersion` (0.37.0), `ruleQueryOffset` (0.38.0),
+    `enableFeatures` (0.39.0), `grpcServerTlsConfig.cipherSuites` and
+    `curves` (0.42.0). Remote write (`createOrUpdateRulerConfigSecret`):
+    `remoteWrite` itself (0.24.0, refused at reconcile); of an entry,
+    `tlsConfig.minVersion` (0.28.0), `tlsConfig.maxVersion` and
+    `sendNativeHistograms` (0.30.0), `azureAd` and `azureAd.oauth` (0.31.0),
+    `queueConfig.sampleAgeLimit`, `noProxy`, `proxyFromEnvironment` and
+    `proxyConnectHeader` (0.32.0), `azureAd.sdk` (0.36.0), `messageVersion`
+    (0.37.0), `roundRobinDNS` (0.38.0), and an `azureAd.managedIdentity`
+    without `clientId` (0.40.0, refused at reconcile).
+    `TestThanosRulerVersionGates_MatchVendoredSource` parses every version
+    comparison of the operator's package `pkg/thanos` (every Go file of it,
+    its tests aside), vendored as for `alertmanager`, and holds each to this
+    list.
 
   **Not checked of what the operator refuses:** a ThanosRuler with neither
   `queryConfig` nor `queryEndpoints` (:141-143), a `version` it cannot parse
