@@ -54,7 +54,7 @@ source, shared within the document)
 or, under `delivery: template`, to a `helmtemplate`. `oci` lowers to an
 `ocirepository` and a `fluxcd-kustomization` (go-kure/launcher#784): a same-name
 pair deployed as one component, or, when several `oci` components in the document
-use the same artifact at the same interval with the same registry access, one
+use the same artifact, version and interval with the same registry access, one
 shared `ocirepository` they all reference. So `builtinComponentHandlers()` must register `ocirepository` and
 `fluxcd-kustomization`, the kind-named projection of the Flux `Kustomization`,
 authorable on its own; the `oci` fixture under `testdata/` builds the pair. The built-in application policy

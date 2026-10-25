@@ -9760,8 +9760,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   terminals' own.
   Each Secret reference of the registry access names a Secret in the
   namespace the OCIRepository lands in, the Flux namespace when one is set,
-  as on `ocirepository`. A Secret-making trait (`external-secret`,
-  `certificate`) goes to the Kustomization, not the source, so the Secret it
+  as on `ocirepository`. A Secret-making trait (`secret`,
+  `external-secret`, `certificate`) goes to the Kustomization, not the source, so the Secret it
   makes is not moved to the Flux namespace for the source to read: provide the
   Secret there, or author `ocirepository` and `fluxcd-kustomization`.
   - *A component alone on its artifact* lowers to a same-name group: both
