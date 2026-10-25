@@ -4201,7 +4201,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of that name, the Prometheus operator's port at 9094/UDP, …`; a port at
   9094 renames `mesh-tcp`, never `mesh-udp`). A patch may rename a
   generated port and reuse its name, and a later port of the patch merges
-  into one an earlier port added. Two `volumes` of one name are refused,
+  into one an earlier port added. A patch that renames the web port (a port
+  at 9093 of another name than `portName`) is refused while a liveness or
+  readiness probe the operator writes still names `portName`: the probe then
+  names a port the container does not have, and fails (`containers[0]
+  "alertmanager": ports[0] "http" at 9093/TCP renames the web port, whose
+  name portName "web" the Prometheus operator's liveness and readiness
+  probes name; …`; go-kure/launcher#963). The operator writes both probes
+  only where `listenLocal` is unset (`pkg/alertmanager/statefulset.go:409-444`
+  at prometheus-operator v0.94.1). A probe of the patch that sets no handler
+  type keeps the operator's handler; one that sets any gives the patch's
+  handler (`MergePatchContainers` and `sanitizeProbeHandlers`,
+  `pkg/k8s/merge.go:27-121`), so a patch that gives each probe a handler
+  that does not name `portName` builds. Two `volumes` of one name are refused,
   as the API refuses the pods (`volumes[1] "scratch": the name is listed
   already at volumes[0], …`), and so is a `serviceName` that is not a
   DNS-1123 label, the rule of every Service name in this package: the API
@@ -4853,8 +4865,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   pods run them, name two ports alike is refused (`containers[0]
   "prometheus": ports[0] "web" at 8080/TCP: the Prometheus operator merges
   the patch's ports into the container's by number, which leaves another port
-  of that name, the Prometheus operator's port at 9090/TCP, …`), and so are
-  two `volumes` of one name and a `serviceName` that is not a DNS-1123 label (a
+  of that name, the Prometheus operator's port at 9090/TCP, …`). A patch that
+  renames the web port (a port at 9090 of another name than `portName`) is
+  refused while a startup, liveness or readiness probe the operator writes
+  still names `portName`, as on `alertmanager` (`containers[0] "prometheus":
+  ports[0] "http" at 9090/TCP renames the web port, whose name portName
+  "web" the Prometheus operator's startup, liveness and readiness probes
+  name; …`; go-kure/launcher#963). The operator's probes name `portName`
+  unless `listenLocal` is set, under which each is an exec and no web port is
+  given (`BuildProbes` and `buildProbeHandler`,
+  `pkg/prometheus/promcfg.go:1398-1451` at prometheus-operator v0.94.1). Two
+  `volumes` of one name are refused, and so is a `serviceName` that is not a DNS-1123 label (a
   leading digit needs RelaxedServiceNameValidation on the cluster, the default
   from Kubernetes 1.36; go-kure/launcher#959, `docs/delivery-scope.md` §3.5).
   A nonempty `externalUrl` that Prometheus exits on at

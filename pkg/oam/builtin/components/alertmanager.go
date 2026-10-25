@@ -139,7 +139,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterPeerTimeout":                  text("clusterPeerTimeout: the timeout of cluster peering, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterPeerName":                     text("clusterPeerName: the name this instance advertises to its peers; may refer to environment variables of the alertmanager container, as $(POD_NAME). Unset, the pod's name. Refused where version is under v0.30.0, which the operator does not pass it to. Not empty."),
-		"portName":                            text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it. A name the API refuses for a port (not an IANA service name: at most 15 characters, lower-case letters, digits and -) is refused where the operator writes it; so are mesh-tcp and mesh-udp, the container ports the operator adds beside it, unless listenLocal is set, and tcp-mesh and udp-mesh, the ports of the governing Service, unless serviceName is set."),
+		"portName":                            text("portName: the name of the web port on the pods and the governing Service. Unset, the API fills web; an empty one is refused, since the API server would replace it. A name the API refuses for a port (not an IANA service name: at most 15 characters, lower-case letters, digits and -) is refused where the operator writes it; so are mesh-tcp and mesh-udp, the container ports the operator adds beside it, unless listenLocal is set, and tcp-mesh and udp-mesh, the ports of the governing Service, unless serviceName is set. A containers patch of alertmanager that renames the web port at 9093 is refused while a probe the operator writes there still names portName."),
 		"forceEnableClusterMode":              flag("forceEnableClusterMode: true keeps the cluster mode on with a single replica, for a cluster that spans several Kubernetes clusters."),
 		"alertmanagerConfigSelector":          object("alertmanagerConfigSelector: the AlertmanagerConfig objects merged into this Alertmanager's configuration, by their labels. A Kubernetes label selector: matchLabels and matchExpressions."),
 		"alertmanagerConfigNamespaceSelector": object("alertmanagerConfigNamespaceSelector: the namespaces AlertmanagerConfig objects are read from, by their labels. Unset, the Alertmanager's own namespace only. A Kubernetes label selector: matchLabels and matchExpressions."),
@@ -320,6 +320,13 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		return err
 	}
 	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
+		return err
+	}
+	// The operator writes a liveness and a readiness probe on the
+	// alertmanager container, both naming portName, only where listenLocal is
+	// unset (pkg/alertmanager/statefulset.go:409-444 at prometheus-operator
+	// v0.94.1), as it gives the web port only then (alertmanagerGeneratedPorts).
+	if err := refuseRenamedProbedPort(spec.Containers, "alertmanager", 9093, spec.PortName, alertmanagerGeneratedPorts(spec)["alertmanager"], []string{"liveness", "readiness"}); err != nil {
 		return err
 	}
 	return validateAlertmanagerVersion(spec)
