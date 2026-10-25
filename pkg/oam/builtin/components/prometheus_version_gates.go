@@ -269,7 +269,7 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		// (BuildCommonPrometheusArgs, pkg/prometheus/promcfg.go, and
 		// buildServerArgs, pkg/prometheus/server/statefulset.go).
 		g("web.pageTitle", "2.6.0", promFlagDropped, func(s *spec) bool { return s.Web != nil && s.Web.PageTitle != nil }),
-		g("logFormat", "2.6.0", "does not pass it to Prometheus, which runs without it, while the config reloaders and the Thanos sidecar still log in it", func(s *spec) bool { return s.LogFormat != "" && s.LogFormat != "logfmt" }),
+		g("logFormat", "2.6.0", "does not pass it to Prometheus, which runs without it", func(s *spec) bool { return s.LogFormat != "" && s.LogFormat != "logfmt" }),
 		g("enableFeatures", "2.25.0", promFlagDropped, func(s *spec) bool { return len(s.EnableFeatures) > 0 }),
 		g("enableRemoteWriteReceiver", "2.33.0", promFlagDropped, func(s *spec) bool { return s.EnableRemoteWriteReceiver }),
 		g("remoteWriteReceiverMessageVersions", "2.54.0", promFlagDropped, func(s *spec) bool {
