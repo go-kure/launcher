@@ -4004,7 +4004,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     feature. The joined list is read as the kubelet passes it, which reads
     `$$` as `$` and leaves `$(` without its closing parenthesis as written; one
     that refers to an environment variable, as `$(AM_FEATURE)`, is not refused,
-    since the kubelet expands it to a value the component cannot see. The
+    since the kubelet expands it to a value the component cannot see. A
+    reference runs from `$(` to the first `)` after it; one whose name no
+    variable can have, an empty one or one with `=`, a character beyond ASCII
+    or one not printable, as `$()`, is passed as written and judged as such. The
     names, by minor: `classic-mode`, `receiver-name-in-metrics`
     and `utf8-strict-mode` from 0.27;
     `auto-gomaxprocs` and `auto-gomemlimit` from 0.28; `alert-names-in-metrics`
@@ -4244,7 +4247,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   kubelet passes it, which reads `$$` as `$` and leaves `$(` without its
   closing parenthesis as written; one that refers to an environment variable,
   as `[$(POD_IP)]:9094`, is not refused, since the kubelet expands it to a
-  value the component cannot see (`expand.go` of Kubernetes v1.35.0). With the
+  value the component cannot see (`expand.go` of Kubernetes v1.37.1). A
+  reference runs from `$(` to the first `)` after it. One whose name no
+  variable can have, an empty one or one with `=`, a character beyond ASCII
+  or one not printable (the API refuses each as a variable's name), as
+  `[$()]:9094`, `[$(a=b)]:9094` or `[$(é)]:9094`, is passed as written, and
+  the value is judged as a literal one, so those three are refused. With the
   cluster off the value is not read. The message does not name the value.
 
   **Policy.** `ApplyPolicy` refuses or passes; it writes nothing, and without

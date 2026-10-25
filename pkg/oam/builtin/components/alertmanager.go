@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/blang/semver/v4"
 	"github.com/go-kure/kure/pkg/kubernetes/prometheus"
@@ -131,7 +133,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"priorityClassName": text("priorityClassName: the priority class of the pods."),
 		"additionalPeers": texts("additionalPeers: further Alertmanager instances to form a high-availability cluster with, outside this object.",
 			"The address of one peer."),
-		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. An empty host, as in :9094, is not refused: Alertmanager then works the address out itself. The host is judged an IP address in full only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port, a numeric port and a host of the characters an IP address has (hex digits, '.' and ':') are held: a host name such as alerts.example.com is still refused there. The port is read as on a 32-bit image, so one above 2147483647 is refused. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them."),
+		"clusterAdvertiseAddress":             text("clusterAdvertiseAddress: the address advertised to the cluster's peers; needed where the pod's address is not a private one. Where the cluster runs, at replicas other than 1 (0 included) or with forceEnableClusterMode, Alertmanager exits at startup on one that is not an IP address and a numeric port written as host:port, such as 10.0.0.1:9094 or [fd00::1]:9094; such a one is refused there. An empty host, as in :9094, is not refused: Alertmanager then works the address out itself. The host is judged an IP address in full only from v0.28.0 on and where version is unset, by the rules of the Go 1.23 Alertmanager is built with there; older Alertmanager versions parse IP addresses with older Go rules, which this check does not model, so before v0.28.0 only host:port, a numeric port and a host of the characters an IP address has (hex digits, '.' and ':') are held: a host name such as alerts.example.com is still refused there. The port is read as on a 32-bit image, so one above 2147483647 is refused. A value that refers to an environment variable, as [$(POD_IP)]:9094, is left alone, as the kubelet expands it first. A reference runs from $( to the first ) after it, and one whose name no variable can have, an empty one or one with =, a character beyond ASCII or one not printable, as $() or $(a=b), is read as written, as are $( without its closing parenthesis and $$, read as $, as the kubelet passes them."),
 		"clusterGossipInterval":               text("clusterGossipInterval: the interval between gossip attempts, as a Go duration. Not 0 or less, which the operator ignores."),
 		"clusterLabel":                        text("clusterLabel: the identifier of the Alertmanager cluster; set only when the cluster includes instances outside this object."),
 		"clusterPushpullInterval":             text("clusterPushpullInterval: the interval between push-pull attempts, as a Go duration. Not 0 or less, which the operator ignores."),
@@ -151,7 +153,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
 		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
-		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.0; above 0.34 no name is refused. A list of one empty element, which the operator passes as a flag without a value, is refused at any version. A list that refers to an environment variable, as $(AM_FEATURE), is left alone, as the kubelet expands it first; $$ is read as $, and $( without its closing parenthesis as written, as the kubelet passes them.",
+		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.0; above 0.34 no name is refused. A list of one empty element, which the operator passes as a flag without a value, is refused at any version. A list that refers to an environment variable, as $(AM_FEATURE), is left alone, as the kubelet expands it first. A reference runs from $( to the first ) after it, and one whose name no variable can have, an empty one or one with =, a character beyond ASCII or one not printable, as $(), is read as written, as are $( without its closing parenthesis and $$, read as $, as the kubelet passes them.",
 			"The name of one feature flag."),
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
@@ -609,8 +611,9 @@ func alertmanagerClusterRuns(spec *monitoringv1.AlertmanagerSpec) bool {
 // value is read as the kubelet passes it (kubeletArgument); one that refers to
 // an environment variable, as [$(POD_IP)]:9094, is not refused, as the kind
 // cannot see what the kubelet expands it to (the operator itself gives the
-// container POD_IP, statefulset.go:770-780). No message names the value, as
-// refuseUnservableExternalURL names none.
+// container POD_IP, statefulset.go:770-780). A reference no variable can have,
+// as [$()]:9094, is passed as written, and the value is judged as a literal
+// one. No message names the value, as refuseUnservableExternalURL names none.
 func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 	if spec.ClusterAdvertiseAddress == "" || !alertmanagerClusterRuns(spec) {
 		return nil
@@ -633,38 +636,64 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 
 // kubeletArgument returns an argument of a container as the kubelet passes it
 // to the process, and whether it refers to an environment variable, whose
-// value the kind cannot see: the kubelet expands each $(NAME) in it, reads $$
-// as $, and leaves $( without a closing parenthesis, and $ before any other
-// byte, as written, that byte as a rune (Expand and tryReadVariableName,
-// third_party/forked/golang/expansion/expand.go:35-102 at Kubernetes
-// v1.35.0). A reference to a variable the container does not have is left as
-// written too, but the kind cannot tell which it has: envFrom and the
-// Services' variables add names it does not see, so any reference counts.
+// value the kind cannot see: the kubelet reads $( to the first ) after it as a
+// reference and expands it, reads $$ as $, and leaves $( without a closing
+// parenthesis, and $ before any other rune, as written (Expand and
+// tryReadVariableName, third_party/forked/golang/expansion/expand.go:39-105 at
+// Kubernetes v1.37.1). A reference to a variable the container does not have
+// is left as written too (MappingFuncFor, expand.go:23-34 there). The kind
+// cannot tell which names the container has, as envFrom and the Services'
+// variables add names it does not see, so a reference counts unless no
+// variable can have its name (envVariableNameCanExist); that one is kept
+// as written.
 func kubeletArgument(value string) (string, bool) {
 	var b strings.Builder
-	lastClose := strings.LastIndexByte(value, ')')
 	for i := 0; i < len(value); i++ {
 		if value[i] != '$' || i+1 == len(value) {
 			b.WriteByte(value[i])
 			continue
 		}
-		i++
-		switch value[i] {
+		r, size := utf8.DecodeRuneInString(value[i+1:])
+		switch r {
 		case '$':
 			b.WriteByte('$')
 		case '(':
-			if lastClose > i {
+			end := strings.IndexByte(value[i+2:], ')')
+			if end < 0 {
+				b.WriteString("$(")
+				break
+			}
+			if envVariableNameCanExist(value[i+2 : i+2+end]) {
 				return "", true
 			}
-			b.WriteString("$(")
+			b.WriteString(value[i : i+3+end])
+			size = end + 2
 		default:
-			// string(input[0]) there: a byte above 0x7F is written as the
-			// rune of its value, in UTF-8.
+			// An invalid byte is decoded as utf8.RuneError, which the kubelet
+			// writes as U+FFFD.
 			b.WriteByte('$')
-			b.WriteRune(rune(value[i]))
+			b.WriteRune(r)
 		}
+		i += size
 	}
 	return b.String(), false
+}
+
+// envVariableNameCanExist reports whether a container can have an environment
+// variable of name: the API refuses an empty name and one with a character
+// beyond ASCII, one that is not printable, or '=' (IsRelaxedEnvVarName,
+// staging/src/k8s.io/apimachinery/pkg/util/validation/validation.go:388-402 at
+// Kubernetes v1.37.1).
+func envVariableNameCanExist(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r > unicode.MaxASCII || !unicode.IsPrint(r) || r == '=' {
+			return false
+		}
+	}
+	return true
 }
 
 // ipAddressCharacters reports whether host has only characters an IP address

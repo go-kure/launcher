@@ -3,8 +3,8 @@ package components
 import "testing"
 
 // TestKubeletArgument pins kubeletArgument to Expand and tryReadVariableName
-// (third_party/forked/golang/expansion/expand.go:35-102 at Kubernetes
-// v1.35.0), whose output Alertmanager reads.
+// (third_party/forked/golang/expansion/expand.go:39-105 at Kubernetes
+// v1.37.1), whose output Alertmanager reads.
 func TestKubeletArgument(t *testing.T) {
 	cases := []struct {
 		name, in, want string
@@ -16,12 +16,25 @@ func TestKubeletArgument(t *testing.T) {
 		{"an unclosed reference", "[$(POD_IP]:9094", "[$(POD_IP]:9094", false},
 		{"a closer before the opener", ")$(", ")$(", false},
 		{"$ before another byte", "$x:9094", "$x:9094", false},
-		// string(input[0]) there writes a byte above 0x7F as the rune of its
-		// value: the first byte of é (c3 a9) becomes c3 83.
-		{"$ before a byte above 0x7F", "$é", "$\xc3\x83\xa9", false},
+		// The kubelet decodes the rune after $ and writes it as decoded.
+		{"$ before a multibyte rune", "$é", "$é", false},
+		{"$ before an invalid byte", "$\xff", "$�", false},
 		{"a complete reference", "[$(POD_IP)]:9094", "", true},
-		{"an empty reference", "$()", "", true},
 		{"a reference after an escape", "$$$(X)", "", true},
+		// No variable has an empty name or one with '=', a rune beyond ASCII
+		// or one not printable, so the kubelet passes such a reference as
+		// written, and reads on after it.
+		{"an empty reference", "$()", "$()", false},
+		{"an empty reference in brackets", "[$()]:9094", "[$()]:9094", false},
+		{"a reference of a name with =", "[$(a=b)]:9094", "[$(a=b)]:9094", false},
+		{"a reference of a name beyond ASCII", "[$(é)]:9094", "[$(é)]:9094", false},
+		{"a reference of a name with a tab", "$(a\tb)", "$(a\tb)", false},
+		{"a reference after one no variable has", "$()$(POD_IP)", "", true},
+		{"an unclosed reference after one no variable has", "$(=)$(POD_IP", "$(=)$(POD_IP", false},
+		// A reference ends at the first ')': here that of the later $(PORT),
+		// so the name is "a=]:$(PORT", which no variable has.
+		{"an opener before the closer of a later reference", "[$(a=]:$(PORT)", "[$(a=]:$(PORT)", false},
+		{"an opener before the closer of a later reference without =", "[$(x]:$(PORT)", "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

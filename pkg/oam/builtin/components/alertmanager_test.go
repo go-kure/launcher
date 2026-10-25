@@ -345,6 +345,16 @@ func alertmanagerRefusals(notA string) []struct {
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		{"a cluster advertise address of an unclosed reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$(POD_IP]:9094"},
 			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		// No variable has an empty name or one with '=', so the kubelet passes
+		// such a reference as written; a reference ends at the first ')'.
+		{"a cluster advertise address of an empty reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$()]:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of a reference of a name with =", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$(a=b)]:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of a reference of a name beyond ASCII", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$(é)]:9094"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
+		{"a cluster advertise address of an opener before the closer of a later reference", map[string]any{"replicas": 3, "clusterAdvertiseAddress": "[$(a=]:$(PORT)"},
+			"clusterAdvertiseAddress: not an IP address and a numeric port"},
 		// A web port name the API refuses on the container (statefulset.go:483-500).
 		{"a port name over 15 characters", map[string]any{"portName": "alertmanager-web"},
 			`portName: "alertmanager-web" is not a valid port name`},
@@ -1060,6 +1070,7 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// operator gives the container POD_IP.
 		"a cluster advertise address of the pod's IP":                     {"replicas": 3, "clusterAdvertiseAddress": "[$(POD_IP)]:9094"},
 		"a cluster advertise address of a reference after an escaped one": {"replicas": 3, "clusterAdvertiseAddress": "$$[$(AM_ADVERTISE)"},
+		"a cluster advertise address of a reference after an empty one":   {"replicas": 3, "clusterAdvertiseAddress": "$()$(AM_ADVERTISE)"},
 		// Before v0.28.0 Alertmanager is built with an older Go, whose rules
 		// for an IP address the check does not model: the host is not judged.
 		"a cluster advertise address of a long IPv6 group before v0.28.0":   {"version": "v0.27.0", "replicas": 3, "clusterAdvertiseAddress": "[fd00::00001]:9094"},
