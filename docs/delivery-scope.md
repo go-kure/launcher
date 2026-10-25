@@ -1916,17 +1916,19 @@ and by scope, whatever component or trait emits it.
     and `mountPath`, which the operator drops; an entry of either at the path of an
     earlier entry of the same field, compared cleaned; a `queryLogFile` named without a directory
     beside a `scrapeFailureLogFile`
-    named with one, where the operator mounts no volume for it, unless a writable volume
-    of the author's is mounted at `/var/log/prometheus` (compared cleaned) and no mount
-    there, in `volumeMounts` or a patch of the prometheus container, sets `readOnly` or
-    mounts a `configMap`, `secret`, `downwardAPI` or `projected` volume, which the kubelet
-    mounts read-only (where the patch names the path as `volumeMounts` does, the merged
-    mount takes the patch's volume, so the `volumeMounts` entry's volume is not judged);
-    a `queryLogFile` or `scrapeFailureLogFile` with a directory (a relative one joined to
-    `/etc/prometheus/config_out`, as Prometheus does) no such writable volume is mounted
-    at exactly, other than `/prometheus`, the operator's log-file volume, and `/dev`,
-    `/proc` or any directory under them (as for `/dev/stdout`), unless a prometheus patch sets
-    `readOnlyRootFilesystem: false`; a negative request or limit; and a
+    named with one, where the operator mounts no volume for it, unless `/var/log/prometheus`
+    is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` in a directory
+    Prometheus cannot write (a name alone in `/var/log/prometheus`, a relative path joined
+    to `/etc/prometheus/config_out`, as Prometheus does), where the mount covering the
+    directory most closely, at it or above it, decides: `/prometheus` and the operator's
+    log-file volume are writable, its other mounts read-only, and a mount of the author's,
+    in `volumeMounts` or a prometheus patch, read-only where it sets `readOnly` or mounts a
+    `configMap`, `secret`, `downwardAPI` or `projected` volume, which the kubelet mounts
+    read-only (a patch mount at a path written as an earlier one's is merged into it,
+    taking its volume and keeping `readOnly` from either); where none covers it, the
+    read-only root filesystem refuses unless a prometheus patch sets
+    `readOnlyRootFilesystem: false`, and a directory under `/dev` or `/proc` (as for
+    `/dev/stdout`) is never refused; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
     characters, fewer where the authored shards and replicas make the hostname longer),
