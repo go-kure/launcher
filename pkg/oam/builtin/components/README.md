@@ -4926,13 +4926,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     joins a relative one, as `logs/query.log`, to the directory of its
     configuration, `/etc/prometheus/config_out`. The mount that covers the
     directory most closely, at it or at the nearest directory above it
-    (paths compared cleaned), decides: the data volume at `/prometheus` and
-    the `log-file` volume at `/var/log/prometheus` where the operator adds
-    it are writable; the operator's other mounts, `config_out` among them,
-    are read-only; a mount of the author's, in `volumeMounts` or a patch of
-    the `prometheus` container, is writable unless it sets `readOnly` or
-    mounts a `configMap`, `secret`, `downwardAPI` or `projected` volume,
-    which the kubelet mounts read-only. A patch mount at a path written as
+    (paths compared cleaned, a relative `mountPath` taken from `/` as the
+    kubelet does), decides: the data volume at `/prometheus` and the
+    `log-file` volume at `/var/log/prometheus` where the operator adds it
+    are writable; `config_out` and the operator's certificate, secret,
+    configMap and web configuration mounts are read-only; a mount of the
+    author's, in `volumeMounts` or a patch of the `prometheus` container, is
+    writable unless it sets `readOnly` or mounts a `configMap`, `secret`,
+    `downwardAPI` or `projected` volume, which the kubelet mounts read-only.
+    Other read-only sources are not judged, and a mount of one is admitted:
+    the rule ConfigMap and web TLS mounts, image volumes, CSI volumes set
+    `readOnly`, and the operator's own volumes named in a mount. The check
+    refuses only a directory it knows is read-only. A patch mount at a path written as
     an earlier mount's is merged into it by the operator's strategic merge:
     it takes the patch's volume and keeps `readOnly` if either sets it. Of
     mounts at one path written differently, as `/data` and `/data/`, any
@@ -4942,8 +4947,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     init container. Where no mount covers the directory, the root filesystem
     decides, which the operator makes read-only unless a patch of the
     `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
-    `false`. A path under `/dev` or `/proc`, as `/dev/stdout`, is not
-    refused.
+    `false`. A file in `/dev`, `/proc` or a directory under them, as
+    `/dev/stdout`, is not refused.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a parseable `version` of a major other than 2 or 3: the operator
