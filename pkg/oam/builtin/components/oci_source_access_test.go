@@ -263,21 +263,25 @@ func TestOCIRule_SourceAccess_SourceName(t *testing.T) {
 }
 
 // A component that writes source.objectName keeps its own source, which
-// carries its access.
+// carries its access, also beside a component with the same source: that one,
+// alone among the unnamed consumers, keeps its own pair.
 func TestOCIRule_SourceAccess_ObjectName(t *testing.T) {
 	const url = "oci://registry.example.com/org/platform"
-	access := withSource(ociProps(url, "1.4.0", ""), "objectName", "kept")
+	access := ociProps(url, "1.4.0", "")
 	for _, key := range []string{"secretRef", "certSecretRef", "proxySecretRef"} {
 		access = withSource(access, key, map[string]any{"name": "regcred"})
 	}
 	app := ociDocument(
-		oam.Component{Name: "a", Type: "oci", Properties: access},
-		oam.Component{Name: "b", Type: "oci", Properties: withSource(ociProps(url, "1.4.0", ""), "secretRef", map[string]any{"name": "regcred"})},
+		oam.Component{Name: "a", Type: "oci", Properties: withSource(access, "objectName", "kept")},
+		oam.Component{Name: "b", Type: "oci", Properties: access},
 	)
 	lctx := ociLowering("shop")
 	a := lowerOCI(t, lctx, app, "a")
-	if len(a) != 2 || a[0].Type != "ocirepository" || a[0].Name != "a" {
-		t.Fatalf("a lowered to %+v, want its own source", a)
+	if len(a) != 2 || a[0].Type != "ocirepository" || a[0].Name != "a" || a[0].ObjectName() != "kept" {
+		t.Fatalf("a lowered to %+v, want its own source, named kept", a)
+	}
+	if b := lowerOCI(t, lctx, app, "b"); len(b) != 2 || b[0].Name != "b" || b[1].Name != "b" {
+		t.Errorf("b lowered to %+v, want its own same-name pair", b)
 	}
 	for _, key := range []string{"secretRef", "certSecretRef", "proxySecretRef"} {
 		if got := a[0].Properties[key]; !reflect.DeepEqual(got, map[string]any{"name": "regcred"}) {
