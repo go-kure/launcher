@@ -17,6 +17,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
@@ -153,6 +154,7 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
 	{"autoscalingv2.HorizontalPodAutoscalerSpec", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec]()},
 	{"autov1.ImageUpdateAutomationSpec", reflect.TypeFor[autov1.ImageUpdateAutomationSpec]()},
+	{"barmanapi.BarmanObjectStoreConfiguration", reflect.TypeFor[barmanapi.BarmanObjectStoreConfiguration]()},
 	{"barmanv1.ObjectStoreSpec", reflect.TypeFor[barmanv1.ObjectStoreSpec]()},
 	{"certv1.CertificateSpec", reflect.TypeFor[certv1.CertificateSpec]()},
 	{"certv1.IssuerSpec", reflect.TypeFor[certv1.IssuerSpec]()},

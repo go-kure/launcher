@@ -15,7 +15,6 @@ spec:
     name: barman-cloud.cloudnative-pg.io
     parameters:
       barmanObjectName: postgres
-      serverName: postgres-v2
   postgresql:
     syncReplicaElectionConstraint:
       enabled: false
@@ -34,14 +33,7 @@ metadata:
 spec:
   configuration:
     destinationPath: s3://my-bucket/postgres/
-    endpointURL: https://s3.example.com
     s3Credentials:
-      accessKeyId:
-        key: ACCESS_KEY_ID
-        name: postgres-backup-creds
-      secretAccessKey:
-        key: SECRET_ACCESS_KEY
-        name: postgres-backup-creds
+      inheritFromIAMRole: true
   instanceSidecarConfiguration:
     resources: {}
-  retentionPolicy: 30d

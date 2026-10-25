@@ -45,8 +45,9 @@ func lowerPostgresql(t *testing.T, comp *oam.Component, doc *oam.Application) oa
 	return res
 }
 
-// The rule emits the Cluster, the ObjectStore under the same name, the Pooler
-// and one Database per entry, in that order. The defaults are a post-policy
+// The rule emits the Cluster, the ObjectStore under the same name, the Pooler,
+// one Database per entry and one ScheduledBackup per backup.schedules entry,
+// in that order. The defaults are a post-policy
 // step on the Cluster, not a trait, so the Cluster carries only the authored
 // traits. Every component gets its own copy of the annotations.
 func TestPostgresqlRule_Emission(t *testing.T) {
@@ -54,8 +55,14 @@ func TestPostgresqlRule_Emission(t *testing.T) {
 		Name: "db",
 		Type: "postgresql",
 		Properties: map[string]any{
-			"pooler":      map[string]any{"enabled": true},
-			"objectStore": map[string]any{"destinationPath": "s3://bucket/db/"},
+			"pooler": map[string]any{"enabled": true},
+			"backup": map[string]any{
+				"objectStore": map[string]any{"destinationPath": "s3://bucket/db/", "s3Credentials": map[string]any{"inheritFromIAMRole": true}},
+				"schedules": []any{
+					map[string]any{"name": "daily", "schedule": "0 0 0 * * *"},
+					map[string]any{"name": "weekly", "schedule": "@weekly"},
+				},
+			},
 			"databases": []any{
 				map[string]any{"name": "orders", "owner": "app"},
 				map[string]any{"name": "billing", "owner": "app"},
@@ -77,6 +84,8 @@ func TestPostgresqlRule_Emission(t *testing.T) {
 		{"db-pooler", "cnpg-pooler"},
 		{"db-orders", "cnpg-database"},
 		{"db-billing", "cnpg-database"},
+		{"db-daily", "cnpg-scheduledbackup"},
+		{"db-weekly", "cnpg-scheduledbackup"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("emitted %v, want %v", got, want)
@@ -202,14 +211,18 @@ func TestPostgresqlRule_RefusesRepeatedDatabaseName(t *testing.T) {
 	}
 }
 
-// The rule orders the Pooler and the Databases after the Cluster with a
-// dependency policy only when the document already orders its components: a
+// The rule orders the Pooler, the Databases and the ScheduledBackups after the
+// Cluster with a dependency policy only when the document already orders its components: a
 // dependency edge splits the application into ordered groups, which would order
 // a document that never asked for ordering.
 func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) {
 	comp := oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
 		"pooler":    map[string]any{"enabled": true},
 		"databases": []any{map[string]any{"name": "orders", "owner": "app"}},
+		"backup": map[string]any{
+			"objectStore": map[string]any{"destinationPath": "s3://backups/db", "s3Credentials": map[string]any{"inheritFromIAMRole": true}},
+			"schedules":   []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *"}},
+		},
 	}}
 
 	unordered := &oam.Application{Spec: oam.ApplicationSpec{
@@ -231,8 +244,9 @@ func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) 
 		"rules": []any{
 			map[string]any{"component": "db-pooler", "dependsOn": []any{"db"}},
 			map[string]any{"component": "db-orders", "dependsOn": []any{"db"}},
+			map[string]any{"component": "db-daily", "dependsOn": []any{"db"}},
 			// api waited for every object of db; it now waits for each member.
-			map[string]any{"component": "api", "dependsOn": []any{"db-pooler", "db-orders"}},
+			map[string]any{"component": "api", "dependsOn": []any{"db-pooler", "db-orders", "db-daily"}},
 		},
 	}}}
 	if !reflect.DeepEqual(res.Policies, want) {
@@ -267,8 +281,11 @@ func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) 
 func TestPostgresqlRule_BundleTraitOncePerBundle(t *testing.T) {
 	comp := oam.Component{Name: "db", Type: "postgresql",
 		Properties: map[string]any{
-			"pooler":      map[string]any{"enabled": true},
-			"objectStore": map[string]any{"destinationPath": "s3://backups/db"},
+			"pooler": map[string]any{"enabled": true},
+			"backup": map[string]any{
+				"objectStore": map[string]any{"destinationPath": "s3://backups/db", "s3Credentials": map[string]any{"inheritFromIAMRole": true}},
+				"schedules":   []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *"}},
+			},
 			"databases": []any{
 				map[string]any{"name": "orders", "owner": "app"},
 				map[string]any{"name": "billing", "owner": "app"},
@@ -288,7 +305,7 @@ func TestPostgresqlRule_BundleTraitOncePerBundle(t *testing.T) {
 		}
 		return out
 	}
-	everyObject := []string{"cnpg-cluster/db", "cnpg-objectstore/db", "cnpg-pooler/db-pooler", "cnpg-database/db-orders", "cnpg-database/db-billing"}
+	everyObject := []string{"cnpg-cluster/db", "cnpg-objectstore/db", "cnpg-pooler/db-pooler", "cnpg-database/db-orders", "cnpg-database/db-billing", "cnpg-scheduledbackup/db-daily"}
 
 	unordered := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
 	res := lowerPostgresql(t, &comp, unordered)

@@ -7,10 +7,8 @@ import (
 	"maps"
 	"slices"
 
-	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
-	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -35,18 +33,16 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 
 	// The ObjectStore is a member of the Cluster's same-name sibling group: it
 	// is emitted under the component's own name, and its object named like the
-	// component unless `objectStoreObjectName` or the naming hook says otherwise. It
-	// is named before the Cluster's spec is built, which names the store.
+	// component unless `backup.objectStoreObjectName` or the naming hook says
+	// otherwise. It is named before the Cluster's spec is built, which names the
+	// store.
 	var store *oam.Component
-	if c.ObjectStore != nil {
-		store = &oam.Component{Name: comp.Name, Type: "cnpg-objectstore", Annotations: maps.Clone(comp.Annotations)}
-		if err := nameRoleMember(comp, lctx, store, &CnpgObjectStoreHandler{}, oam.NameRolePostgresqlObjectStore, postgresqlObjectStoreNameProperty, "ObjectStore"); err != nil {
+	if c.Backup != nil {
+		member, err := postgresqlObjectStoreMember(comp, lctx, c.Backup)
+		if err != nil {
 			return oam.LoweringResult{}, err
 		}
-		c.ObjectStore.ObjectName = store.ObjectName()
-		if store.Properties, err = specProperties(c.objectStoreSpec()); err != nil {
-			return oam.LoweringResult{}, err
-		}
+		store = &member
 	}
 
 	spec, err := c.clusterSpec()
@@ -76,8 +72,9 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	if store != nil {
 		out = append(out, *store)
 	}
-	// What the Pooler and the Databases refer to is the Cluster's object, by
-	// its name. Their own default names keep the component's.
+	// What the Pooler, the Databases and the ScheduledBackups refer to is the
+	// Cluster's object, by its name. Their own default names keep the
+	// component's.
 	clusterName := cluster.ObjectName()
 
 	var dependents []string
@@ -124,6 +121,25 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 			return oam.LoweringResult{}, err
 		}
 		out = append(out, oam.Component{Name: name, Type: "cnpg-database", Properties: props, Annotations: maps.Clone(comp.Annotations)})
+	}
+	// One ScheduledBackup per backup.schedules entry, of the Cluster's object,
+	// waiting for the Cluster as the Pooler and the Databases do.
+	if c.Backup != nil {
+		for i, s := range c.Backup.Schedules {
+			name, err := postgresqlScheduledBackupName(comp, lctx, i, s)
+			if err != nil {
+				return oam.LoweringResult{}, err
+			}
+			if err := postgresqlReserveMember(lctx, name, fmt.Sprintf("backup.schedules[%d] %q", i, s.Name)); err != nil {
+				return oam.LoweringResult{}, err
+			}
+			dependents = append(dependents, name)
+			props, err := specProperties(s.scheduledBackupSpec(clusterName))
+			if err != nil {
+				return oam.LoweringResult{}, err
+			}
+			out = append(out, oam.Component{Name: name, Type: "cnpg-scheduledbackup", Properties: props, Annotations: maps.Clone(comp.Annotations)})
+		}
 	}
 
 	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents)
@@ -252,8 +268,8 @@ func postgresqlMemberNameTaken(what, name string, other *oam.Component) error {
 }
 
 // postgresqlMemberPolicies returns the policies that keep the members (the
-// components the rule emits beside the Cluster: the Pooler and the Databases,
-// one per name) where postgresql's own objects were. A policy names a component;
+// components the rule emits beside the Cluster: the Pooler, the Databases and
+// the ScheduledBackups, one per name) where postgresql's own objects were. A policy names a component;
 // what the document's policies say about the postgresql component by its name
 // covered all of its objects, and now reaches only the Cluster's.
 //
@@ -533,23 +549,6 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		Limits:   cnpgResourceList(c.Resources.Limits),
 	}
 
-	// An authored destinationPath builds the backup even when empty: it is a
-	// value, written as authored (Parse refuses the block's other values
-	// without one).
-	if c.BackupRetentionPolicy != "" || c.BackupDestinationPath != "" || c.explicitBackupDestinationPath {
-		bos := &barmanapi.BarmanObjectStoreConfiguration{
-			DestinationPath: c.BackupDestinationPath,
-			EndpointURL:     c.BackupEndpointURL,
-		}
-		if c.BackupSecretName != "" {
-			bos.AWS = s3Credentials(c.BackupSecretName)
-		}
-		spec.Backup = &cnpgv1.BackupConfiguration{
-			RetentionPolicy:   c.BackupRetentionPolicy,
-			BarmanObjectStore: bos,
-		}
-	}
-
 	if c.MonitoringEnabled {
 		mon := &cnpgv1.MonitoringConfiguration{EnablePodMonitor: true} //nolint:staticcheck // SA1019: EnablePodMonitor is still the only upstream opt-in for operator-created PodMonitors
 		for _, cq := range c.MonitoringCustomQueries {
@@ -607,26 +606,12 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		spec.PostgresConfiguration.Synchronous = sync
 	}
 
-	// An objectStore component archives WAL through the barman-cloud plugin, pointed
-	// at the ObjectStore the rule emits, by the name resolved for it (the
-	// component's unless LowerComponent resolved another). The plugin reads the
-	// store from barmanObjectName and the server name from serverName (defaulting
-	// to the Cluster name); the ObjectStore CRD forbids a serverName of its own.
-	if c.ObjectStore != nil {
-		isWALArchiver := true
-		storeName := c.ObjectStore.ObjectName
-		if storeName == "" {
-			storeName = c.Name
-		}
-		params := map[string]string{"barmanObjectName": storeName}
-		if c.ObjectStore.ServerName != "" {
-			params["serverName"] = c.ObjectStore.ServerName
-		}
-		spec.Plugins = []cnpgv1.PluginConfiguration{{
-			Name:          barmanCloudPluginName,
-			IsWALArchiver: &isWALArchiver,
-			Parameters:    params,
-		}}
+	// A component with `backup` archives WAL through the barman-cloud plugin,
+	// pointed at the ObjectStore the rule emits; the ObjectStore CRD forbids a
+	// serverName of its own. The Cluster carries no in-tree spec.backup: that
+	// path is deprecated and goes in CloudNativePG 1.31.
+	if c.Backup != nil {
+		spec.Plugins = []cnpgv1.PluginConfiguration{c.Backup.pluginEntry(c.Name)}
 	}
 
 	if c.AffinityEnabled {
@@ -712,21 +697,6 @@ func (c *PostgresqlConfig) poolerSpec(cluster string) cnpgv1.PoolerSpec {
 	if c.PoolerInstances > 0 || c.explicitPoolerInstances {
 		instances := c.PoolerInstances
 		spec.Instances = &instances
-	}
-	return spec
-}
-
-// objectStoreSpec is the ObjectStore spec postgresql wrote for objectStore.
-func (c *PostgresqlConfig) objectStoreSpec() barmanv1.ObjectStoreSpec {
-	spec := barmanv1.ObjectStoreSpec{
-		Configuration: barmanapi.BarmanObjectStoreConfiguration{
-			DestinationPath: c.ObjectStore.DestinationPath,
-			EndpointURL:     c.ObjectStore.EndpointURL,
-		},
-		RetentionPolicy: c.ObjectStore.RetentionPolicy,
-	}
-	if c.ObjectStore.SecretName != "" {
-		spec.Configuration.AWS = s3Credentials(c.ObjectStore.SecretName)
 	}
 	return spec
 }

@@ -11,17 +11,17 @@ import (
 // TestPostgresqlRule_UnauthoredRequiredStrings: the cnpg-cluster component a
 // postgresql component lowers to is built from a typed spec, so a string of
 // cnpgClusterRequired the author left out would reach the kind as an authored
-// "" and pass its refusal. The lowering fills the parent of four of the
-// eleven: the backup's and an external cluster's object store path, the base
-// backup's source and the synchronous method. The first two it builds from
-// other authored settings, so postgresql refuses them unauthored, under the
-// property the author wrote; the last two it builds only from the string
-// itself, and postgresql refuses their block without it
-// (TestPostgresqlRule_BlockNotBuilt). Each case reads every path of
-// cnpgClusterRequired in the lowered component.
+// "" and pass its refusal. The lowering fills the parent of three of the
+// eleven: an external cluster's object store path, the base backup's source
+// and the synchronous method. The first it builds from other authored
+// settings, so postgresql refuses it unauthored, under the property the author
+// wrote; the last two it builds only from the string itself, and postgresql
+// refuses their block without it (TestPostgresqlRule_BlockNotBuilt). `backup`
+// lowers to no in-tree spec.backup, only the Cluster's plugin entry: its object
+// store is the ObjectStore's (go-kure/launcher#1001). Each case reads every path of cnpgClusterRequired
+// in the lowered component.
 func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 	const (
-		backupPath   = "backup.barmanObjectStore.destinationPath"
 		externalPath = "externalClusters[].barmanObjectStore.destinationPath"
 	)
 	external := func(stores ...map[string]any) []any {
@@ -37,16 +37,6 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 		refused string
 		carried map[string][]any
 	}{
-		{
-			name:    "backup with a retention policy and no path",
-			props:   map[string]any{"backup": map[string]any{"retentionPolicy": "30d"}},
-			refused: "backup.destinationPath: required (",
-		},
-		{
-			name:    "backup with a retention policy and a null path",
-			props:   map[string]any{"backup": map[string]any{"retentionPolicy": "30d", "destinationPath": nil}},
-			refused: "backup.destinationPath: required (",
-		},
 		{
 			name:    "external cluster with an empty object store",
 			props:   map[string]any{"externalClusters": external(map[string]any{})},
@@ -73,11 +63,6 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 			carried: map[string][]any{externalPath: {"s3://bucket/a"}},
 		},
 		{
-			name:    "backup with an endpoint, an empty retention policy and no path",
-			props:   map[string]any{"backup": map[string]any{"endpointURL": "https://s3.example", "retentionPolicy": ""}},
-			refused: "backup.destinationPath: required (",
-		},
-		{
 			name:    "base backup without a source",
 			props:   map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{}}},
 			refused: "bootstrap.pg_basebackup.source: required (",
@@ -95,21 +80,18 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 		{
 			name: "an authored empty path is a value",
 			props: map[string]any{
-				"backup":           map[string]any{"retentionPolicy": "30d", "destinationPath": ""},
 				"externalClusters": external(map[string]any{"destinationPath": ""}),
 			},
-			carried: map[string][]any{backupPath: {""}, externalPath: {""}},
+			carried: map[string][]any{externalPath: {""}},
 		},
 		{
-			name: "all four authored",
+			name: "all three authored",
 			props: map[string]any{
-				"backup":           map[string]any{"retentionPolicy": "30d", "destinationPath": "s3://bucket/db"},
 				"externalClusters": external(map[string]any{"destinationPath": "s3://bucket/a"}),
 				"bootstrap":        map[string]any{"pg_basebackup": map[string]any{"source": "origina"}},
 				"replication":      map[string]any{"synchronous": map[string]any{"method": "any", "number": 1}},
 			},
 			carried: map[string][]any{
-				backupPath:                       {"s3://bucket/db"},
 				externalPath:                     {"s3://bucket/a"},
 				"bootstrap.pg_basebackup.source": {"origina"},
 				"postgresql.synchronous.method":  {"any"},

@@ -442,7 +442,7 @@ func (PostgresqlRule) ContractMetadata() oam.ContractMetadata { return contract(
 // and the policies that order and place what the rule split the component into.
 func (PostgresqlRule) LoweringTargets() oam.LoweringTargets {
 	return oam.LoweringTargets{
-		ComponentTypes: []string{"cnpg-cluster", "cnpg-objectstore", "cnpg-pooler", "cnpg-database"},
+		ComponentTypes: []string{"cnpg-cluster", "cnpg-objectstore", "cnpg-pooler", "cnpg-database", "cnpg-scheduledbackup"},
 		PolicyTypes:    []string{"dependency", "placement"},
 	}
 }

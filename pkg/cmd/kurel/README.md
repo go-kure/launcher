@@ -45,8 +45,8 @@ emit a same-name `serviceaccount` member for the component's ServiceAccount, and
 turn each claim a `pvc` volume describes into a synthesized `pvc` trait on the
 `deployment` member (go-kure/launcher#702), so `builtinComponentHandlers()` must
 register `serviceaccount` and the `pvc` trait handler must be registered. `postgresql` lowers to a `cnpg-cluster`
-(plus `cnpg-objectstore`, `cnpg-pooler` and one `cnpg-database` per database
-when authored), with a post-policy step on the `cnpg-cluster` for the values
+(plus `cnpg-objectstore`, `cnpg-pooler`, one `cnpg-database` per database
+and one `cnpg-scheduledbackup` per backup schedule when authored), with a post-policy step on the `cnpg-cluster` for the values
 postgresql derives after the policy; nothing besides the rule needs registering
 for it. `helm` lowers to a `helmrelease` (plus a generated
 `helmrepository`, `ocirepository`, `gitrepository` or `bucket` for an inline

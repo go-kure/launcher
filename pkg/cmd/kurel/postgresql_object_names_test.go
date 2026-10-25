@@ -14,15 +14,16 @@ import (
 
 // These tests pin the names of the Cluster and the ObjectStore a postgresql
 // component generates (go-kure/launcher#787) through kurel's own transformer.
-// Each is named by the author (clusterObjectName, objectStoreObjectName), else
+// Each is named by the author (clusterObjectName, backup.objectStoreObjectName), else
 // by the Naming hook (roles postgresql-cluster, postgresql-objectstore), else
 // after the component, and every reference launcher writes to one of them
 // follows the name it got, while the Pooler's and the Database's default names
 // keep the component's.
 
-// postgresqlNamesDoc holds the postgresql component "db" of namingDBStore (an
-// object store, a pooler and a database), with props appended to its
-// properties, and extraComponents after it.
+// postgresqlNamesDoc holds the postgresql component "db" of namingDBStore (a
+// backup, a pooler and a database), with props appended to its properties, and
+// extraComponents after it. backup is the last property: a line of props
+// indented by ten spaces is one of backup's.
 func postgresqlNamesDoc(props, extraComponents string) string {
 	return helmNamesApp(namingDBStore + props + extraComponents)
 }
@@ -51,6 +52,9 @@ func postgresqlObjectRequests(requests []oam.NameRequest) []oam.NameRequest {
 // postgresqlObjectNames are the names of the Cluster and the ObjectStore of
 // component db.
 type postgresqlObjectNames struct{ cluster, store string }
+
+// storeNamed names the ObjectStore, as a line of backup in postgresqlNamesDoc.
+const storeNamed = "          objectStoreObjectName: shop.backups\n"
 
 var (
 	postgresqlDefaultNames = postgresqlObjectNames{cluster: "db", store: "db"}
@@ -198,7 +202,7 @@ func TestPostgresqlObjectNames_HookAnswerIsUsed(t *testing.T) {
 // transform or for the endpoint, through the whole build: kurel writes the
 // objects under the authored names, with the references following.
 func TestPostgresqlObjectNames_AuthoredWinsAndHookIsNotAsked(t *testing.T) {
-	doc := postgresqlNamesDoc("        clusterObjectName: shop-pg\n        objectStoreObjectName: shop.backups\n", "")
+	doc := postgresqlNamesDoc(storeNamed+"        clusterObjectName: shop-pg\n", "")
 
 	var requests []oam.NameRequest
 	hook := func(req oam.NameRequest) (string, bool) {
@@ -236,7 +240,7 @@ func TestPostgresqlObjectNames_OneNameAtATime(t *testing.T) {
 		want        postgresqlObjectNames
 	}{
 		{"the Cluster", "        clusterObjectName: shop-pg\n", postgresqlObjectNames{cluster: "shop-pg", store: "db"}},
-		{"the ObjectStore", "        objectStoreObjectName: shop.backups\n", postgresqlObjectNames{cluster: "db", store: "shop.backups"}},
+		{"the ObjectStore", storeNamed, postgresqlObjectNames{cluster: "db", store: "shop.backups"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, apps := namingTransform(t, postgresqlNamesDoc(tc.props, ""), postgresqlNamesContext(nil))
@@ -245,7 +249,7 @@ func TestPostgresqlObjectNames_OneNameAtATime(t *testing.T) {
 	}
 }
 
-// A component with no objectStore generates no ObjectStore, so the hook is not
+// A component with no backup generates no ObjectStore, so the hook is not
 // asked for one.
 func TestPostgresqlObjectNames_HookNotAskedForAStoreNotGenerated(t *testing.T) {
 	var requests []oam.NameRequest
@@ -370,10 +374,10 @@ func TestPostgresqlObjectNames_Refusals(t *testing.T) {
 		},
 		{
 			name:  "an authored ObjectStore name that is another component's ObjectStore",
-			extra: second + "        objectStore:\n          destinationPath: s3://backups/db2\n        objectStoreObjectName: db\n",
+			extra: second + "        backup:\n          objectStore:\n            destinationPath: s3://backups/db2\n            s3Credentials:\n              inheritFromIAMRole: true\n          objectStoreObjectName: db\n",
 			want: `name collision: ObjectStore.barmancloud.cnpg.io "db" is named by ` +
 				`component "db" (role "postgresql-objectstore", its default) and by ` +
-				`component "db2" (role "postgresql-objectstore", set by objectStoreObjectName); give one of them another name`,
+				`component "db2" (role "postgresql-objectstore", set by backup.objectStoreObjectName); give one of them another name`,
 		},
 		{
 			// The authored kind component's name is resolved after lowering, in
@@ -382,11 +386,6 @@ func TestPostgresqlObjectNames_Refusals(t *testing.T) {
 			props: "        clusterObjectName: pg\n",
 			extra: "    - name: pg\n      type: cnpg-cluster\n      properties:\n        instances: 1\n        storage:\n          size: 1Gi\n",
 			want:  `name collision: Cluster.postgresql.cnpg.io "default/pg" is named by `,
-		},
-		{
-			name:  "objectStoreObjectName without objectStore",
-			extra: second + "        objectStoreObjectName: backups\n",
-			want:  `objectStoreObjectName: names the ObjectStore, and objectStore is not set; remove it, or set objectStore`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

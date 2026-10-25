@@ -171,10 +171,16 @@ const namingDB = `    - name: db
             owner: app
 `
 
-// namingDBStore is namingDB with an object store, so that the rule generates
-// an ObjectStore as well.
-const namingDBStore = namingDB + `        objectStore:
-          destinationPath: s3://backups/db
+// namingDBStore is namingDB with a backup of one schedule, so that the rule
+// generates an ObjectStore and a ScheduledBackup as well.
+const namingDBStore = namingDB + `        backup:
+          objectStore:
+            destinationPath: s3://backups/db
+            s3Credentials:
+              inheritFromIAMRole: true
+          schedules:
+            - name: nightly
+              schedule: "@daily"
 `
 
 const (
@@ -182,6 +188,7 @@ const (
 	databaseKindName    = "Database.postgresql.cnpg.io"
 	clusterKindName     = "Cluster.postgresql.cnpg.io"
 	objectStoreKindName = "ObjectStore.barmancloud.cnpg.io"
+	scheduledBackupKind = "ScheduledBackup.postgresql.cnpg.io"
 )
 
 func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
@@ -215,7 +222,7 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// helm rule for its HelmRelease and the oci rule for the two objects it names
 	// after its component, each under its own role. The postgresql rule asks for
 	// its Cluster first and its ObjectStore next, each named after the component,
-	// before the Pooler and the Database.
+	// before the Pooler, the Database and the ScheduledBackup.
 	want := []oam.NameRequest{
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadVolumeClaim, Kind: "PersistentVolumeClaim", Default: "web-data"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
@@ -225,6 +232,7 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePooler, Kind: poolerKindName, Default: "db-pooler"},
 		{Application: "shop", Component: "db", Role: oam.NameRoleDatabase, Kind: databaseKindName, Default: "db-orders"},
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlScheduledBackup, Kind: scheduledBackupKind, Default: "db-nightly"},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesSecret, Kind: "Secret", Default: chartSecretDefault},
 		{Application: "shop", Component: "chart", Role: oam.NameRoleValuesConfigMap, Kind: "ConfigMap", Default: chartConfigMapDefault},
 		{Application: "shop", Role: oam.NameRoleHelmSource, Kind: "HelmRepository.source.toolkit.fluxcd.io", Default: chartSourceDefault},
@@ -722,6 +730,8 @@ func TestNamingHook_PostgresqlRefusals(t *testing.T) {
 		// endpoint is set when ComponentEndpointsNamed refuses the answer too, in
 		// the same words.
 		endpoint bool
+		// components replaces the postgresql component of two databases.
+		components string
 	}{
 		{
 			name:     "a pooler answer that is no DNS-1123 label",
@@ -742,13 +752,28 @@ func TestNamingHook_PostgresqlRefusals(t *testing.T) {
 				`component "db" (role "database", returned by the Naming hook in place of "db-billing"); give one of them another name`,
 		},
 		{
+			// The answer is a valid subdomain, which the role admits; the rule
+			// holds it to 63 characters and names the hook, not the
+			// component or the schedule, as what to shorten.
+			name:       "a scheduledbackup answer over 63 characters",
+			names:      map[string]string{"postgresql-scheduledbackup db-nightly": strings.Repeat("b", 64)},
+			components: namingDBStore,
+			want: `backup.schedules[0] "nightly": ScheduledBackup name "` + strings.Repeat("b", 64) + `" is 64 characters long, ` +
+				`and CloudNativePG copies it into a label of each Backup, which holds at most 63; ` +
+				`shorten the Naming hook's answer for role "postgresql-scheduledbackup"`,
+		},
+		{
 			name:  "the pooler named as another component",
 			names: map[string]string{"pooler db-pooler": "web"},
 			want:  `pooler: generates component "web", which is already the name of component "web" (type "webservice") in the document; rename one of them`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := namingApp("", namingDB+twoDatabases)
+			components := tc.components
+			if components == "" {
+				components = namingDB + twoDatabases
+			}
+			doc := namingApp("", components)
 			hook := renameBy(tc.names)
 			err := transformErr(t, doc, namingContext(hook))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -15,9 +15,22 @@ import (
 // its optional properties with bare comma-ok assertions, so a wrongly typed value was
 // treated as absent and the cluster was built with a default or with nothing. Every
 // read is now refused by path. The nested cases are the ones an authored document
-// reaches too: the schema keeps these sub-objects open and types none of their
-// fields. The top-level cases are reachable only from a direct handler call.
+// reaches too where the schema keeps a sub-object open and types none of its
+// fields; `backup` is typed (go-kure/launcher#1001), so an authored document
+// reaches its cases at the document check first. The top-level cases are
+// reachable only from a direct handler call.
 func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
+	// withStore, withBackup and withSchedule are a valid backup.objectStore,
+	// backup and one-schedule backup with one key set on top.
+	withStore := func(key string, value any) map[string]any {
+		return map[string]any{"destinationPath": "s3://b", "s3Credentials": map[string]any{"inheritFromIAMRole": true}, key: value}
+	}
+	withBackup := func(key string, value any) map[string]any {
+		return map[string]any{"objectStore": withStore("endpointURL", "https://s3.example"), key: value}
+	}
+	withSchedule := func(key string, value any) map[string]any {
+		return withBackup("schedules", []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *", key: value}})
+	}
 	cases := []struct {
 		name  string
 		props map[string]any
@@ -29,10 +42,23 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 		{"imageName", map[string]any{"imageName": true}, "imageName"},
 
 		{"backup", map[string]any{"backup": "daily"}, "backup"},
-		{"backup.retentionPolicy", map[string]any{"backup": map[string]any{"retentionPolicy": 3}}, "backup.retentionPolicy"},
-		{"backup.destinationPath", map[string]any{"backup": map[string]any{"destinationPath": 1}}, "backup.destinationPath"},
-		{"backup.endpointURL", map[string]any{"backup": map[string]any{"endpointURL": 1}}, "backup.endpointURL"},
-		{"backup.secretName", map[string]any{"backup": map[string]any{"secretName": 1}}, "backup.secretName"},
+		{"backup.objectStore", map[string]any{"backup": map[string]any{"objectStore": "x"}}, "backup.objectStore"},
+		{"backup.objectStore.destinationPath", map[string]any{"backup": map[string]any{"objectStore": map[string]any{"destinationPath": 1}}}, "destinationPath"},
+		{"backup.objectStore.endpointURL", map[string]any{"backup": map[string]any{"objectStore": withStore("endpointURL", 1)}}, "endpointURL"},
+		{"backup.objectStore.s3Credentials", map[string]any{"backup": map[string]any{"objectStore": withStore("s3Credentials", "x")}}, "s3Credentials"},
+		{"backup.objectStore.wal", map[string]any{"backup": map[string]any{"objectStore": withStore("wal", "x")}}, "backup.objectStore.wal"},
+		{"backup.objectStore.data", map[string]any{"backup": map[string]any{"objectStore": withStore("data", "x")}}, "backup.objectStore.data"},
+		{"backup.objectStoreObjectName", map[string]any{"backup": withBackup("objectStoreObjectName", 1)}, "backup.objectStoreObjectName"},
+		{"backup.retentionPolicy", map[string]any{"backup": withBackup("retentionPolicy", 3)}, "backup.retentionPolicy"},
+		{"backup.serverName", map[string]any{"backup": withBackup("serverName", 1)}, "backup.serverName"},
+		{"backup.schedules", map[string]any{"backup": withBackup("schedules", "x")}, "backup.schedules"},
+		{"backup.schedules[0]", map[string]any{"backup": withBackup("schedules", []any{"x"})}, "backup.schedules[0]"},
+		{"backup.schedules[0].name", map[string]any{"backup": withSchedule("name", 1)}, "backup.schedules[0].name"},
+		{"backup.schedules[0].schedule", map[string]any{"backup": withSchedule("schedule", 1)}, "backup.schedules[0].schedule"},
+		{"backup.schedules[0].immediate", map[string]any{"backup": withSchedule("immediate", "yes")}, "backup.schedules[0].immediate"},
+		{"backup.schedules[0].suspend", map[string]any{"backup": withSchedule("suspend", "no")}, "backup.schedules[0].suspend"},
+		{"backup.schedules[0].target", map[string]any{"backup": withSchedule("target", 1)}, "backup.schedules[0].target"},
+		{"backup.schedules[0].backupOwnerReference", map[string]any{"backup": withSchedule("backupOwnerReference", 1)}, "backup.schedules[0].backupOwnerReference"},
 
 		{"monitoring", map[string]any{"monitoring": true}, "monitoring"},
 		{"monitoring.enabled", map[string]any{"monitoring": map[string]any{"enabled": "true"}}, "monitoring.enabled"},
@@ -86,12 +112,7 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 		{"managedRoles[0].inRoles", map[string]any{"managedRoles": []any{map[string]any{"name": "r", "inRoles": "admin"}}}, "managedRoles[0].inRoles"},
 		{"managedRoles[0].inRoles[1]", map[string]any{"managedRoles": []any{map[string]any{"name": "r", "inRoles": []any{"a", 2}}}}, "managedRoles[0].inRoles[1]"},
 
-		{"objectStore", map[string]any{"objectStore": "x"}, "objectStore"},
-		{"objectStore.destinationPath", map[string]any{"objectStore": map[string]any{"destinationPath": 1}}, "objectStore.destinationPath"},
-		{"objectStore.endpointURL", map[string]any{"objectStore": map[string]any{"destinationPath": "s3://b", "endpointURL": 1}}, "objectStore.endpointURL"},
-		{"objectStore.secretName", map[string]any{"objectStore": map[string]any{"destinationPath": "s3://b", "secretName": 1}}, "objectStore.secretName"},
-		{"objectStore.retentionPolicy", map[string]any{"objectStore": map[string]any{"destinationPath": "s3://b", "retentionPolicy": 1}}, "objectStore.retentionPolicy"},
-		{"objectStore.serverName", map[string]any{"objectStore": map[string]any{"destinationPath": "s3://b", "serverName": 1}}, "objectStore.serverName"},
+		{"objectStore", map[string]any{"objectStore": "x"}, "objectStore: moved to backup.objectStore"},
 
 		{"databases", map[string]any{"databases": "x"}, "databases"},
 		{"databases[0].name", map[string]any{"databases": []any{map[string]any{"name": 1, "owner": "o"}}}, "databases[0].name"},
@@ -118,20 +139,19 @@ func TestPostgresql_WrongTypeIsRejected(t *testing.T) {
 
 // TestPostgresql_NullIsAbsence: an explicit null, including the typed nil a Go
 // lowering rule leaves for an unset optional, reads as absent, as it does for every
-// other kind. objectStore in particular used to read a typed nil map as present and
-// then demand destinationPath.
+// other kind. The former top-level objectStore used to read a typed nil map as
+// present and then demand destinationPath; `backup` is read the same null-safe way.
 func TestPostgresql_NullIsAbsence(t *testing.T) {
 	cfg, err := postgresqlConfigFor(t, map[string]any{
-		"version":     nil,
-		"objectStore": map[string]any(nil),
-		"pooler":      map[string]any{"enabled": nil},
-		"databases":   []any(nil),
-		"backup":      map[string]any{"retentionPolicy": nil},
+		"version":   nil,
+		"pooler":    map[string]any{"enabled": nil},
+		"databases": []any(nil),
+		"backup":    map[string]any(nil),
 	})
 	if err != nil {
 		t.Fatalf("nulls were refused: %v", err)
 	}
-	if cfg.Version != "16" || cfg.ObjectStore != nil || cfg.PoolerEnabled || cfg.Databases != nil || cfg.BackupRetentionPolicy != "" {
+	if cfg.Version != "16" || cfg.Backup != nil || cfg.PoolerEnabled || cfg.Databases != nil {
 		t.Errorf("nulls did not read as absent: %+v", cfg)
 	}
 }

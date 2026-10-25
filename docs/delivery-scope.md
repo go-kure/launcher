@@ -198,7 +198,8 @@ Decided in the ticket:
 
 - **Consumer knobs:** `ClusterID`, `Namespace`, `FluxNamespace`, `Domain`,
   `ComponentLabelKey`, and the `Naming` hook for the names of a closed set of roles
-  (go-kure/launcher#787, §3.2), which include the `postgresql` Pooler and Databases: a
+  (go-kure/launcher#787, §3.2), which include the `postgresql` Pooler, Databases and
+  ScheduledBackups (go-kure/launcher#1001): a
   lowering rule resolves such a name with `LoweringContext.ResolveName`, and
   `Transformer.ComponentEndpointsNamed` gives the pooler endpoint the same name. The roles
   also include a kind component's own object, the source and the values ConfigMap and
@@ -208,7 +209,7 @@ Decided in the ticket:
   (`hpaName`, `pdbName`), the `rbac` objects (`name`), the `networkpolicy` trait's
   policy (`name`), the `postgresql` Pooler and Databases (`poolerName`,
   `databases[].objectName`) and its Cluster and ObjectStore (`clusterObjectName`,
-  `objectStoreObjectName`), the object of every kind component (`objectName`), the source
+  `backup.objectStoreObjectName` since go-kure/launcher#1001), the object of every kind component (`objectName`), the source
   a `helm` or `oci` component generates (`source.name`) and the `helm` values ConfigMap and
   Secret (`valuesConfigMapName`, `valuesSecretName`), the HelmRelease of a `helm`
   component (`helmReleaseName`), the Kustomization of an `oci`
@@ -259,8 +260,8 @@ Decided in the ticket:
     group's bundle, each sub-application a trait or a synthesized policy adds, each
     synthesized NetworkPolicy, the `scaler` HPA and PDB, the `rbac` objects, the
     `networkpolicy` trait's policy, the `ingress` trait's Ingress, the `httproute`
-    trait's HTTPRoute and the `volsync` trait's ReplicationSource, the `postgresql` Pooler
-    and Databases, the object
+    trait's HTTPRoute and the `volsync` trait's ReplicationSource, the `postgresql` Cluster,
+    ObjectStore, Pooler, Databases and ScheduledBackups, the object
     of an authored kind component, the generated source, the values ConfigMap and
     Secret and the HelmRelease of a `helm` component, the Kustomization and the kept source of an `oci`
     component, the Deployment, the Service and the ServiceAccount of a `webservice` or
@@ -275,7 +276,8 @@ Decided in the ticket:
   - An override from the hook is held to the rule for an authored name: never shortened,
     a DNS-1123 subdomain (a DNS-1123 label for the Pooler and for the Service of a
     `webservice`, §3.5; a DNS-1035 label of at most 50 characters for the Cluster of a
-    `postgresql`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
+    `postgresql`; at most 63 characters for its ScheduledBackups, §6.3), refused when
+    invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
   - A lowering rule's request carries the name of the document the rule is lowering,
     which a later document rule may still change. The hook is asked only inside
     `Transform`: `LowerRaws` and a rule driven directly keep the defaults.
@@ -385,24 +387,29 @@ Decided in the ticket:
     (`checkSiblingGroups`, `pkg/oam/sibling_group.go`).
 - **Shipped: the Cluster and the ObjectStore of a `postgresql`** (`PostgresqlRule`,
   `pkg/oam/builtin/components/postgresql.go` and `postgresql_lowering.go`; the components
-  README, **postgresql**). `clusterObjectName` and `objectStoreObjectName` name the two
+  README, **postgresql**). `clusterObjectName` and `backup.objectStoreObjectName` (a
+  top-level property until go-kure/launcher#1001) name the two
   objects, under roles `postgresql-cluster` and `postgresql-objectstore`, asked with the
   component; the default of each is the component name, so a document that sets neither
   builds as before.
   - Each names its object alone and is claimed (`LoweringContext.ResolveMemberName`). The
     members keep the component's name. The Cluster's name is held to the Cluster's rule, a
     DNS-1035 label of at most 50 characters, whoever chose it.
-  - The references launcher writes follow: the Pooler's and each Database's `cluster.name`
-    and the `cnpg.io/cluster` endpoint selector (`ComponentEndpointsNamed` with the hook)
-    the Cluster; the backup plugin's `barmanObjectName` the ObjectStore. The default names
-    of the Pooler and the Databases keep deriving from the component name; a component
+  - The references launcher writes follow: the Pooler's, each Database's and each
+    ScheduledBackup's `cluster.name` and the `cnpg.io/cluster` endpoint selector
+    (`ComponentEndpointsNamed` with the hook) the Cluster; the backup plugin's
+    `barmanObjectName` the ObjectStore. The default names of the Pooler, the Databases and
+    the ScheduledBackups keep deriving from the component name; a component
     name the Pooler's default cannot be built from is refused, naming `poolerName` as what
     settles it.
   - **CloudNativePG derives the Cluster's Services and Secrets from the Cluster's name, and
     the default backup path moves with it. Renaming an existing Cluster creates a new one:
     the old one is pruned with its data unless it is protected.**
-  - `objectStoreObjectName` is refused without `objectStore`: the component then generates
-    no store, and the hook is not asked.
+  - Without `backup` the component generates no store, and the hook is not asked.
+  - Its ScheduledBackups (go-kure/launcher#1001, §6.3) are named under role
+    `postgresql-scheduledbackup`, by the hook, else `<component>-<schedule name>`; no
+    property names them. Each is held to 63 characters, since CloudNativePG copies it into a
+    label of each Backup.
 - **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
   hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
@@ -869,7 +876,7 @@ and by scope, whatever component or trait emits it.
 
 ---
 
-## 6. Contract metadata and kind coverage (go-kure/launcher#789, go-kure/launcher#790)
+## 6. Contract metadata and kind coverage (go-kure/launcher#789, go-kure/launcher#790, go-kure/launcher#1001)
 
 ### 6.1 Shipped (go-kure/launcher#789): contract metadata
 
@@ -1087,7 +1094,8 @@ and by scope, whatever component or trait emits it.
   `cnpg_backup.go`, `cnpg_scheduledbackup.go`, `cnpg_databaserole.go`,
   `cnpg_publication.go`, `cnpg_subscription.go`), each the strict projection of its
   spec type, declaring its object and taking `objectName`. The ClusterImageCatalog is
-  cluster-scoped; the other six are namespaced. No rule lowers onto them.
+  cluster-scoped; the other six are namespaced. No rule lowers onto them but
+  `postgresql`, onto `cnpg-scheduledbackup` (go-kure/launcher#1001, §6.3).
   - **No capability is required and nothing gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
     a test. The five kinds that refer to a Cluster hold `cluster.name` to a name a
@@ -1672,7 +1680,9 @@ and by scope, whatever component or trait emits it.
     where `backup.retentionPolicy` is set, and the `barmanObjectStore.destinationPath`
     of an `externalClusters` entry that has a `barmanObjectStore`
     (`TestPostgresqlRule_UnauthoredRequiredStrings`). Breaking for a document that
-    leaves either out.
+    leaves either out. Since go-kure/launcher#1001 (§6.3) `backup` writes no in-tree
+    `spec.backup` on the Cluster, only the plugin entry in `spec.plugins`: its path is
+    `backup.objectStore.destinationPath`, required.
   - A `postgresql` component refuses a block that would not be built, where it used to
     drop what the author wrote in it. Five blocks are built only when one field is set:
     `backup` (`destinationPath`), `bootstrap.recovery` and `bootstrap.pg_basebackup`
@@ -1687,7 +1697,9 @@ and by scope, whatever component or trait emits it.
     builds as before, an empty `bootstrap.pg_basebackup` or `replication.synchronous`
     does not
     (`TestPostgresqlRule_BlockNotBuilt`). Breaking for a document that authored such a
-    block without its field: it built, without those values.
+    block without its field: it built, without those values. Since
+    go-kure/launcher#1001 (§6.3) `backup` is built from `objectStore`, and `backup: {}` is
+    refused.
   - A `postgresql` component writes an authored `pooler.instances` as authored, a 0 or
     a negative count included, where it left a count of 0 or less out and the Pooler
     CRD's default of 1 applied. The CRD sets no minimum, so nothing is refused
@@ -2148,6 +2160,42 @@ and by scope, whatever component or trait emits it.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.
 
+### 6.3 Partly shipped (go-kure/launcher#1001, open): `postgresql` backup through the Barman Cloud plugin
+
+- **Before:** `postgresql`'s `backup` (`destinationPath`, `endpointURL`, `secretName`,
+  `retentionPolicy`) built the Cluster's in-tree `barmanObjectStore`, which CloudNativePG
+  deprecates and is removing, and a top-level `objectStore` built a barman-cloud
+  `ObjectStore` beside it. Nothing scheduled a backup.
+- **Now** (first slice; the components README, **postgresql**, "Backup"):
+  - `backup.objectStore` (required) is the `ObjectStore`'s configuration, decoded strictly
+    into the vendored Barman Cloud type: S3-compatible storage only, `s3Credentials`
+    required as exactly one way to authenticate, `destinationPath` not empty.
+    `backup.objectStoreObjectName`, `backup.retentionPolicy` (`<n><d|w|m>`) and
+    `backup.serverName` sit beside it.
+  - The Cluster carries one barman-cloud plugin entry, the WAL archiver, naming the store;
+    it has no in-tree `spec.backup`.
+  - Each `backup.schedules` entry emits a `cnpg-scheduledbackup` of method `plugin`,
+    named `<component>-<name>` under role `postgresql-scheduledbackup` (§3.2), held to 63
+    characters; its `schedule` is parsed as CloudNativePG's webhook parses it, and one
+    of five fields, which that webhook only warns of and reads seconds first, is refused,
+    naming the six-field forms it may have meant. One whose time never comes within the
+    operator's five-year look-ahead (February the 30th) is not refused: the operator records
+    NoSchedule and runs no backup (go-kure/launcher#1032).
+  - **Breaking:** the former `backup` keys `destinationPath`, `endpointURL` and
+    `secretName` and the top-level `objectStore` and `objectStoreObjectName` are refused,
+    naming their replacement, and so is `backup: {}`; `backup.retentionPolicy` stays.
+- **Prerequisites in the cluster.** The CloudNativePG operator 1.26 or later (the emitted
+  objects follow the vendored 1.30.1 API), the Barman Cloud plugin v0.15.x with its
+  `barmancloud.cnpg.io/v1` CRD, and cert-manager, recommended for the plugin. The bucket and
+  the Secrets the object store references exist beforehand.
+- **What happens at apply.** The build does not see the cluster. A missing CRD fails the
+  apply; an older CRD can prune a field it does not know without an error. Check the
+  installed versions and read the applied object back.
+- **Limits:** the prerequisites are documented, not declared: `oam.ContractMetadata` has no
+  field for an operator or CRD requirement (go-kure/launcher#1027). Recovery from a backup,
+  and the removal of `bootstrap.recovery` and of an external cluster's in-tree
+  `barmanObjectStore`, are later slices of the ticket.
+
 ---
 
 ## 7. Asymmetries (go-kure/launcher#794)
@@ -2315,3 +2363,4 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
+| [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Partly: `backup` (object store, WAL archiving, scheduled backups) | Recovery; go-kure/launcher#1027 |

@@ -217,6 +217,12 @@ post-policy step the rule attaches to the Cluster (go-kure/launcher#729):
 `enablePDB` from the post-policy instance count, and the `1Gi` storage fallback,
 held to the policy maximum. The generated objects are unchanged; with both an
 object store and a pooler, the ObjectStore now precedes the Pooler.
+go-kure/launcher#1001 reshapes `postgresql`'s `backup` onto these kinds and
+adds nothing to them: `backup.objectStore` is the configuration of the
+`cnpg-objectstore` it emits, the Cluster gets the barman-cloud plugin entry
+that archives WAL to that store (no in-tree `spec.backup`), and each
+`backup.schedules` entry emits a `cnpg-scheduledbackup` of method `plugin`,
+named `<component>-<schedule>`, after the Databases.
 
 ## Consequences
 
@@ -236,7 +242,8 @@ object store and a pooler, the ObjectStore now precedes the Pooler.
 - The CRDs' validation rules (CEL) are left to the API server, except the
   `ObjectStore`'s ban on `configuration.serverName`, which `cnpg-objectstore`
   refuses because the shared Barman type invites it. `postgresql` carries its
-  `objectStore.serverName` as the `serverName` parameter of the Cluster's
+  `backup.serverName` (`objectStore.serverName` until go-kure/launcher#1001)
+  as the `serverName` parameter of the Cluster's
   barman-cloud plugin entry, never on the `ObjectStore` it emits
   (go-kure/launcher#643).
 - Of the shared resource parser's per-entry rules, `cnpg-pooler` and

@@ -16,24 +16,25 @@ import (
 // (go-kure/launcher#790). The engine holds a top-level Required on an emitted
 // component, so a member emitted without one would be refused in the schema's
 // words where its kind refused it before. Of the kinds whose schema gained a
-// Required property with that issue, postgresql's rule emits three
-// (cnpg-pooler, cnpg-database, cnpg-objectstore) and no rule emits the others.
+// Required property with that issue, postgresql's rule emits four
+// (cnpg-pooler, cnpg-database, cnpg-objectstore, cnpg-scheduledbackup) and no rule emits the others.
 func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 	schemas := map[string]map[string]oam.PropertySchema{
-		"cnpg-cluster":     (&components.CnpgClusterHandler{}).PropertySchema(),
-		"cnpg-objectstore": (&components.CnpgObjectStoreHandler{}).PropertySchema(),
-		"cnpg-pooler":      (&components.CnpgPoolerHandler{}).PropertySchema(),
-		"cnpg-database":    (&components.CnpgDatabaseHandler{}).PropertySchema(),
+		"cnpg-cluster":         (&components.CnpgClusterHandler{}).PropertySchema(),
+		"cnpg-objectstore":     (&components.CnpgObjectStoreHandler{}).PropertySchema(),
+		"cnpg-pooler":          (&components.CnpgPoolerHandler{}).PropertySchema(),
+		"cnpg-database":        (&components.CnpgDatabaseHandler{}).PropertySchema(),
+		"cnpg-scheduledbackup": (&components.CnpgScheduledBackupHandler{}).PropertySchema(),
 	}
 	cases := map[string]map[string]any{
-		"nothing authored":                  {},
-		"a pooler with nothing under it":    {"pooler": map[string]any{"enabled": true}},
-		"a database of a name and an owner": {"databases": []any{map[string]any{"name": "orders", "owner": "app"}}},
-		"an object store of a path":         {"objectStore": map[string]any{"destinationPath": "s3://bucket/db/"}},
-		"all three": {
-			"pooler":      map[string]any{"enabled": true},
-			"objectStore": map[string]any{"destinationPath": "s3://bucket/db/"},
-			"databases":   []any{map[string]any{"name": "orders", "owner": "app"}, map[string]any{"name": "billing", "owner": "app"}},
+		"nothing authored":                   {},
+		"a pooler with nothing under it":     {"pooler": map[string]any{"enabled": true}},
+		"a database of a name and an owner":  {"databases": []any{map[string]any{"name": "orders", "owner": "app"}}},
+		"a backup of a store and a schedule": {"backup": map[string]any{"objectStore": map[string]any{"destinationPath": "s3://bucket/db/", "s3Credentials": map[string]any{"inheritFromIAMRole": true}}, "schedules": []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *"}}}},
+		"all four": {
+			"pooler":    map[string]any{"enabled": true},
+			"backup":    map[string]any{"objectStore": map[string]any{"destinationPath": "s3://bucket/db/", "s3Credentials": map[string]any{"inheritFromIAMRole": true}}, "schedules": []any{map[string]any{"name": "daily", "schedule": "0 0 0 * * *"}}},
+			"databases": []any{map[string]any{"name": "orders", "owner": "app"}, map[string]any{"name": "billing", "owner": "app"}},
 		},
 	}
 	held := map[string]int{}
@@ -67,7 +68,7 @@ func TestPostgresqlRule_MembersHoldTheRequiredProperties(t *testing.T) {
 	if ran < len(cases) {
 		return
 	}
-	for _, typ := range []string{"cnpg-objectstore", "cnpg-pooler", "cnpg-database"} {
+	for _, typ := range []string{"cnpg-objectstore", "cnpg-pooler", "cnpg-database", "cnpg-scheduledbackup"} {
 		if held[typ] == 0 {
 			t.Errorf("no Required property of an emitted %s was looked for", typ)
 		}

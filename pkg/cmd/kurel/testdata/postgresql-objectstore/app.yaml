@@ -10,9 +10,8 @@ spec:
     properties:
       version: "16"
       storageSize: "10Gi"
-      objectStore:
-        destinationPath: s3://my-bucket/postgres/
-        endpointURL: https://s3.example.com
-        secretName: postgres-backup-creds
-        retentionPolicy: 30d
-        serverName: postgres-v2
+      backup:
+        objectStore:
+          destinationPath: s3://my-bucket/postgres/
+          s3Credentials:
+            inheritFromIAMRole: true

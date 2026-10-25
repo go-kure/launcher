@@ -11,7 +11,38 @@ spec:
       version: "16"
       storageSize: "10Gi"
       backup:
+        objectStore:
+          destinationPath: "s3://my-bucket/backups"
+          endpointURL: "https://s3.example.com"
+          endpointCA:
+            name: s3-ca
+            key: ca.crt
+          s3Credentials:
+            accessKeyId:
+              name: backup-creds
+              key: ACCESS_KEY_ID
+            secretAccessKey:
+              name: backup-creds
+              key: SECRET_ACCESS_KEY
+            region:
+              name: backup-creds
+              key: REGION
+          wal:
+            compression: gzip
+            maxParallel: 4
+          data:
+            compression: gzip
+            jobs: 2
+            immediateCheckpoint: true
+        objectStoreObjectName: postgres-store
         retentionPolicy: "30d"
-        destinationPath: "s3://my-bucket/backups"
-        endpointURL: "https://s3.amazonaws.com"
-        secretName: "backup-creds"
+        serverName: postgres-v2
+        schedules:
+        - name: nightly
+          schedule: "0 0 2 * * *"
+        - name: weekly
+          schedule: "@weekly"
+          immediate: false
+          suspend: true
+          target: prefer-standby
+          backupOwnerReference: cluster
