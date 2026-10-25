@@ -4917,15 +4917,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
     the scrape failure log file, on a read-only root filesystem
-    (server/statefulset.go:510, :537; common.go:334-347), unless
-    `/var/log/prometheus` is writable all the same, judged as in the next
-    entry.
-  - a `queryLogFile` or `scrapeFailureLogFile` in a directory Prometheus
-    cannot write. A name alone is in `/var/log/prometheus`; the operator
+    (server/statefulset.go:510, :537; common.go:334-347), unless the file
+    there is writable all the same, judged as in the next entry.
+  - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. A name alone is in `/var/log/prometheus`; the operator
     passes any other path unchanged (common.go:230-236), and Prometheus
     joins a relative one, as `logs/query.log`, to the directory of its
     configuration, `/etc/prometheus/config_out`. The mount that covers the
-    directory most closely, at it or at the nearest directory above it
+    file most closely, at the file itself (as a `subPath` mount of an
+    existing file, which Prometheus opens for appending without writing to
+    its directory), at its directory or at the nearest directory above it
     (paths compared cleaned, a relative `mountPath` taken from `/` as the
     kubelet does), decides: the data volume at `/prometheus` and the
     `log-file` volume at `/var/log/prometheus` where the operator adds it
@@ -4935,17 +4935,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     writable unless it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only.
     Other read-only sources are not modelled: the rule ConfigMap and web TLS
-    mounts are not listed, so a directory in one is judged as one no mount
-    covers, below; an author's mount of an image volume, a CSI volume set
+    mounts are not listed, so a directory in one is judged by the listed
+    mounts alone; an author's mount of an image volume, a CSI volume set
     `readOnly`, or one of the operator's own volumes counts as writable. A
     patch mount at a path written as an earlier mount's is merged into it by
     the operator's strategic merge: it takes the patch's volume and keeps
     `readOnly` if either sets it. Of mounts at one path written differently,
     as `/data` and `/data/`, one writable makes it writable, since which one
     the container runtime mounts over the other is not derived. The check
-    refuses only where it knows the directory is read-only. A directory below a writable mount
-    counts as writable, since it may exist on the volume or be made by an
-    init container. Where no mount covers the directory, the root filesystem
+    refuses only where it knows the file or its directory is read-only. A
+    directory below a writable mount counts as writable, since it may exist
+    on the volume or be made by an init container. Where no mount covers the
+    file, the root filesystem
     decides, which the operator makes read-only unless a patch of the
     `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
     `false`. A file in `/dev`, `/proc` or a directory under them, as
