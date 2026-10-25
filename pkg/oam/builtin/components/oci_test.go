@@ -84,9 +84,15 @@ func ociLowering(doc string) oam.LoweringContext {
 }
 
 // ociSourceIdentity is the identity the rule gives a source: the url, the
-// version and the effective interval, as time.Duration prints it.
-func ociSourceIdentity(url, version, interval string) string {
-	return `oci-artifact:{"url":"` + url + `","version":"` + version + `","interval":"` + interval + `"}`
+// version and the effective interval, as time.Duration prints it, then the
+// registry access keys that are set, each an encoded `"key":value` member in
+// the rule's order (go-kure/launcher#999).
+func ociSourceIdentity(url, version, interval string, access ...string) string {
+	id := `oci-artifact:{"url":"` + url + `","version":"` + version + `","interval":"` + interval + `"`
+	for _, member := range access {
+		id += "," + member
+	}
+	return id + "}"
 }
 
 func ociProps(url, version, interval string) map[string]any {
