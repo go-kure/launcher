@@ -98,7 +98,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"probeNamespaceSelector":          object("probeNamespaceSelector: the namespaces Probe objects are read from, by their labels. Unset, the Prometheus's own namespace only; an empty selector, all." + selector),
 		"scrapeConfigSelector":            object("scrapeConfigSelector: the ScrapeConfig objects scraped, by their labels. Unset, none; an empty selector, all. ScrapeConfig is an alpha API upstream." + unmanaged + selector),
 		"scrapeConfigNamespaceSelector":   object("scrapeConfigNamespaceSelector: the namespaces ScrapeConfig objects are read from, by their labels. Unset, the Prometheus's own namespace only; an empty selector, all." + selector),
-		"version":                         text("version: the Prometheus version the operator configures for. Unset, the latest the operator knows of."),
+		"version":                         text("version: the Prometheus version the operator configures for, such as v3.5.0. Unset, the latest the operator knows of, v3.14.0 at the operator release the kind is built against. A version of a major other than 2 or 3 is refused; one the operator cannot parse is left to it. A field the operator reads only from a later version than this one, or than v3.14.0 where this is unset, is refused, naming the version it needs: below it the operator drops the field, or refuses the object; so are the three fields it reads only below some version. The components README lists them."),
 		"paused":                          flag("paused: true stops the operator from acting on the objects it manages for this Prometheus, deletion excepted."),
 		"image":                           text("image: the full image reference of the prometheus container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. Unset or empty, the image is the one an entry of containers named prometheus names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. version is still needed for the operator to know which Prometheus it configures."),
 		"imagePullPolicy":                 text("imagePullPolicy: when the images of the prometheus, config-reloader, init-config-reloader and thanos-sidecar containers are pulled: Always, Never or IfNotPresent."),
@@ -147,7 +147,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One constraint, and additionalLabelSelectors."+decoded+"TopologySpreadConstraint in its API reference."),
 		"remoteWrite": objects("remoteWrite: the remote write endpoints Prometheus sends its series to. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required. An empty action of a writeRelabelConfigs rule is refused, since the API server would replace it with replace."+decoded+"RemoteWriteSpec in its API reference."),
-		"otlp":                object("otlp: the settings of the OTLP receiver, which they turn on. Requires Prometheus v2.55.0 or later." + decoded + "OTLPConfig in its API reference."),
+		"otlp":                object("otlp: the settings of the OTLP receiver, which they turn on. Requires Prometheus v2.55.0 or later, and several of its fields a later one: each is refused below the version the operator writes it from (the components README lists them)." + decoded + "OTLPConfig in its API reference."),
 		"securityContext":     object("securityContext: the pod-level security attributes of the pods. Its windowsOptions.hostProcess is refused under an EnvironmentPolicy that does not allow privileged containers." + core + "PodSecurityContext in the Kubernetes API reference."),
 		"dnsPolicy":           text("dnsPolicy: the DNS policy of the pods: ClusterFirstWithHostNet, ClusterFirst, Default or None. With hostNetwork and no dnsPolicy, ClusterFirstWithHostNet."),
 		"dnsConfig":           object("dnsConfig: the DNS configuration of the pods: nameservers, searches and options." + decoded + "PodDNSConfig in its API reference."),
@@ -178,7 +178,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"enforcedKeepDroppedTargets": number("enforcedKeepDroppedTargets: the most targets dropped by relabeling that are kept in memory. Requires Prometheus v2.47.0 or later." +
 			enforcedLimit),
 		"enforcedBodySizeLimit":          text("enforcedBodySizeLimit: the largest uncompressed response body a scrape accepts, as a number and a unit (B, KB, MB, GB, TB, PB, EB, or KiB to EiB). Requires Prometheus v2.28.0 or later. Overrides a larger or unset limit of a scrape object."),
-		"nameValidationScheme":           text("nameValidationScheme: how metric and label names are validated: UTF8 or Legacy. Requires Prometheus v2.55.0 or later."),
+		"nameValidationScheme":           text("nameValidationScheme: how metric and label names are validated: UTF8 or Legacy. Refused below Prometheus v3.0.0, where the operator drops it."),
 		"nameEscapingScheme":             text("nameEscapingScheme: how names outside the legacy character set are escaped in a scrape request: AllowUTF8, Underscores, Dots or Values. Requires Prometheus v3.4.0 or later."),
 		"convertClassicHistogramsToNHCB": flag("convertClassicHistogramsToNHCB: true converts every scraped classic histogram into a native histogram with custom buckets. Requires Prometheus v3.4.0 or later."),
 		"scrapeNativeHistograms":         flag("scrapeNativeHistograms: whether native histograms are scraped. Requires Prometheus v3.8.0 or later."),
@@ -207,7 +207,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"scrapeClasses": objects("scrapeClasses: the scrape classes ServiceMonitor, PodMonitor, Probe and ScrapeConfig objects may name. Experimental upstream.",
 			"One scrape class: name, required. An empty action of a relabelings or metricRelabelings rule is refused, since the API server would replace it with replace."+decoded+"ScrapeClass in its API reference."),
 		"serviceDiscoveryRole":          text("serviceDiscoveryRole: the role ServiceMonitor targets and Alertmanager endpoints are discovered with: Endpoints, the operator's default, or EndpointSlice."),
-		"tsdb":                          object("tsdb: the settings of the time series database that are reloaded at runtime: outOfOrderTimeWindow, staleSeriesCompactionThreshold and chunkEncoding. Requires Prometheus v2.39.0 or later." + decoded + "TSDBSpec in its API reference."),
+		"tsdb":                          object("tsdb: the settings of the time series database that are reloaded at runtime: outOfOrderTimeWindow, staleSeriesCompactionThreshold and chunkEncoding. Each is refused below the Prometheus version the operator writes it from, where it drops it: v2.39.0, v3.10.0 and v3.13.0." + decoded + "TSDBSpec in its API reference."),
 		"scrapeFailureLogFile":          text("scrapeFailureLogFile: the file scrape failures are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus; a full path needs a writable volume mounted there. Requires Prometheus v2.55.0 or later. Not empty."),
 		"serviceName":                   text("serviceName: the name of the governing Service of the StatefulSets, which must exist in the namespace and select the pods. Unset, the operator creates and manages a headless Service named prometheus-operated. Not empty, and a DNS-1035 label (starting with a letter), the rule of every Service name here: the API refuses a Service of another name before Kubernetes 1.36 (by default), and the operator fails to reconcile where it finds no Service of the name."),
 		"runtime":                       object("runtime: the settings of the Prometheus process: goGC." + decoded + "RuntimeConfig in its API reference."),
@@ -232,7 +232,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalAlertManagerConfigs": object("additionalAlertManagerConfigs: the Secret key that holds further Alertmanager configurations, appended to the ones the operator generates as they are." + secretKey),
 		"remoteRead": objects("remoteRead: the remote read endpoints Prometheus reads series from. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required."+decoded+"RemoteReadSpec in its API reference."),
-		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names; the operator copies only an entry's name and mountPath, so any other field of one is refused. An empty blockSize is refused, since the API server would replace it with 2h." + decoded + "ThanosSpec in its API reference."),
+		"thanos":                 object("thanos: the Thanos sidecar the operator adds to the pods. Its image is held to the EnvironmentPolicy's allowed registries, with a tag other than latest or a digest, and its resources to the cpu and memory maxima, as the prometheus container's are; its deprecated baseImage, tag and sha are refused whenever set, the empty string included; a null one sets none. Unset or empty image, the sidecar's image is the one an entry of containers named thanos-sidecar names, and where none does the operator chooses it: refused under a policy with allowed registries, built under one without. Its objectStorageConfig and tracingConfig are keys of a Secret. An entry of its volumeMounts is refused at /prometheus where object storage is configured, and at /etc/thanos/config, where the operator mounts its own from Thanos v0.24.0, whatever version names; the operator copies only an entry's name and mountPath, so any other field of one is refused. An empty blockSize is refused, since the API server would replace it with 2h; so is a blockSize other than that 2h where object storage is configured, disableCompaction is not set, and both version and the Thanos version are at least v3.9.0 and v0.42.0 (unset, the operator's defaults), where the operator keeps compaction on in step with the sidecar and passes no block duration. A field the operator passes to the sidecar only from a later Thanos version than its version, or than the operator's default v0.42.4 where that is unset, is refused, naming the version it needs; a version the operator cannot parse is left to it." + decoded + "ThanosSpec in its API reference."),
 		"queryLogFile":           text("queryLogFile: the file PromQL queries are logged to. A name alone is a file of an emptyDir the operator mounts at /var/log/prometheus, which it does not mount beside a scrapeFailureLogFile with a directory: refused there unless a volume is mounted at /var/log/prometheus without readOnly. A full path needs a writable volume mounted there, or a standard stream such as /dev/stdout."),
 		"allowOverlappingBlocks": flag("allowOverlappingBlocks: true turns vertical compaction on. Deprecated upstream: no effect from Prometheus v2.39.0, where it is on."),
 		"exemplars":              object("exemplars: the exemplar storage: maxSize. Needs the exemplar-storage feature flag." + decoded + "Exemplars in its API reference."),
@@ -431,7 +431,10 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 	if err := validateThanosSidecarMounts(spec.Thanos); err != nil {
 		return err
 	}
-	return validateMonitoringWorkload(prometheusWorkload(spec))
+	if err := validateMonitoringWorkload(prometheusWorkload(spec)); err != nil {
+		return err
+	}
+	return validatePrometheusVersion(spec)
 }
 
 // refusePrometheusExternalURL refuses a nonempty externalUrl Prometheus exits
@@ -528,7 +531,10 @@ const prometheusLogDirectory = "/var/log/prometheus"
 // objectStorageConfigFile is set (:649 and :664-671), and /etc/thanos/config,
 // the HTTP client configuration, for Thanos 0.24.0 and later (:730-738,
 // thanosConfigDir in thanos_sidecar_config.go:29). The latter is reserved
-// whatever thanos.version names, as web-config is (validatePrometheusName).
+// whatever thanos.version names, as web-config is (validatePrometheusName),
+// so that raising the version does not turn a mount of the author's into a
+// clash: one rule across the monitoring kinds, where a version gates a field
+// but never what the operator reserves.
 //
 // It refuses too a field of an entry other than name and mountPath: the
 // operator copies only those two into the sidecar's mount (:642-647), so any
@@ -630,7 +636,8 @@ const prometheusRuleFiles = 3
 // (createThanosContainer, :729-746), and the rule ConfigMaps' volumes. The
 // operator adds web-config only for Prometheus 2.24.0 and later, and the
 // sidecar's only for Thanos 0.24.0 and later; both are reserved whatever the
-// versions name, as on the alertmanager kind. Its mounts in the prometheus
+// versions name, as on the alertmanager kind, so that raising a version does
+// not turn a volume of the author's into a clash. Its mounts in the prometheus
 // container are /prometheus, /etc/prometheus/config_out and
 // /etc/prometheus/certs (common.go:263-283), /etc/prometheus/secrets/<name>
 // and /etc/prometheus/configmaps/<name> for each entry of secrets and

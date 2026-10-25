@@ -10,7 +10,9 @@ import (
 	"go/printer"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -147,7 +149,7 @@ func loadVendoredPromOp(t *testing.T) *vendoredPromOp {
 
 // stringConst is the value of the package-level string constant name of the
 // excerpt's file rel.
-func (v *vendoredPromOp) stringConst(t *testing.T, rel, name string) string {
+func (v *vendoredPromOp) stringConst(t testing.TB, rel, name string) string {
 	t.Helper()
 	file := v.files[rel]
 	if file == nil {
@@ -180,9 +182,155 @@ func (v *vendoredPromOp) stringConst(t *testing.T, rel, name string) string {
 	return ""
 }
 
-// operatorGate is one comparison of a version in the operator's source: the
-// condition of an if, the value of an assignment, or the statement it is in,
-// with every literal version it compares against.
+// packageDecl is the expression the package-level constant or variable name
+// of the excerpt's file rel is declared with.
+func (v *vendoredPromOp) packageDecl(t testing.TB, rel, name string) ast.Expr {
+	t.Helper()
+	file := v.files[rel]
+	if file == nil {
+		t.Fatalf("the excerpt holds no %s", rel)
+	}
+	if e := declaredValue(file, name); e != nil {
+		return e
+	}
+	t.Fatalf("%s declares no constant or variable %s with a value", rel, name)
+	return nil
+}
+
+// declaredValue is the expression the package-level constant or variable
+// name of file is declared with, nil where it declares none.
+func declaredValue(file *ast.File, name string) ast.Expr {
+	for _, decl := range file.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs := spec.(*ast.ValueSpec)
+			for i, id := range vs.Names {
+				if id.Name == name && i < len(vs.Values) {
+					return vs.Values[i]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// stringLiteral is the value of a string literal, ok false for any other
+// expression.
+func stringLiteral(e ast.Expr) (string, bool) {
+	lit, ok := ast.Unparen(e).(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	return s, err == nil
+}
+
+// stringSliceElem is element i, counted from the end where negative, of the
+// package-level []string composite literal name of the excerpt's file rel.
+func (v *vendoredPromOp) stringSliceElem(t testing.TB, rel, name string, i int) string {
+	t.Helper()
+	lit, ok := v.packageDecl(t, rel, name).(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("%s: %s is not a composite literal", rel, name)
+	}
+	if typ, ok := lit.Type.(*ast.ArrayType); !ok || typ.Len != nil || v.text(typ.Elt) != "string" {
+		t.Fatalf("%s: %s is not a []string literal", rel, name)
+	}
+	if i < 0 {
+		i += len(lit.Elts)
+	}
+	if i < 0 || i >= len(lit.Elts) {
+		t.Fatalf("%s: %s has %d elements, none at %d", rel, name, len(lit.Elts), i)
+	}
+	s, ok := stringLiteral(lit.Elts[i])
+	if !ok {
+		t.Fatalf("%s: element %d of %s is not a string literal", rel, i, name)
+	}
+	return s
+}
+
+// structStringField is the string field field of the package-level variable
+// name of the excerpt's file rel, declared with a keyed composite literal: ""
+// where the literal leaves the field out.
+func (v *vendoredPromOp) structStringField(t testing.TB, rel, name, field string) string {
+	t.Helper()
+	lit, ok := v.packageDecl(t, rel, name).(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("%s: %s is not a composite literal", rel, name)
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			t.Fatalf("%s: %s is not a keyed literal", rel, name)
+		}
+		if key, ok := kv.Key.(*ast.Ident); ok && key.Name == field {
+			s, ok := stringLiteral(kv.Value)
+			if !ok {
+				t.Fatalf("%s: %s.%s is not a string literal", rel, name, field)
+			}
+			return s
+		}
+	}
+	return ""
+}
+
+// stringArgCall is one call that callStringArgs reads: the function that
+// makes it and the string literal it passes.
+type stringArgCall struct {
+	fn, arg string
+}
+
+// callStringArgs is every call of the function or method callee in the
+// excerpt's file rel, in source order, with the string literal each passes
+// as its argument at index arg. A call that passes anything else fails the
+// test.
+func (v *vendoredPromOp) callStringArgs(t testing.TB, rel, callee string, arg int) []stringArgCall {
+	t.Helper()
+	file := v.files[rel]
+	if file == nil {
+		t.Fatalf("the excerpt holds no %s", rel)
+	}
+	var calls []stringArgCall
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fd, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name := ""
+			switch f := ast.Unparen(call.Fun).(type) {
+			case *ast.Ident:
+				name = f.Name
+			case *ast.SelectorExpr:
+				name = f.Sel.Name
+			}
+			if name != callee {
+				return true
+			}
+			if arg >= len(call.Args) {
+				t.Fatalf("%s: %s calls %s with %d arguments", v.fset.Position(call.Pos()), funcName(fd), callee, len(call.Args))
+			}
+			s, ok := stringLiteral(call.Args[arg])
+			if !ok {
+				t.Fatalf("%s: %s passes %s argument %d that is not a string literal", v.fset.Position(call.Pos()), funcName(fd), callee, arg)
+			}
+			calls = append(calls, stringArgCall{fn: funcName(fd), arg: s})
+			return true
+		})
+	}
+	return calls
+}
+
+// operatorGate is one gate of the operator's source: the condition of an if,
+// the value of an assignment, or the statement it is in, with the versions
+// its comparisons read.
 type operatorGate struct {
 	file string
 	// fn is the declaring function, as makeStatefulSetSpec or
@@ -193,8 +341,16 @@ type operatorGate struct {
 	// ordinal counts the gates of one file, function and condition from 1, in
 	// source order: the same block test twice in one function.
 	ordinal int
-	minima  []string
-	pos     token.Position
+	// minima are the versions it compares against: the argument of a
+	// comparison method of semver.Version or of WithMinimumVersion.
+	minima []string
+	// maxima are the arguments of WithMaximumVersion, from which on the
+	// operator drops what is appended through the generator it returns.
+	maxima []string
+	// unread holds, as "minimum" or "maximum", each comparison whose version
+	// the walker cannot resolve (resolveVersion).
+	unread []string
+	pos    token.Position
 }
 
 func (g operatorGate) key() string {
@@ -204,12 +360,83 @@ func (g operatorGate) key() string {
 // versionComparisons are the methods of semver.Version that compare it.
 var versionComparisons = map[string]bool{"GTE": true, "GT": true, "LTE": true, "LT": true, "EQ": true, "NE": true, "Compare": true, "Equals": true}
 
+// versionMethods are the methods readAt reads a bound from only where they
+// are called: the comparisons, and the ConfigGenerator's version guards.
+var versionMethods = func() map[string]bool {
+	m := maps.Clone(versionComparisons)
+	m["WithMinimumVersion"], m["WithMaximumVersion"] = true, true
+	return m
+}()
+
+// versionRead is how a node of the source reads a version.
+type versionRead int
+
+const (
+	noRead versionRead = iota
+	// compared is a call of a comparison method of semver.Version on one
+	// argument: its version is a minimum.
+	compared
+	// minimumOf is a call of the operator's WithMinimumVersion, whose
+	// generator drops what is appended through it below its argument.
+	minimumOf
+	// maximumOf is a call of WithMaximumVersion, whose generator drops what
+	// is appended through it from its argument on.
+	maximumOf
+	// component is a read of a version's Major, Minor or Patch.
+	component
+)
+
+// readAt is how n, whose ancestors are stack, reads a version. A Major, Minor
+// or Patch selector that is called is a method of another type (a client's
+// Patch), not a version's component.
+func readAt(n ast.Node, stack []ast.Node) versionRead {
+	switch n := n.(type) {
+	case *ast.CallExpr:
+		sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr)
+		if !ok || len(n.Args) != 1 {
+			return noRead
+		}
+		switch {
+		case versionComparisons[sel.Sel.Name]:
+			return compared
+		case sel.Sel.Name == "WithMinimumVersion":
+			return minimumOf
+		case sel.Sel.Name == "WithMaximumVersion":
+			return maximumOf
+		}
+	case *ast.SelectorExpr:
+		switch n.Sel.Name {
+		case "Major", "Minor", "Patch":
+			if !calledAt(stack, n) {
+				return component
+			}
+		}
+	}
+	return noRead
+}
+
+// inspectWithStack calls visit for every node under root, with its
+// ancestors, root first.
+func inspectWithStack(root ast.Node, visit func(n ast.Node, stack []ast.Node)) {
+	var stack []ast.Node
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		visit(n, stack)
+		stack = append(stack, n)
+		return true
+	})
+}
+
 // versionGates walks the named files of the excerpt and returns every gate:
-// a call of a comparison method of semver.Version on one argument, and a
-// read of a version's Major, Minor or Patch. A comparison whose argument is
-// not semver.MustParse of a string literal is reported, not guessed at: its
-// minimum cannot be read.
-func (v *vendoredPromOp) versionGates(t *testing.T, files ...string) []operatorGate {
+// a call of a comparison method of semver.Version on one argument, of
+// WithMinimumVersion or of WithMaximumVersion, and a read of a version's
+// Major, Minor or Patch. A version the walker cannot resolve is recorded as
+// unread, which holdVersionGates fails unless the gate is classified as not
+// the kind's or the test reads its bounds itself.
+func (v *vendoredPromOp) versionGates(t testing.TB, files ...string) []operatorGate {
 	t.Helper()
 	var gates []operatorGate
 	for _, rel := range files {
@@ -221,11 +448,10 @@ func (v *vendoredPromOp) versionGates(t *testing.T, files ...string) []operatorG
 			fd, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				// A comparison outside a function would escape the walk.
-				ast.Inspect(decl, func(n ast.Node) bool {
-					if isVersionRead(n) {
+				inspectWithStack(decl, func(n ast.Node, stack []ast.Node) {
+					if readAt(n, stack) != noRead {
 						t.Errorf("%s: a version comparison outside a function", v.fset.Position(n.Pos()))
 					}
-					return true
 				})
 				continue
 			}
@@ -233,22 +459,6 @@ func (v *vendoredPromOp) versionGates(t *testing.T, files ...string) []operatorG
 		}
 	}
 	return gates
-}
-
-// isVersionRead reports whether n compares a version or reads one of its
-// components.
-func isVersionRead(n ast.Node) bool {
-	switch n := n.(type) {
-	case *ast.CallExpr:
-		sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr)
-		return ok && versionComparisons[sel.Sel.Name] && len(n.Args) == 1
-	case *ast.SelectorExpr:
-		switch n.Sel.Name {
-		case "Major", "Minor", "Patch":
-			return true
-		}
-	}
-	return false
 }
 
 // calledAt reports whether sel, whose ancestors are path, is the function of
@@ -277,44 +487,42 @@ func funcName(fd *ast.FuncDecl) string {
 	return "(" + b.String() + ")." + fd.Name.Name
 }
 
-func (v *vendoredPromOp) funcGates(t *testing.T, rel string, fd *ast.FuncDecl) []operatorGate {
+func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) []operatorGate {
 	t.Helper()
 	fn := funcName(fd)
-	var stack []ast.Node
+	locals := localNames(fd)
 	byNode := map[ast.Node]*operatorGate{}
 	var order []ast.Node
-	ast.Inspect(fd, func(n ast.Node) bool {
-		if n == nil {
-			stack = stack[:len(stack)-1]
-			return true
+	inspectWithStack(fd, func(n ast.Node, stack []ast.Node) {
+		if sel, ok := n.(*ast.SelectorExpr); ok && versionMethods[sel.Sel.Name] && !calledAt(stack, sel) {
+			t.Errorf("%s: %s takes the version method %s as a value; the test cannot read its bound", v.fset.Position(n.Pos()), fn, sel.Sel.Name)
+			return
 		}
-		defer func() { stack = append(stack, n) }()
-		if sel, ok := n.(*ast.SelectorExpr); ok && versionComparisons[sel.Sel.Name] && !calledAt(stack, sel) {
-			t.Errorf("%s: %s takes the comparison method %s as a value; the test cannot read its minimum", v.fset.Position(n.Pos()), fn, sel.Sel.Name)
-			return true
+		read := readAt(n, stack)
+		if read == noRead {
+			return
 		}
-		if !isVersionRead(n) {
-			return true
-		}
-		minimum := ""
-		if call, ok := n.(*ast.CallExpr); ok {
-			minimum = mustParseLiteral(call.Args[0])
-			if minimum == "" {
-				t.Errorf("%s: %s compares a version with something other than semver.MustParse of a literal; the test cannot read its minimum", v.fset.Position(n.Pos()), fn)
-				return true
-			}
-		}
-		at := gateNode(append(stack, n))
+		at := gateNode(append(slices.Clip(stack), n))
 		g := byNode[at]
 		if g == nil {
 			g = &operatorGate{file: rel, fn: fn, cond: v.text(at), pos: v.fset.Position(at.Pos())}
 			byNode[at] = g
 			order = append(order, at)
 		}
-		if minimum != "" {
-			g.minima = append(g.minima, minimum)
+		if read == component {
+			return
 		}
-		return true
+		bound, ok := v.resolveVersion(rel, locals, n.(*ast.CallExpr).Args[0], 0)
+		switch {
+		case !ok && read == maximumOf:
+			g.unread = append(g.unread, "maximum")
+		case !ok:
+			g.unread = append(g.unread, "minimum")
+		case read == maximumOf:
+			g.maxima = append(g.maxima, bound)
+		default:
+			g.minima = append(g.minima, bound)
+		}
 	})
 	var gates []operatorGate
 	seen := map[string]int{}
@@ -327,41 +535,111 @@ func (v *vendoredPromOp) funcGates(t *testing.T, rel string, fd *ast.FuncDecl) [
 	return gates
 }
 
-// mustParseLiteral is the version of semver.MustParse("<v>"), "" for any
-// other expression.
-func mustParseLiteral(e ast.Expr) string {
-	call, ok := e.(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 {
-		return ""
+// localNames are the names fd declares: its receiver, parameters and
+// results, and every name declared in its body or a function literal's.
+// The walker resolves no such name to a package-level one.
+func localNames(fd *ast.FuncDecl) map[string]bool {
+	names := map[string]bool{}
+	add := func(ids ...*ast.Ident) {
+		for _, id := range ids {
+			names[id.Name] = true
+		}
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "MustParse" {
-		return ""
+	ast.Inspect(fd, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.Field:
+			add(n.Names...)
+		case *ast.ValueSpec:
+			add(n.Names...)
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				for _, e := range n.Lhs {
+					if id, ok := e.(*ast.Ident); ok {
+						add(id)
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if n.Tok == token.DEFINE {
+				for _, e := range []ast.Expr{n.Key, n.Value} {
+					if id, ok := e.(*ast.Ident); ok {
+						add(id)
+					}
+				}
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// resolveVersion is the version e names: a string literal; semver.MustParse
+// of one; or a package-level constant or variable of rel's package, not
+// shadowed by a name of locals, declared as either. ok is false for anything
+// else: a parameter, a field, a call of another function.
+func (v *vendoredPromOp) resolveVersion(rel string, locals map[string]bool, e ast.Expr, depth int) (string, bool) {
+	if depth > 4 {
+		return "", false
 	}
-	if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "semver" {
-		return ""
+	switch e := ast.Unparen(e).(type) {
+	case *ast.BasicLit:
+		return stringLiteral(e)
+	case *ast.CallExpr:
+		sel, ok := e.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "MustParse" || len(e.Args) != 1 {
+			return "", false
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "semver" {
+			return "", false
+		}
+		return v.resolveVersion(rel, locals, e.Args[0], depth+1)
+	case *ast.Ident:
+		if locals[e.Name] {
+			return "", false
+		}
+		for other, file := range v.files {
+			if path.Dir(other) != path.Dir(rel) {
+				continue
+			}
+			if value := declaredValue(file, e.Name); value != nil {
+				// A package-level value is resolved in its own scope.
+				return v.resolveVersion(rel, nil, value, depth+1)
+			}
+		}
 	}
-	lit, ok := call.Args[0].(*ast.BasicLit)
-	if !ok || lit.Kind != token.STRING {
-		return ""
-	}
-	s, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		return ""
-	}
-	return s
+	return "", false
 }
 
 // gateNode is what the innermost statement around the last node of path
-// makes of it: the condition of an if, the value of an assignment, or the
-// statement itself.
+// makes of it: the condition of an if, the tag of a switch, the expression of
+// a case, the value of an assignment or a var declaration, or the statement
+// itself.
 func gateNode(path []ast.Node) ast.Node {
 	for i := len(path) - 1; i >= 0; i-- {
+		var child ast.Node
+		if i+1 < len(path) {
+			child = path[i+1]
+		}
 		switch s := path[i].(type) {
 		case *ast.IfStmt:
 			// Only a comparison in the condition is the if's own: one in its
-			// body has a statement nearer.
+			// body or its init has a statement nearer.
 			return s.Cond
+		case *ast.SwitchStmt:
+			if child != nil && child == s.Tag {
+				return s.Tag
+			}
+			return s
+		case *ast.CaseClause:
+			if e, ok := child.(ast.Expr); ok {
+				return e
+			}
+			return s
+		case *ast.ValueSpec:
+			// One value of a var declaration, as of an assignment.
+			if e, ok := child.(ast.Expr); ok && slices.Contains(s.Values, e) {
+				return e
+			}
 		case *ast.AssignStmt:
 			if len(s.Rhs) == 1 {
 				return s.Rhs[0]
@@ -383,35 +661,104 @@ func (v *vendoredPromOp) text(n ast.Node) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
-// gateRow classifies one gate of the operator's source for a kind: the
-// kind's fields it gates (each a row of the kind's versionGate table at the
-// gate's minimum), the floor of the kind's version check, or why it is not
-// the kind's.
+// gateEntry is one row of a kind's table as holdVersionGates sees it: the id
+// of a field and its bound, a minimum or a maximum.
+type gateEntry struct {
+	id, bound string
+}
+
+// gateEntriesOf is a versionGate table by path.
+func gateEntriesOf[S any](gates []versionGate[S]) []gateEntry {
+	entries := make([]gateEntry, len(gates))
+	for i, g := range gates {
+		entries[i] = gateEntry{g.path, g.minimum}
+	}
+	return entries
+}
+
+// idGateEntriesOf is an idGate table by id, or path where the id is empty.
+func idGateEntriesOf[S any](table []idGate[S]) []gateEntry {
+	entries := make([]gateEntry, len(table))
+	for i, g := range table {
+		id := g.id
+		if id == "" {
+			id = g.gate.path
+		}
+		entries[i] = gateEntry{id, g.gate.minimum}
+	}
+	return entries
+}
+
+// ceilingEntriesOf is a versionCeiling table by id, or path where the id is
+// empty.
+func ceilingEntriesOf[S any](table []versionCeiling[S]) []gateEntry {
+	entries := make([]gateEntry, len(table))
+	for i, c := range table {
+		id := c.id
+		if id == "" {
+			id = c.path
+		}
+		entries[i] = gateEntry{id, c.maximum}
+	}
+	return entries
+}
+
+// gateRow classifies one gate of the operator's source for a kind, by
+// exactly one of: the ids of the kind's fields it gates at its own bounds
+// (paths); the bound of each id where the walker cannot read the gate's
+// version and the test reads it from the source itself (bounds); the floor
+// of the kind's version check; or why it is not the kind's (not).
 type gateRow struct {
 	file, fn, cond string
 	ordinal        int // 0 is 1
-	paths          []string
-	floor          bool
-	not            string
+	// paths are ids of the kind's tables, each at the gate's minimum, its
+	// maximum, or both.
+	paths []string
+	// major, beside paths, is for a gate that reads only a version's Major:
+	// the least version, verified by hand from the condition, from which the
+	// operator drops the field. Each id of paths is a ceiling at it.
+	major string
+	// bounds is the bound of each id, read from the source by the test, for
+	// a gate whose one version the walker cannot read. An empty bound is no
+	// gate: the id is not in the kind's tables.
+	bounds map[string]string
+	floor  bool
+	not    string
 }
 
-// holdVersionGates holds a kind's gate table to the gates of the operator's
-// source: every gate is classified exactly once, by a row of rows or, for
-// every gate of a function, by funcs (keyed "<file> <fn>", with the reason);
-// each row and each funcs entry names a gate; a row's paths are rows of
-// table at the gate's one minimum, and every row of table is named; and the
-// floor's minimum is floor.
-func holdVersionGates[S any](t *testing.T, gates []operatorGate, rows []gateRow, funcs map[string]string, table []versionGate[S], floor string) {
+// holdVersionGates holds a kind's tables, minima and maxima (nil where the
+// kind has no ceilings), to the gates of the operator's source: every gate is
+// classified exactly once, by a row of rows or, for every gate of a function,
+// by funcs (keyed "<file> <fn>", with the reason); each row and each funcs
+// entry names a gate; an id a row names is in the table of each of its
+// gate's bounds, at that bound, and every id of both tables is named; and the
+// floor's minima are floor, none where the floor reads only the major.
+func holdVersionGates(t testing.TB, gates []operatorGate, rows []gateRow, funcs map[string]string, minima, maxima []gateEntry, floor []string) {
 	t.Helper()
-	minimum := map[string]string{}
-	for _, g := range table {
-		if _, dup := minimum[g.path]; dup {
-			t.Errorf("the table lists %s twice", g.path)
+	index := func(kind string, entries []gateEntry) map[string]string {
+		bounds := map[string]string{}
+		for _, e := range entries {
+			if _, dup := bounds[e.id]; dup {
+				t.Errorf("the %s table lists %s twice", kind, e.id)
+			}
+			if _, err := semver.Parse(e.bound); err != nil {
+				t.Errorf("%s: %s %q: %v", e.id, kind, e.bound, err)
+			}
+			bounds[e.id] = e.bound
 		}
-		if _, err := semver.Parse(g.minimum); err != nil {
-			t.Errorf("%s: minimum %q: %v", g.path, g.minimum, err)
+		return bounds
+	}
+	tables := map[string]map[string]string{"minimum": index("minimum", minima), "maximum": index("maximum", maxima)}
+	named := map[string]map[string]bool{"minimum": {}, "maximum": {}}
+	check := func(g operatorGate, kind, id, bound string) {
+		named[kind][id] = true
+		b, ok := tables[kind][id]
+		switch {
+		case !ok:
+			t.Errorf("%s: %s gates %s at the %s %s, which the kind's %s table does not list", g.pos, g.key(), id, kind, bound, kind)
+		case b != bound:
+			t.Errorf("%s: %s gates %s at the %s %s; the kind's table says %s", g.pos, g.key(), id, kind, bound, b)
 		}
-		minimum[g.path] = g.minimum
 	}
 	byKey := map[string]int{}
 	for i, r := range rows {
@@ -425,18 +772,20 @@ func holdVersionGates[S any](t *testing.T, gates []operatorGate, rows []gateRow,
 		}
 		byKey[k] = i
 		kinds := 0
-		for _, set := range []bool{len(r.paths) > 0, r.floor, r.not != ""} {
+		for _, set := range []bool{len(r.paths) > 0, r.bounds != nil, r.floor, r.not != ""} {
 			if set {
 				kinds++
 			}
 		}
 		if kinds != 1 {
-			t.Errorf("the row of %s names %d of paths, floor and a reason; want exactly one", k, kinds)
+			t.Errorf("the row of %s names %d of paths, bounds, floor and a reason; want exactly one", k, kinds)
+		}
+		if r.major != "" && len(r.paths) == 0 {
+			t.Errorf("the row of %s names a major ceiling without paths", k)
 		}
 	}
 	usedRows := make([]bool, len(rows))
 	usedFuncs := map[string]bool{}
-	named := map[string]bool{}
 	for _, g := range gates {
 		i, ok := byKey[g.key()]
 		_, byFunc := funcs[g.file+" "+g.fn]
@@ -447,29 +796,48 @@ func holdVersionGates[S any](t *testing.T, gates []operatorGate, rows []gateRow,
 			usedFuncs[g.file+" "+g.fn] = true
 			continue
 		case !ok:
-			t.Errorf("%s: %s, comparing against %v, is not classified: name the kind's fields it gates, or why it is not the kind's", g.pos, g.key(), g.minima)
+			t.Errorf("%s: %s, comparing against minima %v, maxima %v and %d it cannot read, is not classified: name the kind's fields it gates, or why it is not the kind's", g.pos, g.key(), g.minima, g.maxima, len(g.unread))
 			continue
 		}
 		usedRows[i] = true
 		r := rows[i]
 		switch {
 		case r.floor:
-			if !slices.Equal(g.minima, []string{floor}) {
-				t.Errorf("%s: the floor compares against %v, the kind refuses under %s", g.pos, g.minima, floor)
+			if len(g.unread) > 0 || len(g.maxima) > 0 || !slices.Equal(g.minima, floor) {
+				t.Errorf("%s: the floor compares against minima %v, maxima %v and %d it cannot read; the kind refuses under %v", g.pos, g.minima, g.maxima, len(g.unread), floor)
 			}
-		case len(r.paths) > 0:
-			if len(g.minima) != 1 {
-				t.Errorf("%s: %s compares against %v; a gate of the kind's fields has one minimum", g.pos, g.key(), g.minima)
+		case r.not != "":
+		case r.bounds != nil:
+			if len(g.unread) != 1 || len(g.minima)+len(g.maxima) > 0 {
+				t.Errorf("%s: %s: bounds stand for one version the walker cannot read; it reads minima %v and maxima %v and cannot read %d", g.pos, g.key(), g.minima, g.maxima, len(g.unread))
 				continue
 			}
-			for _, p := range r.paths {
-				named[p] = true
-				m, ok := minimum[p]
-				switch {
-				case !ok:
-					t.Errorf("%s: %s gates %s, which the kind's table does not list", g.pos, g.key(), p)
-				case m != g.minima[0]:
-					t.Errorf("%s: %s gates %s at %s; the kind's table says %s", g.pos, g.key(), p, g.minima[0], m)
+			for id, b := range r.bounds {
+				if b != "" {
+					check(g, g.unread[0], id, b)
+				}
+			}
+		case len(g.unread) > 0:
+			t.Errorf("%s: %s compares against a version the walker cannot read: name the bound of each id (bounds), or why it is not the kind's", g.pos, g.key())
+		case r.major != "":
+			if len(g.minima)+len(g.maxima) > 0 {
+				t.Errorf("%s: %s compares against minima %v and maxima %v; a major ceiling stands for a read of the major alone", g.pos, g.key(), g.minima, g.maxima)
+				continue
+			}
+			for _, id := range r.paths {
+				check(g, "maximum", id, r.major)
+			}
+		default:
+			if len(g.minima) > 1 || len(g.maxima) > 1 || len(g.minima)+len(g.maxima) == 0 {
+				t.Errorf("%s: %s compares against minima %v and maxima %v; a gate of the kind's fields has one minimum, one maximum, or one of each", g.pos, g.key(), g.minima, g.maxima)
+				continue
+			}
+			for _, id := range r.paths {
+				for _, b := range g.minima {
+					check(g, "minimum", id, b)
+				}
+				for _, b := range g.maxima {
+					check(g, "maximum", id, b)
 				}
 			}
 		}
@@ -484,9 +852,11 @@ func holdVersionGates[S any](t *testing.T, gates []operatorGate, rows []gateRow,
 			t.Errorf("%s holds no gate of the source", k)
 		}
 	}
-	for _, g := range table {
-		if !named[g.path] {
-			t.Errorf("the kind's table lists %s, which no gate of the source names", g.path)
+	for kind, entries := range map[string][]gateEntry{"minimum": minima, "maximum": maxima} {
+		for _, e := range entries {
+			if !named[kind][e.id] {
+				t.Errorf("the kind's %s table lists %s, which no gate of the source names", kind, e.id)
+			}
 		}
 	}
 }
