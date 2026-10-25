@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -254,6 +255,72 @@ func TestSecurityContextHandler_Error_ConflictingOverride(t *testing.T) {
 	err := h.Apply(trait, app, newBundle())
 	if err == nil {
 		t.Fatal("expected error for restricted + allowPrivilegeEscalation:true, got nil")
+	}
+}
+
+// The restricted Pod Security Standards profile does not constrain
+// readOnlyRootFilesystem, so false is accepted under psaLevel restricted and
+// renders false, with the rest of the restricted profile unchanged
+// (go-kure/launcher#998).
+func TestSecurityContextHandler_Apply_RestrictedWritableRootFilesystem(t *testing.T) {
+	h := &traits.SecurityContextHandler{}
+	app := stack.NewApplication("svc", "ns", &deployStub{name: "svc", namespace: "ns"})
+	trait := &oam.Trait{
+		Type: "security-context",
+		Properties: map[string]any{
+			"psaLevel":               "restricted",
+			"readOnlyRootFilesystem": false,
+		},
+	}
+	if err := h.Apply(trait, app, newBundle()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	resources, err := app.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	dep := (*resources[0]).(*appsv1.Deployment)
+	podSC := dep.Spec.Template.Spec.SecurityContext
+	if podSC == nil || podSC.RunAsNonRoot == nil || !*podSC.RunAsNonRoot || podSC.SeccompProfile == nil {
+		t.Errorf("restricted: pod SecurityContext = %+v, want runAsNonRoot true and a seccompProfile", podSC)
+	}
+	containerSC := dep.Spec.Template.Spec.Containers[0].SecurityContext
+	if containerSC == nil {
+		t.Fatal("container SecurityContext is nil")
+	}
+	if containerSC.ReadOnlyRootFilesystem == nil || *containerSC.ReadOnlyRootFilesystem {
+		t.Errorf("ReadOnlyRootFilesystem = %v, want false", containerSC.ReadOnlyRootFilesystem)
+	}
+	if containerSC.AllowPrivilegeEscalation == nil || *containerSC.AllowPrivilegeEscalation {
+		t.Error("restricted: AllowPrivilegeEscalation must stay false")
+	}
+	if containerSC.Capabilities == nil || len(containerSC.Capabilities.Drop) == 0 {
+		t.Error("restricted: Capabilities.Drop must stay set")
+	}
+}
+
+func TestSecurityContextHandler_Error_RestrictedConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value bool
+	}{
+		{"allowPrivilegeEscalation", true},
+		{"runAsNonRoot", false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			h := &traits.SecurityContextHandler{}
+			app := stack.NewApplication("svc", "ns", &deployStub{name: "svc", namespace: "ns"})
+			trait := &oam.Trait{
+				Type:       "security-context",
+				Properties: map[string]any{"psaLevel": "restricted", tc.key: tc.value},
+			}
+			err := h.Apply(trait, app, newBundle())
+			if err == nil || !strings.Contains(err.Error(), "incompatible with psaLevel restricted") {
+				t.Fatalf("Apply error = %v, want the restricted incompatibility for %s: %v", err, tc.key, tc.value)
+			}
+		})
 	}
 }
 
