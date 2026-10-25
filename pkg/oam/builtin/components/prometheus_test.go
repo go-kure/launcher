@@ -560,6 +560,12 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":      []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}, map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/logs"}, map[string]any{"name": "cfg", "mountPath": "/logs/queries"}}},
 			`queryLogFile: "/logs/queries/query.log" is in /logs/queries, under the read-only mount at /logs/queries in the prometheus container`},
+		// The kubelet joins a relative mountPath to the root.
+		{"a log file under a read-only mount written relative", map[string]any{"queryLogFile": "/var/log/query.log",
+			"volumes":      []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
+			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "var/log", "readOnly": true}},
+			"containers":   []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
+			`queryLogFile: "/var/log/query.log" is in /var/log, under the read-only mount at /var/log in the prometheus container`},
 		// Of two mounts at one path the API refuses those written alike, and
 		// the runtime mounts one over the other where they are not.
 		{"two mounts at one path", map[string]any{"volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}},
@@ -922,6 +928,8 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/var/log"}}, "containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log"}}}}},
 		"a log file in the data volume":    {"queryLogFile": "/prometheus/query.log"},
 		"a log file below the data volume": {"queryLogFile": "/prometheus/logs/query.log"},
+		"a log file in a directory with a writable mount written relative": {"queryLogFile": "/var/log/query.log",
+			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "var/log"}}},
 		// A directory below a writable mount may exist on the volume or be
 		// made by an init container.
 		"a log file in a directory below a writable mount": {"queryLogFile": "/var/log/prometheus/query.log", "scrapeFailureLogFile": "/dev/stdout",
