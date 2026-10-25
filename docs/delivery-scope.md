@@ -1916,11 +1916,12 @@ and by scope, whatever component or trait emits it.
     and `mountPath`, which the operator drops; an entry of either at the path of an
     earlier entry of the same field, compared cleaned; a `queryLogFile` named without a directory
     beside a `scrapeFailureLogFile`
-    named with one, where the operator mounts no volume for it, unless `/var/log/prometheus`
-    is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` in a directory
-    Prometheus cannot write (a name alone in `/var/log/prometheus`, a relative path joined
+    named with one, where the operator mounts no volume for it, unless the file there
+    is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
+    write (a name alone in `/var/log/prometheus`, a relative path joined
     to `/etc/prometheus/config_out`, as Prometheus does), where the mount covering the
-    directory most closely, at it or above it, decides: `/prometheus` and the operator's
+    file most closely, at the file itself (a `subPath` mount of the file), at its
+    directory or above, decides: `/prometheus` and the operator's
     log-file volume are writable, `config_out` and its certificate, secret, configMap and
     web configuration mounts read-only, and a mount of the author's, in `volumeMounts` or a
     prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
@@ -1929,8 +1930,8 @@ and by scope, whatever component or trait emits it.
     `readOnly` from either; of mounts at one path written differently, one writable makes
     it writable); an author's mount of an image volume, a `readOnly` CSI volume or one of
     the operator's own volumes counts as writable, and the rule ConfigMap and web TLS
-    mounts are not listed, so the check refuses only where it knows the directory is
-    read-only; where no listed mount covers it, the read-only root
+    mounts are not listed, so the check refuses only where it knows the file or its
+    directory is read-only; where no listed mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
     a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
     refused; a negative request or limit; and a
