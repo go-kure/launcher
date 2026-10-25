@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      recovery:
+        source:
+          serverName: origin
+          objectStore:
+            destinationPath: "s3://origin-bucket/backups"
+            endpointURL: "https://s3.example.com"
+            s3Credentials:
+              accessKeyId:
+                name: origin-backup-creds
+                key: ACCESS_KEY_ID
+              secretAccessKey:
+                name: origin-backup-creds
+                key: SECRET_ACCESS_KEY
+            wal:
+              maxParallel: 4

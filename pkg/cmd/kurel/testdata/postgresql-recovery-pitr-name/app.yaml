@@ -1,0 +1,24 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      recovery:
+        source:
+          serverName: origin
+          objectStore:
+            destinationPath: "s3://origin-bucket/backups"
+            endpointURL: "https://s3.example.com"
+            s3Credentials:
+              inheritFromIAMRole: true
+        target:
+          name: before-migration
+          backupID: 20261020T030000
+          exclusive: true

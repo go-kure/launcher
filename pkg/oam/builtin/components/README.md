@@ -10777,30 +10777,87 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (a database named `postgres`) is not seen there: one of the four things an
   endpoint entry does not see (`pkg/oam`, "Name roles and the `Naming`
   hook").
+  **Recovery** (go-kure/launcher#1001). `recovery` bootstraps a new Cluster
+  from the base backups and WAL another cluster wrote to an object store
+  through the Barman Cloud plugin, to the end of the WAL or to a target
+  (point-in-time recovery). It lowers into the base kinds and adds nothing to
+  them. A bootstrap is read only when the Cluster is created: recover into a
+  new component beside the source one; set on a component whose Cluster
+  exists already, it changes nothing. Recovering by renaming the source
+  component's Cluster instead (`clusterObjectName`) creates a new Cluster and
+  prunes the original with its data unless it is protected. It is not
+  combined with
+  `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`).
+  - `recovery.source` (required) is where the backups are read from:
+    `serverName` (required, not empty), the folder the source cluster wrote
+    within the store (its `backup.serverName`, else its Cluster's name), and
+    exactly one of `objectStoreName`, an existing ObjectStore in the namespace,
+    and `objectStore`, one defined here. The inline store reads as
+    `backup.objectStore` does, with the same checks and refusals under its own
+    path (`recovery.source.objectStore.serverName: not allowed …; use
+    recovery.source.serverName`), and the component emits it as a
+    `cnpg-objectstore` named `<component>-recovery-source` (or by the `Naming`
+    hook, below).
+  - The Cluster gets `bootstrap.recovery` whose `source` is one
+    `externalClusters` entry the rule writes, `<component>-recovery-source`:
+    the plugin `barman-cloud.cloudnative-pg.io` with the parameters
+    `barmanObjectName`, the store by the name it took, and `serverName`, always
+    written, since the plugin would otherwise read the new Cluster's own folder.
+    An authored `externalClusters` entry of that name is refused.
+  - `recovery.target` is where the recovery stops, the vendored
+    `RecoveryTarget`: `time`, `lsn`, `xid`, `name` and `immediate`, at most one
+    of them; `backupID`; `timeline` (`latest` or a positive integer, written as
+    a string); `exclusive`. What CloudNativePG's webhook refuses without
+    looking at a cluster is refused at build: two targets (an authored
+    `immediate`, `false` included, counts), a `time` or `lsn` that does not
+    parse as the operator parses it, an `xid` that is no 32-bit integer, a
+    `name` of 64 bytes or more or with a control character, an `xid`, `name`
+    or `immediate` without `backupID` (the plugin finds the base backup from
+    the catalog by time or LSN only), and a `timeline` that is neither. An
+    authored `""` in a target, `database` or `owner` is refused: the Cluster
+    omits an empty value, which would recover to the end of the WAL, or take
+    the operator's default.
+  - `recovery.database`, `recovery.owner` and `recovery.secret.name` (the
+    owner's credentials) are the Cluster's, written only when authored.
+  - A cluster that would archive its WAL into the folder it is recovered from
+    is refused where launcher sees both (`recovery.source: the cluster would
+    archive its WAL into the folder it is recovered from …`): the endpoint,
+    the destination path and the server name of `backup` (its `serverName`,
+    else the Cluster's name) against those of the source, read from the inline
+    store, from the component's own backup store, or from the store another
+    component of the document emits (a `postgresql` component's backup store
+    or a `cnpg-objectstore`), known by the name the document gives it. A
+    store outside the document, or one another component's name the `Naming`
+    hook changes, is left to the plugin's own check before it archives.
+  - **Ordering.** The recovering Cluster reads its source store before it can
+    become ready, so the store never waits for the Cluster as the other members
+    do. Where the document orders its components (a `dependency` policy), the
+    Cluster waits for the store: the store is in a group before the Cluster's,
+    with the placements and the bundle traits the members get. Where it does
+    not, nothing is ordered, and the store is applied with the Cluster.
+  **Behavior-changing**: the former `bootstrap.recovery` is refused, whatever
+  its value (`bootstrap.recovery: moved to recovery (…)`), and so is an
+  external cluster's in-tree `barmanObjectStore`
+  (`externalClusters[0].barmanObjectStore: removed (in-tree Barman Cloud, gone
+  in CloudNativePG 1.31); use recovery.source`). `externalClusters` keeps its
+  `name` and `connectionParameters`, the source of `bootstrap.pg_basebackup`.
   **Two object store paths are required** (go-kure/launcher#790):
   `backup.objectStore.destinationPath` (go-kure/launcher#1001; until then
   `backup.destinationPath`, where another value of `backup` was set), and
-  `barmanObjectStore.destinationPath` of an `externalClusters` entry that has
-  a `barmanObjectStore` (`backup.objectStore.destinationPath: required (…)`,
-  `externalClusters[0].barmanObjectStore.destinationPath: required (…)`). The
-  CRDs require both. In an external cluster's `barmanObjectStore`, the
-  lowering used to write `""` where the author wrote nothing, which the API
-  server refuses. An authored empty path is refused in
-  `backup.objectStore` (`must not be empty (…)`); in an external cluster's
-  `barmanObjectStore` it is a value: it is written, and refusing it is left
-  to the API server. The external cluster's path is one of the strings
-  `cnpg-cluster` refuses unauthored; the
-  lowering fills the parent of two more, `bootstrap.pg_basebackup.source` and
-  the Cluster's `postgresql.synchronous.method` (authored here as
+  `recovery.source.objectStore.destinationPath` for an inline recovery store
+  (`backup.objectStore.destinationPath: required (…)`). The ObjectStore CRD
+  requires it. An authored empty path is refused in each (`must not be empty
+  (…)`). Until go-kure/launcher#1001 the second was the path of an external
+  cluster's in-tree `barmanObjectStore`, now refused (above). Of the strings
+  `cnpg-cluster` refuses unauthored, the lowering fills the parent of two,
+  `bootstrap.pg_basebackup.source` and the Cluster's
+  `postgresql.synchronous.method` (authored here as
   `replication.synchronous.method`), only from the string itself, and of the
-  other eight (the Cluster's `backup.barmanObjectStore.destinationPath` among
-  them, since `backup` writes no in-tree `spec.backup`, only the plugin entry
-  in `spec.plugins`) never.
-  `TestPostgresqlRule_UnauthoredRequiredStrings` reads all
-  eleven in the lowered component. An external cluster's `barmanObjectStore`
-  is decoded into the upstream type, which reads a key in any spelling, so
-  its path counts as authored in any spelling. The refusal is made on the authored
-  properties, so a `PostgresqlConfig` built in Go is not held to it.
+  other nine (the Cluster's `backup.barmanObjectStore.destinationPath` and
+  `externalClusters[].barmanObjectStore.destinationPath` among them, since
+  `backup` and `recovery` write no in-tree Barman configuration, only plugin
+  entries) never. `TestPostgresqlRule_UnauthoredRequiredStrings` reads all
+  eleven in the lowered component.
   **A block that would not be built is refused, not dropped**
   (go-kure/launcher#790). Five blocks are built only when one field of
   theirs is set, and a document that authored other values of such a block
@@ -10811,10 +10868,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the store itself needs a `destinationPath` that is not empty and
     `s3Credentials` (go-kure/launcher#1001, above; until then the Cluster's
     backup was built from `backup.destinationPath`).
-  - `bootstrap.recovery` and `bootstrap.pg_basebackup`: the bootstrap is
-    built from a non-empty `source`, so either block without one is refused
+  - `bootstrap.pg_basebackup`: the bootstrap is built from a non-empty
+    `source`, so the block without one is refused
     (`bootstrap.pg_basebackup.source: required (…)`, or `must not be empty
-    (…)` for an authored `""`).
+    (…)` for an authored `""`). `recovery`, which replaced
+    `bootstrap.recovery`, is refused without its `source` likewise
+    (`recovery.source: required (…)`).
   - `replication.synchronous`: built from `method`, so the block without one
     is refused (`replication.synchronous.method: required (any or first)`),
     after a wrongly typed `number` or `dataDurability`, which is still
@@ -10902,6 +10961,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Databases and the ScheduledBackups keep deriving from the component name**
   (`<name>-pooler`, `<name>-<db>`, `<name>-<schedule>`), whatever the Cluster
   is named.
+  **The recovery ObjectStore's name** (go-kure/launcher#1001) is the `Naming`
+  hook's answer for role `postgresql-recovery-objectstore`, else
+  `<name>-recovery-source`, with no property of its own; the hook is not asked
+  where `recovery.source.objectStoreName` names an existing store. It is a
+  DNS-1123 subdomain, a component of its own, and the Cluster's recovery
+  source names the store by it; a name another component of the document
+  holds is refused, naming both.
   **The ScheduledBackups' names** (go-kure/launcher#1001) are resolved the
   same way, with no property of their own: the `Naming` hook's answer for
   role `postgresql-scheduledbackup`, else `<name>-<schedule>`, where the

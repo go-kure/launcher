@@ -1,10 +1,8 @@
 package components
 
 import (
-	"encoding/json"
 	"fmt"
 
-	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -242,8 +240,9 @@ func (r PostgresqlRule) EndpointsNamed(component *oam.Component, lctx oam.Loweri
 // properties. The CNPG-shaped sub-objects (pooler, bootstrap, databases, …)
 // are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
 // rather than modeled field-by-field, so a database's `objectName` is declared
-// by no entry of its own. `backup` is the exception, declared key by key
-// (schemaPostgresqlBackup, go-kure/launcher#1001). TestPostgresqlRule_PropertySchemaUnchanged pins it
+// by no entry of its own. `backup` and `recovery` are the exceptions, declared
+// key by key (schemaPostgresqlBackup, schemaPostgresqlRecovery,
+// go-kure/launcher#1001). TestPostgresqlRule_PropertySchemaUnchanged pins it
 // byte for byte.
 func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 	// The CNPG-shaped sub-objects are kept open; each reuses the same open shape
@@ -269,12 +268,13 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses."),
 		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, used as written (default: the component name followed by -pooler); a DNS-1123 label, since CloudNativePG names the Pooler's Service after it (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36). Only with pooler.enabled: true."},
-		"bootstrap":         openObj("Cluster bootstrap source (recovery or pg_basebackup)."),
+		"bootstrap":         openObj("Cluster bootstrap by pg_basebackup: pg_basebackup.source names the externalClusters entry the cluster is copied from. A recovery from an object store is recovery."),
+		"recovery":          schemaPostgresqlRecovery(),
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
 		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),
 		"inheritedMetadata": openObj("Labels and annotations propagated to the generated resources."),
 		"affinity":          openObj("Pod affinity and anti-affinity scheduling settings."),
-		"externalClusters":  openArr("External clusters referenced for bootstrap or replica sources.", "A single external cluster definition."),
+		"externalClusters":  openArr("External clusters a pg_basebackup bootstrap copies from, each a name and its connectionParameters. A recovery source is recovery.source.", "A single external cluster definition."),
 		"managedRoles":      openArr("Database roles created and reconciled by the operator.", "A single managed role definition."),
 		"databases":         openArr("Databases created and reconciled within the cluster.", "A single database definition."),
 	}
@@ -514,27 +514,26 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		return nil, err
 	}
 	if present {
-		recovery, hasRecovery, err := parseObjectField(bootstrap, "recovery", "bootstrap.recovery")
-		if err != nil {
+		// A recovery from an object store is `recovery` now; the former
+		// bootstrap.recovery is refused, whatever its value, naming it.
+		if err := refusedProperty(bootstrap, postgresqlRecoveryRefusedKeys); err != nil {
 			return nil, err
 		}
 		pgbb, hasPgBasebackup, err := parseObjectField(bootstrap, "pg_basebackup", "bootstrap.pg_basebackup")
 		if err != nil {
 			return nil, err
 		}
-		if hasRecovery && hasPgBasebackup {
-			return nil, errors.New("bootstrap: recovery and pg_basebackup are mutually exclusive")
-		}
-		if hasRecovery {
-			if config.BootstrapRecoverySource, err = bootstrapSource(recovery, "bootstrap.recovery.source", "the externalClusters entry the cluster is recovered from"); err != nil {
-				return nil, err
-			}
-		}
 		if hasPgBasebackup {
 			if config.BootstrapPgBasebackupSource, err = bootstrapSource(pgbb, "bootstrap.pg_basebackup.source", "the externalClusters entry the cluster is copied from"); err != nil {
 				return nil, err
 			}
 		}
+	}
+	if config.Recovery, err = parsePostgresqlRecovery(props); err != nil {
+		return nil, err
+	}
+	if config.Recovery != nil && config.BootstrapPgBasebackupSource != "" {
+		return nil, errors.New("recovery: not with bootstrap.pg_basebackup (each bootstraps the Cluster); remove one of them")
 	}
 
 	ecList, _, err := parseObjectListField(props, "externalClusters", "externalClusters")
@@ -554,17 +553,15 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, errors.Errorf("%s: 'name' is required", label)
 		}
 		ext.Name = name
-		if bos, present, err := parseObjectField(ecMap, "barmanObjectStore", label+".barmanObjectStore"); err != nil {
-			return nil, err
-		} else if present {
-			// An authored barmanObjectStore is lowered whole, and without the
-			// path the Cluster would carry "".
-			// The map is decoded into the upstream type (toBarmanObjectStore),
-			// which reads the key in any spelling, so any spelling is authored.
-			if !authoredInAnySpelling(bos, "destinationPath") {
-				return nil, errors.Errorf("%s.barmanObjectStore.destinationPath: required (the object store path the cluster's backups and WAL are read from)", label)
-			}
-			ext.BarmanObjectStore = bos
+		// The in-tree Barman Cloud source is removed: it goes in CloudNativePG
+		// 1.31, and a recovery source is `recovery.source`.
+		if _, present := ecMap["barmanObjectStore"]; present {
+			return nil, errors.Errorf("%s.barmanObjectStore: removed (in-tree Barman Cloud, gone in CloudNativePG 1.31); use recovery.source", label)
+		}
+		// The rule writes an entry of this name for `recovery`, and
+		// CloudNativePG refuses two of one name.
+		if config.Recovery != nil && name == postgresqlRecoverySourceName(config.Name) {
+			return nil, errors.Errorf("%s.name %q: the name of the entry recovery's source is written as; rename this one", label, name)
 		}
 		if cp, present, err := parseObjectField(ecMap, "connectionParameters", label+".connectionParameters"); err != nil {
 			return nil, err
@@ -926,10 +923,10 @@ type CustomQueryRef struct {
 	Key  string
 }
 
-// ExternalCluster defines an external cluster for bootstrap or replica sources.
+// ExternalCluster defines an external cluster a pg_basebackup bootstrap copies
+// from.
 type ExternalCluster struct {
 	Name                 string
-	BarmanObjectStore    map[string]any
 	ConnectionParameters map[string]string
 }
 
@@ -996,7 +993,9 @@ type PostgresqlConfig struct {
 	// pgbouncer.image; empty for the operator's choice.
 	PoolerImage string
 
-	BootstrapRecoverySource     string
+	// Recovery is `recovery`; nil when it is not set.
+	Recovery *PostgresqlRecovery
+
 	BootstrapPgBasebackupSource string
 	ExternalClusters            []ExternalCluster
 
@@ -1069,18 +1068,4 @@ func cnpgResourceList(rl corev1.ResourceList) corev1.ResourceList {
 		out[name] = q.DeepCopy()
 	}
 	return out
-}
-
-// toBarmanObjectStore converts an authored externalClusters[].barmanObjectStore map into the
-// upstream Barman configuration by a JSON round-trip.
-func toBarmanObjectStore(m map[string]any) (*barmanapi.BarmanObjectStoreConfiguration, error) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal barman object store")
-	}
-	var bos barmanapi.BarmanObjectStoreConfiguration
-	if err := json.Unmarshal(data, &bos); err != nil {
-		return nil, errors.Wrap(err, "unmarshal barman object store")
-	}
-	return &bos, nil
 }

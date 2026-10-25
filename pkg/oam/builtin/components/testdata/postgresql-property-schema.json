@@ -133,7 +133,7 @@
   },
   "bootstrap": {
     "type": "object",
-    "description": "Cluster bootstrap source (recovery or pg_basebackup).",
+    "description": "Cluster bootstrap by pg_basebackup: pg_basebackup.source names the externalClusters entry the cluster is copied from. A recovery from an object store is recovery.",
     "additionalProperties": true
   },
   "clusterObjectName": {
@@ -151,7 +151,7 @@
   },
   "externalClusters": {
     "type": "array",
-    "description": "External clusters referenced for bootstrap or replica sources.",
+    "description": "External clusters a pg_basebackup bootstrap copies from, each a name and its connectionParameters. A recovery source is recovery.source.",
     "items": {
       "type": "object",
       "description": "A single external cluster definition.",
@@ -202,6 +202,148 @@
     "enum": [
       "cnpg"
     ]
+  },
+  "recovery": {
+    "type": "object",
+    "description": "Bootstrap the Cluster from the base backups and WAL another cluster wrote to an object store through the Barman Cloud plugin, to the end of its WAL or to a target (point-in-time recovery). A bootstrap is read only when the Cluster is created: recover into a new component beside the source one; set on a component whose Cluster exists already, it changes nothing. Not with bootstrap.pg_basebackup.",
+    "properties": {
+      "database": {
+        "type": "string",
+        "description": "The application database. Unset, the operator's default, app."
+      },
+      "owner": {
+        "type": "string",
+        "description": "The owner of the application database. Unset, the database's name."
+      },
+      "secret": {
+        "type": "object",
+        "description": "The Secret holding the owner's credentials. Unset, the operator generates one.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Required, not empty. The name of the Secret in the namespace.",
+            "required": true
+          }
+        }
+      },
+      "source": {
+        "type": "object",
+        "description": "Required. Where the backups and WAL are read from.",
+        "properties": {
+          "objectStore": {
+            "type": "object",
+            "description": "The object store the cluster is recovered from, defined here: the component also emits a cnpg-objectstore of this configuration, named \u003ccomponent\u003e-recovery-source. Exactly one of objectStoreName and objectStore.",
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "How base backups are written.",
+                "properties": {
+                  "compression": {
+                    "type": "string",
+                    "description": "Compression of the base backup: bzip2, gzip, lz4 or snappy. Unset, none."
+                  },
+                  "encryption": {
+                    "type": "string",
+                    "description": "Server-side encryption: AES256 or aws:kms. Unset, the bucket's policy."
+                  },
+                  "immediateCheckpoint": {
+                    "type": "boolean",
+                    "description": "true, a backup starts with an immediate checkpoint instead of a spread one."
+                  },
+                  "jobs": {
+                    "type": "integer",
+                    "description": "How many files are uploaded at once, at least 1."
+                  }
+                }
+              },
+              "destinationPath": {
+                "type": "string",
+                "description": "Required, not empty. The object store path backups and WAL are written to (for example s3://bucket/path)."
+              },
+              "endpointCA": {
+                "type": "object",
+                "description": "The CA bundle the endpoint's TLS certificate is checked against: a reference to one key of a Secret in the namespace, {name, key}.",
+                "additionalProperties": true
+              },
+              "endpointURL": {
+                "type": "string",
+                "description": "The endpoint of an S3-compatible service, in place of the AWS endpoint discovery."
+              },
+              "s3Credentials": {
+                "type": "object",
+                "description": "Required. Exactly one way to authenticate: accessKeyId and secretAccessKey, each a reference to one key of a Secret in the namespace, {name, key} (region and sessionToken, references alike, may be set beside them), or inheritFromIAMRole: true. Decoded strictly into the Barman Cloud S3Credentials type.",
+                "additionalProperties": true
+              },
+              "wal": {
+                "type": "object",
+                "description": "How WAL files are archived.",
+                "properties": {
+                  "compression": {
+                    "type": "string",
+                    "description": "Compression of each WAL file: bzip2, gzip, lz4, snappy, xz or zstd. Unset, none."
+                  },
+                  "encryption": {
+                    "type": "string",
+                    "description": "Server-side encryption: AES256 or aws:kms. Unset, the bucket's policy."
+                  },
+                  "maxParallel": {
+                    "type": "integer",
+                    "description": "How many WAL files are archived or restored at once, at least 1."
+                  }
+                }
+              }
+            }
+          },
+          "objectStoreName": {
+            "type": "string",
+            "description": "The name of an existing ObjectStore in the namespace to read from. Exactly one of objectStoreName and objectStore."
+          },
+          "serverName": {
+            "type": "string",
+            "description": "Required, not empty. The folder the source cluster wrote within the store's destinationPath: its backup.serverName, else its Cluster's name.",
+            "required": true
+          }
+        }
+      },
+      "target": {
+        "type": "object",
+        "description": "Where the recovery stops. Unset, at the end of the WAL. At most one of time, lsn, xid, name and immediate.",
+        "properties": {
+          "backupID": {
+            "type": "string",
+            "description": "The ID of the base backup to start from. Required with xid, name or immediate; otherwise chosen by time or lsn, else the latest."
+          },
+          "exclusive": {
+            "type": "boolean",
+            "description": "true, the recovery stops just before the target instead of just after it."
+          },
+          "immediate": {
+            "type": "boolean",
+            "description": "Stop as soon as the base backup is consistent. Set at all, false included, it is the target, and needs backupID."
+          },
+          "lsn": {
+            "type": "string",
+            "description": "Stop at this WAL location (for example 0/3000060)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Stop at this restore point, created with pg_create_restore_point; shorter than 64 bytes. Needs backupID."
+          },
+          "time": {
+            "type": "string",
+            "description": "Stop at this time, in RFC 3339 or a PostgreSQL timestamp; one without a time zone is UTC. The base backup is the latest one before it."
+          },
+          "timeline": {
+            "type": "string",
+            "description": "The timeline to follow: latest, or a positive integer written as a string. Unset, the operator's default."
+          },
+          "xid": {
+            "type": "string",
+            "description": "Stop at this transaction ID, a 32-bit integer written as a string. Needs backupID."
+          }
+        }
+      }
+    }
   },
   "replicas": {
     "type": "integer",

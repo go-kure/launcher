@@ -410,6 +410,11 @@ Decided in the ticket:
     `postgresql-scheduledbackup`, by the hook, else `<component>-<schedule name>`; no
     property names them. Each is held to 63 characters, since CloudNativePG copies it into a
     label of each Backup.
+  - The ObjectStore of an inline `recovery.source.objectStore` (go-kure/launcher#1001,
+    §6.3) is named under role `postgresql-recovery-objectstore`, by the hook, else
+    `<component>-recovery-source`; no property names it. The Cluster's recovery source
+    names the store by it. A source naming an existing store generates none, and the hook
+    is not asked.
 - **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
   hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
@@ -1682,11 +1687,13 @@ and by scope, whatever component or trait emits it.
     (`TestPostgresqlRule_UnauthoredRequiredStrings`). Breaking for a document that
     leaves either out. Since go-kure/launcher#1001 (§6.3) `backup` writes no in-tree
     `spec.backup` on the Cluster, only the plugin entry in `spec.plugins`: its path is
-    `backup.objectStore.destinationPath`, required.
+    `backup.objectStore.destinationPath`, required. An external cluster's in-tree
+    `barmanObjectStore` is refused there since (§6.3); an inline recovery store's path,
+    `recovery.source.objectStore.destinationPath`, is required in its place.
   - A `postgresql` component refuses a block that would not be built, where it used to
     drop what the author wrote in it. Five blocks are built only when one field is set:
-    `backup` (`destinationPath`), `bootstrap.recovery` and `bootstrap.pg_basebackup`
-    (a non-empty `source`), `replication.synchronous` (`method`), `monitoring` and
+    `backup` (`destinationPath`), `bootstrap.recovery` (now `recovery`, refused without
+    its `source`, §6.3) and `bootstrap.pg_basebackup` (a non-empty `source`), `replication.synchronous` (`method`), `monitoring` and
     `pooler` (`enabled`). Other values of the block without that field are refused by the
     field's name (`replication.synchronous.method: required (any or first)`,
     `pooler.enabled: required where pooler.instances is set (…)`); under `backup` that
@@ -2194,12 +2201,14 @@ and by scope, whatever component or trait emits it.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.
 
-### 6.3 Partly shipped (go-kure/launcher#1001, open): `postgresql` backup through the Barman Cloud plugin
+### 6.3 Partly shipped (go-kure/launcher#1001, open): `postgresql` backup and recovery through the Barman Cloud plugin
 
 - **Before:** `postgresql`'s `backup` (`destinationPath`, `endpointURL`, `secretName`,
   `retentionPolicy`) built the Cluster's in-tree `barmanObjectStore`, which CloudNativePG
   deprecates and is removing, and a top-level `objectStore` built a barman-cloud
-  `ObjectStore` beside it. Nothing scheduled a backup.
+  `ObjectStore` beside it. Nothing scheduled a backup. A recovery was
+  `bootstrap.recovery.source` naming an `externalClusters` entry with an in-tree
+  `barmanObjectStore`, with no recovery target.
 - **Now** (first slice; the components README, **postgresql**, "Backup"):
   - `backup.objectStore` (required) is the `ObjectStore`'s configuration, decoded strictly
     into the vendored Barman Cloud type: S3-compatible storage only, `s3Credentials`
@@ -2218,6 +2227,26 @@ and by scope, whatever component or trait emits it.
   - **Breaking:** the former `backup` keys `destinationPath`, `endpointURL` and
     `secretName` and the top-level `objectStore` and `objectStoreObjectName` are refused,
     naming their replacement, and so is `backup: {}`; `backup.retentionPolicy` stays.
+- **Now** (second slice; the components README, **postgresql**, "Recovery"):
+  - `recovery` bootstraps a new Cluster from an object store. `recovery.source` names the
+    source's folder (`serverName`, required) and exactly one of an existing ObjectStore
+    (`objectStoreName`) and an inline one (`objectStore`, read as `backup.objectStore`),
+    which the component emits as a `cnpg-objectstore` named `<component>-recovery-source`
+    under role `postgresql-recovery-objectstore` (§3.2). The Cluster gets
+    `bootstrap.recovery` from one `externalClusters` entry the rule writes for the
+    barman-cloud plugin. `recovery.target` (point-in-time recovery: `time`, `lsn`, `xid`,
+    `name`, `immediate`, with `backupID`, `timeline` and `exclusive`), `database`, `owner`
+    and `secret` are the vendored type's; what CloudNativePG's webhook refuses without a
+    cluster is refused at build. Not with `bootstrap.pg_basebackup`.
+  - A cluster that would archive its WAL into the folder it is recovered from is refused
+    where launcher sees both stores; otherwise the plugin's own check applies.
+  - Where the document orders its components, the Cluster is ordered after the inline
+    store, which it reads before it can become ready; the store gets a group of its own.
+    Where it does not, nothing is ordered.
+  - **Breaking:** `bootstrap.recovery` is refused (moved to `recovery`), and so is an
+    external cluster's in-tree `barmanObjectStore` (gone in CloudNativePG 1.31; use
+    `recovery.source`). `externalClusters` keeps `name` and `connectionParameters`, the
+    source of `bootstrap.pg_basebackup`.
 - **Prerequisites in the cluster.** The CloudNativePG operator 1.26 or later (the emitted
   objects follow the vendored 1.30.1 API), the Barman Cloud plugin v0.15.x with its
   `barmancloud.cnpg.io/v1` CRD, and cert-manager, recommended for the plugin. The bucket and
@@ -2226,9 +2255,8 @@ and by scope, whatever component or trait emits it.
   apply; an older CRD can prune a field it does not know without an error. Check the
   installed versions and read the applied object back.
 - **Limits:** the prerequisites are documented, not declared: `oam.ContractMetadata` has no
-  field for an operator or CRD requirement (go-kure/launcher#1027). Recovery from a backup,
-  and the removal of `bootstrap.recovery` and of an external cluster's in-tree
-  `barmanObjectStore`, are later slices of the ticket.
+  field for an operator or CRD requirement (go-kure/launcher#1027). The user guide and
+  evidence from a live recovery are the ticket's last slice.
 
 ---
 

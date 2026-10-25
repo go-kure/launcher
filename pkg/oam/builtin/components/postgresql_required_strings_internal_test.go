@@ -11,57 +11,21 @@ import (
 // TestPostgresqlRule_UnauthoredRequiredStrings: the cnpg-cluster component a
 // postgresql component lowers to is built from a typed spec, so a string of
 // cnpgClusterRequired the author left out would reach the kind as an authored
-// "" and pass its refusal. The lowering fills the parent of three of the
-// eleven: an external cluster's object store path, the base backup's source
-// and the synchronous method. The first it builds from other authored
-// settings, so postgresql refuses it unauthored, under the property the author
-// wrote; the last two it builds only from the string itself, and postgresql
-// refuses their block without it (TestPostgresqlRule_BlockNotBuilt). `backup`
-// lowers to no in-tree spec.backup, only the Cluster's plugin entry: its object
-// store is the ObjectStore's (go-kure/launcher#1001). Each case reads every path of cnpgClusterRequired
-// in the lowered component.
+// "" and pass its refusal. The lowering fills the parent of two of the eleven,
+// the base backup's source and the synchronous method, and builds each only
+// from the string itself: postgresql refuses their block without it
+// (TestPostgresqlRule_BlockNotBuilt). `backup` lowers to no in-tree
+// spec.backup, only the Cluster's plugin entry, and `recovery` to an
+// externalClusters entry naming the plugin, with no in-tree barmanObjectStore:
+// their object stores are ObjectStores (go-kure/launcher#1001). Each case reads
+// every path of cnpgClusterRequired in the lowered component.
 func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
-	const (
-		externalPath = "externalClusters[].barmanObjectStore.destinationPath"
-	)
-	external := func(stores ...map[string]any) []any {
-		out := make([]any, 0, len(stores))
-		for i, store := range stores {
-			out = append(out, map[string]any{"name": "origin" + string(rune('a'+i)), "barmanObjectStore": store})
-		}
-		return out
-	}
 	for _, tc := range []struct {
 		name    string
 		props   map[string]any
 		refused string
 		carried map[string][]any
 	}{
-		{
-			name:    "external cluster with an empty object store",
-			props:   map[string]any{"externalClusters": external(map[string]any{})},
-			refused: "externalClusters[0].barmanObjectStore.destinationPath: required (",
-		},
-		{
-			name: "second external cluster with an object store and no path",
-			props: map[string]any{"externalClusters": external(
-				map[string]any{"destinationPath": "s3://bucket/a"},
-				map[string]any{"endpointURL": "https://s3.example"},
-			)},
-			refused: "externalClusters[1].barmanObjectStore.destinationPath: required (",
-		},
-		{
-			// The object store map is decoded into the upstream type, which
-			// folds the key, so a null in another spelling is no path either.
-			name:    "external cluster with a null path in another spelling",
-			props:   map[string]any{"externalClusters": external(map[string]any{"DestinationPath": nil})},
-			refused: "externalClusters[0].barmanObjectStore.destinationPath: required (",
-		},
-		{
-			name:    "external cluster with its path in another spelling",
-			props:   map[string]any{"externalClusters": external(map[string]any{"DestinationPath": "s3://bucket/a"})},
-			carried: map[string][]any{externalPath: {"s3://bucket/a"}},
-		},
 		{
 			name:    "base backup without a source",
 			props:   map[string]any{"bootstrap": map[string]any{"pg_basebackup": map[string]any{}}},
@@ -78,21 +42,21 @@ func TestPostgresqlRule_UnauthoredRequiredStrings(t *testing.T) {
 			carried: map[string][]any{},
 		},
 		{
-			name: "an authored empty path is a value",
-			props: map[string]any{
-				"externalClusters": external(map[string]any{"destinationPath": ""}),
-			},
-			carried: map[string][]any{externalPath: {""}},
+			name: "recovery from an inline store",
+			props: map[string]any{"recovery": map[string]any{"source": map[string]any{
+				"serverName":  "origin",
+				"objectStore": map[string]any{"destinationPath": "s3://bucket/a", "s3Credentials": map[string]any{"inheritFromIAMRole": true}},
+			}}},
+			carried: map[string][]any{},
 		},
 		{
-			name: "all three authored",
+			name: "both authored",
 			props: map[string]any{
-				"externalClusters": external(map[string]any{"destinationPath": "s3://bucket/a"}),
+				"externalClusters": []any{map[string]any{"name": "origina", "connectionParameters": map[string]any{"host": "h"}}},
 				"bootstrap":        map[string]any{"pg_basebackup": map[string]any{"source": "origina"}},
 				"replication":      map[string]any{"synchronous": map[string]any{"method": "any", "number": 1}},
 			},
 			carried: map[string][]any{
-				externalPath:                     {"s3://bucket/a"},
 				"bootstrap.pg_basebackup.source": {"origina"},
 				"postgresql.synchronous.method":  {"any"},
 			},

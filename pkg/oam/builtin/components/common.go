@@ -1886,20 +1886,6 @@ func bothAuthored(raw map[string]any, a, b string) bool {
 	return hasA && hasB
 }
 
-// authoredInAnySpelling reports whether raw authors field under a key that
-// matches it case-insensitively. It is authoredValue for a map that is decoded
-// into a Go type afterwards, where encoding/json folds field names: there the
-// author's `DestinationPath` is the type's destinationPath. An explicit null
-// is absence in each spelling.
-func authoredInAnySpelling(raw map[string]any, field string) bool {
-	for key, v := range raw {
-		if strings.EqualFold(key, field) && !isExplicitNull(v) {
-			return true
-		}
-	}
-	return false
-}
-
 // parseBoolField extracts an optional bool from raw[key], erroring if key is
 // present with a non-bool value rather than silently skipping it — a mistyped
 // value (e.g. a quoted `"false"`) must not silently fall back to whatever

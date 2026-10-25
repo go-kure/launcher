@@ -44,6 +44,20 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		}
 		store = &member
 	}
+	// An inline recovery source is an ObjectStore of its own, a component
+	// apart from the backup store, named before the Cluster's spec is built,
+	// which names it.
+	var recoveryStore *oam.Component
+	if c.Recovery != nil && c.Recovery.ObjectStore != nil {
+		member, err := postgresqlRecoveryStoreMember(comp, lctx, c.Recovery)
+		if err != nil {
+			return oam.LoweringResult{}, err
+		}
+		recoveryStore = &member
+	}
+	if err := postgresqlArchivesIntoSource(comp, lctx.Document, c, cluster.ObjectName()); err != nil {
+		return oam.LoweringResult{}, err
+	}
 
 	spec, err := c.clusterSpec()
 	if err != nil {
@@ -71,6 +85,21 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 
 	if store != nil {
 		out = append(out, *store)
+	}
+	// The recovering Cluster reads its source store before it can become
+	// ready, so the store never waits for the Cluster, as the other members
+	// do: under a dependency policy Flux applies a group only once the one
+	// before it is ready, and a store ordered after the Cluster would never be
+	// applied. Where the document orders its components, the Cluster is
+	// ordered after the store instead; where it does not, nothing is ordered
+	// and the store is applied with the Cluster, as the backup store is.
+	var prerequisites []string
+	if recoveryStore != nil {
+		out = append(out, *recoveryStore)
+		prerequisites = append(prerequisites, recoveryStore.Name)
+		if documentOrdersComponents(lctx.Document) {
+			out[0].OrderAfter(recoveryStore.Name)
+		}
 	}
 	// What the Pooler, the Databases and the ScheduledBackups refer to is the
 	// Cluster's object, by its name. Their own default names keep the
@@ -142,12 +171,20 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		}
 	}
 
-	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents)
+	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents, prerequisites)
 	split := slices.ContainsFunc(policies, func(p oam.ApplicationPolicy) bool { return p.Type == "dependency" })
-	if err := postgresqlMembersShareBundle(lctx.Document, comp, dependents); err != nil {
+	if err := postgresqlMembersShareBundle(lctx.Document, comp, append(slices.Clone(dependents), prerequisites...)); err != nil {
 		return oam.LoweringResult{}, err
 	}
-	forwardMemberTraits(out, comp.Traits, split)
+	// A prerequisite is in a group before the Cluster's only where the
+	// document orders its components; it then needs a bundle trait of its own.
+	ownBundle := map[string]bool{}
+	if documentOrdersComponents(lctx.Document) {
+		for _, name := range prerequisites {
+			ownBundle[name] = true
+		}
+	}
+	forwardMemberTraits(out, comp.Traits, split, ownBundle)
 	return oam.LoweringResult{Components: out, Policies: policies}, nil
 }
 
@@ -177,15 +214,19 @@ var (
 // configure that one bundle twice. Without split nothing separates the
 // members from the Cluster, whose bundle already carries them.
 //
+// A member named in own is in a group of its own, ahead of the Cluster's (the
+// inline recovery store under document ordering): it gets the bundle traits
+// whatever split says, and is not the members' group.
+//
 // Each is a by-value copy of the authored element with the same properties
 // map, which the engine recognises as forwarded rather than built by the rule
 // (oam's isForwardedTrait): it keeps its authored classification and checks.
-func forwardMemberTraits(out []oam.Component, authored []oam.Trait, split bool) {
+func forwardMemberTraits(out []oam.Component, authored []oam.Trait, split bool, own map[string]bool) {
 	membersBundle := split
 	for i := 1; i < len(out); i++ {
-		ownBundle := membersBundle && out[i].Name != out[0].Name
-		if ownBundle {
-			membersBundle = false
+		ownBundle := own[out[i].Name]
+		if !ownBundle && membersBundle && out[i].Name != out[0].Name {
+			ownBundle, membersBundle = true, false
 		}
 		for _, t := range authored {
 			if postgresqlObjectTraits[t.Type] || (ownBundle && postgresqlBundleTraits[t.Type]) {
@@ -269,7 +310,9 @@ func postgresqlMemberNameTaken(what, name string, other *oam.Component) error {
 
 // postgresqlMemberPolicies returns the policies that keep the members (the
 // components the rule emits beside the Cluster: the Pooler, the Databases and
-// the ScheduledBackups, one per name) where postgresql's own objects were. A policy names a component;
+// the ScheduledBackups, one per name, and the prerequisites, the inline
+// recovery store, which the Cluster waits for instead) where postgresql's own
+// objects were. A policy names a component;
 // what the document's policies say about the postgresql component by its name
 // covered all of its objects, and now reaches only the Cluster's.
 //
@@ -278,7 +321,9 @@ func postgresqlMemberNameTaken(what, name string, other *oam.Component) error {
 //     bundle).
 //   - Under a dependency policy, the members wait for the Cluster, and every
 //     component the document makes wait for the postgresql component waits for
-//     the members too (postgresqlDependencyRules).
+//     the members too (postgresqlDependencyRules). A prerequisite takes no rule:
+//     the Cluster is ordered after it (OrderAfter), and what waits for the
+//     Cluster waits for it through the Cluster.
 //
 // The names are implementation details no author refers to, so each takes the
 // first of <base>, <base>-1, … that no policy of the document, and none this
@@ -290,8 +335,8 @@ func postgresqlMemberNameTaken(what, name string, other *oam.Component) error {
 // generates the same name, depending on which rule ran first. Two calls cannot
 // name the same policy either: each base is the call's own component name
 // followed by "-dependencies" or "-placement-<i>".
-func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members []string) []oam.ApplicationPolicy {
-	if len(members) == 0 || lctx.Document == nil {
+func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members, prerequisites []string) []oam.ApplicationPolicy {
+	if len(members)+len(prerequisites) == 0 || lctx.Document == nil {
 		return nil
 	}
 	used := map[string]bool{}
@@ -307,14 +352,17 @@ func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members 
 		return name
 	}
 	var out []oam.ApplicationPolicy
-	if rules := postgresqlDependencyRules(lctx.Document, cluster, members); rules != nil {
-		out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
+	if len(members) > 0 {
+		if rules := postgresqlDependencyRules(lctx.Document, cluster, members); rules != nil {
+			out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
+		}
 	}
 	// Placements are numbered rather than named after the member: a member's
 	// name may already be as long as a policy name can be, the Cluster's cannot.
 	n := 0
+	placed := append(slices.Clone(members), prerequisites...)
 	for _, tier := range postgresqlPlacementTiers(lctx.Document, cluster) {
-		for _, m := range members {
+		for _, m := range placed {
 			out = append(out, oam.ApplicationPolicy{Name: free(fmt.Sprintf("%s-placement-%d", cluster, n)), Type: "placement", Properties: map[string]any{"component": m, "tier": tier}})
 			n++
 		}
@@ -560,36 +608,26 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		spec.Monitoring = mon
 	}
 
-	// Parse refuses both sources together; recovery still wins here to match
-	// the retired builder should that guard ever move.
+	// Parse refuses both together; recovery wins here should that guard ever
+	// move.
 	switch {
-	case c.BootstrapRecoverySource != "":
-		spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
-			Recovery: &cnpgv1.BootstrapRecovery{Source: c.BootstrapRecoverySource},
-		}
+	case c.Recovery != nil:
+		spec.Bootstrap = &cnpgv1.BootstrapConfiguration{Recovery: c.Recovery.bootstrap(c.Name)}
 	case c.BootstrapPgBasebackupSource != "":
 		spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
 			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{Source: c.BootstrapPgBasebackupSource},
 		}
 	}
 
-	if len(c.ExternalClusters) > 0 {
-		ecs := make([]cnpgv1.ExternalCluster, 0, len(c.ExternalClusters))
-		for _, ec := range c.ExternalClusters {
-			ext := cnpgv1.ExternalCluster{
-				Name:                 ec.Name,
-				ConnectionParameters: ec.ConnectionParameters,
-			}
-			if ec.BarmanObjectStore != nil {
-				bos, err := toBarmanObjectStore(ec.BarmanObjectStore)
-				if err != nil {
-					return cnpgv1.ClusterSpec{}, errors.Wrapf(err, "external cluster %q", ec.Name)
-				}
-				ext.BarmanObjectStore = bos
-			}
-			ecs = append(ecs, ext)
-		}
-		spec.ExternalClusters = ecs
+	for _, ec := range c.ExternalClusters {
+		spec.ExternalClusters = append(spec.ExternalClusters, cnpgv1.ExternalCluster{
+			Name:                 ec.Name,
+			ConnectionParameters: ec.ConnectionParameters,
+		})
+	}
+	// The recovery's source is one entry more, which the rule writes.
+	if c.Recovery != nil {
+		spec.ExternalClusters = append(spec.ExternalClusters, c.Recovery.externalCluster(c.Name))
 	}
 
 	if len(c.PostgresqlParameters) > 0 {

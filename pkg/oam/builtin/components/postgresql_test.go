@@ -301,64 +301,56 @@ func TestPostgresqlHandler_BootstrapMutualExclusion(t *testing.T) {
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
-			"bootstrap": map[string]any{
-				"recovery":      map[string]any{"source": "src"},
-				"pg_basebackup": map[string]any{"source": "src"},
+			"bootstrap": map[string]any{"pg_basebackup": map[string]any{"source": "src"}},
+			"recovery":  map[string]any{"source": map[string]any{"serverName": "origin", "objectStoreName": "origin"}},
+			"externalClusters": []any{
+				map[string]any{"name": "src", "connectionParameters": map[string]any{"host": "h"}},
 			},
 		},
 	}, "default")
-	if err == nil {
-		t.Error("expected error for mutually exclusive bootstrap options")
+	if err == nil || !strings.Contains(err.Error(), "recovery: not with bootstrap.pg_basebackup") {
+		t.Errorf("recovery with pg_basebackup: err = %v, want refused", err)
 	}
 }
 
-func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
+// TestPostgresqlHandler_FormerRecoveryKeysAreRefused: a recovery from an
+// object store is `recovery` (go-kure/launcher#1001); the former
+// bootstrap.recovery and the in-tree externalClusters[].barmanObjectStore are
+// refused naming it.
+func TestPostgresqlHandler_FormerRecoveryKeysAreRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"bootstrap.recovery": {
+			map[string]any{"bootstrap": map[string]any{"recovery": map[string]any{"source": "backup-src"}}},
+			"bootstrap.recovery: moved to recovery",
+		},
+		"externalClusters[].barmanObjectStore": {
+			map[string]any{"externalClusters": []any{map[string]any{"name": "backup-src", "barmanObjectStore": map[string]any{"destinationPath": "s3://backups/"}}}},
+			"externalClusters[0].barmanObjectStore: removed (in-tree Barman Cloud, gone in CloudNativePG 1.31); use recovery.source",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := postgresqlViaRule{}.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: tc.props}, "default")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostgresqlHandler_BootstrapPgBasebackup_ConnectionParameters(t *testing.T) {
 	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
 			"bootstrap": map[string]any{
-				"recovery": map[string]any{"source": "backup-src"},
+				"pg_basebackup": map[string]any{"source": "origin"},
 			},
 			"externalClusters": []any{
 				map[string]any{
-					"name": "backup-src",
-					"barmanObjectStore": map[string]any{
-						"destinationPath": "s3://backups/",
-					},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	pc := cfg.(*postgresqlViaRuleConfig)
-	if pc.BootstrapRecoverySource != "backup-src" {
-		t.Errorf("BootstrapRecoverySource: got %q, want %q", pc.BootstrapRecoverySource, "backup-src")
-	}
-	if len(pc.ExternalClusters) != 1 {
-		t.Fatalf("ExternalClusters: got %d, want 1", len(pc.ExternalClusters))
-	}
-	if pc.ExternalClusters[0].Name != "backup-src" {
-		t.Errorf("ExternalClusters[0].Name: got %q", pc.ExternalClusters[0].Name)
-	}
-	if pc.ExternalClusters[0].BarmanObjectStore == nil {
-		t.Error("ExternalClusters[0].BarmanObjectStore: expected non-nil")
-	}
-}
-
-func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) {
-	h := postgresqlViaRule{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db", Type: "postgresql",
-		Properties: map[string]any{
-			"bootstrap": map[string]any{
-				"recovery": map[string]any{"source": "backup-cluster"},
-			},
-			"externalClusters": []any{
-				map[string]any{
-					"name": "backup-cluster",
+					"name": "origin",
 					"connectionParameters": map[string]any{
 						"host": "db.example.com",
 					},
@@ -370,8 +362,8 @@ func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) 
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
 	pc := cfg.(*postgresqlViaRuleConfig)
-	if pc.BootstrapRecoverySource != "backup-cluster" {
-		t.Errorf("BootstrapRecoverySource: got %q", pc.BootstrapRecoverySource)
+	if pc.BootstrapPgBasebackupSource != "origin" {
+		t.Errorf("BootstrapPgBasebackupSource: got %q", pc.BootstrapPgBasebackupSource)
 	}
 	if len(pc.ExternalClusters) != 1 || pc.ExternalClusters[0].ConnectionParameters["host"] != "db.example.com" {
 		t.Errorf("ExternalClusters[0].ConnectionParameters: got %v", pc.ExternalClusters[0].ConnectionParameters)
@@ -815,13 +807,11 @@ func TestPostgresqlConfig_Generate_WithAffinity(t *testing.T) {
 	}
 }
 
-func TestPostgresqlConfig_Generate_WithBootstrap(t *testing.T) {
+func TestPostgresqlConfig_Generate_WithRecovery(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
-		"bootstrap": map[string]any{
-			"recovery": map[string]any{"source": "backup-cluster"},
-		},
-		"externalClusters": []any{
-			map[string]any{"name": "backup-cluster"},
+		"recovery": map[string]any{
+			"source": map[string]any{"serverName": "origin", "objectStoreName": "origin-store"},
+			"target": map[string]any{"time": "2026-10-20T03:00:00Z"},
 		},
 	})
 	objs := generatePostgresql(t, pc)
@@ -832,29 +822,19 @@ func TestPostgresqlConfig_Generate_WithBootstrap(t *testing.T) {
 	if cluster.Spec.Bootstrap == nil || cluster.Spec.Bootstrap.Recovery == nil {
 		t.Fatal("expected non-nil Bootstrap.Recovery")
 	}
-	if cluster.Spec.Bootstrap.Recovery.Source != "backup-cluster" {
-		t.Errorf("Bootstrap.Recovery.Source: got %q", cluster.Spec.Bootstrap.Recovery.Source)
+	want := cnpgv1.BootstrapRecovery{Source: "db-recovery-source", RecoveryTarget: &cnpgv1.RecoveryTarget{TargetTime: "2026-10-20T03:00:00Z"}}
+	if got := *cluster.Spec.Bootstrap.Recovery; !reflect.DeepEqual(got, want) {
+		t.Errorf("Bootstrap.Recovery = %+v, want %+v", got, want)
 	}
-}
-
-// An externalClusters[].barmanObjectStore that does not fit the upstream Barman
-// configuration is refused when the rule builds the Cluster, naming the external
-// cluster, instead of being dropped or half-applied.
-func TestPostgresqlRule_ExternalClusterMalformedBarmanObjectStore(t *testing.T) {
-	_, err := postgresqlViaRule{}.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
-		"externalClusters": []any{
-			map[string]any{
-				"name":              "x",
-				"barmanObjectStore": map[string]any{"destinationPath": float64(123)},
-			},
+	wantExt := []cnpgv1.ExternalCluster{{
+		Name: "db-recovery-source",
+		PluginConfiguration: &cnpgv1.PluginConfiguration{
+			Name:       "barman-cloud.cloudnative-pg.io",
+			Parameters: map[string]string{"barmanObjectName": "origin-store", "serverName": "origin"},
 		},
-	}}, "default")
-	if err == nil {
-		t.Fatal("expected an error for a malformed barmanObjectStore, got nil")
-	}
-	const want = `external cluster "x": unmarshal barman object store:`
-	if !strings.Contains(err.Error(), want) {
-		t.Errorf("error %q does not contain %q", err.Error(), want)
+	}}
+	if !reflect.DeepEqual(cluster.Spec.ExternalClusters, wantExt) {
+		t.Errorf("ExternalClusters = %+v, want %+v", cluster.Spec.ExternalClusters, wantExt)
 	}
 }
 

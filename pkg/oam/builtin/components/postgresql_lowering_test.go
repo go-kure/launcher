@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	"github.com/go-kure/kure/pkg/stack"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -473,22 +474,41 @@ func TestCnpgClusterConfig_ApplyPostgresqlDefaults_EnablePDB(t *testing.T) {
 }
 
 // An integer above 2^53 keeps its exact value from the authored property to
-// the generated Cluster: the rule's encoding of the spec does not round it
-// through a float64 into a value the Cluster's decode refuses.
-func TestPostgresqlRule_LargeIntegerReachesTheCluster(t *testing.T) {
-	pc := newPostgresqlApp(t, map[string]any{
-		"bootstrap": map[string]any{"recovery": map[string]any{"source": "origin"}},
-		"externalClusters": []any{map[string]any{
-			"name": "origin",
-			"barmanObjectStore": map[string]any{
+// the generated ObjectStore of an inline recovery source: the rule's encoding
+// of the spec does not round it through a float64 into a value the
+// cnpg-objectstore decode refuses.
+func TestPostgresqlRule_LargeIntegerReachesTheObjectStore(t *testing.T) {
+	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
+		"recovery": map[string]any{"source": map[string]any{
+			"serverName": "origin",
+			"objectStore": map[string]any{
 				"destinationPath": "s3://bucket/origin/",
+				"s3Credentials":   map[string]any{"inheritFromIAMRole": true},
 				"wal":             map[string]any{"maxParallel": int64(math.MaxInt64)},
 			},
 		}},
-	})
-	cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
-	got := cluster.Spec.ExternalClusters[0].BarmanObjectStore.Wal.MaxParallel
-	if got != math.MaxInt64 {
-		t.Errorf("maxParallel = %d, want %d", got, int64(math.MaxInt64))
+	}}
+	res, err := components.PostgresqlRule{}.LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
+	if err != nil {
+		t.Fatalf("LowerComponent: %v", err)
 	}
+	for i := range res.Components {
+		if res.Components[i].Type != "cnpg-objectstore" {
+			continue
+		}
+		cfg, err := (&components.CnpgObjectStoreHandler{}).ToApplicationConfig(&res.Components[i], "default")
+		if err != nil {
+			t.Fatalf("cnpg-objectstore refuses the lowered component: %v", err)
+		}
+		objs, err := cfg.Generate(stack.NewApplication(res.Components[i].Name, "default", cfg))
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		store := (*objs[0]).(*barmanv1.ObjectStore)
+		if got := store.Spec.Configuration.Wal.MaxParallel; got != math.MaxInt64 {
+			t.Errorf("maxParallel = %d, want %d", got, int64(math.MaxInt64))
+		}
+		return
+	}
+	t.Fatal("the lowering emitted no cnpg-objectstore component")
 }

@@ -66,7 +66,7 @@ func TestPostgresqlBackup_Refusals(t *testing.T) {
 		{"the object store's serverName", backupWith(map[string]any{"serverName": "x"}, nil),
 			"backup.objectStore.serverName: not allowed (the ObjectStore CRD forbids it); use backup.serverName"},
 		{"Azure credentials", backupWith(map[string]any{"azureCredentials": map[string]any{}}, nil),
-			"backup.objectStore.azureCredentials: not supported (backup writes to S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)"},
+			"backup.objectStore.azureCredentials: not supported (S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)"},
 		{"Google credentials", backupWith(map[string]any{"googleCredentials": map[string]any{}}, nil),
 			"backup.objectStore.googleCredentials: not supported"},
 		{"an unknown key of the object store", backupWith(map[string]any{"historyTags": map[string]any{}}, nil),

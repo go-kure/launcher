@@ -60,12 +60,12 @@ func TestBuild_PostgresqlBackupOldKeysRefused(t *testing.T) {
 			// before it gives the reason Azure is refused.
 			"an Azure object store",
 			"        backup:\n          objectStore:\n            destinationPath: https://acct.blob.core.windows.net/c\n            azureCredentials:\n              inheritFromAzureAD: true\n",
-			"backup.objectStore.azureCredentials: not supported (backup writes to S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)",
+			"backup.objectStore.azureCredentials: not supported (S3-compatible storage only; the cnpg-objectstore kind takes Azure credentials)",
 		},
 		{
 			"a Google object store",
 			"        backup:\n          objectStore:\n            destinationPath: gs://bucket/db/\n            googleCredentials:\n              gkeEnvironment: true\n",
-			"backup.objectStore.googleCredentials: not supported (backup writes to S3-compatible storage only; the cnpg-objectstore kind takes Google credentials)",
+			"backup.objectStore.googleCredentials: not supported (S3-compatible storage only; the cnpg-objectstore kind takes Google credentials)",
 		},
 		{
 			"an object store without a path",
