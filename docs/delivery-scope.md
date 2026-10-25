@@ -1965,8 +1965,11 @@ and by scope, whatever component or trait emits it.
     prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only (a patch mount
     at a path written as an earlier one's is merged into it, taking its volume and keeping
-    `readOnly` from either); other read-only sources are not judged, so the check refuses
-    only a directory it knows is read-only; where none covers it, the read-only root
+    `readOnly` from either; of mounts at one path written differently, one writable makes
+    it writable); an author's mount of an image volume, a `readOnly` CSI volume or one of
+    the operator's own volumes counts as writable, and the rule ConfigMap and web TLS
+    mounts are not listed, so the check refuses only where it knows the directory is
+    read-only; where no listed mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
     a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
     refused; a negative request or limit; and a
