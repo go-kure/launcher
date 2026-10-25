@@ -139,6 +139,10 @@ func parseSecurityContextProperties(props map[string]any) (securityContextSpec, 
 }
 
 // validateSecurityContextSpec rejects overrides that contradict the declared psaLevel.
+// readOnlyRootFilesystem is not among them: the Pod Security Standards restricted
+// profile does not constrain it, so readOnlyRootFilesystem: false opts a workload
+// out of the read-only default while keeping psaLevel restricted
+// (go-kure/launcher#998).
 func validateSecurityContextSpec(spec securityContextSpec) error {
 	if spec.PSALevel == kubernetes.PSARestricted {
 		if spec.AllowPrivilegeEscalation != nil && *spec.AllowPrivilegeEscalation {
@@ -146,9 +150,6 @@ func validateSecurityContextSpec(spec securityContextSpec) error {
 		}
 		if spec.RunAsNonRoot != nil && !*spec.RunAsNonRoot {
 			return errors.New("security-context: runAsNonRoot: false is incompatible with psaLevel restricted")
-		}
-		if spec.ReadOnlyRootFilesystem != nil && !*spec.ReadOnlyRootFilesystem {
-			return errors.New("security-context: readOnlyRootFilesystem: false is incompatible with psaLevel restricted")
 		}
 	}
 	return nil
