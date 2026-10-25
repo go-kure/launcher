@@ -2846,6 +2846,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `serviceAccountName`. The credentials, the proxy configuration and the
     certificates of `secretRef`, `proxySecretRef` and `certSecretRef` are
     Secrets the object names, not values.
+  - **A `pagerduty` Provider's routing key in `channel` is an identifier,
+    not a credential**, and is written as authored under every policy, one
+    that forbids explicit secrets included (go-kure/launcher#975). The
+    controller hands `channel` to the pagerduty notifier as its Events API
+    routing key (`internal/notifier/factory.go`, `pagerduty.go` at v1.9.4).
+    The key reaches only the Events API of the service it routes to, where
+    it opens alerts and acknowledges or resolves one by its `dedup_key`; it
+    reads nothing and changes no configuration. Launcher does not hold it
+    as a secret, and no Secret can supply it: the controller reads `channel`
+    from the spec alone (`internal/server/event_handlers.go`), unlike
+    `address`. Refusing it would leave the type unusable under such a policy.
   - **No field of a Receiver holds an image or a secret.** The token is in
     the Secret `secretRef` names. **A user or a password in an OIDC
     provider's `issuerURL` is refused**, under every policy and under none,
