@@ -155,6 +155,14 @@ jobs:
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
 
+    # GOMEMLIMIT keeps Go's GC under the runner pod memory limit so golangci-lint doesn't get
+    # OOMKilled on the in-cluster ARC runner. Pairs with the 6Gi ARC runner limit: uncapped,
+    # golangci-lint v2.15.0 peaks at ~6GiB on this tree and the kill takes the runner with it
+    # ("runner lost communication"); capped at 4GiB it peaks at ~4GiB. Lower than the security
+    # job's 5GiB because 5GiB was not measured here.
+    env:
+      GOMEMLIMIT: 4GiB
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

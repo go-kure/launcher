@@ -678,6 +678,12 @@ Jobs run on the `autops-kube-kure` runner described on the Shared Workflows page
   run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
 ```
 
+Each runner pod has a 6Gi memory limit, and an out-of-memory kill takes the runner process down
+with the job, so the run reports "runner lost communication" instead of a Go error. The two
+memory-heavy jobs therefore set `GOMEMLIMIT` at job level to keep Go's garbage collector under that
+limit: `lint` at `4GiB` (uncapped, golangci-lint peaks at about 6GiB) and `Security` at `5GiB`
+(govulncheck).
+
 ---
 
 ## Maintenance Notes
